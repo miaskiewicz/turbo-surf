@@ -111,8 +111,30 @@ fn typed_pairs(
     vec![(name.to_string(), control_value(tree, h))]
 }
 
+fn is_image_button(tree: &Tree, h: Handle) -> bool {
+    lower_tag(tree, h) == "input" && lower_type(tree, h).as_deref() == Some("image")
+}
+
+// HTML "constructing the entry list": an image-button submitter contributes the click
+// coordinates as `name.x`/`name.y` (bare `x`/`y` when unnamed), never its value. A
+// synthetic click has no position, so both are 0, as in Chrome.
+fn image_coordinate_pairs(name: &str) -> Vec<(String, String)> {
+    let prefix = if name.is_empty() {
+        String::new()
+    } else {
+        format!("{name}.")
+    };
+    vec![
+        (format!("{prefix}x"), "0".to_string()),
+        (format!("{prefix}y"), "0".to_string()),
+    ]
+}
+
 // One control → its successful [name,value] pairs (HTML successful-controls).
 fn control_pairs(tree: &Tree, h: Handle, submitter: Option<Handle>) -> Vec<(String, String)> {
+    if Some(h) == submitter && is_image_button(tree, h) {
+        return image_coordinate_pairs(tree.get_attribute(h, "name").unwrap_or(""));
+    }
     let Some(name) = tree.get_attribute(h, "name") else {
         return Vec::new();
     };
@@ -422,7 +444,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "turbo-surf#55: fails until the fix"]
     fn image_submitter_contributes_click_coordinates_like_chrome() {
         // Chrome 156: `new FormData(form, submitter)` for an element.click() on an
         // <input type=image> gives `q=v&i.x=0&i.y=0` (named) and `q=v&x=0&y=0` (unnamed);

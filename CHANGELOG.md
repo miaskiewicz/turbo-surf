@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed (turbo-dom consolidation, coverage phase)
+- No-JS form submission through an `<input type=image>` submitter (#55): like Chrome 156
+  it contributes the click coordinates `name.x=0&name.y=0` (`x=0&y=0` when unnamed)
+  instead of `name=value`.
+
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,
   `naturalHeight` and `currentSrc` are `HTMLImageElement.prototype` accessors

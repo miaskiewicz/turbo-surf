@@ -114,6 +114,14 @@
   `host_input`'s interruption tests run only the interrupted operation under their tiny
   budget (new `#[doc(hidden)] PageSession::set_execution_budget_for_testing`) and check
   the session afterwards under a 60 s cap (#47).
+- Detection "fixed Enter window" test (#51): its failures were not timing. A headed
+  Chrome takes the OS keyboard focus on launch, so keys typed on the host landed in the
+  fixture's textarea next to CDP's (`fixtture query`, `hfixture query`, 27 key events
+  for 26) and the collector refused to send Enter. Authored loopback controls can now set
+  `headless: true` (`--headless=new`, loopback-only like `disableExtensions`); this test
+  does and asserts the effective flags. A retry's terminal document committed near the
+  fixed deadline may be `interactive` at the snapshot, and the per-collection (120 s)
+  and test (15 min) caps are generous caps. 30/30 under 3 concurrent runs.
 - turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
   shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
   percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102

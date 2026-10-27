@@ -46,26 +46,22 @@ test("frame-timing controls opt into foreground scheduling only on loopback", ()
   );
 });
 
-test(
-  "keyboard-driven loopback controls can run headless, away from the OS keyboard focus",
-  { todo: "turbo-surf#51" },
-  () => {
-    for (const url of ["http://localhost:1/", "http://127.0.0.1:1/", "http://[::1]:1/"])
-      assert.deepEqual(chromeExtensionArgs({ url, headless: true }), ["--headless=new"]);
-    assert.deepEqual(
-      chromeExtensionArgs({ url: "http://127.0.0.1:1/", disableExtensions: true, headless: true }),
-      [
-        "--disable-extensions",
-        "--disable-component-extensions-with-background-pages",
-        "--headless=new",
-      ],
+test("keyboard-driven loopback controls can run headless, away from the OS keyboard focus", () => {
+  for (const url of ["http://localhost:1/", "http://127.0.0.1:1/", "http://[::1]:1/"])
+    assert.deepEqual(chromeExtensionArgs({ url, headless: true }), ["--headless=new"]);
+  assert.deepEqual(
+    chromeExtensionArgs({ url: "http://127.0.0.1:1/", disableExtensions: true, headless: true }),
+    [
+      "--disable-extensions",
+      "--disable-component-extensions-with-background-pages",
+      "--headless=new",
+    ],
+  );
+  for (const headless of [undefined, false, "true", 1])
+    assert.deepEqual(chromeExtensionArgs({ url: "https://www.google.com/", headless }), []);
+  for (const url of ["https://www.google.com/", "http://localhost.example/", "file:///tmp/x"])
+    assert.throws(
+      () => chromeExtensionArgs({ url, headless: true }),
+      /headless is restricted to authored localhost/,
     );
-    for (const headless of [undefined, false, "true", 1])
-      assert.deepEqual(chromeExtensionArgs({ url: "https://www.google.com/", headless }), []);
-    for (const url of ["https://www.google.com/", "http://localhost.example/", "file:///tmp/x"])
-      assert.throws(
-        () => chromeExtensionArgs({ url, headless: true }),
-        /headless is restricted to authored localhost/,
-      );
-  },
-);
+});

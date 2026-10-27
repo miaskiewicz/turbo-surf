@@ -837,7 +837,11 @@ configuration. This adds only `--disable-extensions`, rejects non-loopback targe
 URLs and records `effectiveExtensionFlags` in the trace. The prototype/API
 comparison and worker/iframe regression use this explicit isolation so installed
 system extensions cannot delay their control targets. Normal live Chrome launches
-keep their default extension behavior.
+keep their default extension behavior. Keyboard-driven authored controls can also
+set `headless: true` (`--headless=new`, loopback-only as well): a headed window takes
+the OS keyboard focus on launch, and keys typed on the host would land in the focused
+field next to the collector's trusted input (turbo-surf#51). The navigation-observation
+control uses it.
 
 `range-live-probe.js` and its saved Chrome 155.0.8059.79 / V815.5.35.23 fixture
 cover live boundary changes for text, splitting, insertion/removal, replacements,

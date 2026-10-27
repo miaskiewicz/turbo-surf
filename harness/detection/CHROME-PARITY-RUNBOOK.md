@@ -373,7 +373,8 @@ imports or reuse a signed-in UI session. Consent dispatch is conditional; verify
 Language/locale (`en-US`, `['en-US','en']`),1920×1080 screen and scale2 are fixed runner configuration, not invented CLI
 flags. Verify actual snapshot values; native languages must match its ordered HTTP profile. Extension disabling is a direct
 collector JSON setting `disableExtensions: true`, not a runner CLI flag. This setting is restricted to authored localhost
-controls; the collector rejects it for Google or other remote URLs. The matrix sets native `TURBO_SURF_TZ` from `--tz`;
+controls; the collector rejects it for Google or other remote URLs. The same holds for `headless: true` (keyboard-driven
+authored controls, so host keystrokes cannot reach a focused headed window; turbo-surf#51). The matrix sets native `TURBO_SURF_TZ` from `--tz`;
 set it explicitly when invoking the native example directly. The detection example selects `WindowTimerMode::RealTime` before
 hydration/frames/form replacements; there is no `--real-time` flag. Normal crawler constructors remain virtual. The host API's
 one-shot `initial_hydration_budget_ms` can bound a redirect open without reducing later configured operation budgets. The

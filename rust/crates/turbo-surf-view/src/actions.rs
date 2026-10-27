@@ -392,4 +392,68 @@ mod tests {
         let s = build_submission(&tree, first(&tree, "form"), BASE, None);
         assert_eq!(s.url, "https://x.test/page?a=1");
     }
+
+    #[test]
+    fn click_intent_submits_the_owning_form_with_only_a_real_submitter() {
+        let tree = Tree::parse(
+            "<form action='/s' method='get'><span id='inner'><b id='deep'>x</b></span>\
+             <input id='q' name='q' value='v'><button id='b' name='go' value='1'>Go</button>\
+             <input id='sub' type='Submit' name='t' value='3'></form>\
+             <p id='out'>outside</p><a href='/l'><em id='em'>link</em></a>",
+        );
+        let submit = |sel: &str| match click_intent(&tree, first(&tree, sel), BASE) {
+            ClickIntent::Submit(s) => s.url,
+            other => panic!("{sel}: expected a submit, got {other:?}"),
+        };
+        // A non-submitter (text input, or any descendant) submits without a submitter entry.
+        assert_eq!(submit("#q"), "https://x.test/s?q=v");
+        assert_eq!(submit("#deep"), "https://x.test/s?q=v");
+        // <button> (any type) and input type=submit (case-insensitive) are submitters.
+        assert_eq!(submit("#b"), "https://x.test/s?q=v&go=1");
+        assert_eq!(submit("#sub"), "https://x.test/s?q=v&t=3");
+        assert_eq!(
+            click_intent(&tree, first(&tree, "#out"), BASE),
+            ClickIntent::Inert
+        );
+        assert_eq!(
+            click_intent(&tree, first(&tree, "#em"), BASE),
+            ClickIntent::Navigate("https://x.test/l".into())
+        );
+    }
+
+    #[test]
+    #[ignore = "turbo-surf#55: fails until the fix"]
+    fn image_submitter_contributes_click_coordinates_like_chrome() {
+        // Chrome 156: `new FormData(form, submitter)` for an element.click() on an
+        // <input type=image> gives `q=v&i.x=0&i.y=0` (named) and `q=v&x=0&y=0` (unnamed);
+        // the image button's value is never submitted (turbo-surf#55).
+        let tree = Tree::parse(
+            "<form action='/s' method='get'><input name='q' value='v'>\
+             <input id='named' type='IMAGE' name='i' value='2'><input id='bare' type='image' value='5'></form>",
+        );
+        let submit = |sel: &str| match click_intent(&tree, first(&tree, sel), BASE) {
+            ClickIntent::Submit(s) => s.url,
+            other => panic!("{sel}: expected a submit, got {other:?}"),
+        };
+        assert_eq!(submit("#named"), "https://x.test/s?q=v&i.x=0&i.y=0");
+        assert_eq!(submit("#bare"), "https://x.test/s?q=v&x=0&y=0");
+        // Not the submitter: an image button contributes nothing.
+        let form = first(&tree, "form");
+        assert_eq!(
+            build_submission(&tree, form, BASE, None).url,
+            "https://x.test/s?q=v"
+        );
+    }
+
+    #[test]
+    fn get_submission_keeps_an_unparseable_action_verbatim() {
+        // With no absolute base the action cannot be resolved; the submission keeps the
+        // raw action (no query appended) rather than inventing a URL.
+        let tree = Tree::parse("<form method='get'><input name='a' value='1'></form>");
+        let s = build_submission(&tree, first(&tree, "form"), "relative/base", None);
+        assert_eq!(s.method, "GET");
+        assert_eq!(s.url, "relative/base");
+        assert_eq!(s.body, None);
+        assert_eq!(s.content_type, None);
+    }
 }

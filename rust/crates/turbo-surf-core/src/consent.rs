@@ -730,7 +730,8 @@ mod tests {
     // Not HTML, and a Max-Age cookie: the handshake must accept any content type and
     // stamp expiry with the caller's clock.
     const MINT: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: NID=n1; Path=/; Max-Age=60\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
-    const NOW: f64 = 2_000_000_000.0;
+    // Jar clock in epoch milliseconds.
+    const NOW: f64 = 2_000_000_000_000.0;
 
     #[tokio::test]
     async fn post_accept_form_sends_fields_in_the_body_with_the_user_agent() {
@@ -838,5 +839,37 @@ mod tests {
         assert_eq!(form.action, "https://consent.google.com/save");
         assert_eq!(form.method, "POST");
         assert_eq!(form.fields.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_submit_ingests_cookies_set_on_the_redirect_hop() {
+        // Google mints NID on the /save 302; the handshake follows hops itself so the
+        // redirect's Set-Cookie lands in the jar.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = if req.starts_with("GET /save") {
+                    "HTTP/1.1 302 Found\r\nSet-Cookie: NID=hop; Path=/\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                };
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut jar = CookieJar::new();
+        let form = ConsentForm {
+            action: format!("{base}/save"),
+            method: "GET".into(),
+            fields: vec![("set_sc".into(), "true".into())],
+        };
+        let earned = earn_consent_session(&mut jar, &form, "", NOW)
+            .await
+            .unwrap();
+        assert!(earned.earned_nid);
+        assert_eq!(earned.minted, vec!["NID".to_string()]);
     }
 }

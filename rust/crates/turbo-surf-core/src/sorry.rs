@@ -905,4 +905,82 @@ mod tests {
         assert_eq!(form.action, "https://g.test/sorry/save");
         assert_eq!(form.continue_url.as_deref(), Some("https://g.test/s?q=1"));
     }
+
+    // Answers by request-line prefix (first match) and forwards each raw request.
+    async fn spawn_routes(
+        routes: Vec<(&'static str, String)>,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = routes
+                    .iter()
+                    .find(|(prefix, _)| req.starts_with(prefix))
+                    .map_or_else(|| http_ok("404"), |(_, resp)| resp.clone());
+                let _ = tx.send(req);
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (base, rx)
+    }
+
+    // Jar clock in epoch milliseconds.
+    const NOW: f64 = 2_000_000_000_000.0;
+
+    #[tokio::test]
+    async fn exemption_cookies_are_stamped_and_replayed_at_the_callers_clock() {
+        // The POST answer is not HTML and its cookie has a Max-Age; a cookie that
+        // expired before NOW must not be replayed on the SERP re-fetch.
+        let mint = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: GOOGLE_ABUSE_EXEMPTION=EX; Path=/; Max-Age=60\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_string();
+        let (base, mut rx) = spawn_routes(vec![
+            ("POST /sorry/index", mint),
+            ("GET /search", http_ok("<p>SERP</p>")),
+        ])
+        .await;
+        let mut jar = CookieJar::new();
+        jar.add("OLD", "1", "127.0.0.1", "/", Some(NOW / 1000.0 - 10.0));
+        let form = SorryForm {
+            action: format!("{base}/sorry/index"),
+            continue_url: Some(format!("{base}/search?q=1")),
+            fields: Vec::new(),
+        };
+        let cleared = submit_and_clear(&mut jar, &form, "T", "", NOW)
+            .await
+            .unwrap();
+        assert_eq!(cleared.serp_html, "<p>SERP</p>");
+        let _post = rx.recv().await.unwrap();
+        let get = rx.recv().await.unwrap().to_ascii_lowercase();
+        assert!(
+            get.contains("\r\ncookie: google_abuse_exemption=ex\r\n"),
+            "{get}"
+        );
+
+        // The solver-cookie branch re-fetches at the same clock.
+        let html = SORRY_FORM.replace("CONTINUE_URL", &format!("{base}/search?q=2"));
+        let solver = CookieSolver(vec![("GOOGLE_ABUSE_EXEMPTION".into(), "S".into())]);
+        let mut jar = CookieJar::new();
+        jar.add("OLD", "1", "127.0.0.1", "/", Some(NOW / 1000.0 - 10.0));
+        clear_if_sorry(
+            &solver,
+            &mut jar,
+            &format!("{base}/sorry/index"),
+            &html,
+            &SolveContext::default(),
+            NOW,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let get = rx.recv().await.unwrap().to_ascii_lowercase();
+        assert!(get.starts_with("get /search?q=2 "), "{get}");
+        assert!(
+            get.contains("\r\ncookie: google_abuse_exemption=s\r\n"),
+            "{get}"
+        );
+    }
 }

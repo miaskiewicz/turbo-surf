@@ -148,17 +148,14 @@
   156.0.8078.47 are byte-identical and their results equal the committed control, so the
   recapture only updates its `collectorSha256`; `user-activation-gates-chrome.test.mjs`
   repeats the escape-* captures five times against it on that build.
-- turbo-dom crates repinned to turbo-dom refactor f50e6cb, the final consolidation head
+- turbo-dom crates repinned to turbo-dom refactor f860fea, the final consolidation head
   (turbo-dom#99 track key order on re-install, #104 `<selectedcontent>`, #106 textarea
   `dir=auto`, #107 undecodable images paint nothing / truncated AVIF is broken, #94 /
   #109 corrupt AVIF never aborts, #95 raster paint and colour fixes, #108 / #110 / #111
   canvas colours and save()/restore() state, #112 DOM ownership amortised, turbo-test
-  #125 / #127 computed-style reuse). The child-frame `HTMLTrackElement` key-order pin is
-  gone: the initial about:blank frame now matches Chrome 156 like every other frame.
-  Known regression from this turbo-dom (turbo-dom#113, filed): a parent realm's live
-  `getComputedStyle` declaration for a child-frame element misses a CSSOM edit made in
-  that frame, so `harness/detection/computed-style-owner.test.mjs` fails until turbo-dom
-  fixes it and surf repins.
+  #125 / #127 computed-style reuse, kept fresh across realms by turbo-dom#113). The
+  child-frame `HTMLTrackElement` key-order pin is gone: the initial about:blank frame
+  now matches Chrome 156 like every other frame.
 - turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
   shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
   percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102

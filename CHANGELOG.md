@@ -155,6 +155,10 @@
   canvas colours and save()/restore() state, #112 DOM ownership amortised, turbo-test
   #125 / #127 computed-style reuse). The child-frame `HTMLTrackElement` key-order pin is
   gone: the initial about:blank frame now matches Chrome 156 like every other frame.
+  Known regression from this turbo-dom (turbo-dom#113, filed): a parent realm's live
+  `getComputedStyle` declaration for a child-frame element misses a CSSOM edit made in
+  that frame, so `harness/detection/computed-style-owner.test.mjs` fails until turbo-dom
+  fixes it and surf repins.
 - turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
   shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
   percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102

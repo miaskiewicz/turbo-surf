@@ -116,4 +116,3 @@ async fn child_frame_interfaces_follow_chrome156_key_order() {
         assert!(failures.is_empty(), "{frame}: {}", failures.join("\n"));
     }
 }
-

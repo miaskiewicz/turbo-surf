@@ -114,6 +114,11 @@
   `host_input`'s interruption tests run only the interrupted operation under their tiny
   budget (new `#[doc(hidden)] PageSession::set_execution_budget_for_testing`) and check
   the session afterwards under a 60 s cap (#47).
+- turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
+  shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
+  percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102
+  control). The child-frame `HTMLTrackElement` key-order pin (turbo-dom#99) stays: the
+  initial about:blank frame still lists the frozen constants right after `kind`.
 - turbo-dom crates repinned to turbo-dom refactor 8965838 (P5b-X4/W3/X5/W4/W5/X6/X7/W6 and
   the core coverage slice: layout turbo-dom#28, #41, #48-#53, #55, #56, #62-#65, #69, #70,
   #75-#78, #86, #88, #93; dialog/top layer, fullscreen, `::before`/`::after`, composed

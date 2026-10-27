@@ -412,6 +412,10 @@ mod tests {
         max_curve.curve = vec![0.; 65536];
         max_curve.duration = 1.;
         assert!(validate(&auto(vec![max_curve])).is_ok());
+        let mut two_points = ev("curve", 0., 0.);
+        two_points.curve = vec![0., 1.];
+        two_points.duration = 1.;
+        assert!(validate(&auto(vec![two_points])).is_ok());
     }
 
     #[test]

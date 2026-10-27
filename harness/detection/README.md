@@ -840,8 +840,12 @@ system extensions cannot delay their control targets. Normal live Chrome launche
 keep their default extension behavior. Keyboard-driven authored controls can also
 set `headless: true` (`--headless=new`, loopback-only as well): a headed window takes
 the OS keyboard focus on launch, and keys typed on the host would land in the focused
-field next to the collector's trusted input (turbo-surf#51). The navigation-observation
-control uses it.
+field next to the collector's trusted input (turbo-surf#51). Every localhost control
+that types uses it (turbo-surf#52): navigation-observation, action-parity, and the cdp
+worker/iframe and rootless-Enter tests (all assert `--headless=new` in
+`effectiveExtensionFlags`). The Patchright backend of `chrome-trace.mjs` honours the
+same option through the same policy and records `headless` in its trace; live
+configurations leave it unset and stay headed.
 
 `range-live-probe.js` and its saved Chrome 155.0.8059.79 / V815.5.35.23 fixture
 cover live boundary changes for text, splitting, insertion/removal, replacements,
@@ -1039,7 +1043,10 @@ aggregate durations may overlap. Promise results retain identity and are never
 awaited; these measurements cover synchronous invocation only.
 
 The localhost activation oracle uses real Chrome input and records outgoing
-`Sec-Fetch-User` headers alongside public activation state:
+`Sec-Fetch-User` headers alongside public activation state. It always launches
+headless (`--headless=new`, recorded with the other `flags`), as does
+`user-activation-gates-chrome.mjs`, so host keystrokes cannot reach their trusted
+Enter/Space/Escape input (turbo-surf#52):
 
 ```bash
 node harness/detection/activation-headers-chrome.mjs /tmp/activation-headers.json

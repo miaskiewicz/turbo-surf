@@ -630,7 +630,6 @@ for (const backend of ["cdp", "patchright"]) {
             ),
           )),
       timeout: 45000,
-      ...(backend === "patchright" ? { todo: "turbo-surf#52" } : {}),
     },
     async (t) => {
       const directory = mkdtempSync(join(tmpdir(), `turbo-${backend}-rootless-fixture-`));

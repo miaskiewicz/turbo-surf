@@ -95,7 +95,9 @@ try {
     `--user-data-dir=${profile}`,
     "--no-first-run",
     "--no-default-browser-check",
-    ...chromeExtensionArgs({ url: origin, disableExtensions: true }),
+    // Headless: a headed window takes the OS keyboard focus on launch, and host
+    // keystrokes would land next to the trusted Enter/Space input (turbo-surf#52).
+    ...chromeExtensionArgs({ url: origin, disableExtensions: true, headless: true }),
     "about:blank",
   ];
   chrome = spawn(
@@ -293,6 +295,10 @@ try {
       .update(readFileSync(new URL(import.meta.url)))
       .digest("hex"),
     freshProfile: true,
+    headless: true,
+    flags: flags.map((flag) =>
+      flag.startsWith("--user-data-dir=") ? "--user-data-dir=<fresh-profile>" : flag,
+    ),
     activationShape,
     realElapsedExpiryMs: 5200,
     errors,

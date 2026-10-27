@@ -34,6 +34,8 @@ const KNOWN_GAPS: &[&str] = &[
     // viewport is fixed, so innerWidth/innerHeight never change.
     "fullscreen-activation/1/sizeChanged = false",
     "fullscreen-activation/1/sizeLater = false",
+    // ...and 300 ms later Chrome's window matches the screen (turbo-surf#52 recapture).
+    "fullscreen-activation/1/matchesScreenLater = false",
     // Chrome dispatches the dialog `close` event before already-queued toggle tasks
     // during Esc processing (batch-1 leaves close-vs-task order unpinned).
     // Closing a modal dialog whose focused control had no prior focus to restore leaves

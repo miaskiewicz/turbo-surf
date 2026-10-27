@@ -18,7 +18,6 @@ if (!casesArgument || !outputArgument)
 const output = resolve(outputArgument),
   casesText = readFileSync(resolve(casesArgument), "utf8"),
   { prelude, cases } = JSON.parse(casesText);
-const headless = process.env.TURBO_SURF_CHROME_HEADLESS === "1";
 const only = process.env.TURBO_SURF_CASES ? process.env.TURBO_SURF_CASES.split(",") : null;
 const profile = mkdtempSync(join(tmpdir(), "turbo-activation-gates-"));
 // The page is the case's HTML after the shared prelude, exactly as the offline test composes it.
@@ -54,8 +53,14 @@ try {
     `--user-data-dir=${profile}`,
     "--no-first-run",
     "--no-default-browser-check",
-    ...chromeExtensionArgs({ url: origin, disableExtensions: true, foregroundFrames: true }),
-    ...(headless ? ["--headless=new"] : []),
+    // Always headless: a headed window takes the OS keyboard focus on launch, and host
+    // keystrokes would land next to the trusted Escape/Enter input (turbo-surf#52).
+    ...chromeExtensionArgs({
+      url: origin,
+      disableExtensions: true,
+      foregroundFrames: true,
+      headless: true,
+    }),
     "about:blank",
   ];
   chrome = spawn(
@@ -159,7 +164,7 @@ try {
     collectorSha256: createHash("sha256")
       .update(readFileSync(new URL(import.meta.url)))
       .digest("hex"),
-    headless,
+    headless: true,
     flags: flags.map((flag) =>
       flag.startsWith("--user-data-dir=") ? "--user-data-dir=<fresh-profile>" : flag,
     ),

@@ -2,7 +2,7 @@
   "browser": "Chrome/156.0.8078.47",
   "v8": "15.6.75.19",
   "casesSha256": "de0d0559f85f87b31ec060f6d6cf743746171f5fa3afa2b7027042cac1673157",
-  "collectorSha256": "79226be5ddec9c5d3dadc0adc0e479e16d99aa7861ad83870ed96a5ecd7f0210",
+  "collectorSha256": "d856cefbd4419ce7aac6a2a280cebbf7d2508b23d80bd43490b92a38eb4ec0ae",
   "headless": true,
   "flags": [
     "--remote-debugging-port=0",
@@ -957,7 +957,7 @@
           "boxMatches": true,
           "childMatches": false,
           "sizeLater": true,
-          "matchesScreenLater": false
+          "matchesScreenLater": true
         },
         {
           "settled": [

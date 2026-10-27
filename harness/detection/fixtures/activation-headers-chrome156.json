@@ -1,8 +1,19 @@
 {
-  "browser": "Chrome/155.0.8059.80",
-  "v8": "15.5.35.23",
-  "sourceSha256": "4d400f8ee805bfa671e932a9c876a3c0a74e511b4d3b235084e083b1e198e958",
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "sourceSha256": "f6a694c11756dd23f61da73b5499cc7502c0f28ce4e3c54a8c1f527bc6c1da3f",
   "freshProfile": true,
+  "headless": true,
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--headless=new",
+    "about:blank"
+  ],
   "activationShape": {
     "global": {
       "configurable": true,

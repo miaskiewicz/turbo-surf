@@ -122,6 +122,18 @@
   does and asserts the effective flags. A retry's terminal document committed near the
   fixed deadline may be `interactive` at the snapshot, and the per-collection (120 s)
   and test (15 min) caps are generous caps. 30/30 under 3 concurrent runs.
+- Every other keyboard-driven localhost Chrome control runs headless too (#52), so host
+  keystrokes cannot reach its trusted input: `action-parity` and the cdp worker/iframe
+  and rootless-Enter tests set `headless: true` and assert `--headless=new`; the
+  Patchright backend of `chrome-trace.mjs` honours `headless` through the same
+  loopback-only policy (recorded as `trace.headless`, previously always headed); and
+  `activation-headers-chrome.mjs` / `user-activation-gates-chrome.mjs` always launch
+  headless (the `TURBO_SURF_CHROME_HEADLESS` opt-in is gone from the latter). Both
+  controls were recaptured on Chrome 156.0.8078.47: the activation-headers results are
+  identical to the headed Chrome 155 control (renamed
+  `activation-headers-chrome156.json`, now recording `headless` and `flags`); the
+  activation-gates control now shows fullscreen's window matching the screen 300 ms
+  later (`matchesScreenLater: true`, a new known gap beside `sizeLater`).
 - turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
   shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
   percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102

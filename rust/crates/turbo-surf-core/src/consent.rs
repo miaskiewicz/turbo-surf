@@ -727,7 +727,10 @@ mod tests {
         (base, rx)
     }
 
-    const MINT: &str = "HTTP/1.1 200 OK\r\nSet-Cookie: NID=n1; Path=/\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+    // Not HTML, and a Max-Age cookie: the handshake must accept any content type and
+    // stamp expiry with the caller's clock.
+    const MINT: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: NID=n1; Path=/; Max-Age=60\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+    const NOW: f64 = 2_000_000_000.0;
 
     #[tokio::test]
     async fn post_accept_form_sends_fields_in_the_body_with_the_user_agent() {
@@ -739,7 +742,7 @@ mod tests {
             <input name="continue" value="https://www.google.com/?a&amp;b"></form>"#;
         let page = format!("{base}/consent");
         let mut jar = CookieJar::new();
-        let earned = handshake_if_consent(&mut jar, &page, html, "UA/2", 0.0)
+        let earned = handshake_if_consent(&mut jar, &page, html, "UA/2", NOW)
             .await
             .unwrap()
             .unwrap();
@@ -769,17 +772,19 @@ mod tests {
             method: "GET".into(),
             fields: vec![("set_sc".into(), "true".into())],
         };
-        let earned = earn_consent_session(&mut jar, &form, "", 0.0).await.unwrap();
+        let earned = earn_consent_session(&mut jar, &form, "UA/3", NOW).await.unwrap();
         assert_eq!(earned.continue_url, None);
+        assert!(earned.earned_nid);
         let req = rx.recv().await.unwrap();
         assert!(req.starts_with("GET /save?x=1&set_sc=true "), "{req}");
+        assert!(req.to_ascii_lowercase().contains("\r\nuser-agent: ua/3\r\n"), "{req}");
         // NID already present → not newly minted, but still earned.
         let bare = ConsentForm {
             action: format!("{base}/save"),
             method: "GET".into(),
             fields: Vec::new(),
         };
-        let again = earn_consent_session(&mut jar, &bare, "", 0.0).await.unwrap();
+        let again = earn_consent_session(&mut jar, &bare, "", NOW).await.unwrap();
         assert!(again.earned_nid);
         assert!(again.minted.is_empty());
         assert!(rx.recv().await.unwrap().starts_with("GET /save "));

@@ -115,7 +115,9 @@ async fn child_frame_interfaces_follow_chrome156_key_order() {
         );
         // Known gap (turbo-dom#99): in the initial about:blank child frame HTMLTrackElement's
         // frozen constants precede its attributes. Pinned to that exact order; it must still
-        // differ (the parsed srcdoc frame already matches).
+        // differ (the parsed srcdoc frame already matches). turbo-dom edde7dc's
+        // configurable-until-key-order fix does not reach this frame: its constants are
+        // already non-configurable right after `kind` when the key order runs.
         let (gaps, failures): (Vec<String>, Vec<String>) = failures
             .into_iter()
             .partition(|failure| failure.starts_with("HTMLTrackElement.prototype order"));

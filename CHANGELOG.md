@@ -6,6 +6,9 @@
 - No-JS form submission through an `<input type=image>` submitter (#55): like Chrome 156
   it contributes the click coordinates `name.x=0&name.y=0` (`x=0&y=0` when unnamed)
   instead of `name=value`.
+- Google `/sorry` clearing with solver-returned cookies (#56): the cookies are stored
+  under the continue URL's bare host, so a non-default-port origin replays them on the
+  SERP re-fetch (they were keyed by `host:port` and never sent).
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

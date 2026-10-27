@@ -322,7 +322,11 @@ pub async fn clear_if_sorry(
             .continue_url
             .clone()
             .ok_or_else(|| SolveError::Parse("sorry: form has no `continue` (SERP) URL".into()))?;
-        let host = crate::url::host_of(&continue_url).unwrap_or_default();
+        // Cookies are port-agnostic (RFC 6265 §8.5): the domain is the bare host.
+        let host = url::Url::parse(&continue_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_default();
         for (k, v) in &solved.cookies {
             jar.add(k, v, &host, "/", None);
         }
@@ -753,7 +757,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "turbo-surf#56: fails until the fix"]
     async fn solver_cookies_clear_the_wall_and_refetch_the_serp() {
         let (base, mut rx) = spawn_recorder(http_ok("<p>SERP</p>")).await;
         let html = SORRY_FORM.replace("CONTINUE_URL", &format!("{base}/search?q=cats"));

@@ -420,7 +420,8 @@ mod tests {
         let tree = Tree::parse(
             "<form action='/s' method='get'><span id='inner'><b id='deep'>x</b></span>\
              <input id='q' name='q' value='v'><button id='b' name='go' value='1'>Go</button>\
-             <input id='sub' type='Submit' name='t' value='3'></form>\
+             <input id='sub' type='Submit' name='t' value='3'>\
+             <input id='ib' type='button' name='b' value='4'><input id='ir' type='reset' name='r' value='5'></form>\
              <p id='out'>outside</p><a href='/l'><em id='em'>link</em></a>",
         );
         let submit = |sel: &str| match click_intent(&tree, first(&tree, sel), BASE) {
@@ -433,6 +434,9 @@ mod tests {
         // <button> (any type) and input type=submit (case-insensitive) are submitters.
         assert_eq!(submit("#b"), "https://x.test/s?q=v&go=1");
         assert_eq!(submit("#sub"), "https://x.test/s?q=v&t=3");
+        // input type=button / type=reset are not submitters: never their own pair.
+        assert_eq!(submit("#ib"), "https://x.test/s?q=v");
+        assert_eq!(submit("#ir"), "https://x.test/s?q=v");
         assert_eq!(
             click_intent(&tree, first(&tree, "#out"), BASE),
             ClickIntent::Inert

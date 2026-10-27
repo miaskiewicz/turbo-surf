@@ -11,6 +11,9 @@
   SERP re-fetch (they were keyed by `host:port` and never sent).
 - URL canonicalization (#57) leaves an empty opaque path alone (`foo:?a=1` stayed
   `foo:%2F?a=1`), like the JS canonicalizer it mirrors.
+- `Permissions-Policy` bare-token allowlists (#59): `feature=self` narrows the feature
+  to the document's origin and `feature=<other token>` disables it, like Chrome 156
+  (both kept the feature's default allowlist).
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

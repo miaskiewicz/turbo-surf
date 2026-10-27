@@ -114,13 +114,9 @@ impl PermissionsPolicy {
             }
             let items = match entry {
                 sfv::ListEntry::InnerList(list) => list.items,
-                sfv::ListEntry::Item(item) => {
-                    match item.bare_item.as_token().map(|value| value.as_str()) {
-                        Some("*") => vec![item],
-                        Some(_) => continue,
-                        None => vec![item],
-                    }
-                }
+                // A bare item is a one-item allowlist (Chrome: `f=self` → [self],
+                // `f=<other token>` → []).
+                sfv::ListEntry::Item(item) => vec![item],
             };
             let mut list = Vec::new();
             for item in items {
@@ -317,7 +313,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "turbo-surf#59: fails until the fix"]
     fn bare_token_allowlists_match_chrome() {
         // Chrome 156: `ch-ua=self` → [self origin]; `ch-save-data=bogus` → [] (disabled),
         // both default-`*` features (turbo-surf#59).

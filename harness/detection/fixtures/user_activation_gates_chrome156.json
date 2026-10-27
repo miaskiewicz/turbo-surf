@@ -2,7 +2,7 @@
   "browser": "Chrome/156.0.8078.47",
   "v8": "15.6.75.19",
   "casesSha256": "de0d0559f85f87b31ec060f6d6cf743746171f5fa3afa2b7027042cac1673157",
-  "collectorSha256": "d856cefbd4419ce7aac6a2a280cebbf7d2508b23d80bd43490b92a38eb4ec0ae",
+  "collectorSha256": "3d3cfde8111a1fb4500827672e60f9981034e4b440b88f9c1faf991798fd5aa9",
   "headless": true,
   "flags": [
     "--remote-debugging-port=0",

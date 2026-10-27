@@ -1,3 +1,4 @@
+/* eslint-disable no-await-in-loop -- the five captures are deliberately sequential. */
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -19,14 +20,15 @@ const escapeIds = cases.map((item) => item.id).filter((id) => id.startsWith("esc
 // Only the exact build the control was recorded on can reproduce it row for row.
 const chromeBuild = () => {
   if (!existsSync(chrome)) return null;
-  const match = /(\d+\.\d+\.\d+\.\d+)/.exec(execFileSync(chrome, ["--version"], { encoding: "utf8" }));
+  const match = /(\d+\.\d+\.\d+\.\d+)/.exec(
+    execFileSync(chrome, ["--version"], { encoding: "utf8" }),
+  );
   return match && `Chrome/${match[1]}`;
 };
 
 test(
   "escape-* activation-gate captures agree run to run and with the Chrome 156 control (turbo-surf#54)",
   {
-    todo: "turbo-surf#54: fails until the fix",
     skip: chromeBuild() !== fixture.browser && `needs ${fixture.browser} at TURBO_SURF_CHROME_PATH`,
     timeout: 600000,
   },
@@ -56,7 +58,11 @@ test(
           output,
         ],
         {
-          env: { ...process.env, TURBO_SURF_CHROME_PATH: chrome, TURBO_SURF_CASES: escapeIds.join(",") },
+          env: {
+            ...process.env,
+            TURBO_SURF_CHROME_PATH: chrome,
+            TURBO_SURF_CASES: escapeIds.join(","),
+          },
           timeout: 120000,
         },
       );

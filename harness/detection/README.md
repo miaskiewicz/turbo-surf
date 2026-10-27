@@ -1046,7 +1046,13 @@ The localhost activation oracle uses real Chrome input and records outgoing
 `Sec-Fetch-User` headers alongside public activation state. It always launches
 headless (`--headless=new`, recorded with the other `flags`), as does
 `user-activation-gates-chrome.mjs`, so host keystrokes cannot reach their trusted
-Enter/Space/Escape input (turbo-surf#52):
+Enter/Space/Escape input (turbo-surf#52). The gates collector also lets the page run
+two rendering updates and a task before, between and after its trusted input events
+(keydown/keyup, press/release), so queued `toggle`/`close` tasks and the focus fixup
+cannot race the input and repeated captures agree (turbo-surf#54); on the recording
+build (`TURBO_SURF_CHROME_PATH` pointing at Chrome 156.0.8078.47)
+`node --test harness/detection/user-activation-gates-chrome.test.mjs` repeats the
+escape-* captures five times against the control:
 
 ```bash
 node harness/detection/activation-headers-chrome.mjs /tmp/activation-headers.json

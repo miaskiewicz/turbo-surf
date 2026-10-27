@@ -140,6 +140,14 @@
   `evaluate(fn, arg, isolatedContext)` ("Too many arguments"), so every Patchright Chrome
   test failed; 1.59.4 is the release the Chrome 156 fixtures were recorded with.
   `browser-sidecar-pin.test.mjs` asserts the pin and the committed lockfile.
+- `user-activation-gates-chrome.mjs` escape-* captures are deterministic (#54): trusted
+  input raced the page's queued work, so setup `toggle` tasks landed on either side of
+  an Escape and a dialog's `close` task (with the focus fixup) on either side of the
+  keyup. The collector now waits for two rendering updates and a task before, between
+  and after its trusted input events (no wall-clock wait). Five full captures on Chrome
+  156.0.8078.47 are byte-identical and their results equal the committed control, so the
+  recapture only updates its `collectorSha256`; `user-activation-gates-chrome.test.mjs`
+  repeats the escape-* captures five times against it on that build.
 - turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
   shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
   percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102

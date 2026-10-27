@@ -152,10 +152,10 @@ pub(crate) fn attr_value(tag: &str, name: &str) -> Option<String> {
             let end = body.find(q)?;
             return Some(body[..end].to_string());
         }
-        // Unquoted value: up to the next whitespace or tag close.
+        // Unquoted value: up to the next whitespace or tag close (`/` is part of it).
         let v: String = after
             .chars()
-            .take_while(|c| !c.is_whitespace() && *c != '>' && *c != '/')
+            .take_while(|c| !c.is_whitespace() && *c != '>')
             .collect();
         if !v.is_empty() {
             return Some(v);
@@ -868,7 +868,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "turbo-surf#60: fails until the fix"]
     fn unquoted_attribute_values_keep_slashes_like_chrome() {
         // Chrome 156 getAttribute: an unquoted value ends at whitespace or `>` only.
         assert_eq!(

@@ -14,6 +14,9 @@
 - `Permissions-Policy` bare-token allowlists (#59): `feature=self` narrows the feature
   to the document's origin and `feature=<other token>` disables it, like Chrome 156
   (both kept the feature's default allowlist).
+- Google `/sorry` and consent forms (#60): an unquoted attribute value keeps its `/`
+  (`action=/save`, `value=https://…`), like Chrome's HTML parser; it was cut at the
+  first `/`.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

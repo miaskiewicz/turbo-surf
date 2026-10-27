@@ -6315,4 +6315,104 @@ mod session_tool_tests {
         assert_eq!(s.fingerprint, "{}");
         turbo_surf_render::set_fingerprint("{}");
     }
+
+    // A sensor-gated page: GET without the clearance cookie serves the gate (with the
+    // Akamai script), the sensor POST sets the cookie, and GET with it is the real page.
+    // (The clearance cookie is not `_abck`: any `_abck` in the jar keeps test_sensor
+    // detecting a wall, turbo-surf#58.)
+    async fn spawn_akamai_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let line = req.lines().next().unwrap_or("").to_string();
+                let (head, body) = if line.starts_with("GET /ak.js") {
+                    ("Content-Type: application/javascript".to_string(), "var bmak={sensor_data:1};navigator.webdriver;".to_string())
+                } else if line.starts_with("GET /other.js") {
+                    ("Content-Type: application/javascript".to_string(), "var x=1;".to_string())
+                } else if line.starts_with("POST /") {
+                    ("Set-Cookie: ak_ok=1; Path=/".to_string(), "{}".to_string())
+                } else if req.contains("ak_ok=1") {
+                    ("Content-Type: text/html".to_string(), "<title>Shop</title>".to_string())
+                } else {
+                    (
+                        "Content-Type: text/html".to_string(),
+                        "<title>Wall</title><script src='/other.js'></script><script src='/ak.js'></script>".to_string(),
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\n{head}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        base
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn analyze_akamai_builds_candidates_and_retry_keeps_the_accepted_one() {
+        let base = spawn_akamai_site().await;
+        let dir = std::env::temp_dir().join(format!("surf-sensors-{}", std::process::id()));
+        std::env::set_var("TURBO_SURF_SENSOR_DIR", &dir);
+        let mut s = Session::new();
+        assert_eq!(
+            call(&mut s, "analyze_akamai", json!({})).await.unwrap_err(),
+            "no Akamai script found on the current page"
+        );
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        let script = "var bmak={sensor_data:1};navigator.webdriver;";
+        let dry = call(&mut s, "analyze_akamai", json!({})).await.unwrap();
+        assert_eq!(dry["scriptUrl"], format!("{base}/ak.js"));
+        assert_eq!(dry["scriptBytes"], script.len());
+        assert_eq!(dry["scriptHash"], format!("{:016x}", fnv_hex(script)));
+        assert_eq!(dry["retried"], false);
+        assert_eq!(dry["accepted"], Value::Null);
+        let versions = turbo_surf_core::akamai::SensorVersion::all();
+        assert_eq!(dry["candidates"].as_array().unwrap().len(), versions.len());
+        assert!(dry["candidates"][0].get("accepted").is_none());
+
+        let hot = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        let first = format!("{:?}", versions[0]);
+        assert_eq!(hot["candidates"][0]["accepted"], true);
+        let saved = format!("{}/{}-{first}.json", dir.display(), dry["scriptHash"].as_str().unwrap());
+        assert_eq!(hot["accepted"], json!({ "version": first, "savedTo": saved }));
+        // Only the first accepted candidate is tested.
+        if versions.len() > 1 {
+            assert!(hot["candidates"][1].get("accepted").is_none());
+        }
+        let blob: Value = serde_json::from_slice(&std::fs::read(&saved).unwrap()).unwrap();
+        assert_eq!(blob["pageUrl"], format!("{base}/"));
+        assert_eq!(blob["sensor_data"], hot["candidates"][0]["sensor_data"]);
+        assert_eq!(s.jar.cookie_header(&format!("{base}/"), 0.0), "ak_ok=1");
+        std::env::remove_var("TURBO_SURF_SENSOR_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_reports_what_the_page_scripts_read() {
+        let mut s = Session::new();
+        s.load(
+            "https://x.test/",
+            "<body><script>navigator.userAgent; navigator.notAThing;</script></body>",
+        );
+        let report = call(&mut s, "probe", json!({})).await.unwrap();
+        let accesses = report["accesses"].to_string();
+        assert!(accesses.contains("userAgent"), "{report}");
+        assert!(
+            report["shim_needed"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "navigator.notAThing"),
+            "{report}"
+        );
+    }
 }

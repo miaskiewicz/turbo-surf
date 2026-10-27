@@ -111,7 +111,7 @@ On a Mac with a real Metal GPU:
 ```bash
 npm install
 # Optional: legacy Playwright/Patchright collectors only; raw CDP needs neither.
-# npm install --prefix scripts/browser-sidecar
+# npm ci --prefix scripts/browser-sidecar   # pinned Patchright 1.59.4 (turbo-surf#53)
 cd rust
 cargo build --release -p turbo-surf-mcp --features trust-anchors,gpu-metal,coretext --example detection_trace
 cd ..

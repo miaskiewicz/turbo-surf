@@ -59,6 +59,10 @@ node scripts/browser-sidecar/net-trace.mjs https://www.google.com/ --fill "texta
 node scripts/browser-sidecar/run-probe.mjs scripts/browser-sidecar/probes/webgl-fp.js
 ```
 
-Committed dev dependencies are declared in `package.json`. `node_modules/`,
-`.chrome-profile/`, `package-lock.json` and `.enid-cache.json` are local/gitignored.
+Committed dev dependencies are declared in `package.json` and locked in the committed
+`package-lock.json`: Patchright is pinned to exactly 1.59.4 because
+`harness/detection/chrome-trace.mjs` uses the 3-argument
+`evaluate(fn, arg, isolatedContext)` that 1.62.3 and 1.64.2 reject (turbo-surf#53);
+install with `npm ci`. `node_modules/`, `.chrome-profile/` and `.enid-cache.json` are
+local/gitignored.
 Cookie caches and raw diagnostics can contain session secrets; keep them local.

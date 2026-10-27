@@ -134,6 +134,12 @@
   `activation-headers-chrome156.json`, now recording `headless` and `flags`); the
   activation-gates control now shows fullscreen's window matching the screen 300 ms
   later (`matchesScreenLater: true`, a new known gap beside `sizeLater`).
+- The browser sidecar pins Patchright to exactly 1.59.4 and commits its
+  `package-lock.json` (#53; `setup.sh` installs with `npm ci`). `patchright@^1` resolved
+  1.64.2 on a fresh install, which rejects `chrome-trace.mjs`'s 3-argument
+  `evaluate(fn, arg, isolatedContext)` ("Too many arguments"), so every Patchright Chrome
+  test failed; 1.59.4 is the release the Chrome 156 fixtures were recorded with.
+  `browser-sidecar-pin.test.mjs` asserts the pin and the committed lockfile.
 - turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
   shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
   percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102

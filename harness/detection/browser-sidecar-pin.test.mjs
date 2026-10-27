@@ -14,15 +14,15 @@ const repo = fileURLToPath(new URL("../../", import.meta.url));
 
 test(
   "browser sidecar pins the Patchright release chrome-trace.mjs is written against (turbo-surf#53)",
-  { todo: "turbo-surf#53: fails until the fix" },
   () => {
     const manifest = JSON.parse(readFileSync(new URL("package.json", sidecar), "utf8"));
     assert.deepEqual(manifest.dependencies, { patchright: PATCHRIGHT });
     const lock = JSON.parse(readFileSync(new URL("package-lock.json", sidecar), "utf8"));
     assert.deepEqual(lock.packages[""].dependencies, { patchright: PATCHRIGHT });
     assert.equal(lock.packages["node_modules/patchright"].version, PATCHRIGHT);
+    // patchright 1.59.4's own manifest spells its core dependency with a "v" prefix.
     assert.deepEqual(lock.packages["node_modules/patchright"].dependencies, {
-      "patchright-core": PATCHRIGHT,
+      "patchright-core": `v${PATCHRIGHT}`,
     });
     assert.equal(lock.packages["node_modules/patchright-core"].version, PATCHRIGHT);
     assert.equal(

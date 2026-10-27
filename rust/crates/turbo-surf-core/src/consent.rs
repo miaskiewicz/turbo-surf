@@ -708,4 +708,102 @@ mod tests {
         .unwrap();
         assert!(out.is_none(), "ordinary page → nothing to do");
     }
+
+    // Answers every request with `resp` and forwards the raw request text.
+    async fn spawn_recorder(
+        resp: &'static str,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (base, rx)
+    }
+
+    const MINT: &str = "HTTP/1.1 200 OK\r\nSet-Cookie: NID=n1; Path=/\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+
+    #[tokio::test]
+    async fn post_accept_form_sends_fields_in_the_body_with_the_user_agent() {
+        let (base, mut rx) = spawn_recorder(MINT).await;
+        // No action → the page URL; a nameless input is not a field.
+        let html = r#"<p>Before you continue to Google</p><form method="post">
+            <input type="submit" value="Accept all">
+            <input name="set_aps" value="true"><input name="set_sc" value="true">
+            <input name="continue" value="https://www.google.com/?a&amp;b"></form>"#;
+        let page = format!("{base}/consent");
+        let mut jar = CookieJar::new();
+        let earned = handshake_if_consent(&mut jar, &page, html, "UA/2", 0.0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(earned.earned_nid);
+        assert_eq!(earned.minted, vec!["NID".to_string()]);
+        assert_eq!(earned.continue_url.as_deref(), Some("https://www.google.com/?a&b"));
+        let req = rx.recv().await.unwrap();
+        assert!(req.starts_with("POST /consent "), "{req}");
+        let lower = req.to_ascii_lowercase();
+        assert!(lower.contains("\r\nuser-agent: ua/2\r\n"), "{req}");
+        assert!(
+            lower.contains("\r\ncontent-type: application/x-www-form-urlencoded\r\n"),
+            "{req}"
+        );
+        assert!(
+            req.ends_with("set_aps=true&set_sc=true&continue=https%3A%2F%2Fwww.google.com%2F%3Fa%26b"),
+            "{req}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_submit_appends_fields_to_an_existing_query_or_none_at_all() {
+        let (base, mut rx) = spawn_recorder(MINT).await;
+        let mut jar = CookieJar::new();
+        let form = ConsentForm {
+            action: format!("{base}/save?x=1"),
+            method: "GET".into(),
+            fields: vec![("set_sc".into(), "true".into())],
+        };
+        let earned = earn_consent_session(&mut jar, &form, "", 0.0).await.unwrap();
+        assert_eq!(earned.continue_url, None);
+        let req = rx.recv().await.unwrap();
+        assert!(req.starts_with("GET /save?x=1&set_sc=true "), "{req}");
+        // NID already present → not newly minted, but still earned.
+        let bare = ConsentForm {
+            action: format!("{base}/save"),
+            method: "GET".into(),
+            fields: Vec::new(),
+        };
+        let again = earn_consent_session(&mut jar, &bare, "", 0.0).await.unwrap();
+        assert!(again.earned_nid);
+        assert!(again.minted.is_empty());
+        assert!(rx.recv().await.unwrap().starts_with("GET /save "));
+    }
+
+    #[tokio::test]
+    async fn handshake_errors_are_explicit() {
+        let mut jar = CookieJar::new();
+        let err = handshake_if_consent(
+            &mut jar,
+            "https://consent.google.com/m",
+            "<p>no form</p>",
+            "",
+            0.0,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "consent: no parseable \"Accept all\" form on the interstitial");
+        let form = ConsentForm {
+            action: "http://127.0.0.1:1/save".into(),
+            method: "POST".into(),
+            fields: Vec::new(),
+        };
+        let err = earn_consent_session(&mut jar, &form, "", 0.0).await.unwrap_err();
+        assert!(err.starts_with("consent handshake: "), "{err}");
+    }
 }

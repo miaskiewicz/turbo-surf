@@ -1,7 +1,7 @@
 //! Solver selection from the environment / `.env`, the solver-chain plumbing
 //! (FallbackSolver, solve_if_challenged), the browser-sidecar protocol and the error
-//! surface. ONE test function: it mutates the process environment and the current
-//! directory, which must not race another test in this binary.
+//! surface. Only `solver_selection_chain_and_sidecar_protocol` touches the process
+//! environment and current directory; nothing else in this binary reads either.
 use std::time::Duration;
 use turbo_surf_core::challenge::{
     self, BrowserSolver, Challenge, ChallengeSolver, FallbackSolver, PowEngine, RecaptchaEngine,
@@ -225,4 +225,60 @@ fn solver_selection_chain_and_sidecar_protocol() {
     );
     assert!(std::env::var("NOT_AN_ASSIGNMENT").is_err());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn vendor_solvers_surface_transport_errors_and_parse_edges() {
+    use turbo_surf_core::{akamai, aws_waf, cloudflare, recaptcha};
+    let dead = Challenge {
+        page_url: "http://127.0.0.1:1/wall".into(),
+        ..Default::default()
+    };
+    let ctx = SolveContext::default();
+    let solvers: Vec<Box<dyn ChallengeSolver>> = vec![
+        Box::new(akamai::AkamaiSolver::default()),
+        Box::new(cloudflare::CloudflareSolver::default()),
+        Box::new(aws_waf::AwsWafSolver::default()),
+        Box::new(recaptcha::RecaptchaSolver::default()),
+    ];
+    for solver in &solvers {
+        let err = solver.solve(&dead, &ctx).await.unwrap_err();
+        assert!(
+            matches!(err, SolveError::Http(_)),
+            "{}: {err:?}",
+            solver.name()
+        );
+    }
+    assert_eq!(
+        [
+            aws_waf::WafTier::Common,
+            aws_waf::WafTier::Targeted,
+            aws_waf::WafTier::Captcha
+        ]
+        .map(|t| t.label()),
+        ["common", "targeted", "captcha"]
+    );
+    // Site-key extraction skips non-word-start hits, keys without a separator or a
+    // quoted value, and a bare `render=explicit`.
+    assert_eq!(
+        recaptcha::extract_sitekey(
+            r#"data-sitekeyx="no" sitekey sitekey= sitekey=bare 'sitekey' : "K1""#
+        )
+        .as_deref(),
+        Some("K1")
+    );
+    assert_eq!(recaptcha::extract_sitekey("sitekey="), None);
+    assert_eq!(
+        recaptcha::extract_sitekey("grecaptcha.execute(KEY)"),
+        None
+    );
+    assert_eq!(
+        recaptcha::extract_sitekey("grecaptcha.execute('V3KEY', {})").as_deref(),
+        Some("V3KEY")
+    );
+    // Cloudflare fields must be quoted JS strings.
+    assert_eq!(
+        cloudflare::parse_challenge("window._cf_chl_opt={cRay: 123, cvId: '2'}"),
+        None
+    );
 }

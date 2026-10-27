@@ -467,4 +467,22 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn non_mac_profiles_report_x86_and_their_platform_version() {
+        let mut p = default_profile();
+        p.nav_platform = "Win32";
+        assert_eq!(p.architecture(), "x86");
+        assert_eq!(p.platform_version(), "10.0.0");
+        p.nav_platform = "Linux x86_64";
+        assert_eq!(p.architecture(), "x86");
+        assert_eq!(p.platform_version(), "");
+        p.nav_platform = "MacIntel";
+        let mac = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            "x86"
+        } else {
+            "arm"
+        };
+        assert_eq!(p.architecture(), mac);
+    }
 }

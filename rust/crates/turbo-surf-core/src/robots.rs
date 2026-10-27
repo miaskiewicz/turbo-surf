@@ -50,9 +50,7 @@ fn pattern_matches(pat: &str, path: &str) -> bool {
             }
         }
     }
-    // Unreachable in practice: with N parts the loop always returns at the
-    // i==last arm (or the single-segment arm); kept as a defensive total.
-    true
+    unreachable!("split('*') yields >= 1 part and the last part's iteration always returns")
 }
 
 fn tail_matches(rest: &str, part: &str, anchored: bool) -> bool {

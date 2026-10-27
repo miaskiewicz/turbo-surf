@@ -155,4 +155,15 @@ mod tests {
         );
         assert_eq!(origin_of("not a url"), None);
     }
+
+    #[test]
+    #[ignore = "turbo-surf#57: fails until the fix"]
+    fn canonicalize_leaves_an_empty_opaque_path_alone() {
+        // Like the JS canonicalizer (an opaque path's pathname cannot be set), only the
+        // fragment and query change: `new URL("foo:?b=2&a=1")` keeps `foo:` (turbo-surf#57).
+        assert_eq!(
+            canonicalize("foo:?b=2&a=1#frag").as_deref(),
+            Some("foo:?a=1&b=2")
+        );
+    }
 }

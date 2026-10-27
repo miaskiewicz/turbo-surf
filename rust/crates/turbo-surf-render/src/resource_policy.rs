@@ -387,7 +387,10 @@ mod measured_embedder_headers {
             assert!(active_mixed_content_allowed(from, ok), "{ok}");
         }
         assert!(!active_mixed_content_allowed(from, "http://10.0.0.1/a.js"));
-        assert!(active_mixed_content_allowed("http://page.test/", "http://x.test/a.js"));
+        assert!(active_mixed_content_allowed(
+            "http://page.test/",
+            "http://x.test/a.js"
+        ));
     }
 
     #[test]

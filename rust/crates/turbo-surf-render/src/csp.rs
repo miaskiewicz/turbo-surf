@@ -474,7 +474,9 @@ fn active_parser_node(
         }
         ancestor = parent.parent();
     }
-    unreachable!("a node from the document's query_selector_all reaches the root or a template fragment")
+    unreachable!(
+        "a node from the document's query_selector_all reaches the root or a template fragment"
+    )
 }
 impl DocumentPolicy {
     pub fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
@@ -796,16 +798,41 @@ mod tests {
     fn source_expressions_match_ports_keywords_and_bad_urls_like_chrome() {
         let doc = "https://page.test/";
         // A keyword never matches a URL; an unparsable target never matches.
-        assert!(!matches_source("'unsafe-inline'", doc, "https://x.test/", false));
+        assert!(!matches_source(
+            "'unsafe-inline'",
+            doc,
+            "https://x.test/",
+            false
+        ));
         assert!(!matches_source("https:", doc, "not a url", false));
         // Explicit port: exact or the scheme default; `*` any; none = default only.
-        assert!(matches_source("x.test:8080", doc, "https://x.test:8080/a", false));
-        assert!(!matches_source("x.test:8080", doc, "https://x.test:8081/a", false));
+        assert!(matches_source(
+            "x.test:8080",
+            doc,
+            "https://x.test:8080/a",
+            false
+        ));
+        assert!(!matches_source(
+            "x.test:8080",
+            doc,
+            "https://x.test:8081/a",
+            false
+        ));
         assert!(matches_source("x.test:443", doc, "https://x.test/a", false));
-        assert!(!matches_source("x.test:abc", doc, "https://x.test/a", false));
+        assert!(!matches_source(
+            "x.test:abc",
+            doc,
+            "https://x.test/a",
+            false
+        ));
         assert!(matches_source("x.test:*", doc, "https://x.test:9/a", false));
         assert!(matches_source("x.test", doc, "https://x.test:443/a", false));
-        assert!(!matches_source("x.test", doc, "https://x.test:8443/a", false));
+        assert!(!matches_source(
+            "x.test",
+            doc,
+            "https://x.test:8443/a",
+            false
+        ));
     }
 
     #[test]
@@ -820,7 +847,10 @@ mod tests {
         );
         let records = policy.eval_violations();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].original, "script-src 'self' 'report-sample'; report-uri /r");
+        assert_eq!(
+            records[0].original,
+            "script-src 'self' 'report-sample'; report-uri /r"
+        );
         assert!(records[0].sample);
         assert!(matches!(
             &records[0].destination,
@@ -828,9 +858,11 @@ mod tests {
         ));
         let quiet = Policy::new("https://eval.test/", ["script-src 'self'".into()]);
         assert!(!quiet.eval_violations()[0].sample);
-        assert!(Policy::new("https://eval.test/", ["script-src 'unsafe-eval'".into()])
-            .eval_violations()
-            .is_empty());
+        assert!(
+            Policy::new("https://eval.test/", ["script-src 'unsafe-eval'".into()])
+                .eval_violations()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -840,7 +872,14 @@ mod tests {
                     <meta http-equiv=Content-Security-Policy content=\"script-src 'self'\"></head>";
         let mut doc = DocumentPolicy::new("https://meta.test/", &[], html);
         doc.activate(usize::MAX);
-        assert!(doc.current().allows_request("img-src", "https://other.test/i.png", "", false));
-        assert!(!doc.current().allows_request("script-src-elem", "https://other.test/s.js", "", false));
+        assert!(doc
+            .current()
+            .allows_request("img-src", "https://other.test/i.png", "", false));
+        assert!(!doc.current().allows_request(
+            "script-src-elem",
+            "https://other.test/s.js",
+            "",
+            false
+        ));
     }
 }

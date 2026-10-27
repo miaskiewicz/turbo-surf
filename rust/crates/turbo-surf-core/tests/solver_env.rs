@@ -84,10 +84,23 @@ fn solver_selection_chain_and_sidecar_protocol() {
     .collect();
     assert_eq!(
         labels,
-        ["akamai", "datadome", "kasada", "cloudflare", "awswaf", "recaptcha"]
+        [
+            "akamai",
+            "datadome",
+            "kasada",
+            "cloudflare",
+            "awswaf",
+            "recaptcha"
+        ]
     );
-    assert_eq!(SolveError::NotConfigured.to_string(), "no solver configured");
-    assert_eq!(SolveError::Http("x".into()).to_string(), "solver HTTP error: x");
+    assert_eq!(
+        SolveError::NotConfigured.to_string(),
+        "no solver configured"
+    );
+    assert_eq!(
+        SolveError::Http("x".into()).to_string(),
+        "solver HTTP error: x"
+    );
     assert_eq!(
         SolveError::Parse("y".into()).to_string(),
         "solver response parse error: y"
@@ -159,16 +172,30 @@ fn solver_selection_chain_and_sidecar_protocol() {
         ))
         .unwrap();
     assert_eq!(token.cookies, vec![("_abck".to_string(), "A".to_string())]);
-    assert_eq!(token.headers, vec![("x-kpsdk-ct".to_string(), "K".to_string())]);
+    assert_eq!(
+        token.headers,
+        vec![("x-kpsdk-ct".to_string(), "K".to_string())]
+    );
     assert_eq!(token.ttl, Duration::from_secs(30 * 60));
     // Either half of the envelope alone is a token.
     let cookies_only = rt
-        .block_on(sidecar(r#"cat >/dev/null; echo '{"cookies":{"c":"1"}}'"#, &ch, &ctx))
+        .block_on(sidecar(
+            r#"cat >/dev/null; echo '{"cookies":{"c":"1"}}'"#,
+            &ch,
+            &ctx,
+        ))
         .unwrap();
-    assert_eq!(cookies_only.cookies, vec![("c".to_string(), "1".to_string())]);
+    assert_eq!(
+        cookies_only.cookies,
+        vec![("c".to_string(), "1".to_string())]
+    );
     assert!(cookies_only.headers.is_empty());
     let headers_only = rt
-        .block_on(sidecar(r#"cat >/dev/null; echo '{"headers":{"h":"2"}}'"#, &ch, &ctx))
+        .block_on(sidecar(
+            r#"cat >/dev/null; echo '{"headers":{"h":"2"}}'"#,
+            &ch,
+            &ctx,
+        ))
         .unwrap();
     assert!(headers_only.cookies.is_empty());
     assert_eq!(
@@ -290,10 +317,7 @@ async fn vendor_solvers_surface_transport_errors_and_parse_edges() {
         Some("K1")
     );
     assert_eq!(recaptcha::extract_sitekey("sitekey="), None);
-    assert_eq!(
-        recaptcha::extract_sitekey("grecaptcha.execute(KEY)"),
-        None
-    );
+    assert_eq!(recaptcha::extract_sitekey("grecaptcha.execute(KEY)"), None);
     assert_eq!(
         recaptcha::extract_sitekey("grecaptcha.execute('V3KEY', {})").as_deref(),
         Some("V3KEY")

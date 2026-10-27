@@ -658,12 +658,18 @@ mod tests {
             </form>"#;
         let form = parse_sorry_form("https://g.test/sorry/index?continue=x", html).unwrap();
         assert_eq!(form.action, "https://g.test/sorry/index?continue=x");
-        assert_eq!(form.continue_url.as_deref(), Some("https://g.test/search?q=1"));
+        assert_eq!(
+            form.continue_url.as_deref(),
+            Some("https://g.test/search?q=1")
+        );
         assert_eq!(
             form.fields,
             vec![
                 ("bare".to_string(), "v1".to_string()),
-                ("Continue".to_string(), "https://g.test/search?q=1".to_string()),
+                (
+                    "Continue".to_string(),
+                    "https://g.test/search?q=1".to_string()
+                ),
                 ("single".to_string(), "a b".to_string()),
             ]
         );
@@ -715,7 +721,10 @@ mod tests {
         );
         let req = rx.recv().await.unwrap();
         assert!(req.starts_with("POST /sorry/index "), "{req}");
-        assert!(req.to_ascii_lowercase().contains("user-agent: ua/1.0"), "{req}");
+        assert!(
+            req.to_ascii_lowercase().contains("user-agent: ua/1.0"),
+            "{req}"
+        );
         assert!(req.ends_with("q=t%26k&g-recaptcha-response=TOKEN"), "{req}");
     }
 
@@ -728,7 +737,9 @@ mod tests {
             continue_url: Some(format!("{base}/search")),
             fields: Vec::new(),
         };
-        assert!(submit_and_clear(&mut jar, &form, "T", "", 0.0).await.is_err());
+        assert!(submit_and_clear(&mut jar, &form, "T", "", 0.0)
+            .await
+            .is_err());
         let req = rx.recv().await.unwrap().to_ascii_lowercase();
         assert!(req.contains("user-agent: "), "{req}");
         assert!(!req.contains("user-agent: \r\n"), "{req}");
@@ -875,11 +886,17 @@ mod tests {
             Some("/save")
         );
         assert_eq!(
-            attr_value("<input name=continue value=https://g.test/search?q=1>", "value")
-                .as_deref(),
+            attr_value(
+                "<input name=continue value=https://g.test/search?q=1>",
+                "value"
+            )
+            .as_deref(),
             Some("https://g.test/search?q=1")
         );
-        assert_eq!(attr_value("<input value=x/>", "value").as_deref(), Some("x/"));
+        assert_eq!(
+            attr_value("<input value=x/>", "value").as_deref(),
+            Some("x/")
+        );
         let form = parse_sorry_form(
             "https://g.test/sorry/index",
             "<form action=/sorry/save><input name=continue value=https://g.test/s?q=1></form>",

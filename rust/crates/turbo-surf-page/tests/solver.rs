@@ -5,7 +5,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use turbo_surf_core::crawl::Navigator;
 use turbo_surf_page::TurboNavigator;
 
-const WALL: &str = "<title>Just a moment...</title><script src='/cdn-cgi/challenge-platform/x.js'></script>";
+const WALL: &str =
+    "<title>Just a moment...</title><script src='/cdn-cgi/challenge-platform/x.js'></script>";
 
 // Serves the Cloudflare wall until a request carries the solver's cookie and header,
 // then the real page; every request line + cookie/header is forwarded to `log`.

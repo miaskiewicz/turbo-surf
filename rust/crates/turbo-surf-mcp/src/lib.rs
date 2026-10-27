@@ -5961,11 +5961,14 @@ mod session_tool_tests {
             p if p.starts_with("/search") => (
                 "200 OK",
                 "text/html",
-                format!("<title>Search</title><p id=q>{p}</p><a href='/'>home</a>")
-                    .into_bytes(),
+                format!("<title>Search</title><p id=q>{p}</p><a href='/'>home</a>").into_bytes(),
             ),
             "/post" => ("200 OK", "text/html", b"<title>Posted</title>".to_vec()),
-            _ => ("404 Not Found", "text/html", b"<title>Missing</title>".to_vec()),
+            _ => (
+                "404 Not Found",
+                "text/html",
+                b"<title>Missing</title>".to_vec(),
+            ),
         }
     }
 
@@ -6077,17 +6080,23 @@ mod session_tool_tests {
 
         // fetch_json / fetch_raw over the session client.
         assert_eq!(
-            call(&mut s, "fetch_json", json!({ "url": format!("{base}/good.json") }))
-                .await
-                .unwrap(),
+            call(
+                &mut s,
+                "fetch_json",
+                json!({ "url": format!("{base}/good.json") })
+            )
+            .await
+            .unwrap(),
             json!({ "a": [1, 2] })
         );
-        assert!(
-            call(&mut s, "fetch_json", json!({ "url": format!("{base}/bad.json") }))
-                .await
-                .unwrap_err()
-                .starts_with("invalid JSON: ")
-        );
+        assert!(call(
+            &mut s,
+            "fetch_json",
+            json!({ "url": format!("{base}/bad.json") })
+        )
+        .await
+        .unwrap_err()
+        .starts_with("invalid JSON: "));
         assert_eq!(
             call(&mut s, "fetch_json", json!({})).await.unwrap_err(),
             "fetch_json: missing 'url'"
@@ -6205,7 +6214,10 @@ mod session_tool_tests {
         let shot = call(&mut s, "screenshot", json!({ "height": 48 }))
             .await
             .unwrap();
-        assert_eq!((shot["width"].as_u64(), shot["height"].as_u64()), (Some(64), Some(48)));
+        assert_eq!(
+            (shot["width"].as_u64(), shot["height"].as_u64()),
+            (Some(64), Some(48))
+        );
         assert_eq!(shot["mimeType"], "image/png");
         // The fetched <img> (red), the background-image from the linked sheet (red)
         // and the linked sheet's blue body background.
@@ -6258,14 +6270,10 @@ mod session_tool_tests {
         .await
         .unwrap();
         assert_eq!(s.dom_history.len(), 1);
-        assert_eq!(
-            call(&mut s, "latest_dom", json!({}))
-                .await
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .contains("<title>Injected</title>"),
-            true
+        let latest = call(&mut s, "latest_dom", json!({})).await.unwrap();
+        assert!(
+            latest.as_str().unwrap().contains("<title>Injected</title>"),
+            "{latest}"
         );
         assert!(call(
             &mut s,
@@ -6330,13 +6338,22 @@ mod session_tool_tests {
                 let req = String::from_utf8_lossy(&buf[..n]).to_string();
                 let line = req.lines().next().unwrap_or("").to_string();
                 let (head, body) = if line.starts_with("GET /ak.js") {
-                    ("Content-Type: application/javascript".to_string(), "var bmak={sensor_data:1};navigator.webdriver;".to_string())
+                    (
+                        "Content-Type: application/javascript".to_string(),
+                        "var bmak={sensor_data:1};navigator.webdriver;".to_string(),
+                    )
                 } else if line.starts_with("GET /other.js") {
-                    ("Content-Type: application/javascript".to_string(), "var x=1;".to_string())
+                    (
+                        "Content-Type: application/javascript".to_string(),
+                        "var x=1;".to_string(),
+                    )
                 } else if line.starts_with("POST /") {
                     ("Set-Cookie: ak_ok=1; Path=/".to_string(), "{}".to_string())
                 } else if req.contains("ak_ok=1") {
-                    ("Content-Type: text/html".to_string(), "<title>Shop</title>".to_string())
+                    (
+                        "Content-Type: text/html".to_string(),
+                        "<title>Shop</title>".to_string(),
+                    )
                 } else {
                     (
                         "Content-Type: text/html".to_string(),
@@ -6382,8 +6399,15 @@ mod session_tool_tests {
             .unwrap();
         let first = format!("{:?}", versions[0]);
         assert_eq!(hot["candidates"][0]["accepted"], true);
-        let saved = format!("{}/{}-{first}.json", dir.display(), dry["scriptHash"].as_str().unwrap());
-        assert_eq!(hot["accepted"], json!({ "version": first, "savedTo": saved }));
+        let saved = format!(
+            "{}/{}-{first}.json",
+            dir.display(),
+            dry["scriptHash"].as_str().unwrap()
+        );
+        assert_eq!(
+            hot["accepted"],
+            json!({ "version": first, "savedTo": saved })
+        );
         // Only the first accepted candidate is tested.
         if versions.len() > 1 {
             assert!(hot["candidates"][1].get("accepted").is_none());
@@ -6431,9 +6455,13 @@ mod session_tool_tests {
         assert_eq!(one["title"], "Search");
         assert_eq!(one["markdown"], "/search?m\n\nhome");
         assert_eq!(one["links"], json!([format!("{base}/")]));
-        let plain = call(&mut s, "fetch_markdown", json!({ "url": format!("{base}/post") }))
-            .await
-            .unwrap();
+        let plain = call(
+            &mut s,
+            "fetch_markdown",
+            json!({ "url": format!("{base}/post") }),
+        )
+        .await
+        .unwrap();
         assert!(plain.get("links").is_none());
         assert_eq!(
             call(&mut s, "fetch_markdown", json!({})).await.unwrap_err(),
@@ -6453,7 +6481,9 @@ mod session_tool_tests {
         assert_eq!(many[1]["url"], "http://127.0.0.1:1/x");
         assert!(many[1]["error"].as_str().is_some_and(|e| !e.is_empty()));
         assert_eq!(
-            call(&mut s, "fetch_markdown_batch", json!({})).await.unwrap_err(),
+            call(&mut s, "fetch_markdown_batch", json!({}))
+                .await
+                .unwrap_err(),
             "fetch_markdown_batch: missing 'urls' array"
         );
         // run_playwright navigates to `url` first, then runs the script on that page.
@@ -6483,7 +6513,10 @@ mod session_tool_tests {
             "web_search_load_strategy: 'engine' must be non-empty"
         );
         assert_eq!(
-            load(&mut s, json!({ "engine": "e", "query_url": "https://e.test/" })),
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "https://e.test/" })
+            ),
             "web_search_load_strategy: 'query_url' must contain '{query}'"
         );
         assert_eq!(
@@ -6491,7 +6524,10 @@ mod session_tool_tests {
             "web_search_load_strategy: format 'html' requires result_container/title/link"
         );
         assert_eq!(
-            load(&mut s, json!({ "engine": "e", "query_url": "{query}", "format": "json" })),
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "{query}", "format": "json" })
+            ),
             "web_search_load_strategy: format 'json' requires 'json_path'"
         );
         assert_eq!(
@@ -6503,10 +6539,14 @@ mod session_tool_tests {
             "web_search_load_strategy: 'json_path' needs results/title/url"
         );
         assert_eq!(
-            load(&mut s, json!({ "engine": "e", "query_url": "{query}", "format": "xml" })),
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "{query}", "format": "xml" })
+            ),
             "web_search_load_strategy: unknown format 'xml' (html|json|structural)"
         );
-        assert!(load(&mut s, json!({ "engine": 1 })).starts_with("web_search_load_strategy: invalid strategy ("));
+        assert!(load(&mut s, json!({ "engine": 1 }))
+            .starts_with("web_search_load_strategy: invalid strategy ("));
         assert_eq!(
             tool_search_load_strategy(&mut s, &json!({})).unwrap_err(),
             "web_search_load_strategy: missing 'strategy' object"

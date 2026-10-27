@@ -748,7 +748,10 @@ mod tests {
             .unwrap();
         assert!(earned.earned_nid);
         assert_eq!(earned.minted, vec!["NID".to_string()]);
-        assert_eq!(earned.continue_url.as_deref(), Some("https://www.google.com/?a&b"));
+        assert_eq!(
+            earned.continue_url.as_deref(),
+            Some("https://www.google.com/?a&b")
+        );
         let req = rx.recv().await.unwrap();
         assert!(req.starts_with("POST /consent "), "{req}");
         let lower = req.to_ascii_lowercase();
@@ -758,7 +761,9 @@ mod tests {
             "{req}"
         );
         assert!(
-            req.ends_with("set_aps=true&set_sc=true&continue=https%3A%2F%2Fwww.google.com%2F%3Fa%26b"),
+            req.ends_with(
+                "set_aps=true&set_sc=true&continue=https%3A%2F%2Fwww.google.com%2F%3Fa%26b"
+            ),
             "{req}"
         );
     }
@@ -772,19 +777,27 @@ mod tests {
             method: "GET".into(),
             fields: vec![("set_sc".into(), "true".into())],
         };
-        let earned = earn_consent_session(&mut jar, &form, "UA/3", NOW).await.unwrap();
+        let earned = earn_consent_session(&mut jar, &form, "UA/3", NOW)
+            .await
+            .unwrap();
         assert_eq!(earned.continue_url, None);
         assert!(earned.earned_nid);
         let req = rx.recv().await.unwrap();
         assert!(req.starts_with("GET /save?x=1&set_sc=true "), "{req}");
-        assert!(req.to_ascii_lowercase().contains("\r\nuser-agent: ua/3\r\n"), "{req}");
+        assert!(
+            req.to_ascii_lowercase()
+                .contains("\r\nuser-agent: ua/3\r\n"),
+            "{req}"
+        );
         // NID already present → not newly minted, but still earned.
         let bare = ConsentForm {
             action: format!("{base}/save"),
             method: "GET".into(),
             fields: Vec::new(),
         };
-        let again = earn_consent_session(&mut jar, &bare, "", NOW).await.unwrap();
+        let again = earn_consent_session(&mut jar, &bare, "", NOW)
+            .await
+            .unwrap();
         assert!(again.earned_nid);
         assert!(again.minted.is_empty());
         assert!(rx.recv().await.unwrap().starts_with("GET /save "));
@@ -802,13 +815,18 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(err, "consent: no parseable \"Accept all\" form on the interstitial");
+        assert_eq!(
+            err,
+            "consent: no parseable \"Accept all\" form on the interstitial"
+        );
         let form = ConsentForm {
             action: "http://127.0.0.1:1/save".into(),
             method: "POST".into(),
             fields: Vec::new(),
         };
-        let err = earn_consent_session(&mut jar, &form, "", 0.0).await.unwrap_err();
+        let err = earn_consent_session(&mut jar, &form, "", 0.0)
+            .await
+            .unwrap_err();
         assert!(err.starts_with("consent handshake: "), "{err}");
     }
 

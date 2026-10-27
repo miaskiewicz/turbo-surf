@@ -309,7 +309,11 @@ mod tests {
         let p = policy("made-up=*");
         assert!(p.allowlist("made-up", "https://site.test").is_empty());
         assert!(!p.allows_self("made-up", "https://site.test"));
-        assert!(policy("geolocation=*").allows("geolocation", "https://site.test", "https://x.test"));
+        assert!(policy("geolocation=*").allows(
+            "geolocation",
+            "https://site.test",
+            "https://x.test"
+        ));
     }
 
     #[test]
@@ -327,7 +331,8 @@ mod tests {
 
     #[test]
     fn allowlist_origins_match_scheme_port_and_wildcard_hosts() {
-        let p = policy(r#"geolocation=("https://*.cdn.test" "https://a.test:8443" "http://b.test:*")"#);
+        let p =
+            policy(r#"geolocation=("https://*.cdn.test" "https://a.test:8443" "http://b.test:*")"#);
         let allows = |target| p.allows("geolocation", "https://site.test", target);
         assert!(allows("https://img.cdn.test"));
         assert!(!allows("https://cdn.test"));

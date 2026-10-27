@@ -484,7 +484,7 @@ mod tests {
         let (mut re, mut im) = (vec![9.0; packed], vec![9.0; packed]);
         rustfft_new(size).do_fft(&x, &mut re, &mut im);
         close(re[0] as f64, dft(&x, 0).0);
-        if size % 2 == 0 {
+        if size.is_multiple_of(2) {
             close(im[0] as f64, dft(&x, size / 2).0);
         } else {
             assert_eq!(im[0], 0.0);
@@ -524,8 +524,14 @@ mod tests {
     fn plans_are_cached_per_size() {
         let a = rustfft_new(12);
         let b = rustfft_new(12);
-        let (FftStrategy::Even { fft_forward: fa, .. }, FftStrategy::Even { fft_forward: fb, .. }) =
-            (&a.strategy, &b.strategy)
+        let (
+            FftStrategy::Even {
+                fft_forward: fa, ..
+            },
+            FftStrategy::Even {
+                fft_forward: fb, ..
+            },
+        ) = (&a.strategy, &b.strategy)
         else {
             panic!("12 is even");
         };

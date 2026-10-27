@@ -380,7 +380,10 @@ mod tests {
             err(vec![ev("set", 2., 0.), ev("set", 1., 0.)]),
             "Invalid audio automation event"
         );
-        assert_eq!(err(vec![ev("hold", 0., 0.)]), "Unknown audio automation event");
+        assert_eq!(
+            err(vec![ev("hold", 0., 0.)]),
+            "Unknown audio automation event"
+        );
         let mut target = ev("target", 0., 1.);
         target.constant = -0.5;
         assert_eq!(err(vec![target]), "Invalid target time constant");
@@ -436,7 +439,13 @@ mod tests {
             value_at(1., active, 6., rate).unwrap_err(),
             "AudioParam hold evaluation limit exceeded"
         );
-        for (time, r) in [(f64::NAN, rate), (-1., rate), (0., 2999.), (0., 768001.), (0., f64::INFINITY)] {
+        for (time, r) in [
+            (f64::NAN, rate),
+            (-1., rate),
+            (0., 2999.),
+            (0., 768001.),
+            (0., f64::INFINITY),
+        ] {
             assert_eq!(
                 value_at(0., auto(vec![]), time, r).unwrap_err(),
                 "Invalid AudioParam hold time"
@@ -449,13 +458,23 @@ mod tests {
     fn rendered_ramps_handle_degenerate_spans_and_instant_targets() {
         let rate = 3000.;
         // Linear ramp onto the same instant: no division by zero, jumps to the end value.
-        let same = render(0., &auto(vec![ev("set", 0., 1.), ev("linear", 0., 5.)]), 4, rate)
-            .unwrap();
+        let same = render(
+            0.,
+            &auto(vec![ev("set", 0., 1.), ev("linear", 0., 5.)]),
+            4,
+            rate,
+        )
+        .unwrap();
         assert!(same.samples.iter().all(|v| v.is_finite()));
         assert_eq!(*same.samples.last().unwrap(), 5.);
         // Exponential across zero holds its start value until the end time.
-        let held = render(0., &auto(vec![ev("set", 0., -2.), ev("exponential", 1., 3.)]), 8, rate)
-            .unwrap();
+        let held = render(
+            0.,
+            &auto(vec![ev("set", 0., -2.), ev("exponential", 1., 3.)]),
+            8,
+            rate,
+        )
+        .unwrap();
         assert_eq!(&held.samples[..8], &[-2.; 8]);
         // A first ramp starts from the intrinsic value.
         let ramp = render(4., &auto(vec![ev("linear", 1., 0.)]), 3001, rate).unwrap();

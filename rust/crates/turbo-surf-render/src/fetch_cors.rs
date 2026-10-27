@@ -295,7 +295,15 @@ mod tests {
         assert!(!unsafe_one("range", "bytes=0-10"));
         assert!(!unsafe_one("range", "bytes=5-"));
         assert!(!unsafe_one("range", "bytes=7-7"));
-        for range in ["bytes=-5", "bytes=5-1", "bytes=a-1", "bytes=1-b", "items=0-1", "bytes=0", "bytes=0-1,2-3"] {
+        for range in [
+            "bytes=-5",
+            "bytes=5-1",
+            "bytes=a-1",
+            "bytes=1-b",
+            "items=0-1",
+            "bytes=0",
+            "bytes=0-1,2-3",
+        ] {
             assert!(unsafe_one("range", range), "{range}");
         }
         assert_eq!(
@@ -317,25 +325,35 @@ mod tests {
         );
         let headers = vec![
             ("Content-Type".to_string(), "text/plain".to_string()),
-            ("Access-Control-Expose-Headers".to_string(), "X-One, x-two".to_string()),
+            (
+                "Access-Control-Expose-Headers".to_string(),
+                "X-One, x-two".to_string(),
+            ),
             ("X-One".to_string(), "1".to_string()),
             ("X-Two".to_string(), "2".to_string()),
             ("X-Three".to_string(), "3".to_string()),
             ("Set-Cookie".to_string(), "a=1".to_string()),
         ];
-        let names = |list: Vec<(String, String)>| list.into_iter().map(|(n, _)| n).collect::<Vec<_>>();
+        let names =
+            |list: Vec<(String, String)>| list.into_iter().map(|(n, _)| n).collect::<Vec<_>>();
         assert_eq!(
             names(exposed_headers(&context, headers.clone(), true)),
             vec!["Content-Type", "X-One", "X-Two"]
         );
         // Same-origin: everything but Set-Cookie.
-        assert_eq!(names(exposed_headers(&context, headers.clone(), false)).len(), 5);
+        assert_eq!(
+            names(exposed_headers(&context, headers.clone(), false)).len(),
+            5
+        );
         // `*` exposes everything for uncredentialed requests only.
         let star = vec![
             ("Access-Control-Expose-Headers".to_string(), "*".to_string()),
             ("X-Three".to_string(), "3".to_string()),
         ];
-        assert_eq!(names(exposed_headers(&context, star.clone(), true)).len(), 2);
+        assert_eq!(
+            names(exposed_headers(&context, star.clone(), true)).len(),
+            2
+        );
         context.credentials = Credentials::Include;
         assert!(names(exposed_headers(&context, star, true)).is_empty());
     }

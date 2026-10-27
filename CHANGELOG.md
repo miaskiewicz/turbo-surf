@@ -9,6 +9,8 @@
 - Google `/sorry` clearing with solver-returned cookies (#56): the cookies are stored
   under the continue URL's bare host, so a non-default-port origin replays them on the
   SERP re-fetch (they were keyed by `host:port` and never sent).
+- URL canonicalization (#57) leaves an empty opaque path alone (`foo:?a=1` stayed
+  `foo:%2F?a=1`), like the JS canonicalizer it mirrors.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

@@ -136,7 +136,25 @@ fn deferred(tokens: &TokenList<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::matches;
+    use super::{matches, property};
+    #[test]
+    fn css_supports_two_argument_form_and_zoom_follow_chrome() {
+        // CSS.supports(name, value): the name must be exactly one identifier.
+        assert!(property("width", "1px"));
+        assert!(!property(" width", "1px"));
+        assert!(!property("width height", "1px"));
+        assert!(!property("1px", "1px"));
+        // zoom: numbers/percentages, CSS-wide keywords and var() are supported.
+        assert!(property("zoom", "1.5"));
+        assert!(property("zoom", "inherit"));
+        assert!(property("zoom", "var(--z)"));
+        assert!(!property("zoom", "big"));
+        assert_eq!(matches("(zoom: 50%)"), Ok(true));
+        assert_eq!(matches("(zoom: var(--z))"), Ok(true));
+        assert_eq!(matches("(zoom: wide)"), Ok(false));
+        // An `or` with no supported branch is false.
+        assert_eq!(matches("(unknown: 1) or (width: nonsense)"), Ok(false));
+    }
     #[test]
     fn native_declarations_validate_values_and_nested_boolean_grammar() {
         for source in [

@@ -369,10 +369,20 @@ mod tests {
             "AudioParam event limit exceeded"
         );
         assert!(validate(&auto((0..256).map(|i| ev("set", i as f64, 0.)).collect())).is_ok());
+        let mut nan_constant = ev("target", 0., 0.);
+        nan_constant.constant = f64::NAN;
+        let mut infinite_duration = ev("set", 0., 0.);
+        infinite_duration.duration = f64::INFINITY;
+        let mut huge_curve = ev("curve", 0., 0.);
+        huge_curve.curve = vec![0.; 65537];
+        huge_curve.duration = 1.;
         for bad in [
             ev("set", f64::NAN, 0.),
             ev("set", -1., 0.),
             ev("set", 0., f32::INFINITY),
+            nan_constant,
+            infinite_duration,
+            huge_curve,
         ] {
             assert_eq!(err(vec![bad]), "Invalid audio automation event");
         }
@@ -398,6 +408,10 @@ mod tests {
         nan_curve.curve = vec![1., f32::NAN];
         nan_curve.duration = 1.;
         assert_eq!(err(vec![nan_curve]), "Invalid audio automation event");
+        let mut max_curve = ev("curve", 0., 0.);
+        max_curve.curve = vec![0.; 65536];
+        max_curve.duration = 1.;
+        assert!(validate(&auto(vec![max_curve])).is_ok());
     }
 
     #[test]

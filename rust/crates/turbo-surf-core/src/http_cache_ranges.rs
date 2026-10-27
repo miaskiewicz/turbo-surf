@@ -165,6 +165,35 @@ mod tests {
             b"xy"
         );
         assert_eq!(many.slice(ByteRange { start: 0, end: 1 }), None);
+        // Exactly 1024 parts after the append is still within the limit.
+        let mut full = SparseBody::new(4096);
+        for i in 0..1023 {
+            assert!(full.insert(
+                ByteRange {
+                    start: i,
+                    end: i + 1
+                },
+                vec![b'a']
+            ));
+        }
+        let mut last = SparseBody::new(4096);
+        assert!(last.insert(
+            ByteRange {
+                start: 1023,
+                end: 1024
+            },
+            vec![b'b']
+        ));
+        full.append(last);
+        assert_eq!(full.size(), 1024);
+        assert_eq!(
+            full.slice(ByteRange {
+                start: 1022,
+                end: 1024
+            })
+            .unwrap(),
+            b"ab"
+        );
         // Under the limit, parts merge in start order.
         let mut a = SparseBody::new(4);
         assert!(a.insert(ByteRange { start: 2, end: 4 }, b"cd".to_vec()));

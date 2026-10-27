@@ -70,8 +70,8 @@ the offline detection harness tests (`test:detection`). Never
 bypass with `--no-verify`.
 
 CI also gates **line coverage** (`coverage` job: `cd rust && cargo tarpaulin`, reading
-`rust/tarpaulin.toml`; fail-under 83.15 (measured 83.19%), the floor measured when the gate landed, raised to
->= 99.5 by the coverage phase) and **cyclomatic complexity**
+`rust/tarpaulin.toml` fail-under 84.1, then per-crate floors in `rust/coverage-floors.json`;
+measured values, raised toward >= 99.5 by the coverage phase) and **cyclomatic complexity**
 (`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /
 `complexity:js`, one limit, no allow-list; expected red until the post-coverage refactor, see
 [`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md) for the commands, the floors and the

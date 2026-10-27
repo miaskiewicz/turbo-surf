@@ -52,11 +52,12 @@ jobs:
       - name: Test
         run: npm test
 
-  # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine, fail-under) ----
-  # fail-under is the coverage measured when the gate landed (82.89%, see tarpaulin.toml and
-  # docs/QUALITY-GATES.md); the coverage phase raises it to >= 99.5. Never lower it to pass a
-  # change. macOS arm64 matches the platform the floor was measured on; the V8 archive is the
-  # same simdutf rusty_v8 release the `lint + test` job's build downloads.
+  # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine) ----
+  # One tarpaulin run over the whole workspace's tests; it fails below the workspace
+  # fail-under (rust/tarpaulin.toml), then every crate must meet its own floor
+  # (rust/coverage-floors.json). Floors are measured values (docs/QUALITY-GATES.md); the
+  # coverage phase raises them toward >= 99.5. Never lower one to pass a change. macOS arm64
+  # matches the platform the floors were measured on.
   coverage:
     name: coverage (rust workspace, tarpaulin fail-under)
     runs-on: macos-latest
@@ -89,6 +90,8 @@ jobs:
       - name: cargo tarpaulin (fails below rust/tarpaulin.toml fail-under)
         working-directory: rust
         run: cargo tarpaulin --locked
+      - name: Per-crate floors (rust/coverage-floors.json)
+        run: python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json rust/coverage-floors.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

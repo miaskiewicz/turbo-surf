@@ -12,10 +12,29 @@ Line coverage of the Rust workspace is measured by `cargo tarpaulin` with the LL
 cd rust && cargo tarpaulin        # CI job `coverage`; fails below `fail-under`
 ```
 
-`fail-under` is the coverage measured when the gate landed (83.19%, 18440/22167 lines;
-rounded down to 83.15 because a few timing-dependent render paths move ~5 lines between
-identical runs). The coverage phase raises it toward >= 99.5 with behaviour-asserting tests;
-never lower it to pass a change.
+Then every crate must meet its own floor (`rust/coverage-floors.json`, checked by
+`python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json
+rust/coverage-floors.json`; a crate without a floor fails too). Floors are the values measured
+on 2026-10-27 (base 27ed802 plus the first coverage-phase tests), rounded down to 0.1; the
+workspace `fail-under` is 84.1 (measured 84.14%, 18632/22145 lines):
+
+| crate | measured | floor |
+|---|---|---|
+| turbo-surf-core | 93.80 | 93.8 |
+| turbo-surf-mcp | 65.72 | 65.7 |
+| turbo-surf-napi | 0.00 | 0 |
+| turbo-surf-page | 82.93 | 82.9 |
+| turbo-surf-py | 0.00 | 0 |
+| turbo-surf-render | 88.02 | 88.0 |
+| turbo-surf-transform | 100.00 | 100 |
+| turbo-surf-view | 99.55 | 99.5 |
+
+`turbo-surf-napi` and `turbo-surf-py` are exercised only by their Node / Python callers,
+which tarpaulin does not instrument. `turbo-surf-render`'s `window_proxy.rs`,
+`frame_location.rs` and `frame_ancestors.rs` (536 lines) compile only under
+`cfg(turbo_surf_native_proxy)` (the TURBO_SURF_ENGINE=154/155 native-V8 build) yet are counted
+in this default-build run. The coverage phase raises every floor toward >= 99.5 with
+behaviour-asserting tests; never lower one to pass a change.
 
 ## Complexity
 

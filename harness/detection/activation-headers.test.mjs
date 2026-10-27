@@ -45,3 +45,25 @@ test("activation oracle distinguishes cross-origin sticky state from redirect re
   assert.equal(controls.get("trusted-cross-origin-form").requests[0].origin, "secondary");
   assert.equal(controls.get("trusted-cross-origin-redirect").requests[0].origin, "primary");
 });
+
+test(
+  "keyboard-driven activation controls always launch headless, away from the OS keyboard focus",
+  { todo: "turbo-surf#52" },
+  () => {
+    // A headed Chrome takes the OS keyboard focus on launch, so host keystrokes would
+    // land next to the collector's trusted Enter/Space/Escape input (turbo-surf#52).
+    for (const [collector, control] of [
+      ["./activation-headers-chrome.mjs", "./fixtures/activation-headers-chrome156.json"],
+      ["./user-activation-gates-chrome.mjs", "./fixtures/user_activation_gates_chrome156.json"],
+    ]) {
+      const source = readFileSync(new URL(collector, import.meta.url), "utf8");
+      assert.doesNotMatch(source, /TURBO_SURF_CHROME_HEADLESS/, collector);
+      const fixture = JSON.parse(readFileSync(new URL(control, import.meta.url), "utf8"));
+      assert.match(fixture.browser, /^Chrome\/156\./, control);
+      assert.equal(fixture.headless, true, control);
+      assert.equal(fixture.flags.filter((flag) => flag === "--headless=new").length, 1, control);
+      assert.equal(fixture.flags.at(-1), "about:blank", control);
+      assert.equal(fixture.flags.at(-2), "--headless=new", control);
+    }
+  },
+);

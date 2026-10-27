@@ -285,6 +285,8 @@ test(
           successSelector: "body[data-ready]",
           interfaces: true,
           disableExtensions: true,
+          // Keyboard-driven: headless keeps host keystrokes out of #q (turbo-surf#52).
+          headless: true,
           debugger: true,
           waitMs: 100,
           interfaceScript: fileURLToPath(new URL("./interface-trace.js", import.meta.url)),
@@ -299,6 +301,7 @@ test(
       assert.deepEqual(trace.effectiveExtensionFlags, [
         "--disable-extensions",
         "--disable-component-extensions-with-background-pages",
+        "--headless=new",
       ]);
       assert.equal(
         trace.pages[0].environment.webdriver,
@@ -627,6 +630,7 @@ for (const backend of ["cdp", "patchright"]) {
             ),
           )),
       timeout: 45000,
+      ...(backend === "patchright" ? { todo: "turbo-surf#52" } : {}),
     },
     async (t) => {
       const directory = mkdtempSync(join(tmpdir(), `turbo-${backend}-rootless-fixture-`));
@@ -656,6 +660,9 @@ for (const backend of ["cdp", "patchright"]) {
             interfaces: false,
             debugger: false,
             disableExtensions: true,
+            // A headed Chrome takes the OS keyboard focus, and keys typed on the host
+            // then corrupt the trusted query (turbo-surf#52).
+            headless: true,
             observationMs: 100,
             steps: [{ focus: "#q" }, { type: "root fixture" }, { press: "Enter" }],
           }),
@@ -670,6 +677,13 @@ for (const backend of ["cdp", "patchright"]) {
         assert.equal(result.code, 0, JSON.stringify(trace.collectorErrors));
         assert.equal(trace.captureComplete, true);
         assert.deepEqual(trace.collectorErrors, []);
+        if (backend === "cdp")
+          assert.deepEqual(trace.effectiveExtensionFlags, [
+            "--disable-extensions",
+            "--disable-component-extensions-with-background-pages",
+            "--headless=new",
+          ]);
+        else assert.equal(trace.headless, true);
         assert.equal(trace.pages[0].results, 1);
         assert.equal(trace.pages[0].status, 200);
         assert.equal(trace.pages[0].documentElementPresent, true);

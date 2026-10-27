@@ -119,6 +119,9 @@ test(
           chromePath: chrome,
           chromeIncognito: true,
           disableExtensions: true,
+          // A headed Chrome takes the OS keyboard focus, and keys typed on the host
+          // then corrupt the trusted query (turbo-surf#52).
+          headless: true,
           interfaceScript: join(here, "interface-trace.js"),
           readySelector: "[data-input-ready]",
           dismissSelector: "#dismiss",
@@ -174,6 +177,11 @@ test(
           );
           assert.equal(trace.dismissal.clicked, true);
           if (runtime === "chrome") {
+            assert.deepEqual(trace.effectiveExtensionFlags, [
+              "--disable-extensions",
+              "--disable-component-extensions-with-background-pages",
+              "--headless=new",
+            ]);
             assert.equal(trace.browserContext.requestedIncognito, true);
             assert.equal(trace.browserContext.nonDefaultContext, true);
             assert.equal(trace.browserContext.createdContextVerified, true);
@@ -234,6 +242,7 @@ test(
             url: origin + "/",
             chromePath: chrome,
             chromeIncognito: true,
+            headless: true,
             interfaces: false,
             readySelector: "#never-created",
             readyTimeoutMs: 75,

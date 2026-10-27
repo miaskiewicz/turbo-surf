@@ -5918,3 +5918,401 @@ mod storage_response_tests {
         server.abort();
     }
 }
+
+#[cfg(test)]
+mod session_tool_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // A 2x2 opaque red PNG (8-bit RGB).
+    const RED_PNG: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2,
+        0, 0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0,
+        68, 12, 16, 10, 0, 31, 238, 3, 253, 139, 95, 20, 212, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66,
+        96, 130,
+    ];
+
+    const HOME: &str = "<html><head><title>Home</title>\
+        <link rel=stylesheet href='/site.css'><link rel=stylesheet href='/missing.css'></head>\
+        <body style='margin:0'>\
+        <img src='/red.png' style='position:absolute;left:0;top:0;width:20px;height:20px'>\
+        <div class=bg style='position:absolute;left:0;top:20px;width:20px;height:20px'></div>\
+        <form id=f action='/search' method=get>\
+        <input name=q value=cats><select name=s><option value=a>A</option>\
+        <option value=b>B</option></select></form>\
+        <form id=p action='/post' method=post><input name=x value=1></form></body></html>";
+
+    fn route(path: &str) -> (&'static str, &'static str, Vec<u8>) {
+        match path {
+            "/" => ("200 OK", "text/html", HOME.as_bytes().to_vec()),
+            "/site.css" => (
+                "200 OK",
+                "text/css",
+                b"body{background:rgb(0,0,255)} .bg{background-image:url(/red.png)}".to_vec(),
+            ),
+            "/red.png" => ("200 OK", "image/png", RED_PNG.to_vec()),
+            "/robots.txt" => (
+                "200 OK",
+                "text/plain",
+                b"User-agent: *\nDisallow: /private\n".to_vec(),
+            ),
+            "/bad.json" => ("200 OK", "application/json", b"{nope".to_vec()),
+            "/good.json" => ("200 OK", "application/json", b"{\"a\":[1,2]}".to_vec()),
+            p if p.starts_with("/search") => (
+                "200 OK",
+                "text/html",
+                format!("<title>Search</title><p id=q>{p}</p><a href='/'>home</a>")
+                    .into_bytes(),
+            ),
+            "/post" => ("200 OK", "text/html", b"<title>Posted</title>".to_vec()),
+            _ => ("404 Not Found", "text/html", b"<title>Missing</title>".to_vec()),
+        }
+    }
+
+    async fn spawn_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 16384];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    let (status, ty, body) = route(&path);
+                    let head = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {ty}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = sock.write_all(head.as_bytes()).await;
+                    let _ = sock.write_all(&body).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        base
+    }
+
+    async fn call(s: &mut Session, name: &str, args: Value) -> Result<Value, String> {
+        call_tool(s, name, &args).await
+    }
+
+    fn pixel(shot: &Value, x: u32, y: u32) -> [u8; 3] {
+        let png = BASE64.decode(shot["base64"].as_str().unwrap()).unwrap();
+        let img = turbo_dom_layout::image::decode_png_rgba(&png).unwrap();
+        let at = ((y * img.width + x) * 4) as usize;
+        [img.rgba[at], img.rgba[at + 1], img.rgba[at + 2]]
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn history_forms_and_network_tools_follow_the_session() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        assert_eq!(
+            call(&mut s, "go_back", json!({})).await.unwrap_err(),
+            "no back history"
+        );
+        assert_eq!(
+            call(&mut s, "go_forward", json!({})).await.unwrap_err(),
+            "no forward history"
+        );
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        // select_option + submit (the first form when no selector is given).
+        call(
+            &mut s,
+            "select_option",
+            json!({ "selector": "select", "value": "b" }),
+        )
+        .await
+        .unwrap();
+        call(&mut s, "submit", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=b"));
+        assert_eq!(
+            call(&mut s, "text_content", json!({ "selector": "#q" }))
+                .await
+                .unwrap(),
+            json!("/search?q=cats&s=b")
+        );
+        // back → home, forward → search, reload keeps the URL.
+        call(&mut s, "go_back", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/"));
+        call(&mut s, "go_forward", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=b"));
+        call(&mut s, "reload", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=b"));
+        assert_eq!(
+            call(&mut s, "text", json!({})).await.unwrap(),
+            json!("/search?q=cats&s=b\nhome")
+        );
+        // A selected POST form.
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        call(&mut s, "submit", json!({ "selector": "#p" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/post"));
+        assert_eq!(
+            call(&mut s, "submit", json!({ "selector": "#nope" }))
+                .await
+                .unwrap_err(),
+            "no element matches #nope"
+        );
+        assert_eq!(
+            call(&mut s, "submit", json!({})).await.unwrap_err(),
+            "no form on page"
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                "select_option",
+                json!({ "selector": "select", "value": "x" })
+            )
+            .await
+            .unwrap_err(),
+            "no element matches select"
+        );
+
+        // fetch_json / fetch_raw over the session client.
+        assert_eq!(
+            call(&mut s, "fetch_json", json!({ "url": format!("{base}/good.json") }))
+                .await
+                .unwrap(),
+            json!({ "a": [1, 2] })
+        );
+        assert!(
+            call(&mut s, "fetch_json", json!({ "url": format!("{base}/bad.json") }))
+                .await
+                .unwrap_err()
+                .starts_with("invalid JSON: ")
+        );
+        assert_eq!(
+            call(&mut s, "fetch_json", json!({})).await.unwrap_err(),
+            "fetch_json: missing 'url'"
+        );
+
+        // robots_check: the explicit url, then the session url; UA from set_user_agent.
+        assert_eq!(
+            call(
+                &mut s,
+                "robots_check",
+                json!({ "url": format!("{base}/private/x") })
+            )
+            .await
+            .unwrap(),
+            json!({ "url": format!("{base}/private/x"), "allowed": false })
+        );
+        call(&mut s, "set_user_agent", json!({ "value": "probe-bot" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "robots_check", json!({})).await.unwrap(),
+            json!({ "url": format!("{base}/post"), "allowed": true })
+        );
+        assert_eq!(
+            call(&mut Session::new(), "robots_check", json!({}))
+                .await
+                .unwrap_err(),
+            "robots_check: missing 'url'"
+        );
+
+        // set_cookie lands in the jar and get_cookies dumps it.
+        call(
+            &mut s,
+            "set_cookie",
+            json!({ "name": "sid", "value": "v1", "domain": ".127.0.0.1", "expires": 4102444800.0 }),
+        )
+        .await
+        .unwrap();
+        let cookies = call(&mut s, "get_cookies", json!({})).await.unwrap();
+        let sid = cookies
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "sid")
+            .unwrap();
+        assert_eq!(sid["value"], "v1");
+        assert_eq!(sid["domain"], "127.0.0.1");
+        assert_eq!(sid["path"], "/");
+        assert_eq!(
+            call(&mut s, "set_cookie", json!({})).await.unwrap_err(),
+            "set_cookie: missing 'name'"
+        );
+
+        // crawl + batch (bulk tools, fresh navigators).
+        let crawl = call(
+            &mut s,
+            "crawl",
+            json!({ "url": format!("{base}/search?z"), "maxPages": 2, "maxDepth": 1, "itemSelector": "p" }),
+        )
+        .await
+        .unwrap();
+        let pages = crawl.as_array().unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0]["url"], format!("{base}/search?z"));
+        assert_eq!(pages[0]["title"], "Search");
+        assert_eq!(pages[0]["items"], 1);
+        assert_eq!(pages[1]["url"], format!("{base}/"));
+        assert_eq!(pages[1]["title"], "Home");
+        let crawl_start = call(
+            &mut s,
+            "crawl",
+            json!({ "start": [format!("{base}/post"), 7], "maxPages": 1 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(crawl_start[0]["title"], "Posted");
+        assert_eq!(crawl_start.as_array().unwrap().len(), 1);
+        let batch = call(
+            &mut s,
+            "batch",
+            json!({ "urls": [format!("{base}/post"), "http://127.0.0.1:1/", 3], "concurrency": 1 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            batch[0],
+            json!({ "url": format!("{base}/post"), "status": 200, "title": "Posted" })
+        );
+        assert_eq!(batch[1]["url"], "http://127.0.0.1:1/");
+        assert!(batch[1]["error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert_eq!(batch.as_array().unwrap().len(), 2);
+        assert_eq!(
+            call(&mut s, "batch", json!({})).await.unwrap_err(),
+            "batch: missing 'urls' array"
+        );
+        assert_eq!(
+            call(&mut s, "no_such_tool", json!({})).await.unwrap_err(),
+            "unknown tool: no_such_tool"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn screenshot_fetches_linked_css_and_images_over_the_session() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "set_viewport", json!({ "width": 64, "height": 0 }))
+                .await
+                .unwrap(),
+            json!({ "viewport": { "width": 64, "height": s.viewport.height } })
+        );
+        let shot = call(&mut s, "screenshot", json!({ "height": 48 }))
+            .await
+            .unwrap();
+        assert_eq!((shot["width"].as_u64(), shot["height"].as_u64()), (Some(64), Some(48)));
+        assert_eq!(shot["mimeType"], "image/png");
+        // The fetched <img> (red), the background-image from the linked sheet (red)
+        // and the linked sheet's blue body background.
+        assert_eq!(pixel(&shot, 5, 5), [255, 0, 0]);
+        assert_eq!(pixel(&shot, 5, 25), [255, 0, 0]);
+        assert_eq!(pixel(&shot, 40, 45), [0, 0, 255]);
+        assert!(s.requests.iter().any(|r| r.ends_with("/red.png")));
+        // Without external CSS or images: white canvas, nothing fetched.
+        s.requests.clear();
+        let bare = call(
+            &mut s,
+            "screenshot",
+            json!({ "height": 48, "external_css": false, "images": false }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(pixel(&bare, 40, 45), [255, 255, 255]);
+        // The unfetched <img> paints its placeholder, never the image's red.
+        assert_ne!(pixel(&bare, 5, 5), [255, 0, 0]);
+        assert_ne!(pixel(&bare, 5, 25), [255, 0, 0]);
+        assert!(s.requests.is_empty(), "{:?}", s.requests);
+        let svg = call(
+            &mut s,
+            "screenshot",
+            json!({ "format": "svg", "height": 30, "images": false }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(svg["mimeType"], "image/svg+xml");
+        assert_eq!(svg["height"], 30);
+        assert!(svg["svg"].as_str().unwrap().starts_with("<svg"));
+        assert_eq!(
+            call(&mut s, "screenshot", json!({ "format": "gif" }))
+                .await
+                .unwrap_err(),
+            "screenshot: unknown format 'gif' (png|svg)"
+        );
+        assert_eq!(
+            call(&mut s, "screenshot", json!({ "snapshot": 3 }))
+                .await
+                .unwrap_err(),
+            "screenshot: snapshot 3 out of range (have 0)"
+        );
+        // inject_js keeps the hydrated DOM as a history snapshot.
+        call(
+            &mut s,
+            "inject_js",
+            json!({ "script": "document.title='Injected'" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.dom_history.len(), 1);
+        assert_eq!(
+            call(&mut s, "latest_dom", json!({}))
+                .await
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("<title>Injected</title>"),
+            true
+        );
+        assert!(call(
+            &mut s,
+            "screenshot",
+            json!({ "snapshot": 0, "images": false, "external_css": false })
+        )
+        .await
+        .is_ok());
+        assert_eq!(png_dims(b"short"), None);
+        assert_eq!(svg_height("<svg width=\"3\">"), None);
+        assert_eq!(svg_height("<svg height=\"x\">"), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stealth_status_and_fingerprint_overrides() {
+        let mut s = Session::new();
+        let blank = call(&mut s, "stealth_status", json!({})).await.unwrap();
+        assert_eq!(blank["solver"], Value::Null);
+        assert_eq!(blank["poolSize"], json!(fingerprint::pool_size()));
+        assert_eq!(blank["renderFingerprintOverrides"], json!({}));
+        let p = s.profile_for("about:blank");
+        assert_eq!(blank["profile"]["userAgent"], json!(p.user_agent));
+        assert_eq!(blank["profile"]["chromeMajor"], json!(p.chrome_major));
+        assert_eq!(
+            call(
+                &mut s,
+                "set_fingerprint",
+                json!({ "overrides": { "hardwareConcurrency": 6 } })
+            )
+            .await
+            .unwrap(),
+            json!({ "ok": true, "fingerprint": { "hardwareConcurrency": 6 } })
+        );
+        s.load("https://shop.test/", "<p>x</p>");
+        let st = call(&mut s, "stealth_status", json!({})).await.unwrap();
+        assert_eq!(
+            st["renderFingerprintOverrides"],
+            json!({ "hardwareConcurrency": 6 })
+        );
+        assert_eq!(
+            st["profile"]["userAgent"],
+            json!(s.profile_for("https://shop.test/").user_agent)
+        );
+        call(&mut s, "set_fingerprint", json!({ "overrides": null }))
+            .await
+            .unwrap();
+        assert_eq!(s.fingerprint, "{}");
+        turbo_surf_render::set_fingerprint("{}");
+    }
+}

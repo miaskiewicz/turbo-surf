@@ -113,25 +113,7 @@ async fn child_frame_interfaces_follow_chrome156_key_order() {
             compared >= 200,
             "{frame}: only {compared} shared interfaces"
         );
-        // Known gap (turbo-dom#99): in the initial about:blank child frame HTMLTrackElement's
-        // frozen constants precede its attributes. Pinned to that exact order; it must still
-        // differ (the parsed srcdoc frame already matches). turbo-dom edde7dc's
-        // configurable-until-key-order fix does not reach this frame: its constants are
-        // already non-configurable right after `kind` when the key order runs.
-        let (gaps, failures): (Vec<String>, Vec<String>) = failures
-            .into_iter()
-            .partition(|failure| failure.starts_with("HTMLTrackElement.prototype order"));
-        let pinned: &[&str] = if frame == "<iframe></iframe>" {
-            &[TRACK_FRAME_ORDER_GAP]
-        } else {
-            &[]
-        };
-        assert_eq!(
-            gaps, pinned,
-            "{frame}: known gap changed (fixed: drop the pin)"
-        );
         assert!(failures.is_empty(), "{frame}: {}", failures.join("\n"));
     }
 }
 
-const TRACK_FRAME_ORDER_GAP: &str = "HTMLTrackElement.prototype order\n  native: [\"kind\", \"NONE\", \"LOADING\", \"LOADED\", \"ERROR\", \"src\", \"srclang\", \"label\", \"default\", \"readyState\", \"track\", \"constructor\", \"Symbol(Symbol.toStringTag)\"]\n  chrome: [\"kind\", \"src\", \"srclang\", \"label\", \"default\", \"readyState\", \"track\", \"NONE\", \"LOADING\", \"LOADED\", \"ERROR\", \"constructor\", \"Symbol(Symbol.toStringTag)\"]";

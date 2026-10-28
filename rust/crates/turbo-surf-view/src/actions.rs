@@ -481,4 +481,20 @@ mod tests {
         assert_eq!(s.body, None);
         assert_eq!(s.content_type, None);
     }
+
+    #[test]
+    #[ignore = "turbo-surf#61: fails until the fix"]
+    fn single_selects_submit_their_default_selectedness_like_chrome() {
+        // Chrome 156 FormData: first option when none is selected, first non-disabled
+        // option, the last of several `selected`; multiple/empty selects submit nothing
+        // without a selection (turbo-surf#61).
+        let tree = Tree::parse(
+            "<form method='get'><select name='s'><option value='a'>A</option><option value='b'>B</option></select>\
+             <select name='d'><option disabled value='z'>Z</option><option value='y'>Y</option></select>\
+             <select name='t'><option selected value='1'>1</option><option selected value='2'>2</option></select>\
+             <select name='m' multiple><option value='x'>X</option></select><select name='e'></select></form>",
+        );
+        let s = build_submission(&tree, first(&tree, "form"), BASE, None);
+        assert_eq!(s.url, "https://x.test/page?s=a&d=y&t=2");
+    }
 }

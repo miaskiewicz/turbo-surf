@@ -4152,6 +4152,22 @@ fn frame_namespace<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s,
     let key = v8::Symbol::for_key(scope, name);
     global.get(scope, key.into())?.to_object(scope)
 }
+/// A function the realm's own bootstrap registered through `op_set_host_capabilities`
+/// (never a page-reachable namespace lookup).
+#[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
+fn host_capability<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<v8::Context>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Function>> {
+    let function = context
+        .get_slot::<HostCapabilities>()?
+        .0
+        .borrow()
+        .get(name)
+        .cloned()?;
+    Some(crate::context_ownership::local(scope, function))
+}
 fn call_frame_helper<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     name: &str,
@@ -5225,6 +5241,35 @@ fn op_document_scripts_allowed(scope: &mut v8::PinScope, document: v8::Local<v8:
                 .get_slot::<FrameSandbox>()
                 .is_some_and(|flags| flags.scripts_blocked)
     })
+}
+
+/// HTML "allowed by sandboxing to navigate" for a top-level target: a sandboxed
+/// browsing context without `allow-top-navigation` may not navigate the top-level
+/// document from script (turbo-surf#84). Shared by the page's own Location setters
+/// (window_location.js) and the native cross-origin Location.
+pub(crate) fn sandbox_blocks_top_navigation(
+    source: v8::Local<v8::Context>,
+    target: v8::Local<v8::Context>,
+) -> bool {
+    source != target
+        && target.get_slot::<FrameParent>().is_none()
+        && source
+            .get_slot::<FrameSandbox>()
+            .is_some_and(|flags| flags.top_navigation_without_activation_blocked)
+}
+
+/// Whether the calling (entered) realm may not navigate `window`'s Location. The
+/// target realm comes from the window: an op's own current context is the realm that
+/// owns the op functions, not the frame realm calling it.
+#[op2(fast)]
+fn op_location_navigation_sandboxed(
+    scope: &mut v8::PinScope,
+    window: v8::Local<v8::Object>,
+) -> bool {
+    let source = scope.get_entered_or_microtask_context();
+    window
+        .get_creation_context(scope)
+        .is_some_and(|target| sandbox_blocks_top_navigation(source, target))
 }
 
 #[op2(fast)]
@@ -6887,6 +6932,7 @@ deno_core::extension!(
         op_window_message_pending,
         op_native_window_proxy,
         op_native_location_installed,
+        op_location_navigation_sandboxed,
         op_location_object,
         op_location_seed,
         op_location_ancestor_origins,

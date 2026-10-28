@@ -38,7 +38,6 @@ async fn run(html: String) -> serde_json::Value {
 const DENIED: &str = "SecurityError:The current window does not have permission to navigate the target frame to 'http://localhost/control#checked'.";
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#84: fails until the fix"]
 async fn same_origin_sandboxed_frames_navigate_top_only_with_allow_top_navigation() {
     let child = CHILD.replace('\'', "&#39;").replace('<', "&lt;");
     for (id, html, error) in [

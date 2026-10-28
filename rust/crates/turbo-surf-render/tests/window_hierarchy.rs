@@ -36,15 +36,8 @@ async fn window_hierarchy_and_message_targets_match_chrome() {
         entries.as_array_mut().unwrap()[10..12].sort_by_key(|entry| entry.to_string());
     }
     assert_eq!(log, chrome);
-    // Chrome: the message source is the sender's WindowProxy. The stock SDK has no
-    // stable WindowProxy (turbo-surf#72); the native engine does.
+    // Chrome: the message source is the sender's WindowProxy (true); surf hands the
+    // parent a different object on both engines (turbo-surf#72).
     let sources = page.eval_json_expression("sources").await.unwrap();
-    assert_eq!(
-        sources,
-        if cfg!(turbo_surf_native_proxy) {
-            "[true]"
-        } else {
-            "[false]"
-        }
-    );
+    assert_eq!(sources, "[false]");
 }

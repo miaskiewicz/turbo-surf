@@ -34,6 +34,12 @@
   document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
   the whole page. It has no such bound now; every link settles like Chrome 156 (300
   links, 300 `error` events under a blocking CSP).
+- Native engine build (`TURBO_SURF_ENGINE=155`): `tests/interceptor_mode_agreement.rs`
+  compiles and runs in both engine configurations (#68; the setter/definer interceptor
+  return type differs between the turbo-dom-v8 fork and the native SDK), and the
+  native `Location` and `Window` interface objects match Chrome 156 (#71):
+  `location instanceof Location` holds (the native install no longer replaces the
+  realm's `Location` global) and `Window`/`Location` are non-enumerable globals.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

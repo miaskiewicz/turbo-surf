@@ -280,6 +280,35 @@ mod tests {
     }
 
     #[test]
+    fn width_keywords_scale_only_for_border_outline_and_column_rule_widths() {
+        for name in [
+            "border",
+            "border-top",
+            "border-left-width",
+            "outline",
+            "outline-width",
+            "column-rule",
+            "column-rule-width",
+        ] {
+            assert!(border_width(name), "{name}");
+        }
+        for name in [
+            "border-radius",
+            "border-top-style",
+            "border-color",
+            "border-image-width",
+            "border-spacing",
+            "border-collapse",
+            "outline-offset",
+            "outline-style",
+            "column-rule-style",
+            "width",
+        ] {
+            assert!(!border_width(name), "{name}");
+        }
+    }
+
+    #[test]
     fn factors_follow_the_computed_value_and_effective_zoom_multiplies() {
         let style = |zoom: &str| ComputedStyle::from_pairs([("zoom", zoom)]);
         for (value, expected) in [

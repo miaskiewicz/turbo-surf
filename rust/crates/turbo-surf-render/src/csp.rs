@@ -460,24 +460,6 @@ pub struct DocumentPolicy {
     referrer_metas: Vec<(usize, turbo_surf_core::referrer_policy::ReferrerPolicy)>,
     next_referrer_meta: usize,
 }
-fn active_parser_node(
-    tree: &turbo_dom_parser::rtdom::Tree,
-    node: turbo_dom_parser::rtdom::Handle,
-) -> bool {
-    let mut ancestor = Some(turbo_dom_parser::rtdom::NodeRef::new(tree, node));
-    while let Some(parent) = ancestor {
-        if tree.node_type_id(parent.handle()) == 11 {
-            return false;
-        }
-        if parent.handle() == tree.root() {
-            return true;
-        }
-        ancestor = parent.parent();
-    }
-    unreachable!(
-        "a node from the document's query_selector_all reaches the root or a template fragment"
-    )
-}
 impl DocumentPolicy {
     pub fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
         let values = headers
@@ -499,11 +481,10 @@ impl DocumentPolicy {
         let mut metas = Vec::new();
         let mut referrer_metas = Vec::new();
         for &node in tree.query_selector_all("script,meta").iter() {
-            // The active native script list excludes associated template trees.
-            // Their scripts cannot advance parser phases or activate their metas.
-            if !active_parser_node(&tree, node) {
-                continue;
-            }
+            // The active native script list excludes associated template trees:
+            // query_selector_all walks the document's light tree only, so template
+            // contents (and their scripts and metas) never appear here
+            // (metas_inside_templates_never_activate).
             if tree
                 .tag_name(node)
                 .is_some_and(|name| name.eq_ignore_ascii_case("script"))
@@ -549,7 +530,7 @@ impl DocumentPolicy {
         }
         let mut initial_base = active.clone();
         for &node in tree.query_selector_all("base,meta").iter() {
-            if tree.namespace_id(node) != 0 || !active_parser_node(&tree, node) {
+            if tree.namespace_id(node) != 0 {
                 continue;
             }
             if tree.local_name(node) == Some("base") && tree.get_attribute(node, "href").is_some() {
@@ -902,5 +883,12 @@ mod tests {
             "",
             false
         ));
+        // A template's <base> does not end the initial-base meta scan either.
+        let html = "<head><template><base href='/t/'></template>\
+                    <meta http-equiv=Content-Security-Policy content=\"base-uri 'none'\"></head>";
+        let doc = DocumentPolicy::new("https://meta.test/", &[], html);
+        assert!(!doc
+            .initial_base
+            .allows_request("base-uri", "https://meta.test/t/", "", false));
     }
 }

@@ -190,15 +190,7 @@ pub(crate) fn layout_rules_resolved(
 > {
     let mut active = Vec::new();
     for text in rules {
-        let prepared = test_rules(tree, input, text);
-        match prepared {
-            Ok(mut prepared) if prepared.len() == 1 => active.push(prepared.remove(0)),
-            _ => active.push(crate::live_stylesheets::ActiveRule {
-                text: text.clone(),
-                scoped: None,
-                resource: None,
-            }),
-        }
+        active.extend(test_rules(tree, input, text)?);
     }
     layout_active_rules_resolved(tree, input, &active, layout_scale, inputs, diagnostics)
 }

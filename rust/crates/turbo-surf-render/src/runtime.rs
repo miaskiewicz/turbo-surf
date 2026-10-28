@@ -1445,6 +1445,22 @@ fn op_trusted_type_string<'s>(
         .map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 
+/// Chrome's code-generation path hands a 40-unit prefix of the source to the CSP
+/// report builder, which then strips ASCII whitespace from both ends.
+fn csp_eval_sample(units: &[u16]) -> &[u16] {
+    let prefix = &units[..units.len().min(40)];
+    let whitespace = |unit: &u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
+    let start = prefix
+        .iter()
+        .position(|unit| !whitespace(unit))
+        .unwrap_or(prefix.len());
+    let end = prefix
+        .iter()
+        .rposition(|unit| !whitespace(unit))
+        .map_or(start, |index| index + 1);
+    &prefix[start..end]
+}
+
 #[op2(fast, reentrant)]
 fn op_timer_code_allowed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -1461,7 +1477,7 @@ fn op_timer_code_allowed<'s>(
     let policy = handle.policy.borrow().current().clone();
     let report_only = handle.policy.borrow().report_only.clone();
     let units = crate::browser_env::string_code_units(scope, source);
-    let sample = &units[..units.len().min(40)];
+    let sample = csp_eval_sample(&units);
     for (disposition, records) in [
         ("enforce", policy.eval_violations()),
         ("report", report_only.eval_violations()),
@@ -7814,8 +7830,9 @@ const __createTimer = (name, repeat, handler, delay, args) => {
   const source=typeof handler === "function" ? null : ops.op_trusted_type_string(__timerDocument,handler,"TrustedScript","Window "+name,"Failed to execute '"+name+"' on 'Window': ");
   // Window timers take a signed32-bit delay before negative values clamp to zero.
   delay=(+delay)|0;if(delay<0)delay=0;
+  // Chrome returns 0 for a string handler its CSP check rejects, without consuming an id.
+  if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return 0;
   const id=__tid++;
-  if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return id;
   const level=ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
   const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args};
@@ -15696,5 +15713,27 @@ mod window_timer_task_tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+#[cfg(test)]
+mod csp_eval_sample_tests {
+    use super::csp_eval_sample;
+
+    fn sample(text: &str) -> String {
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        String::from_utf16(csp_eval_sample(&units)).unwrap()
+    }
+
+    #[test]
+    fn eval_samples_trim_ascii_whitespace_after_the_forty_unit_prefix() {
+        assert_eq!(sample("\t\n\u{b}\u{c}\r x = 1 \r\n"), "x = 1");
+        assert_eq!(sample(" \u{a0}x\u{a0}"), "\u{a0}x\u{a0}");
+        assert_eq!(sample(&format!("{}y", " ".repeat(40))), "");
+        assert_eq!(sample("   "), "");
+        assert_eq!(sample(""), "");
+        let long = format!("{}{}", "a".repeat(39), "b c");
+        assert_eq!(sample(&long), format!("{}b", "a".repeat(39)));
+        assert_eq!(sample(&format!("{}  z", "a".repeat(38))), "a".repeat(38));
     }
 }

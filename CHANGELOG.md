@@ -23,6 +23,9 @@
 - No-JS form submission of a single `<select>` (#61) follows HTML selectedness like
   Chrome 156: the last `selected` option, else the first non-disabled one (it sent every
   `selected` option, or nothing).
+- String-handler timers under CSP (#63): a `setTimeout("…")` / `setInterval("…")` that
+  `script-src` blocks returns id `0` like Chrome 156 (it returned a fresh id), and its
+  `'report-sample'` sample is the 40-unit prefix with ASCII whitespace trimmed.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

@@ -53,7 +53,6 @@ async fn string_timers_run_in_the_global_scope_when_eval_is_allowed() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#63: fails until the fix"]
 async fn enforced_script_src_blocks_string_timers_with_an_eval_violation() {
     let mut page = open(&[("Content-Security-Policy", "script-src 'nonce-n'")]).await;
     page.eval(
@@ -70,7 +69,6 @@ async fn enforced_script_src_blocks_string_timers_with_an_eval_violation() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#63: fails until the fix"]
 async fn report_only_script_src_reports_and_still_runs_string_timers() {
     let mut page = open(&[(
         "Content-Security-Policy-Report-Only",

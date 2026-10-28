@@ -3,20 +3,9 @@
 //! Compiled only under `cfg(turbo_surf_native_proxy)`; measured in that configuration.
 use super::*;
 fn csp_eval_sample_units(scope: &v8::PinScope, source: v8::Local<v8::String>) -> Vec<u16> {
-    // Chrome's code-generation path supplies a 40-unit prefix to the report
-    // builder, which then strips ASCII whitespace. Inline reports trim first.
     let mut units = vec![0; source.length().min(40)];
     source.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
-    let whitespace = |unit: &u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
-    let start = units
-        .iter()
-        .position(|unit| !whitespace(unit))
-        .unwrap_or(units.len());
-    let end = units
-        .iter()
-        .rposition(|unit| !whitespace(unit))
-        .map_or(start, |index| index + 1);
-    units[start..end].to_vec()
+    csp_eval_sample(&units).to_vec()
 }
 
 fn deny_code_generation<'s>(

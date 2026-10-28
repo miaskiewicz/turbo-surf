@@ -1,4 +1,6 @@
 // Endpoint ownership and queues live in the isolate's Rust registry.
+// The bootstrap shares these two hooks by their reserved `__` names.
+// oxlint-disable-next-line no-underscore-dangle
 let __portTransferSequence, __hostPortMessage;
 {
   const realm = globalThis,
@@ -25,8 +27,14 @@ let __portTransferSequence, __hostPortMessage;
       configurable: true,
       enumerable: true,
     });
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- block-private helper
   const objectLike = (value) =>
     value !== null && (typeof value === "object" || typeof value === "function");
+  const portEntryError =
+      "Failed to execute 'postMessage' on 'MessagePort': Failed to convert value to 'object'.",
+    portOptionsEntryError =
+      "Failed to execute 'postMessage' on 'MessagePort': Failed to read the 'transfer' property " +
+      "from 'StructuredSerializeOptions': Failed to convert value to 'object'.";
   const record = (receiver) => {
     const state = records.get(receiver);
     if (!state) throw new PortTypeError("Illegal invocation");
@@ -39,7 +47,9 @@ let __portTransferSequence, __hostPortMessage;
       configurable: true,
       enumerable: true,
     });
-  __portTransferSequence = (value) => {
+  // `entryError` is Chrome's full TypeError text for a primitive transfer entry,
+  // which names the calling operation (and the options dictionary, if any).
+  __portTransferSequence = (value, entryError = "Transfer entries must be objects") => {
     if (!objectLike(value)) throw new PortTypeError("Transfer list must be a sequence");
     const iterator = value[iteratorSymbol];
     if (typeof iterator !== "function") throw new PortTypeError("Transfer list must be iterable");
@@ -57,7 +67,7 @@ let __portTransferSequence, __hostPortMessage;
         const error = new PortTypeError(
           result.length === 4096
             ? "Native transfer sequence budget exceeded"
-            : "Transfer entries must be objects",
+            : entryError,
         );
         throw error;
       }
@@ -78,6 +88,8 @@ let __portTransferSequence, __hostPortMessage;
   };
   const Port = make(
     class MessagePort extends Target {
+      // Web IDL: MessagePort has no constructor; it throws before any super().
+      // oxlint-disable-next-line constructor-super
       constructor() {
         throw new PortTypeError("Illegal constructor");
       }
@@ -153,11 +165,11 @@ let __portTransferSequence, __hostPortMessage;
           (typeof options === "object" || typeof options === "function") &&
           typeof options[iteratorSymbol] === "function"
         )
-          transfer = __portTransferSequence(options);
+          transfer = __portTransferSequence(options, portEntryError);
         else if (options !== null) {
           includeActivation = !!options.includeUserActivation;
           const list = options.transfer;
-          if (list !== undefined) transfer = __portTransferSequence(list);
+          if (list !== undefined) transfer = __portTransferSequence(list, portOptionsEntryError);
         }
       }
       ops.op_port_post_message(this, value, transfer, includeActivation);

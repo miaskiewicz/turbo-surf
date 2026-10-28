@@ -40,6 +40,15 @@
   platform object with its interface and values like Chrome 156 (they arrived as empty
   plain objects); the interface is the constructor that created the object (a subclass
   clones as its base), and the clone hooks use intrinsics captured at bootstrap.
+- Transfer-list validation (#62: `postMessage`, `MessagePort.postMessage`,
+  `structuredClone`) throws Chrome 156's errors: the `Failed to execute '…' on '…'`
+  prefix, the transfer index (`Port at index 0 is already neutered.`, `ArrayBuffer at
+  index 1 is a duplicate of an earlier ArrayBuffer.`, `Value at index 0 does not have a
+  transferable type.`, `Port at index 0 contains the source port.`), Chrome's check order
+  (list scan, detached then non-detachable buffers, locked streams, source port,
+  neutered ports), and `TypeError` for a locked stream, a non-detachable buffer and a
+  primitive entry (they were generic `DataCloneError`s). Remaining serialization-order
+  and message gaps: #76.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

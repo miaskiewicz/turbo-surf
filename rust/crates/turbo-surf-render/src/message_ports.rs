@@ -337,20 +337,18 @@ fn transfer_contains_endpoint(
     }
     false
 }
+/// The live endpoint a transfer-list port moves, or `None` for a neutered
+/// (already transferred or collected) port; callers own the exception text.
 pub(crate) fn validate_transfer(
     scope: &mut v8::PinScope,
     object: v8::Local<v8::Object>,
-) -> Result<PortTransfer, JsErrorBox> {
-    let (token, endpoint) = lookup_endpoint(scope, object)?;
-    let endpoint = endpoint
-        .ok_or_else(|| crate::crypto_clone::data_clone_error(scope, "MessagePort is detached"))?;
+) -> Option<PortTransfer> {
+    let (token, endpoint) = lookup_endpoint(scope, object).ok()?;
+    let endpoint = endpoint?;
     if endpoint.borrow().generation != token.generation || token.generation == u32::MAX {
-        return Err(crate::crypto_clone::data_clone_error(
-            scope,
-            "MessagePort is already detached",
-        ));
+        return None;
     }
-    Ok(PortTransfer {
+    Some(PortTransfer {
         token,
         endpoint: Rc::downgrade(&endpoint),
         registry: Rc::downgrade(&registry(scope)),

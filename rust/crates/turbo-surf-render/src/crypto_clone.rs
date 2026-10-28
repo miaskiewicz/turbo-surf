@@ -440,11 +440,11 @@ impl v8::ValueDeserializerImpl for Delegate {
     }
 }
 
-pub(crate) fn data_clone_error(scope: &mut v8::PinScope, message: &'static str) -> JsErrorBox {
-    if let Some(message) = v8::String::new(scope, message) {
-        Delegate(Rc::default()).throw_data_clone_error(scope, message);
+pub(crate) fn data_clone_error(scope: &mut v8::PinScope, message: &str) -> JsErrorBox {
+    if let Some(text) = v8::String::new(scope, message) {
+        Delegate(Rc::default()).throw_data_clone_error(scope, text);
     }
-    JsErrorBox::new("DOMExceptionDataCloneError", message)
+    JsErrorBox::new("DOMExceptionDataCloneError", message.to_string())
 }
 
 struct ValidatedTransfers<'s> {
@@ -453,9 +453,27 @@ struct ValidatedTransfers<'s> {
     streams: Vec<StreamPlan>,
     public_ports: usize,
 }
+/// Chrome's exception prefix for the operation that validates the transfer list.
+fn clone_prefix(local_clone: bool, sender: bool) -> &'static str {
+    if local_clone {
+        "Failed to execute 'structuredClone' on 'Window': "
+    } else if sender {
+        "Failed to execute 'postMessage' on 'MessagePort': "
+    } else {
+        "Failed to execute 'postMessage' on 'Window': "
+    }
+}
+
+const STREAM_INTERFACES: [&str; 3] = ["ReadableStream", "WritableStream", "TransformStream"];
+
+/// Chrome 156 order: one list scan rejects primitives, non-transferable values and
+/// duplicates (list index); then detached, then non-detachable buffers (buffer index),
+/// locked streams, the source port and neutered ports (port index).
 fn validate_transfers<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     transfer: Option<v8::Local<'s, v8::Value>>,
+    sender: Option<v8::Local<v8::Object>>,
+    prefix: &str,
 ) -> Result<ValidatedTransfers<'s>, JsErrorBox> {
     let Some(transfer) = transfer.filter(|value| !value.is_undefined()) else {
         return Ok(ValidatedTransfers {
@@ -473,8 +491,9 @@ fn validate_transfers<'s>(
         ));
     }
     let mut buffers = Vec::new();
-    let mut ports = Vec::new();
-    let mut streams = Vec::<StreamPlan>::new();
+    let mut port_objects =
+        Vec::<(v8::Local<'s, v8::Object>, crate::message_ports::PortToken)>::new();
+    let mut stream_objects = Vec::<(v8::Local<'s, v8::Object>, i32)>::new();
     for index in 0..array.length() {
         if scope.is_execution_terminating() {
             return Err(JsErrorBox::generic("Clone interrupted"));
@@ -482,61 +501,108 @@ fn validate_transfers<'s>(
         let value = array
             .get_index(scope, index)
             .ok_or_else(|| JsErrorBox::generic("Transfer sequence interrupted"))?;
-        if let Ok(object) = v8::Local::<v8::Object>::try_from(value) {
-            if crate::message_ports::token(scope, object).is_some() {
-                let port = crate::message_ports::validate_transfer(scope, object)?;
-                if ports
-                    .iter()
-                    .any(|existing| crate::message_ports::same_transfer(existing, &port))
-                {
-                    return Err(data_clone_error(
-                        scope,
-                        "MessagePort occurs twice in transfer list",
-                    ));
-                }
-                ports.push(port);
-                continue;
+        let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+            return Err(JsErrorBox::type_error(format!(
+                "{prefix}Failed to convert value to 'object'."
+            )));
+        };
+        if let Some(token) = crate::message_ports::token(scope, object) {
+            if port_objects.iter().any(|(_, existing)| *existing == token) {
+                return Err(data_clone_error(
+                    scope,
+                    &format!(
+                        "{prefix}Message port at index {index} is a duplicate of an earlier port."
+                    ),
+                ));
             }
+            port_objects.push((object, token));
+            continue;
         }
-        if let Ok(object) = v8::Local::<v8::Object>::try_from(value) {
-            let kind = crate::stream_transfers::kind(scope, object)?;
-            if kind < 0 {
-                return Err(data_clone_error(scope, "Stream is locked"));
+        let kind = crate::stream_transfers::kind(scope, object)?;
+        if kind != 0 {
+            if stream_objects
+                .iter()
+                .any(|(existing, _)| *existing == object)
+            {
+                let name = STREAM_INTERFACES
+                    .get((kind.unsigned_abs() as usize).wrapping_sub(1))
+                    .copied()
+                    .unwrap_or("Stream");
+                return Err(data_clone_error(
+                    scope,
+                    &format!(
+                        "{prefix}{name} at index {index} is a duplicate of an earlier {name}."
+                    ),
+                ));
             }
-            if kind > 0 {
-                if streams
-                    .iter()
-                    .any(|entry| v8::Local::new(scope, &entry.object) == object)
-                {
-                    return Err(data_clone_error(
-                        scope,
-                        "Stream occurs twice in transfer list",
-                    ));
-                }
-                let plan = crate::stream_transfers::call(scope, 1, &[object.into()])
-                    .and_then(|value| value.to_object(scope))
-                    .ok_or_else(|| JsErrorBox::generic("Stream preparation interrupted"))?;
-                streams.push(StreamPlan {
-                    object: v8::Global::new(scope, object),
-                    plan: v8::Global::new(scope, plan),
-                    kind: kind as u32,
-                    first: 0,
-                });
-                continue;
-            }
+            stream_objects.push((object, kind));
+            continue;
         }
-        let buffer = v8::Local::<v8::ArrayBuffer>::try_from(value)
-            .map_err(|_| data_clone_error(scope, "Value is not transferable"))?;
+        let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) else {
+            return Err(data_clone_error(
+                scope,
+                &format!("{prefix}Value at index {index} does not have a transferable type."),
+            ));
+        };
         if buffers.contains(&buffer) {
             return Err(data_clone_error(
                 scope,
-                "ArrayBuffer occurs twice in transfer list",
+                &format!("{prefix}ArrayBuffer at index {index} is a duplicate of an earlier ArrayBuffer."),
             ));
         }
-        if buffer.was_detached() || !buffer.is_detachable() {
-            return Err(data_clone_error(scope, "ArrayBuffer cannot be transferred"));
-        }
         buffers.push(buffer);
+    }
+    for (index, buffer) in buffers.iter().enumerate() {
+        if buffer.was_detached() {
+            return Err(data_clone_error(
+                scope,
+                &format!("{prefix}ArrayBuffer at index {index} is already detached."),
+            ));
+        }
+    }
+    for (index, buffer) in buffers.iter().enumerate() {
+        if !buffer.is_detachable() {
+            return Err(JsErrorBox::type_error(format!(
+                "{prefix}ArrayBuffer at index {index} is not detachable and could not be transferred."
+            )));
+        }
+    }
+    if stream_objects.iter().any(|(_, kind)| *kind < 0) {
+        return Err(JsErrorBox::type_error(format!(
+            "{prefix}Cannot transfer a locked stream"
+        )));
+    }
+    let source = sender.and_then(|sender| crate::message_ports::token(scope, sender));
+    if let Some(index) = port_objects
+        .iter()
+        .position(|(_, token)| Some(*token) == source)
+    {
+        return Err(data_clone_error(
+            scope,
+            &format!("{prefix}Port at index {index} contains the source port."),
+        ));
+    }
+    let mut ports = Vec::new();
+    for (index, (object, _)) in port_objects.iter().enumerate() {
+        let Some(port) = crate::message_ports::validate_transfer(scope, *object) else {
+            return Err(data_clone_error(
+                scope,
+                &format!("{prefix}Port at index {index} is already neutered."),
+            ));
+        };
+        ports.push(port);
+    }
+    let mut streams = Vec::<StreamPlan>::new();
+    for (object, kind) in stream_objects {
+        let plan = crate::stream_transfers::call(scope, 1, &[object.into()])
+            .and_then(|value| value.to_object(scope))
+            .ok_or_else(|| JsErrorBox::generic("Stream preparation interrupted"))?;
+        streams.push(StreamPlan {
+            object: v8::Global::new(scope, object),
+            plan: v8::Global::new(scope, plan),
+            kind: kind.unsigned_abs(),
+            first: 0,
+        });
     }
     let public_ports = ports.len();
     for entry in &mut streams {
@@ -550,7 +616,9 @@ fn validate_transfers<'s>(
                 .get_index(scope, index)
                 .and_then(|value| value.to_object(scope))
                 .ok_or_else(|| JsErrorBox::generic("Missing stream endpoint"))?;
-            ports.push(crate::message_ports::validate_transfer(scope, object)?);
+            let port = crate::message_ports::validate_transfer(scope, object)
+                .ok_or_else(|| data_clone_error(scope, "MessagePort is detached"))?;
+            ports.push(port);
         }
     }
     Ok(ValidatedTransfers {
@@ -661,22 +729,13 @@ fn prepare_transfer_with_mode<'s>(
     sender: Option<v8::Local<v8::Object>>,
     local_clone: bool,
 ) -> Result<PreparedClone<'s>, JsErrorBox> {
+    let prefix = clone_prefix(local_clone, sender.is_some());
     let ValidatedTransfers {
         buffers,
         ports,
         streams,
         public_ports,
-    } = validate_transfers(scope, transfer)?;
-    if sender.is_some_and(|sender| {
-        ports
-            .iter()
-            .any(|port| crate::message_ports::transfer_matches(scope, sender, port))
-    }) {
-        return Err(data_clone_error(
-            scope,
-            "Source MessagePort cannot be transferred to itself",
-        ));
-    }
+    } = validate_transfers(scope, transfer, sender, prefix)?;
     let context = scope.get_current_context();
     let mut handles = CloneHandles::default();
     handles.local_clone = local_clone;

@@ -8450,7 +8450,7 @@ globalThis.fetch = async (input, init = undefined) => {
       if(!objectLike(step))throw new __exceptionTypeError("Invalid transfer iterator result");
       if(step.done)return result;
       const entry=step.value;
-      if(!objectLike(entry))throw new __exceptionTypeError("Transfer entries must be objects");
+      if(!objectLike(entry))throw new __exceptionTypeError("Failed to execute 'structuredClone' on 'Window': Failed to read the 'transfer' property from 'StructuredSerializeOptions': Failed to convert value to 'object'.");
       if(result.length===4096)throw new __exceptionTypeError("Native transfer sequence budget exceeded");
       apply(push,result,[entry]);
     }
@@ -8807,8 +8807,9 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
   if (arguments.length === 0) throw new __exceptionTypeError("A message is required");
   const receiver=this==null?__postingWindow:this;
   if(!ops.op_surf_is_window(receiver))throw new __exceptionTypeError("Illegal invocation");
-  let includeActivation=false;
+  let includeActivation=false, fromOptions=false;
   if(targetOrigin===null || typeof targetOrigin==="object") {
+    fromOptions=true;
     const options=targetOrigin||{};
     includeActivation=!!options.includeUserActivation;
     const origin=options.targetOrigin;
@@ -8817,7 +8818,8 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
   }
   if(typeof targetOrigin==="symbol")throw new __exceptionTypeError("Cannot convert a Symbol to a string");
   targetOrigin=__String(targetOrigin);
-  const transferList=transfer===undefined?undefined:__portTransferSequence(transfer);
+  const transferList=transfer===undefined?undefined:__portTransferSequence(transfer,
+    "Failed to execute 'postMessage' on 'Window': "+(fromOptions?"Failed to read the 'transfer' property from 'StructuredSerializeOptions': ":"")+"Failed to convert value to 'object'.");
   if(targetOrigin!=="*" && targetOrigin!=="/") {
     try {ops.op_surf_url_parse(targetOrigin,"");}
     catch(_){throw new __postingException("Invalid target origin","SyntaxError");}

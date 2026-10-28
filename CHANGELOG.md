@@ -30,6 +30,10 @@
   like Chrome 156 (`matchMedia` and live layout `@media`): `not (unknown-x)`,
   `not (orientation: 1px)` and `(width: 800px) and (not (unknown-x))` no longer match,
   and `(width: red)` is unknown instead of an error.
+- Large pages open (#75): compression-dictionary link discovery, which runs for every
+  document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
+  the whole page. It has no such bound now; every link settles like Chrome 156 (300
+  links, 300 `error` events under a blocking CSP).
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

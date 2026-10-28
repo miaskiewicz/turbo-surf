@@ -28,16 +28,19 @@ fn adapt(source: &str, expected: &str, names: &[&str]) -> Result<String, String>
             "Official Deno event source changed; review the private dense-array adapter".into(),
         );
     }
+    // The SHA-256 pin above admits only the reviewed sources, each of which has one
+    // primordials declaration and one line per adapted import (the tests adapt every
+    // pinned source), so these are invariants of the pin, not input checks.
     let marker = "} = primordials;";
-    if source.matches(marker).count() != 1 {
-        return Err("Official Deno primordial declaration is ambiguous".into());
-    }
+    assert_eq!(source.matches(marker).count(), 1, "pinned Deno source");
     let mut source = source.to_owned();
     for name in names {
         let import = format!("  {name},\n");
-        if source.matches(&import).count() != 1 {
-            return Err(format!("Official Deno {name} import changed"));
-        }
+        assert_eq!(
+            source.matches(&import).count(),
+            1,
+            "pinned Deno {name} import"
+        );
         source = source.replacen(&import, "", 1);
     }
     let helper_source = HELPERS.trim().trim_end_matches(';');

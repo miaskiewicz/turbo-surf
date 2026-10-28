@@ -34,15 +34,18 @@ struct EmbeddedSource {
 macro_rules! distribution {
     ($krate:ident) => {
         $krate::embedded_sources::SOURCES.iter().map(|source| {
-            use $krate::embedded_sources::SourceKind as Kind;
             EmbeddedSource {
                 extension: source.extension,
-                kind: match source.kind {
-                    Kind::Js => SourceKind::Js,
-                    Kind::Esm => SourceKind::Esm,
-                    Kind::LazyJs => SourceKind::LazyJs,
-                    Kind::LazyEsm => SourceKind::LazyEsm,
-                },
+                // The distributions declare their fieldless SourceKind in this same
+                // order (prepare.py); the pinned sources use only the lazy kinds, and
+                // embed_list's inventory check (every pinned extension embeds in the
+                // tests) fails on any reordering.
+                kind: [
+                    SourceKind::Js,
+                    SourceKind::Esm,
+                    SourceKind::LazyJs,
+                    SourceKind::LazyEsm,
+                ][source.kind as usize],
                 specifier: source.specifier,
                 code: source.code,
                 sha256: source.sha256,

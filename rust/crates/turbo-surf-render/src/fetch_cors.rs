@@ -262,6 +262,21 @@ mod tests {
             &headers
         ));
         assert!(!preflight_allowed(&context, "DELETE", &[], &headers));
+        // The preflight response itself must pass the CORS check: methods and headers
+        // granted without (or with another) Access-Control-Allow-Origin do not count.
+        for allow_origin in [None, Some("https://source.test")] {
+            let headers: Vec<(String, String)> = allow_origin
+                .map(|origin| ("access-control-allow-origin".into(), origin.into()))
+                .into_iter()
+                .chain(headers[1..].iter().cloned())
+                .collect();
+            assert!(!preflight_allowed(
+                &context,
+                "PUT",
+                &["x-token".into()],
+                &headers
+            ));
+        }
         assert!(!preflight_allowed(
             &context,
             "PUT",

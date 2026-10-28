@@ -5633,14 +5633,9 @@ fn run_frame_timers(scope: &mut v8::PinScope, max: u32) -> u32 {
             continue;
         }
         let scope = &mut v8::ContextScope::new(scope, context);
-        let code = v8::String::new(
-            scope,
-            &format!("globalThis[Symbol.for('ts')].runTimers({max})"),
-        )
-        .unwrap();
-        if let Some(result) =
-            v8::Script::compile(scope, code, None).and_then(|script| script.run(scope))
-        {
+        // The frame's namespace function, called natively (turbo-surf#87).
+        let max = v8::Number::new(scope, f64::from(max));
+        if let Some(result) = call_frame_helper(scope, "runTimers", &[max.into()]) {
             fired += result.uint32_value(scope).unwrap_or(0);
         }
     }
@@ -5661,15 +5656,10 @@ fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
             continue;
         }
         let scope = &mut v8::ContextScope::new(scope, context);
-        let code = v8::String::new(
-            scope,
-            "globalThis[Symbol.for('ts')].pendingWork() === '1' ? 1 : 0",
-        )
-        .unwrap();
-        if let Some(result) =
-            v8::Script::compile(scope, code, None).and_then(|script| script.run(scope))
+        if call_frame_helper(scope, "pendingWork", &[])
+            .is_some_and(|result| result.to_rust_string_lossy(scope) == "1")
         {
-            pending += result.uint32_value(scope).unwrap_or(0);
+            pending += 1;
         }
     }
     pending
@@ -7163,7 +7153,58 @@ let __markDocumentInteractive;
 // Interface records use a native, isolate-owned ephemeron map. Same-origin
 // borrowed methods accept foreign-realm objects without exposing a brand setter.
 const __stringify = JSON.stringify, __String = String;
-const __framePromiseAll = Promise.all.bind(Promise);
+// Intrinsics captured at install time (turbo-surf#87): engine code on the document
+// load and node insertion paths calls these, never a builtin it looks up at run time
+// (a page can replace any prototype method, accessor or static, and install index
+// accessors on Array.prototype / Object.prototype). Internal lists the engine grows are
+// prototype-less records, so no inherited index setter runs.
+const __intrinsicApply = Reflect.apply, __intrinsicDefine = Object.defineProperty,
+  __intrinsicPromise = Promise,
+  __intrinsicFloor = Math.floor, __intrinsicMax = Math.max, __intrinsicMin = Math.min,
+  __intrinsicHasOwn = Object.hasOwn,
+  __intrinsicSetAdd = Set.prototype.add, __intrinsicSetDelete = Set.prototype.delete,
+  __intrinsicSetEach = Set.prototype.forEach,
+  __intrinsicSetSize = Object.getOwnPropertyDescriptor(Set.prototype, "size").get,
+  __intrinsicWeakGet = WeakMap.prototype.get, __intrinsicWeakSet = WeakMap.prototype.set,
+  __intrinsicExec = RegExp.prototype.exec,
+  __intrinsicLower = String.prototype.toLowerCase, __intrinsicTrim = String.prototype.trim,
+  __intrinsicEndsWith = String.prototype.endsWith, __intrinsicRepeat = String.prototype.repeat,
+  __intrinsicIndexOf = Array.prototype.indexOf;
+const __regexpTest = (pattern, text) => __intrinsicApply(__intrinsicExec, pattern, [text]) !== null;
+const __lower = text => __intrinsicApply(__intrinsicLower, text, []);
+const __trim = text => __intrinsicApply(__intrinsicTrim, text, []);
+const __setSize = set => __intrinsicApply(__intrinsicSetSize, set, []);
+// A prototype-less list: `length` plus own indices.
+const __list = () => ({__proto__: null, length: 0});
+const __listPush = (list, value) => { list[list.length] = value; list.length++; };
+const __listIncludes = (list, value) => {
+  for (let index = 0; index < list.length; index++) if (list[index] === value) return true;
+  return false;
+};
+// Promise.prototype.finally without its `then` and @@species lookups: `await` on a
+// native promise reacts to it directly.
+const __promiseFinally = async (promise, callback) => {
+  let value;
+  try { value = await promise; } catch (error) { callback(); throw error; }
+  callback();
+  return value;
+};
+// Promise.all over an array-like of native promises (or plain values), resolving to an
+// array, without the iterator, `Promise.resolve`, `then` or @@species lookups
+// Promise.all makes; it rejects with the first rejection.
+const __framePromiseAll = list => new __intrinsicPromise((resolve, reject) => {
+  const length = list.length, values = [];
+  let remaining = length;
+  if (!remaining) { resolve(values); return; }
+  const settle = async (item, index) => {
+    try {
+      const value = await item;
+      __intrinsicDefine(values, index, {__proto__: null, value, writable: true, enumerable: true, configurable: true});
+      if (--remaining === 0) resolve(values);
+    } catch (error) { reject(error); }
+  };
+  for (let index = 0; index < length; index++) settle(list[index], index);
+});
 const __recordOwn = Object.hasOwn, __recordCreate = Object.create, __recordDefine = Object.defineProperty;
 const __interfaceMap = brand => ({
   has(receiver) { return this.get(receiver) !== undefined; },
@@ -7784,7 +7825,7 @@ const __perfTimeOrigin = __epoch0;
 const __observed = () => (__hrNow() - __hr0) + ops.op_timer_offset();
 let __perfLast = 0;
 const __perfNow = () => {
-  let t = Math.floor(__observed() * 10) / 10; // Chrome 100µs grid
+  let t = __intrinsicFloor(__observed() * 10) / 10; // Chrome 100µs grid
   if (t < __perfLast) t = __perfLast;          // strictly monotonic
   __perfLast = t;
   return t;
@@ -9021,13 +9062,13 @@ for(const name of ['PerformanceEntry','PerformanceMark','PerformanceMeasure','Pe
   const proto=globalThis[name].prototype;Object.defineProperty(proto,Symbol.toStringTag,{value:name,configurable:true});
   for(const key of Object.getOwnPropertyNames(proto)){if(key==='constructor')continue;const d=Object.getOwnPropertyDescriptor(proto,key);Object.defineProperty(proto,key,{...d,enumerable:true});}
 }
-const __navigationRelative = () => Object.fromEntries(__performanceFields.filter(name=>name!=='navigationStart'&&name!=='domLoading').map(name=>[name,__navigationPhases[name]?Math.max(0,__navigationPhases[name]-__navigationPhases.navigationStart):0]));
+const __navigationRelative = () => {const relative={};for(let index=0;index<__performanceFields.length;index++){const name=__performanceFields[index];if(name==='navigationStart'||name==='domLoading')continue;__intrinsicDefine(relative,name,{__proto__:null,value:__navigationPhases[name]?__intrinsicMax(0,__navigationPhases[name]-__navigationPhases.navigationStart):0,writable:true,enumerable:true,configurable:true});}return relative;};
 const __navigationEntry=Object.create(PerformanceNavigationTiming.prototype);
 __performanceEntries.set(__navigationEntry,{name:location.href,navigationId:__navigationId,entryType:'navigation',startTime:0,duration:0});
 for(const name of __performanceFields.filter(name=>name!=='navigationStart'&&name!=='domLoading'))Object.defineProperty(PerformanceNavigationTiming.prototype,name,{get(){if(this!==__navigationEntry)throw new TypeError('Illegal invocation');return __navigationRelative()[name];},enumerable:true,configurable:true});
 for(const [name,value]of Object.entries({type:'navigate',redirectCount:0}))Object.defineProperty(PerformanceNavigationTiming.prototype,name,{get(){if(this!==__navigationEntry)throw new TypeError('Illegal invocation');return value;},enumerable:true,configurable:true});
 __performanceTimeline.push(__navigationEntry);
-__G.performancePhase = name => {if(__performanceFields.includes(name)){__navigationPhases[name]=Math.floor(__perfTimeOrigin+__perfNow());if(name==='loadEventEnd')__entryState(__navigationEntry).duration=__navigationRelative().loadEventEnd;}};
+__G.performancePhase = name => {if(__listIncludes(__performanceFields,name)){__navigationPhases[name]=__intrinsicFloor(__perfTimeOrigin+__perfNow());if(name==='loadEventEnd')__entryState(__navigationEntry).duration=__navigationRelative().loadEventEnd;}};
 const __latestMark = value => {
   if(typeof value==='number')return __performanceNumber(value);
   const name=__performanceString(value);
@@ -9779,10 +9820,14 @@ const __resourceDocumentQuery=Document.prototype.querySelectorAll;
 const __resourceCompare=Node.prototype.compareDocumentPosition;
 let __resourceMutationEpoch = 0;
 const __resourceBaseURL=Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get;
+const __documentURL=Object.getOwnPropertyDescriptor(Document.prototype,"URL").get;
+const __documentFirstElementChild=Object.getOwnPropertyDescriptor(Document.prototype,"firstElementChild").get;
+const __elementFirstElementChild=Object.getOwnPropertyDescriptor(Element.prototype,"firstElementChild").get;
+const __elementNextElementSibling=Object.getOwnPropertyDescriptor(Element.prototype,"nextElementSibling").get;
 "##,
     include_str!("compression_dictionary.js"),
     r##"
-function __cssHost(doc) {let host=__resourceCSSHosts.get(doc);if(!host){host=ops.op_interface_record_get(doc).cssHost;__resourceCSSHosts.set(doc,host);}return host;}
+function __cssHost(doc) {let host=__intrinsicApply(__intrinsicWeakGet,__resourceCSSHosts,[doc]);if(!host){host=ops.op_interface_record_get(doc).cssHost;__intrinsicApply(__intrinsicWeakSet,__resourceCSSHosts,[doc,host]);}return host;}
 function __cssOriginClean(response) {return response.originClean===true;}
 function __validSheetResponse(response, doc, clean) {const mime=(response.contentType||"").split(";")[0].trim().toLowerCase();return mime==="text/css" || !response.nosniff && (__resourceCompatMode.call(doc)==="BackCompat" && clean || __cssHost(doc).looksLikeCSS(response.text));}
 function __fireResourceEvent(el, kind, win = globalThis) {
@@ -9791,8 +9836,8 @@ function __fireResourceEvent(el, kind, win = globalThis) {
   try { ops.op_dispatch_host_event(ev, el); } catch (_) {}
 }
 function __trackResource(promise) {
-  __resourcePromises.add(promise);
-  promise.finally(() => __resourcePromises.delete(promise));
+  __intrinsicApply(__intrinsicSetAdd, __resourcePromises, [promise]);
+  __promiseFinally(promise, () => __intrinsicApply(__intrinsicSetDelete, __resourcePromises, [promise]));
   return promise;
 }
 function __resourceNow() { return __perfNow(); }
@@ -9802,7 +9847,7 @@ function __recordResource(win, url, kind, start) {
 }
 async function __loadSheetImports(sheet, source, win, depth = 0) {
   if (!sheet || depth >= 16) return;
-  const request=__resourceStyleRequests.get(sheet)||{mode:"no-cors",credentials:"include",document:__document};
+  const request=__intrinsicApply(__intrinsicWeakGet,__resourceStyleRequests,[sheet])||{mode:"no-cors",credentials:"include",document:__document};
   const rules=__resourceSheetRules(sheet);
   for(let index=0;index<rules.length;index++) {
     const rule=rules[index];
@@ -9886,9 +9931,9 @@ function __loadImage(el, win = globalThis, parser = false, restart = false) {
 // document owns, connected or not, and images inserted into its trees), and from
 // loadDocumentResources for parser images, so no image carries own properties.
 __G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
-  if(doc!==__document || __documentType.call(doc)!==9)throw new TypeError("Resource loading requires the owning native Document");
+  if(doc!==__document || __intrinsicApply(__documentType,doc,[])!==9)throw new TypeError("Resource loading requires the owning native Document");
   __discoverDictionaries();
-  const styles=[];
+  const styles=__list();
   // The query is already in document order. Avoid a whole-tree position walk
   // for each parser resource, unless a resource hook changed that order.
   const epoch=__resourceMutationEpoch;
@@ -9901,16 +9946,16 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     const el=elements[index];
     if(before){
       if(cutoff>=0&&epoch===__resourceMutationEpoch){if(index>=cutoff)break;}
-      else if((__resourceCompare.call(el,before)&4)===0)continue;
+      else if((__intrinsicApply(__resourceCompare,el,[before])&4)===0)continue;
     }
-    const tag=__resourceTagName.call(el);
-    if(tag==="SCRIPT"||__resourceLocalName.call(el)==="script")continue;
+    const tag=__intrinsicApply(__resourceTagName,el,[]);
+    if(tag==="SCRIPT"||__intrinsicApply(__resourceLocalName,el,[])==="script")continue;
     if (tag==="IMG") {__loadImage(el,win,true);continue;}
     if(tag==="STYLE"){
       const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
-      const source=__resourceText.call(el);let state=__resources.get(el);
-      if(!state||state.src!==source){state={src:source,promise:null};__resources.set(el,state);__resourceStyleRequests.set(sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true});state.promise=__trackResource(__loadSheetImports(sheet,__resourceBaseURL.call(doc)||ops.op_document_request_url(),win));}
-      styles.push(state.promise);continue;
+      const source=__intrinsicApply(__resourceText,el,[]);let state=__intrinsicApply(__intrinsicWeakGet,__resources,[el]);
+      if(!state||state.src!==source){state={__proto__:null,src:source,promise:null};__intrinsicApply(__intrinsicWeakSet,__resources,[el,state]);__intrinsicApply(__intrinsicWeakSet,__resourceStyleRequests,[sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true}]);state.promise=__trackResource(__loadSheetImports(sheet,__intrinsicApply(__resourceBaseURL,doc,[])||ops.op_document_request_url(),win));}
+      __listPush(styles,state.promise);continue;
     }
     if (!(__resourceAttribute.call(el,"rel")||"").toLowerCase().split(/\s+/).includes("stylesheet") || el.disabled) continue;
     const href=__resourceAttribute.call(el,"href");if(!href)continue;
@@ -9937,13 +9982,13 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
         }catch(error){if(!recorded)__recordResource(win,url,"link",start);if(__resources.get(el)===state){const failure=__resourceFailure(error);if(!failure?.integrityBlocked&&(receivedResponse||failure?.responseReceived&&!failure.policyBlocked))__cssHost(doc).attachLinked(el,"",url,false);__fireResourceEvent(el,"error",win);}}
       })());
     }
-    styles.push(state.promise);
+    __listPush(styles,state.promise);
   }
   return __framePromiseAll(styles);
 };
 __G.pendingResourceCount=()=>__resourcePromises.size+__dictionaryPending+__dictionaryTaskCount;
-__G.documentLoadReady=()=>__resourcePromises.size===0 && ops.op_frame_pending()===0;
-__G.waitForDocumentResources=()=>__framePromiseAll(Array.from(__resourcePromises));
+__G.documentLoadReady=()=>__setSize(__resourcePromises)===0 && ops.op_frame_pending()===0;
+__G.waitForDocumentResources=()=>{const pending=__list();__intrinsicApply(__intrinsicSetEach,__resourcePromises,[promise=>__listPush(pending,promise)]);return __framePromiseAll(pending);};
 function __fireScriptEvent(el, kind, err) {
   // Use the same private native event path as image and stylesheet loads.
   // Plain records are not Events and cannot reach addEventListener handlers.
@@ -9960,7 +10005,7 @@ function __fireScriptEvent(el, kind, err) {
 // code runs) routes the chunk to the module pump. Let V8 be the parser, not a regex.
 __G.rewriteEsmForClassic = function (code) {
   if (typeof code !== "string" || !code) return code;
-  if (/import\s*\.\s*meta/.test(code)) {
+  if (__regexpTest(/import\s*\.\s*meta/, code)) {
     code = code.replace(/import\s*\.\s*meta/g, "globalThis[Symbol.for('ts')].importMeta");
   }
   return code;
@@ -10042,7 +10087,9 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
     if(!prepared.asynchronous||!(external||module))await resources;
   }
   const absoluteSource=get("src")?new URL(get("src"),__baseApply(__resourceBaseURL,__document,[])).href:"";
-  const parserIndex=Array.prototype.indexOf.call(document.querySelectorAll("script"),el);
+  const parserScripts=__intrinsicApply(__resourceDocumentQuery,__document,["script"]);
+  let parserIndex=-1;
+  for(let index=0,count=__intrinsicApply(__resourceListLength,parserScripts,[]);index<count;index++)if(__intrinsicApply(__resourceListItem,parserScripts,[index])===el){parserIndex=index;break;}
   if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,absoluteSource,prepared.source)){
     if(absoluteSource)__fireScriptEvent(el,"error");return;
   }
@@ -10076,7 +10123,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
   const src = get("src");
   let downloaded=false,mutedErrors=false;
   try {
-    let code, sourceURL=document.URL;
+    let code, sourceURL=__intrinsicApply(__documentURL,__document,[]);
     if (src) {
       const abs = new URL(src, globalThis.location.href).href;
       const start = __resourceNow(globalThis);
@@ -10277,13 +10324,19 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     // `React is not defined` → the whole app never hydrates. So: non-defer scripts
     // first (document order), then `defer` scripts (document order). `async` isn't
     // deferred. New scripts injected mid-round re-partition on the next pass.
-    const all = __initialResourceScripts.splice(0);
+    const all = __list();
+    for (let index = 0; index < __initialResourceScripts.length; index++) __listPush(all, __initialResourceScripts[index]);
+    __initialResourceScripts.length = 0;
     if(!__G.isFrame)__frameScriptElements.length=0;
-    const isDeferred = element => __htmlPolicyElement(element,"script") && !__resourceScriptAsync.call(element) &&
-      ((__resourceAttribute.call(element,"type") || "").trim().toLowerCase() === "module" ||
-        __resourceAttribute.call(element,"src") !== null && __resourceAttribute.call(element,"defer") !== null);
-    const ordered = all.filter(element => !isDeferred(element)).concat(all.filter(isDeferred));
-    for (const element of ordered) {
+    const attribute = (element, name) => __intrinsicApply(__resourceAttribute, element, [name]);
+    const isDeferred = element => __htmlPolicyElement(element,"script") && !__intrinsicApply(__resourceScriptAsync, element, []) &&
+      (__lower(__trim(attribute(element,"type") || "")) === "module" ||
+        attribute(element,"src") !== null && attribute(element,"defer") !== null);
+    const ordered = __list();
+    for (let index = 0; index < all.length; index++) if (!isDeferred(all[index])) __listPush(ordered, all[index]);
+    for (let index = 0; index < all.length; index++) if (isDeferred(all[index])) __listPush(ordered, all[index]);
+    for (let position = 0; position < ordered.length; position++) {
+      const element = ordered[position];
       const prepared = __prepareResourceScript(element);
       if (!prepared) continue;
       ranScript = true;
@@ -10293,12 +10346,20 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     }
     __G.loadDocumentResources();
     if (__G.initialLoading) __markDocumentInteractive();
-    const fired = fireTimers ? __G.runTimers(Math.min(timersLeft, 5000)) : 0;
+    const fired = fireTimers ? __G.runTimers(__intrinsicMin(timersLeft, 5000)) : 0;
     timersLeft -= fired;
     if (fired) await undefined;
     if (!ranScript && fired === 0) break;
   }
 };
+// The parser pass of the initial load; the host's load gate polls its completion
+// (turbo-surf#87: through these functions, not page-reachable `.finally`/globals).
+let __initialHydrated = false;
+__G.startInitialHydrate = () => {
+  __initialHydrated = false;
+  __promiseFinally(__G.hydrate(300, 200000, false), () => { __initialHydrated = true; });
+};
+__G.initialHydrateDone = () => __initialHydrated;
 // The compatibility module queue contains only native-prepared classic scripts
 // whose V8 parse failed on module syntax. Explicit modules use the import path.
 __G.takeModuleScript = function () {
@@ -10586,7 +10647,7 @@ const __pendingWindowTimer = () => {
   return index>=0 && __timers[index].due<=__timerNow();
 };
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __resourcePromises.size > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
+  (!__G.isFrame && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __setSize(__resourcePromises) > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
 __G.pendingFetchCount = () => String(__pendingFetchCount);
@@ -10657,9 +10718,10 @@ __G.domSig = (() => {
   const iframeTag = __G.domAccessor("tagName", false, "Element");
   const recordFor = (el) => {
     if (frameApply(iframeTag, el, []) !== "IFRAME") throw new TypeError("Illegal invocation");
-    if (Object.hasOwn(el, "__iframeWired")) {
-      for (const name of ["contentWindow", "contentDocument", "__realm", "__iframeWired"]) {
-        if (Object.hasOwn(el, name)) delete el[name];
+    if (__intrinsicHasOwn(el, "__iframeWired")) {
+      const wired = ["contentWindow", "contentDocument", "__realm", "__iframeWired"];
+      for (let index = 0; index < wired.length; index++) {
+        if (__intrinsicHasOwn(el, wired[index])) delete el[wired[index]];
       }
     }
     const owner = frameOwner(el);
@@ -10677,7 +10739,7 @@ __G.domSig = (() => {
   const FRAME_STUB_HOST_RE = /posthog|propelauth/i;
   const frameSrcOf = el => frameApply(frameAttribute, el, ["src"]) || "";
   const frameSrcdocOf = el => frameApply(frameAttribute, el, ["srcdoc"]);
-  const frameWantsRealm = el => !!frameSrcdocOf(el) || !FRAME_STUB_HOST_RE.test(frameSrcOf(el));
+  const frameWantsRealm = el => !!frameSrcdocOf(el) || !__regexpTest(FRAME_STUB_HOST_RE, frameSrcOf(el));
   const resolveFrameUrl = el => {
     const source = frameSrcOf(el);
     if (!source) return "";
@@ -10687,7 +10749,7 @@ __G.domSig = (() => {
     const record = recordFor(el);
     if (!record || record.loaded || record.epoch !== epoch || !frameConnected(el)) return;
     record.loaded = true;
-    globalThis.setTimeout(() => {
+    __frameTimer(() => {
       if (record.epoch !== epoch || !frameConnected(el)) return;
       const event = new __hostEvent("load");
       ops.op_event_trust(event, -1);
@@ -10717,7 +10779,7 @@ __G.domSig = (() => {
   // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL,
   // shared cookie jar).
   const loadFrameScripts = async (cw, frameUrl) => {
-    const scripts = ops.op_frame_scripts(cw), deferred = [], asynchronous = [];
+    const scripts = ops.op_frame_scripts(cw), deferred = __list(), asynchronous = __list();
     const execute = async (script) => {
       let downloaded=false;
       try {
@@ -10730,19 +10792,20 @@ __G.domSig = (() => {
             await runVmInRealm(cw, response.body, response.final_url || script.src, response.frame_script || 0, script.index);
             ops.op_frame_script_event(cw,script.index,true);
           } else ops.op_frame_script_event(cw,script.index,false);
-        } else if (script.code.trim()) {
-          const located = "\n".repeat(script.line) + " ".repeat(script.column) + script.code;
+        } else if (__trim(script.code)) {
+          const located = __intrinsicApply(__intrinsicRepeat, "\n", [script.line]) + __intrinsicApply(__intrinsicRepeat, " ", [script.column]) + script.code;
           await runVmInRealm(cw, located, script.source, 0, script.index);
         }
       } catch (error) { if(script.src)ops.op_frame_script_event(cw,script.index,downloaded); __print("frame script error: " + (error && error.stack ? error.stack : error) + "\n"); }
     };
-    for (const script of scripts) {
-      if (script.asynchronous && (script.src || script.module)) asynchronous.push(execute(script));
-      else if (script.module || (script.src && script.deferred)) deferred.push(script);
+    for (let index = 0; index < scripts.length; index++) {
+      const script = scripts[index];
+      if (script.asynchronous && (script.src || script.module)) __listPush(asynchronous, execute(script));
+      else if (script.module || (script.src && script.deferred)) __listPush(deferred, script);
       else await execute(script);
     }
     ops.op_frame_parser_done(cw);
-    for (const script of deferred) await execute(script);
+    for (let index = 0; index < deferred.length; index++) await execute(deferred[index]);
     return {asynchronous};
   };
   __G.cspFrameScript = index => {
@@ -10842,7 +10905,7 @@ __G.domSig = (() => {
     try {
       // Insertion creates the initial empty document synchronously. Navigation
       // commits on a later microtask, so srcdoc cannot appear during appendChild.
-      await Promise.resolve();
+      await undefined;
       if (record.epoch !== epoch || !frameConnected(el)) return;
       let html = "", responseId = 0;
       const srcdoc = record.navigationURL ? null : frameSrcdocOf(el);
@@ -10992,9 +11055,9 @@ __G.domSig = (() => {
         const receiverDocument = frameDocument(this);
         if (!frameApply(frameDefaultView, receiverDocument, [])) return frameApply(original, this, args);
         const parent = frameApply(frameParentNode, this, []);
-        const moved = ["appendChild","insertBefore","replaceChild"].includes(name) ? [args[0]]
+        const moved = name === "appendChild" || name === "insertBefore" || name === "replaceChild" ? [args[0]]
           : name === "insertAdjacentElement" ? [args[1]]
-          : ["append","prepend","before","after","replaceWith","replaceChildren"].includes(name) ? args : [];
+          : name === "append" || name === "prepend" || name === "before" || name === "after" || name === "replaceWith" || name === "replaceChildren" ? args : [];
         const finishes = __recordCreate(null), seen = new Set();let finishCount = 0;
         for (let index = 0; index < moved.length; index++) {
           let source;
@@ -11049,7 +11112,7 @@ __G.domSig = (() => {
     const original = descriptor.value;
     const delegate = function(...args) {
       const result = frameApply(original, this, args);
-      const attribute = String(args[name.endsWith("NS") ? 1 : 0]).toLowerCase();
+      const attribute = __lower(String(args[__intrinsicApply(__intrinsicEndsWith, name, ["NS"]) ? 1 : 0]));
       if (frameApply(iframeTag, this, []) === "IFRAME" && (attribute === "src" || attribute === "srcdoc")) {
         const owner = frameOwner(this);
         if (owner) ops.op_frame_host_helper(frameDocument(this), "frameSourceChanged", [this]);
@@ -11070,7 +11133,7 @@ __G.domSig = (() => {
   const nativeCreate = document.createElement.bind(document);
   document.createElement = function(tag, options) {
     const el = nativeCreate(tag, options);
-    if (String(tag).toLowerCase() === "iframe") recordFor(el);
+    if (__lower(String(tag)) === "iframe") recordFor(el);
     return el;
   };
   // Retained for child configuration; DOM ownership already determines depth.
@@ -11807,7 +11870,7 @@ __G.domSig = (() => {
       if (typeof value === "function") {
         const method = ({[key](...args) {
           if (this !== object) throw new TypeError("Illegal invocation");
-          return value.apply(object, args);
+          return __intrinsicApply(value, object, args);
         }})[key];
         Object.defineProperty(method, "length", {value: value.length, configurable: true});
         mark(method, key);
@@ -11979,14 +12042,20 @@ __G.domSig = (() => {
     });
   }
   __defineDocumentAccessor("defaultView", state => ops.op_document_has_active_window(state.document) ? state.window : null);
-  __defineDocumentAccessor("documentElement", (_state, receiver) => receiver.firstElementChild);
-  __defineDocumentAccessor("head", (_state, receiver) => {
-    const root = receiver.documentElement;
-    return root ? Array.from(root.children).find(child => child.localName === "head") || null : null;
-  });
+  // The root's children through captured accessors, never the page-replaceable
+  // Document/Element members or Array statics (turbo-surf#87).
+  const rootElement = receiver => __intrinsicApply(__documentFirstElementChild, receiver, []);
+  const rootChild = (receiver, accept) => {
+    const root = rootElement(receiver);
+    if (!root) return null;
+    for (let child = __intrinsicApply(__elementFirstElementChild, root, []); child; child = __intrinsicApply(__elementNextElementSibling, child, []))
+      if (accept(__intrinsicApply(__resourceLocalName, child, []))) return child;
+    return null;
+  };
+  __defineDocumentAccessor("documentElement", (_state, receiver) => rootElement(receiver));
+  __defineDocumentAccessor("head", (_state, receiver) => rootChild(receiver, name => name === "head"));
   __defineDocumentAccessor("body", (_state, receiver) => {
-    const root = receiver.documentElement;
-    return root ? Array.from(root.children).find(child => child.localName === "body" || child.localName === "frameset") || null : null;
+    return rootChild(receiver, name => name === "body" || name === "frameset");
   }, (_state, receiver, value) => {
     if (value != null) __documentType.call(value);
     if (!value || !["body", "frameset"].includes(value.localName) || value.namespaceURI !== "http://www.w3.org/1999/xhtml")
@@ -12785,6 +12854,64 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
     Ok(())
 }
 
+/// An argument for [`namespace_call`].
+enum HostArg {
+    Number(f64),
+    Bool(bool),
+    Null,
+    Value(v8::Global<v8::Value>),
+}
+
+/// Calls a function of the main realm's bootstrap namespace natively (turbo-surf#87).
+/// Host turns never compile `globalThis[Symbol.for('ts')].…` source: `Symbol.for`, the
+/// namespace lookups and any method called on the result are page-replaceable, while
+/// [`call_frame_helper`] resolves the namespace through the V8 API.
+fn namespace_call(
+    rt: &mut JsRuntime,
+    name: &str,
+    args: &[HostArg],
+) -> Result<v8::Global<v8::Value>, String> {
+    let context = rt.main_context();
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    v8::tc_scope!(let scope, scope);
+    let values: Vec<v8::Local<v8::Value>> = args
+        .iter()
+        .map(|arg| match arg {
+            HostArg::Number(value) => v8::Number::new(scope, *value).into(),
+            HostArg::Bool(value) => v8::Boolean::new(scope, *value).into(),
+            HostArg::Null => v8::null(scope).into(),
+            HostArg::Value(value) => v8::Local::new(scope, value),
+        })
+        .collect();
+    if let Some(value) = call_frame_helper(scope, name, &values) {
+        return Ok(v8::Global::new(scope, value));
+    }
+    if !scope.is_execution_terminating() {
+        if let Some(error) = scope.exception() {
+            return Err(error.to_rust_string_lossy(scope));
+        }
+    }
+    Err(format!("Namespace function {name} failed"))
+}
+
+/// Reads a data property of the main realm's bootstrap namespace natively
+/// (turbo-surf#87); `undefined` when the namespace is unavailable.
+fn namespace_value(rt: &mut JsRuntime, name: &str) -> v8::Global<v8::Value> {
+    let context = rt.main_context();
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    v8::tc_scope!(let scope, scope);
+    let value = frame_namespace(scope).and_then(|namespace| {
+        let key = v8::String::new(scope, name)?;
+        namespace.get(scope, key.into())
+    });
+    let value = value.unwrap_or_else(|| v8::undefined(scope).into());
+    v8::Global::new(scope, value)
+}
+
 fn read_string(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<String, String> {
     let context = rt.main_context();
     let scope = v8::HandleScope::new(rt.v8_isolate());
@@ -13321,12 +13448,11 @@ async fn drain_event_loop_until_completion(
             // A completed parser/load gate returns to its host lifecycle turn
             // before selecting another Window task. Pending gates still drive
             // timers below, including resource errors during blocking scripts.
+            // `condition` names a namespace predicate, called natively (turbo-surf#87).
             if let Some(condition) = condition {
-                let value = rt
-                    .execute_script("<load-gate>", condition.to_string())
-                    .map_err(|error| error.to_string());
+                let value = namespace_call(rt, condition, &[]);
                 match value.and_then(|value| read_string(rt, value)) {
-                    Ok(value) if value == "1" => {
+                    Ok(value) if value == "true" => {
                         return std::task::Poll::Ready(Some(Ok(())));
                     }
                     Err(error) => return std::task::Poll::Ready(Some(Err(error))),
@@ -14209,6 +14335,20 @@ fn prepare_hydration(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), S
     result
 }
 
+/// One hydration pass (`hydrate(300, 200000, false)`): runs the document's pending
+/// scripts; returns the pass's promise.
+fn hydrate_pass(rt: &mut JsRuntime) -> Result<v8::Global<v8::Value>, String> {
+    namespace_call(
+        rt,
+        "hydrate",
+        &[
+            HostArg::Number(300.0),
+            HostArg::Number(200000.0),
+            HostArg::Bool(false),
+        ],
+    )
+}
+
 async fn hydrate_installed_document(
     rt: &mut JsRuntime,
     base: &str,
@@ -14217,27 +14357,15 @@ async fn hydrate_installed_document(
     rt.op_state().borrow_mut().put(HydrationProgress::default());
     hydration_phase(rt, HydrationPhase::DocumentLoading);
     run_lifecycle(rt, "documentLoading").map_err(|error| error.to_string())?;
-    rt.execute_script(
-        "<current-script>",
-        "globalThis[Symbol.for('ts')].setCurrentScript(null);",
-    )
-    .map_err(|e| e.to_string())?;
+    namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
     hydration_phase(rt, HydrationPhase::InitScript);
     if !init_script.is_empty() {
         rt.execute_script("<init-script>", init_script.to_string())
             .map_err(|e| e.to_string())?;
     }
     hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
-    rt.execute_script(
-        "<initial-hydrate>",
-        "globalThis[Symbol.for('ts')].initialHydrated=false;globalThis[Symbol.for('ts')].tcHydrate=globalThis[Symbol.for('ts')].hydrate(300,200000,false).finally(()=>{globalThis[Symbol.for('ts')].initialHydrated=true});",
-    )
-    .map_err(|error| error.to_string())?;
-    drain_event_loop_until(
-        rt,
-        Some("globalThis[Symbol.for('ts')].initialHydrated ? '1' : '0'"),
-    )
-    .await?;
+    namespace_call(rt, "startInitialHydrate", &[])?;
+    drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
     hydration_phase(rt, HydrationPhase::ModuleScripts);
     drain_module_scripts(rt, base).await?;
     hydration_phase(rt, HydrationPhase::DocumentInteractive);
@@ -14245,11 +14373,7 @@ async fn hydrate_installed_document(
     // HTML load waits for script graph completion, images/styles and frames,
     // independently of unrelated fetches or a module's pending top-level await.
     hydration_phase(rt, HydrationPhase::LoadResources);
-    drain_event_loop_until(
-        rt,
-        Some("globalThis[Symbol.for('ts')].documentLoadReady() ? '1' : '0'"),
-    )
-    .await?;
+    drain_event_loop_until(rt, Some("documentLoadReady")).await?;
     hydration_phase(rt, HydrationPhase::DocumentComplete);
     run_lifecycle(rt, "dispatchDocumentComplete")?;
     // Unified event-loop pump. A single "run scripts+timers, then drain" pass isn't
@@ -14261,11 +14385,7 @@ async fn hydrate_installed_document(
     const MAX_PUMPS: usize = 500;
     hydration_phase(rt, HydrationPhase::PostLoadHydration);
     for round in 0..MAX_PUMPS {
-        rt.execute_script(
-            "<hydrate>",
-            "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate(300,200000,false);",
-        )
-        .map_err(|e| e.to_string())?;
+        hydrate_pass(rt)?;
         drain_event_loop(rt).await?;
         drain_module_scripts(rt, base).await?;
         drain_event_loop(rt).await?;
@@ -14273,9 +14393,7 @@ async fn hydrate_installed_document(
             .borrow_mut()
             .borrow_mut::<HydrationProgress>()
             .completed_pumps = round + 1;
-        let pending = rt
-            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
-            .map_err(|e| e.to_string())?;
+        let pending = namespace_call(rt, "pendingWork", &[])?;
         if read_string(rt, pending)? != "1" {
             break;
         }
@@ -14293,19 +14411,10 @@ async fn hydrate_installed_document(
 // This is the path a Next dev / turbopack build (served as ES modules) needs to hydrate.
 async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     for n in 0..1000usize {
-        rt.execute_script(
-            "<take-mod>",
-            "globalThis[Symbol.for('ts')].takeModuleScript();",
-        )
-        .map_err(|e| e.to_string())?;
-        let g = rt
-            .execute_script(
-                "<take-mod-r>",
-                "String(globalThis[Symbol.for('ts')].moduleDescriptor || '')",
-            )
-            .map_err(|e| e.to_string())?;
+        namespace_call(rt, "takeModuleScript", &[])?;
+        let g = namespace_value(rt, "moduleDescriptor");
         let desc = read_string(rt, g)?;
-        if desc.is_empty() {
+        if desc.is_empty() || desc == "undefined" || desc == "null" {
             break;
         }
         let v: deno_core::serde_json::Value =
@@ -14340,17 +14449,10 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
                 // .currentScript, …]) and key the chunk by currentScript.src. Without this
                 // an ESM chunk registers under a stale path and the entry's chunk-load
                 // Promise.all never resolves (→ the app never hydrates, no error).
-                rt.execute_script(
-                    "<mod-cs>",
-                    "globalThis[Symbol.for('ts')].setCurrentScript(globalThis[Symbol.for('ts')].currentModuleEl || null);",
-                )
-                .map_err(|e| e.to_string())?;
+                let element = namespace_value(rt, "currentModuleEl");
+                namespace_call(rt, "setCurrentScript", &[HostArg::Value(element)])?;
                 let ev = rt.mod_evaluate(id).await;
-                rt.execute_script(
-                    "<mod-cs0>",
-                    "globalThis[Symbol.for('ts')].setCurrentScript(null);",
-                )
-                .map_err(|e| e.to_string())?;
+                namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
                 if let Err(e) = ev {
                     eprintln!("module eval error ({spec_str}): {e}");
                 }
@@ -14438,11 +14540,7 @@ async fn drain_to_quiescence_with_scripts(
 ) -> Result<(), String> {
     // Fresh virtual-time window for this interaction so its transitions (e.g. a closing
     // MUI modal's Fade-exit timer) fire + complete even when the clock is already large.
-    rt.execute_script(
-        "<reset-budget>",
-        "globalThis[Symbol.for('ts')].resetTimerBudget && globalThis[Symbol.for('ts')].resetTimerBudget();",
-    )
-    .map_err(|e| e.to_string())?;
+    namespace_call(rt, "resetTimerBudget", &[])?;
     const MAX_ROUNDS: usize = 500;
     // Stop early once the visible tree has been STABLE for this many rounds even though
     // timers keep firing: a real app's analytics/idle-scheduler never stops posting
@@ -14457,11 +14555,7 @@ async fn drain_to_quiescence_with_scripts(
         // the chunk never executes, the import() promise never resolves, and the modal never
         // appears. Native script flags and mutation admission prevent repeat execution.
         if execute_document_scripts {
-            rt.execute_script(
-                "<hydrate>",
-                "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate(300,200000,false);",
-            )
-            .map_err(|e| e.to_string())?;
+            hydrate_pass(rt)?;
         }
         drain_event_loop(rt).await?;
         if execute_document_scripts {
@@ -14470,18 +14564,9 @@ async fn drain_to_quiescence_with_scripts(
         }
         let fired = run_window_timers(rt, 2000)?;
         drain_event_loop(rt).await?;
-        let pending = rt
-            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
-            .map_err(|e| e.to_string())?;
-        let sig_v = rt
-            .execute_script("<domsig>", "globalThis[Symbol.for('ts')].domSig()")
-            .map_err(|e| e.to_string())?;
-        let fetches = rt
-            .execute_script(
-                "<fetches>",
-                "globalThis[Symbol.for('ts')].pendingFetchCount()",
-            )
-            .map_err(|e| e.to_string())?;
+        let pending = namespace_call(rt, "pendingWork", &[])?;
+        let sig_v = namespace_call(rt, "domSig", &[])?;
+        let fetches = namespace_call(rt, "pendingFetchCount", &[])?;
         let still = read_string(rt, pending)? == "1";
         let fired_any = fired != 0;
         let awaiting_fetch = read_string(rt, fetches)? != "0";
@@ -14995,12 +15080,7 @@ impl PageSession {
                     .execute_script("<session-expression>", expression.to_owned())
                     .map_err(|error| error.to_string())?;
                 let completion = self.rt.resolve(value.clone());
-                self.rt
-                    .execute_script(
-                        "<expression-budget>",
-                        "globalThis[Symbol.for('ts')].resetTimerBudget();",
-                    )
-                    .map_err(|error| error.to_string())?;
+                namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
                 drain_event_loop_until_completion(&mut self.rt, None, Some(&value)).await?;
                 let value = self
                     .rt
@@ -15062,12 +15142,7 @@ impl PageSession {
                     return Err("Host input exceeded the session execution budget".into());
                 }
                 let completion = self.rt.resolve(promise.clone());
-                self.rt
-                    .execute_script(
-                        "<input-budget>",
-                        "globalThis[Symbol.for('ts')].resetTimerBudget();",
-                    )
-                    .map_err(|error| error.to_string())?;
+                namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
                 drain_event_loop_until_completion(&mut self.rt, None, Some(&promise)).await?;
                 self.rt
                     .with_event_loop_promise(completion, Default::default())

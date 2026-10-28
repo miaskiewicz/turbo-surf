@@ -120,6 +120,18 @@
   the native factory gets the message (interfaces created by turbo-dom's bootstrap,
   such as Node or CustomEvent, still use the factory's generic message).
 
+- A page that replaces builtins no longer breaks loading or node insertion (#87):
+  the host's lifecycle turns call the bootstrap's functions through the V8 API
+  instead of compiling `globalThis[Symbol.for('ts')].…` source (the load gates, the
+  hydration passes, the module-script queue, idle checks and frame timers), and the
+  engine JS on the load/insert path (resource loading, the hydration script order,
+  `performance` navigation phases, `document.head`/`body`/`documentElement`, frame
+  records and loading, the insertion delegates, `Promise.all`/`finally`-style waits)
+  uses intrinsics captured at install time and prototype-less internal lists, so
+  replaced prototype methods/accessors, statics and Array/Object index accessors are
+  never consulted, like Chrome 156. The members turbo-dom's own bootstrap still reads
+  on this path are tracked in miaskiewicz/turbo-dom#172.
+
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,
   `naturalHeight` and `currentSrc` are `HTMLImageElement.prototype` accessors

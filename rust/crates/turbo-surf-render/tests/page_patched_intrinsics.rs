@@ -108,7 +108,6 @@ fn assert_chrome(got: &Value) {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#87: fails until the fix"]
 async fn page_patched_intrinsics_do_not_break_loading_or_append_child() {
     assert_chrome(&load_patched(TURBO_DOM_MEMBERS).await);
 }

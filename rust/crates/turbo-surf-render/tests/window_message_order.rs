@@ -22,7 +22,6 @@ const before=setTimeout(()=>{},0); postMessage('h1','*'); w.postMessage('h2','*'
 const CHROME_156: &str = r#"["timer ids consecutive:true","child:a1","top:a2","timer b0","top:b1","top:c1","child:c2","child:d1","top:d2","timer e0","child:e1","child timer f0","top:f1","child:g1","child timer g2","timer g3","top:h1","child:h2"]"#;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#72: fails until the fix"]
 async fn window_messages_and_timers_run_in_posting_order() {
     let html = format!("<!doctype html><body><script>{SCRIPT}</script></body>");
     let mut page = PageSession::open(&html, "https://order.test/", "", "", 5000)

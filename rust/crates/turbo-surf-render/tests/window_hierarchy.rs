@@ -28,16 +28,12 @@ async fn window_hierarchy_and_message_targets_match_chrome() {
     let mut page = PageSession::open("<body>", "https://windows.test/", "", "", 5000)
         .await
         .unwrap();
-    let mut log: serde_json::Value =
+    let log: serde_json::Value =
         serde_json::from_str(&page.eval_json_expression(SCRIPT).await.unwrap()).unwrap();
-    let mut chrome: serde_json::Value = serde_json::from_str(CHROME_156).unwrap();
-    // turbo-surf#72: cross-window message order; compare the two deliveries as a set.
-    for entries in [&mut log, &mut chrome] {
-        entries.as_array_mut().unwrap()[10..12].sort_by_key(|entry| entry.to_string());
-    }
+    let chrome: serde_json::Value = serde_json::from_str(CHROME_156).unwrap();
     assert_eq!(log, chrome);
     // Chrome: the message source is the sender's WindowProxy. The stock SDK has no
-    // stable WindowProxy (turbo-surf#72); the native engine does.
+    // stable WindowProxy or incumbent realm; the native engine does.
     let sources = page.eval_json_expression("sources").await.unwrap();
     assert_eq!(
         sources,

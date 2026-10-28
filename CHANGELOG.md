@@ -59,6 +59,11 @@
   callable @@iterator property.`, `The provided value cannot be converted to a
   sequence.`, `Overload resolution failed.`, `… is not of type
   'StructuredSerializeOptions'.`). Internal stream-chunk posts stay unprefixed.
+- Window messages and timers across same-agent windows (#72) run as one FIFO like
+  Chrome 156: every timer and posted message carries its posting time and an
+  agent-wide sequence, and the cross-realm scheduler breaks deadline ties by it (a
+  message to a child no longer runs after later parent tasks). A posted message no
+  longer consumes a `setTimeout` id, and `clearTimeout(0)` cannot cancel one.
 =======
 - Large pages open (#75): compression-dictionary link discovery, which runs for every
   document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed

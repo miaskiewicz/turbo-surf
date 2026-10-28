@@ -26,9 +26,9 @@
   "rustfft": {
     "version": "6.4.1",
     "source": "third_party/blink/renderer/platform/audio/rustfft_ffi.rs",
-    "adaptation": "CXX bridge removed; forward/inverse implementation preserved; dead-code allowance for unused forward path",
+    "adaptation": "CXX bridge removed; forward/inverse implementation preserved; dead-code allowance for unused forward path; unit tests appended (99a4464)",
     "originalSha256": "52a5317f5074fcfa50dedb7aac8b88cdfd007c75e01f4438a27e144cd613400d",
-    "adaptedSha256": "b4b5d2add81728505df2e31ef93d8375c8fddd6872b2b92a7cdca70dbf0a547b"
+    "adaptedSha256": "856d30578e4347ee8e3babdd82ecf9634a8050971a3f2a6fcec5d06bc4614a09"
   },
   "adapters": "Other native headers are bounded standalone adapters for the unchanged compressor, not Chromium source. The local base/bit_cast.h adapter preserves std::bit_cast when available and uses equal-size, trivially-copyable checked runtime memcpy conversions when older manylinux standard libraries omit it; no upstream audio algorithm or license is changed.",
   "portedSources": [

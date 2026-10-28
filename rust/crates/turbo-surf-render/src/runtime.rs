@@ -6948,6 +6948,8 @@ deno_core::extension!(
         crate::web_streams_backend::op_web_abort_listener,
         crate::web_streams_backend::op_web_abort_dispatch,
         op_install_microtask_queue,
+        crate::window_named_properties::op_install_window_named_properties,
+        crate::window_named_properties::op_window_named_elements,
         op_report_exception,
         op_value_is_promise,
         op_frame_cookie_get,
@@ -12298,6 +12300,7 @@ __G.domSig = (() => {
     include_str!("interface_shapes.js"),
     include_str!("user_activation.js"),
     include_str!("host_input.js"),
+    include_str!("window_named_properties.js"),
     r##"
 __hostErrorEvent=globalThis.ErrorEvent;
 })"##

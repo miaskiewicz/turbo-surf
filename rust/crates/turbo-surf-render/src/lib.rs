@@ -55,6 +55,7 @@ mod storage_inbox;
 pub use storage_inbox::StorageEventSignal;
 mod stream_transfers;
 mod web_streams_backend;
+mod window_named_properties;
 
 pub use document_response::DocumentResponseMetadata;
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};

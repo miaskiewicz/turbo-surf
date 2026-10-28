@@ -82,3 +82,97 @@ async fn window_named_access_matches_chrome156() {
     }
     assert_eq!(got, chrome);
 }
+
+/// Page ids that collide with names the engine itself relies on: its run-time
+/// bookkeeping globals (never resolved), interfaces the bootstrap installs only
+/// when absent (still installed: named access starts after the bootstrap), and
+/// real globals (own properties shadow named items).
+const ENGINE_NAMES: &str = r#"<div id=ok1></div><div id=__pendingFetches></div><div id=__RESULT></div>
+<div id=__depth></div><div id=__hi></div><div id=__probe></div><div id=Notification></div>
+<div id=DOMQuad></div><div id=scheduler></div><div id=setTimeout></div><img name=fetch>
+<form name=queueMicrotask></form><div id=document></div><div id=Promise></div><div id=indexedDB></div>"#;
+
+#[tokio::test(flavor = "current_thread")]
+async fn named_access_never_redirects_engine_globals() {
+    let html = format!(
+        r#"<!doctype html><body>{ENGINE_NAMES}<script>
+globalThis.out={{
+  control: window.ok1 === document.getElementById('ok1'),
+  bookkeeping: ['__pendingFetches','__RESULT','__depth','__hi','__probe'].map(n=>typeof window[n]),
+  installed: [typeof Notification, typeof DOMQuad, typeof scheduler, typeof indexedDB, typeof setTimeout, typeof fetch, typeof queueMicrotask, typeof Promise.resolve],
+  document: document.nodeType,
+}};
+fetch('data:text/plain,hi').then(r=>r.text()).then(t=>{{out.fetched=t}});
+queueMicrotask(()=>{{out.microtask=true}});
+setTimeout(()=>{{out.timer=true}},0);
+</script></body>"#
+    );
+    let mut page = PageSession::open(&html, "https://engine-names.test/", "", "", 5000)
+        .await
+        .unwrap();
+    page.eval("globalThis[Symbol.for('ts')].runTimers(200)")
+        .await
+        .unwrap();
+    let got: Value =
+        serde_json::from_str(&page.eval_json_expression("out").await.unwrap()).unwrap();
+    assert_eq!(
+        got,
+        serde_json::json!({
+            "control": true,
+            "bookkeeping": ["undefined", "undefined", "undefined", "undefined", "undefined"],
+            "installed": ["function", "function", "object", "object", "function", "function", "function", "function"],
+            "document": 9,
+            "fetched": "hi",
+            "microtask": true,
+            "timer": true
+        })
+    );
+    // Fetch accounting reads `__pendingFetches` back from the global.
+    assert_eq!(
+        page.eval_json_expression("globalThis[Symbol.for('ts')].pendingFetchCount()")
+            .await
+            .unwrap(),
+        r#""0""#
+    );
+    // The host result channel reads `__RESULT` back: a page element is not a result.
+    let result = turbo_surf_render::eval_async(
+        &format!("<body>{ENGINE_NAMES}</body>"),
+        "https://engine-names.test/",
+        "void 0",
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, "");
+}
+
+/// The resolver runs on every global miss; it must keep answering (and never
+/// throw) after the page replaces the DOM methods, collections and builtins it
+/// would otherwise look up, including an index setter on Array.prototype.
+/// Chrome 156 (156.0.8078.47, headless, localhost page) yields the same values.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#77: fails until Window named access is implemented"]
+async fn named_access_ignores_page_patched_intrinsics() {
+    let html = r#"<!doctype html><body><div id=one></div><i id=two></i><b id=two></b><script>
+const before=[typeof one, two.length];
+Document.prototype.getElementsByTagName=()=>{throw 1};
+Element.prototype.getAttribute=()=>'one';
+Object.defineProperty(Element.prototype,'localName',{get(){throw 2},configurable:true});
+Object.defineProperty(Element.prototype,'namespaceURI',{get(){throw 3},configurable:true});
+Map.prototype.get=()=>{throw 4};Map.prototype.set=()=>{throw 5};
+Reflect.apply=()=>{throw 6};Object.defineProperty=()=>{throw 7};Object.getOwnPropertyDescriptor=()=>{throw 8};
+Object.hasOwn=()=>{throw 9};
+Array.prototype.__defineSetter__('0',()=>{throw 10});
+const late=document.createElement('p');late.id='late';document.body.appendChild(late);
+let missing;try{missing=typeof notDefinedAnywhere}catch(e){missing='threw '+e}
+globalThis.out=[before,typeof one,two.length,late===window.late,missing];
+</script></body>"#;
+    let mut page = PageSession::open(html, "https://patched.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let got: Value =
+        serde_json::from_str(&page.eval_json_expression("out").await.unwrap()).unwrap();
+    assert_eq!(
+        got,
+        serde_json::json!([["object", 2], "object", 2, true, "undefined"])
+    );
+}

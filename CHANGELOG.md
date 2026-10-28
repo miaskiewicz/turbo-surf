@@ -112,6 +112,14 @@
   when its values are 2D-shaped, so `toString()` gives `matrix3d(...)` and
   `toJSON().is2D` is `false` like Chrome 156. Structured clone keeps the flag.
 
+- Interface constructors called without `new` (#86) throw Chrome 156's TypeError:
+  `Failed to construct 'Headers': Please use the 'new' operator, this DOM object
+  constructor cannot be called as a function.`, or `Illegal constructor` for interfaces
+  without a constructor (Navigator, MessagePort, Crypto, ...), instead of V8's generic
+  `Constructor requires 'new'`. Every constructor turbo-surf's bootstrap creates through
+  the native factory gets the message (interfaces created by turbo-dom's bootstrap,
+  such as Node or CustomEvent, still use the factory's generic message).
+
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,
   `naturalHeight` and `currentSrc` are `HTMLImageElement.prototype` accessors

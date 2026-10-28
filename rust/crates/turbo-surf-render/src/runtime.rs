@@ -7121,6 +7121,39 @@ ops.op_capture_runtime_core(__core);
 if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
 const __NS = Symbol.for("ts");
 const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
+// Blink's message for an interface constructor called without `new` (turbo-surf#86):
+// interfaces without a constructor say "Illegal constructor", the others "Failed to
+// construct 'X': Please use the 'new' operator, ...". Every constructor this bootstrap
+// creates through the native factory gets it unless its site names its own message.
+{
+  const __makeNative = __G.makeNativeFunction;
+  const __illegalConstructors = { __proto__: null,
+  AbortSignal: 1, AbstractRange: 1, Attr: 1, CDATASection: 1, CSSImportRule: 1,
+  CSSPseudoElement: 1, CSSRule: 1, CSSRuleList: 1, CSSStyleDeclaration: 1, CSSStyleRule: 1,
+  CaretPosition: 1, CharacterData: 1, Crypto: 1, CryptoKey: 1, CustomStateSet: 1,
+  DOMImplementation: 1, DOMRectList: 1, DOMStringList: 1, DOMTokenList: 1, DocumentType: 1,
+  Element: 1, ElementInternals: 1, EventCounts: 1, FragmentDirective: 1, HTMLCollection: 1,
+  HTMLDocument: 1, HTMLFormControlsCollection: 1, HTMLOptionsCollection: 1, HTMLUnknownElement: 1,
+  History: 1, IntersectionObserverEntry: 1, MathMLElement: 1, MediaList: 1, MessagePort: 1,
+  MutationRecord: 1, NamedNodeMap: 1, Navigator: 1, Node: 1, NodeList: 1, NodeRange: 1,
+  Performance: 1, PerformanceEntry: 1, PerformanceMeasure: 1, PerformanceNavigationTiming: 1,
+  PerformanceObserverEntryList: 1, PermissionStatus: 1, Permissions: 1, PermissionsPolicy: 1,
+  ProcessingInstruction: 1, RadioNodeList: 1, ReadableByteStreamController: 1,
+  ReadableStreamBYOBRequest: 1, ReadableStreamDefaultController: 1, ResizeObserverEntry: 1,
+  ResizeObserverSize: 1, SVGElement: 1, SVGSVGElement: 1, Screen: 1, ScreenOrientation: 1,
+  ShadowRoot: 1, Storage: 1, StyleSheet: 1, StyleSheetList: 1, SubtleCrypto: 1, TextTrack: 1,
+  TextTrackCueList: 1, TransformStreamDefaultController: 1, UserActivation: 1, ValidityState: 1,
+  VisualViewport: 1, Window: 1, WritableStreamDefaultController: 1, XMLDocument: 1,
+  XMLHttpRequestEventTarget: 1, XMLHttpRequestUpload: 1, XPathExpression: 1, XPathResult: 1,
+  };
+  if (typeof __makeNative === "function")
+    __G.makeNativeFunction = (delegate, name, length, constructor, classConstruct, requireNew, callMessage) =>
+      __makeNative(delegate, name, length, constructor, classConstruct, requireNew,
+        typeof callMessage !== "string" && constructor && (requireNew === undefined || requireNew) && typeof name === "string"
+          ? __illegalConstructors[name] === 1 ? "Illegal constructor"
+            : "Failed to construct '" + name + "': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+          : callMessage);
+}
 // In-flight fetches and frame loads (turbo-surf#83): bootstrap-private, so page
 // script can neither read nor forge the count the idle/settle checks rely on.
 let __pendingFetchCount = 0;
@@ -12325,9 +12358,8 @@ __G.domSig = (() => {
       bindProperties(original.prototype, ["constructor"]);
       bindProperties(original, ["prototype", "name", "length", "arguments", "caller"]);
       if (orig.call(original).includes("[native code]")) continue;
-      // Blink's message for a call without `new` (DOMQuad; turbo-surf#69).
-      const callMessage = name === "DOMQuad" ? "Failed to construct 'DOMQuad': Please use the 'new' operator, this DOM object constructor cannot be called as a function." : undefined;
-      const wrapper = factory(original, name, original.length, true, true, name !== "Date", callMessage);
+      // A call without `new` throws Blink's message (the factory's default, turbo-surf#86).
+      const wrapper = factory(original, name, original.length, true, true, name !== "Date");
       Object.defineProperty(wrapper, "prototype", {value: original.prototype, writable: false});
       for (const key of Reflect.ownKeys(original)) {
         if (["prototype", "name", "length", "arguments", "caller"].includes(key)) continue;

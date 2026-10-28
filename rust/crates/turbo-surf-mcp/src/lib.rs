@@ -7241,4 +7241,92 @@ mod session_tool_tests {
             "no element matches #none"
         );
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_mint_reports_reads_and_cookies_earned_by_the_page_scripts() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = if req.starts_with("GET /p.js") {
+                    "navigator.userAgent;document.cookie='__Secure-ENID=e1; Secure';"
+                } else {
+                    "<title>P</title><script>document.cookie='seen=1'</script><script src='/p.js'></script>"
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let out = call(
+            &mut Session::new(),
+            "probe_mint",
+            json!({ "url": format!("{base}/") }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["url"], format!("{base}/"));
+        assert_eq!(out["status"], 200);
+        assert!(out["scripts_bytes"].as_u64().unwrap() > 40, "{out}");
+        assert!(out["accesses"].to_string().contains("userAgent"), "{out}");
+        assert!(
+            out["earned_cookies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c == "seen"),
+            "{out}"
+        );
+        assert_eq!(
+            call(&mut Session::new(), "probe_mint", json!({}))
+                .await
+                .unwrap_err(),
+            "probe_mint: missing 'url'"
+        );
+        assert_eq!(earned_cookie_names("not json"), Vec::<String>::new());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_serp_bounced_to_a_keyless_sorry_wall_fails_explicitly() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = if req.starts_with("GET /search") {
+                    "HTTP/1.1 302 Found\r\nLocation: /sorry/index?continue=x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                } else {
+                    let body = "<p>Our systems have detected unusual traffic from your computer network.</p><form action='/sorry/index' method='post'><input name='continue' value='x'></form>";
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                };
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut s = Session::new();
+        call(
+            &mut s,
+            "web_search_load_strategy",
+            json!({ "strategy": { "engine": "walled", "query_url": "{base}/search?q={query}", "format": "structural" } }),
+        )
+        .await
+        .unwrap();
+        let err = call(
+            &mut s,
+            "web_search",
+            json!({ "query": "q", "engine": "walled", "base": base }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "google /sorry clearance failed: solver response parse error: recaptcha: no site key found on the page"
+        );
+    }
 }

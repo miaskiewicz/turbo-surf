@@ -17,6 +17,7 @@
     writable = new WeakSet();
   const apply = Reflect.apply,
     create = Object.create,
+    construct = Reflect.construct,
     same = Object.is,
     finite = Number.isFinite,
     arrayFrom = Array.from,
@@ -29,7 +30,7 @@
     Float64 = Float64Array,
     IdlTypeError = TypeError,
     IdlDOMException = DOMException,
-    { abs, atan2, cos, fround, hypot, sin, tan, PI } = Math;
+    { abs, atan2, cos, fround, hypot, max, min, sin, tan, PI } = Math;
   // WebIDL `unrestricted double`: ToNumber, which (unlike `Number()`) rejects BigInt.
   const toNumber = (value) => +value;
   const read = (map, receiver) => apply(weakGet, map, [receiver]);
@@ -680,7 +681,175 @@
       configurable: true,
     });
   }
-  for (const constructor of [DOMPointReadOnly, DOMPoint, DOMMatrixReadOnly, DOMMatrix]) {
+  // DOMQuad (turbo-surf#69): four live DOMPoint platform objects. Dictionaries
+  // convert their members in WebIDL's lexicographic order, each read and then
+  // converted, with Blink's nested "Failed to read the ..." messages.
+  const quads = new WeakMap();
+  let quadRectangle = null;
+  // geometry_backend.rs installs DOMRect after this bootstrap and, before any page
+  // script runs, hands its constructor over once (a page cannot replace it later).
+  Object.defineProperty(__G, "installQuadRectangle", {
+    __proto__: null,
+    value: (constructor) => {
+      if (quadRectangle === null && typeof constructor === "function") quadRectangle = constructor;
+      delete __G.installQuadRectangle;
+    },
+    configurable: true,
+  });
+  const quad = (receiver) => {
+    const data = read(quads, receiver);
+    if (!data) throw new IdlTypeError("Illegal invocation");
+    return data;
+  };
+  const isObject = (value) =>
+    value !== null && (typeof value === "object" || typeof value === "function");
+  const member = (source, name, fallback, prefix, type) => {
+    const value = source[name];
+    if (value === undefined) return fallback;
+    const context = `${prefix}Failed to read the '${name}' property from '${type}': `;
+    if (typeof value === "bigint")
+      throw new IdlTypeError(`${context}Cannot convert a BigInt value to a number`);
+    if (typeof value === "symbol")
+      throw new IdlTypeError(`${context}Cannot convert a Symbol value to a number`);
+    return toNumber(value);
+  };
+  const pointInit = (value, prefix) => {
+    if (value === undefined || value === null) return [0, 0, 0, 1];
+    if (!isObject(value))
+      throw new IdlTypeError(`${prefix}The provided value is not of type 'DOMPointInit'.`);
+    const w = member(value, "w", 1, prefix, "DOMPointInit"),
+      x = member(value, "x", 0, prefix, "DOMPointInit"),
+      y = member(value, "y", 0, prefix, "DOMPointInit"),
+      z = member(value, "z", 0, prefix, "DOMPointInit");
+    return [x, y, z, w];
+  };
+  const corners = (values) => [
+    newPoint(values[0], values[1], values[2], values[3]),
+    newPoint(values[4], values[5], values[6], values[7]),
+    newPoint(values[8], values[9], values[10], values[11]),
+    newPoint(values[12], values[13], values[14], values[15]),
+  ];
+  // `values`: the four points' x, y, z, w (16 numbers).
+  const newQuad = (values) => {
+    const result = create(DOMQuad.prototype);
+    store(quads, result, corners(values));
+    return result;
+  };
+  const flatten = (p1, p2, p3, p4) => [
+    p1[0],
+    p1[1],
+    p1[2],
+    p1[3],
+    p2[0],
+    p2[1],
+    p2[2],
+    p2[3],
+    p3[0],
+    p3[1],
+    p3[2],
+    p3[3],
+    p4[0],
+    p4[1],
+    p4[2],
+    p4[3],
+  ];
+  const quadFields = ["p1", "p2", "p3", "p4"];
+  // A function (not a class) so a call without `new` reaches Blink's message.
+  function DOMQuad(...init) {
+    const prefix = "Failed to construct 'DOMQuad': ";
+    if (new.target === undefined)
+      throw new IdlTypeError(
+        `${prefix}Please use the 'new' operator, this DOM object constructor cannot be called as a function.`,
+      );
+    const values = [];
+    for (let index = 0; index < 4; index++) values[index] = pointInit(init[index], prefix);
+    store(quads, this, corners(flatten(values[0], values[1], values[2], values[3])));
+  }
+  const quadMembers = class {
+    static fromQuad(...init) {
+      const prefix = "Failed to execute 'fromQuad' on 'DOMQuad': ",
+        other = init[0];
+      if (other !== undefined && other !== null && !isObject(other))
+        throw new IdlTypeError(`${prefix}The provided value is not of type 'DOMQuadInit'.`);
+      const source = other ?? {},
+        values = [];
+      for (let index = 0; index < 4; index++) {
+        const name = quadFields[index];
+        values[index] = pointInit(
+          source[name],
+          `${prefix}Failed to read the '${name}' property from 'DOMQuadInit': `,
+        );
+      }
+      return newQuad(flatten(values[0], values[1], values[2], values[3]));
+    }
+    static fromRect(...init) {
+      const prefix = "Failed to execute 'fromRect' on 'DOMQuad': ",
+        other = init[0];
+      if (other !== undefined && other !== null && !isObject(other))
+        throw new IdlTypeError(`${prefix}The provided value is not of type 'DOMRectInit'.`);
+      const rect = other ?? {},
+        height = member(rect, "height", 0, prefix, "DOMRectInit"),
+        width = member(rect, "width", 0, prefix, "DOMRectInit"),
+        x = member(rect, "x", 0, prefix, "DOMRectInit"),
+        y = member(rect, "y", 0, prefix, "DOMRectInit");
+      return newQuad(
+        flatten(
+          [x, y, 0, 1],
+          [x + width, y, 0, 1],
+          [x + width, y + height, 0, 1],
+          [x, y + height, 0, 1],
+        ),
+      );
+    }
+    getBounds() {
+      const points4 = quad(this),
+        xs = [],
+        ys = [];
+      for (let index = 0; index < 4; index++) {
+        const value = point(points4[index]);
+        xs[index] = value[0];
+        ys[index] = value[1];
+      }
+      if (quadRectangle === null) throw new IdlTypeError("Illegal invocation");
+      const left = min(xs[0], xs[1], xs[2], xs[3]),
+        top = min(ys[0], ys[1], ys[2], ys[3]);
+      return construct(quadRectangle, [
+        left,
+        top,
+        max(xs[0], xs[1], xs[2], xs[3]) - left,
+        max(ys[0], ys[1], ys[2], ys[3]) - top,
+      ]);
+    }
+    toJSON() {
+      const value = quad(this);
+      return { p1: value[0], p2: value[1], p3: value[2], p4: value[3] };
+    }
+  };
+  for (const key of ["fromQuad", "fromRect"])
+    Object.defineProperty(DOMQuad, key, Object.getOwnPropertyDescriptor(quadMembers, key));
+  for (let index = 0; index < 4; index++)
+    Object.defineProperty(DOMQuad.prototype, quadFields[index], {
+      get() {
+        return quad(this)[index];
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  // Chrome lists the attributes first: p1..p4, getBounds, toJSON, constructor.
+  for (const key of ["getBounds", "toJSON"])
+    Object.defineProperty(
+      DOMQuad.prototype,
+      key,
+      Object.getOwnPropertyDescriptor(quadMembers.prototype, key),
+    );
+  delete DOMQuad.prototype.constructor;
+  Object.defineProperty(DOMQuad.prototype, "constructor", {
+    value: DOMQuad,
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(DOMQuad, "prototype", { writable: false });
+  for (const constructor of [DOMPointReadOnly, DOMPoint, DOMMatrixReadOnly, DOMMatrix, DOMQuad]) {
     Object.defineProperty(constructor.prototype, Symbol.toStringTag, {
       value: constructor.name,
       configurable: true,
@@ -694,8 +863,9 @@
   }
   globalThis.WebKitCSSMatrix = DOMMatrix;
   // Structured clone (crypto_clone.rs): kind 1-4 = DOMPointReadOnly, DOMPoint,
-  // DOMMatrixReadOnly, DOMMatrix with the private values; restore rebuilds the
-  // platform object in this realm without running guest-patchable conversions.
+  // DOMMatrixReadOnly, DOMMatrix with the private values, 5 = DOMQuad with its
+  // points' x, y, z, w; restore rebuilds the platform object in this realm
+  // without running guest-patchable conversions.
   const clonePrototypes = {
     __proto__: null,
     1: DOMPointReadOnly.prototype,
@@ -704,6 +874,14 @@
     4: DOMMatrix.prototype,
   };
   const cloneRecord = (value) => {
+    const quadPoints = read(quads, value);
+    if (quadPoints !== undefined) {
+      const p1 = point(quadPoints[0]),
+        p2 = point(quadPoints[1]),
+        p3 = point(quadPoints[2]),
+        p4 = point(quadPoints[3]);
+      return [5, flatten(p1, p2, p3, p4)];
+    }
     const mutable = apply(isWritable, writable, [value]) ? 1 : 0;
     const coordinates = read(points, value);
     if (coordinates !== undefined) return [1 + mutable, coordinates];
@@ -711,6 +889,7 @@
     if (values !== undefined) return [3 + mutable, values];
   };
   const cloneRestore = (kind, values) => {
+    if (kind === 5) return newQuad(values);
     const result = create(clonePrototypes[kind]);
     store(kind <= 2 ? points : matrices, result, values);
     if (kind % 2 === 0) apply(markWritable, writable, [result]);

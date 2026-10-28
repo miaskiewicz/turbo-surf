@@ -12013,7 +12013,7 @@ __G.domSig = (() => {
       "CSSConditionRule CSSGroupingRule CSSImportRule CSSNamespaceRule CSSPageRule CSSCounterStyleRule CSSLayerBlockRule " +
       "CSSLayerStatementRule CSSPropertyRule CSSNestedDeclarations CSSPositionTryRule CSSTransition CSSAnimation " +
       "CSSNumericValue CSSUnitValue CSSKeywordValue CSSMathSum CSSTransformValue CSSUnparsedValue CSSVariableReferenceValue " +
-      "DOMRectList DOMQuad DOMStringList DOMStringMap DOMException DOMImplementation DOMParser Range StaticRange " +
+      "DOMRectList DOMStringList DOMStringMap DOMException DOMImplementation DOMParser Range StaticRange " +
       "AbstractRange Selection Comment Text CDATASection DocumentType DocumentFragment ShadowRoot Element " +
       "IntersectionObserver ResizeObserver ReportingObserver PerformanceObserver MutationObserver " +
       "Worklet PaintWorkletGlobalScope AudioWorklet AudioWorkletNode Blob FileSystemHandle FileSystemFileHandle " +
@@ -12240,7 +12240,7 @@ __G.domSig = (() => {
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
       "TextEncoder", "TextDecoder", "Screen", "Window", "Crypto", "SubtleCrypto",
       "IntersectionObserver", "ResizeObserver", "MutationObserver", "PerformanceObserver",
-      "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigationTiming", "EventCounts", "DOMPointReadOnly", "DOMPoint", "DOMMatrixReadOnly", "DOMMatrix"];
+      "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigationTiming", "EventCounts", "DOMPointReadOnly", "DOMPoint", "DOMMatrixReadOnly", "DOMMatrix", "DOMQuad"];
     const bindProperties = (object, skip = []) => {
       if (!object) return;
       for (const key of Reflect.ownKeys(object)) {
@@ -12259,7 +12259,9 @@ __G.domSig = (() => {
       bindProperties(original.prototype, ["constructor"]);
       bindProperties(original, ["prototype", "name", "length", "arguments", "caller"]);
       if (orig.call(original).includes("[native code]")) continue;
-      const wrapper = factory(original, name, original.length, true, true, name !== "Date");
+      // Blink's message for a call without `new` (DOMQuad; turbo-surf#69).
+      const callMessage = name === "DOMQuad" ? "Failed to construct 'DOMQuad': Please use the 'new' operator, this DOM object constructor cannot be called as a function." : undefined;
+      const wrapper = factory(original, name, original.length, true, true, name !== "Date", callMessage);
       Object.defineProperty(wrapper, "prototype", {value: original.prototype, writable: false});
       for (const key of Reflect.ownKeys(original)) {
         if (["prototype", "name", "length", "arguments", "caller"].includes(key)) continue;

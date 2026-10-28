@@ -156,6 +156,7 @@ pub(crate) fn install<'s>(
             if global.set_private(scope, key, factory.into()) != Some(true) {
                 return Err("Geometry private factory installation interrupted".into());
             }
+            hand_over_quad_rectangle(scope, global, namespace);
             return Ok(());
         }
     }
@@ -163,6 +164,29 @@ pub(crate) fn install<'s>(
         .exception()
         .map(|error| error.to_rust_string_lossy(scope))
         .unwrap_or_else(|| "Geometry installation interrupted".into()))
+}
+
+/// DOMQuad.getBounds (web_geometry.js, bootstrapped before DOMRect exists) gets
+/// the realm's DOMRect constructor once, before any page script runs.
+fn hand_over_quad_rectangle<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    global: v8::Local<'s, v8::Object>,
+    namespace: v8::Local<'s, v8::Object>,
+) {
+    let read = |scope: &mut v8::PinScope<'s, '_>, object: v8::Local<'s, v8::Object>, name: &str| {
+        let key = v8::String::new(scope, name)?;
+        object
+            .get(scope, key.into())
+            .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    };
+    let (Some(rectangle), Some(hook)) = (
+        read(scope, global, "DOMRect"),
+        read(scope, namespace, "installQuadRectangle"),
+    ) else {
+        return;
+    };
+    let undefined = v8::undefined(scope);
+    hook.call(scope, undefined.into(), &[rectangle.into()]);
 }
 
 #[derive(Clone, Copy)]
@@ -253,8 +277,9 @@ fn op_install_geometry_clone_adapter(
     context.set_slot(std::rc::Rc::new(GeometryCloneAdapter { record, restore }));
 }
 
-/// A DOMPointReadOnly (1), DOMPoint (2), DOMMatrixReadOnly (3) or DOMMatrix (4)
-/// platform object's values: 4 point coordinates or 16 column-major entries.
+/// A DOMPointReadOnly (1), DOMPoint (2), DOMMatrixReadOnly (3), DOMMatrix (4) or
+/// DOMQuad (5) platform object's values: 4 point coordinates, 16 column-major
+/// entries, or the quad's four points' x, y, z, w.
 #[derive(Clone)]
 pub(crate) struct PointMatrixData {
     kind: u32,
@@ -287,7 +312,7 @@ pub(crate) fn point_matrix_snapshot<'s>(
         .then(|| kind.uint32_value(scope))
         .flatten()?
     {
-        kind @ 1..=4 => kind,
+        kind @ 1..=5 => kind,
         _ => return None,
     };
     let data = v8::Local::<v8::Array>::try_from(result.get_index(scope, 1)?).ok()?;

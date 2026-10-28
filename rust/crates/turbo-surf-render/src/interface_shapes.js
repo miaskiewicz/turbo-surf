@@ -21,6 +21,7 @@
     "DOMMatrixReadOnly",
     "DOMPoint",
     "DOMPointReadOnly",
+    "DOMQuad",
     "Headers",
     "Request",
     "Response",

@@ -6663,4 +6663,81 @@ mod session_tool_tests {
         assert_eq!(serp_marker("<div id=\"rso\">"), "id=rso");
         assert_eq!(serp_marker("<h3>t</h3>"), "<h3>");
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn web_search_runs_a_loaded_strategy_against_a_localhost_engine() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let _ = tx.send(req.lines().next().unwrap_or("").to_string());
+                // The third result is only added by the page's own script (js mode).
+                let body = "<div class=r><a href='https://a.test/1'>One</a><p class=s>first</p></div>\
+                    <div class=r><a href='https://a.test/2'>Two</a></div><div id=more></div>\
+                    <script>document.getElementById('more').outerHTML=\"<div class=r><a href='https://a.test/3'>Three</a></div>\"</script>";
+                let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut s = Session::new();
+        let strategy = |engine: &str, mode: &str| {
+            json!({ "strategy": { "engine": engine, "query_url": "{base}/s?q={query}&n={limit}", "mode": mode,
+                "result_container": ".r", "title": "a", "link": "a", "snippet": ".s" } })
+        };
+        call(&mut s, "web_search_load_strategy", strategy("local", ""))
+            .await
+            .unwrap();
+        let hits = call(
+            &mut s,
+            "web_search",
+            json!({ "query": "rust lang", "engine": "local", "base": format!("{base}/"), "limit": 5 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            hits,
+            json!([
+                { "title": "One", "url": "https://a.test/1", "snippet": "first" },
+                { "title": "Two", "url": "https://a.test/2" }
+            ])
+        );
+        assert_eq!(rx.recv().await.unwrap(), "GET /s?q=rust+lang&n=5 HTTP/1.1");
+        // js mode renders the SERP's own script before parsing; limit caps the results.
+        call(
+            &mut s,
+            "web_search_load_strategy",
+            strategy("localjs", "js"),
+        )
+        .await
+        .unwrap();
+        let rendered = call(
+            &mut s,
+            "web_search",
+            json!({ "query": "q", "engine": "localjs", "base": base, "limit": 3 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(rendered.as_array().unwrap().len(), 3);
+        assert_eq!(rendered[2]["title"], "Three");
+        assert_eq!(
+            call(
+                &mut s,
+                "web_search",
+                json!({ "query": "q", "engine": "local" })
+            )
+            .await
+            .unwrap_err(),
+            "web_search: engine 'local' requires 'base'"
+        );
+        assert_eq!(
+            call(&mut s, "web_search", json!({})).await.unwrap_err(),
+            "web_search: missing 'query'"
+        );
+        // The page and history are untouched by a search.
+        assert!(s.tree.is_none());
+    }
 }

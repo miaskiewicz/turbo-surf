@@ -30,7 +30,7 @@
     Float64 = Float64Array,
     IdlTypeError = TypeError,
     IdlDOMException = DOMException,
-    { abs, atan2, cos, fround, hypot, max, min, sin, tan, PI } = Math;
+    { abs, atan2, cos, fround, hypot, max, min, sin, tan, PI, SQRT1_2 } = Math;
   // WebIDL `unrestricted double`: ToNumber, which (unlike `Number()`) rejects BigInt.
   const toNumber = (value) => +value;
   const read = (map, receiver) => apply(weakGet, map, [receiver]);
@@ -90,8 +90,8 @@
     for (let index = 0; index < 16; index++) if (value[index] !== unit[index]) return false;
     return true;
   };
-  const fromSequence = (input) => {
-    const values = arrayFrom(input, toNumber);
+  // A 6-value (2D) or 16-value internal array as 16 column-major entries.
+  const expand = (values) => {
     if (values.length === 16) return values;
     if (values.length !== 6) throw new IdlTypeError("A matrix requires 6 or 16 values");
     return [
@@ -113,28 +113,121 @@
       1,
     ];
   };
-  const angleUnits = { __proto__: null, deg: PI / 180, rad: 1, grad: PI / 200, turn: 2 * PI };
+  // WebIDL sequence<unrestricted double>: the page's iterable protocol applies.
+  const fromSequence = (input) => expand(arrayFrom(input, toNumber));
+  // The CSS transform parser (turbo-surf#82) scans characters itself: String and
+  // RegExp methods are page-replaceable, Chrome's parser is native.
+  const space = (ch) =>
+    ch === " " ||
+    ch === "\t" ||
+    ch === "\n" ||
+    ch === "\r" ||
+    ch === "\f" ||
+    ch === "\v" ||
+    ch === "\u00a0" ||
+    ch === "\u1680" ||
+    (ch >= "\u2000" && ch <= "\u200a") ||
+    ch === "\u2028" ||
+    ch === "\u2029" ||
+    ch === "\u202f" ||
+    ch === "\u205f" ||
+    ch === "\u3000" ||
+    ch === "\ufeff";
+  const digit = (ch) => ch >= "0" && ch <= "9";
+  const lowerTable = { __proto__: null };
+  for (const letter of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") lowerTable[letter] = letter.toLowerCase();
+  const lower = (text) => {
+    let result = "";
+    for (let at = 0; at < text.length; at++) result += lowerTable[text[at]] ?? text[at];
+    return result;
+  };
+  const substring = (text, start, end) => {
+    let result = "";
+    for (let at = start; at < end; at++) result += text[at];
+    return result;
+  };
+  // `[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?` followed by an optional unit:
+  // [number, lower-cased unit], or null.
+  const dimension = (input) => {
+    let at = 0;
+    if (input[at] === "+" || input[at] === "-") at++;
+    const integer = at;
+    while (at < input.length && digit(input[at])) at++;
+    let digits = at > integer;
+    if (input[at] === ".") {
+      at++;
+      const fraction = at;
+      while (at < input.length && digit(input[at])) at++;
+      digits = digits || at > fraction;
+    }
+    if (!digits) return null;
+    if (input[at] === "e" || input[at] === "E") {
+      let exponent = at + 1;
+      if (input[exponent] === "+" || input[exponent] === "-") exponent++;
+      const start = exponent;
+      while (exponent < input.length && digit(input[exponent])) exponent++;
+      if (exponent > start) at = exponent;
+    }
+    return [toNumber(substring(input, 0, at)), lower(substring(input, at, input.length))];
+  };
+  // CSS angles in degrees, the unit gfx::Transform rotates by.
+  const angleUnits = { __proto__: null, deg: 1, rad: 180 / PI, grad: 0.9, turn: 360 };
   const angle = (input) => {
-    const match = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(deg|rad|grad|turn)?$/i.exec(input);
-    if (!match || (!match[2] && toNumber(match[1]) !== 0))
+    const parsed = dimension(input);
+    if (!parsed || (parsed[1] === "" ? parsed[0] !== 0 : !angleUnits[parsed[1]]))
       throw new IdlDOMException("Invalid transform angle", "SyntaxError");
-    return toNumber(match[1]) * (angleUnits[match[2]?.toLowerCase()] || 1);
+    return parsed[0] * (angleUnits[parsed[1]] || 1);
   };
   const length = (input) => {
-    const match = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(px)?$/i.exec(input);
-    if (!match || (!match[2] && toNumber(match[1]) !== 0))
+    const parsed = dimension(input);
+    if (!parsed || (parsed[1] === "" ? parsed[0] !== 0 : parsed[1] !== "px"))
       throw new IdlDOMException("Invalid absolute transform length", "SyntaxError");
-    return toNumber(match[1]);
+    return parsed[0];
   };
-  const rotation = (x, y, z, radians) => {
+  // gfx::SinCosDegrees (turbo-surf#81): multiples of 90 degrees are exact, and
+  // multiples of 45 degrees use the correctly rounded sqrt(1/2).
+  const quarterTurns = [
+      [0, 1],
+      [1, 0],
+      [0, -1],
+      [-1, 0],
+    ],
+    eighthTurns = [
+      [SQRT1_2, SQRT1_2],
+      [SQRT1_2, -SQRT1_2],
+      [-SQRT1_2, -SQRT1_2],
+      [-SQRT1_2, SQRT1_2],
+    ];
+  const sinCosDegrees = (degrees) => {
+    if (degrees % 90 === 0) return quarterTurns[(((degrees / 90) % 4) + 4) % 4];
+    if (degrees % 45 === 0) return eighthTurns[(((((degrees - 45) / 90) % 4) + 4) % 4)];
+    const radians = (degrees * PI) / 180;
+    return [sin(radians), cos(radians)];
+  };
+  const rotation = (x, y, z, degrees) => {
     const magnitude = hypot(x, y, z);
     if (!magnitude) return identity();
     x /= magnitude;
     y /= magnitude;
     z /= magnitude;
-    const c = cos(radians),
-      s = sin(radians),
+    const turn = sinCosDegrees(degrees),
+      s = turn[0],
+      c = turn[1],
       t = 1 - c;
+    // gfx::Transform rotates about a principal axis without the general
+    // formula's 1 - cos rounding (e.g. rotate(135deg) keeps m33 exactly 1).
+    if (x === 0 && y === 0) {
+      const sz = z < 0 ? -s : s;
+      return [c, sz, 0, 0, -sz, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    }
+    if (y === 0 && z === 0) {
+      const sx = x < 0 ? -s : s;
+      return [1, 0, 0, 0, 0, c, sx, 0, 0, -sx, c, 0, 0, 0, 0, 1];
+    }
+    if (x === 0 && z === 0) {
+      const sy = y < 0 ? -s : s;
+      return [c, 0, -sy, 0, 0, 1, 0, 0, sy, 0, c, 0, 0, 0, 0, 1];
+    }
     return [
       t * x * x + c,
       t * x * y + s * z,
@@ -175,7 +268,7 @@
   const rotatedAxisAngle = (values, x, y, z, degrees) =>
     multiply(
       values,
-      rotation(toNumber(x), toNumber(y), toNumber(z), (toNumber(degrees) * PI) / 180),
+      rotation(toNumber(x), toNumber(y), toNumber(z), toNumber(degrees)),
     );
   const rotated = (values, rotX, rotY, rotZ) => {
     if (rotY === undefined && rotZ === undefined) {
@@ -213,14 +306,24 @@
     for (let index = 0; index < args.length; index++) values[index] = toNumber(args[index]);
     return values;
   };
+  const translations = {
+      __proto__: null,
+      translate: 1,
+      translatex: 1,
+      translatey: 1,
+      translatez: 1,
+      translate3d: 1,
+    },
+    scalings = { __proto__: null, scale: 1, scalex: 1, scaley: 1, scalez: 1, scale3d: 1 },
+    rotations = { __proto__: null, rotate: 1, rotatex: 1, rotatey: 1, rotatez: 1 };
   const transformFunction = (name, args) => {
     const value = identity();
     if (name === "matrix" || name === "matrix3d") {
       if (args.length !== (name === "matrix" ? 6 : 16))
         throw new IdlDOMException("Invalid matrix", "SyntaxError");
-      return fromSequence(transformArguments(numbers(args)));
+      return expand(transformArguments(numbers(args)));
     }
-    if (/^translate[xyz]?$/.test(name) || name === "translate3d") {
+    if (translations[name]) {
       const counts =
         name === "translate"
           ? args.length >= 1 && args.length <= 2
@@ -240,7 +343,7 @@
       }
       return value;
     }
-    if (/^scale[xyz]?$/.test(name) || name === "scale3d") {
+    if (scalings[name]) {
       if (
         !(name === "scale"
           ? args.length >= 1 && args.length <= 2
@@ -260,7 +363,7 @@
       }
       return value;
     }
-    if (/^rotate[xyz]?$/.test(name)) {
+    if (rotations[name]) {
       if (args.length !== 1) throw new IdlDOMException("Invalid rotation", "SyntaxError");
       return rotation(
         name === "rotatex" ? 1 : 0,
@@ -279,9 +382,10 @@
     if (name === "skew" || name === "skewx" || name === "skewy") {
       if (!(name === "skew" ? args.length >= 1 && args.length <= 2 : args.length === 1))
         throw new IdlDOMException("Invalid skew", "SyntaxError");
-      if (name !== "skewy") value[4] = tan(angle(args[0]));
-      if (name === "skewy") value[1] = tan(angle(args[0]));
-      else if (args[1]) value[1] = tan(angle(args[1]));
+      const skew = (input) => tan((angle(input) * PI) / 180);
+      if (name !== "skewy") value[4] = skew(args[0]);
+      if (name === "skewy") value[1] = skew(args[0]);
+      else if (args[1]) value[1] = skew(args[1]);
       return value;
     }
     if (name === "perspective" && args.length === 1) {
@@ -292,25 +396,69 @@
     }
     throw new IdlDOMException("Unsupported CSS transform", "SyntaxError");
   };
+  // `name(args)` functions separated by whitespace; arguments split on commas and
+  // whitespace runs, empty ones dropped.
   const parse = (source) => {
-    source = source.trim();
-    if (!source || source === "none") return identity();
+    let start = 0,
+      end = source.length;
+    while (start < end && space(source[start])) start++;
+    while (end > start && space(source[end - 1])) end--;
+    if (start === end || substring(source, start, end) === "none") return identity();
     let result = identity(),
-      end = 0;
-    const matches = source.matchAll(/([a-zA-Z0-9]+)\(([^()]*)\)/g);
-    for (const match of matches) {
-      if (source.slice(end, match.index).trim())
-        throw new IdlDOMException("Invalid CSS transform", "SyntaxError");
-      end = match.index + match[0].length;
-      const parts = match[2].trim().split(/\s*,\s*|\s+/),
+      at = start;
+    const invalid = () => new IdlDOMException("Invalid CSS transform", "SyntaxError");
+    while (at < end) {
+      const nameStart = at;
+      while (
+        at < end &&
+        (digit(source[at]) || lowerTable[source[at]] || (source[at] >= "a" && source[at] <= "z"))
+      )
+        at++;
+      if (at === nameStart || source[at] !== "(") throw invalid();
+      const name = lower(substring(source, nameStart, at)),
         args = [];
-      for (let index = 0; index < parts.length; index++)
-        if (parts[index]) args[args.length] = parts[index];
-      result = multiply(result, transformFunction(match[1].toLowerCase(), args));
+      at++;
+      let token = "";
+      while (at < end && source[at] !== ")") {
+        const ch = source[at];
+        if (ch === "(") throw invalid();
+        if (ch === "," || space(ch)) {
+          if (token) args[args.length] = token;
+          token = "";
+        } else token += ch;
+        at++;
+      }
+      if (source[at] !== ")") throw invalid();
+      if (token) args[args.length] = token;
+      at++;
+      result = multiply(result, transformFunction(name, args));
+      while (at < end && space(source[at])) at++;
     }
-    if (source.slice(end).trim() || !end)
-      throw new IdlDOMException("Invalid CSS transform", "SyntaxError");
     return result;
+  };
+  const isObject = (value) =>
+    value !== null && (typeof value === "object" || typeof value === "function");
+  // WebIDL dictionaries (turbo-surf#69/#79): each member is read, then converted,
+  // in lexicographic order; conversion errors carry Blink's context.
+  const member = (source, name, fallback, prefix, type) => {
+    const value = source[name];
+    if (value === undefined) return fallback;
+    const context = `${prefix}Failed to read the '${name}' property from '${type}': `;
+    if (typeof value === "bigint")
+      throw new IdlTypeError(`${context}Cannot convert a BigInt value to a number`);
+    if (typeof value === "symbol")
+      throw new IdlTypeError(`${context}Cannot convert a Symbol value to a number`);
+    return toNumber(value);
+  };
+  const pointInit = (value, prefix) => {
+    if (value === undefined || value === null) return [0, 0, 0, 1];
+    if (!isObject(value))
+      throw new IdlTypeError(`${prefix}The provided value is not of type 'DOMPointInit'.`);
+    const w = member(value, "w", 1, prefix, "DOMPointInit"),
+      x = member(value, "x", 0, prefix, "DOMPointInit"),
+      y = member(value, "y", 0, prefix, "DOMPointInit"),
+      z = member(value, "z", 0, prefix, "DOMPointInit");
+    return [x, y, z, w];
   };
   const matrixKeys = [
     ["a", 0],
@@ -320,24 +468,45 @@
     ["e", 12],
     ["f", 13],
   ];
-  const dictionary = (input) => {
+  // DOMMatrixInit inherits DOMMatrix2DInit: the base dictionary's members are
+  // converted first, each group in lexicographic order.
+  const matrix2DMembers = ["a", "b", "c", "d", "e", "f", "m11", "m12", "m21", "m22", "m41", "m42"],
+    matrix3DMembers = ["m13", "m14", "m23", "m24", "m31", "m32", "m33", "m34", "m43", "m44"];
+  const matrixIndex = (key) => (key.charCodeAt(1) - 49) * 4 + key.charCodeAt(2) - 49;
+  const dictionary = (input, prefix) => {
+    if (input === undefined || input === null) return identity();
+    if (!isObject(input))
+      throw new IdlTypeError(`${prefix}The provided value is not of type 'DOMMatrixInit'.`);
+    const given = { __proto__: null };
+    for (let at = 0; at < matrix2DMembers.length; at++) {
+      const key = matrix2DMembers[at];
+      given[key] = member(input, key, undefined, prefix, "DOMMatrix2DInit");
+    }
+    const flat = input.is2D,
+      want2D = flat === undefined ? undefined : !!flat;
+    for (let at = 0; at < matrix3DMembers.length; at++) {
+      const key = matrix3DMembers[at];
+      given[key] = member(input, key, undefined, prefix, "DOMMatrixInit");
+    }
     const result = identity();
-    for (let column = 1; column <= 4; column++)
-      for (let row = 1; row <= 4; row++) {
-        const key = `m${column}${row}`;
-        if (input[key] !== undefined) result[(column - 1) * 4 + row - 1] = toNumber(input[key]);
-      }
+    for (let at = 0; at < matrix2DMembers.length; at++) {
+      const key = matrix2DMembers[at];
+      if (key.length === 3 && given[key] !== undefined) result[matrixIndex(key)] = given[key];
+    }
+    for (let at = 0; at < matrix3DMembers.length; at++) {
+      const key = matrix3DMembers[at];
+      if (given[key] !== undefined) result[matrixIndex(key)] = given[key];
+    }
     for (let entry = 0; entry < matrixKeys.length; entry++) {
       const key = matrixKeys[entry][0],
         index = matrixKeys[entry][1];
-      if (input[key] !== undefined) {
-        const full = `m${(index >> 2) + 1}${(index % 4) + 1}`;
-        if (input[full] !== undefined && !same(toNumber(input[key]), toNumber(input[full])))
-          throw new IdlTypeError("Conflicting matrix values");
-        result[index] = toNumber(input[key]);
-      }
+      if (given[key] === undefined) continue;
+      const full = `m${(index >> 2) + 1}${(index % 4) + 1}`;
+      if (given[full] !== undefined && !same(given[key], given[full]))
+        throw new IdlTypeError("Conflicting matrix values");
+      result[index] = given[key];
     }
-    if (input.is2D === true && !is2D(result))
+    if (want2D === true && !is2D(result))
       throw new IdlTypeError("A 2D matrix cannot contain 3D components");
     return result;
   };
@@ -388,23 +557,17 @@
     for (let index = 0; index < 16; index++) result[index] = rows[index % 4][4 + (index >> 2)];
     return result;
   };
-  const pointFrom = (other) => [
-    toNumber(other.x ?? 0),
-    toNumber(other.y ?? 0),
-    toNumber(other.z ?? 0),
-    toNumber(other.w ?? 1),
-  ];
   class DOMPointReadOnly {
     constructor(x = 0, y = 0, z = 0, w = 1) {
       store(points, this, [toNumber(x), toNumber(y), toNumber(z), toNumber(w)]);
     }
-    static fromPoint(other = {}) {
+    static fromPoint(other = undefined) {
       const result = create(DOMPointReadOnly.prototype);
-      store(points, result, pointFrom(other));
+      store(points, result, pointInit(other, "Failed to execute 'fromPoint' on 'DOMPointReadOnly': "));
       return result;
     }
-    matrixTransform(other = {}) {
-      return transformed(dictionary(other), point(this));
+    matrixTransform(other = undefined) {
+      return transformed(dictionary(other, "Failed to execute 'matrixTransform' on 'DOMPointReadOnly': "), point(this));
     }
     toJSON() {
       const value = point(this);
@@ -416,8 +579,8 @@
       super(x, y, z, w);
       apply(markWritable, writable, [this]);
     }
-    static fromPoint(other = {}) {
-      const value = pointFrom(other);
+    static fromPoint(other = undefined) {
+      const value = pointInit(other, "Failed to execute 'fromPoint' on 'DOMPoint': ");
       return newPoint(value[0], value[1], value[2], value[3]);
     }
   }
@@ -458,8 +621,8 @@
             : fromSequence(init),
       );
     }
-    static fromMatrix(other = {}) {
-      return newMatrix(dictionary(other), false);
+    static fromMatrix(other = undefined) {
+      return newMatrix(dictionary(other, "Failed to execute 'fromMatrix' on 'DOMMatrixReadOnly': "), false);
     }
     static fromFloat32Array(input) {
       return newMatrix(sequenceArgument(arguments.length, input), false);
@@ -473,8 +636,8 @@
     get isIdentity() {
       return isIdentity(matrix(this));
     }
-    multiply(other = {}) {
-      return newMatrix(multiply(matrix(this), dictionary(other)));
+    multiply(other = undefined) {
+      return newMatrix(multiply(matrix(this), dictionary(other, "Failed to execute 'multiply' on 'DOMMatrixReadOnly': ")));
     }
     translate(tx = 0, ty = 0, tz = 0) {
       return newMatrix(translated(matrix(this), tx, ty, tz));
@@ -512,9 +675,9 @@
     inverse() {
       return newMatrix(inverse(matrix(this)));
     }
-    transformPoint(other = {}) {
+    transformPoint(other = undefined) {
       const value = matrix(this);
-      return transformed(value, pointFrom(other));
+      return transformed(value, pointInit(other, "Failed to execute 'transformPoint' on 'DOMMatrixReadOnly': "));
     }
     toFloat32Array() {
       const values = matrix(this),
@@ -537,8 +700,6 @@
         d: v[5],
         e: v[12],
         f: v[13],
-        is2D: is2D(v),
-        isIdentity: isIdentity(v),
         m11: v[0],
         m12: v[1],
         m13: v[2],
@@ -555,6 +716,8 @@
         m42: v[13],
         m43: v[14],
         m44: v[15],
+        is2D: is2D(v),
+        isIdentity: isIdentity(v),
       };
     }
     toString() {
@@ -577,8 +740,8 @@
       super(init);
       apply(markWritable, writable, [this]);
     }
-    static fromMatrix(other = {}) {
-      return newMatrix(dictionary(other));
+    static fromMatrix(other = undefined) {
+      return newMatrix(dictionary(other, "Failed to execute 'fromMatrix' on 'DOMMatrix': "));
     }
     static fromFloat32Array(input) {
       return newMatrix(sequenceArgument(arguments.length, input));
@@ -586,12 +749,12 @@
     static fromFloat64Array(input) {
       return newMatrix(sequenceArgument(arguments.length, input));
     }
-    multiplySelf(other = {}) {
-      store(matrices, this, multiply(matrix(this), dictionary(other)));
+    multiplySelf(other = undefined) {
+      store(matrices, this, multiply(matrix(this), dictionary(other, "Failed to execute 'multiplySelf' on 'DOMMatrix': ")));
       return this;
     }
-    preMultiplySelf(other = {}) {
-      store(matrices, this, multiply(dictionary(other), matrix(this)));
+    preMultiplySelf(other = undefined) {
+      store(matrices, this, multiply(dictionary(other, "Failed to execute 'preMultiplySelf' on 'DOMMatrix': "), matrix(this)));
       return this;
     }
     translateSelf(tx = 0, ty = 0, tz = 0) {
@@ -700,28 +863,6 @@
     const data = read(quads, receiver);
     if (!data) throw new IdlTypeError("Illegal invocation");
     return data;
-  };
-  const isObject = (value) =>
-    value !== null && (typeof value === "object" || typeof value === "function");
-  const member = (source, name, fallback, prefix, type) => {
-    const value = source[name];
-    if (value === undefined) return fallback;
-    const context = `${prefix}Failed to read the '${name}' property from '${type}': `;
-    if (typeof value === "bigint")
-      throw new IdlTypeError(`${context}Cannot convert a BigInt value to a number`);
-    if (typeof value === "symbol")
-      throw new IdlTypeError(`${context}Cannot convert a Symbol value to a number`);
-    return toNumber(value);
-  };
-  const pointInit = (value, prefix) => {
-    if (value === undefined || value === null) return [0, 0, 0, 1];
-    if (!isObject(value))
-      throw new IdlTypeError(`${prefix}The provided value is not of type 'DOMPointInit'.`);
-    const w = member(value, "w", 1, prefix, "DOMPointInit"),
-      x = member(value, "x", 0, prefix, "DOMPointInit"),
-      y = member(value, "y", 0, prefix, "DOMPointInit"),
-      z = member(value, "z", 0, prefix, "DOMPointInit");
-    return [x, y, z, w];
   };
   const corners = (values) => [
     newPoint(values[0], values[1], values[2], values[3]),

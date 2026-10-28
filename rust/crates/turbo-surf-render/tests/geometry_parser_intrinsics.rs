@@ -23,7 +23,6 @@ globalThis.out=out;"#;
 const CHROME_156: &str = r#"{"values":["matrix(0.8660254037844387, 0.49999999999999994, -0.49999999999999994, 0.8660254037844387, 3, 4)","matrix(1, 2, 3, 4, 5, 6)","matrix(1, 0, 0, 1, 0, 0)","matrix(1, 0, 0, 1, 0, 0)","matrix(2, 0.35265396141692995, 0, 2, 2, 0)","matrix3d(-2.220446049250313e-16, 0.9999999999999998, 0, 0, 0.9999999999999998, -2.220446049250313e-16, 0, 0, 0, 0, -1, -0.01, 0, 0, 0, 1)","matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 7, 8, 9, 1)","matrix(1, 0, 0, 1, 2, 0)","matrix(0.9659258262890683, 0.25881904510252074, 0.7071067811865475, 1.224744871391589, 0, 0)","matrix(2, 0, 0, 10, 0, -0.5)","SyntaxError","SyntaxError","SyntaxError","SyntaxError","SyntaxError","SyntaxError","SyntaxError","SyntaxError","SyntaxError","SyntaxError",5],"hostile":"same"}"#;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#82: fails until the transform parser captures its intrinsics"]
 async fn transform_parser_ignores_page_patched_intrinsics_like_chrome156() {
     let html = format!("<!doctype html><body><script>{SCRIPT}</script></body>");
     let mut page = PageSession::open(&html, "https://geometry.test/", "", "", 5000)

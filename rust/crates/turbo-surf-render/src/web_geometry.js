@@ -1,8 +1,20 @@
 // Geometry interfaces operate on private column-major matrices. The browser
 // environment binds these delegates with native FunctionTemplates afterward.
+// The pure helpers stay inside this closure so no name leaks into the shared
+// bootstrap scope this file is concatenated into.
+// oxlint-disable unicorn/consistent-function-scoping
 (() => {
   const matrices = new WeakMap(),
-    points = new WeakMap();
+    points = new WeakMap(),
+    // DOMPoint/DOMMatrix platform objects (not their read-only bases), recorded by the
+    // interface constructor that ran, as Chrome serializes the wrapper's interface.
+    writable = new WeakSet();
+  const apply = Reflect.apply,
+    create = Object.create,
+    weakGet = WeakMap.prototype.get,
+    weakSet = WeakMap.prototype.set,
+    isWritable = WeakSet.prototype.has,
+    markWritable = WeakSet.prototype.add;
   const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   const matrix = (receiver) => {
     const data = matrices.get(receiver);
@@ -220,7 +232,7 @@
       return result;
     }
     const rows = Array.from({ length: 4 }, (_, row) =>
-      Array.from({ length: 8 }, (_, column) =>
+      Array.from({ length: 8 }, (__, column) =>
         column < 4 ? values[column * 4 + row] : Number(column - 4 === row),
       ),
     );
@@ -234,8 +246,8 @@
       rows[column] = rows[column].map((value) => value / factor);
       for (let row = 0; row < 4; row++)
         if (row !== column) {
-          const factor = rows[row][column];
-          rows[row] = rows[row].map((value, index) => value - factor * rows[column][index]);
+          const multiple = rows[row][column];
+          rows[row] = rows[row].map((value, index) => value - multiple * rows[column][index]);
         }
     }
     return Array.from({ length: 16 }, (_, index) => rows[index % 4][4 + (index >> 2)]);
@@ -256,6 +268,10 @@
     }
   }
   class DOMPoint extends DOMPointReadOnly {
+    constructor(x = 0, y = 0, z = 0, w = 1) {
+      super(x, y, z, w);
+      apply(markWritable, writable, [this]);
+    }
     static fromPoint(other = {}) {
       return super.fromPoint(other);
     }
@@ -409,6 +425,10 @@
     }
   }
   class DOMMatrix extends DOMMatrixReadOnly {
+    constructor(init = undefined) {
+      super(init);
+      apply(markWritable, writable, [this]);
+    }
     static fromMatrix(other = {}) {
       return super.fromMatrix(other);
     }
@@ -545,4 +565,28 @@
     });
   }
   globalThis.WebKitCSSMatrix = DOMMatrix;
+  // Structured clone (crypto_clone.rs): kind 1-4 = DOMPointReadOnly, DOMPoint,
+  // DOMMatrixReadOnly, DOMMatrix with the private values; restore rebuilds the
+  // platform object in this realm without running guest-patchable conversions.
+  const clonePrototypes = {
+    __proto__: null,
+    1: DOMPointReadOnly.prototype,
+    2: DOMPoint.prototype,
+    3: DOMMatrixReadOnly.prototype,
+    4: DOMMatrix.prototype,
+  };
+  const cloneRecord = (value) => {
+    const mutable = apply(isWritable, writable, [value]) ? 1 : 0;
+    const coordinates = apply(weakGet, points, [value]);
+    if (coordinates !== undefined) return [1 + mutable, coordinates];
+    const values = apply(weakGet, matrices, [value]);
+    if (values !== undefined) return [3 + mutable, values];
+  };
+  const cloneRestore = (kind, values) => {
+    const result = create(clonePrototypes[kind]);
+    apply(weakSet, kind <= 2 ? points : matrices, [result, values]);
+    if (kind % 2 === 0) apply(markWritable, writable, [result]);
+    return result;
+  };
+  ops.op_install_geometry_clone_adapter(cloneRecord, cloneRestore);
 })();

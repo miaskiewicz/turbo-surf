@@ -76,6 +76,7 @@ enum NativeSnapshot {
     Port(usize),
     Stream { kind: u32, first: usize },
     Rectangle(crate::geometry_backend::RectData),
+    PointMatrix(crate::geometry_backend::PointMatrixData),
     Exception { name: String, message: String },
 }
 
@@ -87,6 +88,7 @@ impl NativeSnapshot {
             Self::Exception { name, message } => name.len().saturating_add(message.len()),
             Self::Port(_) | Self::Stream { .. } => 0,
             Self::Rectangle(_) => 40,
+            Self::PointMatrix(data) => data.size_bytes(),
         }
     }
 }
@@ -229,7 +231,8 @@ impl v8::ValueSerializerImpl for Delegate {
                 || crate::browser_env::is_native_abort_object(scope, object)
                 || crate::browser_env::is_native_xpath_object(scope, object)
                 || crate::browser_env::get_interface_record(scope, object)
-                    .is_some_and(|record| record.is_object()),
+                    .is_some_and(|record| record.is_object())
+                || crate::geometry_backend::point_matrix_snapshot(scope, object).is_some(),
         )
     }
 
@@ -273,6 +276,8 @@ impl v8::ValueSerializerImpl for Delegate {
             )?)
         } else if let Some(rectangle) = crate::geometry_backend::snapshot(scope, object) {
             NativeSnapshot::Rectangle(rectangle)
+        } else if let Some(data) = crate::geometry_backend::point_matrix_snapshot(scope, object) {
+            NativeSnapshot::PointMatrix(data)
         } else if let Some(snapshot) = exception_snapshot(scope, object) {
             snapshot
         } else {
@@ -362,6 +367,13 @@ impl v8::ValueDeserializerImpl for Delegate {
             let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
             let scope = &mut scope.init();
             return crate::geometry_backend::restore(scope, data);
+        }
+        if let NativeSnapshot::PointMatrix(data) = snapshot {
+            let data = data.clone();
+            drop(objects);
+            let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
+            let scope = &mut scope.init();
+            return crate::geometry_backend::point_matrix_restore(scope, &data);
         }
         let adapter = scope.get_current_context().get_slot::<KeyAdapter>()?;
         if let NativeSnapshot::Exception { name, message } = snapshot {
@@ -824,4 +836,5 @@ pub(crate) fn extension() -> Extension {
 
 pub(crate) fn clear_context(context: v8::Local<v8::Context>) {
     context.remove_slot::<KeyAdapter>();
+    context.remove_slot::<crate::geometry_backend::GeometryCloneAdapter>();
 }

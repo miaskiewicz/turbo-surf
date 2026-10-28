@@ -321,7 +321,7 @@ impl Reporter {
                 let mut target_url = endpoint.url;
                 let mut method = "POST";
                 let mut body = body;
-                for hop in 0..=20 {
+                for hop in 0.. {
                     let credentials = context.sends_credentials(&target_url);
                     let origin = if context.opaque_origin || context.origin_tainted {
                         "null".into()
@@ -494,7 +494,8 @@ impl Reporter {
                         body.clear();
                     }
                 }
-                None
+                // Every hop returns; hop 20 stops redirects before the range ends.
+                unreachable!("report redirect loop is bounded by hop 20")
             };
             tokio::select! {_ = request=>{},_ = canceled.changed()=>{}}
             drop(permit);

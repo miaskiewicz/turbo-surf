@@ -1,7 +1,7 @@
 //! postMessage / MessagePort.postMessage / structuredClone transfer-list validation
 //! (turbo-surf#62): Chrome's "Failed to execute ..." prefix, the transfer index, the
 //! check order (list scan for duplicates and types, then buffers, locked streams,
-//! the source port and neutered ports) and the TypeError for locked streams,
+//! the source port and neutered ports, after value serialization) and the TypeError for locked streams,
 //! non-detachable buffers and primitives. Expected log: Chrome 156 (156.0.8078.47,
 //! headless) running the same script on a localhost page.
 use turbo_surf_render::PageSession;
@@ -75,6 +75,58 @@ async fn transfer_list_errors_match_chrome() {
     let chrome: serde_json::Value = serde_json::from_str(CHROME_156).unwrap();
     let rows = |value: &serde_json::Value| value.as_array().unwrap().clone();
     for (got, want) in rows(&log).iter().zip(rows(&chrome).iter()) {
+        assert_eq!(got, want);
+    }
+    assert_eq!(log, chrome);
+}
+
+/// Chrome checks buffers, streams and ports after serializing the value: guest
+/// getters run first, a value that references a locked or untransferred stream or
+/// port fails during serialization, and a getter that detaches, locks or neuters a
+/// listed transferable is caught by the later checks.
+const SERIALIZATION_ORDER: &str = r#"const log=[];const t=(n,f)=>{try{f();log.push([n,'ok'])}catch(e){log.push([n,e.name+': '+e.message])}};
+const L=()=>{const s=new ReadableStream();s.getReader();return s};
+const c=new MessageChannel();postMessage(0,'*',[c.port1]);
+const e=new ArrayBuffer(1);postMessage(0,'*',[e]);
+t('locked in value clone',()=>{const s=L();structuredClone(s,{transfer:[s]})});
+t('locked in value',()=>{const s=L();postMessage(s,'*',[s])});
+t('locked writable in value',()=>{const s=new WritableStream();s.getWriter();postMessage(s,'*',[s])});
+t('locked transform in value',()=>{const s=new TransformStream();s.readable.getReader();postMessage(s,'*',[s])});
+t('locked in value before detached',()=>{const s=L();postMessage(s,'*',[e,s])});
+t('locked in value before neutered',()=>{const s=L();postMessage(s,'*',[c.port1,s])});
+t('neutered in value',()=>postMessage(c.port1,'*',[c.port1]));
+t('detached in value',()=>postMessage(e,'*',[e]));
+t('stream not transferred',()=>postMessage(new ReadableStream(),'*'));
+t('locked stream not transferred',()=>postMessage(L(),'*'));
+t('port not transferred',()=>postMessage(new MessageChannel().port1,'*'));
+t('port not transferred via port',()=>new MessageChannel().port1.postMessage(new MessageChannel().port1));
+t('getter then detached',()=>postMessage({get a(){log.push('getter detached');return 1}},'*',[e]));
+t('getter then neutered',()=>postMessage({get a(){log.push('getter neutered');return 1}},'*',[c.port1]));
+t('getter then locked',()=>postMessage({get a(){log.push('getter locked');return 1}},'*',[L()]));
+t('getter then source',()=>{const x=new MessageChannel();x.port1.postMessage({get a(){log.push('getter source');return 1}},[x.port1])});
+t('getter locks',()=>{const s=new ReadableStream();postMessage({get a(){s.getReader();return 1}},'*',[s])});
+t('getter locks before stream',()=>{const s=new ReadableStream();postMessage({get a(){s.getReader();return 1},s},'*',[s])});
+t('getter neuters',()=>{const x=new MessageChannel();postMessage({get a(){postMessage(0,'*',[x.port1]);return 1}},'*',[x.port1])});
+t('getter detaches',()=>{const b=new ArrayBuffer(1);postMessage({get a(){postMessage(0,'*',[b]);return 1}},'*',[b])});
+globalThis.log=log;"#;
+
+const SERIALIZATION_ORDER_CHROME_156: &str = r#"[["locked in value clone","DataCloneError: Failed to execute 'structuredClone' on 'Window': A ReadableStream could not be cloned because it was locked"],["locked in value","DataCloneError: Failed to execute 'postMessage' on 'Window': A ReadableStream could not be cloned because it was locked"],["locked writable in value","DataCloneError: Failed to execute 'postMessage' on 'Window': A WritableStream could not be cloned because it was locked"],["locked transform in value","DataCloneError: Failed to execute 'postMessage' on 'Window': A TransformStream could not be cloned because it was locked"],["locked in value before detached","DataCloneError: Failed to execute 'postMessage' on 'Window': A ReadableStream could not be cloned because it was locked"],["locked in value before neutered","DataCloneError: Failed to execute 'postMessage' on 'Window': A ReadableStream could not be cloned because it was locked"],["neutered in value","DataCloneError: Failed to execute 'postMessage' on 'Window': Port at index 0 is already neutered."],["detached in value","DataCloneError: Failed to execute 'postMessage' on 'Window': ArrayBuffer at index 0 is already detached."],["stream not transferred","DataCloneError: Failed to execute 'postMessage' on 'Window': A ReadableStream could not be cloned because it was not transferred."],["locked stream not transferred","DataCloneError: Failed to execute 'postMessage' on 'Window': A ReadableStream could not be cloned because it was not transferred."],["port not transferred","DataCloneError: Failed to execute 'postMessage' on 'Window': A MessagePort could not be cloned because it was not transferred."],["port not transferred via port","DataCloneError: Failed to execute 'postMessage' on 'MessagePort': A MessagePort could not be cloned because it was not transferred."],"getter detached",["getter then detached","DataCloneError: Failed to execute 'postMessage' on 'Window': ArrayBuffer at index 0 is already detached."],"getter neutered",["getter then neutered","DataCloneError: Failed to execute 'postMessage' on 'Window': Port at index 0 is already neutered."],"getter locked",["getter then locked","TypeError: Failed to execute 'postMessage' on 'Window': Cannot transfer a locked stream"],"getter source",["getter then source","DataCloneError: Failed to execute 'postMessage' on 'MessagePort': Port at index 0 contains the source port."],["getter locks","TypeError: Failed to execute 'postMessage' on 'Window': Cannot transfer a locked stream"],["getter locks before stream","DataCloneError: Failed to execute 'postMessage' on 'Window': A ReadableStream could not be cloned because it was locked"],["getter neuters","DataCloneError: Failed to execute 'postMessage' on 'Window': Port at index 0 is already neutered."],["getter detaches","DataCloneError: Failed to execute 'postMessage' on 'Window': ArrayBuffer at index 0 is already detached."]]"#;
+
+#[tokio::test(flavor = "current_thread")]
+async fn transfer_checks_follow_value_serialization_like_chrome() {
+    let html = format!("<!doctype html><body><script>{SERIALIZATION_ORDER}</script></body>");
+    let mut page = PageSession::open(&html, "https://transfer.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let log: serde_json::Value =
+        serde_json::from_str(&page.eval_json_expression("log").await.unwrap()).unwrap();
+    let chrome: serde_json::Value = serde_json::from_str(SERIALIZATION_ORDER_CHROME_156).unwrap();
+    for (got, want) in log
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(chrome.as_array().unwrap())
+    {
         assert_eq!(got, want);
     }
     assert_eq!(log, chrome);

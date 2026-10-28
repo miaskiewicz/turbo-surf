@@ -45,10 +45,12 @@
   prefix, the transfer index (`Port at index 0 is already neutered.`, `ArrayBuffer at
   index 1 is a duplicate of an earlier ArrayBuffer.`, `Value at index 0 does not have a
   transferable type.`, `Port at index 0 contains the source port.`), Chrome's check order
-  (list scan, detached then non-detachable buffers, locked streams, source port,
-  neutered ports), and `TypeError` for a locked stream, a non-detachable buffer and a
-  primitive entry (they were generic `DataCloneError`s). Remaining serialization-order
-  and message gaps: #76.
+  (list scan for types and duplicates, then the value is serialized, then detached and
+  non-detachable buffers, locked streams, the source port and neutered ports, so guest
+  getters run first), `A ReadableStream could not be cloned because it was locked` /
+  `… not transferred.` for streams and ports the value references, and `TypeError` for a
+  locked stream, a non-detachable buffer and a primitive entry (they were generic
+  `DataCloneError`s). V8's own clone errors and the non-iterable messages: #76.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

@@ -358,9 +358,6 @@ pub(crate) fn validate_transfer(
 pub(crate) fn is_endpoint(transfer: &PortTransfer, id: u32) -> bool {
     transfer.token.id == id
 }
-pub(crate) fn same_transfer(a: &PortTransfer, b: &PortTransfer) -> bool {
-    a.token.id == b.token.id
-}
 pub(crate) fn transfer_matches(
     scope: &mut v8::PinScope,
     object: v8::Local<v8::Object>,

@@ -479,6 +479,12 @@ fn dictionary_storage_rejects_oversize_entries_and_evicts_under_both_cache_bound
             &format!(r#"match="/result-{index}""#),
             &body,
         ));
+        if index == 3 {
+            // Exactly the 32 MiB store budget: nothing is evicted yet.
+            assert!(dictionaries
+                .select("partition", "https://dict.test/result-0", &context())
+                .is_some());
+        }
     }
     assert!(dictionaries
         .select("partition", "https://dict.test/result-0", &context())
@@ -501,6 +507,47 @@ fn dictionary_storage_rejects_oversize_entries_and_evicts_under_both_cache_bound
     assert!(dictionaries
         .select("partition", "https://dict.test/result-64", &context())
         .is_some());
+}
+
+#[test]
+fn re_registering_a_url_replaces_only_that_partitions_entry() {
+    let dictionaries = DictionaryStore::default();
+    let put = |partition: &str, path: &str, pattern: &str, body: &[u8]| {
+        assert!(dictionaries.store_response(
+            partition,
+            &format!("https://dict.test/{path}"),
+            &context(),
+            200,
+            &headers(&format!("match=\"{pattern}\"")),
+            body,
+        ));
+    };
+    put("p", "one", "/a/*", b"first");
+    put("p", "two", "/b/*", b"other url");
+    put("q", "one", "/a/*", b"other partition");
+    put("p", "one", "/a/*", b"replaced");
+    let body = |partition: &str, path: &str| {
+        dictionaries
+            .select(partition, &format!("https://dict.test/{path}"), &context())
+            .map(|selected| selected.body.as_ref().clone())
+    };
+    assert_eq!(body("p", "a/x"), Some(b"replaced".to_vec()));
+    assert_eq!(body("p", "b/x"), Some(b"other url".to_vec()));
+    assert_eq!(body("q", "a/x"), Some(b"other partition".to_vec()));
+    assert_eq!(dictionaries.0.lock().unwrap().entries.len(), 3);
+}
+
+#[test]
+fn use_as_dictionary_header_is_capped_at_sixteen_kib() {
+    let dictionaries = DictionaryStore::default();
+    // Unknown dictionary members are ignored, so padding only changes the length.
+    let header = |length: usize| {
+        let prefix = r#"match="/*", pad=""#;
+        format!("{prefix}{}\"", "p".repeat(length - prefix.len() - 1))
+    };
+    assert_eq!(header(16 * 1024).len(), 16 * 1024);
+    assert!(!store(&dictionaries, "d", &header(16 * 1024 + 1), b"x"));
+    assert!(store(&dictionaries, "d", &header(16 * 1024), b"x"));
 }
 
 #[test]

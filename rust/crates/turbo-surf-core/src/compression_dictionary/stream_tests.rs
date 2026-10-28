@@ -351,3 +351,32 @@ async fn encoded_transport_over_32_mib_and_an_early_worker_exit_end_the_producer
     );
     recovered().await;
 }
+
+#[tokio::test]
+async fn the_encoded_cap_is_cumulative_and_inclusive() {
+    let _serial = decode::TEST_SERIAL.lock().await;
+    let run = |chunks: Vec<usize>| {
+        let source = source(
+            chunks
+                .into_iter()
+                .map(|length| Ok(Bytes::from(vec![0; length])))
+                .collect(),
+        );
+        collect(decode::decode_stream(
+            "dcb".into(),
+            source,
+            dictionary(),
+            usize::MAX,
+        ))
+    };
+    // Exactly 32 MiB passes the transport cap and reaches the (mismatching) header check.
+    let error = run(vec![decode::MAX_ENCODED_BYTES]).await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Dictionary response magic or SHA-256 mismatch"
+    );
+    // One byte more, split across chunks, is over the cap.
+    let error = run(vec![1, decode::MAX_ENCODED_BYTES]).await.unwrap_err();
+    assert!(matches!(error, decode::DecodeError::Size), "{error}");
+    recovered().await;
+}

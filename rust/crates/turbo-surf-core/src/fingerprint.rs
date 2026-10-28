@@ -368,6 +368,20 @@ mod tests {
     }
 
     #[test]
+    fn the_host_macos_version_is_the_normalized_plist_value_or_the_fallback() {
+        let expected = std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist")
+            .ok()
+            .filter(|_| cfg!(target_os = "macos"))
+            .and_then(|plist| plist_product_version(&plist))
+            .unwrap_or_else(|| "15.0.0".to_string());
+        assert_eq!(macos_product_version(), expected);
+        assert_eq!(
+            normalize_product_version(macos_product_version()).as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
     fn product_versions_are_normalized_without_accepting_markup() {
         // The shape of macOS's /System/Library/CoreServices/SystemVersion.plist.
         let plist = |version: &str| {

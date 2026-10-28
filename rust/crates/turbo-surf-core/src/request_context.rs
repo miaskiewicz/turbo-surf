@@ -903,6 +903,25 @@ mod credentialless_tests {
     }
 
     #[test]
+    fn opt_in_hints_go_to_same_origin_subresources_and_navigations_only() {
+        // Client Hints Infrastructure: an origin's Accept-CH applies to its own
+        // navigations and same-origin subresources; a cross-origin subresource gets
+        // only the low-entropy defaults (no Permissions-Policy delegation here).
+        let hints = ClientHints::default();
+        hints.observe("https://a.test/", Some("Sec-CH-UA-Arch"), false);
+        let profile = crate::fingerprint::default_profile();
+        let arch = |source: &str, destination| {
+            let context = RequestContext::resource(source, destination, RequestMode::NoCors);
+            let headers = hints.headers("https://a.test/x", &context, &profile);
+            assert!(headers.contains_key("sec-ch-ua"));
+            headers.contains_key("sec-ch-ua-arch")
+        };
+        assert!(arch("https://a.test/page", Destination::Script));
+        assert!(!arch("https://b.test/page", Destination::Script));
+        assert!(arch("https://b.test/page", Destination::Document));
+    }
+
+    #[test]
     fn destinations_use_their_sec_fetch_dest_tokens() {
         use Destination::*;
         assert_eq!(

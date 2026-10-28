@@ -273,4 +273,19 @@ async fn hooks_shared_clients_and_credentialless_cookie_admission() {
     assert!(!image.contains("cookie:"), "{image}");
 
     assert!(turbo_surf_core::net::report_client_with_trust(b"not a certificate").is_err());
+    // max_bytes is inclusive: a body of exactly that size is read whole.
+    for (max_bytes, ok) in [(4, true), (3, false)] {
+        let page = fetch_html(
+            &format!("{origin}/exact"),
+            FetchOptions {
+                max_bytes: Some(max_bytes),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(
+            page.map(|page| page.html).ok(),
+            ok.then(|| "page".to_owned())
+        );
+    }
 }

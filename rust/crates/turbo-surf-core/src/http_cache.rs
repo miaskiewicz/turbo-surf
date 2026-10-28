@@ -675,7 +675,15 @@ mod tests {
     }
     #[test]
     fn complete_body_prefix_and_range_metadata_follow_rfc_9110() {
-        let mut entry = keyed("https://cache.test/r", &[], b"abcdef".to_vec());
+        let mut entry = keyed(
+            "https://cache.test/r",
+            &[
+                ("Content-Length", "6".into()),
+                ("Content-Range", "bytes 0-5/6".into()),
+                ("x-other", "kept".into()),
+            ],
+            b"abcdef".to_vec(),
+        );
         assert_eq!(entry.prefix(ByteRange { start: 1, end: 4 }), b"bcd");
         assert_eq!(entry.prefix(ByteRange { start: 4, end: 9 }), b"");
         assert!(!entry.sparse());
@@ -686,6 +694,7 @@ mod tests {
         assert_eq!(part.body, b"cd");
         assert_eq!(values(&part.headers, "content-range"), "bytes 2-3/6");
         assert_eq!(values(&part.headers, "content-length"), "2");
+        assert_eq!(values(&part.headers, "x-other"), "kept");
         // HTTP/2 has no reason phrase (RFC 9113 8.3.2).
         entry.version = http::Version::HTTP_2;
         let whole = entry.response_metadata(ByteRange { start: 0, end: 6 }, false);
@@ -780,6 +789,73 @@ mod tests {
         assert_eq!((stored.status, stored.sparse()), (206, true));
         assert_eq!(stored.prefix(ByteRange { start: 0, end: 2 }), b"zz");
     }
+    #[test]
+    fn a_part_merges_only_with_the_same_key_variant_and_strong_validator() {
+        let url = "https://cache.test/";
+        let complete = |etag: &str| keyed(url, &[("etag", etag.into())], b"abcd".to_vec());
+        let part_of = |cache: &HttpCache, part: Entry| {
+            cache.store(part);
+            let stored = cached(cache, url).unwrap();
+            (stored.status, stored.sparse())
+        };
+        // Another URL's complete body of the same length is never borrowed.
+        let cache = HttpCache::default();
+        cache.store(keyed(
+            "https://cache.test/other",
+            &[("etag", "\"v1\"".into())],
+            b"wxyz".to_vec(),
+        ));
+        assert_eq!(
+            part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+            (206, true)
+        );
+        // A different Vary selection is another stored response.
+        let cache = HttpCache::default();
+        let mut varied = complete("\"v1\"");
+        varied.vary = vec![("accept".into(), Some("text/html".into()))];
+        cache.store(varied);
+        assert_eq!(
+            part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+            (206, true)
+        );
+        // A changed (or weak) validator is another representation.
+        for etag in ["\"v2\"", "W/\"v1\""] {
+            let cache = HttpCache::default();
+            cache.store(complete(etag));
+            assert_eq!(
+                part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+                (206, true)
+            );
+        }
+        let cache = HttpCache::default();
+        cache.store(complete("\"v1\""));
+        assert_eq!(
+            part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+            (200, false)
+        );
+    }
+    #[test]
+    fn eviction_counts_the_sum_of_stored_bytes() {
+        let cache = HttpCache::default();
+        cache.store(keyed("https://cache.test/small", &[], vec![1, 2]));
+        cache.store(keyed(
+            "https://cache.test/large",
+            &[],
+            vec![0; 20 * 1024 * 1024],
+        ));
+        assert_eq!(
+            cached(&cache, "https://cache.test/small").unwrap().body,
+            [1, 2]
+        );
+        cache.store(keyed(
+            "https://cache.test/more",
+            &[],
+            vec![0; 12 * 1024 * 1024],
+        ));
+        assert!(cached(&cache, "https://cache.test/small").is_none());
+        assert!(cached(&cache, "https://cache.test/large").is_some());
+    }
+
     #[test]
     fn merged_parts_over_the_budget_keep_the_previous_parts() {
         const HALF: usize = 20 * 1024 * 1024;

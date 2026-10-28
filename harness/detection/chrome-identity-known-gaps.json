@@ -86,11 +86,10 @@
       "PaintWorkletGlobalScope",
       "StorageAccessHandle",
       "webkitAudioContext",
-      "__name",
-      "__pendingFetches"
+      "__name"
     ],
     "allowRemoved": [],
-    "reason": "Window own-property names native exposes and Chrome 156 does not: three absent-interface stub names from runtime.rs's stub list (PaintWorkletGlobalScope is worklet-only, webkitAudioContext was removed, StorageAccessHandle is not a Window global) and two internal globals (`__name`, the esbuild keepNames passthrough, and `__pendingFetches`, the hydration fetch drain counter, both in runtime.rs). Pinned by name so any new extra global is a tell. Interface owners: API-INVENTORY.json / issue #28.",
+    "reason": "Window own-property names native exposes and Chrome 156 does not: three absent-interface stub names from runtime.rs's stub list (PaintWorkletGlobalScope is worklet-only, webkitAudioContext was removed, StorageAccessHandle is not a Window global) and one internal global (`__name`, the esbuild keepNames passthrough in runtime.rs; the hydration fetch drain counter `__pendingFetches` is private since turbo-surf#83). Pinned by name so any new extra global is a tell. Interface owners: API-INVENTORY.json / issue #28.",
     "owner": "render/interfaces"
   }
 ]

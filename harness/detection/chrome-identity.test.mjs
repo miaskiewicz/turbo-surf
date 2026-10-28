@@ -260,7 +260,7 @@ test("parity diff classifies tells, environment noise, collector artifacts and k
   nav.headers.reverse();
   native.js.navigator.webdriver = false;
   native.js.navigator.hardwareConcurrency = 1;
-  native.js.features.globals.push("__pendingFetches");
+  native.js.features.globals.push("__name");
   const { deltas } = diffParity(fixture, native, { knownGaps });
   const find = (predicate) => deltas.find(predicate);
   assert.equal(find((d) => d.type === "header-order" && d.tier === "nojs").class, "tell");

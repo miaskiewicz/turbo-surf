@@ -3,13 +3,20 @@
 //! links, the turbo-dom-v8 fork accessor the binding calls by default
 //! (`PropertyCallbackArguments::should_throw_on_error`) reports the same mode as the
 //! frame read the native-SDK overlay uses (`test_support::frame_read_should_throw`),
-//! and both match the caller's language mode. The fork accessor (and its interceptor
-//! `ReturnValue<()>` signatures) exist only in fork builds, so the native-SDK engine
-//! build does not compile this check (turbo-surf#68).
-#![cfg(not(turbo_surf_native_proxy))]
+//! and both match the caller's language mode. Both engine configurations compile it
+//! (turbo-surf#68): the setter/definer interceptors return `ReturnValue<()>` in the
+//! turbo-dom-v8 fork and `ReturnValue<Boolean>` in the native SDK (`SetterResult`).
+//! The native SDK links V8 without the fork's ShouldThrowOnError fix, so there the
+//! accessor check is ignored (`native-sdk-frame-read`) and only the frame read is checked.
 use std::cell::RefCell;
 use std::sync::Once;
 use turbo_dom_browser_env::test_support::frame_read_should_throw;
+
+/// The setter/definer interceptor return slot of the linked V8 binding.
+#[cfg(not(turbo_surf_native_proxy))]
+type SetterResult<'r> = v8::ReturnValue<'r, ()>;
+#[cfg(turbo_surf_native_proxy)]
+type SetterResult<'r> = v8::ReturnValue<'r, v8::Boolean>;
 
 thread_local! {
     /// (operation, frame read, V8 accessor) per intercepted call.
@@ -39,7 +46,7 @@ fn named_setter<'s>(
     _: v8::Local<'s, v8::Name>,
     _: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    _: v8::ReturnValue<()>,
+    _: SetterResult<'_>,
 ) -> v8::Intercepted {
     record("named-set", scope, &args);
     v8::Intercepted::kNo
@@ -49,7 +56,7 @@ fn named_definer<'s>(
     _: v8::Local<'s, v8::Name>,
     _: &v8::PropertyDescriptor,
     args: v8::PropertyCallbackArguments<'s>,
-    _: v8::ReturnValue<()>,
+    _: SetterResult<'_>,
 ) -> v8::Intercepted {
     record("named-define", scope, &args);
     v8::Intercepted::kNo
@@ -68,7 +75,7 @@ fn indexed_setter<'s>(
     _: u32,
     _: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    _: v8::ReturnValue<()>,
+    _: SetterResult<'_>,
 ) -> v8::Intercepted {
     record("indexed-set", scope, &args);
     v8::Intercepted::kNo
@@ -78,7 +85,7 @@ fn indexed_definer<'s>(
     _: u32,
     _: &v8::PropertyDescriptor,
     args: v8::PropertyCallbackArguments<'s>,
-    _: v8::ReturnValue<()>,
+    _: SetterResult<'_>,
 ) -> v8::Intercepted {
     record("indexed-define", scope, &args);
     v8::Intercepted::kNo

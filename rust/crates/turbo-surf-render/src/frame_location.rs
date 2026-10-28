@@ -43,12 +43,7 @@ pub(super) fn navigate<'s>(
     }
     // Sandboxing constrains even same-origin descendants; origin permission
     // cannot grant a sandboxed frame authority over the top-level document.
-    if source != target
-        && target.get_slot::<FrameParent>().is_none()
-        && source
-            .get_slot::<FrameSandbox>()
-            .is_some_and(|flags| flags.top_navigation_without_activation_blocked)
-    {
+    if crate::runtime::sandbox_blocks_top_navigation(source, target) {
         deny(scope);
         return;
     }
@@ -120,6 +115,23 @@ pub(super) fn navigate<'s>(
         return;
     }
     let Some(host) = target.get_slot::<FrameHost>() else {
+        // The top-level document navigates through its own Location (window_location.js):
+        // same-document fragments, session history and the sandbox check (turbo-surf#84).
+        if target
+            .get_slot::<HostCapabilities>()
+            .is_some_and(|capabilities| capabilities.0.borrow().contains_key("navigateLocation"))
+        {
+            let (Some(navigate), Some(href)) = (
+                host_capability(scope, target, "navigateLocation"),
+                v8::String::new(scope, url.as_str()),
+            ) else {
+                return;
+            };
+            let undefined = v8::undefined(scope);
+            let scope = &mut v8::ContextScope::new(scope, target);
+            navigate.call(scope, undefined.into(), &[href.into()]);
+            return;
+        }
         if let Some(state) = target.get_slot::<State>() {
             script_navigation::record(source, target, url.to_string());
             *state.url.borrow_mut() = url.to_string();
@@ -715,7 +727,18 @@ pub(super) fn install(scope: &mut v8::PinScope, url: &str) {
         value.into(),
         v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
     );
-    window.set(scope, name.into(), function.into());
+    // window_location.js has already installed the page's own Location interface and
+    // its [LegacyUnforgeable] window.location when this realm bootstrapped; replacing
+    // the interface object would leave `location instanceof Location` false
+    // (turbo-surf#71). Otherwise define it, non-enumerable like every interface object.
+    if !window.has_own_property(scope, name.into()).unwrap_or(false) {
+        window.define_own_property(
+            scope,
+            name.into(),
+            function.into(),
+            v8::PropertyAttribute::DONT_ENUM,
+        );
+    }
     for (name, callback, length) in [
         ("assign", v8::MapFnTo::map_fn_to(replace), 1),
         ("reload", v8::MapFnTo::map_fn_to(reload), 0),

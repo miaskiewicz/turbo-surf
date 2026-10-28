@@ -719,7 +719,12 @@ pub(super) fn template<'s>(
     constructor.set_class_name(name);
     constructor.read_only_prototype();
     let template = constructor.instance_template(scope);
-    template.set(name.into(), constructor.into());
+    // `Window` is a non-enumerable global like every interface object (turbo-surf#71).
+    template.set_with_attr(
+        name.into(),
+        constructor.into(),
+        v8::PropertyAttribute::DONT_ENUM,
+    );
     template.set_access_check_callback_and_handler(
         access_allowed,
         v8::NamedPropertyHandlerConfiguration::new()

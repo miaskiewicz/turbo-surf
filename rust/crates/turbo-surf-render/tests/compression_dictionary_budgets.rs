@@ -6,7 +6,6 @@ use turbo_surf_render::PageSession;
 /// More than 100,000 DOM nodes (elements + text) is an ordinary large page: it opens
 /// and runs its scripts. Discovery walks it linearly with no node budget.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#75: fails until the fix"]
 async fn documents_over_a_hundred_thousand_nodes_open() {
     let html = format!(
         "<!doctype html><body>{}<script>document.title='ran'</script>",
@@ -27,7 +26,6 @@ async fn documents_over_a_hundred_thousand_nodes_open() {
 /// one dictionary that the page's CSP blocks each fire `error` (frozen Chrome 156 on
 /// https://localhost: [300, 300, true]).
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#75: fails until the fix"]
 async fn every_dictionary_link_settles_past_256_links() {
     let links: String = (0..300)
         .map(|index| format!("<link rel=compression-dictionary href=/dict id=d{index}>"))

@@ -663,6 +663,27 @@ mod tests {
     }
 
     #[test]
+    fn host_sources_match_schemes_with_the_http_to_https_upgrade_only() {
+        // CSP3 6.7.2.8: a host-source's scheme must equal the URL's, except that an
+        // "http" source also matches "https"; a schemeless source takes the
+        // protected resource's scheme.
+        let doc = "https://page.test/";
+        let matches = |source, target| matches_source(source, doc, target, false);
+        assert!(matches("http://a.test", "https://a.test/x.js"));
+        assert!(matches("http://a.test", "http://a.test/x.js"));
+        assert!(!matches("https://a.test", "http://a.test/x.js"));
+        assert!(!matches("http://a.test", "ws://a.test/x"));
+        assert!(matches("a.test", "https://a.test/x.js"));
+        assert!(!matches("a.test", "http://a.test/x.js"));
+        assert!(matches_source(
+            "a.test",
+            "http://page.test/",
+            "https://a.test/",
+            false
+        ));
+    }
+
+    #[test]
     fn top_navigation_without_activation_sandbox_tokens_intersect() {
         let parse = |header: &str| Policy::new("https://navigation.test/", [header.to_owned()]);
         assert!(!parse("default-src 'self'").blocks_top_navigation_without_activation());

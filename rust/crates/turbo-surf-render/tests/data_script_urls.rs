@@ -22,7 +22,6 @@ const CHROME_156: &str =
     r#"["parser","b64","onerror Uncaught Error: boom","plain","dynamic","dynamic load","ext"]"#;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#67: fails until the fix"]
 async fn classic_data_url_scripts_run_like_chrome() {
     let mut page = PageSession::open(PAGE, "https://frames.test/", "", "", 5000)
         .await

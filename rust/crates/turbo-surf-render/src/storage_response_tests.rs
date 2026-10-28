@@ -224,7 +224,12 @@ fn unparsable_targets_sources_and_poisoned_state_leave_storage_untouched() {
     let storage = seeded();
     let mut invalid_source = context();
     invalid_source.top_level_source = Some("::".into());
-    storage.clear_from_response(0, &invalid_source, "https://target.test/", &headers("\"*\""));
+    storage.clear_from_response(
+        0,
+        &invalid_source,
+        "https://target.test/",
+        &headers("\"*\""),
+    );
     assert!(untouched(&storage));
 
     // A poisoned inbox is skipped; the clear itself still applies.
@@ -242,6 +247,11 @@ fn unparsable_targets_sources_and_poisoned_state_leave_storage_untouched() {
         panic!("poison the inbox");
     })
     .join();
-    storage.clear_from_response(0, &context(), "https://target.test/", &headers("\"storage\""));
+    storage.clear_from_response(
+        0,
+        &context(),
+        "https://target.test/",
+        &headers("\"storage\""),
+    );
     assert!(storage.0.lock().unwrap().values[&1].is_empty());
 }

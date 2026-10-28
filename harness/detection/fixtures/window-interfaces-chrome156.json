@@ -1,12 +1,12 @@
 {
   "browser": "Chrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "collectorSha256": "46568d9f72de3732e855a53de7d06a1da3782daf572cbce37dd32c9b10e8c730",
+  "collectorSha256": "b81b5eb4d66bfdfe5feb36431b289429d6c0e17f7bd1306f29124eeeae005c04",
   "fixtures": {
     "history-location-probe.js": "f17093945987f63221a469c2cff7f664179e24afc29ad81f089008ad605eeee7",
     "viewport-orientation-probe.js": "3fafaf3247ad89889245fa2a6e49c75764107a5e81bdaa39bf370a779b3bc0f2",
     "interface-shapes-probe.js": "f215a8d436e28eea739ed35ad17defb5fd02533d08ba47e6e80e6142d244e21c",
-    "observers-probe.js": "38cccf039ce766a680c806a5fde03f57a66fbe0b15acf0e4ca9f4be69897bc93",
+    "observers-probe.js": "1b1f0366b1ac6157d5150edc315cf314cf7ce41da36c3abff0f626e62cb68d57",
     "transports-probe.js": "1e5d0b15c04bada6731d8ea248f21caf8408885f5715c51d0e8dcdbf738754c3"
   },
   "flags": [

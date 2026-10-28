@@ -446,19 +446,19 @@ fn dictionary_transport_requires_https_even_for_trustworthy_http_loopback() {
 #[tokio::test]
 async fn dictionary_decoder_admission_is_bounded_and_cancelled_waiters_release_capacity() {
     let _serial = decode::TEST_SERIAL.lock().await;
-    let first = decode::reserve().await.unwrap();
-    let second = decode::reserve().await.unwrap();
+    let first = decode::reserve().await;
+    let second = decode::reserve().await;
     let mut blocked = Box::pin(decode::reserve());
     assert!(futures_util::poll!(&mut blocked).is_pending());
     drop(blocked);
     let mut next = Box::pin(decode::reserve());
     assert!(futures_util::poll!(&mut next).is_pending());
     drop(first);
-    let admitted = next.await.unwrap();
+    let admitted = next.await;
     drop(second);
     drop(admitted);
-    let first = decode::reserve().await.unwrap();
-    let second = decode::reserve().await.unwrap();
+    let first = decode::reserve().await;
+    let second = decode::reserve().await;
     drop((first, second));
 }
 

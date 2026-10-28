@@ -224,6 +224,8 @@ mod tests {
         });
         let error = stream.next().await.unwrap().unwrap_err();
         assert_eq!(error.message, "authored source failure");
+        // The failure is terminal: the stream ends instead of draining queued bytes.
+        assert!(stream.next().await.is_none());
         drop(stream);
         assert!(third.await.is_err());
         assert!(sender.write(vec![0]).await.is_err());

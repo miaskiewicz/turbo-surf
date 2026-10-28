@@ -484,9 +484,9 @@ impl ClientHints {
         {
             return headers;
         }
-        let Some(origin) = origin(target) else {
-            return headers;
-        };
+        // trustworthy(target) above admitted only parsed http(s) URLs, which have a
+        // tuple origin.
+        let origin = origin(target).expect("a trustworthy URL has a tuple origin");
         let origins = self.0.origins.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(requested) = origins.get(&origin) {
             for name in requested {
@@ -877,6 +877,63 @@ mod credentialless_tests {
         context.opaque_origin = true;
         assert!(!context.sends_credentials(source));
     }
+
+    #[test]
+    fn sec_fetch_site_stays_none_for_browser_navigations_and_cross_site_for_opaque_sources() {
+        // Fetch Metadata: a user-initiated navigation (no initiator) is `none`, and
+        // its redirects keep `none`; an opaque-origin initiator is always
+        // `cross-site`, even toward its own precursor's host.
+        let mut typed = RequestContext::navigation(None, true);
+        typed.follow_redirect("https://a.test/", "https://b.example/");
+        assert_eq!(typed.redirect_site.as_deref(), Some("none"));
+        assert_eq!(
+            typed.headers("https://b.example/", "GET")["sec-fetch-site"],
+            "none"
+        );
+        assert!(!typed.origin_tainted);
+        let mut sandboxed = RequestContext::resource(
+            "https://a.test/frame",
+            Destination::Script,
+            RequestMode::NoCors,
+        );
+        sandboxed.opaque_origin = true;
+        sandboxed.follow_redirect("https://a.test/x.js", "https://a.test/y.js");
+        assert_eq!(sandboxed.redirect_site.as_deref(), Some("cross-site"));
+        assert!(!sandboxed.origin_tainted);
+    }
+
+    #[test]
+    fn referrer_policy_headers_use_the_last_recognised_token() {
+        // Referrer Policy 8.1: split the combined header on commas and keep the
+        // last token that parses; an unknown token alone changes nothing.
+        let mut context = RequestContext::navigation(None, false);
+        let header = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        context.apply_referrer_policy_headers(&header(&[("Content-Type", "no-referrer")]));
+        assert_eq!(
+            context.referrer_policy,
+            crate::referrer_policy::ReferrerPolicy::StrictOriginWhenCrossOrigin
+        );
+        context.apply_referrer_policy_headers(&header(&[
+            ("Referrer-Policy", "origin"),
+            ("referrer-policy", "unsafe-url, bogus"),
+        ]));
+        assert_eq!(
+            context.referrer_policy,
+            crate::referrer_policy::ReferrerPolicy::UnsafeUrl
+        );
+        context.apply_referrer_policy_headers(&header(&[("Referrer-Policy", "bogus")]));
+        assert_eq!(
+            context.referrer_policy,
+            crate::referrer_policy::ReferrerPolicy::UnsafeUrl
+        );
+        assert!(!trustworthy("not a url"));
+        assert!(!trustworthy("ftp://localhost/"));
+    }
 }
 
 #[cfg(test)]
@@ -923,5 +980,33 @@ mod configured_transport_tests {
         assert!(hints.manual_client().is_err());
         assert!(hints.manual_client().is_err());
         assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn builder_and_build_failures_reach_both_pools_as_network_errors() {
+        let failing = ClientHints::with_client_builder(|| {
+            crate::net::client_builder_with_trust(b"not a certificate")
+        });
+        let error = failing.upload_client().err().unwrap();
+        assert_eq!(error.code, crate::net::ErrorCode::Network);
+        // A header value with a newline makes the configured builder's build() fail.
+        let invalid = ClientHints::with_client_builder(|| {
+            Ok(crate::net::client_builder().user_agent("bad\nagent"))
+        });
+        for error in [
+            invalid.manual_client().err().unwrap(),
+            invalid.upload_client().err().unwrap(),
+        ] {
+            assert_eq!(error.code, crate::net::ErrorCode::Network);
+            assert!(
+                error.message.starts_with("builder error"),
+                "{}",
+                error.message
+            );
+        }
+        assert_eq!(
+            format!("{:?}", ClientHints::default()),
+            "ClientHints { .. }"
+        );
     }
 }

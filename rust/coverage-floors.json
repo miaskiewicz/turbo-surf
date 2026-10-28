@@ -1,10 +1,14 @@
 {
-  "turbo-surf-core": 93.8,
-  "turbo-surf-mcp": 65.7,
-  "turbo-surf-napi": 0,
-  "turbo-surf-page": 82.9,
-  "turbo-surf-py": 0,
-  "turbo-surf-render": 88.0,
-  "turbo-surf-transform": 100,
-  "turbo-surf-view": 99.5
+  "floors": {
+    "turbo-surf-core": 93.8,
+    "turbo-surf-mcp": 65.7,
+    "turbo-surf-page": 82.9,
+    "turbo-surf-render": 88.0,
+    "turbo-surf-transform": 100,
+    "turbo-surf-view": 99.5
+  },
+  "excluded": {
+    "turbo-surf-napi": "Node binding: runs only inside node (Playwright shim / detection suites), which tarpaulin does not instrument; no Rust tests",
+    "turbo-surf-py": "Python binding: runs only inside python (PyPI wheel tests), which tarpaulin does not instrument; no Rust tests"
+  }
 }

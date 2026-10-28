@@ -1,4 +1,5 @@
-# Line-coverage gate for the turbo-surf Rust workspace (all eight member crates' `src/`).
+# Line-coverage gate for the turbo-surf Rust workspace (the member crates' `src/`, minus the
+# exclusions below).
 # Run from rust/: `cargo tarpaulin` (reads this file). CI: the `coverage` job in
 # .github/workflows/ci.yml (macOS arm64, where the floor was measured).
 #
@@ -12,6 +13,21 @@
 engine = "Llvm"
 workspace = true
 include-files = ["crates/*/src/*"]
+# Not measured here (see docs/QUALITY-GATES.md "Coverage"):
+# - turbo-surf-napi, turbo-surf-py: the Node / Python bindings. Their code runs only inside
+#   node / python processes (the Playwright shim and detection suites, the PyPI wheel tests),
+#   which tarpaulin does not instrument; they have no Rust tests of their own.
+# - render's window_proxy.rs / frame_location.rs / frame_ancestors.rs: compiled only under
+#   cfg(turbo_surf_native_proxy), i.e. the TURBO_SURF_ENGINE=154/155 source-built native V8
+#   (harness/detection/engine-15x); absent from this build, so they have no lines to cover.
+exclude = ["turbo-surf-napi", "turbo-surf-py"]
+exclude-files = [
+    "crates/turbo-surf-napi/*",
+    "crates/turbo-surf-py/*",
+    "crates/turbo-surf-render/src/window_proxy.rs",
+    "crates/turbo-surf-render/src/frame_location.rs",
+    "crates/turbo-surf-render/src/frame_ancestors.rs",
+]
 target-dir = "target/cov"
 timeout = "600s"
 # Run every test binary even after a failure, so a red run still reports full coverage.

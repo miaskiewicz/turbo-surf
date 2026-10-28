@@ -6,7 +6,8 @@ CI (`.github/workflows/ci.yml`) gates line coverage and cyclomatic complexity on
 ## Coverage
 
 Line coverage of the Rust workspace is measured by `cargo tarpaulin` with the LLVM engine
-(`rust/tarpaulin.toml`: every member crate's `src/`, the whole workspace's tests):
+(`rust/tarpaulin.toml`: the member crates' `src/` minus the exclusions under "Not measured", the
+whole workspace's tests):
 
 ```sh
 cd rust && cargo tarpaulin        # CI job `coverage`; fails below `fail-under`
@@ -22,19 +23,31 @@ workspace `fail-under` is 84.1 (measured 84.14%, 18632/22145 lines):
 |---|---|---|
 | turbo-surf-core | 93.80 | 93.8 |
 | turbo-surf-mcp | 65.72 | 65.7 |
-| turbo-surf-napi | 0.00 | 0 |
 | turbo-surf-page | 82.93 | 82.9 |
-| turbo-surf-py | 0.00 | 0 |
 | turbo-surf-render | 88.02 | 88.0 |
 | turbo-surf-transform | 100.00 | 100 |
 | turbo-surf-view | 99.55 | 99.5 |
 
-`turbo-surf-napi` and `turbo-surf-py` are exercised only by their Node / Python callers,
-which tarpaulin does not instrument. `turbo-surf-render`'s `window_proxy.rs`,
-`frame_location.rs` and `frame_ancestors.rs` (536 lines) compile only under
-`cfg(turbo_surf_native_proxy)` (the TURBO_SURF_ENGINE=154/155 native-V8 build) yet are counted
-in this default-build run. The coverage phase raises every floor toward >= 99.5 with
-behaviour-asserting tests; never lower one to pass a change.
+Target: >= 99.5 per measured crate. The coverage phase raises each floor to the measured
+value as tests land; never lower one to pass a change.
+
+### Not measured
+
+- **`turbo-surf-napi`, `turbo-surf-py`** (excluded in `rust/tarpaulin.toml` and listed under
+  `excluded` in `rust/coverage-floors.json`): the Node and Python bindings. Their code runs
+  only inside `node` (the Playwright shim and detection suites) and `python` (the wheel
+  tests) processes, which tarpaulin does not instrument, and they have no Rust tests.
+- **`turbo-surf-render/src/window_proxy.rs`, `frame_location.rs`, `frame_ancestors.rs`**
+  (`exclude-files`): compiled only under `cfg(turbo_surf_native_proxy)`, which
+  `turbo-surf-render/build.rs` sets for `TURBO_SURF_ENGINE=154|155`. That engine is a V8
+  compiled from source at a pinned Chromium revision (`harness/detection/engine-154`,
+  `engine-155`: network checkout, the Chromium toolchain, several GB of caches and hours of
+  build on macOS arm64); no prebuilt artifact is published, so CI cannot build it and the
+  default build has no lines to cover in these files. They are gated in that configuration
+  instead: every engine build run by the helper executes the native WindowProxy/security
+  regressions and the frame suites (`tests/frame_modules.rs`, `iframe_default_layout.rs`,
+  `sandbox_forms.rs` and the `cfg(turbo_surf_native_proxy)` cases elsewhere) before it is
+  accepted.
 
 ## Complexity
 

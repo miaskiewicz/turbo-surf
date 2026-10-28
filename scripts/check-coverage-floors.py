@@ -3,11 +3,12 @@
 
 Usage: check-coverage-floors.py <tarpaulin-report.json> <coverage-floors.json>
 
-The floors file maps each workspace crate (the directory under rust/crates/) to the
-minimum line coverage in percent. Every file in the report is attributed to the crate
-whose directory holds it; a crate's coverage is covered/coverable over its files. Exit 1
-when any crate is under its floor, or when a crate in the report has no floor (a new
-crate must declare one) or a floor names a crate the report lacks.
+The floors file is {"floors": {crate: percent}, "excluded": {crate: reason}}, crates
+named by their directory under rust/crates/. Every file in the report is attributed to
+the crate whose directory holds it; a crate's coverage is covered/coverable over its
+files. Exit 1 when any crate is under its floor, when a crate in the report has neither
+a floor nor an exclusion (a new crate must declare one), when a floor names a crate the
+report lacks, or when a crate is both floored and excluded. Excluded crates are skipped.
 """
 import json
 import sys
@@ -35,10 +36,15 @@ def percent(covered, coverable):
     return 100.0 if coverable == 0 else 100.0 * covered / coverable
 
 
-def check(report, floors):
+def check(report, config):
+    floors, excluded = config["floors"], config.get("excluded", {})
     totals = per_crate(report)
     failures, lines = [], []
-    for crate in sorted(set(totals) | set(floors)):
+    for crate in sorted(set(floors) & set(excluded)):
+        failures.append(f"{crate}: both floored and excluded")
+    for crate in sorted(set(excluded)):
+        lines.append(f"skip {crate}: excluded ({excluded[crate]})")
+    for crate in sorted((set(totals) | set(floors)) - set(excluded)):
         if crate not in floors:
             failures.append(f"{crate}: no floor in the floors file")
             continue

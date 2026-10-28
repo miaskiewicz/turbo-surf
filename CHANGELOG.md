@@ -20,6 +20,9 @@
 - MCP `analyze_akamai {retry:true}` (#58) can accept a candidate sensor: acceptance
   needs a 200 re-fetch with no wall markers and a cleared (`~0~`) `_abck`; the jar's
   ever-present `_abck`/`bm_sz` no longer count as a wall.
+- No-JS form submission of a single `<select>` (#61) follows HTML selectedness like
+  Chrome 156: the last `selected` option, else the first non-disabled one (it sent every
+  `selected` option, or nothing).
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

@@ -75,15 +75,39 @@ fn is_checkable(tag: &str, ty: Option<&str>) -> bool {
     tag == "input" && matches!(ty, Some("checkbox") | Some("radio"))
 }
 
+// HTML selectedness: a `multiple` select submits its `selected` options; a single
+// select submits its last `selected` option, else its first non-disabled option.
 fn select_pairs(tree: &Tree, select: Handle, name: &str) -> Vec<(String, String)> {
-    tree.node(select)
+    let options: Vec<Handle> = tree
+        .node(select)
         .query_selector_all("option")
         .iter()
-        .filter(|o| tree.get_attribute(o.handle(), "selected").is_some())
+        .map(|o| o.handle())
+        .collect();
+    let selected = options
+        .iter()
+        .copied()
+        .filter(|&o| tree.get_attribute(o, "selected").is_some());
+    let chosen: Vec<Handle> = if tree.get_attribute(select, "multiple").is_some() {
+        selected.collect()
+    } else {
+        selected
+            .last()
+            .or_else(|| {
+                options
+                    .iter()
+                    .copied()
+                    .find(|&o| tree.get_attribute(o, "disabled").is_none())
+            })
+            .into_iter()
+            .collect()
+    };
+    chosen
+        .into_iter()
         .map(|o| {
             let v = tree
-                .get_attribute(o.handle(), "value")
-                .map_or_else(|| text_of(tree, o.handle()), str::to_string);
+                .get_attribute(o, "value")
+                .map_or_else(|| text_of(tree, o), str::to_string);
             (name.to_string(), v)
         })
         .collect()
@@ -483,7 +507,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "turbo-surf#61: fails until the fix"]
     fn single_selects_submit_their_default_selectedness_like_chrome() {
         // Chrome 156 FormData: first option when none is selected, first non-disabled
         // option, the last of several `selected`; multiple/empty selects submit nothing

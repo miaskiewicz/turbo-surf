@@ -8173,7 +8173,6 @@ Object.defineProperty(StorageAccessHandle,'prototype',{writable:false});
 Object.defineProperty(StorageAccessHandle.prototype,Symbol.toStringTag,{value:'StorageAccessHandle',configurable:true});
 ops.op_storage_access_factory(source=>{const types={__proto__:null};for(let index=0;index<__storageAccessTypes.length;index++){const name=__storageAccessTypes[index];types[name]=source[name];}const handle=__recordCreate(StorageAccessHandle.prototype);__storageHandleMap.set(handle,{types});return handle;});
 if(ops.op_is_secure_context()) {
- globalThis.StorageAccessHandle=StorageAccessHandle;
  const __accessError=(state,name,message)=>new (state.storageRealm?.exception||__storageAccessException)(message,name);
  const __accessActive=state=>!state.inactive&&state.window&&ops.op_document_has_active_window(state.document);
  const has=function hasStorageAccess(){

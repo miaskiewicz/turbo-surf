@@ -28,7 +28,6 @@ async fn storage_access_requests_match_chrome() {
 /// turbo-surf#94: Chrome 156 (156.0.8078.47, headless, localhost page) does not expose
 /// `StorageAccessHandle` as a window global.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#94: fails until the fix"]
 async fn storage_access_handle_is_not_a_window_global() {
     let mut page = PageSession::open("<body>", "https://access.test/", "", "", 5000)
         .await

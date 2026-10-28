@@ -35,7 +35,6 @@ async fn queue_microtask_brand_checks_and_runs_on_a_removed_iframes_window() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#74: fails until the fix"]
 async fn queue_microtask_rejects_a_non_function_with_the_webidl_message() {
     let value = run("globalThis.r2=attempt(()=>queueMicrotask(5));", "r2").await;
     assert_eq!(

@@ -64,7 +64,10 @@ fn enqueue(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(args.get(0)) else {
-        type_error(scope, "The callback must be a function");
+        type_error(
+            scope,
+            "Failed to execute 'queueMicrotask' on 'Window': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     if context.get_slot::<FrameRetired>().is_some() || scope.is_execution_terminating() {

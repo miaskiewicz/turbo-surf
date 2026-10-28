@@ -49,7 +49,10 @@ const ROTATE_NAN_CHROME_156: &str = r#"["false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,N
 #[tokio::test(flavor = "current_thread")]
 async fn rotate_axis_angle_with_nan_axis_is_nan() {
     let got = eval(ROTATE_NAN_SCRIPT).await;
-    assert_eq!(got, serde_json::from_str::<Value>(ROTATE_NAN_CHROME_156).unwrap());
+    assert_eq!(
+        got,
+        serde_json::from_str::<Value>(ROTATE_NAN_CHROME_156).unwrap()
+    );
 }
 
 const INVERSE_SCRIPT: &str = r#"const out=[];const T=f=>{try{out.push(String(f()))}catch(e){out.push(e.name+': '+e.message)}};
@@ -65,5 +68,8 @@ const INVERSE_CHROME_156: &str = r#"["matrix(0.3333333333333333, 0, 0, 0.3333333
 #[tokio::test(flavor = "current_thread")]
 async fn axis_aligned_2d_inverse_stays_in_doubles() {
     let got = eval(INVERSE_SCRIPT).await;
-    assert_eq!(got, serde_json::from_str::<Value>(INVERSE_CHROME_156).unwrap());
+    assert_eq!(
+        got,
+        serde_json::from_str::<Value>(INVERSE_CHROME_156).unwrap()
+    );
 }

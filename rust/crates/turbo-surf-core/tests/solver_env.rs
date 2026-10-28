@@ -98,6 +98,11 @@ fn solver_selection_chain_and_sidecar_protocol() {
         "no solver configured"
     );
     assert_eq!(
+        SolveError::VisualChallenge.to_string(),
+        "reCAPTCHA v2 image-grid challenge needs vision/human — not solvable in-isolate \
+         (route to an external solver)"
+    );
+    assert_eq!(
         SolveError::Http("x".into()).to_string(),
         "solver HTTP error: x"
     );

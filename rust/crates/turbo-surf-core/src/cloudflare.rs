@@ -401,6 +401,11 @@ mod tests {
                     let req = String::from_utf8_lossy(&buf[..n]);
                     let resp = if req.starts_with("POST") {
                         assert!(req.contains("cf_chl_answer"), "expected answer POST: {req}");
+                        // No submit URL configured: the page origin's challenge platform.
+                        assert!(
+                            req.starts_with("POST /cdn-cgi/challenge-platform/ "),
+                            "{req}"
+                        );
                         let b = "{}";
                         format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: cf_clearance=CF~cleared~1; Path=/\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", b.len(), b)
                     } else {
@@ -412,9 +417,8 @@ mod tests {
             }
         });
         let base = format!("http://127.0.0.1:{port}");
-        let solver =
-            CloudflareSolver::new().with_submit_url(format!("{base}/cdn-cgi/challenge-platform/"));
-        let ch = Challenge::new(Vendor::Cloudflare, format!("{base}/"));
+        let solver = CloudflareSolver::new();
+        let ch = Challenge::new(Vendor::Cloudflare, format!("{base}/wall?x=1"));
         let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
         let cf = token.cookies.iter().find(|(k, _)| k == "cf_clearance");
         assert!(cf.is_some(), "must return cf_clearance");

@@ -903,6 +903,15 @@ mod credentialless_tests {
     }
 
     #[test]
+    fn destinations_use_their_sec_fetch_dest_tokens() {
+        use Destination::*;
+        assert_eq!(
+            [Document, Iframe, Script, Style, Image, Empty, Report].map(Destination::as_str),
+            ["document", "iframe", "script", "style", "image", "empty", "report"]
+        );
+    }
+
+    #[test]
     fn referrer_policy_headers_use_the_last_recognised_token() {
         // Referrer Policy 8.1: split the combined header on commas and keep the
         // last token that parses; an unknown token alone changes nothing.
@@ -1004,9 +1013,10 @@ mod configured_transport_tests {
                 error.message
             );
         }
-        assert_eq!(
-            format!("{:?}", ClientHints::default()),
-            "ClientHints { .. }"
-        );
+        // Without a configured transport both pools come from the stock builders.
+        let stock = ClientHints::default();
+        assert!(stock.manual_client().is_ok());
+        assert!(stock.upload_client().is_ok());
+        assert_eq!(format!("{stock:?}"), "ClientHints { .. }");
     }
 }

@@ -3149,6 +3149,56 @@ mod edge_tests {
     }
 
     #[tokio::test]
+    async fn a_streamed_dictionary_is_registered_only_within_eight_mib() {
+        use crate::compression_dictionary::MAX_DICTIONARY_BYTES;
+        use crate::request_context::{Destination, RequestMode};
+        let context =
+            RequestContext::resource("https://dict.test/", Destination::Script, RequestMode::Cors);
+        for (extra, stored) in [(0, true), (1, false)] {
+            let store = DictionaryStore::default();
+            let pending = PendingDictionary::new(
+                &store,
+                store.generation(),
+                "p",
+                "https://dict.test/d",
+                &context,
+                200,
+                vec![
+                    ("use-as-dictionary".into(), "match=\"/*\"".into()),
+                    ("cache-control".into(), "max-age=60".into()),
+                ],
+                std::time::SystemTime::now(),
+            );
+            let chunks = vec![
+                Ok(bytes::Bytes::from(vec![1; MAX_DICTIONARY_BYTES - 1])),
+                Ok(bytes::Bytes::from(vec![2; 1 + extra])),
+            ];
+            let mut body = ResponseBody {
+                stream: Some(Box::pin(futures_util::stream::iter(chunks))),
+                received: 0,
+                max_bytes: usize::MAX,
+                trace_id: 0,
+                url: "https://dict.test/d".into(),
+                status: 200,
+                content_type: String::new(),
+                trace_body: None,
+                trace_prefix: 0,
+                trace_skip_prefix: 0,
+                cache_store: None,
+                dictionary_store: pending,
+                background: None,
+            };
+            let mut received = 0;
+            while let Some(chunk) = body.next_chunk().await.unwrap() {
+                received += chunk.len();
+            }
+            assert_eq!(received, MAX_DICTIONARY_BYTES + extra);
+            let selected = store.select("p", "https://dict.test/a", &context);
+            assert_eq!(selected.is_some(), stored, "extra {extra}");
+        }
+    }
+
+    #[tokio::test]
     async fn a_background_fill_honours_a_closed_owner_and_a_detached_consumer() {
         const CACHEABLE: &[u8] = b"HTTP/1.1 200 OK\r\nCache-Control: max-age=60\r\nContent-Type: text/html\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello";
         let (origin, _heads) = serve(vec![CACHEABLE, CACHEABLE]).await;

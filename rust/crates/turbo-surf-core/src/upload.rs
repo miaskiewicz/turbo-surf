@@ -210,6 +210,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dropping_every_sender_without_finish_drains_then_ends_the_stream() {
+        let (sender, body) = upload_channel(4);
+        sender.write(vec![9]).await.unwrap();
+        let mut stream = body.take_stream().unwrap();
+        let next = stream.next();
+        drop(sender);
+        assert_eq!(next.await.unwrap().unwrap(), &[9][..]);
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
     async fn abort_preempts_queued_bytes_and_stalled_writes_release_on_receiver_drop() {
         let (sender, body) = upload_channel(3);
         sender.write(vec![1]).await.unwrap();

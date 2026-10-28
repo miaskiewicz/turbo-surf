@@ -52,6 +52,9 @@
 - `rotateAxisAngle` / `rotateAxisAngleSelf` with a NaN or infinite axis (#92) give a
   NaN 3x3 part like Chrome 156 (the matrix stayed unchanged); a zero turn stays the
   identity about any axis, and a NaN z axis drops `is2D` unless the turn is zero.
+- The axis-aligned 2D `DOMMatrix` inverse (#93) stays in doubles like Chrome 156
+  (cofactor times the reciprocal determinant: `new DOMMatrix([3,0,0,3,1,1]).inverse()`
+  is `0.3333333333333333`, not the float32 `0.3333333432674408`).
 - Large pages open (#75): compression-dictionary link discovery, which runs for every
   document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
   the whole page. It has no such bound now; every link settles like Chrome 156 (300

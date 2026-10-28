@@ -33,7 +33,7 @@
     Float64 = Float64Array,
     IdlTypeError = TypeError,
     IdlDOMException = DOMException,
-    { abs, atan2, cos, fround, hypot, max, min, sin, tan, PI, SQRT1_2 } = Math;
+    { abs, atan2, cos, hypot, max, min, sin, tan, PI, SQRT1_2 } = Math;
   // WebIDL `unrestricted double`: ToNumber, which (unlike `Number()`) rejects BigInt.
   const toNumber = (value) => +value;
   const read = (map, receiver) => apply(weakGet, map, [receiver]);
@@ -565,8 +565,6 @@
     return [result, want2D === undefined ? is2D(result) : want2D];
   };
   const inverse = (values) => {
-    // gfx::Transform keeps axis-aligned 2D transforms in float vectors. Its
-    // reciprocal scale is rounded before multiplying the translation.
     // A non-invertible matrix becomes all NaN and, like Blink, 3D.
     const singular = () => {
       const result = identity();
@@ -575,11 +573,15 @@
     };
     if (is2D(values) && values[1] === 0 && values[4] === 0) {
       if (values[0] === 0 || values[5] === 0) return singular();
-      const result = identity();
-      result[0] = fround(1 / fround(values[0]));
-      result[5] = fround(1 / fround(values[5]));
-      result[12] = fround(-fround(values[12]) * result[0]);
-      result[13] = fround(-fround(values[13]) * result[5]);
+      // Chrome 156 stays in doubles: each entry is its cofactor times 1 / det.
+      const result = identity(),
+        a = values[0],
+        d = values[5],
+        reciprocal = 1 / (a * d);
+      result[0] = d * reciprocal;
+      result[5] = a * reciprocal;
+      result[12] = -(values[12] * d) * reciprocal;
+      result[13] = -(values[13] * a) * reciprocal;
       return [result, true];
     }
     const rows = [

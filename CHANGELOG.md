@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- Transfer lists longer than 4096 entries (#96): structuredClone, window postMessage and
+  MessagePort.postMessage transfer every entry like Chrome 156 instead of throwing
+  `Native transfer sequence budget exceeded` (the 64 MiB serialization bound stays).
 - No-JS form submission through an `<input type=image>` submitter (#55): like Chrome 156
   it contributes the click coordinates `name.x=0&name.y=0` (`x=0&y=0` when unnamed)
   instead of `name=value`.

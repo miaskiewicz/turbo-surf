@@ -570,11 +570,6 @@ fn validate_transfers<'s>(
     };
     let array = v8::Local::<v8::Array>::try_from(transfer)
         .map_err(|_| JsErrorBox::type_error("Transfer sequence required"))?;
-    if array.length() > 4096 {
-        return Err(JsErrorBox::range_error(
-            "Native transfer sequence budget exceeded",
-        ));
-    }
     let mut buffers = Vec::new();
     let mut port_objects =
         Vec::<(v8::Local<'s, v8::Object>, crate::message_ports::PortToken)>::new();

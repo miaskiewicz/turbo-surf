@@ -63,14 +63,8 @@ let __portTransferSequence, __hostPortMessage;
       if (!objectLike(step)) throw new PortTypeError("Invalid transfer iterator result");
       if (step.done) return result;
       const entry = step.value;
-      if (result.length === 4096 || !objectLike(entry)) {
-        const error = new PortTypeError(
-          result.length === 4096
-            ? "Native transfer sequence budget exceeded"
-            : context + "Failed to convert value to 'object'.",
-        );
-        throw error;
-      }
+      if (!objectLike(entry))
+        throw new PortTypeError(context + "Failed to convert value to 'object'.");
       ownIndex(result, result.length, entry);
     }
   };

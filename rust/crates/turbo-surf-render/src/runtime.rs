@@ -8643,7 +8643,6 @@ globalThis.fetch = async (input, init = undefined) => {
       if(step.done)return result;
       const entry=step.value;
       if(!objectLike(entry))throw new __exceptionTypeError(transferContext+"Failed to convert value to 'object'.");
-      if(result.length===4096)throw new __exceptionTypeError("Native transfer sequence budget exceeded");
       apply(push,result,[entry]);
     }
   };

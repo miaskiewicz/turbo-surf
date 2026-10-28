@@ -62,6 +62,34 @@
   callable @@iterator property.`, `The provided value cannot be converted to a
   sequence.`, `Overload resolution failed.`, `… is not of type
   'StructuredSerializeOptions'.`). Internal stream-chunk posts stay unprefixed.
+- Named access on the Window object (#77): `window.f` / bare `f` resolve
+  `<div id=f>` like Chrome 156 through a native, non-masking `WindowProperties`
+  interceptor (child browsing contexts by `window.name` first, then elements by id and
+  HTML embed/form/img/object by name, one live `HTMLCollection` per shared name). Own
+  globals, declarations and the whole prototype chain shadow named items; the object
+  rejects sets/defines/deletes and prototype changes like Blink. It is enabled after the
+  bootstrap, reads the native tree on each lookup (nothing retains removed elements) and
+  never resolves the host result channel `__RESULT`.
+- `DOMQuad` (#69) is implemented (it was an empty stub): live `p1`..`p4` DOMPoints,
+  `fromRect`/`fromQuad`, `getBounds()`, `toJSON()`, WebIDL dictionary conversion and
+  messages, and structured clone / `postMessage`.
+- Geometry interfaces no longer call page-replaceable intrinsics at use time (#70, #82):
+  DOMPoint/DOMMatrix members use builtins captured at bootstrap and private helpers, and
+  the CSS transform parser scans characters instead of calling String/RegExp methods.
+- DOMPointInit/DOMMatrixInit arguments convert like WebIDL (#79: lexicographic member
+  order, non-objects rejected, Blink's messages); `DOMMatrixReadOnly.toJSON()` lists
+  `is2D`/`isIdentity` last (#80); rotations by multiples of 45/90 degrees are exact like
+  gfx::Transform (#81).
+- A frame's `queueMicrotask` is its own realm's brand-checked function (#73): a foreign
+  `this` throws `Illegal invocation`; a detached window still queues.
+- Engine bookkeeping is private (#83): the in-flight fetch count behind idle/settle and
+  the frame nesting depth are no longer the page-writable globals `__pendingFetches` /
+  `__depth`.
+- User Timing `detail` clone errors carry the caller's Chrome prefix (#78:
+  `Failed to execute 'mark' on 'Performance': …`, `'measure'`, `Failed to construct
+  'PerformanceMark': …`).
+- The PerformanceObserver window-interfaces probe gives its marks explicit start times
+  (#88), so entry order no longer depends on the clock tick (the test was flaky).
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

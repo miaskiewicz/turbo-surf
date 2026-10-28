@@ -122,13 +122,7 @@ test("aborting target setup keeps its finally command catchable without dispatch
   let setupError, cleanupError;
   const setup = (async () => {
     try {
-      await callWithLifecycle(
-        lifecycle,
-        connection,
-        "Network.enable",
-        {},
-        "worker",
-      );
+      await callWithLifecycle(lifecycle, connection, "Network.enable", {}, "worker");
     } catch (error) {
       setupError = error;
     } finally {
@@ -153,11 +147,7 @@ test("aborting target setup keeps its finally command catchable without dispatch
     await assert.doesNotReject(setup);
     assert.equal(setupError, lifecycle.signal.reason);
     assert.equal(cleanupError, lifecycle.signal.reason);
-    assert.equal(
-      sent.length,
-      1,
-      "post-abort cleanup must not send a protocol command",
-    );
+    assert.equal(sent.length, 1, "post-abort cleanup must not send a protocol command");
   } finally {
     connection.close();
     lifecycle.dispose();
@@ -195,48 +185,45 @@ test("a zombie-only browser group counts as retired; a live one's EPERM still fa
   live.dispose();
 });
 
-test(
-  "a Patchright leader whose group goes EPERM just before Node reaps it is retired; a live one still fails (turbo-surf#64)",
-  async () => {
-    // After context.close() macOS answers kill(-pgid) with EPERM a few ms before Node's 'exit'.
-    const calls = [];
-    const closing = leader(126);
-    const retiring = collectorLifecycle({
-      signals: new EventEmitter(),
-      platform: "darwin",
-      graceMs: 200,
-      kill(...args) {
-        calls.push(args);
-        if (closing.exitCode === null) {
-          setTimeout(() => {
-            closing.exitCode = 0;
-            closing.emit("exit", 0, null);
-          }, 5);
-        }
-        eperm();
-      },
-    });
-    retiring.own(closing);
-    const started = Date.now();
-    await retiring.stopBrowser();
-    retiring.dispose();
-    assert.deepEqual(calls, [
-      [-126, "SIGTERM"],
-      [-126, "SIGKILL"],
-    ]);
-    assert.equal(closing.listenerCount("exit"), 0);
-    // The reap wait ends on 'exit', not on the grace timer.
-    assert.ok(Date.now() - started < 200 * 2, `stop took ${Date.now() - started} ms`);
-    const live = leader(127);
-    const holding = collectorLifecycle({
-      signals: new EventEmitter(),
-      platform: "darwin",
-      graceMs: 20,
-      kill: eperm,
-    });
-    holding.own(live);
-    await assert.rejects(holding.stopBrowser(), /kill EPERM/);
-    assert.equal(live.listenerCount("exit"), 0);
-    holding.dispose();
-  },
-);
+test("a Patchright leader whose group goes EPERM just before Node reaps it is retired; a live one still fails (turbo-surf#64)", async () => {
+  // After context.close() macOS answers kill(-pgid) with EPERM a few ms before Node's 'exit'.
+  const calls = [];
+  const closing = leader(126);
+  const retiring = collectorLifecycle({
+    signals: new EventEmitter(),
+    platform: "darwin",
+    graceMs: 200,
+    kill(...args) {
+      calls.push(args);
+      if (closing.exitCode === null) {
+        setTimeout(() => {
+          closing.exitCode = 0;
+          closing.emit("exit", 0, null);
+        }, 5);
+      }
+      eperm();
+    },
+  });
+  retiring.own(closing);
+  const started = Date.now();
+  await retiring.stopBrowser();
+  retiring.dispose();
+  assert.deepEqual(calls, [
+    [-126, "SIGTERM"],
+    [-126, "SIGKILL"],
+  ]);
+  assert.equal(closing.listenerCount("exit"), 0);
+  // The reap wait ends on 'exit', not on the grace timer.
+  assert.ok(Date.now() - started < 200 * 2, `stop took ${Date.now() - started} ms`);
+  const live = leader(127);
+  const holding = collectorLifecycle({
+    signals: new EventEmitter(),
+    platform: "darwin",
+    graceMs: 20,
+    kill: eperm,
+  });
+  holding.own(live);
+  await assert.rejects(holding.stopBrowser(), /kill EPERM/);
+  assert.equal(live.listenerCount("exit"), 0);
+  holding.dispose();
+});

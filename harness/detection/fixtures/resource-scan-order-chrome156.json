@@ -13,11 +13,7 @@
   "generatorSha256": "c7aecc22c262eb3d39b5e20013703b940b0a9fbde432e565c9ab140a605efe2a",
   "errors": [],
   "result": {
-    "cutoff": [
-      1,
-      true,
-      1
-    ],
+    "cutoff": [1, true, 1],
     "finished": true
   },
   "unexpectedStylesheetRequests": [],

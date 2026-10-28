@@ -38,3 +38,54 @@ async fn wasm_modules_geometry_and_uncloneable_values_match_chrome() {
     let chrome: Value = serde_json::from_str(CHROME_156).unwrap();
     assert_eq!(log, chrome);
 }
+
+/// Chrome 156 capture: a port cannot carry itself, and a getter that transfers a
+/// listed buffer or port elsewhere mid-serialization fails the clone.
+const OWNERSHIP: &str = r#"(()=>{const log=[];const t=(n,f)=>{try{log.push([n,f()])}catch(e){log.push([n,e.name])}};
+const c=new MessageChannel();
+t('self port',()=>{c.port1.postMessage(0,[c.port1]);return 'ok'});
+const b=new ArrayBuffer(8);
+t('detached by getter',()=>{postMessage({get x(){structuredClone(0,{transfer:[b]});return 1}},'*',[b]);return 'ok'});
+t('detached after',()=>b.byteLength);
+const p=new MessageChannel();
+t('port moved by getter',()=>{postMessage({get x(){structuredClone(0,{transfer:[p.port1]});return 1}},'*',[p.port1]);return 'ok'});
+t('structuredClone transfer',()=>{const a=new ArrayBuffer(4);const r=structuredClone({a},{transfer:[a]});return [a.byteLength,r.a.byteLength]});
+t('structuredClone non-array transfer',()=>structuredClone(1,{transfer:5}));
+globalThis.__RESULT=JSON.stringify(log);})()"#;
+
+const OWNERSHIP_CHROME_156: &str = r#"[["self port","DataCloneError"],["detached by getter","DataCloneError"],["detached after",0],["port moved by getter","DataCloneError"],["structuredClone transfer",[0,4]],["structuredClone non-array transfer","TypeError"]]"#;
+
+#[tokio::test(flavor = "current_thread")]
+async fn transfer_ownership_changed_during_serialization_matches_chrome() {
+    let result = turbo_surf_render::eval_async(
+        "<!doctype html><body></body>",
+        "https://clone.test/",
+        OWNERSHIP,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, OWNERSHIP_CHROME_156);
+}
+
+/// Native bounds (not Chrome limits): at most 4096 transfer-list entries and 64 MiB
+/// of serialized message per postMessage, each rejected before anything moves (window
+/// postMessage reports the transfer-list bound as a TypeError).
+#[tokio::test(flavor = "current_thread")]
+async fn native_transfer_and_serialization_budgets_reject_before_transfer() {
+    let result = turbo_surf_render::eval_async(
+        "<!doctype html><body></body>",
+        "https://clone.test/",
+        r#"(()=>{const out=[];
+const buffers=Array.from({length:4097},()=>new ArrayBuffer(1));
+try{postMessage(0,'*',buffers);out.push('sent')}catch(e){out.push(e.name+': '+e.message,buffers[0].byteLength)}
+const big=new Uint8Array(64*1024*1024+1);
+try{structuredClone(big);out.push('cloned')}catch(e){out.push(e.name+': '+e.message)}
+globalThis.__RESULT=JSON.stringify(out);})()"#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result,
+        r#"["TypeError: Native transfer sequence budget exceeded",1,"RangeError: Native message serialization budget exceeded"]"#
+    );
+}

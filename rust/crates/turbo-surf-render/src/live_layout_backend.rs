@@ -925,19 +925,12 @@ fn scroll_into_view<'s>(
         }
     }
     let elements = crate::live_layout_dom::wrap_elements(scope, receiver, &changed, 1)?;
-    let result = v8::Object::new(scope);
-    let null = v8::null(scope);
-    if result.set_prototype(scope, null.into()) != Some(true) {
-        return Err("native scroll record interrupted".into());
-    }
     let viewport = v8::Boolean::new(scope, viewport_changed);
-    for (name, value) in [("elements", elements.into()), ("viewport", viewport.into())] {
-        let name = v8::String::new(scope, name).ok_or("native scroll record key interrupted")?;
-        if result.create_data_property(scope, name.into(), value) != Some(true) {
-            return Err("native scroll record interrupted".into());
-        }
-    }
-    Ok(result.into())
+    Ok(null_record(
+        scope,
+        [("elements", elements.into()), ("viewport", viewport.into())],
+    )?
+    .into())
 }
 fn scroll_root(view: &LayoutView) -> Option<turbo_dom_layout::layout_snapshot::SourceId> {
     view.styles
@@ -1437,23 +1430,34 @@ fn offset<'s>(
     } else {
         v8::null(scope).into()
     };
-    let result = v8::Object::new(scope);
-    let null = v8::null(scope);
-    if result.set_prototype(scope, null.into()) != Some(true) {
-        return Err("native offset record interrupted".into());
-    }
     let values = [
         ("left", v8::Integer::new(scope, position.left).into()),
         ("top", v8::Integer::new(scope, position.top).into()),
         ("parent", parent),
     ];
-    for (name, value) in values {
-        let name = v8::String::new(scope, name).ok_or("native offset record key interrupted")?;
-        if result.create_data_property(scope, name.into(), value) != Some(true) {
-            return Err("native offset record write interrupted".into());
-        }
+    null_record(scope, values)
+}
+
+/// A null-prototype record of own data properties, created in one step: no guest
+/// prototype, setter or proxy can observe or interrupt its construction.
+fn null_record<'s, const N: usize>(
+    scope: &mut v8::PinScope<'s, '_>,
+    fields: [(&str, v8::Local<'s, v8::Value>); N],
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let mut names = Vec::with_capacity(N);
+    let mut values = Vec::with_capacity(N);
+    for (name, value) in fields {
+        names.push(
+            v8::String::new(scope, name)
+                .ok_or("native record key interrupted")?
+                .into(),
+        );
+        values.push(value);
     }
-    Ok(result)
+    let null = v8::null(scope).into();
+    Ok(v8::Object::with_prototype_and_properties(
+        scope, null, &names, &values,
+    ))
 }
 
 #[derive(Serialize)]
@@ -1589,19 +1593,14 @@ fn caret_at_point<'s>(
     let node = crate::live_layout_dom::wrap_elements(scope, document, &[source], 3)?
         .get_index(scope, 0)
         .ok_or("native caret source wrapping interrupted")?;
-    let result = v8::Object::new(scope);
-    let null = v8::null(scope);
-    result.set_prototype(scope, null.into());
     let rect = deno_core::serde_v8::to_v8(scope, [rect.x, rect.y, rect.width, rect.height])
         .map_err(|error| error.to_string())?;
     let offset = v8::Integer::new_from_unsigned(scope, offset as u32);
-    for (name, value) in [("node", node), ("offset", offset.into()), ("rect", rect)] {
-        let name = v8::String::new(scope, name).ok_or("native caret record key interrupted")?;
-        if result.create_data_property(scope, name.into(), value) != Some(true) {
-            return Err("native caret record interrupted".into());
-        }
-    }
-    Ok(result.into())
+    Ok(null_record(
+        scope,
+        [("node", node), ("offset", offset.into()), ("rect", rect)],
+    )?
+    .into())
 }
 
 #[derive(Serialize)]

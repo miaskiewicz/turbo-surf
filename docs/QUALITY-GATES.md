@@ -16,17 +16,17 @@ cd rust && cargo tarpaulin        # CI job `coverage`; fails below `fail-under`
 Then every crate must meet its own floor (`rust/coverage-floors.json`, checked by
 `python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json
 rust/coverage-floors.json`; a crate without a floor fails too). Floors are the values measured
-on 2026-10-27 (base 27ed802 plus the first coverage-phase tests), rounded down to 0.1; the
-workspace `fail-under` is 84.1 (measured 84.14%, 18632/22145 lines):
+on 2026-10-28 (consol/cov-c4), rounded down to 0.1; the workspace `fail-under` is 92.5
+(measured 92.51%, 18912/20444 lines):
 
 | crate | measured | floor |
 |---|---|---|
-| turbo-surf-core | 93.80 | 93.8 |
-| turbo-surf-mcp | 65.72 | 65.7 |
-| turbo-surf-page | 82.93 | 82.9 |
-| turbo-surf-render | 88.02 | 88.0 |
+| turbo-surf-core | 95.80 | 95.8 |
+| turbo-surf-mcp | 84.39 | 84.3 |
+| turbo-surf-page | 100.00 | 100 |
+| turbo-surf-render | 91.83 | 91.8 |
 | turbo-surf-transform | 100.00 | 100 |
-| turbo-surf-view | 99.55 | 99.5 |
+| turbo-surf-view | 99.91 | 99.9 |
 
 Target: >= 99.5 per measured crate. The coverage phase raises each floor to the measured
 value as tests land; never lower one to pass a change.

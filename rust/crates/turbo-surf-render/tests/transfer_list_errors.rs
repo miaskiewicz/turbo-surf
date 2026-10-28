@@ -179,3 +179,29 @@ async fn serialization_and_conversion_errors_match_chrome() {
     }
     assert_eq!(log, chrome);
 }
+
+/// Transfer lists longer than 4096 entries (turbo-surf#96): Chrome 156 (156.0.8078.47,
+/// headless, localhost) transfers every entry through structuredClone, window
+/// postMessage, MessagePort.postMessage with an iterable list and with options, and
+/// with MessagePorts as the transferables; it rejected none up to 1,000,000 buffers.
+#[tokio::test(flavor = "current_thread")]
+async fn transfer_lists_past_4096_entries_transfer_like_chrome156() {
+    let script = r#"(async()=>{const out=[];const B=()=>Array.from({length:5000},()=>new ArrayBuffer(1));
+try{let l=B();const r=structuredClone(l,{transfer:l});out.push(r.length,r[4999].byteLength,l[0].byteLength,l[4999].detached)}catch(e){out.push(e.name+': '+e.message)}
+try{let l=B();const got=new Promise(r=>addEventListener('message',e=>r(e.data.length),{once:true}));postMessage(l,'*',l);out.push(await got,l[4999].detached)}catch(e){out.push(e.name+': '+e.message)}
+try{let l=B();const {port1,port2}=new MessageChannel();const got=new Promise(r=>port2.onmessage=e=>r(e.data.length));port1.postMessage(l,new Set(l));out.push(await got)}catch(e){out.push(e.name+': '+e.message)}
+try{let l=B();const {port1,port2}=new MessageChannel();const got=new Promise(r=>port2.onmessage=e=>r(e.data.length));port1.postMessage(l,{transfer:l});out.push(await got)}catch(e){out.push(e.name+': '+e.message)}
+try{const l=Array.from({length:5000},()=>new MessageChannel().port1);const r=structuredClone(l,{transfer:l});out.push(r.length,r[4999] instanceof MessagePort)}catch(e){out.push(e.name+': '+e.message)}
+globalThis.__RESULT=JSON.stringify(out);})()"#;
+    let result = turbo_surf_render::eval_async(
+        "<!doctype html><body></body>",
+        "https://clone.test/",
+        script,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result, "[5000,1,0,true,5000,true,5000,5000,5000,true]",
+        "Chrome 156 transfers all 5000 entries on every path"
+    );
+}

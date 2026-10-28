@@ -40,8 +40,8 @@ value as tests land; never lower one to pass a change.
   `excluded` in `rust/coverage-floors.json`): the Node and Python bindings. Their code runs
   only inside `node` (the Playwright shim and detection suites) and `python` (the wheel
   tests) processes, which tarpaulin does not instrument, and they have no Rust tests.
-- **`turbo-surf-render/src/window_proxy.rs`, `frame_location.rs`, `frame_ancestors.rs`**
-  (`exclude-files`): compiled only under `cfg(turbo_surf_native_proxy)`, which
+- **`turbo-surf-render/src/window_proxy.rs`, `frame_location.rs`, `frame_ancestors.rs`,
+  `code_generation.rs`** (`exclude-files`): compiled only under `cfg(turbo_surf_native_proxy)`, which
   `turbo-surf-render/build.rs` sets for `TURBO_SURF_ENGINE=154|155`. That engine is a V8
   compiled from source at a pinned Chromium revision (`harness/detection/engine-154`,
   `engine-155`: network checkout, the Chromium toolchain, several GB of caches and hours of

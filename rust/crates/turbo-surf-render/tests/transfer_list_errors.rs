@@ -131,3 +131,52 @@ async fn transfer_checks_follow_value_serialization_like_chrome() {
     }
     assert_eq!(log, chrome);
 }
+
+/// turbo-surf#76: value-serialization errors carry the caller's prefix (History
+/// its own operation), and transfer/options conversion errors use Chrome's Web IDL
+/// text for non-iterable and primitive arguments.
+const CONVERSION: &str = r#"const log=[];const t=(n,f)=>{try{f();log.push([n,'ok'])}catch(e){log.push([n,e.name+': '+e.message])}};
+const e=new ArrayBuffer(1);postMessage(0,'*',[e]);
+t('function',()=>postMessage(function f(){},'*'));
+t('function via port',()=>new MessageChannel().port1.postMessage(()=>{}));
+t('function via clone',()=>structuredClone(()=>{}));
+t('symbol',()=>postMessage(Symbol('s'),'*'));
+t('node',()=>postMessage(document.body,'*'));
+t('detached value',()=>postMessage(e,'*'));
+t('detached value via clone',()=>structuredClone(e));
+t('function before detached',()=>postMessage(function f(){},'*',[e]));
+t('history push',()=>history.pushState(()=>{},''));
+t('history replace',()=>history.replaceState(Symbol(),''));
+t('not iterable',()=>postMessage(0,'*',{}));
+t('not iterable options',()=>postMessage(0,{transfer:{}}));
+t('port dictionary without transfer',()=>new MessageChannel().port1.postMessage(0,{}));
+t('port not iterable options',()=>new MessageChannel().port1.postMessage(0,{transfer:{}}));
+t('port primitive options',()=>new MessageChannel().port1.postMessage(0,5));
+t('clone not iterable',()=>structuredClone(0,{transfer:{}}));
+t('clone primitive transfer',()=>structuredClone(0,{transfer:5}));
+t('clone primitive options',()=>structuredClone(0,5));
+t('primitive transfer',()=>postMessage(0,'*',5));
+globalThis.log=log;"#;
+
+const CONVERSION_CHROME_156: &str = r#"[["function","DataCloneError: Failed to execute 'postMessage' on 'Window': function f(){} could not be cloned."],["function via port","DataCloneError: Failed to execute 'postMessage' on 'MessagePort': ()=>{} could not be cloned."],["function via clone","DataCloneError: Failed to execute 'structuredClone' on 'Window': ()=>{} could not be cloned."],["symbol","DataCloneError: Failed to execute 'postMessage' on 'Window': Symbol(s) could not be cloned."],["node","DataCloneError: Failed to execute 'postMessage' on 'Window': HTMLBodyElement object could not be cloned."],["detached value","DataCloneError: Failed to execute 'postMessage' on 'Window': An ArrayBuffer is detached and could not be cloned."],["detached value via clone","DataCloneError: Failed to execute 'structuredClone' on 'Window': An ArrayBuffer is detached and could not be cloned."],["function before detached","DataCloneError: Failed to execute 'postMessage' on 'Window': function f(){} could not be cloned."],["history push","DataCloneError: Failed to execute 'pushState' on 'History': ()=>{} could not be cloned."],["history replace","DataCloneError: Failed to execute 'replaceState' on 'History': Symbol() could not be cloned."],["not iterable","TypeError: Failed to execute 'postMessage' on 'Window': The object must have a callable @@iterator property."],["not iterable options","TypeError: Failed to execute 'postMessage' on 'Window': Failed to read the 'transfer' property from 'StructuredSerializeOptions': The object must have a callable @@iterator property."],["port dictionary without transfer","ok"],["port not iterable options","TypeError: Failed to execute 'postMessage' on 'MessagePort': Failed to read the 'transfer' property from 'StructuredSerializeOptions': The object must have a callable @@iterator property."],["port primitive options","TypeError: Failed to execute 'postMessage' on 'MessagePort': Overload resolution failed."],["clone not iterable","TypeError: Failed to execute 'structuredClone' on 'Window': Failed to read the 'transfer' property from 'StructuredSerializeOptions': The object must have a callable @@iterator property."],["clone primitive transfer","TypeError: Failed to execute 'structuredClone' on 'Window': Failed to read the 'transfer' property from 'StructuredSerializeOptions': The provided value cannot be converted to a sequence."],["clone primitive options","TypeError: Failed to execute 'structuredClone' on 'Window': The provided value is not of type 'StructuredSerializeOptions'."],["primitive transfer","TypeError: Failed to execute 'postMessage' on 'Window': The provided value cannot be converted to a sequence."]]"#;
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#76: fails until the fix"]
+async fn serialization_and_conversion_errors_match_chrome() {
+    let html = format!("<!doctype html><body><script>{CONVERSION}</script></body>");
+    let mut page = PageSession::open(&html, "https://transfer.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let log: serde_json::Value =
+        serde_json::from_str(&page.eval_json_expression("log").await.unwrap()).unwrap();
+    let chrome: serde_json::Value = serde_json::from_str(CONVERSION_CHROME_156).unwrap();
+    for (got, want) in log
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(chrome.as_array().unwrap())
+    {
+        assert_eq!(got, want);
+    }
+    assert_eq!(log, chrome);
+}

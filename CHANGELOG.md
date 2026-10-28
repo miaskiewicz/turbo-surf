@@ -26,6 +26,10 @@
 - String-handler timers under CSP (#63): a `setTimeout("…")` / `setInterval("…")` that
   `script-src` blocks returns id `0` like Chrome 156 (it returned a fresh id), and its
   `'report-sample'` sample is the 40-unit prefix with ASCII whitespace trimmed.
+- Media queries with unknown features or invalid values (#65) evaluate as *unknown*
+  like Chrome 156 (`matchMedia` and live layout `@media`): `not (unknown-x)`,
+  `not (orientation: 1px)` and `(width: 800px) and (not (unknown-x))` no longer match,
+  and `(width: red)` is unknown instead of an error.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

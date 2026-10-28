@@ -7842,7 +7842,7 @@ ops.op_capture_view_transition_host((command, argument) => {
 globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
 // Native V8 jobs share the real Promise/observer microtask checkpoint and the
 // host watchdog. Their callbacks retain private realm ownership until delivery.
-ops.op_install_microtask_queue();
+ops.op_install_microtask_queue(globalThis);
 const __nextLocalTimer = () => {
   if (!__timers.length || ops.op_window_message_pending()) return -1;
   let index=0;

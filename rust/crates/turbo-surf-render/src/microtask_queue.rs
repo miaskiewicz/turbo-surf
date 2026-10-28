@@ -70,10 +70,13 @@ fn enqueue(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v
         );
         return;
     };
-    if context.get_slot::<FrameRetired>().is_some() || scope.is_execution_terminating() {
+    if scope.is_execution_terminating() {
         return;
     }
-    let scope = &mut v8::ContextScope::new(scope, context);
+    // A detached window still queues (Chrome 156); the job belongs to the
+    // callback's realm, so `deliver` drops it once that realm is retired.
+    let owner = callback.get_creation_context(scope).unwrap_or(context);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     if let Some(job) = v8::Function::builder(deliver)
         .data(callback.into())
         .constructor_behavior(v8::ConstructorBehavior::Throw)
@@ -82,8 +85,23 @@ fn enqueue(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v
         scope.enqueue_microtask(job);
     }
 }
+/// Installs the brand-checked `queueMicrotask` on `window`'s own realm. Ops run in
+/// the context that created them (the main realm), so a frame's bootstrap passes
+/// its own global and the function is created there (turbo-surf#73): a frame's
+/// `queueMicrotask` then rejects a foreign `this` like the main window's.
 #[op2(fast)]
-pub(super) fn op_install_microtask_queue(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
+pub(super) fn op_install_microtask_queue(
+    scope: &mut v8::PinScope,
+    window: v8::Local<v8::Object>,
+) -> Result<(), JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("microtask realm unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let global = context.global(scope);
+    if !window.strict_equals(global.into()) {
+        return Err(JsErrorBox::type_error("Illegal invocation"));
+    }
     let name = v8::String::new(scope, "queueMicrotask")
         .ok_or_else(|| JsErrorBox::generic("microtask name allocation failed"))?;
     let function = v8::Function::builder(enqueue)
@@ -92,7 +110,6 @@ pub(super) fn op_install_microtask_queue(scope: &mut v8::PinScope) -> Result<(),
         .build(scope)
         .ok_or_else(|| JsErrorBox::generic("microtask function allocation failed"))?;
     function.set_name(name);
-    let global = scope.get_current_context().global(scope);
     if global.create_data_property(scope, name.into(), function.into()) != Some(true) {
         return Err(JsErrorBox::generic("microtask installation failed"));
     }

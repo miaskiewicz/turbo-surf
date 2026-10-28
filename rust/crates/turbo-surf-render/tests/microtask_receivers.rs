@@ -44,7 +44,6 @@ async fn queue_microtask_rejects_a_non_function_with_the_webidl_message() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#73: fails until the iframe realm's queueMicrotask brand-checks"]
 async fn an_iframes_queue_microtask_brand_checks_its_receiver() {
     let value = run(
         "const q=document.getElementById('f').contentWindow.queueMicrotask;

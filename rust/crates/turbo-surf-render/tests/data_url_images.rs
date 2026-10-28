@@ -10,7 +10,8 @@ log.push(await load('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" 
 log.push(await load('data:text/plain,hello'));
 return log;})()"#;
 
-const CHROME_156: &str = r#"[["load",3,2,true],["error",0,true],["load",7,5,true],["error",0,true]]"#;
+const CHROME_156: &str =
+    r#"[["load",3,2,true],["error",0,true],["load",7,5,true],["error",0,true]]"#;
 
 #[tokio::test(flavor = "current_thread")]
 async fn data_url_images_load_or_fail_like_chrome() {

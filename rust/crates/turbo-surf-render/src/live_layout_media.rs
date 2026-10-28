@@ -391,6 +391,48 @@ mod tests {
             host: HostMedia::default(),
         }
     }
+    /// Chrome 156 (156.0.8078.4, headless) `matchMedia(query).matches` in an
+    /// 800x600 iframe on a localhost page.
+    #[test]
+    #[ignore = "turbo-surf#65: fails until the fix"]
+    fn boolean_ratio_orientation_and_unknown_conditions_match_chrome() {
+        for (query, chrome) in [
+            ("(width)", true),
+            ("(height)", true),
+            ("(aspect-ratio)", true),
+            ("(aspect-ratio: 4)", false),
+            ("(orientation: 1px)", false),
+            ("(orientation: diagonal)", false),
+            ("(orientation)", true),
+            ("(width: 1/2)", false),
+            ("(width: red)", false),
+            ("(min-width: 799.5px) and (max-width: 800.5px)", true),
+            ("not ((width: 1px) or (unknown-x: 1))", false),
+            ("(width: 800px) or (height: 1px)", true),
+            ("((width: 1px) and (height: 600px))", false),
+            ("not all and (width: 800px)", false),
+            ("screen and (not (width: 1px))", true),
+            ("(width >= 50em)", true),
+            ("(400px <= width <= 800px)", true),
+            // Unknown features and invalid values are "unknown": `not` keeps them
+            // unknown and an unknown query does not match.
+            ("not (unknown-feature: invalid)", false),
+            ("not screen and (unknown-x)", false),
+            ("not (orientation: 1px)", false),
+            ("not (aspect-ratio: 4)", true),
+            ("not (foo bar)", false),
+            ("(foo bar)", false),
+            ("not (width: red)", false),
+            ("not (width: 1/2)", false),
+            ("(width: 800px) and (not (unknown-x))", false),
+            ("not ((width: 800px) or (unknown-x))", false),
+            ("(width: 800px) or (unknown-x: 1)", true),
+            ("not ((width: 800px) and (unknown-x: 1))", false),
+            ("not (orientation: diagonal)", false),
+        ] {
+            assert_eq!(viewport().matches(query), Ok(chrome), "{query}");
+        }
+    }
     #[test]
     fn viewport_features_use_actual_dimensions_ranges_negation_and_initial_font_units() {
         for query in [

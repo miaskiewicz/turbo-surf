@@ -82,11 +82,7 @@
   {
     "id": "window-global-inventory",
     "match": { "area": "js", "path": "features.globals" },
-    "allowAdded": [
-      "PaintWorkletGlobalScope",
-      "webkitAudioContext",
-      "__name"
-    ],
+    "allowAdded": ["PaintWorkletGlobalScope", "webkitAudioContext", "__name"],
     "allowRemoved": [],
     "reason": "Window own-property names native exposes and Chrome 156 does not: two absent-interface stub names from runtime.rs's stub list (PaintWorkletGlobalScope is worklet-only, webkitAudioContext was removed; StorageAccessHandle is no longer a global since turbo-surf#94) and one internal global (`__name`, the esbuild keepNames passthrough in runtime.rs; the hydration fetch drain counter `__pendingFetches` is private since turbo-surf#83). Pinned by name so any new extra global is a tell. Interface owners: API-INVENTORY.json / issue #28.",
     "owner": "render/interfaces"

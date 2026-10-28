@@ -19,6 +19,7 @@
   },
   "files": {
     "ignore": [
+      "harness/detection/API-SHAPE-LAST-RUN.json",
       "harness/detection/pointer-capture-probe.js",
       "harness/detection/pointer-capture-cases.json",
       "harness/detection/fixtures/pointer-capture-chrome156.json",

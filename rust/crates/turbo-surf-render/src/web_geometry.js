@@ -213,7 +213,7 @@
     ];
   const sinCosDegrees = (degrees) => {
     if (degrees % 90 === 0) return quarterTurns[(((degrees / 90) % 4) + 4) % 4];
-    if (degrees % 45 === 0) return eighthTurns[(((((degrees - 45) / 90) % 4) + 4) % 4)];
+    if (degrees % 45 === 0) return eighthTurns[((((degrees - 45) / 90) % 4) + 4) % 4];
     const radians = (degrees * PI) / 180;
     return [sin(radians), cos(radians)];
   };
@@ -291,10 +291,7 @@
     return translated(multiply(translated(values, x, y, z), value), -x, -y, -z);
   };
   const rotatedAxisAngle = (values, x, y, z, degrees) =>
-    multiply(
-      values,
-      rotation(toNumber(x), toNumber(y), toNumber(z), toNumber(degrees)),
-    );
+    multiply(values, rotation(toNumber(x), toNumber(y), toNumber(z), toNumber(degrees)));
   const rotated = (values, rotX, rotY, rotZ) => {
     if (rotY === undefined && rotZ === undefined) {
       rotZ = rotX;
@@ -620,11 +617,18 @@
     }
     static fromPoint(other = undefined) {
       const result = create(DOMPointReadOnly.prototype);
-      store(points, result, pointInit(other, "Failed to execute 'fromPoint' on 'DOMPointReadOnly': "));
+      store(
+        points,
+        result,
+        pointInit(other, "Failed to execute 'fromPoint' on 'DOMPointReadOnly': "),
+      );
       return result;
     }
     matrixTransform(other = undefined) {
-      return transformed(dictionary(other, "Failed to execute 'matrixTransform' on 'DOMPointReadOnly': ")[0], point(this));
+      return transformed(
+        dictionary(other, "Failed to execute 'matrixTransform' on 'DOMPointReadOnly': ")[0],
+        point(this),
+      );
     }
     toJSON() {
       const value = point(this);
@@ -793,7 +797,10 @@
     }
     transformPoint(other = undefined) {
       const value = matrix(this);
-      return transformed(value, pointInit(other, "Failed to execute 'transformPoint' on 'DOMMatrixReadOnly': "));
+      return transformed(
+        value,
+        pointInit(other, "Failed to execute 'transformPoint' on 'DOMMatrixReadOnly': "),
+      );
     }
     toFloat32Array() {
       const values = matrix(this),

@@ -34,11 +34,7 @@
     childFrames = ops.op_window_child_frames,
     windowView = __G.windowView,
     document = __document;
-  if (
-    typeof namespace !== "function" ||
-    typeof namedObject !== "function" ||
-    !collectionPrototype
-  )
+  if (typeof namespace !== "function" || typeof namedObject !== "function" || !collectionPrototype)
     return;
   const html = "http://www.w3.org/1999/xhtml";
   // The host result channel (`__RESULT`, written by host scripts and read back by

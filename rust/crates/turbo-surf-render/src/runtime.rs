@@ -24,7 +24,15 @@ mod code_generation;
 #[cfg(turbo_surf_native_proxy)]
 #[path = "frame_modules.rs"]
 mod frame_modules;
-#[cfg(turbo_surf_native_proxy)]
+
+// The stock SDK has no native WindowProxy, per-frame module loader or code-generation
+// callback: same-named stand-ins keep every call site unconditional.
+#[cfg(not(turbo_surf_native_proxy))]
+#[path = "stock_engine.rs"]
+mod stock_engine;
+#[cfg(not(turbo_surf_native_proxy))]
+use stock_engine::{code_generation, frame_modules, window_proxy};
+
 use frame_modules::op_frame_module;
 
 #[path = "microtask_queue.rs"]
@@ -4784,12 +4792,9 @@ fn op_frame_set_document<'s>(
         if sandbox.opaque {
             metadata["origin"] = serde_json::Value::String("null".into());
         }
-        #[cfg(turbo_surf_native_proxy)]
         if replaced.is_some() {
             window_proxy::synchronize_origins(scope, context);
         }
-        #[cfg(not(turbo_surf_native_proxy))]
-        let _ = replaced;
         metadata["depth"] =
             serde_json::Value::from(context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0));
         if metadata
@@ -4956,7 +4961,6 @@ fn op_frame_set_document<'s>(
             .clone()
             .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
         let scope = &mut v8::ContextScope::new(scope, context);
-        #[cfg(turbo_surf_native_proxy)]
         frame_modules::register_frame_modules(scope, &document_base)?;
         let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
             let policy = handle.policy.borrow();
@@ -4983,7 +4987,6 @@ fn op_frame_set_document<'s>(
             None => DocumentFacts::inherited(scope, context, parent),
         };
         install_document_facts(scope, facts);
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_document(scope);
         let global = context.global(scope);
         let core = v8::Local::new(scope, core);
@@ -5039,7 +5042,6 @@ fn op_frame_set_document<'s>(
             parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
             return Err(JsErrorBox::generic("injected frame initialization failure"));
         }
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::capture_exception(scope);
         if let Some(namespace) = frame_namespace(scope) {
             context.set_slot(Rc::new(FrameEnvironment(
@@ -5062,10 +5064,7 @@ fn op_frame_set_document<'s>(
             &[metadata, parent_window.into(), host.into()],
         )
         .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_location(scope, &metadata_location);
-        #[cfg(not(turbo_surf_native_proxy))]
-        let _ = metadata_location;
         crate::browser_env::finish_key_order(scope);
         run_frame_init_script(scope)?;
         Ok(global)
@@ -5446,13 +5445,7 @@ fn allocate_frame<'s>(
         .clone()
         .ok_or_else(|| JsErrorBox::generic("frame host core unavailable"))?;
     let core = v8::Local::new(scope, saved_core);
-    #[cfg(turbo_surf_native_proxy)]
     let context = window_proxy::context(scope, previous);
-    #[cfg(not(turbo_surf_native_proxy))]
-    let context = {
-        let _ = previous;
-        v8::Context::new(scope, Default::default())
-    };
     crate::script_inventory::register_frame(scope, context);
     context.set_slot(Rc::new(FrameContextMarker));
     context.set_slot(Rc::new(FrameDepth(depth)));
@@ -5510,7 +5503,6 @@ fn allocate_frame<'s>(
         install_css_authorization(scope)?;
         let facts = DocumentFacts::inherited(scope, context, parent);
         install_document_facts(scope, facts);
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_document(scope);
 
         let name = v8::String::new(scope, "ts").unwrap();
@@ -5542,7 +5534,6 @@ fn allocate_frame<'s>(
         crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
         crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
         crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::capture_exception(scope);
         crate::browser_env::finish_key_order(scope);
         run_frame_init_script(scope)?;
@@ -5631,16 +5622,6 @@ fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
         }
     }
     pending
-}
-
-/// Child-frame ES modules need the native SDK's per-context module loader
-/// (`frame_modules.rs`); the stock SDK reports the limit to the frame runner.
-#[cfg(not(turbo_surf_native_proxy))]
-#[op2(fast)]
-fn op_frame_module(_window: v8::Local<v8::Object>, _index: u32) -> Result<(), JsErrorBox> {
-    Err(JsErrorBox::generic(
-        "Child-frame ES modules require the exact native SDK",
-    ))
 }
 
 #[op2(reentrant)]
@@ -5918,7 +5899,6 @@ fn op_document_location_url(
     let Some(context) = document.get_creation_context(scope) else {
         return state.borrow::<Base>().0.clone();
     };
-    #[cfg(turbo_surf_native_proxy)]
     if let Some(url) = window_proxy::location_url(context) {
         return url;
     }
@@ -6563,10 +6543,7 @@ fn op_storage_call<'s>(
     if storage_id(scope, receiver)? != id {
         return Err(JsErrorBox::type_error("Illegal invocation"));
     }
-    #[cfg(turbo_surf_native_proxy)]
     let location = window_proxy::location_url(owner);
-    #[cfg(not(turbo_surf_native_proxy))]
-    let location = None;
     let url = location
         .or_else(|| {
             owner
@@ -6788,7 +6765,6 @@ fn install_environment<'s>(
                     sandboxed: pointer_lock_sandboxed,
                 }));
             crate::browser_env::capture_file_host(scope);
-            #[cfg(turbo_surf_native_proxy)]
             code_generation::install_code_generation_authorization(scope)?;
             return Ok(());
         }

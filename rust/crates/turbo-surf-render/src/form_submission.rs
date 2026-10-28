@@ -84,7 +84,6 @@ fn submit<'s>(
     };
     let state = JsRuntime::op_state_from(scope);
     let source = state.borrow().borrow::<Base>().0.clone();
-    #[cfg(turbo_surf_native_proxy)]
     let source = window_proxy::location_url(context).unwrap_or(source);
     let base = approved_base(scope, context, form, &source);
     let action = payload.action.as_deref().filter(|value| !value.is_empty());

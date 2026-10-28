@@ -242,6 +242,42 @@ mod tests {
             assert!(uses.color("--paint").is_err(), "{source}");
         }
     }
+    #[test]
+    fn nested_rule_scan_reaches_conditional_and_keyframe_declarations() {
+        let sheet = StyleSheet::parse(
+            "@media screen{a{--m:var(--paint)}}@supports (color:red){b{--s:var(--m)}}\
+             @keyframes k{from{width:var(--s)}}@font-face{font-family:x}",
+            ParserOptions::default(),
+        )
+        .unwrap();
+        let mut uses = Uses::default();
+        uses.rules(&sheet.rules.0).unwrap();
+        // --paint flows through @media and @supports into a keyframe width.
+        assert!(uses.color("--paint").unwrap_err().contains("width"));
+        let layer = StyleSheet::parse("@layer l{a{color:red}}", ParserOptions::default()).unwrap();
+        assert_eq!(
+            Uses::default().rules(&layer.rules.0).unwrap_err(),
+            "native layout cannot prove unknown nested at-rule geometry neutral"
+        );
+    }
+    #[test]
+    fn dependency_scan_rejects_unresolvable_variable_syntax() {
+        let error = "native layout cannot resolve CSS variable dependency syntax";
+        let deep = format!("{}x{}", "(".repeat(130), ")".repeat(130));
+        for source in [
+            "var(paint)",
+            "url(a b)",
+            "content:\"open\n\"",
+            deep.as_str(),
+        ] {
+            assert_eq!(references(source).unwrap_err(), error, "{source}");
+        }
+        let nested = references("a[x=var(--q)]{b:(var(--r))}").unwrap();
+        assert_eq!(
+            nested,
+            HashSet::from(["--q".to_string(), "--r".to_string()])
+        );
+    }
     /// Opt-in replay of an existing saved CSS capture; no scripts or network.
     #[test]
     fn captured_css_dependency_graph_can_be_replayed_offline() {

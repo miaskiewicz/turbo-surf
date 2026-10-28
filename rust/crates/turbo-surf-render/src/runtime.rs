@@ -17,6 +17,16 @@
 #[path = "window_proxy.rs"]
 mod window_proxy;
 
+#[cfg(turbo_surf_native_proxy)]
+#[path = "code_generation.rs"]
+mod code_generation;
+
+#[cfg(turbo_surf_native_proxy)]
+#[path = "frame_modules.rs"]
+mod frame_modules;
+#[cfg(turbo_surf_native_proxy)]
+use frame_modules::op_frame_module;
+
 #[path = "microtask_queue.rs"]
 mod microtask_queue;
 use microtask_queue::op_install_microtask_queue;
@@ -143,62 +153,6 @@ impl Drop for OwnedRuntime {
         crate::browser_env::reset_isolate(self.0.v8_isolate());
         crate::browser_env::clear_interface_records(self.0.v8_isolate());
         crate::message_ports::clear(&mut self.0);
-    }
-}
-
-#[cfg(turbo_surf_native_proxy)]
-fn register_frame_modules(scope: &mut v8::PinScope, base: &str) -> Result<(), JsErrorBox> {
-    let context = scope.get_current_context();
-    if context
-        .get_slot::<FrameSandbox>()
-        .is_some_and(|policy| policy.scripts_blocked)
-    {
-        return Ok(());
-    }
-    let state = JsRuntime::op_state_from(scope);
-    let state = state.borrow();
-    let opaque_origin = window_is_opaque(scope, context);
-    let credentials = ModuleCredentials::default();
-    context.set_slot(Rc::new(credentials.clone()));
-    let cookie_site_is_opaque = frame_cookie_site_is_opaque(scope, context);
-    let loader = NetModuleLoader {
-        base: base.to_string(),
-        source: context
-            .get_slot::<FrameDocumentUrl>()
-            .map_or_else(|| state.borrow::<Base>().0.clone(), |url| url.0.clone()),
-        top_level_source: state.borrow::<Base>().0.clone(),
-        origins: Rc::new(ModuleOrigins::new(opaque_origin, cookie_site_is_opaque)),
-        jar: context
-            .get_slot::<CspHandle>()
-            .and_then(|handle| handle.partition.clone())
-            .map_or_else(
-                || state.borrow::<Jar>().clone(),
-                |partition| partition.jar.clone(),
-            ),
-        ua: state.borrow::<Ua>().0.clone(),
-        client_hints: state.borrow::<ClientHints>().clone(),
-        http_cache: state.borrow::<BrowserStorage>().http_cache(),
-        storage_effects: state.borrow::<BrowserStorage>().partition_response_effects(
-            context
-                .get_slot::<CspHandle>()
-                .and_then(|handle| handle.partition.clone())
-                .map_or(0, |partition| partition.id),
-        ),
-        inline_sources: state.borrow::<InlineModules>().clone(),
-        credentials,
-        csp: (*context
-            .get_slot::<CspHandle>()
-            .ok_or_else(|| JsErrorBox::generic("Frame CSP context unavailable"))?)
-        .clone(),
-        module_stages: state.borrow::<ModuleStages>().clone(),
-    };
-    drop(state);
-    if JsRuntime::register_module_context(scope, Rc::new(loader)) {
-        Ok(())
-    } else {
-        Err(JsErrorBox::generic(
-            "Native frame module context unavailable",
-        ))
     }
 }
 
@@ -1187,29 +1141,6 @@ fn csp_request_for_context<'s>(
     allowed
 }
 
-#[op2(fast)]
-fn op_csp_inline(
-    scope: &mut v8::PinScope,
-    document: v8::Local<v8::Object>,
-    element: v8::Local<v8::Object>,
-    #[string] kind: &str,
-    #[string] text: &str,
-) -> bool {
-    let Some(context) = document.get_creation_context(scope) else {
-        return false;
-    };
-    let Some(handle) = context.get_slot::<CspHandle>() else {
-        return true;
-    };
-    let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
-    let allowed = handle
-        .policy
-        .borrow()
-        .active
-        .allows_inline(kind, text, &nonce);
-    allowed
-}
-
 fn authorize_css(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -1332,149 +1263,6 @@ fn configure_csp_code_generation(
     context.set_allow_generation_from_strings(allowed);
 }
 
-#[cfg(turbo_surf_native_proxy)]
-fn csp_eval_sample_units(scope: &v8::PinScope, source: v8::Local<v8::String>) -> Vec<u16> {
-    // Chrome's code-generation path supplies a 40-unit prefix to the report
-    // builder, which then strips ASCII whitespace. Inline reports trim first.
-    let mut units = vec![0; source.length().min(40)];
-    source.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
-    let whitespace = |unit: &u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
-    let start = units
-        .iter()
-        .position(|unit| !whitespace(unit))
-        .unwrap_or(units.len());
-    let end = units
-        .iter()
-        .rposition(|unit| !whitespace(unit))
-        .map_or(start, |index| index + 1);
-    units[start..end].to_vec()
-}
-
-#[cfg(turbo_surf_native_proxy)]
-fn deny_code_generation<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    mut result: v8::ReturnValue,
-    message: &str,
-) {
-    let message = v8::String::new(scope, message).unwrap();
-    let detail = v8::Array::new(scope, 1);
-    detail.set_index(scope, 0, message.into());
-    result.set(detail.into());
-}
-#[cfg(turbo_surf_native_proxy)]
-fn authorize_code_generation<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut result: v8::ReturnValue,
-) {
-    let context = scope.get_current_context();
-    let typed = crate::browser_env::trusted_script_source(scope, args.get(0));
-    let original = match typed.or_else(|| v8::Local::<v8::String>::try_from(args.get(0)).ok()) {
-        Some(source) => source,
-        None => {
-            result.set_bool(true);
-            return;
-        }
-    };
-    if context.get_slot::<FrameRetired>().is_some() {
-        result.set_bool(false);
-        return;
-    }
-    let Some(handle) = context.get_slot::<CspHandle>() else {
-        result.set_bool(context.is_code_generation_from_strings_allowed());
-        return;
-    };
-    let policy = handle.policy.borrow().current().clone();
-    let report_only = handle.policy.borrow().report_only.clone();
-    if policy.bypasses_trusted_types_eval() {
-        result.set_bool(true);
-        return;
-    }
-    let key = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
-    let key = v8::Private::for_api(scope, Some(key));
-    let Some(document) = context
-        .global(scope)
-        .get_private(scope, key)
-        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-    else {
-        result.set_bool(false);
-        return;
-    };
-    // Chromium labels generated constructor source using these engine prefixes.
-    // Source admission itself always stays in the real V8 compilation callback.
-    let text = original.to_rust_string_lossy(scope);
-    let sink = if [
-        "(function anonymous",
-        "(async function anonymous",
-        "(function* anonymous",
-        "(async function* anonymous",
-    ]
-    .iter()
-    .any(|prefix| text.starts_with(prefix))
-    {
-        "Function"
-    } else {
-        "eval"
-    };
-    v8::tc_scope!(let scope,scope);
-    let source = crate::browser_env::trusted_type_string(
-        scope,
-        document,
-        args.get(0),
-        "TrustedScript",
-        sink,
-        "",
-    );
-    let message=policy.eval_error_message().unwrap_or_else(||"Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements.".into());
-    let Some(source) = source else {
-        scope.reset();
-        deny_code_generation(scope, result, &message);
-        return;
-    };
-    if crate::browser_env::string_code_units(scope, source)
-        != crate::browser_env::string_code_units(scope, original)
-    {
-        deny_code_generation(scope, result, &message);
-        return;
-    }
-    let sample = csp_eval_sample_units(scope, source);
-    for (disposition, records) in [
-        ("enforce", policy.eval_violations()),
-        ("report", report_only.eval_violations()),
-    ] {
-        queue_csp_report(
-            scope,
-            context,
-            document,
-            CspViolationReport {
-                kind: "script-src",
-                blocked: "eval",
-                disposition,
-                records,
-                parser: None,
-                sample: Some(&sample),
-            },
-        );
-    }
-    if policy.allows_eval() {
-        result.set(source.into());
-    } else {
-        deny_code_generation(scope, result, &message);
-    }
-}
-#[cfg(turbo_surf_native_proxy)]
-fn install_code_generation_authorization(scope: &mut v8::PinScope) -> Result<(), String> {
-    let context = scope.get_current_context();
-    let callback = v8::Function::new(scope, authorize_code_generation)
-        .ok_or("Native code-generation authorization unavailable")?;
-    if context.set_code_generation_callback(callback) {
-        context.set_allow_generation_from_strings(false);
-        Ok(())
-    } else {
-        Err("Native code-generation authorization unavailable".into())
-    }
-}
-
 fn authorize_trusted_types(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -1584,6 +1372,22 @@ fn op_trusted_type_string<'s>(
         .map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 
+/// Chrome's code-generation path hands a 40-unit prefix of the source to the CSP
+/// report builder, which then strips ASCII whitespace from both ends.
+fn csp_eval_sample(units: &[u16]) -> &[u16] {
+    let prefix = &units[..units.len().min(40)];
+    let whitespace = |unit: &u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
+    let start = prefix
+        .iter()
+        .position(|unit| !whitespace(unit))
+        .unwrap_or(prefix.len());
+    let end = prefix
+        .iter()
+        .rposition(|unit| !whitespace(unit))
+        .map_or(start, |index| index + 1);
+    &prefix[start..end]
+}
+
 #[op2(fast, reentrant)]
 fn op_timer_code_allowed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -1600,7 +1404,7 @@ fn op_timer_code_allowed<'s>(
     let policy = handle.policy.borrow().current().clone();
     let report_only = handle.policy.borrow().report_only.clone();
     let units = crate::browser_env::string_code_units(scope, source);
-    let sample = &units[..units.len().min(40)];
+    let sample = csp_eval_sample(&units);
     for (disposition, records) in [
         ("enforce", policy.eval_violations()),
         ("report", report_only.eval_violations()),
@@ -2867,25 +2671,8 @@ async fn op_fetch(
             || !turbo_surf_core::request_context::same_origin(source, &target))
     {
         return FetchOut {
-            status_text: String::new(),
-            stream_id: 0,
-            aborted: false,
-            nosniff: false,
-            integrity_blocked: false,
-            script_errors_muted: false,
-            response_received: false,
-            policy_blocked: false,
-            cross_origin: false,
-            body_bytes: Vec::new(),
-            headers: Vec::new(),
-            redirected: false,
-            status: 0,
-            ok: false,
-            body: String::new(),
-            content_type: String::new(),
-            frame_document: 0,
-            frame_script: 0,
-            final_url: target.clone(),
+            final_url: target,
+            ..Default::default()
         };
     }
     let streaming_upload = init.get("upload").and_then(|value| value.as_bool()) == Some(true);
@@ -5170,7 +4957,7 @@ fn op_frame_set_document<'s>(
             .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
         let scope = &mut v8::ContextScope::new(scope, context);
         #[cfg(turbo_surf_native_proxy)]
-        register_frame_modules(scope, &document_base)?;
+        frame_modules::register_frame_modules(scope, &document_base)?;
         let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
             let policy = handle.policy.borrow();
             policy.initial_base.has_policy() || policy.report_only.has_policy()
@@ -5846,43 +5633,14 @@ fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
     pending
 }
 
-#[op2(reentrant)]
-fn op_frame_module<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    window: v8::Local<v8::Object>,
-    index: u32,
-) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
-    if !cfg!(turbo_surf_native_proxy) {
-        return Err(JsErrorBox::generic(
-            "Child-frame ES modules require the exact native SDK",
-        ));
-    }
-    let context = window
-        .get_creation_context(scope)
-        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
-    if context.get_slot::<FrameRetired>().is_some()
-        || context
-            .get_slot::<FrameSandbox>()
-            .is_some_and(|flags| flags.scripts_blocked)
-    {
-        return Err(JsErrorBox::generic("frame module execution is blocked"));
-    }
-    let policy = context
-        .get_slot::<FrameScriptPolicy>()
-        .ok_or_else(|| JsErrorBox::generic("frame script policy unavailable"))?;
-    if !policy
-        .scripts
-        .iter()
-        .any(|script| script.module && script.index == index as usize)
-    {
-        return Err(JsErrorBox::generic(
-            "frame module is not authorized by its document",
-        ));
-    }
-    let scope = &mut v8::ContextScope::new(scope, context);
-    let index = v8::Integer::new_from_unsigned(scope, index);
-    call_frame_helper(scope, "executeFrameModule", &[index.into()])
-        .ok_or_else(|| JsErrorBox::generic("frame module dispatch failed"))
+/// Child-frame ES modules need the native SDK's per-context module loader
+/// (`frame_modules.rs`); the stock SDK reports the limit to the frame runner.
+#[cfg(not(turbo_surf_native_proxy))]
+#[op2(fast)]
+fn op_frame_module(_window: v8::Local<v8::Object>, _index: u32) -> Result<(), JsErrorBox> {
+    Err(JsErrorBox::generic(
+        "Child-frame ES modules require the exact native SDK",
+    ))
 }
 
 #[op2(reentrant)]
@@ -7031,7 +6789,7 @@ fn install_environment<'s>(
                 }));
             crate::browser_env::capture_file_host(scope);
             #[cfg(turbo_surf_native_proxy)]
-            install_code_generation_authorization(scope)?;
+            code_generation::install_code_generation_authorization(scope)?;
             return Ok(());
         }
     }
@@ -7136,22 +6894,6 @@ fn op_dispatch_host_event(
     crate::browser_env::dispatch_host_event(scope, event, target);
 }
 
-#[op2(nofast, reentrant)]
-fn op_event_callback(
-    scope: &mut v8::PinScope,
-    event: v8::Local<v8::Object>,
-    target: v8::Local<v8::Object>,
-    active: bool,
-) {
-    crate::browser_env::event_callback_state(scope, event, target, active);
-}
-
-#[op2]
-fn op_message_source<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Object> {
-    let context = scope.get_entered_or_microtask_context();
-    context.global(scope)
-}
-
 deno_core::extension!(
     turbo_dom,
     ops = [
@@ -7193,7 +6935,6 @@ deno_core::extension!(
         op_frame_pending,
         op_queue_frame_script,
         op_frame_module,
-        op_message_source,
         op_event_trust,
         op_set_host_input_driver,
         op_host_user_activation,
@@ -7230,7 +6971,6 @@ deno_core::extension!(
         crate::web_streams_backend::op_web_abort_bind,
         crate::web_streams_backend::op_web_abort_listener,
         crate::web_streams_backend::op_web_abort_dispatch,
-        op_event_callback,
         op_install_microtask_queue,
         op_report_exception,
         op_value_is_promise,
@@ -7302,7 +7042,6 @@ deno_core::extension!(
         op_csp_meta,
         op_referrer_meta,
         op_csp_finish_parser,
-        op_csp_inline,
         op_csp_request,
         op_frame_script_allowed,
         op_frame_script_event,
@@ -7953,8 +7692,9 @@ const __createTimer = (name, repeat, handler, delay, args) => {
   const source=typeof handler === "function" ? null : ops.op_trusted_type_string(__timerDocument,handler,"TrustedScript","Window "+name,"Failed to execute '"+name+"' on 'Window': ");
   // Window timers take a signed32-bit delay before negative values clamp to zero.
   delay=(+delay)|0;if(delay<0)delay=0;
+  // Chrome returns 0 for a string handler its CSP check rejects, without consuming an id.
+  if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return 0;
   const id=__tid++;
-  if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return id;
   const level=ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
   const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args};
@@ -15835,5 +15575,81 @@ mod window_timer_task_tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+#[cfg(test)]
+mod csp_eval_sample_tests {
+    use super::csp_eval_sample;
+
+    fn sample(text: &str) -> String {
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        String::from_utf16(csp_eval_sample(&units)).unwrap()
+    }
+
+    #[test]
+    fn eval_samples_trim_ascii_whitespace_after_the_forty_unit_prefix() {
+        assert_eq!(sample("\t\n\u{b}\u{c}\r x = 1 \r\n"), "x = 1");
+        assert_eq!(sample(" \u{a0}x\u{a0}"), "\u{a0}x\u{a0}");
+        assert_eq!(sample(&format!("{}y", " ".repeat(40))), "");
+        assert_eq!(sample("   "), "");
+        assert_eq!(sample(""), "");
+        let long = format!("{}{}", "a".repeat(39), "b c");
+        assert_eq!(sample(&long), format!("{}b", "a".repeat(39)));
+        assert_eq!(sample(&format!("{}  z", "a".repeat(38))), "a".repeat(38));
+    }
+}
+
+#[cfg(test)]
+mod frame_source_tests {
+    use super::{decode_data_document, script_source_bodies};
+
+    #[test]
+    fn data_documents_decode_percent_base64_charset_and_plain_text() {
+        assert_eq!(
+            decode_data_document("data:text/html,%3Cb%3Eok%3C/b%3E%2#frag"),
+            Some(("<b>ok</b>%2".into(), "text/html".into()))
+        );
+        assert_eq!(
+            decode_data_document("data:TEXT/HTML;base64,PG I+e Q"),
+            Some(("<b>y".into(), "text/html".into()))
+        );
+        assert_eq!(
+            decode_data_document("data:text/html;charset=windows-1252,%E9"),
+            Some(("é".into(), "text/html".into()))
+        );
+        assert_eq!(
+            decode_data_document("data:,a<b>&c"),
+            Some((
+                "<html><head></head><body><pre>a&lt;b&gt;&amp;c</pre></body></html>".into(),
+                "text/plain".into()
+            ))
+        );
+        for url in [
+            "data:image/png;base64,AAAA",
+            "data:text/html;base64,%%%",
+            "data:text/html",
+            "https://site.test/,x",
+        ] {
+            assert_eq!(decode_data_document(url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn script_bodies_skip_comments_raw_text_and_quoted_delimiters() {
+        let html = "<!-- <script>no</script> --><style>a{content:'<script>'}</style>\
+            <script a=\"x>y\">one</script ><textarea><script>no</textarea>\
+            <script>two</scripty></script/><title>t</title><script>three";
+        let bodies = script_source_bodies(html)
+            .into_iter()
+            .map(|(start, end)| &html[start..end])
+            .collect::<Vec<_>>();
+        assert_eq!(bodies, ["one", "two</scripty>", "three"]);
+        let unterminated = "<!-- open <script>x</script>";
+        assert!(script_source_bodies(unterminated).is_empty());
+        let plaintext = "<script>a</script><plaintext><script>b</script>";
+        let bodies = script_source_bodies(plaintext);
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(&plaintext[bodies[0].0..bodies[0].1], "a");
     }
 }

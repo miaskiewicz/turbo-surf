@@ -17,7 +17,8 @@ include-files = ["crates/*/src/*"]
 # - turbo-surf-napi, turbo-surf-py: the Node / Python bindings. Their code runs only inside
 #   node / python processes (the Playwright shim and detection suites, the PyPI wheel tests),
 #   which tarpaulin does not instrument; they have no Rust tests of their own.
-# - render's window_proxy.rs / frame_location.rs / frame_ancestors.rs: compiled only under
+# - render's window_proxy.rs / frame_location.rs / frame_ancestors.rs / code_generation.rs /
+#   frame_modules.rs: compiled only under
 #   cfg(turbo_surf_native_proxy), i.e. the TURBO_SURF_ENGINE=154/155 source-built native V8
 #   (harness/detection/engine-15x); absent from this build, so they have no lines to cover.
 exclude = ["turbo-surf-napi", "turbo-surf-py"]
@@ -27,6 +28,8 @@ exclude-files = [
     "crates/turbo-surf-render/src/window_proxy.rs",
     "crates/turbo-surf-render/src/frame_location.rs",
     "crates/turbo-surf-render/src/frame_ancestors.rs",
+    "crates/turbo-surf-render/src/code_generation.rs",
+    "crates/turbo-surf-render/src/frame_modules.rs",
 ]
 target-dir = "target/cov"
 timeout = "600s"

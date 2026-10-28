@@ -3,7 +3,10 @@
 //! links, the turbo-dom-v8 fork accessor the binding calls by default
 //! (`PropertyCallbackArguments::should_throw_on_error`) reports the same mode as the
 //! frame read the native-SDK overlay uses (`test_support::frame_read_should_throw`),
-//! and both match the caller's language mode.
+//! and both match the caller's language mode. The fork accessor (and its interceptor
+//! `ReturnValue<()>` signatures) exist only in fork builds, so the native-SDK engine
+//! build does not compile this check (turbo-surf#68).
+#![cfg(not(turbo_surf_native_proxy))]
 use std::cell::RefCell;
 use std::sync::Once;
 use turbo_dom_browser_env::test_support::frame_read_should_throw;

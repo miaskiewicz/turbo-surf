@@ -11,7 +11,6 @@ struct Payload {
     accept_charset: Option<String>,
     #[serde(skip)]
     entries: Vec<(String, String)>,
-    charset_entries: Vec<usize>,
 }
 
 pub(super) struct Pending {
@@ -119,8 +118,8 @@ fn submit<'s>(
             return;
         }
     };
-    // Charset replacement already preceded the mutable formdata event.
-    payload.charset_entries.clear();
+    // Charset replacement (`_charset_` entries) already preceded the mutable formdata
+    // event, so the binding's charset entry indices are not applied again.
     let files = if payload.method == "post" && payload.enctype == "multipart/form-data" {
         match file_parts(scope, context, snapshot) {
             Ok(files) => files,
@@ -136,7 +135,7 @@ fn submit<'s>(
         result.set_bool(true);
         return;
     }
-    let plan = match form_navigation::prepare_with_files(
+    let plan = match form_navigation::prepare(
         &source,
         &action,
         &payload.method,
@@ -144,7 +143,6 @@ fn submit<'s>(
         &target,
         &payload.entries,
         &files,
-        &payload.charset_entries,
         encoding,
     ) {
         Ok(plan) => plan,

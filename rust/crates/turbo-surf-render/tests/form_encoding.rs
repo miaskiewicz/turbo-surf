@@ -67,9 +67,11 @@ fn actual_chrome_form_wire_encodings_preserve_names_duplicates_and_fragments() {
 }
 
 #[test]
-fn only_native_hidden_charset_indices_are_replaced() {
+fn empty_actions_use_the_document_url_and_unsupported_targets_are_rejected() {
+    // `_charset_` values were already replaced by the binding before the formdata
+    // event; the native plan submits the entry list as given.
     let entries = vec![
-        ("_charset_".into(), "original".into()),
+        ("_charset_".into(), "UTF-8".into()),
         ("_charset_".into(), "text".into()),
     ];
     let plan = form_navigation::prepare(
@@ -79,7 +81,7 @@ fn only_native_hidden_charset_indices_are_replaced() {
         "text/plain",
         "",
         &entries,
-        &[0],
+        &[],
         encoding_rs::UTF_8,
     )
     .unwrap();

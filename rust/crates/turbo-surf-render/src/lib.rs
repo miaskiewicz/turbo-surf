@@ -140,18 +140,15 @@ impl V8RecaptchaEngine {
     }
 
     // Read the token the driver stored in the sink node out of the serialized DOM.
+    // A page that removed the sink yields an empty token.
     fn extract_token(html: &str) -> String {
-        let Some(i) = html.find(RECAPTCHA_TOKEN_SINK) else {
-            return String::new();
+        let token = || {
+            let sink = html.find(RECAPTCHA_TOKEN_SINK)?;
+            let start = sink + html[sink..].find('>')? + 1;
+            let end = start + html[start..].find('<')?;
+            Some(html[start..end].trim().to_string())
         };
-        let Some(gt) = html[i..].find('>') else {
-            return String::new();
-        };
-        let start = i + gt + 1;
-        match html[start..].find('<') {
-            Some(lt) => html[start..start + lt].trim().to_string(),
-            None => String::new(),
-        }
+        token().unwrap_or_default()
     }
 }
 
@@ -203,5 +200,24 @@ impl turbo_surf_core::challenge::RecaptchaEngine for V8RecaptchaEngine {
             .await
             .map_err(|_| "recaptcha render thread panicked".to_string())??;
         Ok(Self::extract_token(&out))
+    }
+}
+
+#[cfg(test)]
+mod recaptcha_token_tests {
+    use super::{V8RecaptchaEngine, RECAPTCHA_TOKEN_SINK};
+
+    #[test]
+    fn the_token_is_the_trimmed_text_of_the_sink_node() {
+        let html =
+            format!("<p>x</p><div id=\"{RECAPTCHA_TOKEN_SINK}\" hidden> tok-1 </div></body>");
+        assert_eq!(V8RecaptchaEngine::extract_token(&html), "tok-1");
+        for html in [
+            "<body>no sink</body>".to_string(),
+            format!("<div id={RECAPTCHA_TOKEN_SINK}"),
+            format!("<div id={RECAPTCHA_TOKEN_SINK}>dangling"),
+        ] {
+            assert_eq!(V8RecaptchaEngine::extract_token(&html), "", "{html}");
+        }
     }
 }

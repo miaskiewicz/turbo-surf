@@ -1904,3 +1904,24 @@ mod recapture_tests {
         page.close();
     }
 }
+
+#[cfg(test)]
+mod zoom_adjust_tests {
+    use super::{adjust_int, unzoom};
+
+    #[test]
+    fn adjust_int_matches_blink_absolute_zoom_rounding() {
+        // Unzoomed values pass through; zooming out truncates the quotient.
+        assert_eq!(adjust_int(101, 1.0), 101);
+        assert_eq!(adjust_int(101, 0.5), 202);
+        assert_eq!(adjust_int(-101, 0.5), -202);
+        // Zooming in first moves the value away from zero to undo truncation.
+        assert_eq!(adjust_int(200, 2.0), 100);
+        assert_eq!(adjust_int(201, 2.0), 101);
+        assert_eq!(adjust_int(-200, 2.0), -100);
+        assert_eq!(adjust_int(-201, 2.0), -101);
+        assert_eq!(adjust_int(10, 3.0), 3);
+        assert_eq!(unzoom(15, 2.0), 8);
+        assert_eq!(unzoom(-15, 2.0), -8);
+    }
+}

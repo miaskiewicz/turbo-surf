@@ -44,6 +44,24 @@
   document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
   the whole page. It has no such bound now; every link settles like Chrome 156 (300
   links, 300 `error` events under a blocking CSP).
+- Transfer-list validation (#62: `postMessage`, `MessagePort.postMessage`,
+  `structuredClone`) throws Chrome 156's errors: the `Failed to execute '…' on '…'`
+  prefix, the transfer index (`Port at index 0 is already neutered.`, `ArrayBuffer at
+  index 1 is a duplicate of an earlier ArrayBuffer.`, `Value at index 0 does not have a
+  transferable type.`, `Port at index 0 contains the source port.`), Chrome's check order
+  (list scan for types and duplicates, then the value is serialized, then detached and
+  non-detachable buffers, locked streams, the source port and neutered ports, so guest
+  getters run first), `A ReadableStream could not be cloned because it was locked` /
+  `… not transferred.` for streams and ports the value references, and `TypeError` for a
+  locked stream, a non-detachable buffer and a primitive entry (they were generic
+  `DataCloneError`s).
+- Structured serialization errors (#76) carry the caller's Chrome prefix
+  (`Failed to execute 'postMessage' on 'Window': function f(){} could not be cloned.`,
+  `… HTMLBodyElement object could not be cloned.`, History's `'pushState' on 'History'`),
+  and transfer/options conversion uses Chrome's Web IDL text (`The object must have a
+  callable @@iterator property.`, `The provided value cannot be converted to a
+  sequence.`, `Overload resolution failed.`, `… is not of type
+  'StructuredSerializeOptions'.`). Internal stream-chunk posts stay unprefixed.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

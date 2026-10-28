@@ -37,12 +37,6 @@ async fn neutered_closed_and_late_started_ports_match_chrome() {
         .unwrap();
     let log: serde_json::Value =
         serde_json::from_str(&page.eval_json_expression("log").await.unwrap()).unwrap();
-    let mut chrome: serde_json::Value = serde_json::from_str(CHROME_156).unwrap();
-    // turbo-surf#62: the DataCloneError message lacks Chrome's prefix and index.
-    assert!(log[3][1]
-        .as_str()
-        .unwrap()
-        .starts_with("throw DataCloneError: "));
-    chrome[3][1] = log[3][1].clone();
+    let chrome: serde_json::Value = serde_json::from_str(CHROME_156).unwrap();
     assert_eq!(log, chrome);
 }

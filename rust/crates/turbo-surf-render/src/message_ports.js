@@ -1,4 +1,6 @@
 // Endpoint ownership and queues live in the isolate's Rust registry.
+// The bootstrap shares these two hooks by their reserved `__` names.
+// oxlint-disable-next-line no-underscore-dangle
 let __portTransferSequence, __hostPortMessage;
 {
   const realm = globalThis,
@@ -25,8 +27,12 @@ let __portTransferSequence, __hostPortMessage;
       configurable: true,
       enumerable: true,
     });
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- block-private helper
   const objectLike = (value) =>
     value !== null && (typeof value === "object" || typeof value === "function");
+  const portContext = "Failed to execute 'postMessage' on 'MessagePort': ",
+    portOptionsContext =
+      portContext + "Failed to read the 'transfer' property from 'StructuredSerializeOptions': ";
   const record = (receiver) => {
     const state = records.get(receiver);
     if (!state) throw new PortTypeError("Illegal invocation");
@@ -39,10 +45,14 @@ let __portTransferSequence, __hostPortMessage;
       configurable: true,
       enumerable: true,
     });
-  __portTransferSequence = (value) => {
-    if (!objectLike(value)) throw new PortTypeError("Transfer list must be a sequence");
+  // `context` is Chrome's Web IDL conversion prefix: the calling operation and,
+  // for the options form, the dictionary member being read.
+  __portTransferSequence = (value, context = "") => {
+    if (!objectLike(value))
+      throw new PortTypeError(context + "The provided value cannot be converted to a sequence.");
     const iterator = value[iteratorSymbol];
-    if (typeof iterator !== "function") throw new PortTypeError("Transfer list must be iterable");
+    if (typeof iterator !== "function")
+      throw new PortTypeError(context + "The object must have a callable @@iterator property.");
     const source = apply(iterator, value, []);
     if (!objectLike(source)) throw new PortTypeError("Invalid transfer iterator");
     const next = source.next,
@@ -57,7 +67,7 @@ let __portTransferSequence, __hostPortMessage;
         const error = new PortTypeError(
           result.length === 4096
             ? "Native transfer sequence budget exceeded"
-            : "Transfer entries must be objects",
+            : context + "Failed to convert value to 'object'.",
         );
         throw error;
       }
@@ -78,6 +88,8 @@ let __portTransferSequence, __hostPortMessage;
   };
   const Port = make(
     class MessagePort extends Target {
+      // Web IDL: MessagePort has no constructor; it throws before any super().
+      // oxlint-disable-next-line constructor-super
       constructor() {
         throw new PortTypeError("Illegal constructor");
       }
@@ -147,20 +159,20 @@ let __portTransferSequence, __hostPortMessage;
         includeActivation = false;
       if (options !== undefined) {
         if (options !== null && !objectLike(options))
-          throw new PortTypeError("Options must be a dictionary or sequence");
+          throw new PortTypeError(portContext + "Overload resolution failed.");
         if (
           options !== null &&
           (typeof options === "object" || typeof options === "function") &&
           typeof options[iteratorSymbol] === "function"
         )
-          transfer = __portTransferSequence(options);
+          transfer = __portTransferSequence(options, portContext);
         else if (options !== null) {
           includeActivation = !!options.includeUserActivation;
           const list = options.transfer;
-          if (list !== undefined) transfer = __portTransferSequence(list);
+          if (list !== undefined) transfer = __portTransferSequence(list, portOptionsContext);
         }
       }
-      ops.op_port_post_message(this, value, transfer, includeActivation);
+      ops.op_port_post_message(this, value, transfer, includeActivation, true);
     },
     1,
   );

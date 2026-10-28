@@ -8,6 +8,16 @@ import {
 } from "./collector-lifecycle.mjs";
 import { cdpConnection } from "./cdp-connection.mjs";
 
+const noopSpawn = () => {};
+// macOS answers kill(-pgid) with EPERM, not ESRCH, while the group's members exit or wait
+// to be reaped.
+const eperm = () => {
+  throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+};
+// Patchright spawns Chrome detached, so the child the collector owns is the group leader.
+const leader = (pid) =>
+  Object.assign(new EventEmitter(), { pid, exitCode: null, signalCode: null });
+
 test("interrupt rejects blocked work, checkpoints once and retires only owned group", async () => {
   const signals = new EventEmitter(),
     calls = [],
@@ -65,8 +75,7 @@ test("launch ownership matches exact profile and restores spawn on success and f
 
 test("missing process ownership closes context and fails closed", async () => {
   let closed = false;
-  const original = () => {};
-  const module = { spawn: original };
+  const module = { spawn: noopSpawn };
   await assert.rejects(
     captureOwnedLaunch(
       module,
@@ -81,7 +90,7 @@ test("missing process ownership closes context and fails closed", async () => {
     /ownership capture unavailable/,
   );
   assert.equal(closed, true);
-  assert.equal(module.spawn, original);
+  assert.equal(module.spawn, noopSpawn);
 });
 
 test("duplicate owned profile is rejected before an untracked child can spawn", async () => {
@@ -147,11 +156,6 @@ test("aborting target setup keeps its finally command catchable without dispatch
 });
 
 test("a zombie-only browser group counts as retired; a live one's EPERM still fails (turbo-surf#50)", async () => {
-  // macOS answers kill(-pgid) with EPERM, not ESRCH, while the exited group's members wait
-  // to be reaped.
-  const eperm = () => {
-    throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
-  };
   const exited = collectorLifecycle({
     signals: new EventEmitter(),
     platform: "darwin",
@@ -179,4 +183,47 @@ test("a zombie-only browser group counts as retired; a live one's EPERM still fa
   live.own({ pid: 125, exitCode: null, signalCode: null });
   await assert.rejects(live.stopBrowser(), /kill EPERM/);
   live.dispose();
+});
+
+test("a Patchright leader whose group goes EPERM just before Node reaps it is retired; a live one still fails (turbo-surf#64)", async () => {
+  // After context.close() macOS answers kill(-pgid) with EPERM a few ms before Node's 'exit'.
+  const calls = [];
+  const closing = leader(126);
+  const retiring = collectorLifecycle({
+    signals: new EventEmitter(),
+    platform: "darwin",
+    graceMs: 200,
+    kill(...args) {
+      calls.push(args);
+      if (closing.exitCode === null) {
+        setTimeout(() => {
+          closing.exitCode = 0;
+          closing.emit("exit", 0, null);
+        }, 5);
+      }
+      eperm();
+    },
+  });
+  retiring.own(closing);
+  const started = Date.now();
+  await retiring.stopBrowser();
+  retiring.dispose();
+  assert.deepEqual(calls, [
+    [-126, "SIGTERM"],
+    [-126, "SIGKILL"],
+  ]);
+  assert.equal(closing.listenerCount("exit"), 0);
+  // The reap wait ends on 'exit', not on the grace timer.
+  assert.ok(Date.now() - started < 200 * 2, `stop took ${Date.now() - started} ms`);
+  const live = leader(127);
+  const holding = collectorLifecycle({
+    signals: new EventEmitter(),
+    platform: "darwin",
+    graceMs: 20,
+    kill: eperm,
+  });
+  holding.own(live);
+  await assert.rejects(holding.stopBrowser(), /kill EPERM/);
+  assert.equal(live.listenerCount("exit"), 0);
+  holding.dispose();
 });

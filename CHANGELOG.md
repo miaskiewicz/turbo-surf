@@ -131,6 +131,13 @@
   replaced prototype methods/accessors, statics and Array/Object index accessors are
   never consulted, like Chrome 156. The members turbo-dom's own bootstrap still reads
   on this path are tracked in miaskiewicz/turbo-dom#172.
+- Patchright detection collector cleanup (#64): Patchright spawns Chrome detached, so the
+  owned child is the group leader; after `context.close()` macOS answers `killpg` with
+  EPERM a few ms before Node reaps that leader. `stop()` now waits (up to the grace
+  period) for the leader's `exit` before judging the EPERM: a reaped group is retired, a
+  live one still fails. The resource-scan-order and window-timer controls, which pin
+  `collector-lifecycle.mjs`, are recaptured on Chrome for Testing 156.0.8078.4 (same
+  results; only timing noise and `pageState.focused` differ).
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

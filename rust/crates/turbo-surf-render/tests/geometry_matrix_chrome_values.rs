@@ -41,12 +41,12 @@ T(()=>L(new DOMMatrix().rotateAxisAngle(0,0,NaN,90)));
 T(()=>L(new DOMMatrix().rotateAxisAngle(Infinity,0,0,90)));
 T(()=>L(new DOMMatrix().rotateAxisAngle(0,0,0,90)));
 T(()=>new DOMMatrix().rotateAxisAngleSelf(NaN,0,1,90).toString());
+for(const a of [[NaN,0,1,0],[0,0,NaN,0],[0,0,NaN,360],[0,0,1,NaN],[0,0,-Infinity,90],[1,1,NaN,90]])T(()=>L(new DOMMatrix().rotateAxisAngle(...a)));
 globalThis.out=out;"#;
 
-const ROTATE_NAN_CHROME_156: &str = r#"["false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","true 1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1","InvalidStateError: Failed to execute 'toString' on 'DOMMatrixReadOnly': DOMMatrix cannot be serialized with NaN or Infinity values."]"#;
+const ROTATE_NAN_CHROME_156: &str = r#"["false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","true 1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1","InvalidStateError: Failed to execute 'toString' on 'DOMMatrixReadOnly': DOMMatrix cannot be serialized with NaN or Infinity values.","false 1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1","true 1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1","true 1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1","true NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,1,0,0,0,0,1","true NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1","false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,0,0,0,1"]"#;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#92: fails until the fix"]
 async fn rotate_axis_angle_with_nan_axis_is_nan() {
     let got = eval(ROTATE_NAN_SCRIPT).await;
     assert_eq!(got, serde_json::from_str::<Value>(ROTATE_NAN_CHROME_156).unwrap());

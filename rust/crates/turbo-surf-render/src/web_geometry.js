@@ -217,16 +217,28 @@
     const radians = (degrees * PI) / 180;
     return [sin(radians), cos(radians)];
   };
+  const isZeroTurn = (degrees) => {
+    const turn = sinCosDegrees(degrees);
+    return turn[0] === 0 && turn[1] === 1;
+  };
   const rotation = (x, y, z, degrees) => {
-    const magnitude = hypot(x, y, z);
-    if (!magnitude) return identity();
-    x /= magnitude;
-    y /= magnitude;
-    z /= magnitude;
     const turn = sinCosDegrees(degrees),
       s = turn[0],
       c = turn[1],
       t = 1 - c;
+    // gfx::Transform skips a zero turn, even about a NaN or infinite axis.
+    if (s === 0 && c === 1) return identity();
+    const magnitude = hypot(x, y, z);
+    // A NaN or infinite axis normalizes to NaN components: the 3x3 part is all NaN.
+    if (magnitude !== magnitude || magnitude === Infinity) {
+      const result = identity();
+      for (let index = 0; index < 11; index++) if (index % 4 !== 3) result[index] = NaN;
+      return result;
+    }
+    if (!magnitude) return identity();
+    x /= magnitude;
+    y /= magnitude;
+    z /= magnitude;
     // gfx::Transform rotates about a principal axis without the general
     // formula's 1 - cos rounding (e.g. rotate(135deg) keeps m33 exactly 1).
     if (x === 0 && y === 0) {
@@ -680,7 +692,8 @@
       turn = toNumber(degrees);
     return [
       rotatedAxisAngle(current[0], ax, ay, az, turn),
-      current[1] && ax === 0 && ay === 0,
+      // Chrome 156 drops is2D for a NaN z axis unless the turn is zero.
+      current[1] && ax === 0 && ay === 0 && (az === az || isZeroTurn(turn)),
     ];
   };
   const fromVectorState = (current, x, y) => [
@@ -827,7 +840,10 @@
         values = current[0];
       for (let index = 0; index < 16; index++)
         if (!finite(values[index]))
-          throw new IdlDOMException("A matrix contains non-finite values", "InvalidStateError");
+          throw new IdlDOMException(
+            "Failed to execute 'toString' on 'DOMMatrixReadOnly': DOMMatrix cannot be serialized with NaN or Infinity values.",
+            "InvalidStateError",
+          );
       const flat = current[1],
         entries = flat
           ? [values[0], values[1], values[4], values[5], values[12], values[13]]

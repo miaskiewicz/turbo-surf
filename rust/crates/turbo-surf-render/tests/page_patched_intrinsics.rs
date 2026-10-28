@@ -113,7 +113,6 @@ async fn page_patched_intrinsics_do_not_break_loading_or_append_child() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "miaskiewicz/turbo-dom#172: turbo-dom's bootstrap still calls page-patchable intrinsics"]
 async fn page_patched_intrinsics_full_set_like_chrome156() {
     assert_chrome(&load_patched("").await);
 }

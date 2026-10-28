@@ -41,12 +41,22 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 // outcome — all otherwise observable only through the final `Err` string. Off by
 // default; one cached env read when off, zero formatting cost.
 fn serp_trace_on() -> bool {
+    #[cfg(test)]
+    if FORCE_TRACE.with(std::cell::Cell::get) {
+        return true;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
         std::env::var("TURBO_SURF_TRACE")
             .map(|v| !v.is_empty() && v != "0")
             .unwrap_or(false)
     })
+}
+
+// Tests turn tracing on for their own thread (the process-wide env read is cached).
+#[cfg(test)]
+thread_local! {
+    static FORCE_TRACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 macro_rules! strace {
@@ -2053,10 +2063,17 @@ fn static_registry() -> &'static StaticRegistry {
 // Resolve an engine id to its active strategy + source, precedence high→low:
 // session override → user dir → bundled default.
 fn resolve_strategy(session: &Session, engine: &str) -> Result<(Strategy, &'static str), String> {
+    resolve_strategy_in(static_registry(), session, engine)
+}
+
+fn resolve_strategy_in(
+    reg: &StaticRegistry,
+    session: &Session,
+    engine: &str,
+) -> Result<(Strategy, &'static str), String> {
     if let Some(s) = session.search_overrides.get(engine) {
         return Ok((s.clone(), "custom"));
     }
-    let reg = static_registry();
     if let Some(s) = reg.user_dir.get(engine) {
         return Ok((s.clone(), "user-dir"));
     }
@@ -2071,7 +2088,10 @@ fn resolve_strategy(session: &Session, engine: &str) -> Result<(Strategy, &'stat
 // List every active strategy with its winning source, sorted by engine id. Layers
 // are inserted low→high precedence so the higher layer overwrites the entry.
 fn list_active_strategies(session: &Session) -> Vec<Value> {
-    let reg = static_registry();
+    list_active_strategies_in(static_registry(), session)
+}
+
+fn list_active_strategies_in(reg: &StaticRegistry, session: &Session) -> Vec<Value> {
     let mut seen: BTreeMap<String, (String, &'static str, String)> = BTreeMap::new();
     let mut add = |engine: &str, s: &Strategy, source: &'static str| {
         seen.insert(
@@ -2325,6 +2345,16 @@ async fn maybe_clear_sorry(
     final_url: String,
     html: String,
 ) -> Result<(String, String), String> {
+    maybe_clear_sorry_with(jar, final_url, html, challenge::solver_from_env).await
+}
+
+// [`maybe_clear_sorry`] with the external-solver lookup injected (tests pass a stub).
+async fn maybe_clear_sorry_with(
+    jar: &mut CookieJar,
+    final_url: String,
+    html: String,
+    external_solver: fn() -> Option<Box<dyn ChallengeSolver>>,
+) -> Result<(String, String), String> {
     use turbo_surf_core::challenge::SolveError;
     use turbo_surf_core::recaptcha::RecaptchaSolver;
     use turbo_surf_core::sorry;
@@ -2343,10 +2373,10 @@ async fn maybe_clear_sorry(
         RecaptchaSolver::new().with_engine(Box::new(turbo_surf_render::V8RecaptchaEngine));
     match sorry::clear_if_sorry(&in_isolate, jar, &final_url, &html, &ctx, 0.0).await {
         Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
-        Ok(None) => Ok((final_url, html)),
+        Ok(None) => unreachable!("clear_if_sorry is None only for a non-wall, checked above"),
         // v2 image grid / no engine: defer to a configured external solver if present.
         Err(e @ (SolveError::VisualChallenge | SolveError::NotConfigured)) => {
-            match challenge::solver_from_env() {
+            match external_solver() {
                 Some(external) => {
                     match sorry::clear_if_sorry(
                         external.as_ref(),
@@ -4526,6 +4556,17 @@ mod tests {
         EnidCache::new(p)
     }
 
+    pub(super) async fn enid_server_for_trace() -> u16 {
+        spawn_enid_search_server().await
+    }
+
+    pub(super) fn stale_mint_cmd() -> String {
+        write_script(
+            "trace-stale",
+            "cat >/dev/null\nprintf '{\"cookies\":[{\"name\":\"__Secure-ENID\",\"value\":\"STALE\",\"domain\":\"127.0.0.1\",\"path\":\"/\"}]}'\n",
+        )
+    }
+
     fn write_script(tag: &str, body: &str) -> String {
         let script =
             std::env::temp_dir().join(format!("surf-stub-{}-{tag}.sh", std::process::id()));
@@ -4542,7 +4583,7 @@ mod tests {
             "cat >/dev/null\nprintf '{\"cookies\":[{\"name\":\"__Secure-ENID\",\"value\":\"STALE\",\"domain\":\"127.0.0.1\",\"path\":\"/\"}]}'\n",
         );
         // A cache path whose directory does not exist: the write fails, the flow goes on.
-        let cache = EnidCache::new(std::env::temp_dir().join("no-such-dir-surf/enid.json"));
+        let cache = EnidCache::new("/dev/null/no-such-dir-surf/enid.json");
         let err = google_enid_flow(&url, &cache, &untrusted, None, false, &BTreeMap::new())
             .await
             .unwrap_err();
@@ -7532,6 +7573,17 @@ mod session_tool_tests {
             shell["verdict"],
             "no SERP markers — search challenge not executed; cookie trust unknown"
         );
+        // A consent interstitial at home: the accept form is replayed (NID earned) and
+        // its continue page is the home whose scripts run.
+        let consent = spawn_consent_site().await;
+        let st2: Strategy = serde_json::from_value(json!({ "engine": "g", "format": "structural",
+            "query_url": format!("{consent}/search?q={{query}}") }))
+        .unwrap();
+        let handshaken = browserless_serp(&st2, &format!("{consent}/"), "q")
+            .await
+            .unwrap();
+        assert_eq!(handshaken["consent_handshake"], true);
+        assert_eq!(handshaken["has_nid"], true);
         turbo_surf_render::set_fingerprint("{}");
     }
 
@@ -7628,7 +7680,7 @@ mod session_tool_tests {
         let html: Strategy = serde_json::from_value(json!({ "engine": "h", "query_url": "{query}",
             "result_container": ".r", "title": "b", "link": "a" }))
         .unwrap();
-        let body = "<div class=r><a>none</a></div><div class=r><a href='mailto:x'>m</a></div><div class=r><b>T</b><a href='https://a.test/'>a</a></div><div class=r><a href='https://b.test/'>b</a></div>";
+        let body = "<div class=r><i>no link</i></div><div class=r><a>none</a></div><div class=r><a href='mailto:x'>m</a></div><div class=r><b>T</b><a href='https://a.test/'>a</a></div><div class=r><a href='https://b.test/'>b</a></div>";
         let hits: Vec<Value> = parse_serp(&html, body, 1)
             .iter()
             .map(SearchResult::to_json)
@@ -7737,5 +7789,127 @@ mod session_tool_tests {
             .unwrap()
             .iter()
             .all(|c| c["accepted"] == false));
+    }
+
+    #[test]
+    fn user_dir_strategies_rank_between_built_ins_and_session_overrides() {
+        let mine: Strategy = serde_json::from_value(json!({ "engine": "bing", "version": "u1", "query_url": "{query}", "format": "structural" })).unwrap();
+        let reg = StaticRegistry {
+            built_in: strategies_from_json_array(BUNDLED_STRATEGIES_JSON),
+            user_dir: HashMap::from([("bing".to_string(), mine)]),
+        };
+        let mut s = Session::new();
+        let (st, source) = resolve_strategy_in(&reg, &s, "bing").unwrap();
+        assert_eq!((st.version.as_str(), source), ("u1", "user-dir"));
+        assert_eq!(
+            resolve_strategy_in(&reg, &s, "duckduckgo").unwrap().1,
+            "built-in"
+        );
+        let listed = list_active_strategies_in(&reg, &s);
+        let bing = listed.iter().find(|e| e["engine"] == "bing").unwrap();
+        assert_eq!(bing["source"], "user-dir");
+        s.search_overrides.insert(
+            "bing".into(),
+            serde_json::from_value(
+                json!({ "engine": "bing", "query_url": "{query}", "format": "structural" }),
+            )
+            .unwrap(),
+        );
+        assert_eq!(resolve_strategy_in(&reg, &s, "bing").unwrap().1, "custom");
+    }
+
+    // Answers the /sorry clearance as an external solver would (exemption cookie), or fails.
+    struct ExemptSolver(bool);
+    #[async_trait::async_trait]
+    impl ChallengeSolver for ExemptSolver {
+        fn name(&self) -> &'static str {
+            "exempt-stub"
+        }
+        async fn solve(
+            &self,
+            _: &challenge::Challenge,
+            _: &SolveContext,
+        ) -> Result<challenge::SolvedToken, challenge::SolveError> {
+            if !self.0 {
+                return Err(challenge::SolveError::Http("down".into()));
+            }
+            Ok(challenge::SolvedToken {
+                cookies: vec![("GOOGLE_ABUSE_EXEMPTION".into(), "EX".into())],
+                headers: Vec::new(),
+                ttl: std::time::Duration::from_secs(1),
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_v2_sorry_wall_defers_to_the_external_solver() {
+        let base = spawn_routes(vec![(
+            "GET /search",
+            "",
+            "<div id=rso>cleared</div>".into(),
+        )])
+        .await;
+        let html = format!("<p>unusual traffic from your computer network</p><form action='/sorry/index'><input name='continue' value='{base}/search?q=1'><div class='g-recaptcha' data-sitekey='K'></div></form>");
+        // The v2 wall page the in-isolate solver re-fetches is served from the URL itself.
+        let wall = spawn_routes(vec![("GET /sorry", "", html.clone())]).await;
+        let page = format!("{wall}/sorry/index");
+        let mut jar = CookieJar::new();
+        fn ok() -> Option<Box<dyn ChallengeSolver>> {
+            Some(Box::new(ExemptSolver(true)))
+        }
+        fn down() -> Option<Box<dyn ChallengeSolver>> {
+            Some(Box::new(ExemptSolver(false)))
+        }
+        let (u, h) = maybe_clear_sorry_with(&mut jar, page.clone(), html.clone(), ok)
+            .await
+            .unwrap();
+        assert_eq!(
+            (u, h.as_str()),
+            (format!("{base}/search?q=1"), "<div id=rso>cleared</div>")
+        );
+        let err = maybe_clear_sorry_with(&mut jar, page, html, down)
+            .await
+            .unwrap_err();
+        assert!(
+            err.starts_with("google /sorry clearance failed (in-isolate: reCAPTCHA v2 image-grid"),
+            "{err}"
+        );
+        assert!(
+            err.ends_with("external exempt-stub: solver HTTP error: down)"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn serp_tracing_changes_no_results() {
+        // With tracing forced on, the diagnostics are formatted and the outcomes are the
+        // same as untraced runs: a cached-token hit, a shell → re-mint → shell error, and
+        // probe_mint.
+        FORCE_TRACE.with(|f| f.set(true));
+        let port = super::tests::enid_server_for_trace().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let cache = EnidCache::new(
+            std::env::temp_dir().join(format!("surf-trace-{}.json", std::process::id())),
+        );
+        cache
+            .set(&[serde_json::from_value(json!({ "name": "__Secure-ENID", "value": "TRUSTED", "domain": "127.0.0.1", "path": "/" })).unwrap()])
+            .unwrap();
+        let hit = google_enid_flow(&url, &cache, "false", None, false, &BTreeMap::new())
+            .await
+            .unwrap();
+        assert!(hit.contains("id=\"rso\""));
+        let stale = super::tests::stale_mint_cmd();
+        let err = google_enid_flow(&url, &cache, &stale, None, true, &BTreeMap::new())
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("google served the enablejs shell"), "{err}");
+        let probe = call(&mut Session::new(), "probe_mint", json!({ "url": url }))
+            .await
+            .unwrap();
+        assert_eq!(probe["status"], 200);
+        let _ = std::fs::remove_file(
+            std::env::temp_dir().join(format!("surf-trace-{}.json", std::process::id())),
+        );
+        FORCE_TRACE.with(|f| f.set(false));
     }
 }

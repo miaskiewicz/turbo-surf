@@ -22,11 +22,16 @@ on 2026-10-28 (consol/cov-c4 5895357), rounded down to 0.1; the workspace `fail-
 | crate | measured | floor |
 |---|---|---|
 | turbo-surf-core | 99.44 * | 99.4 |
-| turbo-surf-mcp | 90.27 | 90.2 |
+| turbo-surf-mcp | 99.67 | 99.6 |
 | turbo-surf-page | 100.00 | 100 |
 | turbo-surf-render | 91.80 | 91.7 |
 | turbo-surf-transform | 100.00 | 100 |
 | turbo-surf-view | 99.91 | 99.9 |
+
+mcp was re-measured on its own (`cargo tarpaulin -p turbo-surf-mcp`, 1829/1835 lines).
+Its remaining lines need the live network or a real reCAPTCHA token: the
+`browserless_google_serp` entry point (fixed to www.google.com; its core
+`browserless_serp` is tested on localhost) and an in-isolate `/sorry` token.
 
 \* core was re-measured on consol/cov-c4c with its own tests only (`cargo tarpaulin` over
 `turbo-surf-core`: 99.44%, 3922/3944). The workspace run adds the other crates' tests, so this

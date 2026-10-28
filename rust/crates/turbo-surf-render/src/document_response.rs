@@ -87,6 +87,31 @@ mod url_tests {
         assert_eq!(report_url("not a url"), "not a url");
     }
     #[test]
+    fn navigation_metadata_takes_the_referrer_the_request_actually_sent() {
+        use turbo_surf_core::request_context::RequestContext;
+        let target = "https://other.test/landing";
+        // No source document (a typed URL / host navigation): no referrer at all.
+        let direct = DocumentResponseMetadata::from_request(
+            203,
+            &RequestContext::navigation(None, false),
+            target,
+        );
+        assert_eq!((direct.status, direct.referrer.as_str()), (203, ""));
+        // The default policy trims a cross-origin referrer to the source origin.
+        let mut request =
+            RequestContext::navigation(Some("https://u:p@site.test/a?b#f".into()), true);
+        let sent = DocumentResponseMetadata::from_request(200, &request, target);
+        assert_eq!(sent.referrer, "https://site.test/");
+        // An explicit request referrer (e.g. kept across redirects) wins over the source.
+        request.referrer = Some("https://site.test/form?q".into());
+        request.referrer_policy = ReferrerPolicy::UnsafeUrl;
+        let sent = DocumentResponseMetadata::from_request(200, &request, target);
+        assert_eq!(sent.referrer, "https://site.test/form?q");
+        request.referrer_policy = ReferrerPolicy::NoReferrer;
+        let sent = DocumentResponseMetadata::from_request(200, &request, target);
+        assert_eq!(sent.referrer, "");
+    }
+    #[test]
     fn local_navigation_referrers_follow_the_policy() {
         let source = "https://u:p@site.test/a?b#frag";
         let referrer = |policy| local_navigation_referrer(source, policy);

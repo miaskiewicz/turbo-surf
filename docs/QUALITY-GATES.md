@@ -24,7 +24,7 @@ on 2026-10-28 (consol/cov-c4 5895357), rounded down to 0.1; the workspace `fail-
 | turbo-surf-core | 99.44 * | 99.4 |
 | turbo-surf-mcp | 99.67 | 99.6 |
 | turbo-surf-page | 100.00 | 100 |
-| turbo-surf-render | 95.38 † | 95.3 |
+| turbo-surf-render | 95.38 † | 95.0 ‡ |
 | turbo-surf-transform | 100.00 | 100 |
 | turbo-surf-view | 99.91 | 99.9 |
 
@@ -46,6 +46,9 @@ timing-dependent render paths move ~3-5 lines between identical runs, inside the
 The remaining render lines are mostly V8 allocation/termination/teardown guards, op-argument
 guards that only the bootstrap JS can reach, and the network report/redirect corners of CSP
 reporting; the release target for render is ~97.5%.
+
+‡ The render floor was set to 95.0 (from 95.3) by user decision on 2026-10-28, when PR CI moved
+to ubuntu runners (macOS runners unavailable) and the Linux measurement moved against the macOS one.
 
 Target: >= 99.5 per measured crate. The coverage phase raises each floor to the measured
 value as tests land; never lower one to pass a change.

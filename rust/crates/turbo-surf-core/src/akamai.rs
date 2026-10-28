@@ -300,6 +300,23 @@ mod tests {
         }
     }
 
+    // RFC 4648 section 10 test vectors, covering both padding shapes.
+    #[test]
+    fn base64_matches_rfc_4648_vectors() {
+        for (input, encoded) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(input.as_bytes()), encoded, "{input:?}");
+        }
+        assert_eq!(base64(&[0xfb, 0xff]), "+/8=");
+    }
+
     // V1 (plaintext) structural contract.
     #[test]
     fn sensor_v1_has_plaintext_structure() {

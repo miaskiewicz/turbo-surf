@@ -30,6 +30,7 @@
   like Chrome 156 (`matchMedia` and live layout `@media`): `not (unknown-x)`,
   `not (orientation: 1px)` and `(width: 800px) and (not (unknown-x))` no longer match,
   and `(width: red)` is unknown instead of an error.
+<<<<<<< HEAD
 - Classic `<script src="data:…">` (#67) runs like Chrome 156 (parser-inserted,
   dynamic and child-frame scripts were dropped as "not an allowed HTTP URL"): script
   fetch decodes the data: URL as a basic response (MIME charset, else windows-1252 for
@@ -58,6 +59,12 @@
   callable @@iterator property.`, `The provided value cannot be converted to a
   sequence.`, `Overload resolution failed.`, `… is not of type
   'StructuredSerializeOptions'.`). Internal stream-chunk posts stay unprefixed.
+=======
+- Large pages open (#75): compression-dictionary link discovery, which runs for every
+  document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
+  the whole page. It has no such bound now; every link settles like Chrome 156 (300
+  links, 300 `error` events under a blocking CSP).
+>>>>>>> origin/consol/cov-c4b
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

@@ -351,3 +351,16 @@ fn extract_sink(html: &str, sink_id: &str) -> String {
 // they boot a deno_core runtime (which initializes the V8 platform), and the
 // lib unit-test binary stays deno_core-free so it never initializes a second V8
 // platform.
+
+#[cfg(test)]
+mod sink_tests {
+    use super::*;
+    #[test]
+    fn sinks_are_read_from_their_element_text_and_unescaped() {
+        let html = r#"<pre id="log">[&quot;a&lt;b&quot;, &amp;lt;]</pre><p id="open">"#;
+        assert_eq!(extract_sink(html, "log"), r#"["a<b", &lt;]"#);
+        assert_eq!(extract_sink(html, "missing"), "[]");
+        assert_eq!(extract_sink(r#"<p id="cut""#, "cut"), "[]");
+        assert_eq!(extract_sink(html, "open"), "[]");
+    }
+}

@@ -66,12 +66,11 @@ fn zoom(value: &str) -> bool {
     if turbo_dom_browser_env::css_values::zoom_value(value).is_some() || css_wide(value) {
         return true;
     }
+    // Lightning CSS has no `zoom` property id, so `zoom` parses as an unknown custom
+    // property (zoom_is_an_unknown_property_to_lightning_css): only var()/env()
+    // values remain to accept.
     Property::parse_string(PropertyId::from("zoom"), value, ParserOptions::default()).is_ok_and(
-        |property| match property {
-            Property::Custom(property) => deferred(&property.value),
-            Property::Unparsed(property) => deferred(&property.value),
-            _ => false,
-        },
+        |property| matches!(property, Property::Custom(property) if deferred(&property.value)),
     )
 }
 
@@ -154,6 +153,22 @@ mod tests {
         assert_eq!(matches("(zoom: wide)"), Ok(false));
         // An `or` with no supported branch is false.
         assert_eq!(matches("(unknown: 1) or (width: nonsense)"), Ok(false));
+        // Chrome 156: Gecko/Trident/Presto-prefixed declarations are unsupported even
+        // when the unprefixed value is valid; -webkit- ones Chrome implements are.
+        assert_eq!(matches("(-moz-appearance: none)"), Ok(false));
+        assert_eq!(matches("(-ms-transform: none)"), Ok(false));
+        assert_eq!(matches("(-o-transition: none)"), Ok(false));
+        assert_eq!(matches("(-webkit-transform: none)"), Ok(true));
+    }
+    #[test]
+    fn zoom_is_an_unknown_property_to_lightning_css() {
+        use lightningcss::properties::custom::CustomPropertyName;
+        assert!(matches!(
+            super::PropertyId::from("zoom"),
+            super::PropertyId::Custom(CustomPropertyName::Unknown(_))
+        ));
+        assert!(super::zoom("env(safe-area-inset-top)"));
+        assert!(!super::zoom("calc(1 +)"));
     }
     #[test]
     fn native_declarations_validate_values_and_nested_boolean_grammar() {

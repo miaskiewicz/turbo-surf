@@ -222,4 +222,22 @@ mod tests {
             .unwrap_err()
             .contains("rule type 0"));
     }
+    #[test]
+    fn imports_with_unmatched_media_are_skipped_and_unhandled_rule_types_are_refused() {
+        let print_import = sheet(serde_json::json!({"rules":[
+            {"type":3,"cssText":"@import url(p.css) print;","media":"print","styleSheet":{"rules":[{"type":1,"cssText":".x{width:10px}"}]}},
+            {"type":3,"cssText":"@import url(gone.css);","media":""},
+            {"type":1,"cssText":".x{width:20px}"}]}));
+        assert_eq!(
+            active_rules(&[print_import], &TestConditions).unwrap(),
+            [".x{width:20px}"]
+        );
+        for kind in [2, 6, 10, 11] {
+            let rule = sheet(serde_json::json!({"rules":[{"type":kind,"cssText":"@x{}"}]}));
+            assert_eq!(
+                active_rules(&[rule], &TestConditions).unwrap_err(),
+                format!("native live layout does not support CSS rule type {kind}")
+            );
+        }
+    }
 }

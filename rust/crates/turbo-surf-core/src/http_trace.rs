@@ -23,9 +23,10 @@ pub(crate) fn record(event: impl FnOnce() -> Value) {
     let Some(path) = std::env::var_os("TURBO_SURF_HTTP_TRACE") else {
         return;
     };
-    let Ok(_lock) = WRITE_LOCK.lock() else {
-        return;
-    };
+    // The lock guards no data, only line interleaving, so a poisoned lock is as good.
+    let _lock = WRITE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let result = (|| -> std::io::Result<()> {
         let mut options = std::fs::OpenOptions::new();
         options.create(true).append(true);

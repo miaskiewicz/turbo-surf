@@ -953,6 +953,23 @@ mod tests {
         assert_eq!(jar.size(), 0);
         jar.set_from_document("https://x.test/", "ok=1", 0.0);
         assert_eq!(jar.cookie_header("https://x.test/", 0.0), "ok=1");
+        // RFC 6265bis 5.7 step 21: a script cannot overwrite a live HttpOnly cookie,
+        // but may set the same name once it has expired.
+        jar.set_from_response(
+            "https://x.test/",
+            &["sid=server; HttpOnly; Max-Age=60".into()],
+            0.0,
+        );
+        jar.set_from_document("https://x.test/", "sid=script", 1.0);
+        assert_eq!(
+            jar.cookie_header("https://x.test/", 1.0),
+            "ok=1; sid=server"
+        );
+        jar.set_from_document("https://x.test/", "sid=script", 120_000.0);
+        assert_eq!(
+            jar.cookie_header("https://x.test/", 120_000.0),
+            "ok=1; sid=script"
+        );
     }
 
     #[test]

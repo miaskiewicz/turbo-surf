@@ -18,7 +18,6 @@ globalThis.out=out;"#;
 const CHROME_156: &str = r#"["DataCloneError: Failed to execute 'mark' on 'Performance': ()=>{} could not be cloned.","DataCloneError: Failed to execute 'measure' on 'Performance': ()=>{} could not be cloned.","DataCloneError: Failed to construct 'PerformanceMark': ()=>{} could not be cloned.","DataCloneError: Failed to execute 'mark' on 'Performance': Symbol(s) could not be cloned.","DataCloneError: Failed to execute 'measure' on 'Performance': HTMLBodyElement object could not be cloned.","DataCloneError: Failed to construct 'PerformanceMark': #<WeakMap> could not be cloned.","ok"]"#;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#78: fails until detail clones carry the caller's prefix"]
 async fn performance_detail_clone_errors_match_chrome156() {
     let html = format!("<!doctype html><body><script>{SCRIPT}</script></body>");
     let mut page = PageSession::open(&html, "https://timing.test/", "", "", 5000)

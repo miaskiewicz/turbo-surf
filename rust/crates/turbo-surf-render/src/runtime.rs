@@ -8914,7 +8914,11 @@ const __performanceString = value => {if(typeof value==='symbol')throw new TypeE
 const __performanceNumber = value => {const n=Number(value);if(!Number.isFinite(n)||n<0)throw new TypeError('A nonnegative finite timestamp is required');return n;};
 const __entryState = receiver => {const state=__performanceEntries.get(receiver);if(!state)throw new TypeError('Illegal invocation');return state;};
 const __performanceOwner=globalThis;
-const __performanceDetail = detail => detail===undefined?null:ops.op_surf_structured_clone(detail,__performanceOwner,undefined,"");
+// Serialization errors carry the calling operation's Chrome prefix (turbo-surf#78).
+// performance.mark() builds its entry through the PerformanceMark constructor, so it
+// lends that construction its own prefix, taken before any guest conversion runs.
+let __performanceMarkPrefix = null;
+const __performanceDetail = (detail, prefix) => detail===undefined?null:ops.op_surf_structured_clone(detail,__performanceOwner,undefined,prefix);
 globalThis.PerformanceEntry = class PerformanceEntry {
   constructor(){throw new TypeError('Illegal constructor');}
   get name(){return __entryState(this).name;}
@@ -8925,7 +8929,7 @@ globalThis.PerformanceEntry = class PerformanceEntry {
   toJSON(){const state=__entryState(this);const result={name:state.name,entryType:state.entryType,startTime:state.startTime,duration:state.duration,navigationId:state.navigationId};if(state.entryType==='navigation')Object.assign(result,__navigationRelative());return result;}
 };
 globalThis.PerformanceMark = class PerformanceMark {
-  constructor(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');name=__performanceString(name);if(__performanceFields.includes(name))throw new DOMException('Reserved timing name','SyntaxError');if(options!=null&&typeof options!=='object'&&typeof options!=='function')throw new TypeError('Mark options must be a dictionary');options=options||{};__performanceEntries.set(this,{name,navigationId:__navigationId,entryType:'mark',startTime:options.startTime===undefined?__perfNow():__performanceNumber(options.startTime),duration:0,detail:__performanceDetail(options.detail)});}
+  constructor(name,options=undefined){const detailPrefix=__performanceMarkPrefix??"Failed to construct 'PerformanceMark': ";__performanceMarkPrefix=null;if(!arguments.length)throw new TypeError('A mark name is required');name=__performanceString(name);if(__performanceFields.includes(name))throw new DOMException('Reserved timing name','SyntaxError');if(options!=null&&typeof options!=='object'&&typeof options!=='function')throw new TypeError('Mark options must be a dictionary');options=options||{};__performanceEntries.set(this,{name,navigationId:__navigationId,entryType:'mark',startTime:options.startTime===undefined?__perfNow():__performanceNumber(options.startTime),duration:0,detail:__performanceDetail(options.detail,detailPrefix)});}
   get detail(){const state=__entryState(this);if(state.entryType!=='mark')throw new TypeError('Illegal invocation');return state.detail;}
 };
 globalThis.PerformanceMeasure = class PerformanceMeasure {
@@ -8974,7 +8978,7 @@ let __resourceTimingBufferSize=250,__resourceBufferFullHandler=null;
 {
   const P=globalThis.performance||(globalThis.performance={});
   Object.defineProperties(P,{now:{value:__perfNow,configurable:true,writable:true},timeOrigin:{value:__perfTimeOrigin,configurable:true,enumerable:true},eventCounts:{value:__eventCounts,configurable:true,enumerable:true},interactionCount:{value:0,configurable:true,enumerable:true},onresourcetimingbufferfull:{get(){return __resourceBufferFullHandler;},set(value){__resourceBufferFullHandler=typeof value==='function'?value:null;},configurable:true,enumerable:true}});
-  P.mark=function(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');const entry=new PerformanceMark(name,options);__performanceTimeline.push(entry);return entry;};
+  P.mark=function(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');__performanceMarkPrefix="Failed to execute 'mark' on 'Performance': ";let entry;try{entry=new PerformanceMark(name,options);}finally{__performanceMarkPrefix=null;}__performanceTimeline.push(entry);return entry;};
   P.measure=function(name,startOrOptions=undefined,endMark=undefined){
     if(!arguments.length)throw new TypeError('A measure name is required');name=__performanceString(name);
     let start=0,end=__perfNow(),detail=null;
@@ -8984,7 +8988,7 @@ let __resourceTimingBufferSize=250,__resourceBufferFullHandler=null;
       if(endMark!==undefined||(!hasStart&&!hasEnd)||(hasStart&&hasEnd&&hasDuration))throw new TypeError('Invalid measure options');
       if(hasStart)start=__latestMark(options.start);if(hasEnd)end=__latestMark(options.end);
       if(hasDuration){const duration=__performanceNumber(options.duration);if(hasStart)end=start+duration;else start=end-duration;}
-      detail=__performanceDetail(options.detail);
+      detail=__performanceDetail(options.detail,"Failed to execute 'measure' on 'Performance': ");
     }else{if(startOrOptions!==undefined&&!options)start=__latestMark(__performanceString(startOrOptions));if(endMark!==undefined)end=__latestMark(__performanceString(endMark));}
     const entry=Object.create(PerformanceMeasure.prototype);__performanceEntries.set(entry,{name,navigationId:__navigationId,entryType:'measure',startTime:start,duration:end-start,detail});__performanceTimeline.push(entry);return entry;
   };

@@ -3,11 +3,12 @@
 # Run from rust/: `cargo tarpaulin` (reads this file). CI: the `coverage` job in
 # .github/workflows/ci.yml (macOS arm64, where the floor was measured).
 #
-# fail-under is the workspace total MEASURED on 2026-10-28 (consol/cov-c4, tarpaulin 0.37.5,
-# LLVM engine, macOS arm64, simdutf rusty_v8 150.4.0, with the exclusions below): 92.51%,
-# 18912/20444 lines, rounded down to 92.5. Per-crate floors from the same run are in
-# coverage-floors.json (CI: scripts/check-coverage-floors.py). The coverage phase raises both
-# toward >= 99.5 with behaviour-asserting tests; never lower them to pass a change.
+# fail-under is the workspace total MEASURED on 2026-10-28 at consol/cov-c4 5895357
+# (tarpaulin 0.37.5, LLVM engine, macOS arm64, simdutf rusty_v8 150.4.0, with the
+# exclusions below): 93.07%, 19287/20723 lines, rounded down to 93.0. Per-crate floors from
+# the same run are in coverage-floors.json (CI: scripts/check-coverage-floors.py). The
+# coverage phase raises both toward >= 99.5 with behaviour-asserting tests; never lower
+# them to pass a change.
 [surf]
 engine = "Llvm"
 workspace = true
@@ -33,4 +34,4 @@ timeout = "600s"
 no-fail-fast = true
 out = ["Stdout", "Json"]
 output-dir = "target/cov/report"
-fail-under = 92.5
+fail-under = 93.0

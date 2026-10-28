@@ -60,7 +60,7 @@ shim tests (`test:playwright` = `build:addon` then `test:shim` + `test:e2e`). Ne
 bypass with `--no-verify`.
 
 CI also gates **line coverage** (`coverage` job: `cd rust && cargo tarpaulin`, reading
-`rust/tarpaulin.toml` fail-under 92.5, then per-crate floors in `rust/coverage-floors.json` (the napi/py bindings are excluded);
+`rust/tarpaulin.toml` fail-under 93.0, then per-crate floors in `rust/coverage-floors.json` (the napi/py bindings are excluded);
 measured values, raised toward >= 99.5 by the coverage phase) and **cyclomatic complexity**
 (`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /
 `complexity:js`, one limit, no allow-list; expected red until the post-coverage refactor, see

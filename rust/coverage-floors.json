@@ -1,9 +1,9 @@
 {
   "floors": {
-    "turbo-surf-core": 95.8,
-    "turbo-surf-mcp": 84.3,
+    "turbo-surf-core": 96.6,
+    "turbo-surf-mcp": 90.2,
     "turbo-surf-page": 100,
-    "turbo-surf-render": 91.8,
+    "turbo-surf-render": 91.7,
     "turbo-surf-transform": 100,
     "turbo-surf-view": 99.9
   },

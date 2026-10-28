@@ -26,7 +26,7 @@
   "rustfft": {
     "version": "6.4.1",
     "source": "third_party/blink/renderer/platform/audio/rustfft_ffi.rs",
-    "adaptation": "CXX bridge removed; forward/inverse implementation preserved; dead-code allowance for unused forward path; unit tests appended (99a4464)",
+    "adaptation": "CXX bridge removed; forward/inverse implementation preserved; dead-code allowance for unused forward path; unit tests appended (99a4464, rustfmt ea1a945)",
     "originalSha256": "52a5317f5074fcfa50dedb7aac8b88cdfd007c75e01f4438a27e144cd613400d",
     "adaptedSha256": "856d30578e4347ee8e3babdd82ecf9634a8050971a3f2a6fcec5d06bc4614a09"
   },

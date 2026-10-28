@@ -56,11 +56,11 @@ jobs:
   # One tarpaulin run over the whole workspace's tests; it fails below the workspace
   # fail-under (rust/tarpaulin.toml), then every crate must meet its own floor
   # (rust/coverage-floors.json). Floors are measured values (docs/QUALITY-GATES.md); the
-  # coverage phase raises them toward >= 99.5. Never lower one to pass a change. macOS arm64
-  # matches the platform the floors were measured on.
+  # coverage phase raises them toward >= 99.5. Never lower one to pass a change. Runs on
+  # ubuntu-latest (macOS runners unavailable); floors were first measured on macOS arm64.
   coverage:
     name: coverage (rust workspace, tarpaulin fail-under)
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
       CARGO_PROFILE_DEV_DEBUG: 0

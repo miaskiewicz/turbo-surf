@@ -300,7 +300,7 @@
   156.0.8078.47 are byte-identical and their results equal the committed control, so the
   recapture only updates its `collectorSha256`; `user-activation-gates-chrome.test.mjs`
   repeats the escape-* captures five times against it on that build.
-- turbo-dom crates repinned to turbo-dom refactor f0fb306, the final consolidation head (turbo-dom#172/#173 fixed; `page_patched_intrinsics_full_set_like_chrome156` un-ignored)
+- turbo-dom crates repinned to turbo-dom refactor d660013, the final consolidation head (turbo-dom#172/#173 fixed; `page_patched_intrinsics_full_set_like_chrome156` un-ignored)
   (turbo-dom#99 track key order on re-install, #104 `<selectedcontent>`, #106 textarea
   `dir=auto`, #107 undecodable images paint nothing / truncated AVIF is broken, #94 /
   #109 corrupt AVIF never aborts, #95 raster paint and colour fixes, #108 / #110 / #111

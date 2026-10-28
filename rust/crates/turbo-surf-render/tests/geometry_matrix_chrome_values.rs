@@ -2,6 +2,7 @@
 //! script on a localhost page). Each test pins one issue:
 //! - turbo-surf#91: `is2D: true` with 3D members throws Blink's message per caller;
 //! - turbo-surf#92: rotateAxisAngle with a NaN or infinite axis is all NaN (3x3);
+//! - turbo-surf#93: the axis-aligned 2D inverse stays in doubles (reciprocal determinant).
 use serde_json::Value;
 use turbo_surf_render::PageSession;
 
@@ -50,4 +51,21 @@ const ROTATE_NAN_CHROME_156: &str = r#"["false NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,N
 async fn rotate_axis_angle_with_nan_axis_is_nan() {
     let got = eval(ROTATE_NAN_SCRIPT).await;
     assert_eq!(got, serde_json::from_str::<Value>(ROTATE_NAN_CHROME_156).unwrap());
+}
+
+const INVERSE_SCRIPT: &str = r#"const out=[];const T=f=>{try{out.push(String(f()))}catch(e){out.push(e.name+': '+e.message)}};
+T(()=>new DOMMatrix([3,0,0,3,1,1]).inverse());
+T(()=>new DOMMatrix([3,0,0,0,0,3,0,0,0,0,1,0,1,1,0,1]).inverse());
+T(()=>new DOMMatrix([3,0,0,3,1,1]).invertSelf());
+T(()=>new DOMMatrixReadOnly([1e-3,0,0,1e40,1,1]).inverse());
+for(const [a,d,e,f] of [[7,0.1,0.3,0.7],[0.3,1.7,0.1,0.9],[1.1,13,0.7,0.3],[3.3,0.07,1.9,2.3],[9,11,0.123,0.456]])T(()=>{const m=new DOMMatrix([a,0,0,d,e,f]).inverse();return [m.a,m.d,m.e,m.f].join()});
+globalThis.out=out;"#;
+
+const INVERSE_CHROME_156: &str = r#"["matrix(0.3333333333333333, 0, 0, 0.3333333333333333, -0.3333333333333333, -0.3333333333333333)","matrix3d(0.3333333333333333, 0, 0, 0, 0, 0.3333333333333333, 0, 0, 0, 0, 1, 0, -0.3333333333333333, -0.3333333333333333, 0, 1)","matrix(0.3333333333333333, 0, 0, 0.3333333333333333, -0.3333333333333333, -0.3333333333333333)","matrix(999.9999999999999, 0, 0, 1e-40, -999.9999999999999, -1e-40)","0.14285714285714285,9.999999999999998,-0.04285714285714285,-6.999999999999998","3.333333333333333,0.588235294117647,-0.33333333333333337,-0.5294117647058824","0.909090909090909,0.07692307692307691,-0.6363636363636362,-0.023076923076923075","0.30303030303030304,14.285714285714285,-0.5757575757575758,-32.857142857142854","0.11111111111111112,0.09090909090909091,-0.013666666666666667,-0.04145454545454546"]"#;
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#93: fails until the fix"]
+async fn axis_aligned_2d_inverse_stays_in_doubles() {
+    let got = eval(INVERSE_SCRIPT).await;
+    assert_eq!(got, serde_json::from_str::<Value>(INVERSE_CHROME_156).unwrap());
 }

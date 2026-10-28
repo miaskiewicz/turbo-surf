@@ -626,8 +626,8 @@ work* so the next person doesn't re-walk it.
 - **Fetch-aware drain.** `drain_to_quiescence`/`__pendingWork` tracked timers +
   un-run scripts but NOT in-flight fetches, so a save `POST` could resolve *after* the
   drain quiesced (the DOM looks "stable" while waiting) and its success re-render — a
-  modal close, a redirect — was lost. A `__pendingFetches` counter now keeps the drain
-  pumping until requests settle.
+  modal close, a redirect — was lost. A bootstrap-private in-flight fetch counter (not a
+  page global since turbo-surf#83) now keeps the drain pumping until requests settle.
 - **Network log → events.** Each live-app `fetch` is recorded in private native op-state; the shim
   drains it through the host-only `liveNetworkLog` accessor to emit `page.on('response')` and back a real `waitForResponse`. Tests use
   these to capture API payloads (payroll period, employments lists).

@@ -4149,7 +4149,7 @@ async fn render_tier_fetch_set_cookie_on_redirect_reaches_jar() {
     .await
     .expect("session opens");
     // Fire the fetch from page JS and await it (eval drains to quiescence, and op_fetch
-    // is counted in __pendingFetches so the drain waits for it).
+    // is counted in the private in-flight fetch count so the drain waits for it).
     session
         .eval(&format!(
             r#"globalThis.__RESULT = 'pending';

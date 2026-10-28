@@ -3,7 +3,7 @@
 //! interface and values through structuredClone and MessagePort.postMessage, the
 //! interface comes from the platform object (a subclass clones as its base, a
 //! prototype-only object as a plain object), aliases are preserved and the copy is a
-//! snapshot (DOMQuad is still a stub constructor: turbo-surf#69). Expected log: Chrome 156 (156.0.8078.47, headless) running the same
+//! snapshot (DOMQuad clones too: dom_quad.rs, turbo-surf#69). Expected log: Chrome 156 (156.0.8078.47, headless) running the same
 //! script on a localhost page.
 use turbo_surf_render::PageSession;
 

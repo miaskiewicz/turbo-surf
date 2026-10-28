@@ -28,7 +28,6 @@ globalThis.out=out;"#;
 const IS2D_CHROME_156: &str = r#"["TypeError: Failed to execute 'fromMatrix' on 'DOMMatrix': The is2D member is set to true but the input matrix is a 3d matrix.","TypeError: Failed to execute 'fromMatrix' on 'DOMMatrixReadOnly': The is2D member is set to true but the input matrix is a 3d matrix.","TypeError: Failed to execute 'multiply' on 'DOMMatrixReadOnly': The is2D member is set to true but the input matrix is a 3d matrix.","TypeError: Failed to execute 'multiplySelf' on 'DOMMatrix': The is2D member is set to true but the input matrix is a 3d matrix.","TypeError: Failed to execute 'preMultiplySelf' on 'DOMMatrix': The is2D member is set to true but the input matrix is a 3d matrix.","TypeError: Failed to execute 'matrixTransform' on 'DOMPointReadOnly': The is2D member is set to true but the input matrix is a 3d matrix.","matrix(2, 0, 0, 1, 0, 0)"]"#;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#91: fails until the fix"]
 async fn is2d_with_3d_members_throws_blink_message() {
     let got = eval(IS2D_SCRIPT).await;
     assert_eq!(got, serde_json::from_str::<Value>(IS2D_CHROME_156).unwrap());

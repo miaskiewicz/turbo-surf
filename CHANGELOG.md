@@ -45,6 +45,10 @@
   agent-wide sequence, and the cross-realm scheduler breaks deadline ties by it (a
   message to a child no longer runs after later parent tasks). A posted message no
   longer consumes a `setTimeout` id, and `clearTimeout(0)` cannot cancel one.
+- A DOMMatrix dictionary with `is2D: true` and 3D members (#91) throws Chrome 156's
+  `Failed to execute '<method>' on '<interface>': The is2D member is set to true but the
+  input matrix is a 3d matrix.` (`fromMatrix`, `multiply`, `multiplySelf`,
+  `preMultiplySelf`, `matrixTransform`; it was a generic message).
 - Large pages open (#75): compression-dictionary link discovery, which runs for every
   document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
   the whole page. It has no such bound now; every link settles like Chrome 156 (300

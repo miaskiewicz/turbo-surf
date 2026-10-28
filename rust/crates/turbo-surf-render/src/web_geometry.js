@@ -546,7 +546,9 @@
       result[index] = given[key];
     }
     if (want2D === true && !is2D(result))
-      throw new IdlTypeError("A 2D matrix cannot contain 3D components");
+      throw new IdlTypeError(
+        `${prefix}The is2D member is set to true but the input matrix is a 3d matrix.`,
+      );
     // Without `is2D` the dictionary is 2D unless a 3D member has a non-default value.
     return [result, want2D === undefined ? is2D(result) : want2D];
   };

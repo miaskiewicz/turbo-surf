@@ -3615,16 +3615,20 @@ fn op_timer_advance(state: &mut OpState, due: f64) {
     }
 }
 
-/// A realm's `[due, sequence]` next-timer pair, both finite, or `None`.
+/// A realm's `[due, sequence]` next-timer pair. A finite deadline is required; a
+/// missing or non-finite sequence orders first rather than stalling the timer.
 fn timer_order_key(scope: &mut v8::PinScope, value: v8::Local<v8::Value>) -> Option<(f64, f64)> {
     let pair = v8::Local::<v8::Array>::try_from(value).ok()?;
     let due = pair.get_index(scope, 0)?;
+    let due = due.is_number().then(|| due.number_value(scope)).flatten()?;
     let sequence = pair.get_index(scope, 1)?;
-    if !due.is_number() || !sequence.is_number() {
-        return None;
-    }
-    let key = (due.number_value(scope)?, sequence.number_value(scope)?);
-    (key.0.is_finite() && key.1.is_finite()).then_some(key)
+    let sequence = sequence
+        .is_number()
+        .then(|| sequence.number_value(scope))
+        .flatten()
+        .filter(|sequence| sequence.is_finite())
+        .unwrap_or(0.0);
+    due.is_finite().then_some((due, sequence))
 }
 
 fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::Instant> {
@@ -7807,7 +7811,8 @@ const __frameStage = (ts) => { __frameNow = ts; __clockEpoch = __taskEpoch; __cl
 // each still ends with its own microtask checkpoint.
 const __frameTask = (fn) => {
   const id = __tid++;
-  const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[]};
+  // Sequence 0 sorts before every queued task (agent sequences start at 1).
+  const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[],sequence:0};
   __timerSet(id,timer);__timerSplice(0,0,timer);
 };
 // Update-the-rendering order: queued engine steps (scroll events), then "update animations

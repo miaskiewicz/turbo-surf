@@ -40,6 +40,12 @@
   native `Location` and `Window` interface objects match Chrome 156 (#71):
   `location instanceof Location` holds (the native install no longer replaces the
   realm's `Location` global) and `Window`/`Location` are non-enumerable globals.
+- Sandboxed iframes (#84): a same-origin frame sandboxed without `allow-top-navigation`
+  can no longer navigate the top-level document through `top.location`; like Chrome it
+  throws `SecurityError` (the check existed only on the native engine's cross-origin
+  path). On the native engine an allowed cross-origin frame's top navigation now goes
+  through the document's own Location, so fragment navigations update its URL and
+  history.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

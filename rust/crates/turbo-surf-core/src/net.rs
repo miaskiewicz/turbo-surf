@@ -2843,6 +2843,88 @@ mod io_tests {
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::Network);
     }
+
+    #[test]
+    fn consent_cookies_merge_without_overriding_an_explicit_cookie() {
+        let google = "https://www.google.com/search?q=1";
+        let mut empty = BTreeMap::new();
+        seed_consent_cookies(&mut empty, google, None);
+        assert_eq!(
+            empty.get("cookie").map(String::as_str),
+            Some(format!("SOCS={}", crate::consent::DEFAULT_SOCS).as_str())
+        );
+        let mut other = BTreeMap::from([("cookie".to_string(), "a=1".to_string())]);
+        seed_consent_cookies(&mut other, google, Some("CUSTOM"));
+        assert_eq!(other["cookie"], "a=1; SOCS=CUSTOM");
+        let mut mine = BTreeMap::from([("cookie".to_string(), "a=1; SOCS = mine".to_string())]);
+        seed_consent_cookies(&mut mine, google, Some("CUSTOM"));
+        assert_eq!(mine["cookie"], "a=1; SOCS = mine");
+        let mut none = BTreeMap::new();
+        seed_consent_cookies(&mut none, google, Some(""));
+        seed_consent_cookies(&mut none, "https://example.test/", None);
+        assert!(none.is_empty());
+    }
+
+    #[tokio::test]
+    async fn manual_redirects_enforce_the_limit_and_same_origin_mode() {
+        let port = spawn().await;
+        let limited = fetch_html(
+            &url(port, "/r"),
+            FetchOptions {
+                redirect: Some(RedirectMode::Follow),
+                max_redirects: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            limited.to_string(),
+            "Network: Request redirect limit exceeded"
+        );
+        let followed = fetch_html(
+            &url(port, "/r"),
+            FetchOptions {
+                redirect: Some(RedirectMode::Follow),
+                max_redirects: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(followed.html, "<html>dest</html>");
+        // A same-origin-mode request may not be redirected to another origin.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bounce = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let resp = format!("HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/dest\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let source = url(bounce, "/page");
+        let same_origin = fetch_html(
+            &url(bounce, "/go"),
+            FetchOptions {
+                context: Some(RequestContext::resource(
+                    &source,
+                    crate::request_context::Destination::Empty,
+                    crate::request_context::RequestMode::SameOrigin,
+                )),
+                max_redirects: Some(5),
+                allow_non_html: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            same_origin.to_string(),
+            "Network: Request redirect violates same-origin mode"
+        );
+    }
 }
 
 #[cfg(test)]

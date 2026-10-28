@@ -502,3 +502,96 @@ fn dictionary_storage_rejects_oversize_entries_and_evicts_under_both_cache_bound
         .select("partition", "https://dict.test/result-64", &context())
         .is_some());
 }
+
+#[test]
+fn use_as_dictionary_rejects_malformed_or_unsupported_fields() {
+    let dictionaries = DictionaryStore::default();
+    for bad in [
+        r#"match=("/a")"#,                    // match must be a string item
+        r#"match="/(\\d+)""#,                 // regexp groups are not allowed
+        r#"match="/*", type=br"#,             // only type=raw
+        r#"match="/*", type="raw""#,          // type must be a token
+        r#"match="/*", id=7"#,                // id must be a string
+        r#"match="/*", match-dest="script""#, // match-dest must be an inner list
+        r#"match="/*", match-dest=(script)"#, // of strings
+        "match=",                             // not a structured dictionary
+    ] {
+        assert!(!store(&dictionaries, "d", bad, b"x"), "{bad}");
+    }
+    let long_id = format!(r#"match="/*", id="{}""#, "i".repeat(1025));
+    assert!(!store(&dictionaries, "d", &long_id, b"x"));
+    let huge = format!(r#"match="/*", id="{}""#, "i".repeat(16 * 1024));
+    assert!(!store(&dictionaries, "d", &huge, b"x"));
+    assert!(dictionaries
+        .select("partition", "https://dict.test/a", &context())
+        .is_none());
+    // An exactly 1024-byte id is accepted.
+    let max_id = format!(r#"match="/*", id="{}""#, "i".repeat(1024));
+    assert!(store(&dictionaries, "d", &max_id, b"x"));
+}
+
+#[test]
+fn dictionaries_are_admitted_only_from_secure_untainted_same_origin_or_cors_responses() {
+    let dictionaries = DictionaryStore::default();
+    let put = |url: &str, ctx: &RequestContext| {
+        dictionaries.store_response("partition", url, ctx, 200, &headers(r#"match="/*""#), b"x")
+    };
+    assert!(!put("http://dict.test/d", &context()));
+    let mut opaque = context();
+    opaque.opaque_origin = true;
+    assert!(!put("https://dict.test/d", &opaque));
+    let mut tainted = context();
+    tainted.origin_tainted = true;
+    assert!(!put("https://dict.test/d", &tainted));
+    let mut sourceless = context();
+    sourceless.source = None;
+    assert!(put("https://dict.test/d", &sourceless));
+    // Non-200 responses and no-store responses are never dictionaries.
+    assert!(!dictionaries.store_response(
+        "p",
+        "https://dict.test/d",
+        &context(),
+        206,
+        &headers(r#"match="/*""#),
+        b"x"
+    ));
+    let no_store = vec![
+        ("Use-As-Dictionary".to_string(), r#"match="/*""#.to_string()),
+        (
+            "Cache-Control".to_string(),
+            "max-age=60, no-store".to_string(),
+        ),
+    ];
+    assert!(!dictionaries.store_response(
+        "p",
+        "https://dict.test/d",
+        &context(),
+        200,
+        &no_store,
+        b"x"
+    ));
+}
+
+#[test]
+fn every_destination_has_its_fetch_dest_name() {
+    let names: Vec<&str> = [
+        Destination::Document,
+        Destination::Iframe,
+        Destination::Script,
+        Destination::Style,
+        Destination::Image,
+        Destination::Empty,
+        Destination::Report,
+    ]
+    .into_iter()
+    .map(|d| {
+        let mut c = context();
+        c.destination = d;
+        destination(&c)
+    })
+    .collect();
+    assert_eq!(
+        names,
+        ["document", "iframe", "script", "style", "image", "", "report"]
+    );
+}

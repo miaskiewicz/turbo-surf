@@ -328,3 +328,84 @@ async fn vendor_solvers_surface_transport_errors_and_parse_edges() {
         None
     );
 }
+
+// A localhost endpoint that records each request and answers with `resp`.
+async fn recorder(resp: &'static str) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = vec![0u8; 16384];
+            let n = sock.read(&mut buf).await.unwrap_or(0);
+            let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+            let _ = sock.write_all(resp.as_bytes()).await;
+        }
+    });
+    (base, rx)
+}
+
+#[tokio::test]
+async fn akamai_solver_posts_the_pinned_sensor_version_to_its_sensor_url() {
+    use turbo_surf_core::akamai::{AkamaiSolver, SensorVersion};
+    let (base, mut rx) = recorder(
+        "HTTP/1.1 200 OK\r\nSet-Cookie: _abck=ok~0~; Path=/\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+    )
+    .await;
+    let solver = AkamaiSolver::new()
+        .with_version(SensorVersion::V1)
+        .with_sensor_url(format!("{base}/_sensor"));
+    let ch = Challenge {
+        vendor: Vendor::Akamai,
+        page_url: "https://shop.test/p".into(),
+        ..Default::default()
+    };
+    let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
+    assert_eq!(
+        token.cookies,
+        vec![("_abck".to_string(), "ok~0~".to_string())]
+    );
+    let req = rx.recv().await.unwrap();
+    assert!(req.starts_with("POST /_sensor "), "{req}");
+    // V1 sensors start with the 1.74 header and carry the page URL.
+    assert!(req.contains(r#"{"sensor_data":"1.74;"#), "{req}");
+    assert!(req.contains("href,https://shop.test/p;"), "{req}");
+}
+
+#[tokio::test]
+async fn recaptcha_solver_needs_a_site_key_from_the_challenge_or_the_page() {
+    use turbo_surf_core::recaptcha::RecaptchaSolver;
+    struct Never;
+    #[async_trait::async_trait]
+    impl RecaptchaEngine for Never {
+        async fn execute(&self, _: &str, _: &str, _: &str, _: &str) -> Result<String, String> {
+            Err("unused".into())
+        }
+    }
+    let (base, _rx) = recorder(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 13\r\nConnection: close\r\n\r\n<p>no key</p>",
+    )
+    .await;
+    let ch = Challenge {
+        vendor: Vendor::Recaptcha,
+        page_url: format!("{base}/"),
+        ..Default::default()
+    };
+    let unconfigured = RecaptchaSolver::new()
+        .solve(&ch, &SolveContext::default())
+        .await;
+    assert!(
+        matches!(unconfigured, Err(SolveError::NotConfigured)),
+        "{unconfigured:?}"
+    );
+    let err = RecaptchaSolver::new()
+        .with_engine(Box::new(Never))
+        .solve(&ch, &SolveContext::default())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "solver response parse error: recaptcha: no site key found on the page"
+    );
+}

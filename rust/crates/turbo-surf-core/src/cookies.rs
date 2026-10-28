@@ -954,4 +954,11 @@ mod tests {
         jar.set_from_document("https://x.test/", "ok=1", 0.0);
         assert_eq!(jar.cookie_header("https://x.test/", 0.0), "ok=1");
     }
+
+    #[test]
+    fn document_cookie_domain_attribute_widens_to_the_registrable_domain() {
+        let mut jar = CookieJar::new();
+        jar.set_from_document("https://www.x.test/", "d=1; Domain=x.test", 0.0);
+        assert_eq!(jar.cookie_header("https://api.x.test/", 0.0), "d=1");
+    }
 }

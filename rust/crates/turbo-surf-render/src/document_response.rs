@@ -72,3 +72,38 @@ impl DocumentResponseMetadata {
         }
     }
 }
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+    use turbo_surf_core::referrer_policy::ReferrerPolicy;
+    #[test]
+    fn report_urls_strip_credentials_and_fragments_and_keep_only_non_http_schemes() {
+        assert_eq!(
+            report_url("https://u:p@site.test/a?b#frag"),
+            "https://site.test/a?b"
+        );
+        assert_eq!(report_url("data:text/plain,secret"), "data");
+        assert_eq!(report_url("not a url"), "not a url");
+    }
+    #[test]
+    fn local_navigation_referrers_follow_the_policy() {
+        let source = "https://u:p@site.test/a?b#frag";
+        let referrer = |policy| local_navigation_referrer(source, policy);
+        assert_eq!(referrer(ReferrerPolicy::NoReferrer), "");
+        assert_eq!(referrer(ReferrerPolicy::SameOrigin), "");
+        assert_eq!(referrer(ReferrerPolicy::UnsafeUrl), "https://site.test/a?b");
+        assert_eq!(
+            referrer(ReferrerPolicy::StrictOriginWhenCrossOrigin),
+            "https://site.test/"
+        );
+        assert_eq!(
+            local_navigation_referrer("about:blank", ReferrerPolicy::UnsafeUrl),
+            ""
+        );
+        assert_eq!(
+            local_navigation_referrer("not a url", ReferrerPolicy::UnsafeUrl),
+            ""
+        );
+    }
+}

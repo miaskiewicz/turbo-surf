@@ -317,6 +317,34 @@ mod tests {
     }
 
     #[test]
+    fn container_allow_tokens_decide_a_cross_origin_child() {
+        // Permissions Policy "define an inherited policy": for a default-self feature
+        // the iframe's allow attribute must name the child ('none' never does).
+        let parent = PermissionsPolicy::from_headers("https://site.test", &[]);
+        let child = |allow: &str| {
+            let mut child = PermissionsPolicy::from_headers("https://child.test", &[]);
+            child.inherit(
+                &parent,
+                "https://site.test",
+                "https://child.test",
+                "https://child.test",
+                allow,
+            );
+            child.allows_self("geolocation", "https://child.test")
+        };
+        assert!(child("geolocation *"));
+        assert!(child("geolocation https://child.test"));
+        assert!(child("geolocation 'src'"));
+        assert!(child("geolocation"));
+        assert!(!child("geolocation 'none'"));
+        assert!(!child("geolocation 'self'"));
+        assert!(!child("geolocation https://other.test"));
+        assert!(!child(""));
+        // Host-less origins never match an allowlist entry.
+        assert!(!matches_origin("file:///", "file:///x"));
+    }
+
+    #[test]
     fn bare_token_allowlists_match_chrome() {
         // Chrome 156: `ch-ua=self` → [self origin]; `ch-save-data=bogus` → [] (disabled),
         // both default-`*` features (turbo-surf#59).

@@ -6852,4 +6852,393 @@ mod session_tool_tests {
             assert_eq!(c["accepted"], false);
         }
     }
+
+    fn strategy_of(v: Value) -> Strategy {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn json_serps_follow_dotted_paths_and_skip_empty_urls() {
+        let st = strategy_of(
+            json!({ "engine": "j", "query_url": "{query}", "format": "json",
+            "json_path": { "results": "data.hits", "title": "t", "url": "meta.u", "snippet": "s" } }),
+        );
+        let body = r#"{"data":{"hits":[
+            {"t":"One","meta":{"u":"https://a.test/1"},"s":"first"},
+            {"t":"NoUrl","meta":{"u":""}},
+            {"meta":{"u":"https://a.test/3"},"s":""},
+            {"t":"Four","meta":{"u":"https://a.test/4"}}]}}"#;
+        let hits: Vec<Value> = parse_serp(&st, body, 2)
+            .iter()
+            .map(SearchResult::to_json)
+            .collect();
+        assert_eq!(
+            hits,
+            vec![
+                json!({ "title": "One", "url": "https://a.test/1", "snippet": "first" }),
+                json!({ "title": "", "url": "https://a.test/3" }),
+            ]
+        );
+        assert!(parse_serp(&st, "not json", 5).is_empty());
+        assert!(parse_serp(&st, r#"{"data":{"hits":{}}}"#, 5).is_empty());
+        assert!(parse_serp(&st, r#"{"data":[]}"#, 5).is_empty());
+        let no_path =
+            strategy_of(json!({ "engine": "j", "query_url": "{query}", "format": "json" }));
+        assert!(parse_serp(&no_path, body, 5).is_empty());
+        assert_eq!(json_lookup(&json!({"a":{"b":1}}), "a.b"), Some(&json!(1)));
+        assert_eq!(json_lookup(&json!({"a":1}), "a.b"), None);
+    }
+
+    #[test]
+    fn redirect_wrappers_unwrap_their_target_parameter() {
+        assert_eq!(
+            decode_redirect(None, "https://x.test/").as_deref(),
+            Some("https://x.test/")
+        );
+        assert_eq!(
+            decode_redirect(Some("q"), "/url?q=https://a.test/p&sa=U").as_deref(),
+            Some("https://a.test/p")
+        );
+        assert_eq!(
+            decode_redirect(
+                Some("uddg"),
+                "//duckduckgo.com/l/?uddg=https%3A%2F%2Fb.test%2F"
+            )
+            .as_deref(),
+            Some("https://b.test/")
+        );
+        // No wrapper parameter: the href stands; an unparsable href is dropped.
+        assert_eq!(
+            decode_redirect(Some("q"), "https://c.test/direct").as_deref(),
+            Some("https://c.test/direct")
+        );
+        assert_eq!(decode_redirect(Some("q"), "http://[bad"), None);
+    }
+
+    #[test]
+    fn user_strategy_dir_loads_only_valid_json_strategies() {
+        // Initialise the process-wide registry first so this env change cannot leak
+        // into it; then exercise the loader directly.
+        let _ = static_registry();
+        let dir = std::env::temp_dir().join(format!("surf-strategies-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("ok.json"),
+            r#"{"engine":"mine","query_url":"https://m.test/?q={query}","format":"structural"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("blank.json"),
+            r#"{"engine":" ","query_url":"{query}"}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("broken.json"), "{").unwrap();
+        std::fs::write(dir.join("notes.txt"), "{}").unwrap();
+        std::fs::create_dir_all(dir.join("sub.json")).unwrap();
+        std::env::set_var("TURBO_SURF_SEARCH_STRATEGIES", &dir);
+        let loaded = load_user_dir();
+        std::env::set_var("TURBO_SURF_SEARCH_STRATEGIES", "");
+        let empty = load_user_dir();
+        std::env::set_var("TURBO_SURF_SEARCH_STRATEGIES", dir.join("missing"));
+        let missing = load_user_dir();
+        std::env::remove_var("TURBO_SURF_SEARCH_STRATEGIES");
+        let unset = load_user_dir();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(loaded.keys().collect::<Vec<_>>(), vec!["mine"]);
+        assert_eq!(loaded["mine"].format, "structural");
+        assert!(empty.is_empty() && missing.is_empty() && unset.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn strategy_listing_reports_each_engines_winning_layer() {
+        let mut s = Session::new();
+        call(
+            &mut s,
+            "web_search_load_strategy",
+            json!({ "strategy": { "engine": "bing", "version": "v9", "query_url": "{query}", "format": "structural" } }),
+        )
+        .await
+        .unwrap();
+        let list = call(&mut s, "web_search_strategies", json!({}))
+            .await
+            .unwrap();
+        let by = |engine: &str| {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["engine"] == engine)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            by("bing"),
+            json!({ "engine": "bing", "version": "v9", "source": "custom", "format": "structural" })
+        );
+        assert_eq!(by("duckduckgo")["source"], "built-in");
+        let engines: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["engine"].as_str().unwrap())
+            .collect();
+        let mut sorted = engines.clone();
+        sorted.sort();
+        assert_eq!(engines, sorted);
+        // Set engine: unknown is an error, a known one becomes the session default.
+        assert_eq!(
+            call(&mut s, "web_search_set_engine", json!({ "engine": "nope" }))
+                .await
+                .unwrap_err(),
+            "unknown engine 'nope' (load one with web_search_load_strategy)"
+        );
+        assert_eq!(
+            call(&mut s, "web_search_set_engine", json!({ "engine": "bing" }))
+                .await
+                .unwrap(),
+            json!({ "engine": "bing", "ok": true })
+        );
+        assert_eq!(pick_search_engine(&s, &json!({})), "bing");
+        assert_eq!(pick_search_engine(&s, &json!({ "engine": "x" })), "x");
+        assert_eq!(
+            pick_search_engine(&Session::new(), &json!({})),
+            "duckduckgo"
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                "web_search_reset_strategy",
+                json!({ "engine": "bing" })
+            )
+            .await
+            .unwrap(),
+            json!({ "engine": "bing", "dropped": true })
+        );
+        assert_eq!(
+            call(&mut s, "web_search_reset_strategy", json!({}))
+                .await
+                .unwrap(),
+            json!({ "dropped": [] })
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_sidecar_failures_are_explicit() {
+        let fail = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write('boom');process.exitCode=3",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            fail.starts_with("browser sidecar failed (exit status: 3): boom"),
+            "{fail}"
+        );
+        let junk = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write('x')",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            junk.starts_with("browser sidecar returned non-JSON: "),
+            "{junk}"
+        );
+        let no_html = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write('{}')",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(no_html, "browser sidecar response has no 'html'");
+        assert_eq!(
+            browser_fetch_serp_cmd("https://e/", "  ", None)
+                .await
+                .unwrap_err(),
+            "TURBO_SURF_BROWSER_FETCH_CMD is empty"
+        );
+        assert!(
+            browser_fetch_serp_cmd("https://e/", "/no/such/sidecar", None)
+                .await
+                .unwrap_err()
+                .starts_with("spawn browser sidecar (/no/such/sidecar): ")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn setup_browser_runs_the_sidecar_setup_script() {
+        let dir = std::env::temp_dir().join(format!("surf-sidecar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.display().to_string();
+        let missing = call(
+            &mut Session::new(),
+            "web_search_setup_browser",
+            json!({ "dir": d }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            missing.starts_with(&format!("setup script not found at {d}/setup.sh")),
+            "{missing}"
+        );
+        std::fs::write(
+            dir.join("setup.sh"),
+            "echo installed; echo warn >&2; exit 2\n",
+        )
+        .unwrap();
+        let out = call(
+            &mut Session::new(),
+            "web_search_setup_browser",
+            json!({ "dir": d }),
+        )
+        .await
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(out["ok"], false);
+        assert_eq!(out["output"], "installed\n");
+        assert_eq!(out["stderr"], "warn\n");
+        assert!(
+            out.to_string()
+                .contains(&format!("node {d}/fetch-serp.mjs")),
+            "{out}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dispatch_covers_checks_consent_socs_eval_render_and_names() {
+        let mut s = Session::new();
+        s.load(
+            "https://x.test/",
+            "<body><input id=c type=checkbox><button aria-label='Send it'>S</button>\
+             <p id=p>a</p><script>document.getElementById('p').textContent='ran'</script></body>",
+        );
+        assert_eq!(
+            call(&mut s, "check", json!({ "selector": "#c" }))
+                .await
+                .unwrap(),
+            json!({ "ok": true })
+        );
+        assert_eq!(
+            call(&mut s, "is_checked", json!({ "selector": "#c" }))
+                .await
+                .unwrap(),
+            json!(true)
+        );
+        call(&mut s, "uncheck", json!({ "selector": "#c" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "is_checked", json!({ "selector": "#c" }))
+                .await
+                .unwrap(),
+            json!(false)
+        );
+        assert_eq!(
+            call(&mut s, "check", json!({})).await.unwrap_err(),
+            "check: missing 'selector'"
+        );
+        assert_eq!(
+            call(&mut s, "accessible_name", json!({ "selector": "button" }))
+                .await
+                .unwrap(),
+            json!("Send it")
+        );
+        assert_eq!(
+            call(&mut s, "set_consent_socs", json!({ "socs": "" }))
+                .await
+                .unwrap(),
+            json!({ "consentSocs": "" })
+        );
+        assert_eq!(
+            call(&mut s, "set_consent_socs", json!({})).await.unwrap(),
+            json!({ "consentSocs": null })
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                "evaluate",
+                json!({ "script": "document.getElementById('p').textContent" })
+            )
+            .await
+            .unwrap(),
+            json!("a")
+        );
+        assert_eq!(
+            call(&mut s, "eval_js", json!({})).await.unwrap_err(),
+            "eval_js: missing 'script'"
+        );
+        // render without a script runs the page's own scripts; with one, injects it.
+        assert_eq!(
+            call(&mut s, "render", json!({})).await.unwrap(),
+            json!({ "ok": true })
+        );
+        assert_eq!(
+            call(&mut s, "text_content", json!({ "selector": "#p" }))
+                .await
+                .unwrap(),
+            json!("ran")
+        );
+        call(
+            &mut s,
+            "render",
+            json!({ "script": "document.getElementById('p').textContent='again'" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            call(&mut s, "text_content", json!({ "selector": "#p" }))
+                .await
+                .unwrap(),
+            json!("again")
+        );
+        assert_eq!(
+            call(&mut s, "get_cookies", json!({})).await.unwrap(),
+            json!([])
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_follows_links_submits_forms_and_reports_inert_targets() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        call(&mut s, "set_user_agent", json!({ "value": "ClickBot/1" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            s.request_headers().get("user-agent").map(String::as_str),
+            Some("ClickBot/1")
+        );
+        call(&mut s, "goto", json!({ "url": format!("{base}/search?c") }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "click", json!({ "selector": "#q" }))
+                .await
+                .unwrap(),
+            json!({ "action": "inert" })
+        );
+        call(&mut s, "click_selector", json!({ "selector": "a" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/"));
+        // A form control: submits its form (GET) and records history.
+        call(&mut s, "click", json!({ "selector": "#f input" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=a"));
+        call(&mut s, "go_back", json!({})).await.unwrap();
+        // A POST form: the submission's method and body reach the site.
+        call(&mut s, "click", json!({ "selector": "#p input" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/post"));
+        assert_eq!(
+            call(&mut s, "click", json!({ "selector": "#none" }))
+                .await
+                .unwrap_err(),
+            "no element matches #none"
+        );
+    }
 }

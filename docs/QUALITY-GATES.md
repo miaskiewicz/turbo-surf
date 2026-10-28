@@ -24,7 +24,7 @@ on 2026-10-28 (consol/cov-c4 5895357), rounded down to 0.1; the workspace `fail-
 | turbo-surf-core | 99.44 * | 99.4 |
 | turbo-surf-mcp | 99.67 | 99.6 |
 | turbo-surf-page | 100.00 | 100 |
-| turbo-surf-render | 91.80 | 91.7 |
+| turbo-surf-render | 95.38 † | 95.3 |
 | turbo-surf-transform | 100.00 | 100 |
 | turbo-surf-view | 99.91 | 99.9 |
 
@@ -39,8 +39,13 @@ is a lower bound; the lines still missed by both runs are platform-only (`x86` o
 macOS), a `sh` spawn/wait failure, a brotli dictionary-attach failure, a cancellation race,
 and two lines of a generic async-trait adapter that tarpaulin never attributes.
 
-Render's floor sits 0.1 under its measurement: a few timing-dependent render paths move
-~3-5 lines between identical runs (12590 vs 12593 covered in two runs of the same tests).
+† render was re-measured on consol/cov-c4b bb1896f (with consol/cov-c4c/c4d merged) with its
+own tests only (`cargo tarpaulin` over `turbo-surf-render`, the exclusions below: 95.38%,
+12914/13540); the workspace run adds the other crates' tests, so this is a lower bound. A few
+timing-dependent render paths move ~3-5 lines between identical runs, inside the 0.08 margin.
+The remaining render lines are mostly V8 allocation/termination/teardown guards, op-argument
+guards that only the bootstrap JS can reach, and the network report/redirect corners of CSP
+reporting; the release target for render is ~97.5%.
 
 Target: >= 99.5 per measured crate. The coverage phase raises each floor to the measured
 value as tests land; never lower one to pass a change.
@@ -52,7 +57,8 @@ value as tests land; never lower one to pass a change.
   only inside `node` (the Playwright shim and detection suites) and `python` (the wheel
   tests) processes, which tarpaulin does not instrument, and they have no Rust tests.
 - **`turbo-surf-render/src/window_proxy.rs`, `frame_location.rs`, `frame_ancestors.rs`,
-  `code_generation.rs`, `frame_modules.rs`** (`exclude-files`): compiled only under `cfg(turbo_surf_native_proxy)`, which
+  `code_generation.rs`, `frame_modules.rs`** (`exclude-files`; `stock_engine.rs` holds their
+  stock-SDK stand-ins): compiled only under `cfg(turbo_surf_native_proxy)`, which
   `turbo-surf-render/build.rs` sets for `TURBO_SURF_ENGINE=154|155`. That engine is a V8
   compiled from source at a pinned Chromium revision (`harness/detection/engine-154`,
   `engine-155`: network checkout, the Chromium toolchain, several GB of caches and hours of
@@ -62,6 +68,28 @@ value as tests land; never lower one to pass a change.
   regressions and the frame suites (`tests/frame_modules.rs`, `iframe_default_layout.rs`,
   `sandbox_forms.rs` and the `cfg(turbo_surf_native_proxy)` cases elsewhere) before it is
   accepted.
+
+### Native-engine render coverage (manual, not in CI)
+
+The native configuration is measured on a machine with a built engine SDK
+(`harness/detection/engine-155`, macOS arm64; on a macOS 27 host build the SDK with
+`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk`, the pinned lld cannot read
+the 27 SDK's `libSystem.tbd`). `build.py --surf` passes its own cargo `--config`, which
+`cargo tarpaulin` rejects, and tarpaulin's source walk skips the helper workspace's symlinked
+`src` directories, so the run is: `cargo tarpaulin -p turbo-surf-render --features
+native-sdk-frame-read --engine llvm` from `.native-builds/sdk155/surf-workspace/rust` (with
+the helper's SDK alias config as `.cargo/config.toml` and its environment:
+`TURBO_SURF_ENGINE=155`, `TURBO_SURF_ENGINE_VERSION`, `RUSTY_V8_ARCHIVE`,
+`RUSTY_V8_ARCHIVE_SHA256`, `RUSTY_V8_SRC_BINDING_PATH`), then `llvm-profdata merge` of its
+profraws and `llvm-cov export -format=lcov` over the test binaries. Measured 2026-10-28 on
+consol/cov-c4b bb1896f (LLVM line records, a finer count than tarpaulin's):
+
+| scope | covered/lines | % | floor |
+|---|---|---|---|
+| render, native engine | 18839/20576 | 91.56 | 91.5 |
+| native-only files (window_proxy, frame_location, frame_ancestors, code_generation, frame_modules) | 1277/1736 | 73.56 | 73.5 |
+
+Three render tests fail in that configuration independently of coverage (#71).
 
 ## Complexity
 

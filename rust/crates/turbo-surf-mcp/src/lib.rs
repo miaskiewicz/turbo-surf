@@ -6560,4 +6560,107 @@ mod session_tool_tests {
             json!({ "engine": "g2", "version": "", "ok": true })
         );
     }
+
+    // A Google-style consent wall on localhost: GET / without NID is the interstitial,
+    // POST /save mints NID and 302s back, GET / with NID is the real page.
+    async fn spawn_consent_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let page = base.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = if req.starts_with("POST /save") {
+                    format!("HTTP/1.1 302 Found\r\nSet-Cookie: NID=earned; Path=/\r\nLocation: {page}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                } else {
+                    let body = if req.contains("NID=earned") {
+                        "<title>Real</title>".to_string()
+                    } else {
+                        format!("<title>Before you continue to Google</title><form action=\"/save\" method=\"post\"><input name=\"set_aps\" value=\"true\"><input name=\"set_sc\" value=\"true\"><input name=\"continue\" value=\"{page}/\"></form>")
+                    };
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                };
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        base
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn consent_walls_are_handshaken_unless_bypass_is_off() {
+        let base = spawn_consent_site().await;
+        let mut raw = Session::new();
+        assert_eq!(
+            call(&mut raw, "set_bypass_consent", json!({ "enabled": false }))
+                .await
+                .unwrap(),
+            json!({ "bypassConsent": false })
+        );
+        let walled = call(&mut raw, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        assert_eq!(walled["title"], "Before you continue to Google");
+        let mut s = Session::new();
+        let real = call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        assert_eq!(real["title"], "Real");
+        assert_eq!(real["status"], 200);
+        assert_eq!(s.jar.cookie_header(&format!("{base}/"), 0.0), "NID=earned");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_failing_or_idle_solver_leaves_the_fetched_page() {
+        let base = spawn_site().await;
+        let failing = Box::new(challenge::BrowserSolver::new(
+            "cat >/dev/null; exit 1".into(),
+        ));
+        let mut s = Session::with_solver(failing);
+        // Not a wall: the solver is never consulted.
+        let page = call(&mut s, "goto", json!({ "url": format!("{base}/post") }))
+            .await
+            .unwrap();
+        assert_eq!(page["title"], "Posted");
+        assert_eq!(s.requests.len(), 1);
+        assert_eq!(
+            call(&mut s, "stealth_status", json!({})).await.unwrap()["solver"],
+            "browser"
+        );
+        // A wall whose solve fails stays in place: no retry fetch, wall status kept.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let wall = format!(
+            "http://127.0.0.1:{}/",
+            listener.local_addr().unwrap().port()
+        );
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let _ = sock.read(&mut buf).await;
+                let body = "<title>Just a moment...</title>";
+                let resp = format!("HTTP/1.1 403 Forbidden\r\ncf-mitigated: challenge\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let out = call(&mut s, "goto", json!({ "url": wall })).await.unwrap();
+        assert_eq!(
+            (out["status"].as_u64(), out["title"].as_str()),
+            (Some(403), Some("Just a moment..."))
+        );
+        assert_eq!(s.requests.len(), 2);
+    }
+
+    #[test]
+    fn serp_diagnostics_name_cookies_flatten_bodies_and_pick_the_marker() {
+        let cookie = |name: &str| -> EnidCookie {
+            serde_json::from_value(json!({ "name": name, "value": "v" })).unwrap()
+        };
+        let cookies = vec![cookie("NID"), cookie("AEC")];
+        assert_eq!(cookie_names(&cookies), "NID,AEC");
+        assert_eq!(body_prefix("a\nb\rc"), "a b c");
+        assert_eq!(body_prefix(&"x".repeat(200)).len(), 160);
+        assert_eq!(serp_marker("<div id=\"rso\">"), "id=rso");
+        assert_eq!(serp_marker("<h3>t</h3>"), "<h3>");
+    }
 }

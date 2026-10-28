@@ -8,8 +8,9 @@ fn turbo_surf_tz_pins_the_page_time_zone() {
     std::env::set_var("TURBO_SURF_TZ", "Asia/Kolkata");
     let result = turbo_surf_render::run_with_dom(
         "<body>",
-        "[new Date(0).getTimezoneOffset(),new Date(Date.UTC(2026,6,1)).getTimezoneOffset(),Intl.DateTimeFormat().resolvedOptions().timeZone].join()",
+        "[new Date(0).getTimezoneOffset(),new Date(Date.UTC(2026,6,1)).getTimezoneOffset(),['Asia/Kolkata','Asia/Calcutta'].includes(Intl.DateTimeFormat().resolvedOptions().timeZone)].join()",
     )
     .unwrap();
-    assert_eq!(result, "-330,-330,Asia/Kolkata");
+    // ICU reports the zone under either of its two canonical names.
+    assert_eq!(result, "-330,-330,true");
 }

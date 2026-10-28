@@ -142,6 +142,51 @@ async fn range_continuations_are_validated_before_they_complete_a_stored_part() 
     assert_eq!(error.message, "Response blocked by native document policy");
 }
 
+fn tail_script(_: &str, head: &str) -> &'static str {
+    if head.contains("range: bytes=2-3") {
+        "HTTP/1.1 206 Partial Content\r\nETag: \"t1\"\r\nCache-Control: max-age=3600\r\nContent-Range: bytes 2-3/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\ncd"
+    } else {
+        "HTTP/1.1 206 Partial Content\r\nETag: \"t1\"\r\nCache-Control: max-age=3600\r\nX-Fresh: whole\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd"
+    }
+}
+
+#[tokio::test]
+async fn a_stored_tail_without_a_prefix_refetches_and_stores_the_whole_representation() {
+    let (origin, seen) = origin(tail_script).await;
+    let cache = HttpCache::default();
+    let url = format!("{origin}/tail");
+    let tail = fetch_stream(&url, ranged(&cache, "bytes=2-3"))
+        .await
+        .unwrap();
+    assert_eq!(body(tail).await, b"cd");
+    // Nothing is stored for byte 0, so the continuation asks for the whole span
+    // under If-Range, and the network headers (not the stored part's) are used.
+    let observed = Mutex::new(0);
+    let observer = |_: &RequestContext, _: &str, _: &[(String, String)]| {
+        *observed.lock().unwrap() += 1;
+    };
+    let mut observed_options = options(&cache, CacheMode::Default);
+    observed_options.response_side_effects = Some(&observer);
+    let whole = fetch_stream(&url, observed_options).await.unwrap();
+    assert_eq!(whole.status, 200);
+    assert!(whole
+        .headers
+        .iter()
+        .any(|(name, value)| name == "x-fresh" && value == "whole"));
+    assert_eq!(body(whole).await, b"abcd");
+    assert_eq!(*observed.lock().unwrap(), 1);
+    let head = seen.lock().unwrap()[1].clone();
+    assert!(head.contains("range: bytes=0-3\r\n"), "{head}");
+    assert!(head.contains("if-range: \"t1\"\r\n"), "{head}");
+    // Every byte is now stored and fresh: the next default fetch is a cache hit.
+    let cached = fetch_stream(&url, options(&cache, CacheMode::Default))
+        .await
+        .unwrap();
+    assert_eq!(cached.status, 200);
+    assert_eq!(body(cached).await, b"abcd");
+    assert_eq!(seen.lock().unwrap().len(), 2);
+}
+
 fn validator_script(_: &str, head: &str) -> &'static str {
     if head.contains("if-none-match: \"e1\"") {
         "HTTP/1.1 304 Not Modified\r\nETag: \"e1\"\r\nX-Revalidated: yes\r\nConnection: close\r\n\r\n"

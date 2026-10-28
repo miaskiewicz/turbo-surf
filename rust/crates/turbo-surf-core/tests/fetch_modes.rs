@@ -273,6 +273,35 @@ async fn hooks_shared_clients_and_credentialless_cookie_admission() {
     assert!(!image.contains("cookie:"), "{image}");
 
     assert!(turbo_surf_core::net::report_client_with_trust(b"not a certificate").is_err());
+    // fetch_html stores a complete cacheable body; consent seeding adds nothing
+    // for a host without a consent wall.
+    let cache = HttpCache::default();
+    let fetched = fetch_html(
+        &format!("{origin}/stored"),
+        FetchOptions {
+            http_cache: Some(&cache),
+            bypass_consent: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(fetched.html, "page");
+    let stored = seen.lock().unwrap().last().unwrap().clone();
+    assert!(!stored.contains("cookie:"), "{stored}");
+    let requests = seen.lock().unwrap().len();
+    let replay = fetch_html(
+        &format!("{origin}/stored"),
+        FetchOptions {
+            http_cache: Some(&cache),
+            cache_mode: CacheMode::OnlyIfCached,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(replay.html, "page");
+    assert_eq!(seen.lock().unwrap().len(), requests);
     // max_bytes is inclusive: a body of exactly that size is read whole.
     for (max_bytes, ok) in [(4, true), (3, false)] {
         let page = fetch_html(

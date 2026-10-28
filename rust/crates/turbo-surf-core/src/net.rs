@@ -3113,6 +3113,26 @@ mod edge_tests {
             "{}",
             error.message
         );
+        // With session client hints the session's upload pool is used instead.
+        let hints = ClientHints::default();
+        let (_sender, upload) = crate::upload::upload_channel(16);
+        let error = fetch_stream(
+            "https://127.0.0.1:1/hinted",
+            FetchOptions {
+                method: Some("POST".into()),
+                upload_body: Some(upload),
+                client_hints: Some(&hints),
+                ..Default::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(
+            error.message.contains("(url: https://127.0.0.1:1/hinted)"),
+            "{}",
+            error.message
+        );
     }
 
     #[tokio::test]
@@ -3223,13 +3243,18 @@ mod edge_tests {
                 .await
                 .is_err()
         );
-        // A detached consumer queues nothing, but the native fill still completes.
+        // A detached consumer queues nothing, but the native fill still completes
+        // and every transport chunk still reaches the observer.
         let (_owner, open) = tokio::sync::watch::channel(false);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let observer: ResponseChunkObserver =
+            std::sync::Arc::new(move |bytes: &[u8]| sink.lock().unwrap().extend_from_slice(bytes));
         let mut body = fetch_stream(&format!("{origin}/detached"), options(CacheMode::Default))
             .await
             .unwrap()
             .body
-            .background_cache(open);
+            .background_cache_with_observer(open, Some(observer));
         assert!(body.detach_cache_consumer());
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while !body.background_complete() {
@@ -3239,6 +3264,7 @@ mod edge_tests {
         .await
         .unwrap();
         assert_eq!(body.background_status(), Some(true));
+        assert_eq!(*seen.lock().unwrap(), b"hello");
         assert!(body
             .background
             .as_ref()

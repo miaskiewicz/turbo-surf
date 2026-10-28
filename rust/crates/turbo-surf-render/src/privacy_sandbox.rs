@@ -58,11 +58,12 @@ pub(super) fn op_private_token_query(
     if !associate {
         return 0;
     }
-    if !state.has::<BrowserStorage>() {
-        state.put(BrowserStorage::default());
-    }
-    let storage = state.borrow::<BrowserStorage>().clone();
-    let Ok(mut areas) = storage.0.lock() else {
+    // Every runtime is built with its BrowserStorage (make_runtime_with_storage_and_options);
+    // a poisoned profile lock refuses the association like a failed store lookup.
+    let Some(mut areas) = state
+        .try_borrow::<BrowserStorage>()
+        .and_then(|storage| storage.0.lock().ok())
+    else {
         return 2;
     };
     let issuers = areas

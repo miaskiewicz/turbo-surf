@@ -112,7 +112,8 @@ async fn lifecycle_phase_and_opt_in_cpu_profile_survive_runaway_microtasks() {
         "",
         "",
         5000,
-        "document.body.getBoundingClientRect();throw Error('authored init failure')",
+        // The second read of the unchanged document is served from the layout cache.
+        "document.body.getBoundingClientRect();document.body.getBoundingClientRect();throw Error('authored init failure')",
     )
     .await;
     std::env::remove_var("TURBO_SURF_JS_TRACE");
@@ -136,9 +137,10 @@ async fn lifecycle_phase_and_opt_in_cpu_profile_survive_runaway_microtasks() {
     let layout: serde_json::Value =
         serde_json::from_slice(&std::fs::read(isolate.join("layout-profile.json")).unwrap())
             .unwrap();
-    assert_eq!(layout["stages"]["capture"]["calls"], 1);
     assert_eq!(layout["stages"]["layout"]["calls"], 1);
+    assert_eq!(layout["stages"]["rulesKey"]["calls"], 2);
     assert_eq!(layout["cacheMisses"], 1);
+    assert_eq!(layout["cacheHits"], 1);
     std::fs::remove_dir_all(&directory).unwrap();
     std::env::set_var("TURBO_SURF_JS_TRACE", &directory);
     let page = PageSession::open(

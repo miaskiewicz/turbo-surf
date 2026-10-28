@@ -195,12 +195,13 @@ pub(crate) fn decode_sync(
     )?;
     Ok(output)
 }
-pub(crate) async fn reserve() -> Result<tokio::sync::OwnedSemaphorePermit, DecodeError> {
+pub(crate) async fn reserve() -> tokio::sync::OwnedSemaphorePermit {
+    // acquire_owned() fails only on a closed semaphore; WORKERS is never closed.
     WORKERS
         .clone()
         .acquire_owned()
         .await
-        .map_err(|error| DecodeError::Invalid(error.to_string()))
+        .expect("the dictionary worker semaphore is never closed")
 }
 pub(crate) async fn decode(
     encoding: String,
@@ -305,13 +306,7 @@ pub(crate) fn decode_stream(
     let cancelled = Arc::new(AtomicBool::new(false));
     let worker_cancelled = cancelled.clone();
     let producer = tokio::spawn(async move {
-        let permit = match reserve().await {
-            Ok(permit) => permit,
-            Err(error) => {
-                let _ = output_send.send(Err(error)).await;
-                return;
-            }
-        };
+        let permit = reserve().await;
         let worker = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let emit = |chunk: &[u8]| {
@@ -419,5 +414,90 @@ mod terminal_tests {
                 .contains("without terminal success"));
             assert!(stream.next().await.is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    fn dictionary() -> SelectedDictionary {
+        SelectedDictionary {
+            hash: [0; 32],
+            body: Arc::new(Vec::new()),
+            id: String::new(),
+        }
+    }
+    #[test]
+    fn brotli_window_bits_follow_rfc_7932_wbits_and_the_large_window_header() {
+        // RFC 7932 9.1: 1 bit 0 -> 16; 4 bits 0bxxx1 -> 17 + xxx; 7 bits 0b0000001 -> 17;
+        // 0b0nnn0001 -> 8 + nnn for nnn in 2..=7; 0b0001_0001 (0x11) is the large-window
+        // escape, whose next byte carries the bits (10..=30).
+        assert_eq!(brotli_window_bits(&[]), None);
+        assert_eq!(brotli_window_bits(&[0x00]), Some(16));
+        assert_eq!(brotli_window_bits(&[0xfe]), Some(16));
+        assert_eq!(brotli_window_bits(&[0x03]), Some(18));
+        assert_eq!(brotli_window_bits(&[0x0f]), Some(24));
+        assert_eq!(brotli_window_bits(&[0x01]), Some(17));
+        assert_eq!(brotli_window_bits(&[0x21]), Some(10));
+        assert_eq!(brotli_window_bits(&[0x71]), Some(15));
+        assert_eq!(brotli_window_bits(&[0x11]), None);
+        assert_eq!(brotli_window_bits(&[0x11, 10]), Some(10));
+        assert_eq!(brotli_window_bits(&[0x11, 0xc0 | 30]), Some(30));
+        assert_eq!(brotli_window_bits(&[0x11, 9]), None);
+        assert_eq!(brotli_window_bits(&[0x11, 31]), None);
+        assert_eq!(brotli_window_bits(&[0x91, 24]), None);
+    }
+    #[test]
+    fn errors_describe_themselves() {
+        assert_eq!(
+            DecodeError::Size.to_string(),
+            "Dictionary body exceeds its byte limit"
+        );
+        assert_eq!(DecodeError::Invalid("x".into()).to_string(), "x");
+        assert_eq!(
+            DecodeError::Cancelled.to_string(),
+            "Dictionary decoding cancelled"
+        );
+    }
+    #[test]
+    fn unsupported_oversize_and_cancelled_inputs_are_rejected_before_decoding() {
+        let flag = || Arc::new(AtomicBool::new(false));
+        let error = decode_sync("gzip", vec![0; 64], dictionary(), 64, flag()).unwrap_err();
+        assert_eq!(error.to_string(), "Unsupported dictionary content encoding");
+        let error = decode_sync(
+            "dcb",
+            vec![0; MAX_ENCODED_BYTES + 1],
+            dictionary(),
+            usize::MAX,
+            flag(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, DecodeError::Size));
+        // A cancelled worker stops before reading the next codec block.
+        let mut emitted = 0;
+        let error = emit_decoded(
+            io::Cursor::new(vec![1; 8]),
+            usize::MAX,
+            &AtomicBool::new(true),
+            &mut |chunk: &[u8]| {
+                emitted += chunk.len();
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, DecodeError::Cancelled));
+        assert_eq!(emitted, 0);
+        // Output is capped exactly at `maximum`.
+        let mut out = Vec::new();
+        let mut sink = |chunk: &[u8]| {
+            out.extend_from_slice(chunk);
+            Ok(())
+        };
+        let cursor = io::Cursor::new(vec![1; 8]);
+        assert!(emit_decoded(cursor, 8, &AtomicBool::new(false), &mut sink).is_ok());
+        let cursor = io::Cursor::new(vec![1; 9]);
+        let error = emit_decoded(cursor, 8, &AtomicBool::new(false), &mut sink).unwrap_err();
+        assert!(matches!(error, DecodeError::Size));
+        assert_eq!(out, [1; 8]);
     }
 }

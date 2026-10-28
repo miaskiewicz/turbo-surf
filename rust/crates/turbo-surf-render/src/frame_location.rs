@@ -715,7 +715,18 @@ pub(super) fn install(scope: &mut v8::PinScope, url: &str) {
         value.into(),
         v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
     );
-    window.set(scope, name.into(), function.into());
+    // window_location.js has already installed the page's own Location interface and
+    // its [LegacyUnforgeable] window.location when this realm bootstrapped; replacing
+    // the interface object would leave `location instanceof Location` false
+    // (turbo-surf#71). Otherwise define it, non-enumerable like every interface object.
+    if !window.has_own_property(scope, name.into()).unwrap_or(false) {
+        window.define_own_property(
+            scope,
+            name.into(),
+            function.into(),
+            v8::PropertyAttribute::DONT_ENUM,
+        );
+    }
     for (name, callback, length) in [
         ("assign", v8::MapFnTo::map_fn_to(replace), 1),
         ("reload", v8::MapFnTo::map_fn_to(reload), 0),

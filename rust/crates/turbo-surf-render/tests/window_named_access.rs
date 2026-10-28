@@ -10,7 +10,7 @@
 //! same document on a localhost page.
 //!
 //! Named access is enabled only after the trusted bootstrap, and never resolves
-//! the engine's own bookkeeping globals, so page ids cannot redirect them.
+//! the host result channel (`__RESULT`), so page ids cannot redirect it.
 use serde_json::Value;
 use turbo_surf_render::PageSession;
 
@@ -82,10 +82,11 @@ async fn window_named_access_matches_chrome156() {
     assert_eq!(got, chrome);
 }
 
-/// Page ids that collide with names the engine itself relies on: its run-time
-/// bookkeeping globals (never resolved), interfaces the bootstrap installs only
-/// when absent (still installed: named access starts after the bootstrap), and
-/// real globals (own properties shadow named items).
+/// Page ids that collide with names the engine itself relies on: the host result
+/// channel `__RESULT` (never resolved), names of former bookkeeping globals (now
+/// private, so they are ordinary page names), interfaces the bootstrap installs
+/// only when absent (still installed: named access starts after the bootstrap),
+/// and real globals (own properties shadow named items).
 const ENGINE_NAMES: &str = r#"<div id=ok1></div><div id=__pendingFetches></div><div id=__RESULT></div>
 <div id=__depth></div><div id=__hi></div><div id=__probe></div><div id=Notification></div>
 <div id=DOMQuad></div><div id=scheduler></div><div id=setTimeout></div><img name=fetch>
@@ -118,7 +119,7 @@ setTimeout(()=>{{out.timer=true}},0);
         got,
         serde_json::json!({
             "control": true,
-            "bookkeeping": ["undefined", "undefined", "undefined", "undefined", "undefined"],
+            "bookkeeping": ["object", "undefined", "object", "object", "object"],
             "installed": ["function", "function", "object", "object", "function", "function", "function", "function"],
             "document": 9,
             "fetched": "settled",
@@ -126,7 +127,7 @@ setTimeout(()=>{{out.timer=true}},0);
             "timer": true
         })
     );
-    // Fetch accounting reads `__pendingFetches` back from the global.
+    // Fetch accounting is private: a page element named `__pendingFetches` is not it.
     assert_eq!(
         page.eval_json_expression("globalThis[Symbol.for('ts')].pendingFetchCount()")
             .await

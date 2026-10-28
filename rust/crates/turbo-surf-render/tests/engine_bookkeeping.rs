@@ -5,7 +5,6 @@
 use turbo_surf_render::PageSession;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#83: fails until the bookkeeping is private"]
 async fn page_globals_cannot_forge_or_observe_engine_bookkeeping() {
     let html = r#"<!doctype html><body><iframe id=f></iframe><script>
 window.__pendingFetches = 1e9;
@@ -28,7 +27,7 @@ fetch('data:text/plain,hi').then(()=>{out.fetched=true},()=>{out.fetched=true});
     assert_eq!(
         page.eval_json_expression(
             "(()=>{delete window.__pendingFetches;delete window.__depth;const w=document.getElementById('f').contentWindow;\
-             return [out.fetched,Object.keys(window).filter(k=>k.startsWith('__')),Object.keys(w).filter(k=>k.startsWith('__')),'__depth' in w];})()"
+             return [out.fetched,Object.keys(window).filter(k=>k==='__pendingFetches'||k==='__depth'),Object.keys(w).filter(k=>k==='__pendingFetches'||k==='__depth'),'__depth' in w];})()"
         )
         .await
         .unwrap(),

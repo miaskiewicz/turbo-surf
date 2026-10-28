@@ -3277,6 +3277,9 @@ struct FrameDocumentUrl(String);
 struct FrameDocumentLocation(String);
 struct FrameDocumentSourceUrl(String);
 struct FrameDepth(u32);
+/// The frame nesting depth the realm's bootstrap reads (turbo-surf#83: a private
+/// slot, not a page-writable `__depth` global).
+struct BootstrapDepth(u32);
 struct FrameParent(v8::Weak<v8::Context>);
 struct FrameHost(v8::Weak<v8::Object>);
 #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
@@ -5011,12 +5014,8 @@ fn op_frame_set_document<'s>(
                 location.set(scope, key.into(), value.into());
             }
         }
-        let depth_key = v8::String::new(scope, "__depth").unwrap();
-        let depth = v8::Integer::new_from_unsigned(
-            scope,
-            context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0),
-        );
-        global.set(scope, depth_key.into(), depth.into());
+        let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
+        context.set_slot(Rc::new(BootstrapDepth(depth)));
         if let Some(namespace) = frame_namespace(scope) {
             let name = v8::String::new(scope, "isFrame").unwrap();
             let flag = v8::Boolean::new(scope, true);
@@ -5201,6 +5200,15 @@ fn op_window_child_frames<'s>(
         .map(|context| context.global(scope).into())
         .collect::<Vec<_>>();
     v8::Array::new_with_elements(scope, &values)
+}
+
+/// The bootstrap nesting depth of `window`'s realm: 0 for a top-level page.
+#[op2(fast)]
+fn op_window_bootstrap_depth(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> u32 {
+    window
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<BootstrapDepth>().map(|depth| depth.0))
+        .unwrap_or(0)
 }
 
 #[op2(fast)]
@@ -5523,9 +5531,7 @@ fn allocate_frame<'s>(
             crate::context_ownership::object(scope, namespace)
                 .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
         )));
-        let depth_key = v8::String::new(scope, "__depth").unwrap();
-        let depth = v8::Integer::new_from_unsigned(scope, depth);
-        global.set(scope, depth_key.into(), depth.into());
+        context.set_slot(Rc::new(BootstrapDepth(depth)));
         install_environment(scope, core).map_err(JsErrorBox::generic)?;
         let secure = secure_context(scope);
         let crypto_core = core
@@ -6894,6 +6900,7 @@ deno_core::extension!(
         op_document_scripts_allowed,
         op_set_frame_navigator,
         op_window_child_frames,
+        op_window_bootstrap_depth,
         op_frame_move_candidates,
         op_frame_finish,
         op_frame_dom_ready,
@@ -7068,6 +7075,9 @@ ops.op_capture_runtime_core(__core);
 if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
 const __NS = Symbol.for("ts");
 const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
+// In-flight fetches and frame loads (turbo-surf#83): bootstrap-private, so page
+// script can neither read nor forge the count the idle/settle checks rely on.
+let __pendingFetchCount = 0;
 const __hostEvent=globalThis.Event;
 let __hostErrorEvent;
 let __markDocumentInteractive;
@@ -7230,7 +7240,7 @@ const __navData = {
   // TOKEN back over sendBeacon — so a no-op that merely returns `true` fingerprints
   // fine yet never completes the exchange (the token is dropped on the floor). Actually
   // send it: a fire-and-forget POST over the tier-1 net stack (`globalThis.fetch` →
-  // `op_fetch`), which shares the page cookie jar and is counted in `__pendingFetches`
+  // `op_fetch`), which shares the page cookie jar and is counted in `__pendingFetchCount`
   // so the hydration drain waits for it to land before serializing. Returns `true`
   // synchronously, per the spec (the boolean reports whether the UA QUEUED the transfer,
   // not whether it succeeded). `globalThis.fetch`/Blob/etc. are defined later in this
@@ -7261,7 +7271,7 @@ const __navData = {
         else { try { body = String(data); } catch (_e) { body = ""; } }
       }
       const headers = contentType ? { "content-type": contentType } : {};
-      // Direct (not deferred) call so `fetch` bumps `__pendingFetches` synchronously and
+      // Direct (not deferred) call so `fetch` bumps `__pendingFetchCount` synchronously and
       // the drain can't quiesce before the beacon completes. `keepalive` mirrors the real
       // beacon flag (informational here).
       try { globalThis.fetch(String(url), { method: "POST", body, headers, keepalive: true, mode: "no-cors", credentials: "include" }); } catch (_e) {}
@@ -8385,13 +8395,13 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   // request is outstanding — otherwise a save POST resolves AFTER the drain gives up
   // (the DOM looks "stable" while waiting) and its success re-render (modal close,
   // redirect) is lost.
-  globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+  __pendingFetchCount++;
   let r;
   try {
     const request=ops.op_fetch(__String(requestTarget), initJson);
     r = await (abortNotice?__FetchPromiseRace([request,__FetchThen(abortNotice,reason=>{throw reason;})]):request);
   } catch(error) {ops.op_fetch_cancel(cancelId);finish();throw error;} finally {
-    globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+    __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
   }
   if(uploadPump){
     if((r.aborted||!r.status||isAborted())&&transport.uploadReader)await transport.uploadReader.cancel(isAborted()?abortReason():new __exceptionTypeError("Failed to fetch")).catch(()=>{});
@@ -10493,10 +10503,10 @@ const __pendingWindowTimer = () => {
   return index>=0 && __timers[index].due<=__timerNow();
 };
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
+  (!__G.isFrame && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __resourcePromises.size > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
-__G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
+__G.pendingFetchCount = () => String(__pendingFetchCount);
 
 // A cheap "has the DOM changed?" signal for the interaction drain: element count + the
 // total length of input values (so a controlled-input edit registers). Lets the drain
@@ -10560,7 +10570,7 @@ __G.domSig = (() => {
   const frameConnected = el => frameApply(frameIsConnected, el, []);
   const visitFrameHosts = callback => frameApply(frameHostEach, frameHosts, [callback]);
   const frameWindowView = __G.windowView;
-  const frameDepth = (globalThis.__depth || 0) + 1;
+  const frameDepth = ops.op_window_bootstrap_depth(globalThis) + 1;
   const iframeTag = __G.domAccessor("tagName", false, "Element");
   const recordFor = (el) => {
     if (frameApply(iframeTag, el, []) !== "IFRAME") throw new TypeError("Illegal invocation");
@@ -10666,7 +10676,6 @@ __G.domSig = (() => {
       const getter=__documentFunction(function(){if(!ops.op_surf_is_window(this))throw new __exceptionTypeError("Illegal invocation");const value=read(this);return name==="frameElement"?value:frameWindowView(value);},"get "+name,0);
       Object.defineProperty(globalThis,name,{__proto__:null,get:getter,configurable:true,enumerable:true});
     }
-    globalThis.__depth = metadata.depth;
     __G.setDocumentReadyState("loading");
     globalThis.origin = metadata.origin;
     location.href = metadata.location;
@@ -10745,7 +10754,7 @@ __G.domSig = (() => {
     const epoch = record.epoch;
     let window = frameRealm(el);
     if (!window) { fireIframeLoad(el, epoch); return; }
-    globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+    __pendingFetchCount++;
     let frameUrl = record.metadata.url;
     try {
       // Insertion creates the initial empty document synchronously. Navigation
@@ -10781,7 +10790,7 @@ __G.domSig = (() => {
     } catch (error) {
       if (record.epoch === epoch) __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
     } finally {
-      globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+      __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
       fireIframeLoad(el, epoch);
     }
   };

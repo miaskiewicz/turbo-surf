@@ -41,16 +41,10 @@
   )
     return;
   const html = "http://www.w3.org/1999/xhtml";
-  // Engine bookkeeping read back from the global at run time (fetch accounting,
-  // host results, input/probe drivers, frame depth): never a page element.
-  const reserved = {
-    __proto__: null,
-    __pendingFetches: 1,
-    __RESULT: 1,
-    __depth: 1,
-    __hi: 1,
-    __probe: 1,
-  };
+  // The host result channel (`__RESULT`, written by host scripts and read back by
+  // eval/run_playwright) is never a page element; the engine's own bookkeeping
+  // is private (turbo-surf#83).
+  const reserved = { __proto__: null, __RESULT: 1 };
   const append = (rows, value) =>
     define(rows, rows.length, {
       __proto__: null,

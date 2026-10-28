@@ -6740,4 +6740,110 @@ mod session_tool_tests {
         // The page and history are untouched by a search.
         assert!(s.tree.is_none());
     }
+
+    // turbo-surf#58: a real Akamai exchange. The gate sets the seed `_abck` (+ `bm_sz`),
+    // the sensor POST answers with a cleared `_abck` (`~0~`), and only a request
+    // carrying the cleared value gets the real page.
+    async fn spawn_real_akamai_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let line = req.lines().next().unwrap_or("").to_string();
+                let (status, head, body) = if line.starts_with("GET /ak.js") {
+                    (
+                        "200 OK",
+                        "Content-Type: application/javascript".to_string(),
+                        "var bmak={sensor_data:1};".to_string(),
+                    )
+                } else if line.starts_with("POST /") {
+                    (
+                        "201 Created",
+                        "Set-Cookie: _abck=CLEARED~0~ok; Path=/".to_string(),
+                        "{}".to_string(),
+                    )
+                } else if req.contains("_abck=CLEARED~0~ok") {
+                    (
+                        "200 OK",
+                        "Content-Type: text/html".to_string(),
+                        "<title>Shop</title>".to_string(),
+                    )
+                } else {
+                    (
+                        "403 Forbidden",
+                        "Content-Type: text/html\r\nSet-Cookie: _abck=0~seed~-1~-1; Path=/\r\nSet-Cookie: bm_sz=s1; Path=/".to_string(),
+                        "<title>Wall</title><script src='/ak.js'></script>".to_string(),
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\n{head}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        base
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "turbo-surf#58: fails until the fix"]
+    async fn analyze_akamai_retry_accepts_a_cleared_abck() {
+        let base = spawn_real_akamai_site().await;
+        let dir = std::env::temp_dir().join(format!("surf-sensors58-{}", std::process::id()));
+        std::env::set_var("TURBO_SURF_SENSOR_DIR", &dir);
+        let mut s = Session::new();
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        let hot = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        std::env::remove_var("TURBO_SURF_SENSOR_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(hot["candidates"][0]["accepted"], true, "{hot}");
+        assert_eq!(
+            hot["accepted"]["version"],
+            format!("{:?}", turbo_surf_core::akamai::SensorVersion::all()[0])
+        );
+        assert!(s
+            .jar
+            .cookie_header(&format!("{base}/"), 0.0)
+            .contains("_abck=CLEARED~0~ok"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn analyze_akamai_retry_rejects_a_still_walled_page() {
+        // The sensor POST yields nothing: the seed `_abck` stays and the page is still
+        // the wall, so no candidate is accepted.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = if req.starts_with("GET /ak.js") {
+                    "var bmak=1;"
+                } else {
+                    "<title>Wall</title><script src='/ak.js'></script>"
+                };
+                let resp = format!("HTTP/1.1 200 OK\r\nSet-Cookie: _abck=0~seed~-1~-1; Path=/\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut s = Session::new();
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        let hot = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        assert_eq!(hot["accepted"], Value::Null, "{hot}");
+        for c in hot["candidates"].as_array().unwrap() {
+            assert_eq!(c["accepted"], false);
+        }
+    }
 }

@@ -1022,15 +1022,19 @@ impl Session {
             jar: Some(&mut self.jar),
             ..Default::default()
         };
+        // Accepted when the re-fetched page is a 200 with no wall markers and every
+        // `_abck` the jar would send carries Akamai's cleared marker (`~0~`). Akamai
+        // sites keep `_abck`/`bm_sz` in the jar either way, so their mere presence is
+        // not a wall signal here (turbo-surf#58).
         match fetch_html_with(&url, get).await {
             Ok((u, html, status)) => {
-                let cookie = self.jar.cookie_header(&u, 0.0);
-                let sig: Vec<(String, String)> = cookie
-                    .split("; ")
-                    .filter(|s| !s.is_empty())
-                    .map(|c| ("set-cookie".to_string(), c.to_string()))
-                    .collect();
-                status == 200 && challenge::detect(&u, status, &sig, &html).is_none()
+                let abck_cleared = self
+                    .jar
+                    .cookies_for(&u, 0.0)
+                    .iter()
+                    .filter(|c| c.name == "_abck")
+                    .all(|c| c.value.contains("~0~"));
+                status == 200 && abck_cleared && challenge::detect(&u, status, &[], &html).is_none()
             }
             Err(_) => false,
         }
@@ -6326,8 +6330,6 @@ mod session_tool_tests {
 
     // A sensor-gated page: GET without the clearance cookie serves the gate (with the
     // Akamai script), the sensor POST sets the cookie, and GET with it is the real page.
-    // (The clearance cookie is not `_abck`: any `_abck` in the jar keeps test_sensor
-    // detecting a wall, turbo-surf#58.)
     async fn spawn_akamai_site() -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
@@ -6370,8 +6372,12 @@ mod session_tool_tests {
         base
     }
 
+    // Serializes the tests that point TURBO_SURF_SENSOR_DIR somewhere.
+    static SENSOR_DIR_ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test(flavor = "current_thread")]
     async fn analyze_akamai_builds_candidates_and_retry_keeps_the_accepted_one() {
+        let _env = SENSOR_DIR_ENV.lock().await;
         let base = spawn_akamai_site().await;
         let dir = std::env::temp_dir().join(format!("surf-sensors-{}", std::process::id()));
         std::env::set_var("TURBO_SURF_SENSOR_DIR", &dir);
@@ -6789,8 +6795,8 @@ mod session_tool_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    #[ignore = "turbo-surf#58: fails until the fix"]
     async fn analyze_akamai_retry_accepts_a_cleared_abck() {
+        let _env = SENSOR_DIR_ENV.lock().await;
         let base = spawn_real_akamai_site().await;
         let dir = std::env::temp_dir().join(format!("surf-sensors58-{}", std::process::id()));
         std::env::set_var("TURBO_SURF_SENSOR_DIR", &dir);

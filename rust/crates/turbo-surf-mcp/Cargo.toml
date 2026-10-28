@@ -65,7 +65,7 @@ tokio = { version = "1", features = ["macros", "rt", "io-std", "io-util", "net",
 url = "2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util", "sync"] }
 # tests/screenshot_image_formats.rs: decode the screenshot PNG and pin its Chrome control.
 turbo-dom-layout = "0.6.0"
 sha2 = "0.10"

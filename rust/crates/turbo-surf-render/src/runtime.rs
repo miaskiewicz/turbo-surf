@@ -4547,7 +4547,7 @@ fn queue_window_message<'s>(
     let data = {
         let scope = &mut v8::ContextScope::new(scope, source);
         v8::tc_scope!(let scope, scope);
-        let result = crate::crypto_clone::prepare_transfer(scope, message, transfer, None);
+        let result = crate::crypto_clone::prepare_transfer(scope, message, transfer, None, true);
         if scope.has_caught() || scope.has_terminated() {
             scope.rethrow();
             return Ok(());
@@ -8436,10 +8436,12 @@ globalThis.fetch = async (input, init = undefined) => {
   const clone=ops.op_surf_structured_clone, owner=globalThis;
   const push=Array.prototype.push, apply=Reflect.apply, iterator=Symbol.iterator, setPrototype=Object.setPrototypeOf;
   const objectLike=value=>value!==null&&(typeof value==="object"||typeof value==="function");
+  const cloneContext="Failed to execute 'structuredClone' on 'Window': ";
+  const transferContext=cloneContext+"Failed to read the 'transfer' property from 'StructuredSerializeOptions': ";
   const sequence=value=>{
-    if(!objectLike(value))throw new __exceptionTypeError("Transfer must be an object sequence");
+    if(!objectLike(value))throw new __exceptionTypeError(transferContext+"The provided value cannot be converted to a sequence.");
     const method=value[iterator];
-    if(typeof method!=="function")throw new __exceptionTypeError("Transfer must be iterable");
+    if(typeof method!=="function")throw new __exceptionTypeError(transferContext+"The object must have a callable @@iterator property.");
     const source=apply(method,value,[]);
     if(!objectLike(source))throw new __exceptionTypeError("Invalid transfer iterator");
     const next=source.next;
@@ -8450,7 +8452,7 @@ globalThis.fetch = async (input, init = undefined) => {
       if(!objectLike(step))throw new __exceptionTypeError("Invalid transfer iterator result");
       if(step.done)return result;
       const entry=step.value;
-      if(!objectLike(entry))throw new __exceptionTypeError("Failed to execute 'structuredClone' on 'Window': Failed to read the 'transfer' property from 'StructuredSerializeOptions': Failed to convert value to 'object'.");
+      if(!objectLike(entry))throw new __exceptionTypeError(transferContext+"Failed to convert value to 'object'.");
       if(result.length===4096)throw new __exceptionTypeError("Native transfer sequence budget exceeded");
       apply(push,result,[entry]);
     }
@@ -8459,9 +8461,9 @@ globalThis.fetch = async (input, init = undefined) => {
     if(!arguments.length)throw new __exceptionTypeError("A value is required");
     const receiver=this==null?owner:this;
     if(!ops.op_surf_is_window(receiver))throw new __exceptionTypeError("Illegal invocation");
-    if(options!=null && !objectLike(options))throw new __exceptionTypeError("Options must be a dictionary");
+    if(options!=null && !objectLike(options))throw new __exceptionTypeError(cloneContext+"The provided value is not of type 'StructuredSerializeOptions'.");
     const transfer=options?.transfer;
-    return clone(value,receiver,transfer===undefined?undefined:sequence(transfer));
+    return clone(value,receiver,transfer===undefined?undefined:sequence(transfer),cloneContext);
   }}).structuredClone,"structuredClone",1);
 }
 // NOTE: getComputedStyle is provided by the binding's browser_env.js (a jsdom-style
@@ -8767,12 +8769,13 @@ const __streamTransferFactory =
   const apply=Reflect.apply, get=Object.getOwnPropertyDescriptor;
   const channel=MessageChannel, cp=channel.prototype;
   const first=get(cp,"port1").get, second=get(cp,"port2").get;
-  const post=MessagePort.prototype.postMessage, close=MessagePort.prototype.close;
+  const close=MessagePort.prototype.close;
   const start=MessagePort.prototype.start, listen=EventTarget.prototype.addEventListener;
   const data=get(MessageEvent.prototype,"data").get;
   const api=__web.transferBackend(), Exception=DOMException;
   api.channel=()=>{const pair=new channel();return [apply(first,pair,[]),apply(second,pair,[])];};
-  api.post=(port,value)=>apply(post,port,[value]);
+  // Internal chunks skip the public method: their errors carry the stream context.
+  api.post=(port,value)=>ops.op_port_post_message(port,value,undefined,false,false);
   api.close=port=>apply(close,port,[]);
   api.listen=(port,receive,error)=>{
     apply(listen,port,["message",event=>receive(apply(data,event,[]))]);
@@ -8819,7 +8822,7 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
   if(typeof targetOrigin==="symbol")throw new __exceptionTypeError("Cannot convert a Symbol to a string");
   targetOrigin=__String(targetOrigin);
   const transferList=transfer===undefined?undefined:__portTransferSequence(transfer,
-    "Failed to execute 'postMessage' on 'Window': "+(fromOptions?"Failed to read the 'transfer' property from 'StructuredSerializeOptions': ":"")+"Failed to convert value to 'object'.");
+    "Failed to execute 'postMessage' on 'Window': "+(fromOptions?"Failed to read the 'transfer' property from 'StructuredSerializeOptions': ":""));
   if(targetOrigin!=="*" && targetOrigin!=="/") {
     try {ops.op_surf_url_parse(targetOrigin,"");}
     catch(_){throw new __postingException("Invalid target origin","SyntaxError");}
@@ -8899,7 +8902,7 @@ const __performanceString = value => {if(typeof value==='symbol')throw new TypeE
 const __performanceNumber = value => {const n=Number(value);if(!Number.isFinite(n)||n<0)throw new TypeError('A nonnegative finite timestamp is required');return n;};
 const __entryState = receiver => {const state=__performanceEntries.get(receiver);if(!state)throw new TypeError('Illegal invocation');return state;};
 const __performanceOwner=globalThis;
-const __performanceDetail = detail => detail===undefined?null:ops.op_surf_structured_clone(detail,__performanceOwner);
+const __performanceDetail = detail => detail===undefined?null:ops.op_surf_structured_clone(detail,__performanceOwner,undefined,"");
 globalThis.PerformanceEntry = class PerformanceEntry {
   constructor(){throw new TypeError('Illegal constructor');}
   get name(){return __entryState(this).name;}

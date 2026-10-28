@@ -585,6 +585,9 @@ fn op_port_post_message<'s>(
     value: v8::Local<'s, v8::Value>,
     transfer: Option<v8::Local<'s, v8::Value>>,
     include_activation: bool,
+    // The public MessagePort.postMessage (Chrome's error prefix) vs internal
+    // stream-chunk posts, whose callers add their own context.
+    public: bool,
 ) -> Result<(), JsErrorBox> {
     let activation = if include_activation {
         crate::runtime::activation_snapshot_bits(scope.get_entered_or_microtask_context())
@@ -609,7 +612,8 @@ fn op_port_post_message<'s>(
         .map(|destination| Reservation::new(scope, registry.clone(), destination.clone()))
         .transpose()?;
     v8::tc_scope!(let scope,scope);
-    let result = crate::crypto_clone::prepare_transfer(scope, value, transfer, Some(object));
+    let result =
+        crate::crypto_clone::prepare_transfer(scope, value, transfer, Some(object), public);
     if scope.has_caught() || scope.has_terminated() {
         scope.rethrow();
         return Ok(());

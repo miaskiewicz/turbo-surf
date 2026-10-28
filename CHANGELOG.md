@@ -50,7 +50,14 @@
   getters run first), `A ReadableStream could not be cloned because it was locked` /
   `… not transferred.` for streams and ports the value references, and `TypeError` for a
   locked stream, a non-detachable buffer and a primitive entry (they were generic
-  `DataCloneError`s). V8's own clone errors and the non-iterable messages: #76.
+  `DataCloneError`s).
+- Structured serialization errors (#76) carry the caller's Chrome prefix
+  (`Failed to execute 'postMessage' on 'Window': function f(){} could not be cloned.`,
+  `… HTMLBodyElement object could not be cloned.`, History's `'pushState' on 'History'`),
+  and transfer/options conversion uses Chrome's Web IDL text (`The object must have a
+  callable @@iterator property.`, `The provided value cannot be converted to a
+  sequence.`, `Overload resolution failed.`, `… is not of type
+  'StructuredSerializeOptions'.`). Internal stream-chunk posts stay unprefixed.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

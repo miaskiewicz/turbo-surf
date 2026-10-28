@@ -40,13 +40,16 @@ fn op_surf_is_window(scope: &mut v8::PinScope, value: v8::Local<v8::Value>) -> b
 struct CloneHandles {
     local_clone: bool,
     /// Chrome's "Failed to execute ..." prefix for the transfer-plan errors raised
-    /// while serializing (V8's own clone errors are still unprefixed: turbo-surf#76).
+    /// while serializing.
     prefix: std::cell::Cell<&'static str>,
     /// Every port/stream named by the transfer list, live or not: the value may
     /// reference a neutered port or locked stream that the post-serialization
     /// checks reject with Chrome's text.
     listed_ports: RefCell<Vec<crate::message_ports::PortToken>>,
     listed_streams: RefCell<Vec<v8::Global<v8::Object>>>,
+    /// The public caller's prefix for V8's own serialization errors (empty for
+    /// internal clones such as stream chunks, whose callers add their context).
+    serialization_prefix: RefCell<String>,
     stream_plans: RefCell<Vec<StreamPlan>>,
     public_ports: std::cell::Cell<usize>,
     objects: RefCell<Vec<NativeSnapshot>>,
@@ -215,14 +218,9 @@ impl Delegate {
             "{prefix}A {name} could not be cloned because it was {reason}"
         ))
     }
-}
 
-impl v8::ValueSerializerImpl for Delegate {
-    fn throw_data_clone_error<'s, 'i>(
-        &self,
-        scope: &mut v8::PinScope<'s, 'i>,
-        message: v8::Local<'s, v8::String>,
-    ) {
+    /// Throws a DataCloneError whose text is already final (prefixed or internal).
+    fn throw_raw<'s>(&self, scope: &mut v8::PinScope<'s, '_>, message: v8::Local<'s, v8::String>) {
         if let Some(adapter) = scope.get_current_context().get_slot::<KeyAdapter>() {
             let factory = crate::context_ownership::local(scope, &adapter.error);
             let receiver = v8::undefined(scope);
@@ -235,6 +233,27 @@ impl v8::ValueSerializerImpl for Delegate {
             let error = v8::Exception::type_error(scope, message);
             scope.throw_exception(error);
         }
+    }
+}
+
+impl v8::ValueSerializerImpl for Delegate {
+    /// V8's own clone errors ("… could not be cloned.") gain the public caller's
+    /// "Failed to execute …" prefix.
+    fn throw_data_clone_error<'s, 'i>(
+        &self,
+        scope: &mut v8::PinScope<'s, 'i>,
+        message: v8::Local<'s, v8::String>,
+    ) {
+        let message = {
+            let prefix = self.0.serialization_prefix.borrow();
+            if prefix.is_empty() {
+                message
+            } else {
+                let text = format!("{prefix}{}", message.to_rust_string_lossy(scope));
+                v8::String::new(scope, &text).unwrap_or(message)
+            }
+        };
+        self.throw_raw(scope, message);
     }
 
     fn has_custom_host_object(&self, _: &v8::Isolate) -> bool {
@@ -293,7 +312,7 @@ impl v8::ValueSerializerImpl for Delegate {
                         scope,
                         &format!("{prefix}A MessagePort could not be cloned because it was not transferred."),
                     )?;
-                    self.throw_data_clone_error(scope, message);
+                    self.throw_raw(scope, message);
                     return None;
                 }
             }
@@ -309,7 +328,7 @@ impl v8::ValueSerializerImpl for Delegate {
             if crate::stream_transfers::kind(scope, object).ok()? < 0 {
                 let text = self.untransferable_stream(scope, object)?;
                 let message = v8::String::new(scope, &text)?;
-                self.throw_data_clone_error(scope, message);
+                self.throw_raw(scope, message);
                 return None;
             }
             NativeSnapshot::Stream { kind, first }
@@ -331,10 +350,13 @@ impl v8::ValueSerializerImpl for Delegate {
             snapshot
         } else if let Some(text) = self.untransferable_stream(scope, object) {
             let message = v8::String::new(scope, &text)?;
-            self.throw_data_clone_error(scope, message);
+            self.throw_raw(scope, message);
             return None;
         } else {
-            let message = v8::String::new(scope, "Unsupported native object")?;
+            // V8's text for an uncloneable platform object, e.g. "HTMLBodyElement
+            // object could not be cloned." (the map's constructor, not a property).
+            let name = object.get_constructor_name().to_rust_string_lossy(scope);
+            let message = v8::String::new(scope, &format!("{name} object could not be cloned."))?;
             self.throw_data_clone_error(scope, message);
             return None;
         };
@@ -821,8 +843,14 @@ pub(crate) fn prepare_transfer<'s>(
     value: v8::Local<'s, v8::Value>,
     transfer: Option<v8::Local<'s, v8::Value>>,
     sender: Option<v8::Local<v8::Object>>,
+    public: bool,
 ) -> Result<PreparedClone<'s>, JsErrorBox> {
-    prepare_transfer_with_mode(scope, value, transfer, sender, false)
+    let prefix = if public {
+        clone_prefix(false, sender.is_some())
+    } else {
+        ""
+    };
+    prepare_transfer_with_mode(scope, value, transfer, sender, false, prefix)
 }
 
 fn prepare_transfer_with_mode<'s>(
@@ -831,6 +859,7 @@ fn prepare_transfer_with_mode<'s>(
     transfer: Option<v8::Local<'s, v8::Value>>,
     sender: Option<v8::Local<v8::Object>>,
     local_clone: bool,
+    serialization_prefix: &str,
 ) -> Result<PreparedClone<'s>, JsErrorBox> {
     let prefix = clone_prefix(local_clone, sender.is_some());
     let ValidatedTransfers {
@@ -844,6 +873,7 @@ fn prepare_transfer_with_mode<'s>(
     let mut handles = CloneHandles::default();
     handles.local_clone = local_clone;
     handles.prefix.set(prefix);
+    *handles.serialization_prefix.get_mut() = serialization_prefix.to_string();
     *handles.listed_ports.get_mut() = listed.ports.iter().map(|(_, token)| *token).collect();
     *handles.listed_streams.get_mut() = listed
         .streams
@@ -974,6 +1004,7 @@ fn op_surf_structured_clone<'s>(
     value: v8::Local<'s, v8::Value>,
     owner: v8::Local<v8::Object>,
     transfer: Option<v8::Local<'s, v8::Value>>,
+    #[string] prefix: &str,
 ) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
     let context = owner
         .get_creation_context(scope)
@@ -982,7 +1013,7 @@ fn op_surf_structured_clone<'s>(
     v8::tc_scope!(let scope, scope);
     // Local cloning completes transfers before deserialization rejects forbidden
     // shared memory; messaging rejects during serialization instead.
-    let result = prepare_transfer_with_mode(scope, value, transfer, None, true)
+    let result = prepare_transfer_with_mode(scope, value, transfer, None, true, prefix)
         .and_then(|prepared| prepared.commit(scope))
         .and_then(|snapshot| deserialize(scope, &snapshot));
     if scope.has_caught() || scope.has_terminated() {

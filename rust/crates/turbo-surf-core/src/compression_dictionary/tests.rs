@@ -531,6 +531,65 @@ fn use_as_dictionary_rejects_malformed_or_unsupported_fields() {
 }
 
 #[test]
+fn match_patterns_new_urlpattern_rejects_never_publish() {
+    // Each of these throws a TypeError from `new URLPattern(match, dictionaryURL)`
+    // in Chrome 156 (checked with that base URL), so the response is not
+    // registered as a dictionary. (`/a)` is accepted there, as here.)
+    let dictionaries = DictionaryStore::default();
+    for bad in [
+        r#"match="/{""#,           // unterminated group
+        r#"match="/:""#,           // parameter without a name
+        r#"match="/(""#,           // unterminated regexp
+        r#"match="/a}""#,          // unbalanced brace
+        r#"match="https://[:1/""#, // invalid IPv6 hostname pattern
+        r#"match="/:a/:a""#,       // duplicate group name
+    ] {
+        assert!(!store(&dictionaries, "d", bad, b"x"), "{bad}");
+    }
+    assert!(dictionaries
+        .select("partition", "https://dict.test/a", &context())
+        .is_none());
+}
+
+#[test]
+fn a_streamed_dictionary_body_is_capped_at_eight_mib() {
+    let dictionaries = DictionaryStore::default();
+    let mut pending = PendingDictionary::new(
+        &dictionaries,
+        dictionaries.generation(),
+        "partition",
+        "https://dict.test/d",
+        &context(),
+        200,
+        headers(r#"match="/*""#),
+        SystemTime::now(),
+    )
+    .unwrap();
+    assert!(pending.append(&vec![1; MAX_DICTIONARY_BYTES - 1]));
+    assert!(!pending.append(&[2, 3]));
+    assert!(pending.append(&[4]));
+    assert!(!pending.append(&[5]));
+    pending.commit();
+    let selected = dictionaries
+        .select("partition", "https://dict.test/a", &context())
+        .unwrap();
+    assert_eq!(selected.body.len(), MAX_DICTIONARY_BYTES);
+    assert_eq!(selected.body[MAX_DICTIONARY_BYTES - 1], 4);
+    // A response without Use-As-Dictionary never starts a pending dictionary.
+    assert!(PendingDictionary::new(
+        &dictionaries,
+        0,
+        "partition",
+        "https://dict.test/d",
+        &context(),
+        200,
+        vec![("Cache-Control".into(), "max-age=60".into())],
+        SystemTime::now(),
+    )
+    .is_none());
+}
+
+#[test]
 fn dictionaries_are_admitted_only_from_secure_untainted_same_origin_or_cors_responses() {
     let dictionaries = DictionaryStore::default();
     let put = |url: &str, ctx: &RequestContext| {

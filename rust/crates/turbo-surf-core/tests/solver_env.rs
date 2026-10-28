@@ -409,3 +409,80 @@ async fn recaptcha_solver_needs_a_site_key_from_the_challenge_or_the_page() {
         "solver response parse error: recaptcha: no site key found on the page"
     );
 }
+
+// Headers promise 100 bytes, the peer closes after 5: a truncated body, which a
+// solver must surface as a transport error rather than parse.
+const TRUNCATED: &str =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort";
+const DEAD: &str = "http://127.0.0.1:1";
+
+fn http_err(result: Result<SolvedToken, SolveError>) -> String {
+    match result {
+        Err(SolveError::Http(message)) => message,
+        other => panic!("expected SolveError::Http, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn solvers_report_dead_endpoints_and_truncated_bodies_as_transport_errors() {
+    use turbo_surf_core::challenge::{HyperSolver, ScrapflySolver};
+    use turbo_surf_core::{aws_waf, cloudflare, recaptcha};
+    let ctx = SolveContext::default();
+    let (truncated, _rx) = recorder(TRUNCATED).await;
+    let at = |vendor, url: &str| Challenge::new(vendor, url);
+
+    // Page fetch: the truncated body fails while being read.
+    for solver in [
+        Box::new(cloudflare::CloudflareSolver::new()) as Box<dyn ChallengeSolver>,
+        Box::new(aws_waf::AwsWafSolver::new()),
+        Box::new(recaptcha::RecaptchaSolver::new()),
+    ] {
+        let page = at(Vendor::Cloudflare, &format!("{truncated}/wall"));
+        assert!(
+            !http_err(solver.solve(&page, &ctx).await).is_empty(),
+            "{}",
+            solver.name()
+        );
+    }
+
+    // Scrapfly: unreachable API, truncated envelope, then a non-JSON envelope.
+    let wall = at(Vendor::Cloudflare, "https://x.test/");
+    let scrapfly = |base: &str| ScrapflySolver::new("k".into()).with_base_url(base.into());
+    assert!(!http_err(scrapfly(DEAD).solve(&wall, &ctx).await).is_empty());
+    assert!(!http_err(scrapfly(&truncated).solve(&wall, &ctx).await).is_empty());
+    let (html, _rx) =
+        recorder("HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\n<html>").await;
+    assert!(matches!(
+        scrapfly(&html).solve(&wall, &ctx).await,
+        Err(SolveError::Parse(_))
+    ));
+
+    // Hyper: the generator's `error` field is an API failure ...
+    let (refused, _rx) = recorder(
+        "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\nConnection: close\r\n\r\n{\"error\":\"bad apikey\"}",
+    )
+    .await;
+    let akamai = at(Vendor::Akamai, &format!("{refused}/target"));
+    let hyper = |base: &str| HyperSolver::new("KEY".into()).with_base_url(base.into());
+    assert_eq!(
+        http_err(hyper(&refused).solve(&akamai, &ctx).await),
+        "hyper: bad apikey"
+    );
+    // ... and a payload that cannot be posted to a dead target is a transport error.
+    let (generator, mut rx) = recorder(
+        "HTTP/1.1 200 OK\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"payload\":\"S\"}",
+    )
+    .await;
+    let dead_target = at(Vendor::Akamai, &format!("{DEAD}/target"));
+    assert!(!http_err(hyper(&generator).solve(&dead_target, &ctx).await).is_empty());
+    assert!(rx.recv().await.unwrap().starts_with("POST /v2/sensor "));
+
+    // Cloudflare: a real interstitial whose submit endpoint is unreachable.
+    let (interstitial, _rx) = recorder(
+        "HTTP/1.1 200 OK\r\nContent-Length: 62\r\nConnection: close\r\n\r\n<script>window._cf_chl_opt={cRay:'r1',cvId:'3'};</script>     ",
+    )
+    .await;
+    let cf = cloudflare::CloudflareSolver::new().with_submit_url(format!("{DEAD}/submit"));
+    let page = at(Vendor::Cloudflare, &format!("{interstitial}/"));
+    assert!(!http_err(cf.solve(&page, &ctx).await).is_empty());
+}

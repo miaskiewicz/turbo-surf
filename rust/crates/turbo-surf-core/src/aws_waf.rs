@@ -225,6 +225,22 @@ mod tests {
         assert!(AwsWafSolver::new().token(page).ends_with(".aws"));
     }
 
+    #[test]
+    fn missing_challenge_js_falls_back_without_the_engine() {
+        struct Unreachable;
+        impl PowEngine for Unreachable {
+            fn compute(&self, script: &str) -> Result<String, String> {
+                panic!("engine ran without challenge.js: {script}")
+            }
+        }
+        assert_eq!(extract_challenge_js("<script>var a = 1;</script>"), None);
+        assert_eq!(extract_challenge_js("<script awswaf"), None);
+        assert_eq!(extract_challenge_js("<script>awswaf"), None);
+        let page = "<p>token.awswaf.com</p>";
+        let solver = AwsWafSolver::new().with_pow_engine(Box::new(Unreachable));
+        assert_eq!(solver.token(page), format!("{:016x}.aws", fnv1a(page)));
+    }
+
     #[tokio::test]
     async fn solver_mints_token_and_rejects_captcha() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};

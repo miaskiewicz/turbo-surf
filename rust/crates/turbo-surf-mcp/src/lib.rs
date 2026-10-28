@@ -2389,7 +2389,7 @@ async fn maybe_clear_sorry_with(
                     .await
                     {
                         Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
-                        Ok(None) => Ok((final_url, html)),
+                        Ok(None) => unreachable!("a /sorry wall was detected above"),
                         Err(ext) => Err(format!(
                             "google /sorry clearance failed (in-isolate: {e}; external {}: {ext})",
                             external.name()

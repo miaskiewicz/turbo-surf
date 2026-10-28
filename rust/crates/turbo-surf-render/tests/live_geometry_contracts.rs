@@ -296,7 +296,7 @@ fn native_geometry_edge_conversion_offset_rounding_and_device_pixel_scroll_match
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/geometry-edges-chrome155.json"
+        "../../../../harness/detection/fixtures/geometry-edges-chrome156.json"
     ))
     .unwrap();
     let actual = run_with_dom(

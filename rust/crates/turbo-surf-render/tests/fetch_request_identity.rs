@@ -1,5 +1,5 @@
-//! Page `fetch` request identity: a session's configured User-Agent is the request's
-//! `User-Agent` (guest headers cannot override it), and `mode: "same-origin"` to
+//! Page request identity: a session's configured User-Agent is the `User-Agent` of
+//! fetches (guest headers cannot override it) and image loads, and `mode: "same-origin"` to
 //! another origin rejects with a network TypeError before any request, like Chrome.
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -27,9 +27,10 @@ async fn server(seen: Arc<Mutex<Vec<String>>>) -> String {
                     .find(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
                     .map_or("", |(_, value)| value.trim())
                     .to_string();
-                seen.lock()
-                    .unwrap()
-                    .push(request.lines().next().unwrap_or("").to_string());
+                seen.lock().unwrap().push(format!(
+                    "{} | {agent}",
+                    request.lines().next().unwrap_or("")
+                ));
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{agent}", agent.len());
                 let _ = socket.write_all(response.as_bytes()).await;
             });
@@ -66,5 +67,19 @@ async fn configured_user_agent_and_same_origin_mode_shape_page_fetches() {
         .await
         .unwrap();
     assert_eq!(rejected, "TypeError");
-    assert_eq!(*seen.lock().unwrap(), ["GET /ua HTTP/1.1"]);
+    // Image loads carry the configured identity too.
+    let image = page
+        .eval_expression(
+            "new Promise(resolve=>{const image=new Image();image.onload=()=>resolve('load');image.onerror=()=>resolve('error');image.src='/pixel';})",
+        )
+        .await
+        .unwrap();
+    assert_eq!(image, "error");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            "GET /ua HTTP/1.1 | SurfTest/1.0 (identity)",
+            "GET /pixel HTTP/1.1 | SurfTest/1.0 (identity)"
+        ]
+    );
 }

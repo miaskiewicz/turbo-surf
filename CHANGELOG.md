@@ -40,6 +40,11 @@
   platform object with its interface and values like Chrome 156 (they arrived as empty
   plain objects); the interface is the constructor that created the object (a subclass
   clones as its base), and the clone hooks use intrinsics captured at bootstrap.
+- Window messages and timers across same-agent windows (#72) run as one FIFO like
+  Chrome 156: every timer and posted message carries its posting time and an
+  agent-wide sequence, and the cross-realm scheduler breaks deadline ties by it (a
+  message to a child no longer runs after later parent tasks). A posted message no
+  longer consumes a `setTimeout` id, and `clearTimeout(0)` cannot cancel one.
 - Large pages open (#75): compression-dictionary link discovery, which runs for every
   document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
   the whole page. It has no such bound now; every link settles like Chrome 156 (300

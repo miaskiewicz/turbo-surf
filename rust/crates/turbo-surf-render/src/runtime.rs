@@ -3564,6 +3564,19 @@ struct TimerClock {
     started: std::time::Instant,
     advance: std::cell::Cell<f64>,
     resource_cursor: std::cell::Cell<usize>,
+    /// One task order across the agent's Window realms: timers and posted
+    /// messages with the same deadline run in the order they were queued.
+    sequence: std::cell::Cell<f64>,
+}
+impl TimerClock {
+    fn now(&self) -> f64 {
+        self.started.elapsed().as_secs_f64() * 1000.0 + self.advance.get()
+    }
+    fn next_sequence(&self) -> f64 {
+        let next = self.sequence.get() + 1.0;
+        self.sequence.set(next);
+        next
+    }
 }
 impl Default for TimerClock {
     fn default() -> Self {
@@ -3572,6 +3585,7 @@ impl Default for TimerClock {
             started: std::time::Instant::now(),
             advance: std::cell::Cell::new(0.0),
             resource_cursor: std::cell::Cell::new(0),
+            sequence: std::cell::Cell::new(0.0),
         }
     }
 }
@@ -3581,8 +3595,11 @@ fn op_window_timers_realtime(state: &mut OpState) -> bool {
 }
 #[op2(fast)]
 fn op_timer_clock(state: &mut OpState) -> f64 {
-    let clock = state.borrow::<TimerClock>();
-    clock.started.elapsed().as_secs_f64() * 1000.0 + clock.advance.get()
+    state.borrow::<TimerClock>().now()
+}
+#[op2(fast)]
+fn op_task_sequence(state: &mut OpState) -> f64 {
+    state.borrow::<TimerClock>().next_sequence()
 }
 #[op2(fast)]
 fn op_timer_offset(state: &mut OpState) -> f64 {
@@ -3599,6 +3616,22 @@ fn op_timer_advance(state: &mut OpState, due: f64) {
                 .max(due - clock.started.elapsed().as_secs_f64() * 1000.0),
         );
     }
+}
+
+/// A realm's `[due, sequence]` next-timer pair. A finite deadline is required; a
+/// missing or non-finite sequence orders first rather than stalling the timer.
+fn timer_order_key(scope: &mut v8::PinScope, value: v8::Local<v8::Value>) -> Option<(f64, f64)> {
+    let pair = v8::Local::<v8::Array>::try_from(value).ok()?;
+    let due = pair.get_index(scope, 0)?;
+    let due = due.is_number().then(|| due.number_value(scope)).flatten()?;
+    let sequence = pair.get_index(scope, 1)?;
+    let sequence = sequence
+        .is_number()
+        .then(|| sequence.number_value(scope))
+        .flatten()
+        .filter(|sequence| sequence.is_finite())
+        .unwrap_or(0.0);
+    due.is_finite().then_some((due, sequence))
 }
 
 fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::Instant> {
@@ -3624,25 +3657,24 @@ fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimer
             .cloned(),
     );
     deno_core::scope!(scope, rt);
-    let mut next: Option<(f64, v8::Local<v8::Context>)> = None;
+    // Earliest deadline first; equal deadlines in agent-wide queueing order.
+    let mut next: Option<((f64, f64), v8::Local<v8::Context>)> = None;
     for context in contexts {
         let context = v8::Local::new(scope, context);
         if context.get_slot::<FrameRetired>().is_some() {
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
-        if let Some(value) = call_frame_helper(active, "timerNextDue", &[]) {
-            if value.is_number() {
-                if let Some(due) = value.number_value(active) {
-                    if due.is_finite() && next.as_ref().is_none_or(|(previous, _)| due < *previous)
-                    {
-                        next = Some((due, context));
-                    }
-                }
-            }
+        let Some(key) = call_frame_helper(active, "timerNextDue", &[])
+            .and_then(|value| timer_order_key(active, value))
+        else {
+            continue;
+        };
+        if next.as_ref().is_none_or(|(previous, _)| key < *previous) {
+            next = Some((key, context));
         }
     }
-    let Some((due, context)) = next else {
+    let Some(((due, _), context)) = next else {
         return WindowTimerTurn::default();
     };
     if !allow_advance {
@@ -4091,6 +4123,10 @@ struct WindowMessage {
     data: crate::crypto_clone::CloneSnapshot,
     /// The sender's UserActivation snapshot bits, or -1 when not included.
     activation: i32,
+    /// The posting time and agent-wide task order: delivery keeps posting order
+    /// with timers and messages of other realms.
+    due: f64,
+    sequence: f64,
 }
 enum MessageTargetOrigin {
     Any,
@@ -4582,6 +4618,12 @@ fn queue_window_message<'s>(
         }
         prepared.commit(scope)?
     };
+    let (due, sequence) = {
+        let state = JsRuntime::op_state_from(scope);
+        let state = state.borrow();
+        let clock = state.borrow::<TimerClock>();
+        (clock.now(), clock.next_sequence())
+    };
     // Structured serialization/transfer precedes the inactive-target check.
     // A payload getter can retire the destination while serialization runs.
     if target.get_slot::<FrameRetired>().is_some() || !expected.matches(scope, target) {
@@ -4606,7 +4648,9 @@ fn queue_window_message<'s>(
         let source_window = source.global(scope);
         let failed = v8::Boolean::new(scope, failed);
         let activation = v8::Integer::new(scope, activation);
-        // Queue the JS timer immediately for synchronous run_with_dom callers;
+        let due = v8::Number::new(scope, due);
+        let sequence = v8::Number::new(scope, sequence);
+        // Queue the JS task immediately for synchronous run_with_dom callers;
         // listener delivery remains asynchronous and sees an actual clone.
         call_frame_helper(
             scope,
@@ -4618,6 +4662,8 @@ fn queue_window_message<'s>(
                 port_array.into(),
                 failed.into(),
                 activation.into(),
+                due.into(),
+                sequence.into(),
             ],
         )
         .ok_or_else(|| JsErrorBox::generic("message dispatch unavailable"))?;
@@ -4630,6 +4676,8 @@ fn queue_window_message<'s>(
         target_origin: expected,
         data,
         activation,
+        due,
+        sequence,
     };
     JsRuntime::op_state_from(scope)
         .borrow_mut()
@@ -6944,6 +6992,7 @@ deno_core::extension!(
         op_frame_scripts,
         op_frame_resources,
         op_timer_clock,
+        op_task_sequence,
         op_timer_offset,
         op_window_timers_realtime,
         op_timer_advance,
@@ -7805,13 +7854,19 @@ const __createTimer = (name, repeat, handler, delay, args) => {
   const id=__tid++;
   const level=ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
-  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args};
+  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args,sequence:ops.op_task_sequence()};
   __timerSet(id,timer);__timerPush(timer);return id;
+};
+// A non-timer task (id 0: never cancellable, no timer id consumed) in the same
+// deadline/sequence order as this agent's timers.
+const __queueTimerTask = (fn, due, sequence) => {
+  __timerPush({__proto__:null,id:0,fn,source:null,due,delay:0,nesting:0,repeat:false,args:[],sequence});
 };
 globalThis.setTimeout=(handler,delay=0,...args)=>__createTimer("setTimeout",false,handler,delay,args);
 globalThis.setInterval=(handler,delay=0,...args)=>__createTimer("setInterval",true,handler,delay,args);
 globalThis.clearTimeout=(id)=>{
-  id=(+id)|0;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
+  // Id 0 is never a timer: it names the internal posted-message tasks.
+  id=(+id)|0;if(id===0)return;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
 };
 globalThis.clearInterval=globalThis.clearTimeout;
 ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;__timerClear();ops.op_timer_set_nesting(__timerDocument,0);}});
@@ -7888,7 +7943,8 @@ const __frameStage = (ts) => { __frameNow = ts; __clockEpoch = __taskEpoch; __cl
 // each still ends with its own microtask checkpoint.
 const __frameTask = (fn) => {
   const id = __tid++;
-  const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[]};
+  // Sequence 0 sorts before every queued task (agent sequences start at 1).
+  const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[],sequence:0};
   __timerSet(id,timer);__timerSplice(0,0,timer);
 };
 // Update-the-rendering order: queued engine steps (scroll events), then "update animations
@@ -7978,7 +8034,10 @@ ops.op_install_microtask_queue(globalThis);
 const __nextLocalTimer = () => {
   if (!__timers.length || ops.op_window_message_pending()) return -1;
   let index=0;
-  for(let i=1;i<__timers.length;i++)if(__timers[i].due<__timers[index].due)index=i;
+  for(let i=1;i<__timers.length;i++){
+    const timer=__timers[i], best=__timers[index];
+    if(timer.due<best.due||(timer.due===best.due&&timer.sequence<best.sequence))index=i;
+  }
   const due=__timers[index].due;
   return !__realWindowTimers && due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
 };
@@ -7997,7 +8056,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
       try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){
         if(timer.nesting<7)timer.nesting++;
-        timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);__timerPush(timer);
+        timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);timer.sequence=ops.op_task_sequence();__timerPush(timer);
       }
     }finally{if(!keepTask)ops.op_timer_set_nesting(__timerDocument,previous);}
   }
@@ -8011,7 +8070,7 @@ __G.runTimers = (max=100000) => {
   return fired;
 };
 ops.op_set_host_capabilities({
-  timerNextDue:()=>{const index=__nextLocalTimer();return index<0?null:__timers[index].due;},
+  timerNextDue:()=>{const index=__nextLocalTimer();return index<0?null:[__timers[index].due,__timers[index].sequence];},
   runNextTimer:()=>__runLocalTimers(1,true),
   runLocalTimers:max=>__runLocalTimers(max)
 });
@@ -8994,15 +9053,17 @@ __G.windowView = (target) => {
   __windowViews.set(target, view);
   return view;
 };
-const __hostMessageEvent=globalThis.MessageEvent, __hostMessageSchedule=globalThis.setTimeout;
-const __deliverWindowMessage = (message, sender, origin, ports, failed, activation) => {
+const __hostMessageEvent=globalThis.MessageEvent;
+// A posted-message task keeps its posting time and agent-wide order (`due`,
+// `sequence`) and consumes no timer id.
+const __deliverWindowMessage = (message, sender, origin, ports, failed, activation, due, sequence) => {
   "use strict";
   const source = __G.windowView(sender);
-  __hostMessageSchedule(() => {
+  __queueTimerTask(() => {
     const event = __hostPortMessage(failed ? "messageerror" : "message", message, ports, source, origin, activation);
     ops.op_event_trust(event, -1);
     ops.op_dispatch_host_event(event, globalThis);
-  }, 0);
+  }, due, sequence);
 };
 ops.op_set_host_capabilities({deliverWindowMessage:__deliverWindowMessage});
 // window `on*` event-handler slots default to `null` in a real browser (never
@@ -13147,6 +13208,8 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
     let origin = v8::String::new(scope, &item.origin).unwrap();
     let failed = v8::Boolean::new(scope, failed);
     let activation = v8::Integer::new(scope, item.activation);
+    let due = v8::Number::new(scope, item.due);
+    let sequence = v8::Number::new(scope, item.sequence);
     call_frame_helper(
         scope,
         "deliverWindowMessage",
@@ -13157,6 +13220,8 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
             port_array.into(),
             failed.into(),
             activation.into(),
+            due.into(),
+            sequence.into(),
         ],
     )
     .ok_or("message dispatch failed")?;

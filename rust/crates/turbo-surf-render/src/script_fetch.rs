@@ -45,6 +45,11 @@ pub async fn fetch(
             return Err("Script blocked by Content Security Policy".into());
         }
         let parsed = url::Url::parse(&target).map_err(|error| error.to_string())?;
+        // Fetch "scheme fetch": a data: URL is a basic (same-origin) response in
+        // every request mode; a redirect to one is a network error.
+        if parsed.scheme() == "data" && !redirected {
+            return data_response(parsed, integrity);
+        }
         if !matches!(parsed.scheme(), "http" | "https")
             || !parsed.username().is_empty()
             || parsed.password().is_some()
@@ -128,6 +133,40 @@ pub async fn fetch(
     unreachable!("bounded redirect loop always returns")
 }
 
+/// A data: script through the Fetch data: URL processor: its MIME type is the
+/// response Content-Type, its charset parameter (else UTF-8, BOM first) decodes the
+/// source, integrity applies and errors are not muted.
+fn data_response(mut url: url::Url, integrity: &str) -> Result<ScriptResponse, String> {
+    url.set_fragment(None);
+    let data = turbo_dom_layout::image::decode_data_url(url.as_str())
+        .ok_or("Script data: URL is not valid")?;
+    if !crate::integrity::matches(&data.bytes, integrity, true) {
+        return Err("Script response failed integrity validation".into());
+    }
+    let encoding = data
+        .mime
+        .split(';')
+        .skip(1)
+        .filter_map(|parameter| parameter.split_once('='))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("charset"))
+        .and_then(|(_, label)| encoding_rs::Encoding::for_label(label.trim().as_bytes()))
+        .unwrap_or(encoding_rs::UTF_8);
+    let html = encoding.decode(&data.bytes).0.into_owned();
+    Ok(ScriptResponse {
+        response: FetchResult {
+            html,
+            body_bytes: data.bytes,
+            headers: vec![("content-type".into(), data.mime.clone())],
+            final_url: url.into(),
+            status: 200,
+            status_text: "OK".into(),
+            redirected: false,
+            content_type: data.mime,
+        },
+        muted_errors: false,
+    })
+}
+
 pub fn javascript_mime(content_type: &str) -> bool {
     matches!(
         content_type
@@ -190,6 +229,7 @@ mod tests {
                     let path = request.split_whitespace().nth(1).unwrap_or("/");
                     let (status, extra) = match path {
                         "/loop" => ("302 Found", "Location: /loop\r\n"),
+                        "/todata" => ("302 Found", "Location: data:,x\r\n"),
                         "/corp" => ("200 OK", "Cross-Origin-Resource-Policy: same-origin\r\n"),
                         _ => ("200 OK", ""),
                     };
@@ -322,6 +362,105 @@ mod tests {
         .unwrap();
         assert!(admitted.muted_errors);
         assert_eq!(admitted.response.body_bytes, b"globalThis.loaded=true;");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn data_urls_are_basic_responses_but_never_redirect_targets() {
+        let origin = server().await;
+        let foreign = "http://foreign.test/";
+        let script = run(
+            "data:text/javascript;charset=windows-1252,a=%E9#frag",
+            context(foreign, RequestMode::NoCors),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        assert!(!script.muted_errors);
+        let response = script.response;
+        assert_eq!(response.html, "a=\u{e9}");
+        assert_eq!(response.body_bytes, b"a=\xe9");
+        assert_eq!(
+            response.final_url,
+            "data:text/javascript;charset=windows-1252,a=%E9"
+        );
+        assert_eq!(
+            (
+                response.status,
+                response.status_text.as_str(),
+                response.redirected
+            ),
+            (200, "OK", false)
+        );
+        assert_eq!(
+            response.content_type,
+            "text/javascript;charset=windows-1252"
+        );
+        assert_eq!(
+            response.headers,
+            [(
+                "content-type".to_string(),
+                "text/javascript;charset=windows-1252".to_string()
+            )]
+        );
+        let ascii = run(
+            "data:,%C3%A9",
+            context(foreign, RequestMode::SameOrigin),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        // The default text/plain;charset=US-ASCII decodes as windows-1252, as in
+        // Chrome 156 (`data:,r.push('%C3%A9')` pushes "\u{c3}\u{a9}").
+        assert_eq!(ascii.response.html, "\u{c3}\u{a9}");
+        assert_eq!(ascii.response.content_type, "text/plain;charset=US-ASCII");
+        async fn integrity(value: &str) -> Result<ScriptResponse, String> {
+            let mut jar = CookieJar::new();
+            fetch(
+                "data:,x",
+                context("http://foreign.test/", RequestMode::NoCors),
+                BTreeMap::new(),
+                &ClientHints::default(),
+                &mut jar,
+                Default::default(),
+                value,
+            )
+            .await
+        }
+        // sha256("x")
+        let good = "sha256-LXEWQrcmsEQBYnyp+6wy9chTD7GQPMTbAiWHF5IaSIE=";
+        assert_eq!(integrity(good).await.unwrap().response.body_bytes, b"x");
+        let bad = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        assert_eq!(
+            integrity(bad).await.err().unwrap(),
+            "Script response failed integrity validation"
+        );
+        assert_eq!(
+            error(
+                "data:text/javascript;base64,%%%",
+                context(foreign, RequestMode::NoCors),
+                Default::default()
+            )
+            .await,
+            "Script data: URL is not valid"
+        );
+        assert_eq!(
+            error(
+                &format!("{origin}/todata"),
+                context(&origin, RequestMode::NoCors),
+                Default::default()
+            )
+            .await,
+            "Script URL is not an allowed HTTP URL"
+        );
+        let deny = |_: &str, _: bool| false;
+        let csp = ScriptPolicies {
+            request: Some(&deny),
+            ..Default::default()
+        };
+        assert_eq!(
+            error("data:,x", context(foreign, RequestMode::NoCors), csp).await,
+            "Script blocked by Content Security Policy"
+        );
     }
 
     #[test]

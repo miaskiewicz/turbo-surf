@@ -76,6 +76,7 @@ deno_core::extension!(
     turbo_geometry,
     ops = [
         op_geometry_object,
+        op_install_geometry_clone_adapter,
         op_capture_frame_scheduler,
         op_capture_view_transition_host,
         op_register_dom_exception,
@@ -225,4 +226,106 @@ pub(crate) fn restore<'s>(
     factory
         .call(scope, undefined.into(), &values)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+}
+
+/// The realm's private DOMPoint/DOMMatrix clone hooks (web_geometry.js), retained
+/// weakly; the realm owns the functions.
+pub(crate) struct GeometryCloneAdapter {
+    record: v8::Weak<v8::Function>,
+    restore: v8::Weak<v8::Function>,
+}
+
+#[op2(fast)]
+fn op_install_geometry_clone_adapter(
+    scope: &mut v8::PinScope,
+    record: v8::Local<v8::Function>,
+    restore: v8::Local<v8::Function>,
+) {
+    let Some(context) = record.get_creation_context(scope) else {
+        return;
+    };
+    let Some(record) = crate::context_ownership::function(scope, record) else {
+        return;
+    };
+    let Some(restore) = crate::context_ownership::function(scope, restore) else {
+        return;
+    };
+    context.set_slot(std::rc::Rc::new(GeometryCloneAdapter { record, restore }));
+}
+
+/// A DOMPointReadOnly (1), DOMPoint (2), DOMMatrixReadOnly (3) or DOMMatrix (4)
+/// platform object's values: 4 point coordinates or 16 column-major entries.
+#[derive(Clone)]
+pub(crate) struct PointMatrixData {
+    kind: u32,
+    values: Vec<f64>,
+}
+impl PointMatrixData {
+    pub(crate) fn size_bytes(&self) -> usize {
+        8 * self.values.len() + 8
+    }
+}
+
+/// Reads a point/matrix through its own realm's hook; anything else (a plain or
+/// prototype-only object, a foreign realm without hooks, malformed hook output) is
+/// `None`. Callers provide a scope that allows JavaScript execution.
+pub(crate) fn point_matrix_snapshot<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+) -> Option<PointMatrixData> {
+    let context = object.get_creation_context(scope)?;
+    let record = context
+        .get_slot::<GeometryCloneAdapter>()?
+        .record
+        .to_local(scope)?;
+    let undefined = v8::undefined(scope);
+    let result = record.call(scope, undefined.into(), &[object.into()])?;
+    let result = v8::Local::<v8::Array>::try_from(result).ok()?;
+    let kind = result.get_index(scope, 0)?;
+    let kind = match kind
+        .is_uint32()
+        .then(|| kind.uint32_value(scope))
+        .flatten()?
+    {
+        kind @ 1..=4 => kind,
+        _ => return None,
+    };
+    let data = v8::Local::<v8::Array>::try_from(result.get_index(scope, 1)?).ok()?;
+    let length = if kind <= 2 { 4 } else { 16 };
+    if data.length() != length {
+        return None;
+    }
+    let mut values = Vec::with_capacity(length as usize);
+    for index in 0..length {
+        let value = data.get_index(scope, index)?;
+        if !value.is_number() {
+            return None;
+        }
+        values.push(value.number_value(scope)?);
+    }
+    Some(PointMatrixData { kind, values })
+}
+
+/// Rebuilds the platform object in the current realm, or `None` when that realm
+/// has no geometry hooks.
+pub(crate) fn point_matrix_restore<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    data: &PointMatrixData,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let restore = scope
+        .get_current_context()
+        .get_slot::<GeometryCloneAdapter>()?
+        .restore
+        .to_local(scope)?;
+    let values: Vec<v8::Local<v8::Value>> = data
+        .values
+        .iter()
+        .map(|value| v8::Number::new(scope, *value).into())
+        .collect();
+    let values = v8::Array::new_with_elements(scope, &values);
+    let kind = v8::Integer::new_from_unsigned(scope, data.kind);
+    let undefined = v8::undefined(scope);
+    restore
+        .call(scope, undefined.into(), &[kind.into(), values.into()])?
+        .to_object(scope)
 }

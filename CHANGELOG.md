@@ -30,6 +30,16 @@
   like Chrome 156 (`matchMedia` and live layout `@media`): `not (unknown-x)`,
   `not (orientation: 1px)` and `(width: 800px) and (not (unknown-x))` no longer match,
   and `(width: red)` is unknown instead of an error.
+- Classic `<script src="data:…">` (#67) runs like Chrome 156 (parser-inserted,
+  dynamic and child-frame scripts were dropped as "not an allowed HTTP URL"): script
+  fetch decodes the data: URL as a basic response (MIME charset, else windows-1252 for
+  the default `text/plain;charset=US-ASCII`; integrity applies; errors are not muted),
+  and a redirect to a data: URL stays a network error.
+- Structured clone of DOMPoint, DOMPointReadOnly, DOMMatrix and DOMMatrixReadOnly
+  (#66: `structuredClone`, `postMessage`, `MessagePort.postMessage`) reconstructs the
+  platform object with its interface and values like Chrome 156 (they arrived as empty
+  plain objects); the interface is the constructor that created the object (a subclass
+  clones as its base), and the clone hooks use intrinsics captured at bootstrap.
 
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,

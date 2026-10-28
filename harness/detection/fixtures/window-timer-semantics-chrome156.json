@@ -8,14 +8,26 @@
     "chrome-cdp-trace.mjs": "440965c5c029143c92058c21f6e125a83d3d91f55331a2e4df225019fdf7a55f",
     "observation-window.mjs": "e352eea8fe8d7760c949b49abf54e84f9582f891e9f7ea4edd7cbf493d4f0be8",
     "main-navigation.mjs": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
-    "collector-lifecycle.mjs": "acea3bf16b5940a3bef05aee1a21802b7cde897d359cd95c3d83abf2c948bd91"
+    "collector-lifecycle.mjs": "e58aa2abf69c459126695d6da0eafb80b1f6de891dbe2447b73c93ac31d6aa60"
   },
   "errors": [],
   "result": {
     "semantics": {
-      "initialCheckpoint": ["first", "microtask", "deep microtask", "observer", "second"],
-      "initialRealmOrder": ["frame", "parent"],
-      "cancellations": [false, false],
+      "initialCheckpoint": [
+        "first",
+        "microtask",
+        "deep microtask",
+        "observer",
+        "second"
+      ],
+      "initialRealmOrder": [
+        "frame",
+        "parent"
+      ],
+      "cancellations": [
+        false,
+        false
+      ],
       "intervalCancellation": 1,
       "mathReplacement": {
         "created": true,
@@ -30,29 +42,108 @@
     },
     "timing": {
       "direct": [
-        0, 0, 0, 0, 0, 0, 4.599999964237213, 4.600000023841858, 4.600000023841858, 4.5,
-        4.599999964237213, 4.600000023841858
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4.600000023841858,
+        4.599999904632568,
+        4.600000023841858,
+        4.600000023841858,
+        4.5,
+        4.700000047683716
       ],
       "promise": [
-        0, 0, 0, 0, 0, 0, 4.600000023841858, 4.600000023841858, 4.5, 4.599999964237213,
-        4.600000023841858, 4.5
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4.600000023841858,
+        4.600000023841858,
+        4.600000023841858,
+        4.600000023841858,
+        4.5,
+        4.599999904632568
       ],
       "queueMicrotask": [
-        0, 0, 0, 0, 0, 0, 4.5, 4.600000023841858, 4.599999964237213, 4.600000023841858,
-        4.399999976158142, 4.599999964237213
+        0.10000002384185791,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4.5,
+        4.299999952316284,
+        4.600000023841858,
+        4.5,
+        4.600000023841858,
+        4.600000023841858
       ],
-      "crossRealm": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      "crossRealmPromise": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      "crossRealmQueueMicrotask": [0, 0, 0, 0, 0, 0, 0, 0, 0.09999996423721313, 0, 0, 0],
+      "crossRealm": [
+        0,
+        0.10000002384185791,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "crossRealmPromise": [
+        0,
+        0.09999990463256836,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "crossRealmQueueMicrotask": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
       "interval": [
-        0, 0, 0, 0, 0, 0.10000002384185791, 4.399999976158142, 4.699999988079071, 3.300000011920929,
-        4.600000023841858, 3.399999976158142, 4.600000023841858
+        0.10000002384185791,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4.600000023841858,
+        4.600000023841858,
+        3.399999976158142,
+        4.600000023841858,
+        3.399999976158142,
+        4.5
       ]
     },
     "pageState": {
       "visibility": "visible",
       "hidden": false,
-      "focused": true
+      "focused": false
     }
   },
   "scope": "Genuine localhost task semantics and observed nesting delays. Timing is not an execution-time guarantee."

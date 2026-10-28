@@ -9,26 +9,47 @@ export function collectorLifecycle({
   const controller = new AbortController();
   let browser = null,
     stopping = null;
-  const stop = (signal) => {
-    if (!browser?.pid) return;
+  const exited = () => (browser.exitCode ?? null) !== null || (browser.signalCode ?? null) !== null;
+  // Returns an EPERM it cannot judge yet: the group may be exiting before Node reaps it.
+  const signalGroup = (signal) => {
+    if (!browser?.pid) return null;
     try {
       if (platform === "win32") browser.kill(signal);
       else kill(-browser.pid, signal);
     } catch (error) {
-      if (error.code === "ESRCH") return;
+      if (error.code === "ESRCH") return null;
       // macOS answers EPERM, not ESRCH, while an exited group's members wait to be
       // reaped: nothing is left to signal (turbo-surf#50). A live browser's EPERM is real.
-      const exited = browser.exitCode != null || browser.signalCode != null;
-      if (error.code !== "EPERM" || !exited) throw error;
+      if (error.code !== "EPERM") throw error;
+      if (!exited()) return error;
     }
+    return null;
+  };
+  const reaped = () =>
+    new Promise((done) => {
+      const finish = () => {
+        clearTimeout(timer);
+        browser.off?.("exit", finish);
+        done();
+      };
+      const timer = setTimeout(finish, graceMs);
+      browser.once?.("exit", finish);
+    });
+  const stop = async (signal) => {
+    const pending = signalGroup(signal);
+    if (!pending) return;
+    // The group (Patchright's detached leader after context.close()) turns EPERM a few
+    // ms before Node emits the leader's 'exit' (turbo-surf#64). Judge it once reaped.
+    await reaped();
+    if (!exited()) throw pending;
   };
   const stopBrowser = () => {
     if (stopping) return stopping;
     stopping = (async () => {
-      stop("SIGTERM");
+      await stop("SIGTERM");
       // A leader may exit before its helpers; always retire the owned group.
       await new Promise((done) => setTimeout(done, graceMs));
-      stop("SIGKILL");
+      await stop("SIGKILL");
     })();
     return stopping;
   };
@@ -54,7 +75,8 @@ export function collectorLifecycle({
         throw new Error("Chrome process ownership already assigned");
       browser = child;
       if (controller.signal.aborted) {
-        stop("SIGKILL");
+        const pending = signalGroup("SIGKILL");
+        if (pending) throw pending;
         throw controller.signal.reason;
       }
     },

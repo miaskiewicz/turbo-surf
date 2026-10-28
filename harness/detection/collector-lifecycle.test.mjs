@@ -197,7 +197,6 @@ test("a zombie-only browser group counts as retired; a live one's EPERM still fa
 
 test(
   "a Patchright leader whose group goes EPERM just before Node reaps it is retired; a live one still fails (turbo-surf#64)",
-  { todo: "turbo-surf#64: fails until the fix" },
   async () => {
     // After context.close() macOS answers kill(-pgid) with EPERM a few ms before Node's 'exit'.
     const calls = [];

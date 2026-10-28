@@ -316,8 +316,15 @@ pub(crate) fn point_matrix_snapshot<'s>(
         _ => return None,
     };
     let data = v8::Local::<v8::Array>::try_from(result.get_index(scope, 1)?).ok()?;
-    let length = if kind <= 2 { 4 } else { 16 };
-    if data.length() != length {
+    // Points carry 4 values, quads 16; a matrix carries 6 when it is 2D (its is2D
+    // flag, turbo-surf#89) and 16 when it is 3D.
+    let length = data.length();
+    let valid = match kind {
+        1 | 2 => length == 4,
+        3 | 4 => length == 6 || length == 16,
+        _ => length == 16,
+    };
+    if !valid {
         return None;
     }
     let mut values = Vec::with_capacity(length as usize);

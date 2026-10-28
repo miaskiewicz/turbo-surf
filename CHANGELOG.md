@@ -103,6 +103,15 @@
   through the document's own Location, so fragment navigations update its URL and
   history.
 
+- `DOMMatrix.is2D` is state like Blink's (#89), not derived from the values: a
+  16-value sequence, a CSS transform with a 3D function (`matrix3d`, `translate3d`,
+  `translateZ`, `scale3d`, `scaleZ`, `rotateX`/`Y`, `rotate3d`, `perspective`), a
+  DOMMatrixInit with `is2D: false`, 3D operations (`translate` with `tz`, `scale` with
+  `scaleZ`/`originZ`, `rotate` about x/y, `rotateAxisAngle` off the z axis, multiplying
+  by a 3D matrix), a 3D member setter or a failed inversion make the matrix 3D even
+  when its values are 2D-shaped, so `toString()` gives `matrix3d(...)` and
+  `toJSON().is2D` is `false` like Chrome 156. Structured clone keeps the flag.
+
 ### Fixed (turbo-dom consolidation P5b)
 - Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,
   `naturalHeight` and `currentSrc` are `HTMLImageElement.prototype` accessors

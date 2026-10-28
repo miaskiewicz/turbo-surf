@@ -166,6 +166,12 @@
     hashChange(oldURL, href);
   }
   function navigate(href, replace) {
+    // A sandboxed frame without allow-top-navigation may not navigate top (turbo-surf#84).
+    if (ops.op_location_navigation_sandboxed(realm))
+      throw new Exception(
+        `The current window does not have permission to navigate the target frame to '${href}'.`,
+        "SecurityError",
+      );
     const target = url();
     if (fragmentOf(href) !== null && withoutFragment(href) === withoutFragment(target)) {
       navigateToFragment(href, replace || href === target);
@@ -177,6 +183,13 @@
     } else current = href;
     ops.op_script_navigation_admitted(href);
   }
+  // The native cross-origin Location (native engine) navigates this document through its
+  // own Location: same-document fragments, session history and the sandbox check
+  // (turbo-surf#84).
+  ops.op_set_host_capabilities({
+    __proto__: null,
+    navigateLocation: (href) => navigate(href, false),
+  });
   const resolve = (value, operation) => {
     const target = parse(value, documentBase());
     if (!target) throw new Exception(`${operation}: '${value}' is not a valid URL.`, "SyntaxError");

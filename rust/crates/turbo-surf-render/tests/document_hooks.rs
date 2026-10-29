@@ -65,6 +65,11 @@ fn headers(value: &Value) -> Vec<(String, String)> {
 
 /// Serves each case under `/<index>/` exactly as the Chrome collector does.
 async fn serve(cases: Value) -> u16 {
+    serve_delayed(cases, &[]).await
+}
+
+/// `serve`, holding each `(resource, ms)` response back to stand in for host load.
+async fn serve_delayed(cases: Value, delays: &'static [(&'static str, u64)]) -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let cases = std::sync::Arc::new(cases);
@@ -84,6 +89,9 @@ async fn serve(cases: Value) -> u16 {
                 let request = String::from_utf8_lossy(&request);
                 let path = request.split_whitespace().nth(1).unwrap_or("/");
                 let path = path.split('?').next().unwrap();
+                if let Some((_, ms)) = delays.iter().find(|(name, _)| path.ends_with(name)) {
+                    tokio::time::sleep(std::time::Duration::from_millis(*ms)).await;
+                }
                 let (status, fields, body) = respond(&cases, path, port);
                 let mut head = format!("HTTP/1.1 {status}\r\nCache-Control: no-store\r\n");
                 for (name, value) in fields {
@@ -158,6 +166,74 @@ fn divergences(path: String, actual: &Value, expected: &Value, out: &mut Vec<(St
     }
 }
 
+/// Runs one case against `port` and returns its divergences from the control.
+async fn case_divergences(
+    cases: &Value,
+    expected: &[Value],
+    index: usize,
+    port: u16,
+) -> Vec<(String, Value)> {
+    let case = &cases[index];
+    let expected = &expected[index];
+    assert_eq!(case["id"], expected["id"]);
+    let (top, cross) = hosts(case);
+    let html = case["html"]
+        .as_str()
+        .unwrap()
+        .replace("{{cross}}", &format!("http://{cross}:{port}/{index}/"));
+    let mut page = PageSession::open_with_response_headers(
+        &html,
+        &format!("http://{top}:{port}/{index}/"),
+        "",
+        "",
+        10000,
+        "",
+        Default::default(),
+        &headers(&case["headers"]),
+    )
+    .await
+    .unwrap();
+    let raw = page
+        .eval_json_expression(PROBE.trim().trim_end_matches(';'))
+        .await
+        .unwrap();
+    page.close();
+    let actual: Value = serde_json::from_str(&raw).unwrap();
+    let mut found = Vec::new();
+    divergences(
+        case["id"].as_str().unwrap().to_string(),
+        &actual,
+        &expected["result"],
+        &mut found,
+    );
+    found
+}
+
+/// turbo-surf#102: an origin's agent-cluster keying is fixed by its first committed
+/// document (Chrome 156 commits `cross` before `crossoff` in the control, and keys both by
+/// the first; with `cross` held back Chrome keys both like `crossoff`). The control was
+/// measured with the children committing in document order, so the comparison must not
+/// depend on which loopback response the host happens to finish first under load.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#102: fails until the fix"]
+async fn agent_cluster_children_compare_independently_of_response_timing() {
+    let control = control();
+    let cases: Value = serde_json::from_str(CASES).unwrap();
+    let expected = control["result"].as_array().unwrap();
+    let index = cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|case| case["id"] == "agent-cluster-site-keyed-children")
+        .unwrap();
+    // A loaded host finishing the first cross-origin child after the second.
+    let port = serve_delayed(cases.clone(), &[("/report", 400)]).await;
+    assert_eq!(
+        case_divergences(&cases, expected, index, port).await,
+        Vec::<(String, Value)>::new()
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn document_response_hooks_and_fullscreen_policy_match_chrome156() {
     let control = control();
@@ -173,33 +249,8 @@ async fn document_response_hooks_and_fullscreen_policy_match_chrome156() {
     assert_eq!(cases.as_array().unwrap().len(), expected.len());
     let port = serve(cases.clone()).await;
     let mut found = Vec::new();
-    for (index, (case, expected)) in cases.as_array().unwrap().iter().zip(expected).enumerate() {
-        assert_eq!(case["id"], expected["id"]);
-        let (top, cross) = hosts(case);
-        let html = case["html"]
-            .as_str()
-            .unwrap()
-            .replace("{{cross}}", &format!("http://{cross}:{port}/{index}/"));
-        let mut page = PageSession::open_with_response_headers(
-            &html,
-            &format!("http://{top}:{port}/{index}/"),
-            "",
-            "",
-            10000,
-            "",
-            Default::default(),
-            &headers(&case["headers"]),
-        )
-        .await
-        .unwrap();
-        let raw = page
-            .eval_json_expression(PROBE.trim().trim_end_matches(';'))
-            .await
-            .unwrap();
-        page.close();
-        let actual: Value = serde_json::from_str(&raw).unwrap();
-        let id = case["id"].as_str().unwrap().to_string();
-        divergences(id, &actual, &expected["result"], &mut found);
+    for index in 0..expected.len() {
+        found.extend(case_divergences(&cases, expected, index, port).await);
     }
     let found: Vec<_> = found
         .iter()

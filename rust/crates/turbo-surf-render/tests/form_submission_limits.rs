@@ -113,3 +113,36 @@ async fn trusted_types_gate_javascript_form_actions_like_chrome156() {
         json!(["2", ["void(window.r1=1)", "Location href"]])
     );
 }
+
+/// turbo-surf#123: a `javascript:` form action aimed at `_blank` or a named frame does not
+/// throw; Chrome 156 runs it in the named iframe and opens `_blank` (or an unknown name)
+/// as a new window, outside this document.
+#[tokio::test(flavor = "current_thread")]
+async fn javascript_form_actions_targeting_other_contexts_match_chrome156() {
+    let mut page = PageSession::open(
+        "<body><form id=f1 action=\"javascript:void(window.r1=1)\" target=_blank></form><form id=f2 action=\"javascript:void(window.r2=1)\" target=nm></form><form id=f3 action=\"javascript:void(window.r3=1)\" target=missing></form><iframe name=nm></iframe>",
+        "https://forms.test/page",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let raw = page
+        .eval_json_expression(
+            "new Promise(r=>{const o=[];for(const f of [f1,f2,f3]){try{f.submit();o.push('ok')}catch(e){o.push(String(e))}}setTimeout(()=>r([o,String(window.r1),String(window.r2),String(window.r3),String(frames[0].r2)]),200)})",
+        )
+        .await
+        .unwrap();
+    page.close();
+    assert_eq!(
+        serde_json::from_str::<Value>(&raw).unwrap(),
+        json!([
+            ["ok", "ok", "ok"],
+            "undefined",
+            "undefined",
+            "undefined",
+            "1"
+        ])
+    );
+}

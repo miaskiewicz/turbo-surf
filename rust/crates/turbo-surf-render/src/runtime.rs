@@ -7837,7 +7837,9 @@ const __timerNow = () => ops.op_timer_clock();
 // task behind a rendering frame queued earlier (turbo-surf#101). The nesting clamp, timers
 // outside timer tasks and real-time window timers use the live clock.
 let __taskBase = null, __taskBaseEpoch = -1;
-const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers ? __taskBase : __timerNow();
+// A nonzero nesting level marks a running timer task (and its microtask checkpoint); a
+// rendering frame runs at level 1.
+const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers && ops.op_timer_nesting(__timerDocument) > 0 ? __taskBase : __timerNow();
 const __realWindowTimers = ops.op_window_timers_realtime();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
@@ -8060,7 +8062,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.due;__taskBaseEpoch=__taskEpoch;
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
-    ops.op_timer_set_nesting(__timerDocument,timer.nesting);
+    ops.op_timer_set_nesting(__timerDocument,timer.nesting||1);
     try{
       try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){

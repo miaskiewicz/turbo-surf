@@ -70,3 +70,46 @@ async fn javascript_form_action_runs_the_script_like_chrome156() {
         ])
     );
 }
+
+async fn csp_page(csp: &str, html: &str, probe: &str) -> Value {
+    let mut page = PageSession::open_with_response_headers(
+        html,
+        "https://forms.test/page",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &[("Content-Security-Policy".into(), csp.into())],
+    )
+    .await
+    .unwrap();
+    let raw = page.eval_json_expression(probe).await.unwrap();
+    page.close();
+    serde_json::from_str(&raw).unwrap()
+}
+
+/// turbo-surf#122: under `require-trusted-types-for 'script'` a `javascript:` form action
+/// is blocked without a default policy, and with one runs the policy's `createScript`
+/// result (sink "Location href"). Chrome 156 (8078.47, headless, localhost).
+#[tokio::test(flavor = "current_thread")]
+async fn trusted_types_gate_javascript_form_actions_like_chrome156() {
+    let html = "<body><form id=f1 action=\"javascript:void(window.r1=1)\"></form>";
+    let blocked = csp_page(
+        "require-trusted-types-for 'script'",
+        html,
+        "new Promise(r=>{f1.submit();setTimeout(()=>r(String(window.r1)),100)})",
+    )
+    .await;
+    assert_eq!(blocked, json!("undefined"));
+    let policed = csp_page(
+        "require-trusted-types-for 'script'",
+        html,
+        "new Promise(r=>{let seen=[];trustedTypes.createPolicy('default',{createScript:(s,t,k)=>{seen.push(s,k);return s.replace('r1=1','r1=2')}});f1.submit();setTimeout(()=>r([String(window.r1),seen]),100)})",
+    )
+    .await;
+    assert_eq!(
+        policed,
+        json!(["2", ["void(window.r1=1)", "Location href"]])
+    );
+}

@@ -87,6 +87,7 @@ fn handle_user_agent(state: &mut ParseState, value: &str) {
         state.current = Some(state.groups.len() - 1);
         state.saw_rule_since_agent = false;
     }
+    // invariant: `current` is set just above whenever it was None.
     let idx = state.current.unwrap();
     state.groups[idx].agents.insert(value.to_ascii_lowercase());
 }
@@ -231,6 +232,7 @@ impl<F: RobotsFetcher> RobotsCache<F> {
                 },
             );
         }
+        // invariant: the entry for `origin` was inserted above when missing or stale.
         &self.cache.get(origin).unwrap().groups
     }
 

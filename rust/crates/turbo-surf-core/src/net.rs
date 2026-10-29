@@ -1349,6 +1349,7 @@ fn finish_range_response(
         || span.is_none_or(|(range, total)| {
             range.start != expected_start
                 || range.end != fill.range.end
+                // invariant: selected_range(None) is always Some (the full body).
                 || total != fill.entry.selected_range(None).unwrap().end
         })
     {

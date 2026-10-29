@@ -1301,6 +1301,7 @@ fn authorize_trusted_types(
     let (kind, blocked, sample, name) = if action == "policy" {
         let value = args.get(1).to_rust_string_lossy(scope);
         let duplicate = args.get(2).is_true();
+        // invariant: the private turbo-dom factory passes the already-converted DOMString name.
         let value_string = v8::Local::<v8::String>::try_from(args.get(1)).unwrap();
         let sample = crate::browser_env::string_code_units(scope, value_string)
             .into_iter()
@@ -1314,6 +1315,7 @@ fn authorize_trusted_types(
         )
     } else {
         let sink = args.get(2).to_rust_string_lossy(scope);
+        // invariant: the private turbo-dom sink check passes the already-converted string.
         let text = v8::Local::<v8::String>::try_from(args.get(3)).unwrap();
         let mut content = crate::browser_env::string_code_units(scope, text);
         if sink == "Function" {

@@ -151,7 +151,12 @@ fn extract_challenge_js(html: &str) -> Option<String> {
         let after = &rest[open..];
         let start = after.find('>')? + 1;
         let end = after.find("</script>")?;
-        let code = &after[start..end];
+        // A `</script>` before the open tag's `>` is malformed: skip past it
+        // (turbo-surf#97) instead of slicing backwards.
+        let Some(code) = after.get(start..end) else {
+            rest = &after[end + "</script>".len()..];
+            continue;
+        };
         if code.contains("awswaf") || code.contains("challenge") || code.contains("AwsWafToken") {
             body.push_str(code);
             body.push('\n');

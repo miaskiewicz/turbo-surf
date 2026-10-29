@@ -1,5 +1,12 @@
 # Google detection audit — 2026-10-09; follow-up 2026-10-21
 
+> **0.6.0 status (2026-10-29).** Issue #28 is closed. The 0.6.0 remeasure against Chrome
+> 156.0.8078.47 found 2 missing own members (was 142) and 4 difference paths (was 374) on the
+> same 75 interfaces; each remaining gap now has its own issue (turbo-surf #103–#116, #27;
+> turbo-dom #185–#192). The summary and links are in the README's
+> [Chrome parity (0.6.0)](../../README.md#chrome-parity-060) section. The text below is the
+> dated pre-0.6.0 record (Chrome 155) and still says "issue28" where it was written.
+
 The canonical pending-work checklist is [PARITY-GAPS.md](./PARITY-GAPS.md).
 Residual work beyond PR26 is tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28),
 with deferred audio in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).

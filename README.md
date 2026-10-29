@@ -359,9 +359,9 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **Window surface breadth** includes many Chrome interface constructors, `on*`
   slots and API objects. Exact property counts differ by document/version, and
   presence does not establish implementation parity.
-- **Namespaced helpers.** Most render helpers live on `globalThis[Symbol.for('ts')]`,
-  reducing named globals. Symbol properties remain discoverable and some helpers
-  are transiently exposed during evaluation/interaction; this is not invisible storage.
+- **Private helpers.** Render helpers live on the engine namespace, a V8 private
+  that page script cannot reach by any property or symbol route (turbo-dom#222);
+  driver scripts reach it through the engine eval entry points (`__tsNs`).
 - **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
   real native functions); the `toString` anti-hook trap is itself shapeless.
 - **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for

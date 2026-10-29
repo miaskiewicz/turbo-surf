@@ -21,6 +21,14 @@ Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
 `turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
 render → mcp.
 
+### Fixed (turbo-dom #222, #223)
+- The engine namespace is no longer page-reachable: it moved from
+  `globalThis[Symbol.for('ts')]` to a V8 private (turbo-dom#222). Driver scripts
+  use `PageSession::eval_engine*`, `run_engine_with_dom` or the napi
+  `liveEvalEngine`, which bind it to `__tsNs`; the playwright shim uses them.
+- `window` keeps Chrome's Window -> WindowProperties -> EventTarget chain with the
+  binding's own Window interface work (turbo-dom#223).
+
 ### Fixed (review round 3)
 - MCP stdio errors follow JSON-RPC 2.0 and MCP 2024-11-05 (#119): a failing tool
   is a result with `isError: true` (was a `-32000` error); unknown methods answer

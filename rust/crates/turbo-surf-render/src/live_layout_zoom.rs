@@ -36,9 +36,15 @@ fn walk(
         let StyledNode::Element(element) = node else {
             continue;
         };
-        let effective = zoom * factor(&element.style);
+        let effective = (zoom * factor(&element.style)).max(MIN_ZOOM);
         if effective != 1.0 {
             element.style = scaled(&element.style, effective);
+        } else if element
+            .style
+            .iter()
+            .any(|(name, value)| scalable(name) && beyond_layout(value))
+        {
+            element.style = clamped(&element.style);
         }
         let id = element
             .source
@@ -65,6 +71,45 @@ fn source_style(element: &StyledElement, parent: Option<SourceId>, zoom: f32) ->
             turbo_dom_layout::Tag::Marker(_) => String::new(),
         },
     }
+}
+
+/// Chrome 156 never lets the effective zoom fall below 1e-6 (measured: `zoom: 1e-30`
+/// computes a 1e30px width to its saturated layout size divided by 1e-6).
+const MIN_ZOOM: f32 = 1e-6;
+/// The largest used length Chrome 156 reports for a saturated box (its layout-unit
+/// range, as the float it stores): `width: 1e30px` measures 33554428px.
+pub(crate) const LAYOUT_MAX: f32 = 33_554_428.0;
+
+/// Whether a value carries an absolute length outside the layout range (cheap check:
+/// such a number needs at least 8 integer digits or an exponent).
+fn beyond_layout(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut run = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        run = if byte.is_ascii_digit() { run + 1 } else { 0 };
+        let exponent = matches!(byte, b'e' | b'E')
+            && index > 0
+            && bytes[index - 1].is_ascii_digit()
+            && bytes
+                .get(index + 1)
+                .is_some_and(|next| next.is_ascii_digit() || *next == b'+');
+        if run >= 8 || exponent {
+            return true;
+        }
+    }
+    false
+}
+
+/// An unzoomed style whose lengths saturate at the layout range.
+fn clamped(style: &ComputedStyle) -> ComputedStyle {
+    ComputedStyle::from_pairs(style.iter().map(|(name, value)| {
+        let value = if scalable(name) {
+            scale_value(value, 1.0, false)
+        } else {
+            value.to_owned()
+        };
+        (name.to_owned(), value)
+    }))
 }
 
 // The native layout default font size; an element without a cascaded size
@@ -211,7 +256,8 @@ pub(crate) fn scale_value(value: &str, zoom: f32, keywords: bool) -> String {
                 .any(|known| suffix.eq_ignore_ascii_case(known));
             match value[index..number].parse::<f32>() {
                 Ok(amount) if zoomed => {
-                    out.push_str(&format!("{}{suffix}", amount * zoom));
+                    let length = (amount * zoom).clamp(-LAYOUT_MAX, LAYOUT_MAX);
+                    out.push_str(&format!("{length}{suffix}"));
                     index = unit;
                     continue;
                 }

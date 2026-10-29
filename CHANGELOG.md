@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- Extreme `zoom` (#99): the effective zoom never drops below 1e-6 and used lengths and
+  unzoomed CSSOM metrics saturate at Chrome 156's layout range, so `zoom: 1e-30` on a
+  `1e30px` box reports 33554432 instead of throwing `native CSSOM metric is outside its
+  integer range`.
 - Transfer lists longer than 4096 entries (#96): structuredClone, window postMessage and
   MessagePort.postMessage transfer every entry like Chrome 156 instead of throwing
   `Native transfer sequence budget exceeded` (the 64 MiB serialization bound stays).

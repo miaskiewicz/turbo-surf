@@ -395,8 +395,12 @@ fn unzoom_metrics(
         *value = unzoom(*value, zoom);
     }
 }
+/// Chrome 156 saturates an unzoomed metric at its layout-unit range (2^25).
+const UNZOOMED_MAX: f64 = 33_554_432.0;
 fn unzoom(value: i32, zoom: f32) -> i32 {
-    (f64::from(value) / f64::from(zoom)).round() as i32
+    (f64::from(value) / f64::from(zoom))
+        .round()
+        .clamp(-UNZOOMED_MAX, UNZOOMED_MAX) as i32
 }
 /// Blink's AdjustForAbsoluteZoom::AdjustInt for integral content sizes: zooming
 /// in compensates for truncation before dividing.

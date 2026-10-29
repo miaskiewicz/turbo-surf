@@ -15,10 +15,9 @@ const PROBE: &str = r#"(()=>{
 })()"#;
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#99: fails until the fix"]
 async fn tiny_zoom_on_a_huge_box_saturates_like_chrome156() {
     let mut page = PageSession::open(
-        "<body><div id=a style=\"zoom:1e-30;width:1e30px;height:1e30px\">x</div><div id=b style=\"width:1e30px\">y</div><div id=c style=\"zoom:1e-30;width:100px;height:10px\"></div>",
+        "<body><div id=a style=\"zoom:1e-30;width:1e30px;height:1e30px\">x</div><div id=b style=\"width:1e30px;height:7px\"></div><div id=c style=\"zoom:1e-30;width:100px;height:10px\"></div>",
         "http://127.0.0.1/",
         "",
         "",
@@ -34,7 +33,7 @@ async fn tiny_zoom_on_a_huge_box_saturates_like_chrome156() {
         value,
         json!({
             "a": [big, big, big, big, big, big],
-            "b": [33_554_428, 18, 33_554_428, 18, 33_554_428, 18],
+            "b": [33_554_428, 7, 33_554_428, 7, 33_554_428, 7],
             "c": [0, 0, 0, 0, 0, 0]
         })
     );

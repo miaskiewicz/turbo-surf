@@ -10,8 +10,15 @@ Line coverage of the Rust workspace is measured by `cargo tarpaulin` with the LL
 whole workspace's tests):
 
 ```sh
-cd rust && cargo tarpaulin        # CI job `coverage`; fails below `fail-under`
+cd rust && cargo tarpaulin        # one whole-workspace run; fails below `fail-under`
 ```
+
+CI shards the same measurement (one instrumented link of every test binary exhausts the ubuntu
+runner): the `coverage-shard` matrix runs `python3 ../scripts/coverage-shard.py <shard>
+<crates>` from `rust/` for render, mcp and core+view+page+transform, with `tarpaulin.toml`'s
+settings, and the `coverage` job merges the shard reports (`scripts/merge-coverage-reports.py`:
+each crate keeps its own shard's coverable lines, a line is covered when any shard hits it)
+and applies the workspace `fail-under` and the per-crate floors to the merge.
 
 Then every crate must meet its own floor (`rust/coverage-floors.json`, checked by
 `python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json

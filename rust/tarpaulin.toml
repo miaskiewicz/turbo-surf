@@ -1,6 +1,7 @@
 # Line-coverage gate for the turbo-surf Rust workspace (the member crates' `src/`, minus the
 # exclusions below).
-# Run from rust/: `cargo tarpaulin` (reads this file). CI: the `coverage` job in
+# Run from rust/: `cargo tarpaulin` (reads this file). CI: the `coverage-shard` matrix
+# (scripts/coverage-shard.py reads [surf] below) merged by the `coverage` job in
 # .github/workflows/ci.yml (ubuntu-latest; the floor was first measured on macOS arm64).
 #
 # fail-under is the workspace total MEASURED on 2026-10-28 at consol/cov-c4 5895357

@@ -59,7 +59,7 @@ Chrome probes are skipped). `npm run check` runs the JS lint/format + the Rust g
 shim tests (`test:playwright` = `build:addon` then `test:shim` + `test:e2e`). Never
 bypass with `--no-verify`.
 
-CI also gates **line coverage** (`coverage` job: `cd rust && cargo tarpaulin`, reading
+CI also gates **line coverage** (`coverage` job over the `coverage-shard` matrix, the sharded equivalent of `cd rust && cargo tarpaulin`, reading
 `rust/tarpaulin.toml` fail-under 93.0, then per-crate floors in `rust/coverage-floors.json` (the napi/py bindings are excluded);
 measured values, raised toward >= 99.5 by the coverage phase) and **cyclomatic complexity**
 (`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /

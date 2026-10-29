@@ -53,23 +53,38 @@ jobs:
         run: npm test
 
   # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine) ----
-  # One tarpaulin run over the whole workspace's tests; it fails below the workspace
+  # Sharded: one instrumented link of every workspace test binary exhausts the ubuntu runner
+  # (rust-lld bus error, run 40788261228), so each shard runs tarpaulin over its crates' tests
+  # with rust/tarpaulin.toml's settings (scripts/coverage-shard.py) and uploads its JSON. The
+  # `coverage` job merges them (scripts/merge-coverage-reports.py: a line is covered when any
+  # shard hits it, so the union equals one whole-workspace run), fails below the workspace
   # fail-under (rust/tarpaulin.toml), then every crate must meet its own floor
-  # (rust/coverage-floors.json). Floors are measured values (docs/QUALITY-GATES.md); the
-  # coverage phase raises them toward >= 99.5. Never lower one to pass a change. Runs on
-  # ubuntu-latest (macOS runners unavailable); floors were first measured on macOS arm64.
-  coverage:
-    name: coverage (rust workspace, tarpaulin fail-under)
+  # (rust/coverage-floors.json). Floors are measured values (docs/QUALITY-GATES.md); never
+  # lower one to pass a change. Runs on ubuntu-latest (macOS runners unavailable); floors were
+  # first measured on macOS arm64.
+  coverage-shard:
+    name: coverage shard (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: render
+            crates: turbo-surf-render
+          - shard: mcp
+            crates: turbo-surf-mcp
+          - shard: rest
+            crates: turbo-surf-core turbo-surf-view turbo-surf-page turbo-surf-transform
     env:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
       CARGO_INCREMENTAL: 0
+      # Fewer concurrent rust-lld links of V8-sized test binaries (memory, not just disk).
+      CARGO_BUILD_JOBS: 2
     steps:
-      # The instrumented workspace build outgrows the ubuntu runner's free disk; drop the
-      # preinstalled toolchains this job never uses (Android, .NET, GHC, CodeQL, Boost, images).
-      # napi/py are already left out of the build by rust/tarpaulin.toml `exclude`.
+      # Drop the preinstalled toolchains this job never uses (Android, .NET, GHC, CodeQL,
+      # Boost, images) before the instrumented build.
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
@@ -83,7 +98,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: llvm-tools-preview
-      # turbo-surf-py (a workspace member) links libpython through pyo3.
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -93,19 +107,46 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target/cov
-          key: coverage
+          key: coverage-${{ matrix.shard }}
       - name: Install
         run: npm ci
-      - name: cargo tarpaulin (fails below rust/tarpaulin.toml fail-under)
+      - name: cargo tarpaulin (${{ matrix.crates }})
         working-directory: rust
-        run: cargo tarpaulin --locked
+        run: python3 ../scripts/coverage-shard.py ${{ matrix.shard }} ${{ matrix.crates }}
+      - run: df -h
+        if: always()
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: rust/target/cov/report-${{ matrix.shard }}/tarpaulin-report.json
+          if-no-files-found: error
+
+  coverage:
+    name: coverage (rust workspace, tarpaulin fail-under)
+    needs: coverage-shard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-*
+          path: shards
+      - name: Merge shards (fails below rust/tarpaulin.toml fail-under)
+        run: >
+          python3 scripts/merge-coverage-reports.py rust/tarpaulin.toml coverage-merged.json
+          turbo-surf-render=shards/coverage-shard-render/tarpaulin-report.json
+          turbo-surf-mcp=shards/coverage-shard-mcp/tarpaulin-report.json
+          turbo-surf-core,turbo-surf-view,turbo-surf-page,turbo-surf-transform=shards/coverage-shard-rest/tarpaulin-report.json
       - name: Per-crate floors (rust/coverage-floors.json)
-        run: python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json rust/coverage-floors.json
+        run: python3 scripts/check-coverage-floors.py coverage-merged.json rust/coverage-floors.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-rust
-          path: rust/target/cov/report/
+          path: coverage-merged.json
           if-no-files-found: ignore
 
   # ---- Complexity: cyclomatic complexity <= 15 per function, no allow-list, no baseline ----

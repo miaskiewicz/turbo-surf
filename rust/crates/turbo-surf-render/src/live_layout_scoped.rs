@@ -653,6 +653,32 @@ mod tests {
         assert!(!validated);
     }
 
+    /// turbo-surf#117: a rule whose selector list Chrome drops (an unknown pseudo-class)
+    /// matches nothing instead of failing the page; Google's view-transition rules are
+    /// valid and never match an element; the rules around them keep matching.
+    #[test]
+    fn invalid_selector_rule_is_skipped_not_page_fatal() {
+        let tree = Tree::parse("<body><div id=a class=pick></div></body>");
+        let a = tree.get_element_by_id("a").unwrap();
+        let graph = Composition::scopes(&tree).unwrap();
+        let root = tree.root();
+        let targets = |css: &str| prepared(&tree, root, &graph, css).targets;
+        assert_eq!(targets("html:bogus .pick{width:1px}"), Vec::<Target>::new());
+        assert_eq!(
+            targets(".pick, html:bogus{width:1px}"),
+            Vec::<Target>::new()
+        );
+        assert_eq!(
+            targets("html:active-view-transition-type(aimc)::view-transition-new(sb):only-child{width:1px}"),
+            Vec::<Target>::new()
+        );
+        let kept = targets(".pick, html:active-view-transition-type(aimc) .pick{width:1px}");
+        assert_eq!(
+            kept.iter().map(|t| t.source).collect::<Vec<_>>(),
+            vec![source_id(1, a)]
+        );
+    }
+
     #[test]
     fn original_scopes_and_slot_assignment_are_distinct_from_flat_parentage() {
         let mut tree =

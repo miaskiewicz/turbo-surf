@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- turbo-surf#117: the view-transition rules of www.google.com (fetched 2026-10-29), which turbo-dom rejected as "unknown pseudo-class", plus one truly invalid rule; markup reduced to the "Reject all" button. Chrome 156 keeps the view-transition rules (never matching) and drops html:bogus. -->
+<html><head><style>
+::view-transition-old(sb){height:100%}
+::view-transition-new(sb){height:100%}
+html:active-view-transition-type(aimc)::view-transition-new(sb),html:active-view-transition-type(aimc)::view-transition-old(sb){height:100%}
+html:active-view-transition-type(aimc)::view-transition-old(sb):only-child{animation:sb-slide-up-fade-out .5s cubic-bezier(.38,.72,0,1) forwards}
+html:active-view-transition-type(aimc)::view-transition-new(sb):only-child{animation:sb-slide-down-fade-in .5s cubic-bezier(.38,.72,0,1) forwards}
+html:active-view-transition-type(aimc)::view-transition-new(mb),html:active-view-transition-type(aimc)::view-transition-old(mb){width:auto;animation-duration:.5s;animation-timing-function:cubic-bezier(.38,.72,0,1)}
+html:active-view-transition-type(aimc)::view-transition-group(*){transform-origin:top left}
+html:active-view-transition-type(aimc)::view-transition-new(ubi),html:active-view-transition-type(aimc)::view-transition-old(ubi){width:100%;height:100%;animation-duration:.5s;animation-timing-function:cubic-bezier(.38,.72,0,1)}
+html:active-view-transition-type(aimc)::view-transition-old(ubi):only-child{animation:ubi-fade-out .5s cubic-bezier(.38,.72,0,1)}
+html:active-view-transition-type(aimc)::view-transition-new(ubi):only-child{animation:ubi-fade-in .5s cubic-bezier(.38,.72,0,1)}
+html:bogus #W0wltc{display:none}
+#W0wltc{display:block;width:120px;height:36px;margin:10px}
+</style></head><body><div role="dialog"><button id="W0wltc" class="tHlp8d">Reject all</button></div></body></html>

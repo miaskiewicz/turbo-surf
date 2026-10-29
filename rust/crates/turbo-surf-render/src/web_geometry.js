@@ -33,7 +33,7 @@
     Float64 = Float64Array,
     IdlTypeError = TypeError,
     IdlDOMException = DOMException,
-    { abs, atan2, cos, hypot, max, min, sin, tan, PI, SQRT1_2 } = Math;
+    { abs, atan2, cos, fround, hypot, max, min, sin, tan, PI, SQRT1_2 } = Math;
   // WebIDL `unrestricted double`: ToNumber, which (unlike `Number()`) rejects BigInt.
   const toNumber = (value) => +value;
   const read = (map, receiver) => apply(weakGet, map, [receiver]);
@@ -364,7 +364,9 @@
             : args.length === 1;
       if (!counts) throw new IdlDOMException("Invalid translation", "SyntaxError");
       const amounts = [];
-      for (let index = 0; index < args.length; index++) amounts[index] = length(args[index]);
+      // Blink parses transform lengths and scale factors as float.
+      for (let index = 0; index < args.length; index++)
+        amounts[index] = fround(length(args[index]));
       if (name === "translatex") value[12] = amounts[0];
       else if (name === "translatey") value[13] = amounts[0];
       else if (name === "translatez") value[14] = amounts[0];
@@ -385,6 +387,7 @@
       )
         throw new IdlDOMException("Invalid scaling", "SyntaxError");
       const factors = transformArguments(numbers(args));
+      for (let index = 0; index < factors.length; index++) factors[index] = fround(factors[index]);
       if (name === "scalex") value[0] = factors[0];
       else if (name === "scaley") value[5] = factors[0];
       else if (name === "scalez") value[10] = factors[0];
@@ -676,7 +679,8 @@
     const x = toNumber(tx),
       y = toNumber(ty),
       z = toNumber(tz);
-    return [translated(current[0], x, y, z), current[1] && z === 0];
+    // Blink narrows the offsets to float; is2D is decided on the doubles.
+    return [translated(current[0], fround(x), fround(y), fround(z)), current[1] && z === 0];
   };
   const scaledState = (current, scaleX, scaleY, scaleZ, originX, originY, originZ) => {
     const sx = toNumber(scaleX),
@@ -685,7 +689,11 @@
       ox = toNumber(originX),
       oy = toNumber(originY),
       oz = toNumber(originZ);
-    return [scaled(current[0], sx, sy, sz, ox, oy, oz), current[1] && sz === 1 && oz === 0];
+    // Blink narrows the factors and origin to float; is2D is decided on the doubles.
+    return [
+      scaled(current[0], fround(sx), fround(sy), fround(sz), fround(ox), fround(oy), fround(oz)),
+      current[1] && sz === 1 && oz === 0,
+    ];
   };
   const rotatedState = (current, rotX, rotY, rotZ) => {
     const result = rotated(current[0], rotX, rotY, rotZ);

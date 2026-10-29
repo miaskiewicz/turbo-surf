@@ -184,24 +184,41 @@ async fn serialization_and_conversion_errors_match_chrome() {
 /// headless, localhost) transfers every entry through structuredClone, window
 /// postMessage, MessagePort.postMessage with an iterable list and with options, and
 /// with MessagePorts as the transferables; it rejected none up to 1,000,000 buffers.
+// One eval per path: each runs under its own render budget, so the instrumented
+// coverage build (several times slower) stays inside DEFAULT_RENDER_BUDGET_MS.
+const TRANSFER_PATHS: [(&str, &str); 5] = [
+    ("structuredClone", "let l=B();const r=structuredClone(l,{transfer:l});out.push(r.length,r[4999].byteLength,l[0].byteLength,l[4999].detached)"),
+    ("window.postMessage", "let l=B();const got=new Promise(r=>addEventListener('message',e=>r(e.data.length),{once:true}));postMessage(l,'*',l);out.push(await got,l[4999].detached)"),
+    ("port.postMessage(iterable)", "let l=B();const {port1,port2}=new MessageChannel();const got=new Promise(r=>port2.onmessage=e=>r(e.data.length));port1.postMessage(l,new Set(l));out.push(await got)"),
+    ("port.postMessage(options)", "let l=B();const {port1,port2}=new MessageChannel();const got=new Promise(r=>port2.onmessage=e=>r(e.data.length));port1.postMessage(l,{transfer:l});out.push(await got)"),
+    ("MessagePort transferables", "const l=Array.from({length:5000},()=>new MessageChannel().port1);const r=structuredClone(l,{transfer:l});out.push(r.length,r[4999] instanceof MessagePort)"),
+];
+
 #[tokio::test(flavor = "current_thread")]
 async fn transfer_lists_past_4096_entries_transfer_like_chrome156() {
-    let script = r#"(async()=>{const out=[];const B=()=>Array.from({length:5000},()=>new ArrayBuffer(1));
-try{let l=B();const r=structuredClone(l,{transfer:l});out.push(r.length,r[4999].byteLength,l[0].byteLength,l[4999].detached)}catch(e){out.push(e.name+': '+e.message)}
-try{let l=B();const got=new Promise(r=>addEventListener('message',e=>r(e.data.length),{once:true}));postMessage(l,'*',l);out.push(await got,l[4999].detached)}catch(e){out.push(e.name+': '+e.message)}
-try{let l=B();const {port1,port2}=new MessageChannel();const got=new Promise(r=>port2.onmessage=e=>r(e.data.length));port1.postMessage(l,new Set(l));out.push(await got)}catch(e){out.push(e.name+': '+e.message)}
-try{let l=B();const {port1,port2}=new MessageChannel();const got=new Promise(r=>port2.onmessage=e=>r(e.data.length));port1.postMessage(l,{transfer:l});out.push(await got)}catch(e){out.push(e.name+': '+e.message)}
-try{const l=Array.from({length:5000},()=>new MessageChannel().port1);const r=structuredClone(l,{transfer:l});out.push(r.length,r[4999] instanceof MessagePort)}catch(e){out.push(e.name+': '+e.message)}
-globalThis.__RESULT=JSON.stringify(out);})()"#;
-    let result = turbo_surf_render::eval_async(
-        "<!doctype html><body></body>",
-        "https://clone.test/",
-        script,
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        result, "[5000,1,0,true,5000,true,5000,5000,5000,true]",
-        "Chrome 156 transfers all 5000 entries on every path"
-    );
+    let expected = [
+        "[5000,1,0,true]",
+        "[5000,true]",
+        "[5000]",
+        "[5000]",
+        "[5000,true]",
+    ];
+    for ((path, body), want) in TRANSFER_PATHS.iter().zip(expected) {
+        let script = format!(
+            "(async()=>{{const out=[];const B=()=>Array.from({{length:5000}},()=>new ArrayBuffer(1));\
+try{{{body}}}catch(e){{out.push(e.name+': '+e.message)}}\
+globalThis.__RESULT=JSON.stringify(out);}})()"
+        );
+        let result = turbo_surf_render::eval_async(
+            "<!doctype html><body></body>",
+            "https://clone.test/",
+            &script,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("{path}: {e}"));
+        assert_eq!(
+            result, want,
+            "Chrome 156 transfers all 5000 entries via {path}"
+        );
+    }
 }

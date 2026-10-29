@@ -9,18 +9,10 @@ turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-R
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
 requires `turbo-dom` 0.6 (the consolidation release, published with
 turbo-dom-layout / -raster / -browser-env 0.6.0; until then the pre-publish
-`[patch.crates-io]` table resolves them from a turbo-dom Git rev). Since 0.5.7
-(tagged merge `5ec17065`) it carries [PR15](https://github.com/miaskiewicz/turbo-dom/pull/15)
-and PR13/PR14 custom states, checkedness and detached contextual fragments.
-The release also repairs scalar/original-UTF16
-attribute case modifiers and measured HTML name/type defaults; the shared native
-search selector now excludes hidden query fields correctly.
-The release adds native custom states and live checked-state reads to the original
-0.5.6 capabilities, including original UTF-16
-payload/name/parser APIs, native mutation batches and bounded storage collection.
-The earlier published0.5.6 annotated release tag identifies PR #12 merge commit
-`ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`; npm platform/WASM metadata,
-the successful release workflow and official registry checksums were verified.
+`[patch.crates-io]` table resolves them from a turbo-dom Git rev). turbo-dom 0.6 brings the one Chrome-checked selector engine, the
+original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
+mutation batches and bounded storage collection (the per-release history is in
+[CHANGELOG.md](../CHANGELOG.md)).
 The canonical binding consumes collection through the public API with genuine
 weak wrapper roots and native job pins. Real V8 GC notifications schedule a
 bounded scan after completed host operations; no Tree traversal runs inside the

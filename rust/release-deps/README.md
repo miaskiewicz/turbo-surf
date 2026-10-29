@@ -15,17 +15,32 @@ published registry consumer. Keep those verdicts separate.
   `turbo-surf-wreq`, `turbo-surf-wreq-util`. Exact public Git revisions and the
   BoringSSL submodule revision are pinned in the generator. The selected native
   sources are bundled, so a registry consumer does not need a Git submodule.
-- `deno/`: the coherent V8/facade/serde/core/crypto/web/WebIDL/benchmark closure.
-  Its source archives, licenses, reviewed hardening and distribution test patch
-  have explicit hashes. See its README for preparation and graph details.
-- Turbo-test prepares the same `turbo-surf-v8` package family at upstream version
-  149.3.0; Surf's stock Deno facade requires 150.4.0. They are separate dependency
-  graphs. Neither is the experimental Chrome155 SDK.
+- `deno/`: the coherent facade/serde/core/crypto/web/WebIDL/benchmark closure
+  (seven packages). Its source archives, licenses, reviewed hardening and
+  embedded-source inventories have explicit hashes. See its README for
+  preparation and graph details.
+- The native V8 binding is **not** prepared here. `turbo-dom-v8` 150.4.x (the
+  reviewed rusty_v8 fork, library `v8`, `links = "rusty_v8"`) is published from the
+  turbo-dom repository and is an external prerequisite: the facade requires it from
+  the registry (`~150.4`). Publish it first. Neither is the experimental
+  Chrome155 SDK.
 
-The initial fork versions retain upstream numbers because the native build
-scripts derive official SDK URLs from them. Preserve library names and dependency
-aliases even when package names change. Later package-version changes require
-separate upstream-SDK-version handling and validation.
+Each distribution records its upstream identity (`[package.metadata.turbo-surf-upstream]`)
+separately from its own version. The 0.x.1 Deno family is upstream + 1 patch;
+preparation still verifies the downloaded upstream archive at its exact upstream
+version. Preserve library names and dependency aliases even when package names
+change.
+
+## Pre-publication candidates
+
+`push-candidates.sh` runs `deno/prepare.py --download` and `--check`, lays the
+seven candidates out with `deno/candidate_tree.py` (registry-form manifests with
+dependency paths removed, unique package names), commits them with a private
+index to the orphan branch `consolidation/deno-candidates` (later runs append a
+child commit only when the tree changes) and pushes it. It prints the commit and
+the `[patch.crates-io]` table a consumer PR uses, one entry per package at that
+one `rev`; the PR must also patch `turbo-dom-v8` to its turbo-dom Git revision.
+Nothing is published; the branch is kept until the consumer PR merges.
 
 ## Staged validation
 
@@ -63,6 +78,7 @@ without changing that cache or replacing existing staged candidates.
 
 ```sh
 python3 -B -m unittest discover -s rust/release-deps -p 'test_*.py' -v
+python3 -B -m unittest discover -s rust/release-deps/deno -p 'test_*.py' -v
 ```
 
 The controls cover package aliases and target edges, preserved native links,

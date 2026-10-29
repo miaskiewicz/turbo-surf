@@ -26,6 +26,7 @@ export function crawl(optsJson: string): Promise<string>;
 
 /** Evaluate JS against the page DOM → result as a string (no event loop). */
 export function evaluate(html: string, script: string): string;
+export function evaluateEngine(html: string, script: string): string;
 
 /** Run the page's own JS (promises/timers/fetch/cookies) → hydrated HTML. */
 export function render(html: string, baseUrl: string, script: string): string;
@@ -58,6 +59,8 @@ export function liveOpen(
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
+/** `liveEval` for a driver script that needs the engine namespace (its `__tsNs` parameter). */
+export function liveEvalEngine(id: number, script: string): Promise<string>;
 /** Await an expression’s actual native Promise completion. */
 export function liveEvalExpression(id: number, expression: string): Promise<string>;
 /** Serialize the live session's current DOM to HTML. */

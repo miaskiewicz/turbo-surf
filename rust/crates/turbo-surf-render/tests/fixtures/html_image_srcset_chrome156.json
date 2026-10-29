@@ -1,0 +1,31 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "7936c64f18cba09489bc55958b4dbdecf056f791ce8be8559f0eab6173fefd1a",
+  "casesSha256": "2f4f4dabe578670cbd7346adb5ceb95123596ed7618b0d18bd2b67d7cf673a49",
+  "collectorSha256": "bc161302ef45bbf1b0281d99825c8a45354ffb24df418779d90443d8618f4021",
+  "errors": [],
+  "result": [
+    {
+      "id": "html-image-srcset",
+      "result": {
+        "devicePixelRatio": 2,
+        "innerWidth": 1280,
+        "only1x": ["r", 3, 2, true],
+        "noDescriptor": ["r", 3, 2, true],
+        "densities": ["b", 2, 2, true],
+        "densitiesUnordered": ["b", 2, 2, true],
+        "firstReaching": ["g", 2, 2, true],
+        "belowRatio": ["b", 3, 2, true],
+        "allBelow": ["b", 2, 2, true],
+        "srcIs1x": ["b", 2, 2, true],
+        "srcAnd1x": ["b", 2, 2, true],
+        "widthsSized": ["b", 1, 1, true],
+        "widthsViewport": ["b", 2, 2, true],
+        "widthsMediaSizes": ["b", 2, 2, true],
+        "emptySrcset": ["s", 9, 8, true],
+        "invalidOnly": ["s", 9, 8, true],
+        "trailingComma": ["b", 2, 2, true]
+      }
+    }
+  ]
+}

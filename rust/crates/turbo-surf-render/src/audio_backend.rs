@@ -75,13 +75,8 @@ pub(crate) fn install<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Object>,
 ) -> Result<(), String> {
-    let global = scope.get_current_context().global(scope);
-    let name = v8::String::new(scope, "ts").unwrap();
-    let key = v8::Symbol::for_key(scope, name);
-    let namespace = global
-        .get(scope, key.into())
-        .and_then(|value| value.to_object(scope))
-        .ok_or("native audio namespace missing")?;
+    let namespace =
+        crate::browser_env::engine_namespace(scope).ok_or("native audio namespace missing")?;
     let key = v8::String::new(scope, "makeNativeFunction").unwrap();
     let factory = namespace
         .get(scope, key.into())

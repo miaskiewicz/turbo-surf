@@ -102,10 +102,8 @@ pub fn links(tree: &Tree, base: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for &h in tree.query_selector_all("a[href]").iter() {
-        // The `a[href]` selector guarantees the attribute is present; the else is
-        // a defensive total.
         let Some(href) = tree.get_attribute(h, "href") else {
-            continue;
+            unreachable!("the `a[href]` selector only matches elements with an href");
         };
         if let Some(abs) = resolve(base, href) {
             if is_http_url(&abs) && seen.insert(abs.clone()) {

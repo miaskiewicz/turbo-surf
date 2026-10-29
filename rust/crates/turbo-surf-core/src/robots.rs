@@ -50,9 +50,7 @@ fn pattern_matches(pat: &str, path: &str) -> bool {
             }
         }
     }
-    // Unreachable in practice: with N parts the loop always returns at the
-    // i==last arm (or the single-segment arm); kept as a defensive total.
-    true
+    unreachable!("split('*') yields >= 1 part and the last part's iteration always returns")
 }
 
 fn tail_matches(rest: &str, part: &str, anchored: bool) -> bool {
@@ -89,6 +87,7 @@ fn handle_user_agent(state: &mut ParseState, value: &str) {
         state.current = Some(state.groups.len() - 1);
         state.saw_rule_since_agent = false;
     }
+    // invariant: `current` is set just above whenever it was None.
     let idx = state.current.unwrap();
     state.groups[idx].agents.insert(value.to_ascii_lowercase());
 }
@@ -233,6 +232,7 @@ impl<F: RobotsFetcher> RobotsCache<F> {
                 },
             );
         }
+        // invariant: the entry for `origin` was inserted above when missing or stale.
         &self.cache.get(origin).unwrap().groups
     }
 

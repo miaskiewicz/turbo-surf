@@ -24,6 +24,7 @@ import {
   prepareTypedControl,
   requireEffectiveInput,
 } from "./effective-input.mjs";
+import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
 const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const observationMs = observationMilliseconds(config);
 const observationClock = { monotonic: () => performance.now(), wall: () => Date.now() };
@@ -44,6 +45,7 @@ mkdirSync(out, { recursive: true });
 const profile = mkdtempSync(join(tmpdir(), "turbo-search-oracle-"));
 let context, networkSession, browserVersion, browserV8Version;
 const executable = chromeExecutable(config);
+let headless = false;
 const requests = [],
   actions = [],
   dwell = [],
@@ -85,6 +87,10 @@ const requestRows = new WeakMap();
 const startedAt = new Date().toISOString();
 let sequence = 0;
 async function capture() {
+  // Keyboard-driven authored controls opt into headless (loopback-only, turbo-surf#52).
+  headless = chromeExtensionArgs({ url: config.url, headless: config.headless }).includes(
+    "--headless=new",
+  );
   context = await captureOwnedLaunch(
     childProcess,
     profile,
@@ -94,7 +100,7 @@ async function capture() {
         handleSIGTERM: false,
         handleSIGINT: false,
         handleSIGHUP: false,
-        headless: false,
+        headless,
         viewport: config.viewport || { width: 1280, height: 800 },
         screen: config.screen || { width: 1920, height: 1080 },
         deviceScaleFactor: config.deviceScaleFactor ?? 2,
@@ -541,6 +547,7 @@ function writeTrace() {
         startedAt,
         browserVersion,
         browserV8Version,
+        headless,
         executable: executable || "installed-channel:chrome",
         config,
         pages,

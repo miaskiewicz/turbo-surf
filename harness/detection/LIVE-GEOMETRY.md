@@ -41,7 +41,9 @@ hashes are also predecessor evidence. The current
 follow-up also integrates default/zero iframe corrections and officially
 re-vendored computed-font resolution;
 the implementation and exact tested source are tracked in [PARITY-GAPS.md](./PARITY-GAPS.md).
-It copies the actual native DOM through public rtdom methods and assigns external
+It lays out the actual native DOM in place — turbo-dom-layout's live-DOM input
+(`turbo_dom_layout::live`) walks surf's composed tree under the source budgets and
+styles it from surf's pre-matched rules, with no copy — and assigns external
 source identities. Native CSSOM exports supply current inline, linked, imported
 and adopted rules, media and disabled state. The bridge does not serialize or
 rewrite HTML, add identity attributes, or call page-owned text/style/layout getters.
@@ -103,9 +105,18 @@ uses typed rules and a transitive variable/declaration proof for bounded static
 geometry. Unknown or potentially geometry-changing uses still reject. Retained
 descriptor blocks alone do not implement CSS property registration or transitions.
 
+Table rows and row groups, and pages with an absolutely positioned inline such as the
+common `.sr-only` span, no longer throw (turbo-surf#31, fixed in turbo-dom-layout:
+row/row-group boxes with used-box metrics, blockified positioned inlines, per-element
+inline failures); `rust/crates/turbo-surf-render/tests/live_geometry_throws.rs` holds
+every read to its Chrome 156 control with no known gaps. A loaded `<img>` lays out at its
+natural size (turbo-surf#39), which `img.width`/`height`/`x`/`y` read (turbo-dom#26).
+
 The reusable `*-chrome-control.mjs` runners serve independent authored localhost
 fixtures. The older controls retain their original Chrome155.0.8059.79 metadata;
-new shadow/scoped controls record Chrome155.0.8059.80. Both use V815.5.35.23.
+new shadow/scoped controls record Chrome155.0.8059.80. Both use V815.5.35.23. The
+three same-font controls (font runs, Range transforms, leading spaces) were
+recaptured on Chrome for Testing 156.0.8078.4 (V8 15.6.75) with identical values.
 Source/collector hashes pin the executed inputs; font-specific controls also
 record their measured font hashes. The earlier focused genuine-native155 cohort
 passes all75 tests, zero failures/skips: abstract Range3, custom elements10, GC4,
@@ -216,8 +227,10 @@ Remaining bounds:
 - Full fixed-position/containing-block and layout-unit arithmetic behavior. Returned
   rectangles are not quantized after layout to conceal differences.
 - Remaining stylesheet at-rules and full selector/CSS parsing behavior. Property
-  conditions use genuine private grammar; public CSS.supports now uses private native grammar and selector-capability checks.
+  conditions use genuine private grammar; public CSS.supports now uses private native grammar, and `selector()`
+  conditions use turbo-dom's selector engine (`parse_for_supports`, one unforgiving complex selector, as Chrome 156).
 
 Regression source is `rust/crates/turbo-surf-render/tests/live_geometry_contracts.rs`;
-the `live_layout*` modules also test actual source provenance, rules, media,
-transform metrics, overflow and inverse hit regions without V8.
+the `live_layout*` modules (and turbo-dom-layout's `live` / `cssom_view` modules, which
+hold the pure geometry since the consolidation) also test actual source provenance,
+rules, media, transform metrics, overflow and inverse hit regions without V8.

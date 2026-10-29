@@ -1,5 +1,5 @@
 //! Render runtime (tier 3). Page JS runs on a `deno_core` V8 isolate. The DOM is
-//! a real rtdom↔V8 binding ([`crate::browser_env`], vendored from turbo-test) so
+//! a real rtdom↔V8 binding ([`crate::browser_env`], the turbo-dom-browser-env crate) so
 //! jQuery / React / hand-rolled bundles see a genuine `document`/Element. deno_core
 //! supplies the rest: the async event loop, `fetch`/cookies over the tier-1 net
 //! stack (`#[op2]` ops below), virtual timers, and the runaway-execution budget.
@@ -16,6 +16,24 @@
 #[cfg(turbo_surf_native_proxy)]
 #[path = "window_proxy.rs"]
 mod window_proxy;
+
+#[cfg(turbo_surf_native_proxy)]
+#[path = "code_generation.rs"]
+mod code_generation;
+
+#[cfg(turbo_surf_native_proxy)]
+#[path = "frame_modules.rs"]
+mod frame_modules;
+
+// The stock SDK has no native WindowProxy, per-frame module loader or code-generation
+// callback: same-named stand-ins keep every call site unconditional.
+#[cfg(not(turbo_surf_native_proxy))]
+#[path = "stock_engine.rs"]
+mod stock_engine;
+#[cfg(not(turbo_surf_native_proxy))]
+use stock_engine::{code_generation, frame_modules, window_proxy};
+
+use frame_modules::op_frame_module;
 
 #[path = "microtask_queue.rs"]
 mod microtask_queue;
@@ -49,7 +67,7 @@ use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
 #[path = "fetch_streams.rs"]
 pub(crate) mod fetch_streams;
-use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
+use turbo_surf_core::net::{fetch_html, fetch_typed_bytes, FetchOptions, FetchedBytes};
 use turbo_surf_core::request_context::{
     ClientHints, Credentials, Destination, RequestContext, RequestMode,
 };
@@ -143,62 +161,6 @@ impl Drop for OwnedRuntime {
         crate::browser_env::reset_isolate(self.0.v8_isolate());
         crate::browser_env::clear_interface_records(self.0.v8_isolate());
         crate::message_ports::clear(&mut self.0);
-    }
-}
-
-#[cfg(turbo_surf_native_proxy)]
-fn register_frame_modules(scope: &mut v8::PinScope, base: &str) -> Result<(), JsErrorBox> {
-    let context = scope.get_current_context();
-    if context
-        .get_slot::<FrameSandbox>()
-        .is_some_and(|policy| policy.scripts_blocked)
-    {
-        return Ok(());
-    }
-    let state = JsRuntime::op_state_from(scope);
-    let state = state.borrow();
-    let opaque_origin = window_is_opaque(scope, context);
-    let credentials = ModuleCredentials::default();
-    context.set_slot(Rc::new(credentials.clone()));
-    let cookie_site_is_opaque = frame_cookie_site_is_opaque(scope, context);
-    let loader = NetModuleLoader {
-        base: base.to_string(),
-        source: context
-            .get_slot::<FrameDocumentUrl>()
-            .map_or_else(|| state.borrow::<Base>().0.clone(), |url| url.0.clone()),
-        top_level_source: state.borrow::<Base>().0.clone(),
-        origins: Rc::new(ModuleOrigins::new(opaque_origin, cookie_site_is_opaque)),
-        jar: context
-            .get_slot::<CspHandle>()
-            .and_then(|handle| handle.partition.clone())
-            .map_or_else(
-                || state.borrow::<Jar>().clone(),
-                |partition| partition.jar.clone(),
-            ),
-        ua: state.borrow::<Ua>().0.clone(),
-        client_hints: state.borrow::<ClientHints>().clone(),
-        http_cache: state.borrow::<BrowserStorage>().http_cache(),
-        storage_effects: state.borrow::<BrowserStorage>().partition_response_effects(
-            context
-                .get_slot::<CspHandle>()
-                .and_then(|handle| handle.partition.clone())
-                .map_or(0, |partition| partition.id),
-        ),
-        inline_sources: state.borrow::<InlineModules>().clone(),
-        credentials,
-        csp: (*context
-            .get_slot::<CspHandle>()
-            .ok_or_else(|| JsErrorBox::generic("Frame CSP context unavailable"))?)
-        .clone(),
-        module_stages: state.borrow::<ModuleStages>().clone(),
-    };
-    drop(state);
-    if JsRuntime::register_module_context(scope, Rc::new(loader)) {
-        Ok(())
-    } else {
-        Err(JsErrorBox::generic(
-            "Native frame module context unavailable",
-        ))
     }
 }
 
@@ -1187,29 +1149,6 @@ fn csp_request_for_context<'s>(
     allowed
 }
 
-#[op2(fast)]
-fn op_csp_inline(
-    scope: &mut v8::PinScope,
-    document: v8::Local<v8::Object>,
-    element: v8::Local<v8::Object>,
-    #[string] kind: &str,
-    #[string] text: &str,
-) -> bool {
-    let Some(context) = document.get_creation_context(scope) else {
-        return false;
-    };
-    let Some(handle) = context.get_slot::<CspHandle>() else {
-        return true;
-    };
-    let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
-    let allowed = handle
-        .policy
-        .borrow()
-        .active
-        .allows_inline(kind, text, &nonce);
-    allowed
-}
-
 fn authorize_css(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -1332,149 +1271,6 @@ fn configure_csp_code_generation(
     context.set_allow_generation_from_strings(allowed);
 }
 
-#[cfg(turbo_surf_native_proxy)]
-fn csp_eval_sample_units(scope: &v8::PinScope, source: v8::Local<v8::String>) -> Vec<u16> {
-    // Chrome's code-generation path supplies a 40-unit prefix to the report
-    // builder, which then strips ASCII whitespace. Inline reports trim first.
-    let mut units = vec![0; source.length().min(40)];
-    source.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
-    let whitespace = |unit: &u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
-    let start = units
-        .iter()
-        .position(|unit| !whitespace(unit))
-        .unwrap_or(units.len());
-    let end = units
-        .iter()
-        .rposition(|unit| !whitespace(unit))
-        .map_or(start, |index| index + 1);
-    units[start..end].to_vec()
-}
-
-#[cfg(turbo_surf_native_proxy)]
-fn deny_code_generation<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    mut result: v8::ReturnValue,
-    message: &str,
-) {
-    let message = v8::String::new(scope, message).unwrap();
-    let detail = v8::Array::new(scope, 1);
-    detail.set_index(scope, 0, message.into());
-    result.set(detail.into());
-}
-#[cfg(turbo_surf_native_proxy)]
-fn authorize_code_generation<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut result: v8::ReturnValue,
-) {
-    let context = scope.get_current_context();
-    let typed = crate::browser_env::trusted_script_source(scope, args.get(0));
-    let original = match typed.or_else(|| v8::Local::<v8::String>::try_from(args.get(0)).ok()) {
-        Some(source) => source,
-        None => {
-            result.set_bool(true);
-            return;
-        }
-    };
-    if context.get_slot::<FrameRetired>().is_some() {
-        result.set_bool(false);
-        return;
-    }
-    let Some(handle) = context.get_slot::<CspHandle>() else {
-        result.set_bool(context.is_code_generation_from_strings_allowed());
-        return;
-    };
-    let policy = handle.policy.borrow().current().clone();
-    let report_only = handle.policy.borrow().report_only.clone();
-    if policy.bypasses_trusted_types_eval() {
-        result.set_bool(true);
-        return;
-    }
-    let key = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
-    let key = v8::Private::for_api(scope, Some(key));
-    let Some(document) = context
-        .global(scope)
-        .get_private(scope, key)
-        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-    else {
-        result.set_bool(false);
-        return;
-    };
-    // Chromium labels generated constructor source using these engine prefixes.
-    // Source admission itself always stays in the real V8 compilation callback.
-    let text = original.to_rust_string_lossy(scope);
-    let sink = if [
-        "(function anonymous",
-        "(async function anonymous",
-        "(function* anonymous",
-        "(async function* anonymous",
-    ]
-    .iter()
-    .any(|prefix| text.starts_with(prefix))
-    {
-        "Function"
-    } else {
-        "eval"
-    };
-    v8::tc_scope!(let scope,scope);
-    let source = crate::browser_env::trusted_type_string(
-        scope,
-        document,
-        args.get(0),
-        "TrustedScript",
-        sink,
-        "",
-    );
-    let message=policy.eval_error_message().unwrap_or_else(||"Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements.".into());
-    let Some(source) = source else {
-        scope.reset();
-        deny_code_generation(scope, result, &message);
-        return;
-    };
-    if crate::browser_env::string_code_units(scope, source)
-        != crate::browser_env::string_code_units(scope, original)
-    {
-        deny_code_generation(scope, result, &message);
-        return;
-    }
-    let sample = csp_eval_sample_units(scope, source);
-    for (disposition, records) in [
-        ("enforce", policy.eval_violations()),
-        ("report", report_only.eval_violations()),
-    ] {
-        queue_csp_report(
-            scope,
-            context,
-            document,
-            CspViolationReport {
-                kind: "script-src",
-                blocked: "eval",
-                disposition,
-                records,
-                parser: None,
-                sample: Some(&sample),
-            },
-        );
-    }
-    if policy.allows_eval() {
-        result.set(source.into());
-    } else {
-        deny_code_generation(scope, result, &message);
-    }
-}
-#[cfg(turbo_surf_native_proxy)]
-fn install_code_generation_authorization(scope: &mut v8::PinScope) -> Result<(), String> {
-    let context = scope.get_current_context();
-    let callback = v8::Function::new(scope, authorize_code_generation)
-        .ok_or("Native code-generation authorization unavailable")?;
-    if context.set_code_generation_callback(callback) {
-        context.set_allow_generation_from_strings(false);
-        Ok(())
-    } else {
-        Err("Native code-generation authorization unavailable".into())
-    }
-}
-
 fn authorize_trusted_types(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -1505,6 +1301,7 @@ fn authorize_trusted_types(
     let (kind, blocked, sample, name) = if action == "policy" {
         let value = args.get(1).to_rust_string_lossy(scope);
         let duplicate = args.get(2).is_true();
+        // invariant: the private turbo-dom factory passes the already-converted DOMString name.
         let value_string = v8::Local::<v8::String>::try_from(args.get(1)).unwrap();
         let sample = crate::browser_env::string_code_units(scope, value_string)
             .into_iter()
@@ -1518,6 +1315,7 @@ fn authorize_trusted_types(
         )
     } else {
         let sink = args.get(2).to_rust_string_lossy(scope);
+        // invariant: the private turbo-dom sink check passes the already-converted string.
         let text = v8::Local::<v8::String>::try_from(args.get(3)).unwrap();
         let mut content = crate::browser_env::string_code_units(scope, text);
         if sink == "Function" {
@@ -1584,6 +1382,22 @@ fn op_trusted_type_string<'s>(
         .map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 
+/// Chrome's code-generation path hands a 40-unit prefix of the source to the CSP
+/// report builder, which then strips ASCII whitespace from both ends.
+fn csp_eval_sample(units: &[u16]) -> &[u16] {
+    let prefix = &units[..units.len().min(40)];
+    let whitespace = |unit: &u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
+    let start = prefix
+        .iter()
+        .position(|unit| !whitespace(unit))
+        .unwrap_or(prefix.len());
+    let end = prefix
+        .iter()
+        .rposition(|unit| !whitespace(unit))
+        .map_or(start, |index| index + 1);
+    &prefix[start..end]
+}
+
 #[op2(fast, reentrant)]
 fn op_timer_code_allowed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -1600,7 +1414,7 @@ fn op_timer_code_allowed<'s>(
     let policy = handle.policy.borrow().current().clone();
     let report_only = handle.policy.borrow().report_only.clone();
     let units = crate::browser_env::string_code_units(scope, source);
-    let sample = &units[..units.len().min(40)];
+    let sample = csp_eval_sample(&units);
     for (disposition, records) in [
         ("enforce", policy.eval_violations()),
         ("report", report_only.eval_violations()),
@@ -2262,7 +2076,7 @@ fn op_browser_device_memory(major: u32) -> u32 {
 }
 
 // Process-global text-measurement hook. The render crate has no font/layout stack, so the host
-// (napi/mcp, which own turbo-surf-raster) injects a real advance-width measurer. ENV_BOOTSTRAP's
+// (napi/mcp, which own turbo-dom-raster) injects a real advance-width measurer. ENV_BOOTSTRAP's
 // offsetWidth/offsetHeight read it so a font-detection probe sees per-family metric differences a
 // no-layout DOM otherwise can't produce. Same host-injection pattern as `set_fingerprint`.
 type MeasureFn = Box<dyn Fn(&str, &str, f64) -> (f64, f64) + Send + Sync>;
@@ -2318,14 +2132,14 @@ fn op_now_epoch() -> Result<f64, JsErrorBox> {
 // Host canvas rasterizer: replay a 2D draw list into real PNG bytes. Same injection
 // pattern as `set_measure_fn` — the crate that owns the raster/paint engine installs it,
 // so the render crate keeps no tiny-skia/font dep (matters for the PyO3 wheel build). Until
-// set, `toDataURL` keeps the vendored synthetic behavior.
+// set, `toDataURL` keeps the binding's synthetic behavior.
 type RasterFn = Box<dyn Fn(u32, u32, &str) -> Option<Vec<u8>> + Send + Sync>;
 static RASTER_PNG: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
 
 /// Install the host's canvas rasterizer: `(width, height, ops_json) -> PNG bytes`.
-/// `ops_json` is the recorded 2D display list (the vendored `ctx._ops`). Injected once at
+/// `ops_json` is the recorded 2D display list (the binding's `ctx._ops`). Injected once at
 /// startup by the crate that owns the raster engine (raster). Until set, `toDataURL` returns
-/// the vendored synthetic blob.
+/// the binding's synthetic blob.
 pub fn set_raster_fn(f: RasterFn) {
     if let Ok(mut g) = RASTER_PNG.write() {
         *g = Some(f);
@@ -2333,7 +2147,7 @@ pub fn set_raster_fn(f: RasterFn) {
 }
 
 // Rasterize a canvas draw list to a base64 PNG (no `data:` prefix), or "" when no host
-// rasterizer is installed (the JS override then falls back to the vendored blob). Never
+// rasterizer is installed (the JS override then falls back to the binding's blob). Never
 // throws across the boundary.
 #[op2]
 #[string]
@@ -2351,12 +2165,12 @@ fn op_raster_png(width: u32, height: u32, #[string] ops_json: &str) -> String {
 
 // Same rasterizer, RAW straight-alpha RGBA output (not PNG) — for getImageData, which returns
 // pixels with no encoder in the loop. So `fillRect(red); getImageData(...)` reads back the actual
-// rendered red (the vendored synthetic getImageData returned unrelated bytes — a broken-canvas
+// rendered red (the binding's synthetic getImageData returned unrelated bytes — a broken-canvas
 // tell). Raw pixels also mean solids/shapes match a real browser exactly (no PNG-encoder variance).
 static RASTER_RGBA: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
 
 /// Install the host's raw-RGBA canvas rasterizer: `(width, height, ops_json) -> RGBA8 bytes`
-/// (straight alpha, top-left origin, tightly packed). Until set, getImageData keeps the vendored
+/// (straight alpha, top-left origin, tightly packed). Until set, getImageData keeps the binding's
 /// behavior.
 pub fn set_raster_rgba_fn(f: RasterFn) {
     if let Ok(mut g) = RASTER_RGBA.write() {
@@ -2433,7 +2247,7 @@ fn op_webgl_readback(width: u32, height: u32, #[string] calls_json: &str) -> Str
 
 // Whether a host WebGL executor is installed. The op itself is always registered, so the JS
 // recorder can't infer presence from `typeof op`; it checks this so it only overrides the WebGL
-// context when a GPU backend exists (else the vendored synthetic context is left untouched).
+// context when a GPU backend exists (else the binding's synthetic context is left untouched).
 #[op2(fast)]
 fn op_webgl_available() -> bool {
     WEBGL_EXEC.read().map(|g| g.is_some()).unwrap_or(false)
@@ -2867,25 +2681,8 @@ async fn op_fetch(
             || !turbo_surf_core::request_context::same_origin(source, &target))
     {
         return FetchOut {
-            status_text: String::new(),
-            stream_id: 0,
-            aborted: false,
-            nosniff: false,
-            integrity_blocked: false,
-            script_errors_muted: false,
-            response_received: false,
-            policy_blocked: false,
-            cross_origin: false,
-            body_bytes: Vec::new(),
-            headers: Vec::new(),
-            redirected: false,
-            status: 0,
-            ok: false,
-            body: String::new(),
-            content_type: String::new(),
-            frame_document: 0,
-            frame_script: 0,
-            final_url: target.clone(),
+            final_url: target,
+            ..Default::default()
         };
     }
     let streaming_upload = init.get("upload").and_then(|value| value.as_bool()) == Some(true);
@@ -3395,37 +3192,83 @@ async fn op_load_image(
         jar: Some(&mut local),
         ..Default::default()
     };
-    let response = if let Some(data) = target.strip_prefix("data:") {
-        use base64::Engine;
-        data.split_once(",")
-            .filter(|(kind, _)| kind.ends_with(";base64"))
-            .and_then(|(_, data)| base64::engine::general_purpose::STANDARD.decode(data).ok())
-            .map(|bytes| (target.clone(), bytes, 200))
+    // data: URLs go through the Fetch data: URL processor (base64, percent-encoded and
+    // raw payloads) and keep their MIME type, like a network response's Content-Type.
+    let response = if target
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
+    {
+        turbo_dom_layout::image::decode_data_url(&target).map(|data| FetchedBytes {
+            final_url: target.clone(),
+            bytes: data.bytes,
+            status: 200,
+            content_type: data.mime,
+        })
     } else {
-        fetch_bytes(&target, opts).await.ok()
+        fetch_typed_bytes(&target, opts).await.ok()
     };
     jar.borrow_mut().merge_request_changes(local);
-    let Some((url, bytes, status)) = response else {
+    let Some(response) = response else {
         return ImageOut::default();
     };
-    let image = (200..300)
-        .contains(&status)
-        .then(|| image::load_from_memory(&bytes).ok())
-        .flatten();
-    match image {
-        Some(image) => ImageOut {
+    match natural_image_size(&response.bytes, &response.content_type) {
+        Some((width, height)) => ImageOut {
+            url: response.final_url,
+            status: response.status,
+            width,
+            height,
+            ok: true,
+        },
+        None => ImageOut {
+            url: response.final_url,
+            status: response.status,
+            ..Default::default()
+        },
+    }
+}
+
+/// A `data:` image source decoded synchronously (turbo-surf#38): Chrome loads a data:
+/// image the moment its source is set, so its state is final before any script reads it.
+#[op2]
+#[serde]
+fn op_decode_data_image(#[string] url: String) -> ImageOut {
+    let size = turbo_dom_layout::image::decode_data_url(&url)
+        .and_then(|data| natural_image_size(&data.bytes, &data.mime));
+    match size {
+        Some((width, height)) => ImageOut {
             url,
-            status,
-            width: image.width(),
-            height: image.height(),
+            status: 200,
+            width,
+            height,
             ok: true,
         },
         None => ImageOut {
             url,
-            status,
             ..Default::default()
         },
     }
+}
+
+/// Whether an `<img>` response decodes, and its `naturalWidth`/`naturalHeight`, as Chrome
+/// 156 decides them (turbo-surf#30, `tests/fixtures/image_formats_chrome156.json`): the
+/// shared turbo-dom-layout probe sizes every raster format Chrome shows (PNG, JPEG, GIF,
+/// WebP, BMP, ICO/CUR, AVIF; EXIF orientation applied) from its bytes whatever the
+/// declared type or HTTP status, while SVG is decoded only when served as
+/// `image/svg+xml` and an `image/svg+xml` response is never sniffed as a raster.
+fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32)> {
+    use turbo_dom_layout::{image, svg};
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    let natural = if essence.eq_ignore_ascii_case("image/svg+xml") {
+        svg::is_svg(bytes)
+            .then(|| image::probe_natural(bytes))
+            .flatten()
+    } else {
+        // The raster sniff alone: probe_natural would try SVG markup first.
+        image::sniff(bytes)
+            .and_then(|_| image::probe(bytes))
+            .map(|intrinsic| intrinsic.displayed(true))
+    }?;
+    Some((natural.width, natural.height))
 }
 
 // Each frame owns its native tree and JS browser APIs in its own V8 context.
@@ -3436,6 +3279,9 @@ struct FrameDocumentUrl(String);
 struct FrameDocumentLocation(String);
 struct FrameDocumentSourceUrl(String);
 struct FrameDepth(u32);
+/// The frame nesting depth the realm's bootstrap reads (turbo-surf#83: a private
+/// slot, not a page-writable `__depth` global).
+struct BootstrapDepth(u32);
 struct FrameParent(v8::Weak<v8::Context>);
 struct FrameHost(v8::Weak<v8::Object>);
 #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
@@ -3664,6 +3510,8 @@ pub struct PageSessionOptions {
 #[derive(Default)]
 struct WindowTimerNesting {
     level: std::cell::Cell<u32>,
+    /// Whether a timer task (with its microtask checkpoint) is running in this realm.
+    task: std::cell::Cell<bool>,
 }
 
 fn window_timer_nesting(context: v8::Local<v8::Context>) -> Rc<WindowTimerNesting> {
@@ -3682,6 +3530,13 @@ fn op_timer_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -
 }
 
 #[op2(fast)]
+fn op_timer_task_active(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(|context| window_timer_nesting(context).task.get())
+}
+
+#[op2(fast)]
 fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>, level: u32) {
     if let Some(context) = document.get_creation_context(scope) {
         window_timer_nesting(context).level.set(level);
@@ -3694,17 +3549,24 @@ fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object
 struct WindowTimerTask {
     nesting: Rc<WindowTimerNesting>,
     previous: u32,
+    previous_task: bool,
 }
 impl WindowTimerTask {
     fn new(context: v8::Local<v8::Context>) -> Self {
         let nesting = window_timer_nesting(context);
         let previous = nesting.level.get();
-        Self { nesting, previous }
+        let previous_task = nesting.task.replace(true);
+        Self {
+            nesting,
+            previous,
+            previous_task,
+        }
     }
 }
 impl Drop for WindowTimerTask {
     fn drop(&mut self) {
         self.nesting.level.set(self.previous);
+        self.nesting.task.set(self.previous_task);
     }
 }
 
@@ -3720,6 +3582,19 @@ struct TimerClock {
     started: std::time::Instant,
     advance: std::cell::Cell<f64>,
     resource_cursor: std::cell::Cell<usize>,
+    /// One task order across the agent's Window realms: timers and posted
+    /// messages with the same deadline run in the order they were queued.
+    sequence: std::cell::Cell<f64>,
+}
+impl TimerClock {
+    fn now(&self) -> f64 {
+        self.started.elapsed().as_secs_f64() * 1000.0 + self.advance.get()
+    }
+    fn next_sequence(&self) -> f64 {
+        let next = self.sequence.get() + 1.0;
+        self.sequence.set(next);
+        next
+    }
 }
 impl Default for TimerClock {
     fn default() -> Self {
@@ -3728,6 +3603,7 @@ impl Default for TimerClock {
             started: std::time::Instant::now(),
             advance: std::cell::Cell::new(0.0),
             resource_cursor: std::cell::Cell::new(0),
+            sequence: std::cell::Cell::new(0.0),
         }
     }
 }
@@ -3737,8 +3613,11 @@ fn op_window_timers_realtime(state: &mut OpState) -> bool {
 }
 #[op2(fast)]
 fn op_timer_clock(state: &mut OpState) -> f64 {
-    let clock = state.borrow::<TimerClock>();
-    clock.started.elapsed().as_secs_f64() * 1000.0 + clock.advance.get()
+    state.borrow::<TimerClock>().now()
+}
+#[op2(fast)]
+fn op_task_sequence(state: &mut OpState) -> f64 {
+    state.borrow::<TimerClock>().next_sequence()
 }
 #[op2(fast)]
 fn op_timer_offset(state: &mut OpState) -> f64 {
@@ -3755,6 +3634,22 @@ fn op_timer_advance(state: &mut OpState, due: f64) {
                 .max(due - clock.started.elapsed().as_secs_f64() * 1000.0),
         );
     }
+}
+
+/// A realm's `[due, sequence]` next-timer pair. A finite deadline is required; a
+/// missing or non-finite sequence orders first rather than stalling the timer.
+fn timer_order_key(scope: &mut v8::PinScope, value: v8::Local<v8::Value>) -> Option<(f64, f64)> {
+    let pair = v8::Local::<v8::Array>::try_from(value).ok()?;
+    let due = pair.get_index(scope, 0)?;
+    let due = due.is_number().then(|| due.number_value(scope)).flatten()?;
+    let sequence = pair.get_index(scope, 1)?;
+    let sequence = sequence
+        .is_number()
+        .then(|| sequence.number_value(scope))
+        .flatten()
+        .filter(|sequence| sequence.is_finite())
+        .unwrap_or(0.0);
+    due.is_finite().then_some((due, sequence))
 }
 
 fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::Instant> {
@@ -3780,25 +3675,24 @@ fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimer
             .cloned(),
     );
     deno_core::scope!(scope, rt);
-    let mut next: Option<(f64, v8::Local<v8::Context>)> = None;
+    // Earliest deadline first; equal deadlines in agent-wide queueing order.
+    let mut next: Option<((f64, f64), v8::Local<v8::Context>)> = None;
     for context in contexts {
         let context = v8::Local::new(scope, context);
         if context.get_slot::<FrameRetired>().is_some() {
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
-        if let Some(value) = call_frame_helper(active, "timerNextDue", &[]) {
-            if value.is_number() {
-                if let Some(due) = value.number_value(active) {
-                    if due.is_finite() && next.as_ref().is_none_or(|(previous, _)| due < *previous)
-                    {
-                        next = Some((due, context));
-                    }
-                }
-            }
+        let Some(key) = call_frame_helper(active, "timerNextDue", &[])
+            .and_then(|value| timer_order_key(active, value))
+        else {
+            continue;
+        };
+        if next.as_ref().is_none_or(|(previous, _)| key < *previous) {
+            next = Some((key, context));
         }
     }
-    let Some((due, context)) = next else {
+    let Some(((due, _), context)) = next else {
         return WindowTimerTurn::default();
     };
     if !allow_advance {
@@ -4247,6 +4141,10 @@ struct WindowMessage {
     data: crate::crypto_clone::CloneSnapshot,
     /// The sender's UserActivation snapshot bits, or -1 when not included.
     activation: i32,
+    /// The posting time and agent-wide task order: delivery keeps posting order
+    /// with timers and messages of other realms.
+    due: f64,
+    sequence: f64,
 }
 enum MessageTargetOrigin {
     Any,
@@ -4306,10 +4204,23 @@ fn frame_namespace<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s,
     if let Some(environment) = context.get_slot::<FrameEnvironment>() {
         return Some(crate::context_ownership::local(scope, &environment.0));
     }
-    let global = context.global(scope);
-    let name = v8::String::new(scope, "ts").unwrap();
-    let key = v8::Symbol::for_key(scope, name);
-    global.get(scope, key.into())?.to_object(scope)
+    crate::browser_env::engine_namespace(scope)
+}
+/// A function the realm's own bootstrap registered through `op_set_host_capabilities`
+/// (never a page-reachable namespace lookup).
+#[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
+fn host_capability<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<v8::Context>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Function>> {
+    let function = context
+        .get_slot::<HostCapabilities>()?
+        .0
+        .borrow()
+        .get(name)
+        .cloned()?;
+    Some(crate::context_ownership::local(scope, function))
 }
 fn call_frame_helper<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -4706,7 +4617,7 @@ fn queue_window_message<'s>(
     let data = {
         let scope = &mut v8::ContextScope::new(scope, source);
         v8::tc_scope!(let scope, scope);
-        let result = crate::crypto_clone::prepare_transfer(scope, message, transfer, None);
+        let result = crate::crypto_clone::prepare_transfer(scope, message, transfer, None, true);
         if scope.has_caught() || scope.has_terminated() {
             scope.rethrow();
             return Ok(());
@@ -4721,6 +4632,12 @@ fn queue_window_message<'s>(
             admit_window_snapshot(scope, prepared.size_bytes())?;
         }
         prepared.commit(scope)?
+    };
+    let (due, sequence) = {
+        let state = JsRuntime::op_state_from(scope);
+        let state = state.borrow();
+        let clock = state.borrow::<TimerClock>();
+        (clock.now(), clock.next_sequence())
     };
     // Structured serialization/transfer precedes the inactive-target check.
     // A payload getter can retire the destination while serialization runs.
@@ -4746,7 +4663,9 @@ fn queue_window_message<'s>(
         let source_window = source.global(scope);
         let failed = v8::Boolean::new(scope, failed);
         let activation = v8::Integer::new(scope, activation);
-        // Queue the JS timer immediately for synchronous run_with_dom callers;
+        let due = v8::Number::new(scope, due);
+        let sequence = v8::Number::new(scope, sequence);
+        // Queue the JS task immediately for synchronous run_with_dom callers;
         // listener delivery remains asynchronous and sees an actual clone.
         call_frame_helper(
             scope,
@@ -4758,6 +4677,8 @@ fn queue_window_message<'s>(
                 port_array.into(),
                 failed.into(),
                 activation.into(),
+                due.into(),
+                sequence.into(),
             ],
         )
         .ok_or_else(|| JsErrorBox::generic("message dispatch unavailable"))?;
@@ -4770,6 +4691,8 @@ fn queue_window_message<'s>(
         target_origin: expected,
         data,
         activation,
+        due,
+        sequence,
     };
     JsRuntime::op_state_from(scope)
         .borrow_mut()
@@ -4951,12 +4874,9 @@ fn op_frame_set_document<'s>(
         if sandbox.opaque {
             metadata["origin"] = serde_json::Value::String("null".into());
         }
-        #[cfg(turbo_surf_native_proxy)]
         if replaced.is_some() {
             window_proxy::synchronize_origins(scope, context);
         }
-        #[cfg(not(turbo_surf_native_proxy))]
-        let _ = replaced;
         metadata["depth"] =
             serde_json::Value::from(context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0));
         if metadata
@@ -5123,8 +5043,7 @@ fn op_frame_set_document<'s>(
             .clone()
             .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
         let scope = &mut v8::ContextScope::new(scope, context);
-        #[cfg(turbo_surf_native_proxy)]
-        register_frame_modules(scope, &document_base)?;
+        frame_modules::register_frame_modules(scope, &document_base)?;
         let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
             let policy = handle.policy.borrow();
             policy.initial_base.has_policy() || policy.report_only.has_policy()
@@ -5150,7 +5069,6 @@ fn op_frame_set_document<'s>(
             None => DocumentFacts::inherited(scope, context, parent),
         };
         install_document_facts(scope, facts);
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_document(scope);
         let global = context.global(scope);
         let core = v8::Local::new(scope, core);
@@ -5175,12 +5093,8 @@ fn op_frame_set_document<'s>(
                 location.set(scope, key.into(), value.into());
             }
         }
-        let depth_key = v8::String::new(scope, "__depth").unwrap();
-        let depth = v8::Integer::new_from_unsigned(
-            scope,
-            context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0),
-        );
-        global.set(scope, depth_key.into(), depth.into());
+        let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
+        context.set_slot(Rc::new(BootstrapDepth(depth)));
         if let Some(namespace) = frame_namespace(scope) {
             let name = v8::String::new(scope, "isFrame").unwrap();
             let flag = v8::Boolean::new(scope, true);
@@ -5206,7 +5120,6 @@ fn op_frame_set_document<'s>(
             parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
             return Err(JsErrorBox::generic("injected frame initialization failure"));
         }
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::capture_exception(scope);
         if let Some(namespace) = frame_namespace(scope) {
             context.set_slot(Rc::new(FrameEnvironment(
@@ -5229,10 +5142,7 @@ fn op_frame_set_document<'s>(
             &[metadata, parent_window.into(), host.into()],
         )
         .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_location(scope, &metadata_location);
-        #[cfg(not(turbo_surf_native_proxy))]
-        let _ = metadata_location;
         crate::browser_env::finish_key_order(scope);
         run_frame_init_script(scope)?;
         Ok(global)
@@ -5371,6 +5281,15 @@ fn op_window_child_frames<'s>(
     v8::Array::new_with_elements(scope, &values)
 }
 
+/// The bootstrap nesting depth of `window`'s realm: 0 for a top-level page.
+#[op2(fast)]
+fn op_window_bootstrap_depth(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> u32 {
+    window
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<BootstrapDepth>().map(|depth| depth.0))
+        .unwrap_or(0)
+}
+
 #[op2(fast)]
 fn op_window_opaque(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> bool {
     window
@@ -5393,6 +5312,35 @@ fn op_document_scripts_allowed(scope: &mut v8::PinScope, document: v8::Local<v8:
                 .get_slot::<FrameSandbox>()
                 .is_some_and(|flags| flags.scripts_blocked)
     })
+}
+
+/// HTML "allowed by sandboxing to navigate" for a top-level target: a sandboxed
+/// browsing context without `allow-top-navigation` may not navigate the top-level
+/// document from script (turbo-surf#84). Shared by the page's own Location setters
+/// (window_location.js) and the native cross-origin Location.
+pub(crate) fn sandbox_blocks_top_navigation(
+    source: v8::Local<v8::Context>,
+    target: v8::Local<v8::Context>,
+) -> bool {
+    source != target
+        && target.get_slot::<FrameParent>().is_none()
+        && source
+            .get_slot::<FrameSandbox>()
+            .is_some_and(|flags| flags.top_navigation_without_activation_blocked)
+}
+
+/// Whether the calling (entered) realm may not navigate `window`'s Location. The
+/// target realm comes from the window: an op's own current context is the realm that
+/// owns the op functions, not the frame realm calling it.
+#[op2(fast)]
+fn op_location_navigation_sandboxed(
+    scope: &mut v8::PinScope,
+    window: v8::Local<v8::Object>,
+) -> bool {
+    let source = scope.get_entered_or_microtask_context();
+    window
+        .get_creation_context(scope)
+        .is_some_and(|target| sandbox_blocks_top_navigation(source, target))
 }
 
 #[op2(fast)]
@@ -5542,7 +5490,7 @@ fn retire_frame_tree_impl<'s>(
                 fetch_streams::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
                 storage_events::retire(context);
-                crate::browser_env::retire_native_document(scope, context);
+                turbo_dom_browser_env::host_internals::retire_context(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 #[cfg(turbo_surf_native_proxy)]
@@ -5613,13 +5561,7 @@ fn allocate_frame<'s>(
         .clone()
         .ok_or_else(|| JsErrorBox::generic("frame host core unavailable"))?;
     let core = v8::Local::new(scope, saved_core);
-    #[cfg(turbo_surf_native_proxy)]
     let context = window_proxy::context(scope, previous);
-    #[cfg(not(turbo_surf_native_proxy))]
-    let context = {
-        let _ = previous;
-        v8::Context::new(scope, Default::default())
-    };
     crate::script_inventory::register_frame(scope, context);
     context.set_slot(Rc::new(FrameContextMarker));
     context.set_slot(Rc::new(FrameDepth(depth)));
@@ -5677,20 +5619,14 @@ fn allocate_frame<'s>(
         install_css_authorization(scope)?;
         let facts = DocumentFacts::inherited(scope, context, parent);
         install_document_facts(scope, facts);
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_document(scope);
 
-        let name = v8::String::new(scope, "ts").unwrap();
-        let namespace_key = v8::Symbol::for_key(scope, name);
-        let namespace = global
-            .get(scope, namespace_key.into())
-            .and_then(|v| v.to_object(scope))
-            .ok_or_else(|| {
-                storage_events::retire(context);
-                context.set_slot(Rc::new(FrameRetired));
-                crate::context_ownership::release_parent(scope, context);
-                JsErrorBox::generic("frame initialization was interrupted")
-            })?;
+        let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
+            storage_events::retire(context);
+            context.set_slot(Rc::new(FrameRetired));
+            crate::context_ownership::release_parent(scope, context);
+            JsErrorBox::generic("frame initialization was interrupted")
+        })?;
         let name = v8::String::new(scope, "isFrame").unwrap();
         let flag = v8::Boolean::new(scope, true);
         namespace.set(scope, name.into(), flag.into());
@@ -5698,9 +5634,7 @@ fn allocate_frame<'s>(
             crate::context_ownership::object(scope, namespace)
                 .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
         )));
-        let depth_key = v8::String::new(scope, "__depth").unwrap();
-        let depth = v8::Integer::new_from_unsigned(scope, depth);
-        global.set(scope, depth_key.into(), depth.into());
+        context.set_slot(Rc::new(BootstrapDepth(depth)));
         install_environment(scope, core).map_err(JsErrorBox::generic)?;
         let secure = secure_context(scope);
         let crypto_core = core
@@ -5709,7 +5643,6 @@ fn allocate_frame<'s>(
         crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
         crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
         crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::capture_exception(scope);
         crate::browser_env::finish_key_order(scope);
         run_frame_init_script(scope)?;
@@ -5758,14 +5691,9 @@ fn run_frame_timers(scope: &mut v8::PinScope, max: u32) -> u32 {
             continue;
         }
         let scope = &mut v8::ContextScope::new(scope, context);
-        let code = v8::String::new(
-            scope,
-            &format!("globalThis[Symbol.for('ts')].runTimers({max})"),
-        )
-        .unwrap();
-        if let Some(result) =
-            v8::Script::compile(scope, code, None).and_then(|script| script.run(scope))
-        {
+        // The frame's namespace function, called natively (turbo-surf#87).
+        let max = v8::Number::new(scope, f64::from(max));
+        if let Some(result) = call_frame_helper(scope, "runTimers", &[max.into()]) {
             fired += result.uint32_value(scope).unwrap_or(0);
         }
     }
@@ -5786,57 +5714,13 @@ fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
             continue;
         }
         let scope = &mut v8::ContextScope::new(scope, context);
-        let code = v8::String::new(
-            scope,
-            "globalThis[Symbol.for('ts')].pendingWork() === '1' ? 1 : 0",
-        )
-        .unwrap();
-        if let Some(result) =
-            v8::Script::compile(scope, code, None).and_then(|script| script.run(scope))
+        if call_frame_helper(scope, "pendingWork", &[])
+            .is_some_and(|result| result.to_rust_string_lossy(scope) == "1")
         {
-            pending += result.uint32_value(scope).unwrap_or(0);
+            pending += 1;
         }
     }
     pending
-}
-
-#[op2(reentrant)]
-fn op_frame_module<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    window: v8::Local<v8::Object>,
-    index: u32,
-) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
-    if !cfg!(turbo_surf_native_proxy) {
-        return Err(JsErrorBox::generic(
-            "Child-frame ES modules require the exact native SDK",
-        ));
-    }
-    let context = window
-        .get_creation_context(scope)
-        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
-    if context.get_slot::<FrameRetired>().is_some()
-        || context
-            .get_slot::<FrameSandbox>()
-            .is_some_and(|flags| flags.scripts_blocked)
-    {
-        return Err(JsErrorBox::generic("frame module execution is blocked"));
-    }
-    let policy = context
-        .get_slot::<FrameScriptPolicy>()
-        .ok_or_else(|| JsErrorBox::generic("frame script policy unavailable"))?;
-    if !policy
-        .scripts
-        .iter()
-        .any(|script| script.module && script.index == index as usize)
-    {
-        return Err(JsErrorBox::generic(
-            "frame module is not authorized by its document",
-        ));
-    }
-    let scope = &mut v8::ContextScope::new(scope, context);
-    let index = v8::Integer::new_from_unsigned(scope, index);
-    call_frame_helper(scope, "executeFrameModule", &[index.into()])
-        .ok_or_else(|| JsErrorBox::generic("frame module dispatch failed"))
 }
 
 #[op2(reentrant)]
@@ -6114,7 +5998,6 @@ fn op_document_location_url(
     let Some(context) = document.get_creation_context(scope) else {
         return state.borrow::<Base>().0.clone();
     };
-    #[cfg(turbo_surf_native_proxy)]
     if let Some(url) = window_proxy::location_url(context) {
         return url;
     }
@@ -6759,10 +6642,7 @@ fn op_storage_call<'s>(
     if storage_id(scope, receiver)? != id {
         return Err(JsErrorBox::type_error("Illegal invocation"));
     }
-    #[cfg(turbo_surf_native_proxy)]
     let location = window_proxy::location_url(owner);
-    #[cfg(not(turbo_surf_native_proxy))]
-    let location = None;
     let url = location
         .or_else(|| {
             owner
@@ -6965,6 +6845,8 @@ fn install_environment<'s>(
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         .ok_or("Native stream initialization failed")?;
+    let namespace = crate::browser_env::engine_namespace(scope)
+        .ok_or("Native environment namespace unavailable")?;
     let code = v8::String::new(scope, ENV_BOOTSTRAP).unwrap();
     let function = v8::Script::compile(scope, code, None)
         .and_then(|script| script.run(scope))
@@ -6972,7 +6854,11 @@ fn install_environment<'s>(
     if let Some(function) = function {
         let receiver = v8::undefined(scope);
         if function
-            .call(scope, receiver.into(), &[core, web_factory.into()])
+            .call(
+                scope,
+                receiver.into(),
+                &[core, web_factory.into(), namespace.into()],
+            )
             .is_some()
         {
             crate::browser_env::capture_popover_scheduler(scope);
@@ -6984,8 +6870,7 @@ fn install_environment<'s>(
                     sandboxed: pointer_lock_sandboxed,
                 }));
             crate::browser_env::capture_file_host(scope);
-            #[cfg(turbo_surf_native_proxy)]
-            install_code_generation_authorization(scope)?;
+            code_generation::install_code_generation_authorization(scope)?;
             return Ok(());
         }
     }
@@ -7090,22 +6975,6 @@ fn op_dispatch_host_event(
     crate::browser_env::dispatch_host_event(scope, event, target);
 }
 
-#[op2(nofast, reentrant)]
-fn op_event_callback(
-    scope: &mut v8::PinScope,
-    event: v8::Local<v8::Object>,
-    target: v8::Local<v8::Object>,
-    active: bool,
-) {
-    crate::browser_env::event_callback_state(scope, event, target, active);
-}
-
-#[op2]
-fn op_message_source<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Object> {
-    let context = scope.get_entered_or_microtask_context();
-    context.global(scope)
-}
-
 deno_core::extension!(
     turbo_dom,
     ops = [
@@ -7123,6 +6992,7 @@ deno_core::extension!(
         op_window_message_pending,
         op_native_window_proxy,
         op_native_location_installed,
+        op_location_navigation_sandboxed,
         op_location_object,
         op_location_seed,
         op_location_ancestor_origins,
@@ -7130,6 +7000,7 @@ deno_core::extension!(
         op_document_scripts_allowed,
         op_set_frame_navigator,
         op_window_child_frames,
+        op_window_bootstrap_depth,
         op_frame_move_candidates,
         op_frame_finish,
         op_frame_dom_ready,
@@ -7137,17 +7008,18 @@ deno_core::extension!(
         op_frame_scripts,
         op_frame_resources,
         op_timer_clock,
+        op_task_sequence,
         op_timer_offset,
         op_window_timers_realtime,
         op_timer_advance,
         op_timer_nesting,
         op_timer_set_nesting,
+        op_timer_task_active,
         op_run_local_timers,
         op_run_frame_timers,
         op_frame_pending,
         op_queue_frame_script,
         op_frame_module,
-        op_message_source,
         op_event_trust,
         op_set_host_input_driver,
         op_host_user_activation,
@@ -7184,8 +7056,9 @@ deno_core::extension!(
         crate::web_streams_backend::op_web_abort_bind,
         crate::web_streams_backend::op_web_abort_listener,
         crate::web_streams_backend::op_web_abort_dispatch,
-        op_event_callback,
         op_install_microtask_queue,
+        crate::window_named_properties::op_install_window_named_properties,
+        crate::window_named_properties::op_window_named_elements,
         op_report_exception,
         op_value_is_promise,
         op_frame_cookie_get,
@@ -7229,6 +7102,7 @@ deno_core::extension!(
         fetch_streams::op_fetch_read,
         op_fetch,
         op_load_image,
+        op_decode_data_image,
         op_dictionary_active,
         op_dictionary_headers,
         op_dictionary_links,
@@ -7255,7 +7129,6 @@ deno_core::extension!(
         op_csp_meta,
         op_referrer_meta,
         op_csp_finish_parser,
-        op_csp_inline,
         op_csp_request,
         op_frame_script_allowed,
         op_frame_script_event,
@@ -7294,7 +7167,7 @@ deno_core::extension!(
 // inside the IIFE they're per-invocation. Globals are assigned to `globalThis`
 // (idempotent) and the cookie bridge re-applies to the current `document`.
 const ENV_BOOTSTRAP: &str = concat!(
-    r##"((__core, __webFactory) => {
+    r##"((__core, __webFactory, __tsNs) => {
 "use strict";
 // Core is a private embedder argument; no page global temporarily exposes ops.
 const ops = __core.ops;
@@ -7302,15 +7175,103 @@ const __print = __core.print;
 let __web;
 ops.op_capture_runtime_core(__core);
 if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
-const __NS = Symbol.for("ts");
-const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
+// The engine namespace (turbo-dom#222): a V8 private on the global, handed to this
+// bootstrap by Rust; page script cannot reach it.
+const __G = __tsNs;
+// Blink's message for an interface constructor called without `new` (turbo-surf#86):
+// interfaces without a constructor say "Illegal constructor", the others "Failed to
+// construct 'X': Please use the 'new' operator, ...". Every constructor this bootstrap
+// creates through the native factory gets it unless its site names its own message.
+{
+  const __makeNative = __G.makeNativeFunction;
+  const __illegalConstructors = { __proto__: null,
+  AbortSignal: 1, AbstractRange: 1, Attr: 1, CDATASection: 1, CSSImportRule: 1,
+  CSSPseudoElement: 1, CSSRule: 1, CSSRuleList: 1, CSSStyleDeclaration: 1, CSSStyleRule: 1,
+  CaretPosition: 1, CharacterData: 1, Crypto: 1, CryptoKey: 1, CustomStateSet: 1,
+  DOMImplementation: 1, DOMRectList: 1, DOMStringList: 1, DOMTokenList: 1, DocumentType: 1,
+  Element: 1, ElementInternals: 1, EventCounts: 1, FragmentDirective: 1, HTMLCollection: 1,
+  HTMLDocument: 1, HTMLFormControlsCollection: 1, HTMLOptionsCollection: 1, HTMLUnknownElement: 1,
+  History: 1, IntersectionObserverEntry: 1, MathMLElement: 1, MediaList: 1, MessagePort: 1,
+  MutationRecord: 1, NamedNodeMap: 1, Navigator: 1, Node: 1, NodeList: 1, NodeRange: 1,
+  Performance: 1, PerformanceEntry: 1, PerformanceMeasure: 1, PerformanceNavigationTiming: 1,
+  PerformanceObserverEntryList: 1, PermissionStatus: 1, Permissions: 1, PermissionsPolicy: 1,
+  ProcessingInstruction: 1, RadioNodeList: 1, ReadableByteStreamController: 1,
+  ReadableStreamBYOBRequest: 1, ReadableStreamDefaultController: 1, ResizeObserverEntry: 1,
+  ResizeObserverSize: 1, SVGElement: 1, SVGSVGElement: 1, Screen: 1, ScreenOrientation: 1,
+  ShadowRoot: 1, Storage: 1, StyleSheet: 1, StyleSheetList: 1, SubtleCrypto: 1, TextTrack: 1,
+  TextTrackCueList: 1, TransformStreamDefaultController: 1, UserActivation: 1, ValidityState: 1,
+  VisualViewport: 1, Window: 1, WritableStreamDefaultController: 1, XMLDocument: 1,
+  XMLHttpRequestEventTarget: 1, XMLHttpRequestUpload: 1, XPathExpression: 1, XPathResult: 1,
+  };
+  if (typeof __makeNative === "function")
+    __G.makeNativeFunction = (delegate, name, length, constructor, classConstruct, requireNew, callMessage) =>
+      __makeNative(delegate, name, length, constructor, classConstruct, requireNew,
+        typeof callMessage !== "string" && constructor && (requireNew === undefined || requireNew) && typeof name === "string"
+          ? __illegalConstructors[name] === 1 ? "Illegal constructor"
+            : "Failed to construct '" + name + "': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+          : callMessage);
+}
+// In-flight fetches and frame loads (turbo-surf#83): bootstrap-private, so page
+// script can neither read nor forge the count the idle/settle checks rely on.
+let __pendingFetchCount = 0;
 const __hostEvent=globalThis.Event;
 let __hostErrorEvent;
 let __markDocumentInteractive;
 // Interface records use a native, isolate-owned ephemeron map. Same-origin
 // borrowed methods accept foreign-realm objects without exposing a brand setter.
 const __stringify = JSON.stringify, __String = String;
-const __framePromiseAll = Promise.all.bind(Promise);
+// Intrinsics captured at install time (turbo-surf#87): engine code on the document
+// load and node insertion paths calls these, never a builtin it looks up at run time
+// (a page can replace any prototype method, accessor or static, and install index
+// accessors on Array.prototype / Object.prototype). Internal lists the engine grows are
+// prototype-less records, so no inherited index setter runs.
+const __intrinsicApply = Reflect.apply, __intrinsicDefine = Object.defineProperty,
+  __intrinsicPromise = Promise,
+  __intrinsicFloor = Math.floor, __intrinsicMax = Math.max, __intrinsicMin = Math.min,
+  __intrinsicHasOwn = Object.hasOwn,
+  __intrinsicSetAdd = Set.prototype.add, __intrinsicSetDelete = Set.prototype.delete,
+  __intrinsicSetEach = Set.prototype.forEach,
+  __intrinsicSetSize = Object.getOwnPropertyDescriptor(Set.prototype, "size").get,
+  __intrinsicWeakGet = WeakMap.prototype.get, __intrinsicWeakSet = WeakMap.prototype.set,
+  __intrinsicExec = RegExp.prototype.exec,
+  __intrinsicLower = String.prototype.toLowerCase, __intrinsicTrim = String.prototype.trim,
+  __intrinsicEndsWith = String.prototype.endsWith, __intrinsicRepeat = String.prototype.repeat,
+  __intrinsicIndexOf = Array.prototype.indexOf;
+const __regexpTest = (pattern, text) => __intrinsicApply(__intrinsicExec, pattern, [text]) !== null;
+const __lower = text => __intrinsicApply(__intrinsicLower, text, []);
+const __trim = text => __intrinsicApply(__intrinsicTrim, text, []);
+const __setSize = set => __intrinsicApply(__intrinsicSetSize, set, []);
+// A prototype-less list: `length` plus own indices.
+const __list = () => ({__proto__: null, length: 0});
+const __listPush = (list, value) => { list[list.length] = value; list.length++; };
+const __listIncludes = (list, value) => {
+  for (let index = 0; index < list.length; index++) if (list[index] === value) return true;
+  return false;
+};
+// Promise.prototype.finally without its `then` and @@species lookups: `await` on a
+// native promise reacts to it directly.
+const __promiseFinally = async (promise, callback) => {
+  let value;
+  try { value = await promise; } catch (error) { callback(); throw error; }
+  callback();
+  return value;
+};
+// Promise.all over an array-like of native promises (or plain values), resolving to an
+// array, without the iterator, `Promise.resolve`, `then` or @@species lookups
+// Promise.all makes; it rejects with the first rejection.
+const __framePromiseAll = list => new __intrinsicPromise((resolve, reject) => {
+  const length = list.length, values = [];
+  let remaining = length;
+  if (!remaining) { resolve(values); return; }
+  const settle = async (item, index) => {
+    try {
+      const value = await item;
+      __intrinsicDefine(values, index, {__proto__: null, value, writable: true, enumerable: true, configurable: true});
+      if (--remaining === 0) resolve(values);
+    } catch (error) { reject(error); }
+  };
+  for (let index = 0; index < length; index++) settle(list[index], index);
+});
 const __recordOwn = Object.hasOwn, __recordCreate = Object.create, __recordDefine = Object.defineProperty;
 const __interfaceMap = brand => ({
   has(receiver) { return this.get(receiver) !== undefined; },
@@ -7466,7 +7427,7 @@ const __navData = {
   // TOKEN back over sendBeacon — so a no-op that merely returns `true` fingerprints
   // fine yet never completes the exchange (the token is dropped on the floor). Actually
   // send it: a fire-and-forget POST over the tier-1 net stack (`globalThis.fetch` →
-  // `op_fetch`), which shares the page cookie jar and is counted in `__pendingFetches`
+  // `op_fetch`), which shares the page cookie jar and is counted in `__pendingFetchCount`
   // so the hydration drain waits for it to land before serializing. Returns `true`
   // synchronously, per the spec (the boolean reports whether the UA QUEUED the transfer,
   // not whether it succeeded). `globalThis.fetch`/Blob/etc. are defined later in this
@@ -7497,7 +7458,7 @@ const __navData = {
         else { try { body = String(data); } catch (_e) { body = ""; } }
       }
       const headers = contentType ? { "content-type": contentType } : {};
-      // Direct (not deferred) call so `fetch` bumps `__pendingFetches` synchronously and
+      // Direct (not deferred) call so `fetch` bumps `__pendingFetchCount` synchronously and
       // the drain can't quiesce before the beacon completes. `keepalive` mirrors the real
       // beacon flag (informational here).
       try { globalThis.fetch(String(url), { method: "POST", body, headers, keepalive: true, mode: "no-cors", credentials: "include" }); } catch (_e) {}
@@ -7887,6 +7848,14 @@ let __taskEpoch = 0;
 // work (microtasks / the React scheduler) still drains promptly (it never advances the
 // clock); only delayed polls are time-gated.
 const __timerNow = () => ops.op_timer_clock();
+// The clock an unclamped timer queued by a timer task (or its microtasks) counts its
+// delay from: that task's own due time, not the host's elapsed real time, so a loaded host cannot reorder a task queued by a
+// task behind a rendering frame queued earlier (turbo-surf#101). The nesting clamp, timers
+// outside timer tasks and real-time window timers use the live clock.
+let __taskBase = null, __taskBaseEpoch = -1;
+// Only while the host runs a timer task (and its microtask checkpoint) in this realm; a
+// rendering frame's own tasks keep the live clock.
+const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers && ops.op_timer_task_active(__timerDocument) ? __taskBase : __timerNow();
 const __realWindowTimers = ops.op_window_timers_realtime();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
@@ -7902,21 +7871,38 @@ __G.resetTimerBudget = () => { __budgetBase = __timerNow(); };
 const __timerDocument = globalThis.document;
 const __activeTimers = new Map();
 const __timerGet = Map.prototype.get.bind(__activeTimers), __timerSet = Map.prototype.set.bind(__activeTimers), __timerDelete = Map.prototype.delete.bind(__activeTimers), __timerClear = Map.prototype.clear.bind(__activeTimers);
-const __createTimer = (name, repeat, handler, delay, args) => {
+// Zero-delay tasks stay first-in first-out: one queued from a task's earlier clock never
+// overtakes a zero-delay task queued before it.
+let __lastTaskDue = -Infinity;
+const __timerDue = (nesting, delay, rendering) => {
+  if (nesting > 6) return __timerNow() + __timerMax(4, delay);
+  const due = __taskClock() + delay;
+  if (delay !== 0 || rendering) return due;
+  return __lastTaskDue = __timerMax(due, __lastTaskDue);
+};
+const __createTimer = (name, repeat, handler, delay, args, rendering = false) => {
   const source=typeof handler === "function" ? null : ops.op_trusted_type_string(__timerDocument,handler,"TrustedScript","Window "+name,"Failed to execute '"+name+"' on 'Window': ");
   // Window timers take a signed32-bit delay before negative values clamp to zero.
   delay=(+delay)|0;if(delay<0)delay=0;
+  // Chrome returns 0 for a string handler its CSP check rejects, without consuming an id.
+  if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return 0;
   const id=__tid++;
-  if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return id;
-  const level=ops.op_timer_nesting(__timerDocument);
+  // A rendering frame is not a timer task: it neither nests nor is clamped (turbo-surf#101).
+  const level=rendering?-1:ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
-  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args};
+  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerDue(nesting,delay,rendering),delay,nesting,repeat,args,sequence:ops.op_task_sequence(),rendering};
   __timerSet(id,timer);__timerPush(timer);return id;
+};
+// A non-timer task (id 0: never cancellable, no timer id consumed) in the same
+// deadline/sequence order as this agent's timers.
+const __queueTimerTask = (fn, due, sequence) => {
+  __timerPush({__proto__:null,id:0,fn,source:null,due,delay:0,nesting:0,repeat:false,args:[],sequence});
 };
 globalThis.setTimeout=(handler,delay=0,...args)=>__createTimer("setTimeout",false,handler,delay,args);
 globalThis.setInterval=(handler,delay=0,...args)=>__createTimer("setInterval",true,handler,delay,args);
 globalThis.clearTimeout=(id)=>{
-  id=(+id)|0;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
+  // Id 0 is never a timer: it names the internal posted-message tasks.
+  id=(+id)|0;if(id===0)return;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
 };
 globalThis.clearInterval=globalThis.clearTimeout;
 ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;__timerClear();ops.op_timer_set_nesting(__timerDocument,0);}});
@@ -7930,7 +7916,7 @@ const __perfTimeOrigin = __epoch0;
 const __observed = () => (__hrNow() - __hr0) + ops.op_timer_offset();
 let __perfLast = 0;
 const __perfNow = () => {
-  let t = Math.floor(__observed() * 10) / 10; // Chrome 100µs grid
+  let t = __intrinsicFloor(__observed() * 10) / 10; // Chrome 100µs grid
   if (t < __perfLast) t = __perfLast;          // strictly monotonic
   __perfLast = t;
   return t;
@@ -7983,7 +7969,7 @@ let __rafQueue = [], __frameSteps = [];
 // a step may queue more, so snapshot-and-clear each frame.
 let __renderingSteps = [], __viewTransitionSteps = [], __renderingSuppressed = false;
 // Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
-const __frameTimer = globalThis.setTimeout;
+const __frameTimer = (fn, delay) => __createTimer("setTimeout", false, fn, delay, [], true);
 // Web Animations frame host: the binding's handler for the next frame, the running frame's
 // time and the last frame time the between-frames document timeline advances from.
 let __animationFrame = null, __frameNow = null, __frameLast = null, __clockEpoch = -1, __clockTime = 0;
@@ -7993,7 +7979,8 @@ const __frameStage = (ts) => { __frameNow = ts; __clockEpoch = __taskEpoch; __cl
 // each still ends with its own microtask checkpoint.
 const __frameTask = (fn) => {
   const id = __tid++;
-  const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[]};
+  // Sequence 0 sorts before every queued task (agent sequences start at 1).
+  const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[],sequence:0};
   __timerSet(id,timer);__timerSplice(0,0,timer);
 };
 // Update-the-rendering order: queued engine steps (scroll events), then "update animations
@@ -8067,7 +8054,7 @@ globalThis.requestAnimationFrame = (fn) => {
   return id;
 };
 ops.op_capture_frame_scheduler((step) => { __frameSteps[__frameSteps.length] = step; __scheduleFrame(); });
-// The vendored binding's view-transition rendering seam. A page here is never hidden: the
+// The binding's view-transition rendering seam. A page here is never hidden: the
 // engine has no tab or occlusion model and reports document.visibilityState "visible".
 ops.op_capture_view_transition_host((command, argument) => {
   if (command === "frame") { __viewTransitionSteps[__viewTransitionSteps.length] = argument; __scheduleFrame(); }
@@ -8079,13 +8066,27 @@ ops.op_capture_view_transition_host((command, argument) => {
 globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
 // Native V8 jobs share the real Promise/observer microtask checkpoint and the
 // host watchdog. Their callbacks retain private realm ownership until delivery.
-ops.op_install_microtask_queue();
+ops.op_install_microtask_queue(globalThis);
 const __nextLocalTimer = () => {
   if (!__timers.length || ops.op_window_message_pending()) return -1;
   let index=0;
-  for(let i=1;i<__timers.length;i++)if(__timers[i].due<__timers[index].due)index=i;
+  for(let i=1;i<__timers.length;i++){
+    const timer=__timers[i], best=__timers[index];
+    if(timer.due<best.due||(timer.due===best.due&&timer.sequence<best.sequence))index=i;
+  }
   const due=__timers[index].due;
   return !__realWindowTimers && due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
+};
+// A timer task's nested timers count from the latest due time among the timers already
+// due with it (within the same millisecond of its own due time): in Chrome the parent
+// runs no earlier than those siblings were due, so a nested zero-delay timer queues
+// behind an equal-delay sibling set slightly later by the live clock (turbo-surf#118).
+// Rendering frames are not siblings (turbo-surf#101); only queued dues are read, never
+// the live clock, so the order stays deterministic.
+const __taskBaseFor = (due) => {
+  let base=due;
+  for(let i=0;i<__timers.length;i++){const t=__timers[i];if(!t.rendering&&t.due>base&&t.due<due+1)base=t.due;}
+  return base;
 };
 const __runLocalTimers = (max=100000,keepTask=false) => {
   let fired=0;
@@ -8094,7 +8095,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const timer=__timers[index];
     // Every caller, including hydration and child-frame drains, obeys this policy.
     if(__realWindowTimers && timer.due>__timerNow())break;
-    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:__taskBaseFor(timer.due);__taskBaseEpoch=__taskEpoch;
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);
@@ -8102,7 +8103,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
       try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){
         if(timer.nesting<7)timer.nesting++;
-        timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);__timerPush(timer);
+        timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);timer.sequence=ops.op_task_sequence();__timerPush(timer);
       }
     }finally{if(!keepTask)ops.op_timer_set_nesting(__timerDocument,previous);}
   }
@@ -8116,13 +8117,13 @@ __G.runTimers = (max=100000) => {
   return fired;
 };
 ops.op_set_host_capabilities({
-  timerNextDue:()=>{const index=__nextLocalTimer();return index<0?null:__timers[index].due;},
+  timerNextDue:()=>{const index=__nextLocalTimer();return index<0?null:[__timers[index].due,__timers[index].sequence];},
   runNextTimer:()=>__runLocalTimers(1,true),
   runLocalTimers:max=>__runLocalTimers(max)
 });
 // NOTE: getElementsByTagName/ClassName/Name, lastChild/previous*/nextElementSibling,
-// and document.write/writeln are provided by the vendored binding (browser_env.js,
-// turbo-test ≥ 71477ba) — real-world bundles (jQuery's load-time support probe,
+// and document.write/writeln are provided by the binding (turbo-dom-browser-env's
+// browser_env.js, since turbo-test 71477ba) — real-world bundles (jQuery's load-time support probe,
 // document.write-driven pages) depend on them. They live upstream, not here.
 //
 // Runtime document state stays outside the native node. Use the native brand
@@ -8146,11 +8147,15 @@ const __documentState = (receiver) => {
   if (__parsedDocumentStates.has(receiver)) return __parsedDocumentStates.get(receiver);
   return ops.op_document_runtime_state(receiver);
 };
+// The native accessor resolves a document through its own realm's copy of this function.
+// A document of this realm that no initializer registered (the binding's inert template
+// contents owner, turbo-dom#29) is an inert document like a parsed one: no window
+// (defaultView null), URL about:blank, as in Chrome.
 const __documentStateFor = (receiver) => {
   if (__documentApply(__documentType,receiver,[]) !== 9) throw new TypeError("Illegal invocation");
   if (receiver === __document) return __documentRuntimeState;
-  if (__parsedDocumentStates.has(receiver)) return __parsedDocumentStates.get(receiver);
-  throw new TypeError("Illegal invocation");
+  if (!__parsedDocumentStates.has(receiver)) __registerInertDocument(receiver,"about:blank","text/html");
+  return __parsedDocumentStates.get(receiver);
 };
 ops.op_set_document_runtime_state_accessor(__documentStateFor);
 delete __G.documentStateFor;
@@ -8215,7 +8220,6 @@ Object.defineProperty(StorageAccessHandle,'prototype',{writable:false});
 Object.defineProperty(StorageAccessHandle.prototype,Symbol.toStringTag,{value:'StorageAccessHandle',configurable:true});
 ops.op_storage_access_factory(source=>{const types={__proto__:null};for(let index=0;index<__storageAccessTypes.length;index++){const name=__storageAccessTypes[index];types[name]=source[name];}const handle=__recordCreate(StorageAccessHandle.prototype);__storageHandleMap.set(handle,{types});return handle;});
 if(ops.op_is_secure_context()) {
- globalThis.StorageAccessHandle=StorageAccessHandle;
  const __accessError=(state,name,message)=>new (state.storageRealm?.exception||__storageAccessException)(message,name);
  const __accessActive=state=>!state.inactive&&state.window&&ops.op_document_has_active_window(state.document);
  const has=function hasStorageAccess(){
@@ -8616,13 +8620,13 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   // request is outstanding — otherwise a save POST resolves AFTER the drain gives up
   // (the DOM looks "stable" while waiting) and its success re-render (modal close,
   // redirect) is lost.
-  globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+  __pendingFetchCount++;
   let r;
   try {
     const request=ops.op_fetch(__String(requestTarget), initJson);
     r = await (abortNotice?__FetchPromiseRace([request,__FetchThen(abortNotice,reason=>{throw reason;})]):request);
   } catch(error) {ops.op_fetch_cancel(cancelId);finish();throw error;} finally {
-    globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+    __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
   }
   if(uploadPump){
     if((r.aborted||!r.status||isAborted())&&transport.uploadReader)await transport.uploadReader.cancel(isAborted()?abortReason():new __exceptionTypeError("Failed to fetch")).catch(()=>{});
@@ -8669,10 +8673,12 @@ globalThis.fetch = async (input, init = undefined) => {
   const clone=ops.op_surf_structured_clone, owner=globalThis;
   const push=Array.prototype.push, apply=Reflect.apply, iterator=Symbol.iterator, setPrototype=Object.setPrototypeOf;
   const objectLike=value=>value!==null&&(typeof value==="object"||typeof value==="function");
+  const cloneContext="Failed to execute 'structuredClone' on 'Window': ";
+  const transferContext=cloneContext+"Failed to read the 'transfer' property from 'StructuredSerializeOptions': ";
   const sequence=value=>{
-    if(!objectLike(value))throw new __exceptionTypeError("Transfer must be an object sequence");
+    if(!objectLike(value))throw new __exceptionTypeError(transferContext+"The provided value cannot be converted to a sequence.");
     const method=value[iterator];
-    if(typeof method!=="function")throw new __exceptionTypeError("Transfer must be iterable");
+    if(typeof method!=="function")throw new __exceptionTypeError(transferContext+"The object must have a callable @@iterator property.");
     const source=apply(method,value,[]);
     if(!objectLike(source))throw new __exceptionTypeError("Invalid transfer iterator");
     const next=source.next;
@@ -8683,8 +8689,7 @@ globalThis.fetch = async (input, init = undefined) => {
       if(!objectLike(step))throw new __exceptionTypeError("Invalid transfer iterator result");
       if(step.done)return result;
       const entry=step.value;
-      if(!objectLike(entry))throw new __exceptionTypeError("Transfer entries must be objects");
-      if(result.length===4096)throw new __exceptionTypeError("Native transfer sequence budget exceeded");
+      if(!objectLike(entry))throw new __exceptionTypeError(transferContext+"Failed to convert value to 'object'.");
       apply(push,result,[entry]);
     }
   };
@@ -8692,12 +8697,12 @@ globalThis.fetch = async (input, init = undefined) => {
     if(!arguments.length)throw new __exceptionTypeError("A value is required");
     const receiver=this==null?owner:this;
     if(!ops.op_surf_is_window(receiver))throw new __exceptionTypeError("Illegal invocation");
-    if(options!=null && !objectLike(options))throw new __exceptionTypeError("Options must be a dictionary");
+    if(options!=null && !objectLike(options))throw new __exceptionTypeError(cloneContext+"The provided value is not of type 'StructuredSerializeOptions'.");
     const transfer=options?.transfer;
-    return clone(value,receiver,transfer===undefined?undefined:sequence(transfer));
+    return clone(value,receiver,transfer===undefined?undefined:sequence(transfer),cloneContext);
   }}).structuredClone,"structuredClone",1);
 }
-// NOTE: getComputedStyle is provided by the vendored browser_env.js (a jsdom-style
+// NOTE: getComputedStyle is provided by the binding's browser_env.js (a jsdom-style
 // getComputedStyle the Playwright shim's cssValue/visibility reads). Do NOT redefine
 // IT here — ENV_BOOTSTRAP runs AFTER the binding, so an override would clobber the
 // real one and break the shim.
@@ -8894,7 +8899,7 @@ ops.op_set_host_capabilities({
 // The canonical binding owns native custom-element construction, registry state
 // and lifecycle reactions in every Window realm.
 // (CSSStyleSheet, document.adoptedStyleSheets, and the HTML*Element constructor
-// family are all provided by the vendored browser_env binding.)
+// family are all provided by the turbo-dom-browser-env binding.)
 // MessagePort / MessageChannel — real classes (not object-literal stubs), so `port instanceof
 // MessagePort` holds and `port.addEventListener('message', fn)` works, not just `onmessage=`
 // (Chrome shape; the object-literal stub was a brand/instanceof tell). React 18's scheduler
@@ -8903,7 +8908,7 @@ ops.op_set_host_capabilities({
 // idiom — delivery routes through the virtual timer queue (setTimeout 0) so the hydration/
 // interaction pump drains it. Setting `onmessage` implies `start()` (Chrome); the addEventListener
 // path queues until start().
-// MessageEvent — a REAL constructor (the vendored binding ships only a hollow `function(){}`
+// MessageEvent — a REAL constructor (the binding ships only a hollow `function(){}`
 // stub, so `new MessageEvent('message',{data}).data` was undefined). Our postMessage / port /
 // BroadcastChannel dispatch build events via this so `ev instanceof MessageEvent` holds and the
 // event carries data/origin/source/ports like Chrome. Defined before the ports that use it.
@@ -9000,12 +9005,13 @@ const __streamTransferFactory =
   const apply=Reflect.apply, get=Object.getOwnPropertyDescriptor;
   const channel=MessageChannel, cp=channel.prototype;
   const first=get(cp,"port1").get, second=get(cp,"port2").get;
-  const post=MessagePort.prototype.postMessage, close=MessagePort.prototype.close;
+  const close=MessagePort.prototype.close;
   const start=MessagePort.prototype.start, listen=EventTarget.prototype.addEventListener;
   const data=get(MessageEvent.prototype,"data").get;
   const api=__web.transferBackend(), Exception=DOMException;
   api.channel=()=>{const pair=new channel();return [apply(first,pair,[]),apply(second,pair,[])];};
-  api.post=(port,value)=>apply(post,port,[value]);
+  // Internal chunks skip the public method: their errors carry the stream context.
+  api.post=(port,value)=>ops.op_port_post_message(port,value,undefined,false,false);
   api.close=port=>apply(close,port,[]);
   api.listen=(port,receive,error)=>{
     apply(listen,port,["message",event=>receive(apply(data,event,[]))]);
@@ -9032,7 +9038,7 @@ const __streamTransferFactory =
 // its own scheduler by posting to the window and running work in the `message` handler —
 // a bare `postMessage(...)` call (window.postMessage) with no shim throws
 // "postMessage is not a function" and aborts the VM before any token path runs. The
-// vendored binding supplies window `addEventListener`/`dispatchEvent`; we only add the
+// binding supplies window `addEventListener`/`dispatchEvent`; we only add the
 // poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
 // collectors read (data/origin/source/ports).
 const __postingWindow=globalThis, __postingException=DOMException;
@@ -9040,8 +9046,9 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
   if (arguments.length === 0) throw new __exceptionTypeError("A message is required");
   const receiver=this==null?__postingWindow:this;
   if(!ops.op_surf_is_window(receiver))throw new __exceptionTypeError("Illegal invocation");
-  let includeActivation=false;
+  let includeActivation=false, fromOptions=false;
   if(targetOrigin===null || typeof targetOrigin==="object") {
+    fromOptions=true;
     const options=targetOrigin||{};
     includeActivation=!!options.includeUserActivation;
     const origin=options.targetOrigin;
@@ -9050,7 +9057,8 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
   }
   if(typeof targetOrigin==="symbol")throw new __exceptionTypeError("Cannot convert a Symbol to a string");
   targetOrigin=__String(targetOrigin);
-  const transferList=transfer===undefined?undefined:__portTransferSequence(transfer);
+  const transferList=transfer===undefined?undefined:__portTransferSequence(transfer,
+    "Failed to execute 'postMessage' on 'Window': "+(fromOptions?"Failed to read the 'transfer' property from 'StructuredSerializeOptions': ":""));
   if(targetOrigin!=="*" && targetOrigin!=="/") {
     try {ops.op_surf_url_parse(targetOrigin,"");}
     catch(_){throw new __postingException("Invalid target origin","SyntaxError");}
@@ -9090,15 +9098,17 @@ __G.windowView = (target) => {
   __windowViews.set(target, view);
   return view;
 };
-const __hostMessageEvent=globalThis.MessageEvent, __hostMessageSchedule=globalThis.setTimeout;
-const __deliverWindowMessage = (message, sender, origin, ports, failed, activation) => {
+const __hostMessageEvent=globalThis.MessageEvent;
+// A posted-message task keeps its posting time and agent-wide order (`due`,
+// `sequence`) and consumes no timer id.
+const __deliverWindowMessage = (message, sender, origin, ports, failed, activation, due, sequence) => {
   "use strict";
   const source = __G.windowView(sender);
-  __hostMessageSchedule(() => {
+  __queueTimerTask(() => {
     const event = __hostPortMessage(failed ? "messageerror" : "message", message, ports, source, origin, activation);
     ops.op_event_trust(event, -1);
     ops.op_dispatch_host_event(event, globalThis);
-  }, 0);
+  }, due, sequence);
 };
 ops.op_set_host_capabilities({deliverWindowMessage:__deliverWindowMessage});
 // window `on*` event-handler slots default to `null` in a real browser (never
@@ -9108,7 +9118,7 @@ for (const __on of ["onmessage", "onerror", "onmessageerror", "ononline", "onoff
   try { if (globalThis[__on] === undefined) globalThis[__on] = null; } catch (_e) {}
 }
 // document.contentType — real Chrome reports "text/html" for an HTML document; the
-// reCAPTCHA VM reads it. The vendored binding doesn't expose it, so add an own accessor.
+// reCAPTCHA VM reads it. The binding doesn't expose it, so add an own accessor.
 try {
   if (globalThis.document && globalThis.document.contentType === undefined) {
     Object.defineProperty(globalThis.document, "contentType", { configurable: true, get() { return "text/html"; } });
@@ -9130,7 +9140,11 @@ const __performanceString = value => {if(typeof value==='symbol')throw new TypeE
 const __performanceNumber = value => {const n=Number(value);if(!Number.isFinite(n)||n<0)throw new TypeError('A nonnegative finite timestamp is required');return n;};
 const __entryState = receiver => {const state=__performanceEntries.get(receiver);if(!state)throw new TypeError('Illegal invocation');return state;};
 const __performanceOwner=globalThis;
-const __performanceDetail = detail => detail===undefined?null:ops.op_surf_structured_clone(detail,__performanceOwner);
+// Serialization errors carry the calling operation's Chrome prefix (turbo-surf#78).
+// performance.mark() builds its entry through the PerformanceMark constructor, so it
+// lends that construction its own prefix, taken before any guest conversion runs.
+let __performanceMarkPrefix = null;
+const __performanceDetail = (detail, prefix) => detail===undefined?null:ops.op_surf_structured_clone(detail,__performanceOwner,undefined,prefix);
 globalThis.PerformanceEntry = class PerformanceEntry {
   constructor(){throw new TypeError('Illegal constructor');}
   get name(){return __entryState(this).name;}
@@ -9141,7 +9155,7 @@ globalThis.PerformanceEntry = class PerformanceEntry {
   toJSON(){const state=__entryState(this);const result={name:state.name,entryType:state.entryType,startTime:state.startTime,duration:state.duration,navigationId:state.navigationId};if(state.entryType==='navigation')Object.assign(result,__navigationRelative());return result;}
 };
 globalThis.PerformanceMark = class PerformanceMark {
-  constructor(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');name=__performanceString(name);if(__performanceFields.includes(name))throw new DOMException('Reserved timing name','SyntaxError');if(options!=null&&typeof options!=='object'&&typeof options!=='function')throw new TypeError('Mark options must be a dictionary');options=options||{};__performanceEntries.set(this,{name,navigationId:__navigationId,entryType:'mark',startTime:options.startTime===undefined?__perfNow():__performanceNumber(options.startTime),duration:0,detail:__performanceDetail(options.detail)});}
+  constructor(name,options=undefined){const detailPrefix=__performanceMarkPrefix??"Failed to construct 'PerformanceMark': ";__performanceMarkPrefix=null;if(!arguments.length)throw new TypeError('A mark name is required');name=__performanceString(name);if(__performanceFields.includes(name))throw new DOMException('Reserved timing name','SyntaxError');if(options!=null&&typeof options!=='object'&&typeof options!=='function')throw new TypeError('Mark options must be a dictionary');options=options||{};__performanceEntries.set(this,{name,navigationId:__navigationId,entryType:'mark',startTime:options.startTime===undefined?__perfNow():__performanceNumber(options.startTime),duration:0,detail:__performanceDetail(options.detail,detailPrefix)});}
   get detail(){const state=__entryState(this);if(state.entryType!=='mark')throw new TypeError('Illegal invocation');return state.detail;}
 };
 globalThis.PerformanceMeasure = class PerformanceMeasure {
@@ -9154,13 +9168,13 @@ for(const name of ['PerformanceEntry','PerformanceMark','PerformanceMeasure','Pe
   const proto=globalThis[name].prototype;Object.defineProperty(proto,Symbol.toStringTag,{value:name,configurable:true});
   for(const key of Object.getOwnPropertyNames(proto)){if(key==='constructor')continue;const d=Object.getOwnPropertyDescriptor(proto,key);Object.defineProperty(proto,key,{...d,enumerable:true});}
 }
-const __navigationRelative = () => Object.fromEntries(__performanceFields.filter(name=>name!=='navigationStart'&&name!=='domLoading').map(name=>[name,__navigationPhases[name]?Math.max(0,__navigationPhases[name]-__navigationPhases.navigationStart):0]));
+const __navigationRelative = () => {const relative={};for(let index=0;index<__performanceFields.length;index++){const name=__performanceFields[index];if(name==='navigationStart'||name==='domLoading')continue;__intrinsicDefine(relative,name,{__proto__:null,value:__navigationPhases[name]?__intrinsicMax(0,__navigationPhases[name]-__navigationPhases.navigationStart):0,writable:true,enumerable:true,configurable:true});}return relative;};
 const __navigationEntry=Object.create(PerformanceNavigationTiming.prototype);
 __performanceEntries.set(__navigationEntry,{name:location.href,navigationId:__navigationId,entryType:'navigation',startTime:0,duration:0});
 for(const name of __performanceFields.filter(name=>name!=='navigationStart'&&name!=='domLoading'))Object.defineProperty(PerformanceNavigationTiming.prototype,name,{get(){if(this!==__navigationEntry)throw new TypeError('Illegal invocation');return __navigationRelative()[name];},enumerable:true,configurable:true});
 for(const [name,value]of Object.entries({type:'navigate',redirectCount:0}))Object.defineProperty(PerformanceNavigationTiming.prototype,name,{get(){if(this!==__navigationEntry)throw new TypeError('Illegal invocation');return value;},enumerable:true,configurable:true});
 __performanceTimeline.push(__navigationEntry);
-__G.performancePhase = name => {if(__performanceFields.includes(name)){__navigationPhases[name]=Math.floor(__perfTimeOrigin+__perfNow());if(name==='loadEventEnd')__entryState(__navigationEntry).duration=__navigationRelative().loadEventEnd;}};
+__G.performancePhase = name => {if(__listIncludes(__performanceFields,name)){__navigationPhases[name]=__intrinsicFloor(__perfTimeOrigin+__perfNow());if(name==='loadEventEnd')__entryState(__navigationEntry).duration=__navigationRelative().loadEventEnd;}};
 const __latestMark = value => {
   if(typeof value==='number')return __performanceNumber(value);
   const name=__performanceString(value);
@@ -9190,7 +9204,7 @@ let __resourceTimingBufferSize=250,__resourceBufferFullHandler=null;
 {
   const P=globalThis.performance||(globalThis.performance={});
   Object.defineProperties(P,{now:{value:__perfNow,configurable:true,writable:true},timeOrigin:{value:__perfTimeOrigin,configurable:true,enumerable:true},eventCounts:{value:__eventCounts,configurable:true,enumerable:true},interactionCount:{value:0,configurable:true,enumerable:true},onresourcetimingbufferfull:{get(){return __resourceBufferFullHandler;},set(value){__resourceBufferFullHandler=typeof value==='function'?value:null;},configurable:true,enumerable:true}});
-  P.mark=function(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');const entry=new PerformanceMark(name,options);__performanceTimeline.push(entry);return entry;};
+  P.mark=function(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');__performanceMarkPrefix="Failed to execute 'mark' on 'Performance': ";let entry;try{entry=new PerformanceMark(name,options);}finally{__performanceMarkPrefix=null;}__performanceTimeline.push(entry);return entry;};
   P.measure=function(name,startOrOptions=undefined,endMark=undefined){
     if(!arguments.length)throw new TypeError('A measure name is required');name=__performanceString(name);
     let start=0,end=__perfNow(),detail=null;
@@ -9200,7 +9214,7 @@ let __resourceTimingBufferSize=250,__resourceBufferFullHandler=null;
       if(endMark!==undefined||(!hasStart&&!hasEnd)||(hasStart&&hasEnd&&hasDuration))throw new TypeError('Invalid measure options');
       if(hasStart)start=__latestMark(options.start);if(hasEnd)end=__latestMark(options.end);
       if(hasDuration){const duration=__performanceNumber(options.duration);if(hasStart)end=start+duration;else start=end-duration;}
-      detail=__performanceDetail(options.detail);
+      detail=__performanceDetail(options.detail,"Failed to execute 'measure' on 'Performance': ");
     }else{if(startOrOptions!==undefined&&!options)start=__latestMark(__performanceString(startOrOptions));if(endMark!==undefined)end=__latestMark(__performanceString(endMark));}
     const entry=Object.create(PerformanceMeasure.prototype);__performanceEntries.set(entry,{name,navigationId:__navigationId,entryType:'measure',startTime:start,duration:end-start,detail});__performanceTimeline.push(entry);return entry;
   };
@@ -9301,7 +9315,7 @@ if (typeof globalThis.CSS === "undefined") {
   };
   // CSS Typed OM numeric factories (CSS.px() …) come from the binding; Chrome's namespace
   // lists its operations in code-unit order.
-  const factories = globalThis[Symbol.for("ts")]?.typedOmFactories?.();
+  const factories = __G.typedOmFactories?.();
   if (factories) {
     const members = [["escape", globalThis.CSS.escape], ["supports", globalThis.CSS.supports], ...factories].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     const namespace = {};
@@ -9887,6 +9901,13 @@ const __resources = new WeakMap();
 const __resourcePromises = new Set();
 const __resourceSheetConstructor = CSSStyleSheet;
 const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readRules;
+// Image load state is published to the binding's HTMLImageElement.prototype accessors
+// (complete/naturalWidth/naturalHeight/currentSrc); page JS cannot reach this record.
+const __imageHost = ops.op_interface_record_get(document).imageHost;
+// width/height/x/y read the rendered box from surf's native live layout (turbo-dom#26):
+// null while the image is not being rendered; a layout this snapshot cannot supply reads
+// as not rendered (the attribute / natural size) rather than throwing from an IDL getter.
+__imageHost.setLayoutQuery(image=>{try{return ops.op_live_image_box(image);}catch(_){return null;}});
 const __resourceStyleRequests = new WeakMap();
 const __resourceCSSHosts = new WeakMap();
 const __resourceCompatMode=Object.getOwnPropertyDescriptor(Document.prototype,"compatMode").get;
@@ -9905,10 +9926,14 @@ const __resourceDocumentQuery=Document.prototype.querySelectorAll;
 const __resourceCompare=Node.prototype.compareDocumentPosition;
 let __resourceMutationEpoch = 0;
 const __resourceBaseURL=Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get;
+const __documentURL=Object.getOwnPropertyDescriptor(Document.prototype,"URL").get;
+const __documentFirstElementChild=Object.getOwnPropertyDescriptor(Document.prototype,"firstElementChild").get;
+const __elementFirstElementChild=Object.getOwnPropertyDescriptor(Element.prototype,"firstElementChild").get;
+const __elementNextElementSibling=Object.getOwnPropertyDescriptor(Element.prototype,"nextElementSibling").get;
 "##,
     include_str!("compression_dictionary.js"),
     r##"
-function __cssHost(doc) {let host=__resourceCSSHosts.get(doc);if(!host){host=ops.op_interface_record_get(doc).cssHost;__resourceCSSHosts.set(doc,host);}return host;}
+function __cssHost(doc) {let host=__intrinsicApply(__intrinsicWeakGet,__resourceCSSHosts,[doc]);if(!host){host=ops.op_interface_record_get(doc).cssHost;__intrinsicApply(__intrinsicWeakSet,__resourceCSSHosts,[doc,host]);}return host;}
 function __cssOriginClean(response) {return response.originClean===true;}
 function __validSheetResponse(response, doc, clean) {const mime=(response.contentType||"").split(";")[0].trim().toLowerCase();return mime==="text/css" || !response.nosniff && (__resourceCompatMode.call(doc)==="BackCompat" && clean || __cssHost(doc).looksLikeCSS(response.text));}
 function __fireResourceEvent(el, kind, win = globalThis) {
@@ -9917,18 +9942,19 @@ function __fireResourceEvent(el, kind, win = globalThis) {
   try { ops.op_dispatch_host_event(ev, el); } catch (_) {}
 }
 function __trackResource(promise) {
-  __resourcePromises.add(promise);
-  promise.finally(() => __resourcePromises.delete(promise));
+  __intrinsicApply(__intrinsicSetAdd, __resourcePromises, [promise]);
+  __promiseFinally(promise, () => __intrinsicApply(__intrinsicSetDelete, __resourcePromises, [promise]));
   return promise;
 }
 function __resourceNow() { return __perfNow(); }
 function __recordResource(win, url, kind, start) {
-  const ns = win[Symbol.for("ts")];
+  // `win` is this realm's own window (each frame runs its own bootstrap).
+  const ns = __G;
   if (ns && typeof ns.recordResourceTiming === "function") ns.recordResourceTiming(url, kind, start, __resourceNow(win));
 }
 async function __loadSheetImports(sheet, source, win, depth = 0) {
   if (!sheet || depth >= 16) return;
-  const request=__resourceStyleRequests.get(sheet)||{mode:"no-cors",credentials:"include",document:__document};
+  const request=__intrinsicApply(__intrinsicWeakGet,__resourceStyleRequests,[sheet])||{mode:"no-cors",credentials:"include",document:__document};
   const rules=__resourceSheetRules(sheet);
   for(let index=0;index<rules.length;index++) {
     const rule=rules[index];
@@ -9949,55 +9975,72 @@ async function __loadSheetImports(sheet, source, win, depth = 0) {
     } catch (_) { if(!recorded)__recordResource(win, url, "css", start); }
   }
 }
-function __loadImage(el, win = globalThis) {
-  const src = el.getAttribute("src") || "";
+function __imageSource(src, source) {try{return new URL(src,source).href;}catch(_){return src;}}
+// The source an <img> loads: turbo-dom-browser-env's selection (turbo-dom#71: <picture>
+// sources by media and type, srcset x / w descriptors against sizes, for this window's
+// viewport and devicePixelRatio) as {url (absolute), density}; and the name live layout keys
+// the box's image by (src, else the first srcset candidate, as turbo-dom-layout names it).
+function __imageChoice(el, win) {
+  const src = __resourceAttribute.call(el, "src") || "";
+  const srcset = __resourceAttribute.call(el, "srcset") || "";
+  const key = src.trim() ? src : srcset.split(",")[0].trim().split(/\s+/)[0];
+  const chosen = __imageHost.selectSource(el, {viewportWidth: Number(win.innerWidth) || 0,
+    viewportHeight: Number(win.innerHeight) || 0, devicePixelRatio: Number(win.devicePixelRatio) || 1});
+  return chosen === null ? { url: "", density: 1, key } : { url: chosen.url, density: chosen.density, key };
+}
+function __imageLoaded(el, choice, result, url) {
+  const loaded = !!(result && result.ok);
+  // A density-selected image reports (and lays out at) the binding's density-corrected size.
+  const size = loaded ? __imageHost.naturalSize(result.width, result.height, choice.density) : null;
+  const width = size ? size.naturalWidth : 0, height = size ? size.naturalHeight : 0;
+  ops.op_live_image_loaded(el,choice.key,width,height);
+  __imageHost.setState(el,loaded?{complete:true,naturalWidth:width,naturalHeight:height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
+  return loaded;
+}
+// `parser`: a document-scan (parser) image, whose broken data: source is already
+// complete at the first script read; a script-set one stays pending until its error.
+// `restart`: a relevant mutation (HTML "update the image data": a src/srcset/sizes set, a
+// <picture> source change), which reloads and fires load again even when the selected
+// source is unchanged (turbo-surf#49); an insertion keeps an unchanged selection's load.
+function __loadImage(el, win = globalThis, parser = false, restart = false) {
+  const choice = __imageChoice(el, win), src = choice.url;
+  const selection = src + "\n" + choice.density;
   const previous = __resources.get(el);
-  if (previous && previous.src === src) return previous.promise;
-  const state = {src,complete:!src,width:0,height:0,currentSrc:"",promise:null};
+  if (previous && previous.src === selection && !restart) return previous.promise;
+  const state = {src:selection,promise:null};
   __resources.set(el,state);
-  if (!src) return Promise.resolve();
+  if (!src) {__imageHost.setState(el,null);return state.promise=Promise.resolve();}
   const doc = __resourceNativeOwner(el);
   const source = __resourceNativeBase(el);
+  const currentSrc = __imageSource(src,source);
+  // turbo-surf#38: a data: image is decoded synchronously, as Chrome loads it the moment
+  // its source is set; its load/error event still fires as a later task.
+  const data = /^data:/i.test(currentSrc);
+  const decoded = data && ops.op_csp_request(doc,currentSrc,"img-src","") ? ops.op_decode_data_image(currentSrc) : null;
+  if (decoded && decoded.ok || data && parser) __imageLoaded(el,choice,decoded,currentSrc);
+  else __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc});
   state.promise = __trackResource((async () => {
-    let result;
+    let result = decoded;
     const url = new URL(src, source).href, start = __resourceNow(win);
     try {
       await 0;
-      if (ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
+      if (!data && ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
     } catch (_) {}
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
-    state.complete=true;
-    if (result && result.ok) {state.width=result.width;state.height=result.height;state.currentSrc=result.url;}
-    __fireResourceEvent(el, result && result.ok ? "load" : "error", win);
+    __fireResourceEvent(el, __imageLoaded(el,choice,result,url) ? "load" : "error", win);
   })());
   return state.promise;
 }
-function __patchImage(el, win = globalThis) {
-  if (el.__tcImagePatched) return;
-  el.__tcImagePatched=true;
-  for (const [name, key, fallback] of [["complete","complete",true],["naturalWidth","width",0],["naturalHeight","height",0],["currentSrc","currentSrc",""]]) {
-    Object.defineProperty(el,name,{configurable:true,get(){const state=__resources.get(this);return state?state[key]:fallback;}});
-  }
-  Object.defineProperty(el,"src",{configurable:true,get(){const src=this.getAttribute("src")||"";try{return src?new URL(src,(this.ownerDocument&&this.ownerDocument.URL)||win.location.href).href:"";}catch(_){return src;}},set(value){this.setAttribute("src",String(value));__loadImage(this,win);}});
-  el.decode=function(){return __loadImage(this,win).then(()=>{if(!this.naturalWidth){const error=new Error("The source image cannot be decoded");error.name="EncodingError";throw error;}});};
-}
-const __createResourceElement = document.createElement.bind(document);
-document.createElement = function(tag, options) {
-  const el=__createResourceElement(tag,options);
-  if (String(tag).toLowerCase()==="img") __patchImage(el);
-  return el;
-};
-globalThis.Image = function Image(width,height) {
-  const el=document.createElement("img");
-  if(width!=null)el.width=width;if(height!=null)el.height=height;
-  return el;
-};
-globalThis.Image.prototype=globalThis.HTMLImageElement.prototype;
+// The binding owns HTMLImageElement entirely (turbo-dom#23): the prototype's reflected
+// src, decode() settling with imageHost, and the native Image() factory. Loads start
+// from the document's mutation consumer below (a src/srcset record on any <img> this
+// document owns, connected or not, and images inserted into its trees), and from
+// loadDocumentResources for parser images, so no image carries own properties.
 __G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
-  if(doc!==__document || __documentType.call(doc)!==9)throw new TypeError("Resource loading requires the owning native Document");
+  if(doc!==__document || __intrinsicApply(__documentType,doc,[])!==9)throw new TypeError("Resource loading requires the owning native Document");
   __discoverDictionaries();
-  const styles=[];
+  const styles=__list();
   // The query is already in document order. Avoid a whole-tree position walk
   // for each parser resource, unless a resource hook changed that order.
   const epoch=__resourceMutationEpoch;
@@ -10010,16 +10053,16 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     const el=elements[index];
     if(before){
       if(cutoff>=0&&epoch===__resourceMutationEpoch){if(index>=cutoff)break;}
-      else if((__resourceCompare.call(el,before)&4)===0)continue;
+      else if((__intrinsicApply(__resourceCompare,el,[before])&4)===0)continue;
     }
-    const tag=__resourceTagName.call(el);
-    if(tag==="SCRIPT"||__resourceLocalName.call(el)==="script")continue;
-    if (tag==="IMG") {__patchImage(el,win);__loadImage(el,win);continue;}
+    const tag=__intrinsicApply(__resourceTagName,el,[]);
+    if(tag==="SCRIPT"||__intrinsicApply(__resourceLocalName,el,[])==="script")continue;
+    if (tag==="IMG") {__loadImage(el,win,true);continue;}
     if(tag==="STYLE"){
       const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
-      const source=__resourceText.call(el);let state=__resources.get(el);
-      if(!state||state.src!==source){state={src:source,promise:null};__resources.set(el,state);__resourceStyleRequests.set(sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true});state.promise=__trackResource(__loadSheetImports(sheet,__resourceBaseURL.call(doc)||ops.op_document_request_url(),win));}
-      styles.push(state.promise);continue;
+      const source=__intrinsicApply(__resourceText,el,[]);let state=__intrinsicApply(__intrinsicWeakGet,__resources,[el]);
+      if(!state||state.src!==source){state={__proto__:null,src:source,promise:null};__intrinsicApply(__intrinsicWeakSet,__resources,[el,state]);__intrinsicApply(__intrinsicWeakSet,__resourceStyleRequests,[sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true}]);state.promise=__trackResource(__loadSheetImports(sheet,__intrinsicApply(__resourceBaseURL,doc,[])||ops.op_document_request_url(),win));}
+      __listPush(styles,state.promise);continue;
     }
     if (!(__resourceAttribute.call(el,"rel")||"").toLowerCase().split(/\s+/).includes("stylesheet") || el.disabled) continue;
     const href=__resourceAttribute.call(el,"href");if(!href)continue;
@@ -10046,13 +10089,13 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
         }catch(error){if(!recorded)__recordResource(win,url,"link",start);if(__resources.get(el)===state){const failure=__resourceFailure(error);if(!failure?.integrityBlocked&&(receivedResponse||failure?.responseReceived&&!failure.policyBlocked))__cssHost(doc).attachLinked(el,"",url,false);__fireResourceEvent(el,"error",win);}}
       })());
     }
-    styles.push(state.promise);
+    __listPush(styles,state.promise);
   }
   return __framePromiseAll(styles);
 };
 __G.pendingResourceCount=()=>__resourcePromises.size+__dictionaryPending+__dictionaryTaskCount;
-__G.documentLoadReady=()=>__resourcePromises.size===0 && ops.op_frame_pending()===0;
-__G.waitForDocumentResources=()=>__framePromiseAll(Array.from(__resourcePromises));
+__G.documentLoadReady=()=>__setSize(__resourcePromises)===0 && ops.op_frame_pending()===0;
+__G.waitForDocumentResources=()=>{const pending=__list();__intrinsicApply(__intrinsicSetEach,__resourcePromises,[promise=>__listPush(pending,promise)]);return __framePromiseAll(pending);};
 function __fireScriptEvent(el, kind, err) {
   // Use the same private native event path as image and stylesheet loads.
   // Plain records are not Events and cannot reach addEventListener handlers.
@@ -10069,8 +10112,9 @@ function __fireScriptEvent(el, kind, err) {
 // code runs) routes the chunk to the module pump. Let V8 be the parser, not a regex.
 __G.rewriteEsmForClassic = function (code) {
   if (typeof code !== "string" || !code) return code;
-  if (/import\s*\.\s*meta/.test(code)) {
-    code = code.replace(/import\s*\.\s*meta/g, "globalThis[Symbol.for('ts')].importMeta");
+  if (__regexpTest(/import\s*\.\s*meta/, code)) {
+    // An inline stand-in (the engine namespace is not page-reachable, turbo-dom#222).
+    code = code.replace(/import\s*\.\s*meta/g, "({get url(){return (globalThis.location&&globalThis.location.href)||\"\"},env:{},resolve(s){try{return new globalThis.URL(s,globalThis.location.href).href}catch(_e){return String(s)}}})");
   }
   return code;
 }
@@ -10151,7 +10195,9 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
     if(!prepared.asynchronous||!(external||module))await resources;
   }
   const absoluteSource=get("src")?new URL(get("src"),__baseApply(__resourceBaseURL,__document,[])).href:"";
-  const parserIndex=Array.prototype.indexOf.call(document.querySelectorAll("script"),el);
+  const parserScripts=__intrinsicApply(__resourceDocumentQuery,__document,["script"]);
+  let parserIndex=-1;
+  for(let index=0,count=__intrinsicApply(__resourceListLength,parserScripts,[]);index<count;index++)if(__intrinsicApply(__resourceListItem,parserScripts,[index])===el){parserIndex=index;break;}
   if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,absoluteSource,prepared.source)){
     if(absoluteSource)__fireScriptEvent(el,"error");return;
   }
@@ -10185,7 +10231,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
   const src = get("src");
   let downloaded=false,mutedErrors=false;
   try {
-    let code, sourceURL=document.URL;
+    let code, sourceURL=__intrinsicApply(__documentURL,__document,[]);
     if (src) {
       const abs = new URL(src, globalThis.location.href).href;
       const start = __resourceNow(globalThis);
@@ -10287,8 +10333,57 @@ function __containsInsertedResource(node) {
   return kind === "LINK" || kind === "IMG" || kind === "STYLE" ||
     kind !== "" && __resourceApply(__resourceElementQuery,node,["link,img,style"]) !== null;
 }
+const __imageMutationAttributes = {__proto__: null, src:true, srcset:true, sizes:true};
+const __resourceElementQueryAll = Element.prototype.querySelectorAll;
+const __resourceFragmentQueryAll = DocumentFragment.prototype.querySelectorAll;
+// An <img> this document owns starts (or restarts) its load when its src or srcset
+// changes, or when a tree inserts it, whether or not it is connected: Chrome loads
+// `new Image().src = …`, detached innerHTML and createContextualFragment images alike.
+// Images of other documents (template contents, DOMParser and createHTMLDocument
+// documents) never load; __loadImage keeps an unchanged src's load.
+function __ownedImage(node) {
+  return __resourceElementKind(node)==="IMG" && __resourceNativeOwner(node)===__document;
+}
+function __startInsertedImages(node) {
+  const type=__resourceApply(__documentType,node,[]);
+  if(type!==1 && type!==11)return;
+  if(__ownedImage(node))__loadImage(node,globalThis);
+  const images=__resourceApply(type===1?__resourceElementQueryAll:__resourceFragmentQueryAll,node,["img"]);
+  const length=__resourceListApply(__resourceListLength,images,[]);
+  for(let index=0;index<length;index++){
+    const image=__resourceListApply(__resourceListItem,images,[index]);
+    if(__ownedImage(image))__loadImage(image,globalThis);
+  }
+}
+// A <picture>'s <source> children take part in its image's selection (turbo-dom#71), so
+// a source attribute change, or a child inserted into or removed from the picture,
+// reselects the picture's own <img> children.
+const __sourceMutationAttributes = {__proto__: null, srcset:true, sizes:true, media:true, type:true, width:true, height:true};
+const __resourceParentNode = __G.domAccessor("parentNode", false, "Node");
+function __reselectPicture(picture) {
+  if(picture===null || __resourceElementKind(picture)!=="PICTURE")return;
+  const images=__resourceApply(__resourceElementQueryAll,picture,[":scope > img"]);
+  const length=__resourceListApply(__resourceListLength,images,[]);
+  for(let index=0;index<length;index++){
+    const image=__resourceListApply(__resourceListItem,images,[index]);
+    if(__ownedImage(image))__loadImage(image,globalThis,false,true);
+  }
+}
+function __imageMutation(event) {
+  if (event.type === "attributes") {
+    if (event.attributeNamespace!==null) return;
+    if (__imageMutationAttributes[event.attributeName] && __ownedImage(event.target))
+      __loadImage(event.target,globalThis,false,true);
+    else if (__sourceMutationAttributes[event.attributeName] && __resourceElementKind(event.target)==="SOURCE")
+      __reselectPicture(__resourceApply(__resourceParentNode,event.target,[]));
+  } else if (event.type === "childList") {
+    for (let index=0; index<event.added.length; index++) __startInsertedImages(event.added[index]);
+    if (event.added.length || event.removed.length) __reselectPicture(event.target);
+  }
+}
 function __resourceMutation(event) {
   if(event.type==="childList")for(let index=0;index<event.removed.length;index++)__dictionaryRemoved(event.removed[index]);
+  __imageMutation(event);
   let connected = false, relevant = false;
   for (let index = 0; index < event.ancestors.length; index++) {
     const ancestor=event.ancestors[index];
@@ -10337,13 +10432,19 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     // `React is not defined` → the whole app never hydrates. So: non-defer scripts
     // first (document order), then `defer` scripts (document order). `async` isn't
     // deferred. New scripts injected mid-round re-partition on the next pass.
-    const all = __initialResourceScripts.splice(0);
+    const all = __list();
+    for (let index = 0; index < __initialResourceScripts.length; index++) __listPush(all, __initialResourceScripts[index]);
+    __initialResourceScripts.length = 0;
     if(!__G.isFrame)__frameScriptElements.length=0;
-    const isDeferred = element => __htmlPolicyElement(element,"script") && !__resourceScriptAsync.call(element) &&
-      ((__resourceAttribute.call(element,"type") || "").trim().toLowerCase() === "module" ||
-        __resourceAttribute.call(element,"src") !== null && __resourceAttribute.call(element,"defer") !== null);
-    const ordered = all.filter(element => !isDeferred(element)).concat(all.filter(isDeferred));
-    for (const element of ordered) {
+    const attribute = (element, name) => __intrinsicApply(__resourceAttribute, element, [name]);
+    const isDeferred = element => __htmlPolicyElement(element,"script") && !__intrinsicApply(__resourceScriptAsync, element, []) &&
+      (__lower(__trim(attribute(element,"type") || "")) === "module" ||
+        attribute(element,"src") !== null && attribute(element,"defer") !== null);
+    const ordered = __list();
+    for (let index = 0; index < all.length; index++) if (!isDeferred(all[index])) __listPush(ordered, all[index]);
+    for (let index = 0; index < all.length; index++) if (isDeferred(all[index])) __listPush(ordered, all[index]);
+    for (let position = 0; position < ordered.length; position++) {
+      const element = ordered[position];
       const prepared = __prepareResourceScript(element);
       if (!prepared) continue;
       ranScript = true;
@@ -10353,12 +10454,20 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     }
     __G.loadDocumentResources();
     if (__G.initialLoading) __markDocumentInteractive();
-    const fired = fireTimers ? __G.runTimers(Math.min(timersLeft, 5000)) : 0;
+    const fired = fireTimers ? __G.runTimers(__intrinsicMin(timersLeft, 5000)) : 0;
     timersLeft -= fired;
     if (fired) await undefined;
     if (!ranScript && fired === 0) break;
   }
 };
+// The parser pass of the initial load; the host's load gate polls its completion
+// (turbo-surf#87: through these functions, not page-reachable `.finally`/globals).
+let __initialHydrated = false;
+__G.startInitialHydrate = () => {
+  __initialHydrated = false;
+  __promiseFinally(__G.hydrate(300, 200000, false), () => { __initialHydrated = true; });
+};
+__G.initialHydrateDone = () => __initialHydrated;
 // The compatibility module queue contains only native-prepared classic scripts
 // whose V8 parse failed on module syntax. Explicit modules use the import path.
 __G.takeModuleScript = function () {
@@ -10646,10 +10755,10 @@ const __pendingWindowTimer = () => {
   return index>=0 && __timers[index].due<=__timerNow();
 };
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
+  (!__G.isFrame && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __setSize(__resourcePromises) > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
-__G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
+__G.pendingFetchCount = () => String(__pendingFetchCount);
 
 // A cheap "has the DOM changed?" signal for the interaction drain: element count + the
 // total length of input values (so a controlled-input edit registers). Lets the drain
@@ -10713,13 +10822,14 @@ __G.domSig = (() => {
   const frameConnected = el => frameApply(frameIsConnected, el, []);
   const visitFrameHosts = callback => frameApply(frameHostEach, frameHosts, [callback]);
   const frameWindowView = __G.windowView;
-  const frameDepth = (globalThis.__depth || 0) + 1;
+  const frameDepth = ops.op_window_bootstrap_depth(globalThis) + 1;
   const iframeTag = __G.domAccessor("tagName", false, "Element");
   const recordFor = (el) => {
     if (frameApply(iframeTag, el, []) !== "IFRAME") throw new TypeError("Illegal invocation");
-    if (Object.hasOwn(el, "__iframeWired")) {
-      for (const name of ["contentWindow", "contentDocument", "__realm", "__iframeWired"]) {
-        if (Object.hasOwn(el, name)) delete el[name];
+    if (__intrinsicHasOwn(el, "__iframeWired")) {
+      const wired = ["contentWindow", "contentDocument", "__realm", "__iframeWired"];
+      for (let index = 0; index < wired.length; index++) {
+        if (__intrinsicHasOwn(el, wired[index])) delete el[wired[index]];
       }
     }
     const owner = frameOwner(el);
@@ -10737,7 +10847,7 @@ __G.domSig = (() => {
   const FRAME_STUB_HOST_RE = /posthog|propelauth/i;
   const frameSrcOf = el => frameApply(frameAttribute, el, ["src"]) || "";
   const frameSrcdocOf = el => frameApply(frameAttribute, el, ["srcdoc"]);
-  const frameWantsRealm = el => !!frameSrcdocOf(el) || !FRAME_STUB_HOST_RE.test(frameSrcOf(el));
+  const frameWantsRealm = el => !!frameSrcdocOf(el) || !__regexpTest(FRAME_STUB_HOST_RE, frameSrcOf(el));
   const resolveFrameUrl = el => {
     const source = frameSrcOf(el);
     if (!source) return "";
@@ -10747,7 +10857,7 @@ __G.domSig = (() => {
     const record = recordFor(el);
     if (!record || record.loaded || record.epoch !== epoch || !frameConnected(el)) return;
     record.loaded = true;
-    globalThis.setTimeout(() => {
+    __frameTimer(() => {
       if (record.epoch !== epoch || !frameConnected(el)) return;
       const event = new __hostEvent("load");
       ops.op_event_trust(event, -1);
@@ -10777,7 +10887,7 @@ __G.domSig = (() => {
   // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL,
   // shared cookie jar).
   const loadFrameScripts = async (cw, frameUrl) => {
-    const scripts = ops.op_frame_scripts(cw), deferred = [], asynchronous = [];
+    const scripts = ops.op_frame_scripts(cw), deferred = __list(), asynchronous = __list();
     const execute = async (script) => {
       let downloaded=false;
       try {
@@ -10790,19 +10900,20 @@ __G.domSig = (() => {
             await runVmInRealm(cw, response.body, response.final_url || script.src, response.frame_script || 0, script.index);
             ops.op_frame_script_event(cw,script.index,true);
           } else ops.op_frame_script_event(cw,script.index,false);
-        } else if (script.code.trim()) {
-          const located = "\n".repeat(script.line) + " ".repeat(script.column) + script.code;
+        } else if (__trim(script.code)) {
+          const located = __intrinsicApply(__intrinsicRepeat, "\n", [script.line]) + __intrinsicApply(__intrinsicRepeat, " ", [script.column]) + script.code;
           await runVmInRealm(cw, located, script.source, 0, script.index);
         }
       } catch (error) { if(script.src)ops.op_frame_script_event(cw,script.index,downloaded); __print("frame script error: " + (error && error.stack ? error.stack : error) + "\n"); }
     };
-    for (const script of scripts) {
-      if (script.asynchronous && (script.src || script.module)) asynchronous.push(execute(script));
-      else if (script.module || (script.src && script.deferred)) deferred.push(script);
+    for (let index = 0; index < scripts.length; index++) {
+      const script = scripts[index];
+      if (script.asynchronous && (script.src || script.module)) __listPush(asynchronous, execute(script));
+      else if (script.module || (script.src && script.deferred)) __listPush(deferred, script);
       else await execute(script);
     }
     ops.op_frame_parser_done(cw);
-    for (const script of deferred) await execute(script);
+    for (let index = 0; index < deferred.length; index++) await execute(deferred[index]);
     return {asynchronous};
   };
   __G.cspFrameScript = index => {
@@ -10819,7 +10930,6 @@ __G.domSig = (() => {
       const getter=__documentFunction(function(){if(!ops.op_surf_is_window(this))throw new __exceptionTypeError("Illegal invocation");const value=read(this);return name==="frameElement"?value:frameWindowView(value);},"get "+name,0);
       Object.defineProperty(globalThis,name,{__proto__:null,get:getter,configurable:true,enumerable:true});
     }
-    globalThis.__depth = metadata.depth;
     __G.setDocumentReadyState("loading");
     globalThis.origin = metadata.origin;
     location.href = metadata.location;
@@ -10898,12 +11008,12 @@ __G.domSig = (() => {
     const epoch = record.epoch;
     let window = frameRealm(el);
     if (!window) { fireIframeLoad(el, epoch); return; }
-    globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+    __pendingFetchCount++;
     let frameUrl = record.metadata.url;
     try {
       // Insertion creates the initial empty document synchronously. Navigation
       // commits on a later microtask, so srcdoc cannot appear during appendChild.
-      await Promise.resolve();
+      await undefined;
       if (record.epoch !== epoch || !frameConnected(el)) return;
       let html = "", responseId = 0;
       const srcdoc = record.navigationURL ? null : frameSrcdocOf(el);
@@ -10934,7 +11044,7 @@ __G.domSig = (() => {
     } catch (error) {
       if (record.epoch === epoch) __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
     } finally {
-      globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+      __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
       fireIframeLoad(el, epoch);
     }
   };
@@ -11053,9 +11163,9 @@ __G.domSig = (() => {
         const receiverDocument = frameDocument(this);
         if (!frameApply(frameDefaultView, receiverDocument, [])) return frameApply(original, this, args);
         const parent = frameApply(frameParentNode, this, []);
-        const moved = ["appendChild","insertBefore","replaceChild"].includes(name) ? [args[0]]
+        const moved = name === "appendChild" || name === "insertBefore" || name === "replaceChild" ? [args[0]]
           : name === "insertAdjacentElement" ? [args[1]]
-          : ["append","prepend","before","after","replaceWith","replaceChildren"].includes(name) ? args : [];
+          : name === "append" || name === "prepend" || name === "before" || name === "after" || name === "replaceWith" || name === "replaceChildren" ? args : [];
         const finishes = __recordCreate(null), seen = new Set();let finishCount = 0;
         for (let index = 0; index < moved.length; index++) {
           let source;
@@ -11110,7 +11220,7 @@ __G.domSig = (() => {
     const original = descriptor.value;
     const delegate = function(...args) {
       const result = frameApply(original, this, args);
-      const attribute = String(args[name.endsWith("NS") ? 1 : 0]).toLowerCase();
+      const attribute = __lower(String(args[__intrinsicApply(__intrinsicEndsWith, name, ["NS"]) ? 1 : 0]));
       if (frameApply(iframeTag, this, []) === "IFRAME" && (attribute === "src" || attribute === "srcdoc")) {
         const owner = frameOwner(this);
         if (owner) ops.op_frame_host_helper(frameDocument(this), "frameSourceChanged", [this]);
@@ -11131,7 +11241,7 @@ __G.domSig = (() => {
   const nativeCreate = document.createElement.bind(document);
   document.createElement = function(tag, options) {
     const el = nativeCreate(tag, options);
-    if (String(tag).toLowerCase() === "iframe") recordFor(el);
+    if (__lower(String(tag)) === "iframe") recordFor(el);
     return el;
   };
   // Retained for child configuration; DOM ownership already determines depth.
@@ -11183,7 +11293,7 @@ __G.domSig = (() => {
   mark(fetch, "fetch");
   mark(setInterval); mark(clearInterval);
   mark(cancelAnimationFrame, "cancelAnimationFrame"); // now its own fn, not a clearTimeout alias
-  // Event API: the vendored addEventListener/removeEventListener/dispatchEvent are `function`
+  // Event API: the binding's addEventListener/removeEventListener/dispatchEvent are `function`
   // shims — their `.toString()` leaks source AND they carry an own `prototype` (native methods
   // don't). WORSE, they sit as WINDOW OWN-PROPS: real Chrome inherits them from
   // EventTarget.prototype, so `window.hasOwnProperty('addEventListener')` is FALSE in Chrome but
@@ -11540,7 +11650,7 @@ __G.domSig = (() => {
     // REAL args (buffer bytes + shader source — captured at the live call site, so nothing is
     // lossy) into a batch, and on readPixels flush the batch to the host GPU executor
     // (op_webgl_readback) and fill the destination from genuine GPU pixels. Only installed when a
-    // host executor is present; otherwise the vendored synthetic context is left as-is. getShader/
+    // host executor is present; otherwise the binding's synthetic context is left as-is. getShader/
     // Program*Parameter report success so a page's compile/link checks pass. Returns real GPU
     // pixels for the common fingerprint draw (shaders + a vertex buffer + drawArrays + readPixels).
     const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -11567,7 +11677,7 @@ __G.domSig = (() => {
     const installWebglRecorder = (gl) => {
       const op = (ops && ops.op_webgl_readback) || null;
       // op_webgl_readback is ALWAYS registered, so `typeof op` can't tell whether a GPU executor
-      // is installed. Only override the (vendored synthetic) WebGL context when one actually is —
+      // is installed. Only override the binding's synthetic WebGL context when one actually is —
       // otherwise the default build would replace the context with recording stubs for nothing.
       const avail = ops && ops.op_webgl_available;
       if (!op || !avail || !avail()) return;
@@ -11671,7 +11781,7 @@ __G.domSig = (() => {
           // Give the context its OWN dedicated prototype carrying its methods, then wire it to
           // the named global constructor, so `gl instanceof WebGLRenderingContext` holds and
           // `WebGLRenderingContext.prototype.getParameter` resolves natively. We must NOT reuse
-          // the vendored context's shared fallback prototype (a generic object also backing
+          // the binding's context's shared fallback prototype (a generic object also backing
           // `location` etc.) as the constructor prototype — that would make `location instanceof
           // WebGLRenderingContext` true and collapse the webgl/webgl2 protos onto one, both worse
           // tells. The context methods are per-instance bound closures (they don't read `this`),
@@ -11706,12 +11816,12 @@ __G.domSig = (() => {
             }
           } catch (e) {}
         }
-        // 2D context: replace the vendored getImageData (an OWN instance method returning synthetic
+        // 2D context: replace the binding's getImageData (an OWN instance method returning synthetic
         // bytes — `fillRect(red); getImageData` read back NON-red, a broken-canvas tell) with one
         // that reads the ACTUAL rendered pixels back through the raw-RGBA rasterizer. Raw pixels
         // have no PNG encoder in the loop, so shapes/solids read back exactly like a real browser.
         if (k === "2d") {
-          // Class tag: real Chrome is "[object CanvasRenderingContext2D]"; the vendored ctx tagged
+          // Class tag: real Chrome is "[object CanvasRenderingContext2D]"; the binding's ctx tagged
           // as "[object DOMImplementation]" (its shared fallback proto) — a tell. Brand the instance
           // (not the shared proto — that would mistag every other object backed by it, incl.
           // `location`, like the WebGL-proto lesson).
@@ -11725,7 +11835,7 @@ __G.domSig = (() => {
               return { alpha: true, colorSpace: "srgb", colorType: "unorm8", desynchronized: false, toneMapping: { mode: "standard" }, willReadFrequently: false };
             } }).getContextAttributes, "getContextAttributes", 0);
           }
-          // measureText: the vendored width was a synthetic approximation (a font-metrics tell —
+          // measureText: the binding's width was a synthetic approximation (a font-metrics tell —
           // font-detection fingerprints compare measureText width across families). Route the WIDTH
           // through the host's real system-font measurer (op_measure_text), which measures the same
           // CoreText face Chrome does → width matches Chrome exactly. The bounding-box fields are
@@ -11798,10 +11908,10 @@ __G.domSig = (() => {
     };
     // Prototype-less native shape (native methods have no own `prototype`); getContext.length === 1.
     canvasProto.getContext = nativize(wrapped, "getContext", 1);
-    // Raster-backed toDataURL: replay the vendored 2D display list (ctx._ops) through the
-    // host rasterizer (op_raster_png) into a REAL PNG. The vendored stub returns a ~94-byte
+    // Raster-backed toDataURL: replay the binding's 2D display list (ctx._ops) through the
+    // host rasterizer (op_raster_png) into a REAL PNG. The binding's stub returns a ~94-byte
     // synthetic blob — an impossible size for rendered content, a canvas-fingerprint tell.
-    // Falls back to the vendored blob when no rasterizer is installed or on any error.
+    // Falls back to the binding's blob when no rasterizer is installed or on any error.
     const rasterOp = (ops && ops.op_raster_png) || null;
     const origToDataURL = canvasProto.toDataURL;
     if (typeof origToDataURL === "function") {
@@ -11810,7 +11920,7 @@ __G.domSig = (() => {
         requireCanvas(this);
         if (this.width === 0 || this.height === 0) return "data:,";
         // The raster op only encodes PNG. For a non-PNG request (e.g. the webp-support probe
-        // toDataURL('image/webp') or an explicit image/jpeg) defer to the vendored path, which
+        // toDataURL('image/webp') or an explicit image/jpeg) defer to the binding's path, which
         // labels the data URL with the requested MIME — returning PNG for a webp request would be
         // both wrong bytes and a tell.
         const mime = typeof type === "string" && type ? type.toLowerCase() : "image/png";
@@ -11868,7 +11978,7 @@ __G.domSig = (() => {
       if (typeof value === "function") {
         const method = ({[key](...args) {
           if (this !== object) throw new TypeError("Illegal invocation");
-          return value.apply(object, args);
+          return __intrinsicApply(value, object, args);
         }})[key];
         Object.defineProperty(method, "length", {value: value.length, configurable: true});
         mark(method, key);
@@ -11897,7 +12007,7 @@ __G.domSig = (() => {
   guard(() => { if (G.CSS) mark(G.CSS.supports, "supports"); });
 
   // Constructed-object host interfaces we own in JS (brand + native method). The 9 rtdom-native
-  // element/Range/Text brands need vendored-binding work and stay as residual struct fails.
+  // element/Range/Text brands need binding work and stay as residual struct fails.
   const defClass = (name, method, ctorArgsOk) => guard(() => {
     let C = G[name];
     if (typeof C !== "function") { C = function () {}; Object.defineProperty(C, "name", { value: name, configurable: true }); G[name] = C; }
@@ -11927,7 +12037,7 @@ __G.domSig = (() => {
   // rtdom nodes/elements expose DISTINCT per-tag prototypes reachable from JS, so brand each
   // (Symbol.toStringTag on the tag's own prototype) and native-mark its checked method IN PLACE
   // (mark the existing function, never shadow it) — clears struct-brand-table + struct-method-not-native
-  // without touching the vendored DOM binding.
+  // without touching the DOM binding.
   guard(() => {
     const brandNode = (obj, name, method) => {
       if (!obj) return;
@@ -11973,7 +12083,7 @@ __G.domSig = (() => {
   guard(() => { ["fetch", "requestAnimationFrame", "queueMicrotask", "matchMedia"].forEach((n) => { if (typeof G[n] === "function") mark(G[n], n); }); });
 
   // Document encoding accessors — a real Chrome document reports characterSet/charset/
-  // inputEncoding = "UTF-8"; the vendored no-layout document leaves them undefined, a tell
+  // inputEncoding = "UTF-8"; the binding's no-layout document leaves them undefined, a tell
   // an anti-bot collector reads (`document.characterSet`). Define on the document's own
   // prototype so all documents (incl. child realms) inherit; skip if already present.
   guard(() => {
@@ -11998,9 +12108,14 @@ __G.domSig = (() => {
 
   // Keep creation-context delegates private: a retained Document must not resolve
   // these through a WindowProxy that may already point at a newer navigation.
+  // getSelection is not delegated: the binding (selection.js) defines it on
+  // Document.prototype over per-document native state, so a retained or inert
+  // document already gets its own answer (null without a browsing context).
   __documentRuntimeState.members = __newDocumentMembers();
-  for (const name of ["close", "open", "write", "writeln", "createEvent", "createNodeIterator", "createRange", "createTreeWalker", "elementFromPoint", "elementsFromPoint", "getSelection", "hasFocus", "implementation", "adoptedStyleSheets", "styleSheets", "contentType", "hidden", "visibilityState", "fullscreenElement"]) {
-    const descriptor = Object.getOwnPropertyDescriptor(__document, name);
+  for (const name of ["close", "open", "write", "writeln", "createEvent", "createNodeIterator", "createRange", "createTreeWalker", "elementFromPoint", "elementsFromPoint", "hasFocus", "implementation", "adoptedStyleSheets", "styleSheets", "contentType", "hidden", "visibilityState", "fullscreenElement"]) {
+    // The binding moves bootstrap members off the document onto Document.prototype
+    // (Chrome's document owns only `location`, turbo-dom#221): capture either.
+    const descriptor = Object.getOwnPropertyDescriptor(__document, name) ?? Object.getOwnPropertyDescriptor(Document.prototype, name);
     if (!descriptor || descriptor.configurable === false) continue;
     __documentRuntimeState.members.set(name, descriptor);
     if (typeof descriptor.value === "function") {
@@ -12037,14 +12152,20 @@ __G.domSig = (() => {
     });
   }
   __defineDocumentAccessor("defaultView", state => ops.op_document_has_active_window(state.document) ? state.window : null);
-  __defineDocumentAccessor("documentElement", (_state, receiver) => receiver.firstElementChild);
-  __defineDocumentAccessor("head", (_state, receiver) => {
-    const root = receiver.documentElement;
-    return root ? Array.from(root.children).find(child => child.localName === "head") || null : null;
-  });
+  // The root's children through captured accessors, never the page-replaceable
+  // Document/Element members or Array statics (turbo-surf#87).
+  const rootElement = receiver => __intrinsicApply(__documentFirstElementChild, receiver, []);
+  const rootChild = (receiver, accept) => {
+    const root = rootElement(receiver);
+    if (!root) return null;
+    for (let child = __intrinsicApply(__elementFirstElementChild, root, []); child; child = __intrinsicApply(__elementNextElementSibling, child, []))
+      if (accept(__intrinsicApply(__resourceLocalName, child, []))) return child;
+    return null;
+  };
+  __defineDocumentAccessor("documentElement", (_state, receiver) => rootElement(receiver));
+  __defineDocumentAccessor("head", (_state, receiver) => rootChild(receiver, name => name === "head"));
   __defineDocumentAccessor("body", (_state, receiver) => {
-    const root = receiver.documentElement;
-    return root ? Array.from(root.children).find(child => child.localName === "body" || child.localName === "frameset") || null : null;
+    return rootChild(receiver, name => name === "body" || name === "frameset");
   }, (_state, receiver, value) => {
     if (value != null) __documentType.call(value);
     if (!value || !["body", "frameset"].includes(value.localName) || value.namespaceURI !== "http://www.w3.org/1999/xhtml")
@@ -12170,7 +12291,7 @@ __G.domSig = (() => {
       "CSSConditionRule CSSGroupingRule CSSImportRule CSSNamespaceRule CSSPageRule CSSCounterStyleRule CSSLayerBlockRule " +
       "CSSLayerStatementRule CSSPropertyRule CSSNestedDeclarations CSSPositionTryRule CSSTransition CSSAnimation " +
       "CSSNumericValue CSSUnitValue CSSKeywordValue CSSMathSum CSSTransformValue CSSUnparsedValue CSSVariableReferenceValue " +
-      "DOMRectList DOMQuad DOMStringList DOMStringMap DOMException DOMImplementation DOMParser Range StaticRange " +
+      "DOMRectList DOMStringList DOMStringMap DOMException DOMImplementation DOMParser Range StaticRange " +
       "AbstractRange Selection Comment Text CDATASection DocumentType DocumentFragment ShadowRoot Element " +
       "IntersectionObserver ResizeObserver ReportingObserver PerformanceObserver MutationObserver " +
       "Worklet PaintWorkletGlobalScope AudioWorklet AudioWorkletNode Blob FileSystemHandle FileSystemFileHandle " +
@@ -12397,7 +12518,7 @@ __G.domSig = (() => {
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
       "TextEncoder", "TextDecoder", "Screen", "Window", "Crypto", "SubtleCrypto",
       "IntersectionObserver", "ResizeObserver", "MutationObserver", "PerformanceObserver",
-      "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigationTiming", "EventCounts", "DOMPointReadOnly", "DOMPoint", "DOMMatrixReadOnly", "DOMMatrix"];
+      "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigationTiming", "EventCounts", "DOMPointReadOnly", "DOMPoint", "DOMMatrixReadOnly", "DOMMatrix", "DOMQuad"];
     const bindProperties = (object, skip = []) => {
       if (!object) return;
       for (const key of Reflect.ownKeys(object)) {
@@ -12416,6 +12537,7 @@ __G.domSig = (() => {
       bindProperties(original.prototype, ["constructor"]);
       bindProperties(original, ["prototype", "name", "length", "arguments", "caller"]);
       if (orig.call(original).includes("[native code]")) continue;
+      // A call without `new` throws Blink's message (the factory's default, turbo-surf#86).
       const wrapper = factory(original, name, original.length, true, true, name !== "Date");
       Object.defineProperty(wrapper, "prototype", {value: original.prototype, writable: false});
       for (const key of Reflect.ownKeys(original)) {
@@ -12453,6 +12575,7 @@ __G.domSig = (() => {
     include_str!("interface_shapes.js"),
     include_str!("user_activation.js"),
     include_str!("host_input.js"),
+    include_str!("window_named_properties.js"),
     r##"
 __hostErrorEvent=globalThis.ErrorEvent;
 })"##
@@ -12577,7 +12700,6 @@ fn make_runtime_with_storage_and_options(
         inspector: std::env::var_os("TURBO_SURF_JS_TRACE").is_some(),
         extensions: {
             let extension = turbo_dom::init();
-            #[cfg(turbo_surf_native_proxy)]
             let extension = {
                 let mut extension = extension;
                 extension.global_template_middleware = Some(window_proxy::template);
@@ -12841,6 +12963,83 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
     Ok(())
 }
 
+/// An argument for [`namespace_call`].
+enum HostArg {
+    Number(f64),
+    Bool(bool),
+    Null,
+    Value(v8::Global<v8::Value>),
+}
+
+/// Calls a function of the main realm's bootstrap namespace natively (turbo-surf#87).
+/// Host turns never compile namespace-reading source: any method called on a looked-up
+/// result is page-replaceable, while [`call_frame_helper`] resolves the function natively.
+fn namespace_call(
+    rt: &mut JsRuntime,
+    name: &str,
+    args: &[HostArg],
+) -> Result<v8::Global<v8::Value>, String> {
+    let context = rt.main_context();
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    v8::tc_scope!(let scope, scope);
+    let values: Vec<v8::Local<v8::Value>> = args
+        .iter()
+        .map(|arg| match arg {
+            HostArg::Number(value) => v8::Number::new(scope, *value).into(),
+            HostArg::Bool(value) => v8::Boolean::new(scope, *value).into(),
+            HostArg::Null => v8::null(scope).into(),
+            HostArg::Value(value) => v8::Local::new(scope, value),
+        })
+        .collect();
+    if let Some(value) = call_frame_helper(scope, name, &values) {
+        return Ok(v8::Global::new(scope, value));
+    }
+    if !scope.is_execution_terminating() {
+        if let Some(error) = scope.exception() {
+            return Err(error.to_rust_string_lossy(scope));
+        }
+    }
+    Err(format!("Namespace function {name} failed"))
+}
+
+/// Runs an embedder (driver) script in the main realm as a function body whose `__tsNs`
+/// parameter is the engine namespace (turbo-dom#222); returns the body's `return` value.
+pub(crate) fn execute_engine_script(
+    rt: &mut JsRuntime,
+    source: &str,
+) -> Result<v8::Global<v8::Value>, String> {
+    let context = rt.main_context();
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    v8::tc_scope!(let scope, scope);
+    if let Some(value) = crate::browser_env::run_engine_script(scope, source) {
+        return Ok(v8::Global::new(scope, value));
+    }
+    Err(scope
+        .exception()
+        .map(|error| error.to_rust_string_lossy(scope))
+        .unwrap_or_else(|| "Engine script failed".into()))
+}
+
+/// Reads a data property of the main realm's bootstrap namespace natively
+/// (turbo-surf#87); `undefined` when the namespace is unavailable.
+fn namespace_value(rt: &mut JsRuntime, name: &str) -> v8::Global<v8::Value> {
+    let context = rt.main_context();
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    v8::tc_scope!(let scope, scope);
+    let value = frame_namespace(scope).and_then(|namespace| {
+        let key = v8::String::new(scope, name)?;
+        namespace.get(scope, key.into())
+    });
+    let value = value.unwrap_or_else(|| v8::undefined(scope).into());
+    v8::Global::new(scope, value)
+}
+
 fn read_string(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<String, String> {
     let context = rt.main_context();
     let scope = v8::HandleScope::new(rt.v8_isolate());
@@ -12905,6 +13104,16 @@ fn sync_task_runtime() -> &'static tokio::runtime::Runtime {
 /// and intrinsics. Same-HTML evaluates share the page's globals/DOM, which matches
 /// Playwright's page-scoped `evaluate` semantics.
 pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
+    run_with_dom_in(html, script, false)
+}
+
+/// [`run_with_dom`] for an embedder script that needs the engine namespace: `script` is a
+/// function body whose `__tsNs` parameter is the namespace; its `return` value is read.
+pub fn run_engine_with_dom(html: &str, script: &str) -> Result<String, String> {
+    run_with_dom_in(html, script, true)
+}
+
+fn run_with_dom_in(html: &str, script: &str, engine: bool) -> Result<String, String> {
     let _task_context = sync_task_runtime().enter();
     EVAL_RT.with(|cell| {
         let mut slot = cell.borrow_mut();
@@ -12926,9 +13135,12 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
         }
         let (rt, _) = slot.as_mut().expect("eval runtime present");
         let _activation = rt.activation_key().enter();
-        let global = rt
-            .execute_script(page_script_name("about:blank"), script.to_string())
-            .map_err(|e| e.to_string())?;
+        let global = if engine {
+            execute_engine_script(rt, script)?
+        } else {
+            rt.execute_script(page_script_name("about:blank"), script.to_string())
+                .map_err(|e| e.to_string())?
+        };
         let result = read_string(rt, global);
         crate::storage_gc::boundary(rt.v8_isolate());
         result
@@ -13076,6 +13288,8 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
     let origin = v8::String::new(scope, &item.origin).unwrap();
     let failed = v8::Boolean::new(scope, failed);
     let activation = v8::Integer::new(scope, item.activation);
+    let due = v8::Number::new(scope, item.due);
+    let sequence = v8::Number::new(scope, item.sequence);
     call_frame_helper(
         scope,
         "deliverWindowMessage",
@@ -13086,6 +13300,8 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
             port_array.into(),
             failed.into(),
             activation.into(),
+            due.into(),
+            sequence.into(),
         ],
     )
     .ok_or("message dispatch failed")?;
@@ -13377,12 +13593,11 @@ async fn drain_event_loop_until_completion(
             // A completed parser/load gate returns to its host lifecycle turn
             // before selecting another Window task. Pending gates still drive
             // timers below, including resource errors during blocking scripts.
+            // `condition` names a namespace predicate, called natively (turbo-surf#87).
             if let Some(condition) = condition {
-                let value = rt
-                    .execute_script("<load-gate>", condition.to_string())
-                    .map_err(|error| error.to_string());
+                let value = namespace_call(rt, condition, &[]);
                 match value.and_then(|value| read_string(rt, value)) {
-                    Ok(value) if value == "1" => {
+                    Ok(value) if value == "true" => {
                         return std::task::Poll::Ready(Some(Ok(())));
                     }
                     Err(error) => return std::task::Poll::Ready(Some(Err(error))),
@@ -13509,6 +13724,16 @@ pub async fn render_page_with_budget(
     use std::sync::Arc;
 
     let mut rt = make_runtime(base, "", "");
+    // Trusted DOM setup runs before the guest budget starts (as in
+    // `prepare_hydration`): a terminate landing in bootstrap could be swallowed by
+    // its native callbacks and leave the guest script unbounded.
+    {
+        let _activation = rt.activation_key().enter();
+        if let Err(error) = install_dom(&mut rt, html, base) {
+            crate::browser_env::reset_isolate(rt.v8_isolate());
+            return Err(error);
+        }
+    }
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
@@ -13519,8 +13744,9 @@ pub async fn render_page_with_budget(
         while !watch.load(Ordering::Relaxed) {
             if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
                 timeout.store(true, Ordering::Relaxed);
+                // Setup and nested native callbacks can clear V8's termination state
+                // (#98 CI hang): keep enforcing the deadline until the owner finishes.
                 handle.terminate_execution();
-                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -13528,7 +13754,7 @@ pub async fn render_page_with_budget(
 
     rt.park();
     let key = rt.activation_key();
-    let result = key.during(run_async(&mut rt, html, base, script)).await;
+    let result = key.during(run_async(&mut rt, base, script)).await;
     let _activation = key.enter();
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
@@ -13675,6 +13901,16 @@ pub async fn render_capture_cookies_with_request_state(
     use std::sync::Arc;
 
     let mut rt = make_runtime_with_hints(base, cookies, ua, client_hints);
+    // Trusted DOM setup runs before the guest budget starts (as in
+    // `prepare_hydration`): a terminate landing in bootstrap could be swallowed by
+    // its native callbacks and leave the guest script unbounded.
+    {
+        let _activation = rt.activation_key().enter();
+        if let Err(error) = install_dom(&mut rt, html, base) {
+            crate::browser_env::reset_isolate(rt.v8_isolate());
+            return Err(error);
+        }
+    }
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
@@ -13682,8 +13918,9 @@ pub async fn render_capture_cookies_with_request_state(
         let start = std::time::Instant::now();
         while !watch.load(Ordering::Relaxed) {
             if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                // Setup and nested native callbacks can clear V8's termination state
+                // (#98 CI hang): keep enforcing the deadline until the owner finishes.
                 handle.terminate_execution();
-                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -13691,7 +13928,7 @@ pub async fn render_capture_cookies_with_request_state(
 
     rt.park();
     let key = rt.activation_key();
-    let result = key.during(run_async(&mut rt, html, base, script)).await;
+    let result = key.during(run_async(&mut rt, base, script)).await;
     let _activation = key.enter();
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
@@ -14107,14 +14344,10 @@ fn run_lifecycle(rt: &mut JsRuntime, phase: &str) -> Result<(), String> {
         .ok_or_else(|| format!("Native lifecycle {phase} failed"))
 }
 
-async fn run_async(
-    rt: &mut JsRuntime,
-    html: &str,
-    base: &str,
-    script: &str,
-) -> Result<String, String> {
-    install_dom(rt, html, base)?;
+async fn run_async(rt: &mut JsRuntime, base: &str, script: &str) -> Result<String, String> {
+    // The caller installs the DOM before arming its budget watchdog.
     run_lifecycle(rt, "documentLoading")?; // readyState "loading" while scripts run
+    run_lifecycle(rt, "loadDocumentResources")?; // parser images/sheets load before scripts
     exec_page_scripts(rt, script, base)?;
     run_lifecycle(rt, "dispatchDocumentInteractive")?; // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
@@ -14208,6 +14441,16 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     let mut rt = make_runtime(base, "", "");
+    // Trusted DOM setup runs before the guest budget starts (as in
+    // `prepare_hydration`): a terminate landing in bootstrap could be swallowed by
+    // its native callbacks and leave the guest script unbounded.
+    {
+        let _activation = rt.activation_key().enter();
+        if let Err(error) = install_dom(&mut rt, html, base) {
+            crate::browser_env::reset_isolate(rt.v8_isolate());
+            return Err(error);
+        }
+    }
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
@@ -14215,8 +14458,9 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
         let start = std::time::Instant::now();
         while !watch.load(Ordering::Relaxed) {
             if start.elapsed() >= std::time::Duration::from_millis(DEFAULT_RENDER_BUDGET_MS) {
+                // Setup and nested native callbacks can clear V8's termination state
+                // (#98 CI hang): keep enforcing the deadline until the owner finishes.
                 handle.terminate_execution();
-                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -14225,7 +14469,6 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
     let key = rt.activation_key();
     let result = key
         .during(async {
-            install_dom(&mut rt, html, base)?;
             rt.execute_script("<script>", script.to_string())
                 .map_err(|e| e.to_string())?;
             drain_event_loop(&mut rt).await?;
@@ -14264,6 +14507,20 @@ fn prepare_hydration(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), S
     result
 }
 
+/// One hydration pass (`hydrate(300, 200000, false)`): runs the document's pending
+/// scripts; returns the pass's promise.
+fn hydrate_pass(rt: &mut JsRuntime) -> Result<v8::Global<v8::Value>, String> {
+    namespace_call(
+        rt,
+        "hydrate",
+        &[
+            HostArg::Number(300.0),
+            HostArg::Number(200000.0),
+            HostArg::Bool(false),
+        ],
+    )
+}
+
 async fn hydrate_installed_document(
     rt: &mut JsRuntime,
     base: &str,
@@ -14272,27 +14529,15 @@ async fn hydrate_installed_document(
     rt.op_state().borrow_mut().put(HydrationProgress::default());
     hydration_phase(rt, HydrationPhase::DocumentLoading);
     run_lifecycle(rt, "documentLoading").map_err(|error| error.to_string())?;
-    rt.execute_script(
-        "<current-script>",
-        "globalThis[Symbol.for('ts')].setCurrentScript(null);",
-    )
-    .map_err(|e| e.to_string())?;
+    namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
     hydration_phase(rt, HydrationPhase::InitScript);
     if !init_script.is_empty() {
         rt.execute_script("<init-script>", init_script.to_string())
             .map_err(|e| e.to_string())?;
     }
     hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
-    rt.execute_script(
-        "<initial-hydrate>",
-        "globalThis[Symbol.for('ts')].initialHydrated=false;globalThis[Symbol.for('ts')].tcHydrate=globalThis[Symbol.for('ts')].hydrate(300,200000,false).finally(()=>{globalThis[Symbol.for('ts')].initialHydrated=true});",
-    )
-    .map_err(|error| error.to_string())?;
-    drain_event_loop_until(
-        rt,
-        Some("globalThis[Symbol.for('ts')].initialHydrated ? '1' : '0'"),
-    )
-    .await?;
+    namespace_call(rt, "startInitialHydrate", &[])?;
+    drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
     hydration_phase(rt, HydrationPhase::ModuleScripts);
     drain_module_scripts(rt, base).await?;
     hydration_phase(rt, HydrationPhase::DocumentInteractive);
@@ -14300,11 +14545,7 @@ async fn hydrate_installed_document(
     // HTML load waits for script graph completion, images/styles and frames,
     // independently of unrelated fetches or a module's pending top-level await.
     hydration_phase(rt, HydrationPhase::LoadResources);
-    drain_event_loop_until(
-        rt,
-        Some("globalThis[Symbol.for('ts')].documentLoadReady() ? '1' : '0'"),
-    )
-    .await?;
+    drain_event_loop_until(rt, Some("documentLoadReady")).await?;
     hydration_phase(rt, HydrationPhase::DocumentComplete);
     run_lifecycle(rt, "dispatchDocumentComplete")?;
     // Unified event-loop pump. A single "run scripts+timers, then drain" pass isn't
@@ -14316,11 +14557,7 @@ async fn hydrate_installed_document(
     const MAX_PUMPS: usize = 500;
     hydration_phase(rt, HydrationPhase::PostLoadHydration);
     for round in 0..MAX_PUMPS {
-        rt.execute_script(
-            "<hydrate>",
-            "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate(300,200000,false);",
-        )
-        .map_err(|e| e.to_string())?;
+        hydrate_pass(rt)?;
         drain_event_loop(rt).await?;
         drain_module_scripts(rt, base).await?;
         drain_event_loop(rt).await?;
@@ -14328,9 +14565,7 @@ async fn hydrate_installed_document(
             .borrow_mut()
             .borrow_mut::<HydrationProgress>()
             .completed_pumps = round + 1;
-        let pending = rt
-            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
-            .map_err(|e| e.to_string())?;
+        let pending = namespace_call(rt, "pendingWork", &[])?;
         if read_string(rt, pending)? != "1" {
             break;
         }
@@ -14342,25 +14577,16 @@ async fn hydrate_installed_document(
     Ok(crate::browser_env::document_html())
 }
 
-// Compatibility only: evaluate module syntax in classic script elements (claimed via `globalThis[Symbol.for('ts')].takeModuleScript`) through
+// Compatibility only: evaluate module syntax in classic script elements (claimed via the engine namespace's `takeModuleScript`) through
 // deno_core's real module graph: inline modules load from their own code, `src` modules
 // load by URL (the `NetModuleLoader` fetches them + their imports over the host net).
 // This is the path a Next dev / turbopack build (served as ES modules) needs to hydrate.
 async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     for n in 0..1000usize {
-        rt.execute_script(
-            "<take-mod>",
-            "globalThis[Symbol.for('ts')].takeModuleScript();",
-        )
-        .map_err(|e| e.to_string())?;
-        let g = rt
-            .execute_script(
-                "<take-mod-r>",
-                "String(globalThis[Symbol.for('ts')].moduleDescriptor || '')",
-            )
-            .map_err(|e| e.to_string())?;
+        namespace_call(rt, "takeModuleScript", &[])?;
+        let g = namespace_value(rt, "moduleDescriptor");
         let desc = read_string(rt, g)?;
-        if desc.is_empty() {
+        if desc.is_empty() || desc == "undefined" || desc == "null" {
             break;
         }
         let v: deno_core::serde_json::Value =
@@ -14380,7 +14606,7 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
             continue;
         };
         // Code in hand (inline module, OR a `<script src>` chunk whose fetched body was
-        // ESM — `globalThis[Symbol.for('ts')].execScriptEl` already fetched it and queued it) → evaluate from that
+        // ESM — the engine namespace's `execScriptEl` already fetched it and queued it) → evaluate from that
         // code with `spec` as its identity so the import graph still resolves relative to
         // the src URL. Only a bare `src` with no body re-fetches through the loader.
         let loaded = if code.is_empty() {
@@ -14395,17 +14621,10 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
                 // .currentScript, …]) and key the chunk by currentScript.src. Without this
                 // an ESM chunk registers under a stale path and the entry's chunk-load
                 // Promise.all never resolves (→ the app never hydrates, no error).
-                rt.execute_script(
-                    "<mod-cs>",
-                    "globalThis[Symbol.for('ts')].setCurrentScript(globalThis[Symbol.for('ts')].currentModuleEl || null);",
-                )
-                .map_err(|e| e.to_string())?;
+                let element = namespace_value(rt, "currentModuleEl");
+                namespace_call(rt, "setCurrentScript", &[HostArg::Value(element)])?;
                 let ev = rt.mod_evaluate(id).await;
-                rt.execute_script(
-                    "<mod-cs0>",
-                    "globalThis[Symbol.for('ts')].setCurrentScript(null);",
-                )
-                .map_err(|e| e.to_string())?;
+                namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
                 if let Err(e) = ev {
                     eprintln!("module eval error ({spec_str}): {e}");
                 }
@@ -14493,11 +14712,7 @@ async fn drain_to_quiescence_with_scripts(
 ) -> Result<(), String> {
     // Fresh virtual-time window for this interaction so its transitions (e.g. a closing
     // MUI modal's Fade-exit timer) fire + complete even when the clock is already large.
-    rt.execute_script(
-        "<reset-budget>",
-        "globalThis[Symbol.for('ts')].resetTimerBudget && globalThis[Symbol.for('ts')].resetTimerBudget();",
-    )
-    .map_err(|e| e.to_string())?;
+    namespace_call(rt, "resetTimerBudget", &[])?;
     const MAX_ROUNDS: usize = 500;
     // Stop early once the visible tree has been STABLE for this many rounds even though
     // timers keep firing: a real app's analytics/idle-scheduler never stops posting
@@ -14512,11 +14727,7 @@ async fn drain_to_quiescence_with_scripts(
         // the chunk never executes, the import() promise never resolves, and the modal never
         // appears. Native script flags and mutation admission prevent repeat execution.
         if execute_document_scripts {
-            rt.execute_script(
-                "<hydrate>",
-                "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate(300,200000,false);",
-            )
-            .map_err(|e| e.to_string())?;
+            hydrate_pass(rt)?;
         }
         drain_event_loop(rt).await?;
         if execute_document_scripts {
@@ -14525,18 +14736,9 @@ async fn drain_to_quiescence_with_scripts(
         }
         let fired = run_window_timers(rt, 2000)?;
         drain_event_loop(rt).await?;
-        let pending = rt
-            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
-            .map_err(|e| e.to_string())?;
-        let sig_v = rt
-            .execute_script("<domsig>", "globalThis[Symbol.for('ts')].domSig()")
-            .map_err(|e| e.to_string())?;
-        let fetches = rt
-            .execute_script(
-                "<fetches>",
-                "globalThis[Symbol.for('ts')].pendingFetchCount()",
-            )
-            .map_err(|e| e.to_string())?;
+        let pending = namespace_call(rt, "pendingWork", &[])?;
+        let sig_v = namespace_call(rt, "domSig", &[])?;
+        let fetches = namespace_call(rt, "pendingFetchCount", &[])?;
         let still = read_string(rt, pending)? == "1";
         let fired_any = fired != 0;
         let awaiting_fetch = read_string(rt, fetches)? != "0";
@@ -14970,13 +15172,24 @@ impl PageSession {
     /// `String(globalThis.__RESULT || '')` — scripts that need to return a value stash
     /// it there.
     pub async fn eval(&mut self, script: &str) -> Result<String, String> {
+        self.eval_in(script, false).await
+    }
+
+    /// [`Self::eval`] for an embedder (driver) script that needs the engine namespace:
+    /// `script` runs as a function body whose `__tsNs` parameter is the main realm's
+    /// namespace (turbo-dom#222), which page script cannot reach.
+    pub async fn eval_engine(&mut self, script: &str) -> Result<String, String> {
+        self.eval_in(script, true).await
+    }
+
+    async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
         let key = self.rt.activation_key();
-        let result = key.during(self.eval_active(script)).await;
+        let result = key.during(self.eval_active(script, engine)).await;
         self.follow_form_navigation().await?;
         result
     }
 
-    async fn eval_active(&mut self, script: &str) -> Result<String, String> {
+    async fn eval_active(&mut self, script: &str, engine: bool) -> Result<String, String> {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
         let drained = {
@@ -14986,9 +15199,13 @@ impl PageSession {
                 budget,
                 &watchdog.exceeded,
                 async {
-                    self.rt
-                        .execute_script("<session-eval>", script.to_string())
-                        .map_err(|e| e.to_string())?;
+                    if engine {
+                        execute_engine_script(&mut self.rt, script)?;
+                    } else {
+                        self.rt
+                            .execute_script("<session-eval>", script.to_string())
+                            .map_err(|e| e.to_string())?;
+                    }
                     drain_to_quiescence(&mut self.rt).await
                 },
             )
@@ -15013,22 +15230,36 @@ impl PageSession {
     /// Evaluate an expression and await its own result without a page-global result slot.
     /// Background page work does not postpone a completed collector Promise.
     pub async fn eval_expression(&mut self, expression: &str) -> Result<String, String> {
-        self.eval_expression_result(expression, false).await
+        self.eval_expression_result(expression, false, false).await
     }
 
     /// Await a collector and serialize its actual value with V8's intrinsic JSON.
     pub async fn eval_json_expression(&mut self, expression: &str) -> Result<String, String> {
-        self.eval_expression_result(expression, true).await
+        self.eval_expression_result(expression, true, false).await
+    }
+
+    /// [`Self::eval_expression`] with the engine namespace bound to `__tsNs`.
+    pub async fn eval_engine_expression(&mut self, expression: &str) -> Result<String, String> {
+        self.eval_expression_result(expression, false, true).await
+    }
+
+    /// [`Self::eval_json_expression`] with the engine namespace bound to `__tsNs`.
+    pub async fn eval_engine_json_expression(
+        &mut self,
+        expression: &str,
+    ) -> Result<String, String> {
+        self.eval_expression_result(expression, true, true).await
     }
 
     async fn eval_expression_result(
         &mut self,
         expression: &str,
         json: bool,
+        engine: bool,
     ) -> Result<String, String> {
         let key = self.rt.activation_key();
         let result = key
-            .during(self.eval_expression_active(expression, json))
+            .during(self.eval_expression_active(expression, json, engine))
             .await;
         self.follow_form_navigation().await?;
         result
@@ -15038,6 +15269,7 @@ impl PageSession {
         &mut self,
         expression: &str,
         json: bool,
+        engine: bool,
     ) -> Result<String, String> {
         if self.closed {
             return Err("Page session is closed".into());
@@ -15045,17 +15277,19 @@ impl PageSession {
         let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
-                let value = self
-                    .rt
-                    .execute_script("<session-expression>", expression.to_owned())
-                    .map_err(|error| error.to_string())?;
+                let value = if engine {
+                    let body = format!(
+                        "return (\n{}\n)",
+                        expression.trim_end().trim_end_matches(';')
+                    );
+                    execute_engine_script(&mut self.rt, &body)?
+                } else {
+                    self.rt
+                        .execute_script("<session-expression>", expression.to_owned())
+                        .map_err(|error| error.to_string())?
+                };
                 let completion = self.rt.resolve(value.clone());
-                self.rt
-                    .execute_script(
-                        "<expression-budget>",
-                        "globalThis[Symbol.for('ts')].resetTimerBudget();",
-                    )
-                    .map_err(|error| error.to_string())?;
+                namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
                 drain_event_loop_until_completion(&mut self.rt, None, Some(&value)).await?;
                 let value = self
                     .rt
@@ -15117,12 +15351,7 @@ impl PageSession {
                     return Err("Host input exceeded the session execution budget".into());
                 }
                 let completion = self.rt.resolve(promise.clone());
-                self.rt
-                    .execute_script(
-                        "<input-budget>",
-                        "globalThis[Symbol.for('ts')].resetTimerBudget();",
-                    )
-                    .map_err(|error| error.to_string())?;
+                namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
                 drain_event_loop_until_completion(&mut self.rt, None, Some(&promise)).await?;
                 self.rt
                     .with_event_loop_promise(completion, Default::default())
@@ -15245,6 +15474,12 @@ impl PageSession {
         serde_json::json!({"hostContexts":frames.contexts.len(),"retiredHostContexts":retired,"queuedWindowMessages":frames.messages.len(),"queuedWindowBytes":frames.messages.iter().map(|message|message.data.size_bytes()).sum::<usize>()})
     }
 
+    /// Replace the execution budget of later operations (turbo-surf#47): a test that has
+    /// exercised an interruption under a tiny budget checks the session under a generous one.
+    #[doc(hidden)]
+    pub fn set_execution_budget_for_testing(&mut self, budget_ms: u64) {
+        self.budget_ms = budget_ms;
+    }
     #[doc(hidden)]
     pub fn set_window_message_limits_for_testing(&mut self, max_messages: usize, max_bytes: usize) {
         self.rt
@@ -15627,7 +15862,11 @@ mod window_timer_task_tests {
     async fn legacy_reentrancy() {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        page.rt.execute_script("<nested-legacy-batch>", "setTimeout(()=>{setTimeout(()=>{},0);globalThis[Symbol.for('ts')].runTimers(1);setTimeout(()=>{},0);},0)").unwrap();
+        execute_engine_script(
+            &mut page.rt,
+            "setTimeout(()=>{setTimeout(()=>{},0);__tsNs.runTimers(1);setTimeout(()=>{},0);},0)",
+        )
+        .unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
         assert_eq!(turn.fired, 1);
         assert_eq!(turn._task.as_ref().unwrap().nesting.level.get(), 1);
@@ -15642,11 +15881,14 @@ mod window_timer_task_tests {
     async fn interrupted_checkpoint(legacy: bool) {
         let mut page = page(100).await;
         let expression = if legacy {
-            "(()=>{setTimeout(()=>{while(true){}},0);globalThis[Symbol.for('ts')].runTimers();return 'unreachable';})()"
+            "(()=>{setTimeout(()=>{while(true){}},0);__tsNs.runTimers();return 'unreachable';})()"
         } else {
             "new Promise(()=>setTimeout(()=>Promise.resolve().then(()=>{while(true){}}),0))"
         };
-        let error = page.eval_json_expression(expression).await.unwrap_err();
+        let error = page
+            .eval_engine_json_expression(expression)
+            .await
+            .unwrap_err();
         assert!(error.contains("budget"), "{error}");
         let _activation = page.rt.activation_key().enter();
         let nesting = {
@@ -15701,5 +15943,81 @@ mod window_timer_task_tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+#[cfg(test)]
+mod csp_eval_sample_tests {
+    use super::csp_eval_sample;
+
+    fn sample(text: &str) -> String {
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        String::from_utf16(csp_eval_sample(&units)).unwrap()
+    }
+
+    #[test]
+    fn eval_samples_trim_ascii_whitespace_after_the_forty_unit_prefix() {
+        assert_eq!(sample("\t\n\u{b}\u{c}\r x = 1 \r\n"), "x = 1");
+        assert_eq!(sample(" \u{a0}x\u{a0}"), "\u{a0}x\u{a0}");
+        assert_eq!(sample(&format!("{}y", " ".repeat(40))), "");
+        assert_eq!(sample("   "), "");
+        assert_eq!(sample(""), "");
+        let long = format!("{}{}", "a".repeat(39), "b c");
+        assert_eq!(sample(&long), format!("{}b", "a".repeat(39)));
+        assert_eq!(sample(&format!("{}  z", "a".repeat(38))), "a".repeat(38));
+    }
+}
+
+#[cfg(test)]
+mod frame_source_tests {
+    use super::{decode_data_document, script_source_bodies};
+
+    #[test]
+    fn data_documents_decode_percent_base64_charset_and_plain_text() {
+        assert_eq!(
+            decode_data_document("data:text/html,%3Cb%3Eok%3C/b%3E%2#frag"),
+            Some(("<b>ok</b>%2".into(), "text/html".into()))
+        );
+        assert_eq!(
+            decode_data_document("data:TEXT/HTML;base64,PG I+e Q"),
+            Some(("<b>y".into(), "text/html".into()))
+        );
+        assert_eq!(
+            decode_data_document("data:text/html;charset=windows-1252,%E9"),
+            Some(("é".into(), "text/html".into()))
+        );
+        assert_eq!(
+            decode_data_document("data:,a<b>&c"),
+            Some((
+                "<html><head></head><body><pre>a&lt;b&gt;&amp;c</pre></body></html>".into(),
+                "text/plain".into()
+            ))
+        );
+        for url in [
+            "data:image/png;base64,AAAA",
+            "data:text/html;base64,%%%",
+            "data:text/html",
+            "https://site.test/,x",
+        ] {
+            assert_eq!(decode_data_document(url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn script_bodies_skip_comments_raw_text_and_quoted_delimiters() {
+        let html = "<!-- <script>no</script> --><style>a{content:'<script>'}</style>\
+            <script a=\"x>y\">one</script ><textarea><script>no</textarea>\
+            <script>two</scripty></script/><title>t</title><script>three";
+        let bodies = script_source_bodies(html)
+            .into_iter()
+            .map(|(start, end)| &html[start..end])
+            .collect::<Vec<_>>();
+        assert_eq!(bodies, ["one", "two</scripty>", "three"]);
+        let unterminated = "<!-- open <script>x</script>";
+        assert!(script_source_bodies(unterminated).is_empty());
+        let plaintext = "<script>a</script><plaintext><script>b</script>";
+        let bodies = script_source_bodies(plaintext);
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(&plaintext[bodies[0].0..bodies[0].1], "a");
     }
 }

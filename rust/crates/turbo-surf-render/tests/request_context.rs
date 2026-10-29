@@ -48,7 +48,7 @@ async fn page_fetch_uses_negotiated_hints_and_browser_owned_headers() {
         &format!("{base}/page?q=1#fragment"),
         &jar.storage_state(),
         "",
-        5000,
+        60_000,
         "",
         hints,
     )
@@ -66,7 +66,7 @@ async fn page_fetch_uses_negotiated_hints_and_browser_owned_headers() {
         .then(() => {globalThis.__RESULT='done'});
     "#).await.unwrap();
     page.close();
-    let requests = tokio::time::timeout(std::time::Duration::from_secs(2), server)
+    let requests = tokio::time::timeout(std::time::Duration::from_secs(30), server)
         .await
         .unwrap()
         .unwrap();

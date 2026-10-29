@@ -33,13 +33,13 @@ const fonts = [
   ["IBM Plex Mono", "ibm-plex-mono/IBMPlexMono-Regular.ttf"],
   ["Fira Code", "fira-code/FiraCode-Regular.ttf"],
 ].map(([family, relative], index) => {
+  // The pinned commit's blob is the only source: turbo-html2pdf 0.6.0 moved its bundled
+  // fonts into turbo-dom-layout, so a current checkout's working tree has no assets/fonts.
   const path = `crates/turbo-html2pdf-core/assets/fonts/${relative}`,
-    bytes = readFileSync(join(producer, path)),
-    pinned = execFileSync("git", ["show", `${producerCommit}:${path}`], {
+    bytes = execFileSync("git", ["show", `${producerCommit}:${path}`], {
       cwd: producer,
       maxBuffer: 8 * 1024 * 1024,
     });
-  if (!bytes.equals(pinned)) throw Error(`Font differs from public producer pin: ${path}`);
   return { family, path, route: `/font-${index}.ttf`, bytes, sha256: sha(bytes) };
 });
 const probes = {
@@ -215,9 +215,6 @@ try {
       await connection.call("Target.closeTarget", { targetId });
     }
   }
-  for (const font of fonts)
-    if (sha(readFileSync(join(producer, font.path))) !== font.sha256)
-      throw Error("Font changed during capture");
   if (
     readFileSync(probePath, "utf8") !== probe ||
     !readFileSync(collectorPath).equals(collectorSource) ||

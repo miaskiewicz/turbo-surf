@@ -93,7 +93,7 @@ fn bundled_geometry_matches_chrome(source: &str, expected: &str, families: &[&st
 fn bundled_font_runs_partial_ranges_splits_and_rotation_match_normal_chrome() {
     bundled_geometry_matches_chrome(
         include_str!("../../../../harness/detection/font-run-geometry-probe.js"),
-        include_str!("../../../../harness/detection/fixtures/font-run-geometry-chrome155.json"),
+        include_str!("../../../../harness/detection/fixtures/font-run-geometry-chrome156.json"),
         &["IBM Plex Mono", "Fira Code"],
     );
 }
@@ -103,7 +103,7 @@ fn leading_and_internal_spaces_preserve_boundaries_ranges_and_wrapping_like_chro
     bundled_geometry_matches_chrome(
         include_str!("../../../../harness/detection/leading-space-geometry-probe.js"),
         include_str!(
-            "../../../../harness/detection/fixtures/leading-space-geometry-chrome155.json"
+            "../../../../harness/detection/fixtures/leading-space-geometry-chrome156.json"
         ),
         &["IBM Plex Mono"],
     );

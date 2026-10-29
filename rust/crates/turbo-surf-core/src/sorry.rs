@@ -152,10 +152,10 @@ pub(crate) fn attr_value(tag: &str, name: &str) -> Option<String> {
             let end = body.find(q)?;
             return Some(body[..end].to_string());
         }
-        // Unquoted value: up to the next whitespace or tag close.
+        // Unquoted value: up to the next whitespace or tag close (`/` is part of it).
         let v: String = after
             .chars()
-            .take_while(|c| !c.is_whitespace() && *c != '>' && *c != '/')
+            .take_while(|c| !c.is_whitespace() && *c != '>')
             .collect();
         if !v.is_empty() {
             return Some(v);
@@ -322,7 +322,11 @@ pub async fn clear_if_sorry(
             .continue_url
             .clone()
             .ok_or_else(|| SolveError::Parse("sorry: form has no `continue` (SERP) URL".into()))?;
-        let host = crate::url::host_of(&continue_url).unwrap_or_default();
+        // Cookies are port-agnostic (RFC 6265 §8.5): the domain is the bare host.
+        let host = url::Url::parse(&continue_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_default();
         for (k, v) in &solved.cookies {
             jar.add(k, v, &host, "/", None);
         }
@@ -634,6 +638,349 @@ mod tests {
                 .iter()
                 .all(|c| c.name != EXEMPTION_COOKIE),
             "no exemption cookie may be set without a token"
+        );
+    }
+
+    #[test]
+    fn form_parsing_edge_cases() {
+        // No action → the page URL; an <input> without a name is skipped; the
+        // reCAPTCHA response placeholder is dropped; `data-name`/`xname` are not `name`;
+        // `name` without `=` or with an empty value is skipped; unquoted values stop at
+        // whitespace, `>` and `/`.
+        let html = r#"<form method=post>
+            <input value=nameless>
+            <input name="g-recaptcha-response" value="placeholder">
+            <input data-name="x" xname=y name=bare value=v1 />
+            <input name value="noeq">
+            <input name= >
+            <input NAME=Continue VALUE="https://g.test/search?q=1">
+            <input name='single' value='a b'>
+            </form>"#;
+        let form = parse_sorry_form("https://g.test/sorry/index?continue=x", html).unwrap();
+        assert_eq!(form.action, "https://g.test/sorry/index?continue=x");
+        assert_eq!(
+            form.continue_url.as_deref(),
+            Some("https://g.test/search?q=1")
+        );
+        assert_eq!(
+            form.fields,
+            vec![
+                ("bare".to_string(), "v1".to_string()),
+                (
+                    "Continue".to_string(),
+                    "https://g.test/search?q=1".to_string()
+                ),
+                ("single".to_string(), "a b".to_string()),
+            ]
+        );
+        assert_eq!(attr_value("<input name=\"open", "name"), None);
+        assert_eq!(attr_value("<input name=", "name"), None);
+        assert_eq!(attr_value("<input/name=x>", "name"), None);
+        assert_eq!(attr_value("<input\tname=x>", "name"), Some("x".to_string()));
+        assert_eq!(attr_value("name=lead>", "name"), Some("lead".to_string()));
+    }
+
+    // A server that answers every request with `resp` and forwards the raw request.
+    async fn spawn_recorder(
+        resp: String,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.flush().await;
+            }
+        });
+        (base, rx)
+    }
+
+    #[tokio::test]
+    async fn rejected_token_without_exemption_cookie_is_a_parse_error() {
+        let (base, mut rx) = spawn_recorder(http_ok("<html>still blocked</html>")).await;
+        let mut jar = CookieJar::new();
+        let form = SorryForm {
+            action: format!("{base}/sorry/index"),
+            continue_url: Some(format!("{base}/search?q=cats")),
+            fields: vec![("q".to_string(), "t&k".to_string())],
+        };
+        let err = submit_and_clear(&mut jar, &form, "TOKEN", "UA/1.0", 0.0)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            SolveError::Parse(
+                "sorry: no GOOGLE_ABUSE_EXEMPTION cookie after the /sorry POST (token rejected?)"
+                    .into()
+            )
+            .to_string()
+        );
+        let req = rx.recv().await.unwrap();
+        assert!(req.starts_with("POST /sorry/index "), "{req}");
+        assert!(
+            req.to_ascii_lowercase().contains("user-agent: ua/1.0"),
+            "{req}"
+        );
+        assert!(req.ends_with("q=t%26k&g-recaptcha-response=TOKEN"), "{req}");
+    }
+
+    #[tokio::test]
+    async fn empty_user_agent_keeps_the_client_default() {
+        let (base, mut rx) = spawn_recorder(http_ok("x")).await;
+        let mut jar = CookieJar::new();
+        let form = SorryForm {
+            action: format!("{base}/sorry/index"),
+            continue_url: Some(format!("{base}/search")),
+            fields: Vec::new(),
+        };
+        assert!(submit_and_clear(&mut jar, &form, "T", "", 0.0)
+            .await
+            .is_err());
+        let req = rx.recv().await.unwrap().to_ascii_lowercase();
+        assert!(req.contains("user-agent: "), "{req}");
+        assert!(!req.contains("user-agent: \r\n"), "{req}");
+    }
+
+    struct CookieSolver(Vec<(String, String)>);
+    #[async_trait::async_trait]
+    impl ChallengeSolver for CookieSolver {
+        fn name(&self) -> &'static str {
+            "cookie-stub"
+        }
+        async fn solve(
+            &self,
+            ch: &Challenge,
+            _ctx: &SolveContext,
+        ) -> Result<SolvedToken, SolveError> {
+            assert_eq!(ch.vendor, Vendor::Recaptcha);
+            assert_eq!(ch.sitekey.as_deref(), Some("6Lc_sorry_key"));
+            Ok(SolvedToken {
+                cookies: self.0.clone(),
+                // A blank token does not count as a minted token.
+                headers: vec![("G-Recaptcha-Response".to_string(), "  ".to_string())],
+                ttl: Duration::from_secs(1),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn solver_cookies_clear_the_wall_and_refetch_the_serp() {
+        let (base, mut rx) = spawn_recorder(http_ok("<p>SERP</p>")).await;
+        let html = SORRY_FORM.replace("CONTINUE_URL", &format!("{base}/search?q=cats"));
+        let mut jar = CookieJar::new();
+        let solver = CookieSolver(vec![
+            ("NID".to_string(), "n1".to_string()),
+            ("google_abuse_exemption".to_string(), "EX".to_string()),
+        ]);
+        let cleared = clear_if_sorry(
+            &solver,
+            &mut jar,
+            &format!("{base}/sorry/index"),
+            &html,
+            &SolveContext::default(),
+            0.0,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(cleared.serp_html, "<p>SERP</p>");
+        assert_eq!(cleared.final_url, format!("{base}/search?q=cats"));
+        assert_eq!(
+            cleared.exemption,
+            Some(("google_abuse_exemption".to_string(), "EX".to_string()))
+        );
+        let req = rx.recv().await.unwrap();
+        assert!(req.starts_with("GET /search?q=cats "), "{req}");
+        // Cookies are port-agnostic: the jar replays them on the non-default port.
+        assert!(
+            req.to_ascii_lowercase()
+                .contains("\r\ncookie: nid=n1; google_abuse_exemption=ex\r\n"),
+            "{req}"
+        );
+    }
+
+    #[tokio::test]
+    async fn solver_cookies_without_a_continue_url_are_a_parse_error() {
+        let html = SORRY_FORM.replace(r#"name="continue""#, r#"name="other""#);
+        let mut jar = CookieJar::new();
+        let solver = CookieSolver(vec![("GOOGLE_ABUSE_EXEMPTION".into(), "EX".into())]);
+        let err = clear_if_sorry(
+            &solver,
+            &mut jar,
+            "https://g.test/sorry/index",
+            &html,
+            &SolveContext::default(),
+            0.0,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            SolveError::Parse("sorry: form has no `continue` (SERP) URL".into()).to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn solver_with_neither_token_nor_exemption_is_a_parse_error() {
+        let mut jar = CookieJar::new();
+        let solver = CookieSolver(vec![("NID".into(), "n".into())]);
+        let err = clear_if_sorry(
+            &solver,
+            &mut jar,
+            "https://g.test/sorry/index",
+            SORRY_FORM,
+            &SolveContext::default(),
+            0.0,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            SolveError::Parse(
+                "sorry: solver produced neither a g-recaptcha-response token nor an exemption cookie"
+                    .into()
+            )
+            .to_string()
+        );
+        assert!(jar.cookies_for("https://g.test/", 0.0).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_page_is_not_cleared() {
+        let mut jar = CookieJar::new();
+        let res = clear_if_sorry(
+            &VisualSolver,
+            &mut jar,
+            "https://g.test/search",
+            "<html>results</html>",
+            &SolveContext::default(),
+            0.0,
+        )
+        .await;
+        assert!(matches!(res, Ok(None)), "{res:?}");
+        let no_form = clear_if_sorry(
+            &VisualSolver,
+            &mut jar,
+            "https://g.test/sorry/index",
+            "<p>unusual traffic</p>",
+            &SolveContext::default(),
+            0.0,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            no_form.to_string(),
+            SolveError::Parse("sorry: no <form> on the /sorry page".into()).to_string()
+        );
+    }
+
+    #[test]
+    fn unquoted_attribute_values_keep_slashes_like_chrome() {
+        // Chrome 156 getAttribute: an unquoted value ends at whitespace or `>` only.
+        assert_eq!(
+            attr_value("<form action=/save method=post>", "action").as_deref(),
+            Some("/save")
+        );
+        assert_eq!(
+            attr_value(
+                "<input name=continue value=https://g.test/search?q=1>",
+                "value"
+            )
+            .as_deref(),
+            Some("https://g.test/search?q=1")
+        );
+        assert_eq!(
+            attr_value("<input value=x/>", "value").as_deref(),
+            Some("x/")
+        );
+        let form = parse_sorry_form(
+            "https://g.test/sorry/index",
+            "<form action=/sorry/save><input name=continue value=https://g.test/s?q=1></form>",
+        )
+        .unwrap();
+        assert_eq!(form.action, "https://g.test/sorry/save");
+        assert_eq!(form.continue_url.as_deref(), Some("https://g.test/s?q=1"));
+    }
+
+    // Answers by request-line prefix (first match) and forwards each raw request.
+    async fn spawn_routes(
+        routes: Vec<(&'static str, String)>,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = routes
+                    .iter()
+                    .find(|(prefix, _)| req.starts_with(prefix))
+                    .map_or_else(|| http_ok("404"), |(_, resp)| resp.clone());
+                let _ = tx.send(req);
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (base, rx)
+    }
+
+    // Jar clock in epoch milliseconds.
+    const NOW: f64 = 2_000_000_000_000.0;
+
+    #[tokio::test]
+    async fn exemption_cookies_are_stamped_and_replayed_at_the_callers_clock() {
+        // The POST answer is not HTML and its cookie has a Max-Age; a cookie that
+        // expired before NOW must not be replayed on the SERP re-fetch.
+        let mint = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: GOOGLE_ABUSE_EXEMPTION=EX; Path=/; Max-Age=60\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_string();
+        let (base, mut rx) = spawn_routes(vec![
+            ("POST /sorry/index", mint),
+            ("GET /search", http_ok("<p>SERP</p>")),
+        ])
+        .await;
+        let mut jar = CookieJar::new();
+        jar.add("OLD", "1", "127.0.0.1", "/", Some(NOW / 1000.0 - 10.0));
+        let form = SorryForm {
+            action: format!("{base}/sorry/index"),
+            continue_url: Some(format!("{base}/search?q=1")),
+            fields: Vec::new(),
+        };
+        let cleared = submit_and_clear(&mut jar, &form, "T", "", NOW)
+            .await
+            .unwrap();
+        assert_eq!(cleared.serp_html, "<p>SERP</p>");
+        let _post = rx.recv().await.unwrap();
+        let get = rx.recv().await.unwrap().to_ascii_lowercase();
+        assert!(
+            get.contains("\r\ncookie: google_abuse_exemption=ex\r\n"),
+            "{get}"
+        );
+
+        // The solver-cookie branch re-fetches at the same clock.
+        let html = SORRY_FORM.replace("CONTINUE_URL", &format!("{base}/search?q=2"));
+        let solver = CookieSolver(vec![("GOOGLE_ABUSE_EXEMPTION".into(), "S".into())]);
+        let mut jar = CookieJar::new();
+        jar.add("OLD", "1", "127.0.0.1", "/", Some(NOW / 1000.0 - 10.0));
+        clear_if_sorry(
+            &solver,
+            &mut jar,
+            &format!("{base}/sorry/index"),
+            &html,
+            &SolveContext::default(),
+            NOW,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let get = rx.recv().await.unwrap().to_ascii_lowercase();
+        assert!(get.starts_with("get /search?q=2 "), "{get}");
+        assert!(
+            get.contains("\r\ncookie: google_abuse_exemption=s\r\n"),
+            "{get}"
         );
     }
 }

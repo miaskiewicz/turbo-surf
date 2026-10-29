@@ -212,7 +212,14 @@
     if (!result) throw new Error("Missing input selector " + selector);
     return result;
   }
+  // The binding's trusted-typing entry (Blink's InsertText): the caret follows the insertion,
+  // live value ranges follow the edit and selectionchange fires, but never a select event.
+  // The API value setter + setSelectionRange below would collapse value ranges and fire
+  // select per character; they remain only for controls without a selection API.
+  const replaceControlSelection = __G.replaceControlSelection;
   function replaceSelection(target, getters, text) {
+    if (typeof replaceControlSelection === "function" && replaceControlSelection(target, text))
+      return;
     const value = apply(getters.value.get, target, []);
     const start = apply(getters.selectionStart, target, []);
     const end = apply(getters.selectionEnd, target, []);

@@ -55,10 +55,9 @@ harness/crawlers/storage/
 # Local stealth browser sidecar (chromium + node_modules) — never committed
 .sidecar/
 
-# Browser-sidecar runtime (committed: fetch-serp.mjs, setup.sh, package.json)
+# Browser-sidecar runtime (committed: fetch-serp.mjs, setup.sh, package.json, package-lock.json)
 scripts/browser-sidecar/node_modules/
 scripts/browser-sidecar/.chrome-profile/
-scripts/browser-sidecar/package-lock.json
 # Minted trusted __Secure-ENID token cache (per-machine, reused by native google search)
 scripts/browser-sidecar/.enid-cache.json
 scripts/browser-sidecar/.enid-cache.json.tmp

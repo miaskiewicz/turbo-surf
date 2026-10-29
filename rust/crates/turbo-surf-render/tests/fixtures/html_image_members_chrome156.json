@@ -1,0 +1,89 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "7dfa61e9b588352a8ca844890c5f30dbc8b0320957fa213b8c8fab3b5418de97",
+  "casesSha256": "dfa5fd7789c9c132301689a6e0940f515a38cbb11fdede42eacb1d872207dc2b",
+  "collectorSha256": "0ab9b47851777c7181ecc3ea9da52b15597722eddbb56711a7da588516b7d921",
+  "errors": [],
+  "result": [
+    {
+      "id": "html-image-members",
+      "result": {
+        "decode": {
+          "writable": true,
+          "enumerable": true,
+          "configurable": true,
+          "value": ["decode", 0, "function decode() { [native code] }", false]
+        },
+        "src": {
+          "enumerable": true,
+          "configurable": true,
+          "get": ["get src", 0, "function get src() { [native code] }", false],
+          "set": ["set src", 1, "function set src() { [native code] }", false]
+        },
+        "decodeReceivers": {
+          "plain": [
+            "throw",
+            "TypeError",
+            "Failed to execute 'decode' on 'HTMLImageElement': Illegal invocation",
+            false,
+            true
+          ],
+          "div": [
+            "throw",
+            "TypeError",
+            "Failed to execute 'decode' on 'HTMLImageElement': Illegal invocation",
+            false,
+            true
+          ],
+          "prototype": [
+            "throw",
+            "TypeError",
+            "Failed to execute 'decode' on 'HTMLImageElement': Illegal invocation",
+            false,
+            true
+          ]
+        },
+        "srcSetterReceiver": ["throw", "TypeError", "Illegal invocation", false],
+        "decodeEmpty": ["throw", "EncodingError", "The source image cannot be decoded.", true],
+        "decodeParsed": ["ok", [true, 3, 2, []]],
+        "created": {
+          "event": "load",
+          "decoded": ["ok", "resolved"],
+          "complete": true,
+          "naturalWidth": 3,
+          "naturalHeight": 2,
+          "currentSrc": true,
+          "own": []
+        },
+        "createdBroken": {
+          "event": "error",
+          "decoded": ["throw", "EncodingError", "The source image cannot be decoded.", true],
+          "complete": true,
+          "naturalWidth": 0,
+          "naturalHeight": 0,
+          "currentSrc": true,
+          "own": []
+        },
+        "factory": {
+          "event": "load",
+          "decoded": ["ok", "resolved"],
+          "complete": true,
+          "naturalWidth": 3,
+          "naturalHeight": 2,
+          "currentSrc": true,
+          "own": []
+        },
+        "innerHTML": {
+          "event": "load",
+          "decoded": ["ok", "resolved"],
+          "complete": true,
+          "naturalWidth": 3,
+          "naturalHeight": 2,
+          "currentSrc": true,
+          "own": []
+        },
+        "documentOwnCreateElement": false
+      }
+    }
+  ]
+}

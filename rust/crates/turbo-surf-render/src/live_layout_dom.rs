@@ -1,51 +1,78 @@
-//! Host-only live tree and CSS snapshot access. Included under the binding adapter
+//! Host-only live tree and CSS snapshot access over the binding's `host_internals`,
 //! so native handles and private document ownership never escape to page JS.
-use super::*;
 use crate::live_layout::{capture_composed_tree, LiveTreeInput};
 use crate::live_layout_composed::Composition;
 use crate::live_stylesheets::SheetSnapshot;
 use std::collections::HashSet;
+use turbo_dom_browser_env::host_internals::{
+    cascade_policy, current_document_context, current_document_id, document_id_of,
+    enter_document_of, handle_of, host_composed_children, interface_record, is_browsing_context,
+    is_connected, with_tree, wrap, Handle, Tree,
+};
 
-pub(crate) fn retire_context(_scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
-    crate::browser_env::retire_custom_element_context(context);
-    let Some(id) = context.get_slot::<DomContextId>() else {
-        return;
-    };
-    let _dom = DomScope::enter(id.0);
-    DOM.with(|state| {
-        if let Some(state) = state.borrow_mut().as_mut() {
-            state.browsing_context = false;
-        }
-    });
+/// The receiver a capture was taken from, so a stale capture can be taken again.
+#[derive(Clone, Copy)]
+enum CaptureSource<'s> {
+    /// [`capture`]: an element, a text node or a Range.
+    Node(v8::Local<'s, v8::Object>),
+    /// [`capture_document`]: a document or shadow root.
+    Document(v8::Local<'s, v8::Object>),
 }
 
 pub(crate) struct NativeLayoutInput<'s> {
+    source: CaptureSource<'s>,
     pub(crate) owner_context: Option<v8::Local<'s, v8::Context>>,
+    /// A wrapper owned by the captured document: layout re-enters that document to
+    /// style its live tree (the capture records provenance only, no copy).
+    pub(crate) document: v8::Local<'s, v8::Object>,
     pub(crate) tree: LiveTreeInput,
     pub(crate) handle: Handle,
     pub(crate) connected: bool,
     pub(crate) browsing_context: bool,
     pub(crate) sheets: Vec<SheetSnapshot>,
-    pub(crate) range: Option<Vec<crate::live_layout_range::Selection>>,
+    pub(crate) range: Option<Vec<turbo_dom_layout::cssom_view::range::Selection>>,
 }
 
 pub(crate) fn capture<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<NativeLayoutInput<'s>, String> {
-    if let Some(handle) = handle_of(scope, receiver) {
-        let _dom = DomScope::for_object(scope, receiver);
+    let mut input = if let Some(handle) = handle_of(scope, receiver) {
+        let _dom = enter_document_of(scope, receiver);
         let text = with_tree(|tree| tree.node_type_id(handle) == 3).unwrap_or(false);
         capture_kind(scope, receiver, if text { 0 } else { 1 })
     } else {
         capture_range(scope, receiver)
-    }
+    }?;
+    input.source = CaptureSource::Node(receiver);
+    Ok(input)
 }
 pub(crate) fn capture_document<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<NativeLayoutInput<'s>, String> {
-    capture_kind(scope, receiver, 9)
+    let mut input = capture_kind(scope, receiver, 9)?;
+    input.source = CaptureSource::Document(receiver);
+    Ok(input)
+}
+/// Whether the captured document's live tree is still at the capture's version.
+pub(crate) fn is_current(
+    scope: &mut v8::PinScope<'_, '_>,
+    input: &NativeLayoutInput<'_>,
+) -> Result<bool, String> {
+    let _dom = enter_document_of(scope, input.document);
+    with_tree(|tree| tree.version == input.tree.capture.tree_version)
+        .ok_or_else(|| String::from("native layout document is unavailable"))
+}
+/// Capture the same receiver again, through the same entry point.
+pub(crate) fn recapture<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    input: &NativeLayoutInput<'s>,
+) -> Result<NativeLayoutInput<'s>, String> {
+    match input.source {
+        CaptureSource::Node(receiver) => capture(scope, receiver),
+        CaptureSource::Document(receiver) => capture_document(scope, receiver),
+    }
 }
 fn capture_kind<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -54,16 +81,11 @@ fn capture_kind<'s>(
 ) -> Result<NativeLayoutInput<'s>, String> {
     let _capture_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Capture);
-    let _dom = DomScope::for_object(scope, receiver);
+    let _dom = enter_document_of(scope, receiver);
     let handle = handle_of(scope, receiver).ok_or("Illegal invocation")?;
-    let document_id = u32::try_from(DOM_ID.with(|id| id.get()))
+    let document_id = u32::try_from(current_document_id())
         .map_err(|_| "native document identity exceeds layout source range")?;
-    let browsing_context = DOM.with(|state| {
-        state
-            .borrow()
-            .as_ref()
-            .is_some_and(|state| state.browsing_context)
-    });
+    let browsing_context = is_browsing_context();
     let composition_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Composition);
     let (connected, root, mut graph, sheets) = with_tree(|tree| {
@@ -112,7 +134,7 @@ fn capture_kind<'s>(
                     .ok_or("native composition interrupted")?;
                 let mut handles = Vec::with_capacity(children.len());
                 for child in children {
-                    if dom_id_of(scope, child) != u64::from(document_id) {
+                    if document_id_of(scope, child) != u64::from(document_id) {
                         return Err("native composition contains a foreign document source".into());
                     }
                     handles.push(
@@ -132,10 +154,7 @@ fn capture_kind<'s>(
         }
     }
     drop(composition_profile);
-    graph.inline_overrides = css_policy::cascade_policy(scope)
-        .inline_overrides
-        .into_iter()
-        .collect();
+    graph.inline_overrides = cascade_policy(scope).inline_overrides.into_iter().collect();
     // Ordinary documents use the same native matched cascade as shadow scopes.
     // Falling back here loses functional selector arguments and specificity.
     let composed = connected && browsing_context;
@@ -147,33 +166,20 @@ fn capture_kind<'s>(
     let tree_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::TreeSnapshot);
     let tree = with_tree(|tree| {
-        if connected && browsing_context {
-            capture_composed_tree(tree, document_id, composed.then(|| graph.clone()))
+        if composed {
+            capture_composed_tree(tree, document_id, graph.clone())
         } else {
-            Ok(LiveTreeInput {
-                document_id,
-                tree_version: tree.version,
-                nodes: Vec::new(),
-                identities: Vec::new(),
-                svg_viewports: Vec::new(),
-                original_text: std::collections::HashMap::new(),
-                composition: None,
-                quirks: false,
-                body: None,
-            })
+            Ok(LiveTreeInput::empty(document_id, tree.version))
         }
     })
     .ok_or("native layout document is unavailable")??;
     drop(tree_profile);
-    let owner_context = DOM_CONTEXTS.with(|contexts| {
-        contexts
-            .borrow()
-            .get(&DOM_ID.with(|id| id.get()))
-            .and_then(|context| context.to_local(scope))
-    });
+    let owner_context = current_document_context(scope);
     if !connected || !browsing_context {
         return Ok(NativeLayoutInput {
+            source: CaptureSource::Node(receiver),
             owner_context,
+            document: receiver,
             tree,
             handle,
             connected,
@@ -185,7 +191,7 @@ fn capture_kind<'s>(
     let _stylesheets_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Stylesheets);
     let document = wrap(scope, root);
-    let record = collection_records::get(scope, document)
+    let record = interface_record(scope, document)
         .and_then(|record| v8::Local::<v8::Object>::try_from(record).ok())
         .ok_or("native layout document interface is unavailable")?;
     let host = v8::Local::<v8::Object>::try_from(own(scope, record, "cssHost")?)
@@ -221,7 +227,9 @@ fn capture_kind<'s>(
         }
     }
     Ok(NativeLayoutInput {
+        source: CaptureSource::Node(receiver),
         owner_context,
+        document: receiver,
         tree,
         handle,
         connected,
@@ -280,11 +288,11 @@ fn capture_range<'s>(
         .ok_or("Illegal invocation")?;
     let (start, start_offset) = range_boundary(scope, record, "startContainer", "startOffset")?;
     let (end, end_offset) = range_boundary(scope, record, "endContainer", "endOffset")?;
-    if dom_id_of(scope, start) != dom_id_of(scope, end) {
+    if document_id_of(scope, start) != document_id_of(scope, end) {
         return Err("native Range endpoints have different owner documents".into());
     }
     let mut input = capture_kind(scope, start, 0)?;
-    let _dom = DomScope::for_object(scope, start);
+    let _dom = enter_document_of(scope, start);
     let start_handle = handle_of(scope, start).ok_or("native Range start source unavailable")?;
     let end_handle = handle_of(scope, end).ok_or("native Range end source unavailable")?;
     if !input.connected || !input.browsing_context {
@@ -293,9 +301,9 @@ fn capture_range<'s>(
     }
     input.range = Some(
         with_tree(|tree| {
-            crate::live_layout_range::select(
+            turbo_dom_layout::cssom_view::range::select(
                 tree,
-                input.tree.document_id,
+                input.tree.document_id(),
                 (start_handle, start_offset),
                 (end_handle, end_offset),
             )
@@ -362,11 +370,11 @@ fn export<'s>(
 pub(crate) fn wrap_elements<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
-    ids: &[turbo_html2pdf_core::layout_snapshot::SourceId],
+    ids: &[turbo_dom_layout::layout_snapshot::SourceId],
     kind: u8,
 ) -> Result<v8::Local<'s, v8::Array>, String> {
-    let _dom = DomScope::for_object(scope, document);
-    let document_id = u32::try_from(DOM_ID.with(|id| id.get()))
+    let _dom = enter_document_of(scope, document);
+    let document_id = u32::try_from(current_document_id())
         .map_err(|_| "native hit document identity exceeds range")?;
     let result = v8::Array::new(scope, 0);
     for (index, id) in ids.iter().enumerate() {
@@ -397,7 +405,7 @@ pub(crate) fn valid_receiver<'s>(
     let Ok(receiver) = v8::Local::<v8::Object>::try_from(receiver) else {
         return false;
     };
-    let _dom = DomScope::for_object(scope, receiver);
+    let _dom = enter_document_of(scope, receiver);
     let Some(handle) = handle_of(scope, receiver) else {
         return false;
     };
@@ -460,6 +468,7 @@ mod tests {
         let membership = |tree: &Tree| {
             Composition::scopes(tree)
                 .unwrap()
+                .graph
                 .scopes
                 .into_iter()
                 .filter(|(node, _)| matches!(tree.local_name(*node), Some("style" | "link")))

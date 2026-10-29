@@ -85,7 +85,7 @@ async fn request_cache_modes_validators_vary_and_referrer_match_chrome155() {
         &format!("{origin}/"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();

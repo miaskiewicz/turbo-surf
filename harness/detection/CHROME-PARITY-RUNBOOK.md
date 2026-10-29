@@ -181,11 +181,14 @@ options: `--archive PATH`, `--bindings PATH`, `--archive-sha256 HASH`. The helpe
 `--jobs 2` precedes `--surf`; Cargo arguments follow `--surf`. The helper owns its SDK target/private Cargo workspace and
 preserves the production lock.
 
-The shared build helper also supports the explicit `turbo-surf-deno-*` registry
-package names used by the release dependency preparation. It creates metadata
-aliases inside the private Surf workspace, preserving the verified SDK source
-files, original manifests and native archive. The facade still points to that
-SDK's `v8-exact`; it must not resolve the stock150 backend. Keep the generated
+The shared build helper also supports the explicit `turbo-surf-deno-*` 0.x.1
+registry package names and the `turbo-dom-v8` native binding used by the release
+dependency preparation. It creates metadata aliases inside the private Surf
+workspace (`turbo-surf-deno-core` 0.412.1, `turbo-surf-deno-v8` 0.4.1 and
+`turbo-dom-v8` 150.4.0 over the SDK's `v8-exact`), preserving the verified SDK
+source files, original manifests and native archive, and enables Surf's
+`native-sdk-frame-read` forwarding feature. The facade still points to that SDK's
+`v8-exact`; it must not resolve the stock150 backend. Keep the generated
 `sdk-release-aliases/metadata-bridge.json` with the build evidence. This
 compatibility path has offline guards; a new dependency release still requires
 fresh stock and native155 integration tests before claiming build support.
@@ -221,28 +224,15 @@ version are different identities. Keep `PARITY_BIN` pointing to the SDK155 execu
 
 Deno extension source embedding is automatic in both stock and native builds;
 it requires no comparison flag or environment variable. All 28 licensed
-Web/WebIDL/Crypto modules are crate-local compile-time inputs, so installed
-artifacts must not read build-machine Cargo paths. `npm test` runs six offline
-reproducer controls and, after Cargo has fetched the locked packages, verifies
-all generated sources against their exact published archives. Recheck directly
-from the repository root when diagnosing source or packaging drift:
-
-```sh
-python3 rust/crates/turbo-surf-render/scripts/vendor-deno-extension-sources.py --check
-```
-
-The helper uses `CARGO_HOME`'s archive cache without modifying it; pass
-`--archive-dir /absolute/path/to/archives` if the three checksum-pinned archives
-are elsewhere. See the [crate provenance](../../rust/crates/turbo-surf-render/DENO-EXTENSIONS.md).
-The embedded subtree is marked `-text -whitespace` in `.gitattributes`: its
-published source, license and pins bytes must survive Windows autocrlf checkout
-unchanged. The root MCP smoke controls exercise a real Git checkout of all 32
-assets and reproduce the old missing-rule failure. Existing worktrees with
-already-converted files need an explicit restore before rebuilding; fresh CI
-checkouts apply the rule automatically.
-Fourteen literal shipping MIT/notice paths are also byte-preserved. Root tests
+Web/WebIDL/Crypto modules are compile-time inputs taken from the Deno
+distributions' `embedded_sources` tables (no vendored copy), so installed
+artifacts must not read build-machine Cargo paths. `cargo test` (part of
+`npm test`) checks every embedded module's SHA-256 and length against the reviewed
+pins in `deno_extension_sources_tests.rs`. See the
+[crate provenance](../../rust/crates/turbo-surf-render/DENO-EXTENSIONS.md).
+Thirteen literal shipping MIT/notice paths are byte-preserved (`-text -whitespace`). Root tests
 reproduce their old Windows CRLF drift and require complete canonical bytes
-in fresh checkouts, including `rust/LICENSE` and all nine member license copies.
+in fresh checkouts, including `rust/LICENSE` and all eight member license copies.
 The unmodified notices checker also runs in controlled Windows-style checkouts;
 removing only the workspace license rule must reproduce its failure. Artifact
 audits still compare exact bytes; complete license text with altered line
@@ -383,7 +373,8 @@ imports or reuse a signed-in UI session. Consent dispatch is conditional; verify
 Language/locale (`en-US`, `['en-US','en']`),1920×1080 screen and scale2 are fixed runner configuration, not invented CLI
 flags. Verify actual snapshot values; native languages must match its ordered HTTP profile. Extension disabling is a direct
 collector JSON setting `disableExtensions: true`, not a runner CLI flag. This setting is restricted to authored localhost
-controls; the collector rejects it for Google or other remote URLs. The matrix sets native `TURBO_SURF_TZ` from `--tz`;
+controls; the collector rejects it for Google or other remote URLs. The same holds for `headless: true` (keyboard-driven
+authored controls, so host keystrokes cannot reach a focused headed window; turbo-surf#51). The matrix sets native `TURBO_SURF_TZ` from `--tz`;
 set it explicitly when invoking the native example directly. The detection example selects `WindowTimerMode::RealTime` before
 hydration/frames/form replacements; there is no `--real-time` flag. Normal crawler constructors remain virtual. The host API's
 one-shot `initial_hydration_budget_ms` can bound a redirect open without reducing later configured operation budgets. The
@@ -481,10 +472,10 @@ parity_env "$PARITY_NODE" harness/detection/resource-scan-order-chrome.mjs "$PAR
 ```
 
 Review actual results/errors/version/source hashes before intentionally replacing
-`harness/detection/fixtures/resource-scan-order-chrome155.json`. Once accepted:
+`harness/detection/fixtures/resource-scan-order-chrome156.json`. Once accepted:
 
 ```sh
-cp "$PARITY_ORACLE" harness/detection/fixtures/resource-scan-order-chrome155.json
+cp "$PARITY_ORACLE" harness/detection/fixtures/resource-scan-order-chrome156.json
 parity_env "$PARITY_NODE" --test harness/detection/resource-scan-order-chrome.test.mjs
 parity_env cargo test --manifest-path rust/Cargo.toml -p turbo-surf-render --test resource_scan_order
 ```

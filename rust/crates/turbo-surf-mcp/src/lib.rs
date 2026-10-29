@@ -15,6 +15,7 @@ use std::sync::OnceLock;
 use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
+use turbo_dom_raster as raster;
 use turbo_surf_core::challenge::{self, ChallengeSolver, SolveContext};
 use turbo_surf_core::consent;
 use turbo_surf_core::cookies::CookieJar;
@@ -24,7 +25,6 @@ use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
 use turbo_surf_core::request_context::{ClientHints, Destination, RequestContext, RequestMode};
 use turbo_surf_core::robots::{RobotsCache, RobotsFetcher};
 use turbo_surf_page::{batch as batch_urls, TurboNavigator};
-use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
@@ -41,12 +41,22 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 // outcome — all otherwise observable only through the final `Err` string. Off by
 // default; one cached env read when off, zero formatting cost.
 fn serp_trace_on() -> bool {
+    #[cfg(test)]
+    if FORCE_TRACE.with(std::cell::Cell::get) {
+        return true;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
         std::env::var("TURBO_SURF_TRACE")
             .map(|v| !v.is_empty() && v != "0")
             .unwrap_or(false)
     })
+}
+
+// Tests turn tracing on for their own thread (the process-wide env read is cached).
+#[cfg(test)]
+thread_local! {
+    static FORCE_TRACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 macro_rules! strace {
@@ -1022,15 +1032,19 @@ impl Session {
             jar: Some(&mut self.jar),
             ..Default::default()
         };
+        // Accepted when the re-fetched page is a 200 with no wall markers and every
+        // `_abck` the jar would send carries Akamai's cleared marker (`~0~`). Akamai
+        // sites keep `_abck`/`bm_sz` in the jar either way, so their mere presence is
+        // not a wall signal here (turbo-surf#58).
         match fetch_html_with(&url, get).await {
             Ok((u, html, status)) => {
-                let cookie = self.jar.cookie_header(&u, 0.0);
-                let sig: Vec<(String, String)> = cookie
-                    .split("; ")
-                    .filter(|s| !s.is_empty())
-                    .map(|c| ("set-cookie".to_string(), c.to_string()))
-                    .collect();
-                status == 200 && challenge::detect(&u, status, &sig, &html).is_none()
+                let abck_cleared = self
+                    .jar
+                    .cookies_for(&u, 0.0)
+                    .iter()
+                    .filter(|c| c.name == "_abck")
+                    .all(|c| c.value.contains("~0~"));
+                status == 200 && abck_cleared && challenge::detect(&u, status, &[], &html).is_none()
             }
             Err(_) => false,
         }
@@ -1053,6 +1067,7 @@ impl Session {
     // Set the session's default layout viewport (px). Zero/absent dimensions are
     // left unchanged. Drives `screenshot` layout when a call omits its own size.
     fn set_viewport(&mut self, args: &Value) -> Result<Value, String> {
+        check_dimensions("set_viewport", args)?;
         if let Some(w) = arg_u32(args, "width") {
             self.viewport.width = w;
         }
@@ -1080,10 +1095,18 @@ impl Session {
             })?,
             None => serialize_doc(self.tree()?),
         };
+        check_dimensions("screenshot", args)?;
         let vp = raster::Viewport {
             width: arg_u32(args, "width").unwrap_or(self.viewport.width),
             height: arg_u32(args, "height").unwrap_or(self.viewport.height),
         };
+        let pixels = u64::from(vp.width) * u64::from(vp.height);
+        if pixels > MAX_SCREENSHOT_PIXELS {
+            return Err(format!(
+                "screenshot: {}x{} exceeds the {MAX_SCREENSHOT_PIXELS}-pixel limit (16384x16384)",
+                vp.width, vp.height
+            ));
+        }
         let want_css = args
             .get("external_css")
             .and_then(Value::as_bool)
@@ -2049,10 +2072,17 @@ fn static_registry() -> &'static StaticRegistry {
 // Resolve an engine id to its active strategy + source, precedence high→low:
 // session override → user dir → bundled default.
 fn resolve_strategy(session: &Session, engine: &str) -> Result<(Strategy, &'static str), String> {
+    resolve_strategy_in(static_registry(), session, engine)
+}
+
+fn resolve_strategy_in(
+    reg: &StaticRegistry,
+    session: &Session,
+    engine: &str,
+) -> Result<(Strategy, &'static str), String> {
     if let Some(s) = session.search_overrides.get(engine) {
         return Ok((s.clone(), "custom"));
     }
-    let reg = static_registry();
     if let Some(s) = reg.user_dir.get(engine) {
         return Ok((s.clone(), "user-dir"));
     }
@@ -2067,7 +2097,10 @@ fn resolve_strategy(session: &Session, engine: &str) -> Result<(Strategy, &'stat
 // List every active strategy with its winning source, sorted by engine id. Layers
 // are inserted low→high precedence so the higher layer overwrites the entry.
 fn list_active_strategies(session: &Session) -> Vec<Value> {
-    let reg = static_registry();
+    list_active_strategies_in(static_registry(), session)
+}
+
+fn list_active_strategies_in(reg: &StaticRegistry, session: &Session) -> Vec<Value> {
     let mut seen: BTreeMap<String, (String, &'static str, String)> = BTreeMap::new();
     let mut add = |engine: &str, s: &Strategy, source: &'static str| {
         seen.insert(
@@ -2321,6 +2354,16 @@ async fn maybe_clear_sorry(
     final_url: String,
     html: String,
 ) -> Result<(String, String), String> {
+    maybe_clear_sorry_with(jar, final_url, html, challenge::solver_from_env).await
+}
+
+// [`maybe_clear_sorry`] with the external-solver lookup injected (tests pass a stub).
+async fn maybe_clear_sorry_with(
+    jar: &mut CookieJar,
+    final_url: String,
+    html: String,
+    external_solver: fn() -> Option<Box<dyn ChallengeSolver>>,
+) -> Result<(String, String), String> {
     use turbo_surf_core::challenge::SolveError;
     use turbo_surf_core::recaptcha::RecaptchaSolver;
     use turbo_surf_core::sorry;
@@ -2339,10 +2382,10 @@ async fn maybe_clear_sorry(
         RecaptchaSolver::new().with_engine(Box::new(turbo_surf_render::V8RecaptchaEngine));
     match sorry::clear_if_sorry(&in_isolate, jar, &final_url, &html, &ctx, 0.0).await {
         Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
-        Ok(None) => Ok((final_url, html)),
+        Ok(None) => unreachable!("clear_if_sorry is None only for a non-wall, checked above"),
         // v2 image grid / no engine: defer to a configured external solver if present.
         Err(e @ (SolveError::VisualChallenge | SolveError::NotConfigured)) => {
-            match challenge::solver_from_env() {
+            match external_solver() {
                 Some(external) => {
                     match sorry::clear_if_sorry(
                         external.as_ref(),
@@ -2355,7 +2398,7 @@ async fn maybe_clear_sorry(
                     .await
                     {
                         Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
-                        Ok(None) => Ok((final_url, html)),
+                        Ok(None) => unreachable!("a /sorry wall was detected above"),
                         Err(ext) => Err(format!(
                             "google /sorry clearance failed (in-isolate: {e}; external {}: {ext})",
                             external.name()
@@ -2450,8 +2493,14 @@ async fn probe_mint(url: &str) -> Result<Value, String> {
 pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
     let session = Session::new();
     let (strategy, _src) = resolve_strategy(&session, "google")?;
-    let home = "https://www.google.com/";
-    let profile = fingerprint::select("www.google.com");
+    browserless_serp(&strategy, "https://www.google.com/", query).await
+}
+
+// The network-parameterised core of [`browserless_google_serp`]: `home` is the engine
+// homepage and `strategy` builds the `/search` URL (google in production; a localhost
+// engine in tests).
+async fn browserless_serp(strategy: &Strategy, home: &str, query: &str) -> Result<Value, String> {
+    let profile = fingerprint::select(&turbo_surf_core::url::host_of(home).unwrap_or_default());
     let ua = profile.user_agent.clone();
     let now = enid::now_secs();
     let mut jar = CookieJar::new();
@@ -2534,7 +2583,7 @@ pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
         .into_iter()
         .map(|c| c.name)
         .collect();
-    let url = build_query_url(&strategy, query, 10, None)?;
+    let url = build_query_url(strategy, query, 10, None)?;
     let sres = fetch_html(
         &url,
         FetchOptions {
@@ -2554,7 +2603,7 @@ pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
     let results = if shell {
         vec![]
     } else {
-        parse_serp(&strategy, &html, 10)
+        parse_serp(strategy, &html, 10)
     };
     Ok(json!({
         "consent_handshake": consent.is_some(),
@@ -2991,10 +3040,10 @@ pub fn tools() -> Value {
              snapshot — native layout+paint, no browser. Honors CSS \
              position/z-index stacking. Fetches the page's external <link> \
              stylesheets and its <img>/background-image bytes (via the session \
-             client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG \
+             client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG/BMP/ICO/AVIF/JPEG XL \
              images are painted, others fall back to a placeholder. Args: format (png|svg), \
-             snapshot? (dom_history index), width?/height? (override viewport), \
-             external_css? (default true), images? (default true), \
+             snapshot? (dom_history index), width?/height? (override viewport; \
+             at most 16384x16384 px in all), external_css? (default true), images? (default true), \
              full_page? (default false — true grows height to full content). \
              PNG returns base64; SVG returns the document string.",
         ),
@@ -3049,6 +3098,29 @@ pub fn tools() -> Value {
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str)
+}
+
+/// Chrome's per-dimension bound (`Emulation.setDeviceMetricsOverride` rejects
+/// larger widths/heights with the message `check_dimensions` reuses).
+const MAX_DIMENSION: u64 = 10_000_000;
+
+/// The largest surface `screenshot` rasterizes: 16384 x 16384 px (1 GiB RGBA).
+/// Larger requests used to allocate unboundedly and stall the stdio server.
+const MAX_SCREENSHOT_PIXELS: u64 = 16384 * 16384;
+
+/// Reject a `width`/`height` argument above Chrome's 10,000,000 px bound.
+fn check_dimensions(tool: &str, args: &Value) -> Result<(), String> {
+    let over = |k| {
+        args.get(k)
+            .and_then(Value::as_u64)
+            .is_some_and(|n| n > MAX_DIMENSION)
+    };
+    if over("width") || over("height") {
+        return Err(format!(
+            "{tool}: width and height values must be positive, not greater than {MAX_DIMENSION}"
+        ));
+    }
+    Ok(())
 }
 
 /// A positive integer argument as `u32` (`0` and non-numbers yield `None`).
@@ -3281,7 +3353,7 @@ fn tool_get_attribute(tree: &Tree, args: &Value) -> Result<Value, String> {
 fn aria_snapshot_body(tree: &Tree) -> String {
     match tree.query_selector("body") {
         Some(b) => view::aria_snapshot(tree, b),
-        None => String::new(), // defensive: a parsed document always has <body>
+        None => unreachable!("the HTML parser always creates <body>"),
     }
 }
 
@@ -3469,8 +3541,19 @@ fn ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-fn err(id: Value, message: &str) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32000, "message": message } })
+// JSON-RPC 2.0 error codes (spec section 5.1).
+const PARSE_ERROR: i64 = -32700;
+const INVALID_REQUEST: i64 = -32600;
+const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
+
+fn err(id: Value, code: i64, message: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+/// The response to a stdin line that is not JSON: `-32700` with `id: null`.
+pub fn parse_error() -> Value {
+    err(Value::Null, PARSE_ERROR, "Parse error")
 }
 
 fn initialize_result() -> Value {
@@ -3481,41 +3564,59 @@ fn initialize_result() -> Value {
     })
 }
 
-async fn tools_call(session: &mut Session, params: &Value) -> Result<Value, String> {
-    let name = arg_str(params, "name").ok_or("tools/call: missing 'name'")?;
-    let args = params
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let value = call_tool(session, name, &args).await?;
-    // MCP content envelope: a single text block carrying the serialized result.
-    let text = match &value {
-        Value::String(s) => s.clone(),
-        other => serde_json::to_string(other).unwrap_or_default(),
-    };
-    Ok(json!({ "content": [{ "type": "text", "text": text }] }))
+/// Whether `tools/list` advertises `name`.
+fn is_listed_tool(name: &str) -> bool {
+    tools()["tools"]
+        .as_array()
+        .is_some_and(|list| list.iter().any(|t| t["name"] == name))
 }
 
-/// Handle one JSON-RPC request object, returning the response object (or `None`
-/// for a notification, which has no `id`).
-pub async fn handle(session: &mut Session, req: &Value) -> Option<Value> {
-    let id = req.get("id").cloned();
-    let method = req.get("method").and_then(Value::as_str).unwrap_or("");
-    let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
-
-    // Notifications (no id) get no response.
-    id.as_ref()?;
-    let id = id.unwrap();
-
-    let result = match method {
-        "initialize" => Ok(initialize_result()),
-        "tools/list" => Ok(tools()),
-        "tools/call" => tools_call(session, &params).await,
-        other => Err(format!("unknown method: {other}")),
+/// `tools/call`: bad params and unknown tools are `Err` (JSON-RPC `-32602`);
+/// a tool that runs and fails is an MCP result with `isError: true`, so the
+/// model sees the message (MCP 2024-11-05, Tools > Error Handling).
+async fn tools_call(session: &mut Session, params: &Value) -> Result<Value, String> {
+    let name = arg_str(params, "name").ok_or("tools/call: missing 'name'")?;
+    let args = match params.get("arguments") {
+        None | Some(Value::Null) => json!({}),
+        Some(v @ Value::Object(_)) => v.clone(),
+        Some(_) => return Err("tools/call: 'arguments' must be an object".into()),
     };
-    Some(match result {
-        Ok(r) => ok(id, r),
-        Err(e) => err(id, &e),
+    if !is_listed_tool(name) {
+        return Err(format!("unknown tool: {name}"));
+    }
+    // MCP content envelope: a single text block carrying the serialized result.
+    Ok(match call_tool(session, name, &args).await {
+        Ok(Value::String(s)) => json!({ "content": [{ "type": "text", "text": s }] }),
+        Ok(other) => json!({ "content": [{ "type": "text",
+            "text": serde_json::to_string(&other).unwrap_or_default() }] }),
+        Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
+    })
+}
+
+/// Handle one JSON-RPC message, returning the response object (or `None` for a
+/// notification, which has no `id`). A message that is not a request object
+/// (no string `method`) is `-32600`.
+pub async fn handle(session: &mut Session, req: &Value) -> Option<Value> {
+    let Some(obj) = req.as_object() else {
+        return Some(err(Value::Null, INVALID_REQUEST, "Invalid Request"));
+    };
+    let id = obj.get("id").cloned();
+    let Some(method) = obj.get("method").and_then(Value::as_str) else {
+        return id.map(|id| err(id, INVALID_REQUEST, "Invalid Request"));
+    };
+    // Notifications (no id) get no response.
+    let id = id?;
+    let params = obj.get("params").cloned().unwrap_or_else(|| json!({}));
+
+    Some(match method {
+        "initialize" => ok(id, initialize_result()),
+        "ping" => ok(id, json!({})),
+        "tools/list" => ok(id, tools()),
+        "tools/call" => match tools_call(session, &params).await {
+            Ok(r) => ok(id, r),
+            Err(e) => err(id, INVALID_PARAMS, &e),
+        },
+        other => err(id, METHOD_NOT_FOUND, &format!("Method not found: {other}")),
     })
 }
 
@@ -4516,6 +4617,140 @@ mod tests {
         EnidCache::new(p)
     }
 
+    pub(super) async fn enid_server_for_trace() -> u16 {
+        spawn_enid_search_server().await
+    }
+
+    pub(super) fn stale_mint_cmd() -> String {
+        write_script(
+            "trace-stale",
+            "cat >/dev/null\nprintf '{\"cookies\":[{\"name\":\"__Secure-ENID\",\"value\":\"STALE\",\"domain\":\"127.0.0.1\",\"path\":\"/\"}]}'\n",
+        )
+    }
+
+    fn write_script(tag: &str, body: &str) -> String {
+        let script =
+            std::env::temp_dir().join(format!("surf-stub-{}-{tag}.sh", std::process::id()));
+        std::fs::write(&script, body).unwrap();
+        format!("bash {}", script.display())
+    }
+
+    #[tokio::test]
+    async fn enid_flow_errors_when_a_fresh_mint_still_gets_the_shell() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let untrusted = write_script(
+            "untrusted",
+            "cat >/dev/null\nprintf '{\"cookies\":[{\"name\":\"__Secure-ENID\",\"value\":\"STALE\",\"domain\":\"127.0.0.1\",\"path\":\"/\"}]}'\n",
+        );
+        // A cache path whose directory does not exist: the write fails, the flow goes on.
+        let cache = EnidCache::new("/dev/null/no-such-dir-surf/enid.json");
+        let err = google_enid_flow(&url, &cache, &untrusted, None, false, &BTreeMap::new())
+            .await
+            .unwrap_err();
+        assert!(
+            err.starts_with(
+                "google served the enablejs shell even after a fresh __Secure-ENID mint"
+            ),
+            "{err}"
+        );
+        let failing = write_script("failmint", "cat >/dev/null\nprintf 'no display'\nexit 4\n");
+        let err = google_enid_flow(
+            &url,
+            &tmp_enid_cache("failmint"),
+            &failing,
+            None,
+            false,
+            &BTreeMap::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "mint sidecar failed (exit status: 4): no display");
+        assert!(cache.path_str().ends_with("no-such-dir-surf/enid.json"));
+    }
+
+    // Serializes the tests that set the sidecar env vars.
+    static SIDECAR_ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn browser_and_enid_strategies_read_their_sidecar_from_the_environment() {
+        let _env = SIDECAR_ENV.lock().await;
+        let port = spawn_enid_search_server().await;
+        let mut s = Session::new();
+        for (engine, mode) in [("viabrowser", "browser"), ("viaenid", "enid")] {
+            call(
+                &mut s,
+                "web_search_load_strategy",
+                json!({ "strategy": { "engine": engine, "mode": mode, "format": "structural",
+                    "query_url": format!("http://127.0.0.1:{port}/search?q={{query}}") } }),
+            )
+            .await;
+        }
+        let search = |engine: &'static str| json!({ "query": "x", "engine": engine });
+        std::env::remove_var("TURBO_SURF_BROWSER_FETCH_CMD");
+        let err = call_tool(&mut s, "web_search", &search("viabrowser"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.starts_with(
+                "web_search browser mode needs the TURBO_SURF_BROWSER_FETCH_CMD env var"
+            ),
+            "{err}"
+        );
+        let err = call_tool(&mut s, "web_search", &search("viaenid"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.starts_with("google web_search needs the TURBO_SURF_BROWSER_FETCH_CMD env var"),
+            "{err}"
+        );
+
+        // Browser mode: the sidecar's html is parsed.
+        std::env::set_var(
+            "TURBO_SURF_BROWSER_FETCH_CMD",
+            "node -e process.stdin.resume();process.stdout.write(JSON.stringify({html:'<a\\u0020href=https://r.test/><h3>R</h3></a>'}))",
+        );
+        assert_eq!(
+            call_tool(&mut s, "web_search", &search("viabrowser"))
+                .await
+                .unwrap(),
+            json!([{ "title": "R", "url": "https://r.test/" }])
+        );
+        // ENID mode: mint via the sidecar, cache under TURBO_SURF_ENID_CACHE, then under
+        // TURBO_SURF_SIDECAR_DIR/.enid-cache.json when the explicit path is empty.
+        let (mint, _) = write_mint_stub("envflow");
+        std::env::set_var("TURBO_SURF_BROWSER_FETCH_CMD", &mint);
+        let dir = std::env::temp_dir().join(format!("surf-sidecar-env-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let explicit = dir.join("explicit.json");
+        std::env::set_var("TURBO_SURF_ENID_CACHE", &explicit);
+        assert_eq!(
+            call_tool(&mut s, "web_search", &search("viaenid"))
+                .await
+                .unwrap(),
+            json!([])
+        );
+        assert!(explicit.exists());
+        std::env::set_var("TURBO_SURF_ENID_CACHE", "");
+        std::env::set_var("TURBO_SURF_SIDECAR_DIR", &dir);
+        assert_eq!(
+            call_tool(&mut s, "web_search", &search("viaenid"))
+                .await
+                .unwrap(),
+            json!([])
+        );
+        assert!(dir.join(".enid-cache.json").exists());
+        for k in [
+            "TURBO_SURF_BROWSER_FETCH_CMD",
+            "TURBO_SURF_ENID_CACHE",
+            "TURBO_SURF_SIDECAR_DIR",
+        ] {
+            std::env::remove_var(k);
+        }
+        assert_eq!(sidecar_dir(), "scripts/browser-sidecar");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     async fn enid_flow_cache_miss_mints_then_native_fetch_gets_serp() {
         let port = spawn_enid_search_server().await;
@@ -5235,10 +5470,19 @@ mod tests {
         let e = handle(&mut s, &json!({"jsonrpc":"2.0","id":1,"method":"bogus"}))
             .await
             .unwrap();
-        assert!(e["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("unknown method"));
+        assert_eq!(
+            e["error"],
+            json!({"code": -32601, "message": "Method not found: bogus"})
+        );
+        // a failing tool is an MCP result with isError, not a JSON-RPC error
+        let e = handle(
+            &mut s,
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"goto","arguments":{}}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(e["result"]["isError"], true, "{e}");
+        assert!(e.get("error").is_none(), "{e}");
         // unknown tool
         assert!(call_tool(&mut s, "nope", &json!({})).await.is_err());
         // read tool with no page loaded
@@ -5246,6 +5490,56 @@ mod tests {
         assert!(call_tool(&mut empty, "text", &json!({})).await.is_err());
         // goto missing url
         assert!(call_tool(&mut s, "goto", &json!({})).await.is_err());
+    }
+
+    // Screenshot size limits: a dimension over Chrome's 10,000,000 px
+    // `Emulation.setDeviceMetricsOverride` bound is rejected with Chrome's
+    // message, and a surface over 16384 x 16384 px is refused before any
+    // allocation (an unbounded request made the stdio server allocate 14 GB
+    // and stop answering).
+    #[tokio::test(flavor = "current_thread")]
+    async fn screenshot_and_viewport_reject_oversized_surfaces() {
+        let mut s = loaded();
+        let shot = |w: u64, h: u64| json!({"width": w, "height": h, "format": "svg", "external_css": false, "images": false});
+        assert_eq!(
+            call_tool(&mut s, "screenshot", &shot(10_000_001, 10))
+                .await
+                .unwrap_err(),
+            "screenshot: width and height values must be positive, not greater than 10000000"
+        );
+        assert_eq!(
+            call_tool(&mut s, "screenshot", &shot(16_385, 16_384))
+                .await
+                .unwrap_err(),
+            "screenshot: 16385x16384 exceeds the 268435456-pixel limit (16384x16384)"
+        );
+        assert!(call_tool(&mut s, "screenshot", &shot(16_384, 16_384))
+            .await
+            .is_ok());
+        assert_eq!(
+            call_tool(&mut s, "set_viewport", &json!({"width": 10_000_001}))
+                .await
+                .unwrap_err(),
+            "set_viewport: width and height values must be positive, not greater than 10000000"
+        );
+        assert_eq!(s.viewport.width, Session::new().viewport.width);
+        call_tool(
+            &mut s,
+            "set_viewport",
+            &json!({"width": 20_000, "height": 20_000}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            call_tool(
+                &mut s,
+                "screenshot",
+                &json!({"format": "svg", "external_css": false, "images": false})
+            )
+            .await
+            .unwrap_err(),
+            "screenshot: 20000x20000 exceeds the 268435456-pixel limit (16384x16384)"
+        );
     }
 
     // --- web search (SERP parser) -------------------------------------------
@@ -5916,5 +6210,1826 @@ mod storage_response_tests {
         assert!(read.contains("data-local=\"null\""), "{read}");
         assert!(read.contains("data-session=\"null\""), "{read}");
         server.abort();
+    }
+}
+
+#[cfg(test)]
+mod session_tool_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // A 2x2 opaque red PNG (8-bit RGB).
+    const RED_PNG: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2,
+        0, 0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0,
+        68, 12, 16, 10, 0, 31, 238, 3, 253, 139, 95, 20, 212, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66,
+        96, 130,
+    ];
+
+    const HOME: &str = "<html><head><title>Home</title>\
+        <link rel=stylesheet href='/site.css'><link rel=stylesheet href='/missing.css'></head>\
+        <body style='margin:0'>\
+        <img src='/red.png' style='position:absolute;left:0;top:0;width:20px;height:20px'>\
+        <div class=bg style='position:absolute;left:0;top:20px;width:20px;height:20px'></div>\
+        <form id=f action='/search' method=get>\
+        <input name=q value=cats><select name=s><option value=a>A</option>\
+        <option value=b>B</option></select></form>\
+        <form id=p action='/post' method=post><input name=x value=1></form></body></html>";
+
+    fn route(path: &str) -> (&'static str, &'static str, Vec<u8>) {
+        match path {
+            "/" => ("200 OK", "text/html", HOME.as_bytes().to_vec()),
+            "/site.css" => (
+                "200 OK",
+                "text/css",
+                b"body{background:rgb(0,0,255)} .bg{background-image:url(/red.png)}".to_vec(),
+            ),
+            "/red.png" => ("200 OK", "image/png", RED_PNG.to_vec()),
+            "/robots.txt" => (
+                "200 OK",
+                "text/plain",
+                b"User-agent: *\nDisallow: /private\n".to_vec(),
+            ),
+            "/bad.json" => ("200 OK", "application/json", b"{nope".to_vec()),
+            "/good.json" => ("200 OK", "application/json", b"{\"a\":[1,2]}".to_vec()),
+            p if p.starts_with("/search") => (
+                "200 OK",
+                "text/html",
+                format!("<title>Search</title><p id=q>{p}</p><a href='/'>home</a>").into_bytes(),
+            ),
+            "/post" => ("200 OK", "text/html", b"<title>Posted</title>".to_vec()),
+            _ => (
+                "404 Not Found",
+                "text/html",
+                b"<title>Missing</title>".to_vec(),
+            ),
+        }
+    }
+
+    async fn spawn_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 16384];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    let (status, ty, body) = route(&path);
+                    let head = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {ty}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = sock.write_all(head.as_bytes()).await;
+                    let _ = sock.write_all(&body).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        base
+    }
+
+    async fn call(s: &mut Session, name: &str, args: Value) -> Result<Value, String> {
+        call_tool(s, name, &args).await
+    }
+
+    fn pixel(shot: &Value, x: u32, y: u32) -> [u8; 3] {
+        let png = BASE64.decode(shot["base64"].as_str().unwrap()).unwrap();
+        let img = turbo_dom_layout::image::decode_png_rgba(&png).unwrap();
+        let at = ((y * img.width + x) * 4) as usize;
+        [img.rgba[at], img.rgba[at + 1], img.rgba[at + 2]]
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn history_forms_and_network_tools_follow_the_session() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        assert_eq!(
+            call(&mut s, "go_back", json!({})).await.unwrap_err(),
+            "no back history"
+        );
+        assert_eq!(
+            call(&mut s, "go_forward", json!({})).await.unwrap_err(),
+            "no forward history"
+        );
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        // select_option + submit (the first form when no selector is given).
+        call(
+            &mut s,
+            "select_option",
+            json!({ "selector": "select", "value": "b" }),
+        )
+        .await
+        .unwrap();
+        call(&mut s, "submit", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=b"));
+        assert_eq!(
+            call(&mut s, "text_content", json!({ "selector": "#q" }))
+                .await
+                .unwrap(),
+            json!("/search?q=cats&s=b")
+        );
+        // back → home, forward → search, reload keeps the URL.
+        call(&mut s, "go_back", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/"));
+        call(&mut s, "go_forward", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=b"));
+        call(&mut s, "reload", json!({})).await.unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=b"));
+        assert_eq!(
+            call(&mut s, "text", json!({})).await.unwrap(),
+            json!("/search?q=cats&s=b\nhome")
+        );
+        // A selected POST form.
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        call(&mut s, "submit", json!({ "selector": "#p" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/post"));
+        assert_eq!(
+            call(&mut s, "submit", json!({ "selector": "#nope" }))
+                .await
+                .unwrap_err(),
+            "no element matches #nope"
+        );
+        assert_eq!(
+            call(&mut s, "submit", json!({})).await.unwrap_err(),
+            "no form on page"
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                "select_option",
+                json!({ "selector": "select", "value": "x" })
+            )
+            .await
+            .unwrap_err(),
+            "no element matches select"
+        );
+
+        // fetch_json / fetch_raw over the session client.
+        assert_eq!(
+            call(
+                &mut s,
+                "fetch_json",
+                json!({ "url": format!("{base}/good.json") })
+            )
+            .await
+            .unwrap(),
+            json!({ "a": [1, 2] })
+        );
+        assert!(call(
+            &mut s,
+            "fetch_json",
+            json!({ "url": format!("{base}/bad.json") })
+        )
+        .await
+        .unwrap_err()
+        .starts_with("invalid JSON: "));
+        assert_eq!(
+            call(&mut s, "fetch_json", json!({})).await.unwrap_err(),
+            "fetch_json: missing 'url'"
+        );
+
+        // robots_check: the explicit url, then the session url; UA from set_user_agent.
+        assert_eq!(
+            call(
+                &mut s,
+                "robots_check",
+                json!({ "url": format!("{base}/private/x") })
+            )
+            .await
+            .unwrap(),
+            json!({ "url": format!("{base}/private/x"), "allowed": false })
+        );
+        call(&mut s, "set_user_agent", json!({ "value": "probe-bot" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "robots_check", json!({})).await.unwrap(),
+            json!({ "url": format!("{base}/post"), "allowed": true })
+        );
+        assert_eq!(
+            call(&mut Session::new(), "robots_check", json!({}))
+                .await
+                .unwrap_err(),
+            "robots_check: missing 'url'"
+        );
+
+        // set_cookie lands in the jar and get_cookies dumps it.
+        call(
+            &mut s,
+            "set_cookie",
+            json!({ "name": "sid", "value": "v1", "domain": ".127.0.0.1", "expires": 4102444800.0 }),
+        )
+        .await
+        .unwrap();
+        let cookies = call(&mut s, "get_cookies", json!({})).await.unwrap();
+        let sid = cookies
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "sid")
+            .unwrap();
+        assert_eq!(sid["value"], "v1");
+        assert_eq!(sid["domain"], "127.0.0.1");
+        assert_eq!(sid["path"], "/");
+        assert_eq!(
+            call(&mut s, "set_cookie", json!({})).await.unwrap_err(),
+            "set_cookie: missing 'name'"
+        );
+
+        // crawl + batch (bulk tools, fresh navigators).
+        let crawl = call(
+            &mut s,
+            "crawl",
+            json!({ "url": format!("{base}/search?z"), "maxPages": 2, "maxDepth": 1, "itemSelector": "p" }),
+        )
+        .await
+        .unwrap();
+        let pages = crawl.as_array().unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0]["url"], format!("{base}/search?z"));
+        assert_eq!(pages[0]["title"], "Search");
+        assert_eq!(pages[0]["items"], 1);
+        assert_eq!(pages[1]["url"], format!("{base}/"));
+        assert_eq!(pages[1]["title"], "Home");
+        let crawl_start = call(
+            &mut s,
+            "crawl",
+            json!({ "start": [format!("{base}/post"), 7], "maxPages": 1 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(crawl_start[0]["title"], "Posted");
+        assert_eq!(crawl_start.as_array().unwrap().len(), 1);
+        let batch = call(
+            &mut s,
+            "batch",
+            json!({ "urls": [format!("{base}/post"), "http://127.0.0.1:1/", 3], "concurrency": 1 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            batch[0],
+            json!({ "url": format!("{base}/post"), "status": 200, "title": "Posted" })
+        );
+        assert_eq!(batch[1]["url"], "http://127.0.0.1:1/");
+        assert!(batch[1]["error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert_eq!(batch.as_array().unwrap().len(), 2);
+        assert_eq!(
+            call(&mut s, "batch", json!({})).await.unwrap_err(),
+            "batch: missing 'urls' array"
+        );
+        assert_eq!(
+            call(&mut s, "no_such_tool", json!({})).await.unwrap_err(),
+            "unknown tool: no_such_tool"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn screenshot_fetches_linked_css_and_images_over_the_session() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "set_viewport", json!({ "width": 64, "height": 0 }))
+                .await
+                .unwrap(),
+            json!({ "viewport": { "width": 64, "height": s.viewport.height } })
+        );
+        let shot = call(&mut s, "screenshot", json!({ "height": 48 }))
+            .await
+            .unwrap();
+        assert_eq!(
+            (shot["width"].as_u64(), shot["height"].as_u64()),
+            (Some(64), Some(48))
+        );
+        assert_eq!(shot["mimeType"], "image/png");
+        // The fetched <img> (red), the background-image from the linked sheet (red)
+        // and the linked sheet's blue body background.
+        assert_eq!(pixel(&shot, 5, 5), [255, 0, 0]);
+        assert_eq!(pixel(&shot, 5, 25), [255, 0, 0]);
+        assert_eq!(pixel(&shot, 40, 45), [0, 0, 255]);
+        assert!(s.requests.iter().any(|r| r.ends_with("/red.png")));
+        // Without external CSS or images: white canvas, nothing fetched.
+        s.requests.clear();
+        let bare = call(
+            &mut s,
+            "screenshot",
+            json!({ "height": 48, "external_css": false, "images": false }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(pixel(&bare, 40, 45), [255, 255, 255]);
+        // The unfetched <img> paints its placeholder, never the image's red.
+        assert_ne!(pixel(&bare, 5, 5), [255, 0, 0]);
+        assert_ne!(pixel(&bare, 5, 25), [255, 0, 0]);
+        assert!(s.requests.is_empty(), "{:?}", s.requests);
+        let svg = call(
+            &mut s,
+            "screenshot",
+            json!({ "format": "svg", "height": 30, "images": false }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(svg["mimeType"], "image/svg+xml");
+        assert_eq!(svg["height"], 30);
+        assert!(svg["svg"].as_str().unwrap().starts_with("<svg"));
+        assert_eq!(
+            call(&mut s, "screenshot", json!({ "format": "gif" }))
+                .await
+                .unwrap_err(),
+            "screenshot: unknown format 'gif' (png|svg)"
+        );
+        assert_eq!(
+            call(&mut s, "screenshot", json!({ "snapshot": 3 }))
+                .await
+                .unwrap_err(),
+            "screenshot: snapshot 3 out of range (have 0)"
+        );
+        // inject_js keeps the hydrated DOM as a history snapshot.
+        call(
+            &mut s,
+            "inject_js",
+            json!({ "script": "document.title='Injected'" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.dom_history.len(), 1);
+        let latest = call(&mut s, "latest_dom", json!({})).await.unwrap();
+        assert!(
+            latest.as_str().unwrap().contains("<title>Injected</title>"),
+            "{latest}"
+        );
+        assert!(call(
+            &mut s,
+            "screenshot",
+            json!({ "snapshot": 0, "images": false, "external_css": false })
+        )
+        .await
+        .is_ok());
+        assert_eq!(png_dims(b"short"), None);
+        assert_eq!(svg_height("<svg width=\"3\">"), None);
+        assert_eq!(svg_height("<svg height=\"x\">"), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stealth_status_and_fingerprint_overrides() {
+        let mut s = Session::new();
+        let blank = call(&mut s, "stealth_status", json!({})).await.unwrap();
+        assert_eq!(blank["solver"], Value::Null);
+        assert_eq!(blank["poolSize"], json!(fingerprint::pool_size()));
+        assert_eq!(blank["renderFingerprintOverrides"], json!({}));
+        let p = s.profile_for("about:blank");
+        assert_eq!(blank["profile"]["userAgent"], json!(p.user_agent));
+        assert_eq!(blank["profile"]["chromeMajor"], json!(p.chrome_major));
+        assert_eq!(
+            call(
+                &mut s,
+                "set_fingerprint",
+                json!({ "overrides": { "hardwareConcurrency": 6 } })
+            )
+            .await
+            .unwrap(),
+            json!({ "ok": true, "fingerprint": { "hardwareConcurrency": 6 } })
+        );
+        s.load("https://shop.test/", "<p>x</p>");
+        let st = call(&mut s, "stealth_status", json!({})).await.unwrap();
+        assert_eq!(
+            st["renderFingerprintOverrides"],
+            json!({ "hardwareConcurrency": 6 })
+        );
+        assert_eq!(
+            st["profile"]["userAgent"],
+            json!(s.profile_for("https://shop.test/").user_agent)
+        );
+        call(&mut s, "set_fingerprint", json!({ "overrides": null }))
+            .await
+            .unwrap();
+        assert_eq!(s.fingerprint, "{}");
+        turbo_surf_render::set_fingerprint("{}");
+    }
+
+    // A sensor-gated page: GET without the clearance cookie serves the gate (with the
+    // Akamai script), the sensor POST sets the cookie, and GET with it is the real page.
+    async fn spawn_akamai_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let line = req.lines().next().unwrap_or("").to_string();
+                let (head, body) = if line.starts_with("GET /ak.js") {
+                    (
+                        "Content-Type: application/javascript".to_string(),
+                        "var bmak={sensor_data:1};navigator.webdriver;".to_string(),
+                    )
+                } else if line.starts_with("GET /other.js") {
+                    (
+                        "Content-Type: application/javascript".to_string(),
+                        "var x=1;".to_string(),
+                    )
+                } else if line.starts_with("POST /") {
+                    ("Set-Cookie: ak_ok=1; Path=/".to_string(), "{}".to_string())
+                } else if req.contains("ak_ok=1") {
+                    (
+                        "Content-Type: text/html".to_string(),
+                        "<title>Shop</title>".to_string(),
+                    )
+                } else {
+                    (
+                        "Content-Type: text/html".to_string(),
+                        "<title>Wall</title><script src='/other.js'></script><script src='/ak.js'></script>".to_string(),
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\n{head}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        base
+    }
+
+    // Serializes the tests that point TURBO_SURF_SENSOR_DIR somewhere.
+    static SENSOR_DIR_ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn analyze_akamai_builds_candidates_and_retry_keeps_the_accepted_one() {
+        let _env = SENSOR_DIR_ENV.lock().await;
+        let base = spawn_akamai_site().await;
+        let dir = std::env::temp_dir().join(format!("surf-sensors-{}", std::process::id()));
+        std::env::set_var("TURBO_SURF_SENSOR_DIR", &dir);
+        let mut s = Session::new();
+        assert_eq!(
+            call(&mut s, "analyze_akamai", json!({})).await.unwrap_err(),
+            "no Akamai script found on the current page"
+        );
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        let script = "var bmak={sensor_data:1};navigator.webdriver;";
+        let dry = call(&mut s, "analyze_akamai", json!({})).await.unwrap();
+        assert_eq!(dry["scriptUrl"], format!("{base}/ak.js"));
+        assert_eq!(dry["scriptBytes"], script.len());
+        assert_eq!(dry["scriptHash"], format!("{:016x}", fnv_hex(script)));
+        assert_eq!(dry["retried"], false);
+        assert_eq!(dry["accepted"], Value::Null);
+        let versions = turbo_surf_core::akamai::SensorVersion::all();
+        assert_eq!(dry["candidates"].as_array().unwrap().len(), versions.len());
+        assert!(dry["candidates"][0].get("accepted").is_none());
+
+        let hot = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        let first = format!("{:?}", versions[0]);
+        assert_eq!(hot["candidates"][0]["accepted"], true);
+        let saved = format!(
+            "{}/{}-{first}.json",
+            dir.display(),
+            dry["scriptHash"].as_str().unwrap()
+        );
+        assert_eq!(
+            hot["accepted"],
+            json!({ "version": first, "savedTo": saved })
+        );
+        // Only the first accepted candidate is tested.
+        if versions.len() > 1 {
+            assert!(hot["candidates"][1].get("accepted").is_none());
+        }
+        let blob: Value = serde_json::from_slice(&std::fs::read(&saved).unwrap()).unwrap();
+        assert_eq!(blob["pageUrl"], format!("{base}/"));
+        assert_eq!(blob["sensor_data"], hot["candidates"][0]["sensor_data"]);
+        assert_eq!(s.jar.cookie_header(&format!("{base}/"), 0.0), "ak_ok=1");
+        std::env::remove_var("TURBO_SURF_SENSOR_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_reports_what_the_page_scripts_read() {
+        let mut s = Session::new();
+        s.load(
+            "https://x.test/",
+            "<body><script>navigator.userAgent; navigator.notAThing;</script></body>",
+        );
+        let report = call(&mut s, "probe", json!({})).await.unwrap();
+        let accesses = report["accesses"].to_string();
+        assert!(accesses.contains("userAgent"), "{report}");
+        assert!(
+            report["shim_needed"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "navigator.notAThing"),
+            "{report}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_markdown_tools_and_run_playwright_navigate_first() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        let one = call(
+            &mut s,
+            "fetch_markdown",
+            json!({ "url": format!("{base}/search?m"), "links": true, "mode": "no-js" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.mode, "no-js");
+        assert_eq!(one["title"], "Search");
+        assert_eq!(one["markdown"], "/search?m\n\nhome");
+        assert_eq!(one["links"], json!([format!("{base}/")]));
+        let plain = call(
+            &mut s,
+            "fetch_markdown",
+            json!({ "url": format!("{base}/post") }),
+        )
+        .await
+        .unwrap();
+        assert!(plain.get("links").is_none());
+        assert_eq!(
+            call(&mut s, "fetch_markdown", json!({})).await.unwrap_err(),
+            "fetch_markdown: missing 'url'"
+        );
+        let many = call(
+            &mut s,
+            "fetch_markdown_batch",
+            json!({ "urls": [format!("{base}/search?b"), "http://127.0.0.1:1/x"], "links": true, "concurrency": 0 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(many[0]["url"], format!("{base}/search?b"));
+        assert_eq!(many[0]["status"], 200);
+        assert_eq!(many[0]["title"], "Search");
+        assert_eq!(many[0]["links"], json!([format!("{base}/")]));
+        assert_eq!(many[1]["url"], "http://127.0.0.1:1/x");
+        assert!(many[1]["error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert_eq!(
+            call(&mut s, "fetch_markdown_batch", json!({}))
+                .await
+                .unwrap_err(),
+            "fetch_markdown_batch: missing 'urls' array"
+        );
+        // run_playwright navigates to `url` first, then runs the script on that page.
+        let run = call(
+            &mut s,
+            "run_playwright",
+            json!({ "url": format!("{base}/post"), "script": "console.log(document.title)" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run["ok"], true, "{run}");
+        assert_eq!(s.url, format!("{base}/post"));
+        assert_eq!(
+            call(&mut s, "run_playwright", json!({})).await.unwrap_err(),
+            "run_playwright: missing 'script'"
+        );
+    }
+
+    #[test]
+    fn strategy_validation_names_each_missing_piece() {
+        let mut s = Session::new();
+        let load = |s: &mut Session, strategy: Value| {
+            tool_search_load_strategy(s, &json!({ "strategy": strategy })).unwrap_err()
+        };
+        assert_eq!(
+            load(&mut s, json!({ "engine": " ", "query_url": "{query}" })),
+            "web_search_load_strategy: 'engine' must be non-empty"
+        );
+        assert_eq!(
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "https://e.test/" })
+            ),
+            "web_search_load_strategy: 'query_url' must contain '{query}'"
+        );
+        assert_eq!(
+            load(&mut s, json!({ "engine": "e", "query_url": "{query}" })),
+            "web_search_load_strategy: format 'html' requires result_container/title/link"
+        );
+        assert_eq!(
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "{query}", "format": "json" })
+            ),
+            "web_search_load_strategy: format 'json' requires 'json_path'"
+        );
+        assert_eq!(
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "{query}", "format": "json",
+                        "json_path": { "results": "r", "title": "", "url": "u" } })
+            ),
+            "web_search_load_strategy: 'json_path' needs results/title/url"
+        );
+        assert_eq!(
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "{query}", "format": "xml" })
+            ),
+            "web_search_load_strategy: unknown format 'xml' (html|json|structural)"
+        );
+        assert!(load(&mut s, json!({ "engine": 1 }))
+            .starts_with("web_search_load_strategy: invalid strategy ("));
+        assert_eq!(
+            tool_search_load_strategy(&mut s, &json!({})).unwrap_err(),
+            "web_search_load_strategy: missing 'strategy' object"
+        );
+        assert_eq!(
+            tool_search_load_strategy(
+                &mut s,
+                &json!({ "strategy": { "engine": "g2", "query_url": "{query}", "format": "structural" } })
+            )
+            .unwrap(),
+            json!({ "engine": "g2", "version": "", "ok": true })
+        );
+    }
+
+    // A Google-style consent wall on localhost: GET / without NID is the interstitial,
+    // POST /save mints NID and 302s back, GET / with NID is the real page.
+    async fn spawn_consent_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let page = base.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = if req.starts_with("POST /save") {
+                    format!("HTTP/1.1 302 Found\r\nSet-Cookie: NID=earned; Path=/\r\nLocation: {page}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                } else {
+                    let body = if req.contains("NID=earned") {
+                        "<title>Real</title>".to_string()
+                    } else {
+                        format!("<title>Before you continue to Google</title><form action=\"/save\" method=\"post\"><input name=\"set_aps\" value=\"true\"><input name=\"set_sc\" value=\"true\"><input name=\"continue\" value=\"{page}/\"></form>")
+                    };
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                };
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        base
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn consent_walls_are_handshaken_unless_bypass_is_off() {
+        let base = spawn_consent_site().await;
+        let mut raw = Session::new();
+        assert_eq!(
+            call(&mut raw, "set_bypass_consent", json!({ "enabled": false }))
+                .await
+                .unwrap(),
+            json!({ "bypassConsent": false })
+        );
+        let walled = call(&mut raw, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        assert_eq!(walled["title"], "Before you continue to Google");
+        let mut s = Session::new();
+        let real = call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        assert_eq!(real["title"], "Real");
+        assert_eq!(real["status"], 200);
+        assert_eq!(s.jar.cookie_header(&format!("{base}/"), 0.0), "NID=earned");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_failing_or_idle_solver_leaves_the_fetched_page() {
+        let base = spawn_site().await;
+        let failing = Box::new(challenge::BrowserSolver::new(
+            "cat >/dev/null; exit 1".into(),
+        ));
+        let mut s = Session::with_solver(failing);
+        // Not a wall: the solver is never consulted.
+        let page = call(&mut s, "goto", json!({ "url": format!("{base}/post") }))
+            .await
+            .unwrap();
+        assert_eq!(page["title"], "Posted");
+        assert_eq!(s.requests.len(), 1);
+        assert_eq!(
+            call(&mut s, "stealth_status", json!({})).await.unwrap()["solver"],
+            "browser"
+        );
+        // A wall whose solve fails stays in place: no retry fetch, wall status kept.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let wall = format!(
+            "http://127.0.0.1:{}/",
+            listener.local_addr().unwrap().port()
+        );
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let _ = sock.read(&mut buf).await;
+                let body = "<title>Just a moment...</title><script src='/cdn-cgi/challenge-platform/h/b'></script>";
+                let resp = format!("HTTP/1.1 403 Forbidden\r\ncf-mitigated: challenge\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let out = call(&mut s, "goto", json!({ "url": wall })).await.unwrap();
+        assert_eq!(
+            (out["status"].as_u64(), out["title"].as_str()),
+            (Some(403), Some("Just a moment..."))
+        );
+        assert_eq!(s.requests.len(), 2);
+    }
+
+    #[test]
+    fn serp_diagnostics_name_cookies_flatten_bodies_and_pick_the_marker() {
+        let cookie = |name: &str| -> EnidCookie {
+            serde_json::from_value(json!({ "name": name, "value": "v" })).unwrap()
+        };
+        let cookies = vec![cookie("NID"), cookie("AEC")];
+        assert_eq!(cookie_names(&cookies), "NID,AEC");
+        assert_eq!(body_prefix("a\nb\rc"), "a b c");
+        assert_eq!(body_prefix(&"x".repeat(200)).len(), 160);
+        assert_eq!(serp_marker("<div id=\"rso\">"), "id=rso");
+        assert_eq!(serp_marker("<h3>t</h3>"), "<h3>");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn web_search_runs_a_loaded_strategy_against_a_localhost_engine() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let _ = tx.send(req.lines().next().unwrap_or("").to_string());
+                // The third result is only added by the page's own script (js mode).
+                let body = "<div class=r><a href='https://a.test/1'>One</a><p class=s>first</p></div>\
+                    <div class=r><a href='https://a.test/2'>Two</a></div><div id=more></div>\
+                    <script>document.getElementById('more').outerHTML=\"<div class=r><a href='https://a.test/3'>Three</a></div>\"</script>";
+                let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut s = Session::new();
+        let strategy = |engine: &str, mode: &str| {
+            json!({ "strategy": { "engine": engine, "query_url": "{base}/s?q={query}&n={limit}", "mode": mode,
+                "result_container": ".r", "title": "a", "link": "a", "snippet": ".s" } })
+        };
+        call(&mut s, "web_search_load_strategy", strategy("local", ""))
+            .await
+            .unwrap();
+        let hits = call(
+            &mut s,
+            "web_search",
+            json!({ "query": "rust lang", "engine": "local", "base": format!("{base}/"), "limit": 5 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            hits,
+            json!([
+                { "title": "One", "url": "https://a.test/1", "snippet": "first" },
+                { "title": "Two", "url": "https://a.test/2" }
+            ])
+        );
+        assert_eq!(rx.recv().await.unwrap(), "GET /s?q=rust+lang&n=5 HTTP/1.1");
+        // js mode renders the SERP's own script before parsing; limit caps the results.
+        call(
+            &mut s,
+            "web_search_load_strategy",
+            strategy("localjs", "js"),
+        )
+        .await
+        .unwrap();
+        let rendered = call(
+            &mut s,
+            "web_search",
+            json!({ "query": "q", "engine": "localjs", "base": base, "limit": 3 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(rendered.as_array().unwrap().len(), 3);
+        assert_eq!(rendered[2]["title"], "Three");
+        assert_eq!(
+            call(
+                &mut s,
+                "web_search",
+                json!({ "query": "q", "engine": "local" })
+            )
+            .await
+            .unwrap_err(),
+            "web_search: engine 'local' requires 'base'"
+        );
+        assert_eq!(
+            call(&mut s, "web_search", json!({})).await.unwrap_err(),
+            "web_search: missing 'query'"
+        );
+        // The page and history are untouched by a search.
+        assert!(s.tree.is_none());
+    }
+
+    // turbo-surf#58: a real Akamai exchange. The gate sets the seed `_abck` (+ `bm_sz`),
+    // the sensor POST answers with a cleared `_abck` (`~0~`), and only a request
+    // carrying the cleared value gets the real page.
+    async fn spawn_real_akamai_site() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let line = req.lines().next().unwrap_or("").to_string();
+                let (status, head, body) = if line.starts_with("GET /ak.js") {
+                    (
+                        "200 OK",
+                        "Content-Type: application/javascript".to_string(),
+                        "var bmak={sensor_data:1};".to_string(),
+                    )
+                } else if line.starts_with("POST /") {
+                    (
+                        "201 Created",
+                        "Set-Cookie: _abck=CLEARED~0~ok; Path=/".to_string(),
+                        "{}".to_string(),
+                    )
+                } else if req.contains("_abck=CLEARED~0~ok") {
+                    (
+                        "200 OK",
+                        "Content-Type: text/html".to_string(),
+                        "<title>Shop</title>".to_string(),
+                    )
+                } else {
+                    (
+                        "403 Forbidden",
+                        "Content-Type: text/html\r\nSet-Cookie: _abck=0~seed~-1~-1; Path=/\r\nSet-Cookie: bm_sz=s1; Path=/".to_string(),
+                        "<title>Wall</title><script src='/ak.js'></script>".to_string(),
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\n{head}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        base
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn analyze_akamai_retry_accepts_a_cleared_abck() {
+        let _env = SENSOR_DIR_ENV.lock().await;
+        let base = spawn_real_akamai_site().await;
+        let dir = std::env::temp_dir().join(format!("surf-sensors58-{}", std::process::id()));
+        std::env::set_var("TURBO_SURF_SENSOR_DIR", &dir);
+        let mut s = Session::new();
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        let hot = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        std::env::remove_var("TURBO_SURF_SENSOR_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(hot["candidates"][0]["accepted"], true, "{hot}");
+        assert_eq!(
+            hot["accepted"]["version"],
+            format!("{:?}", turbo_surf_core::akamai::SensorVersion::all()[0])
+        );
+        assert!(s
+            .jar
+            .cookie_header(&format!("{base}/"), 0.0)
+            .contains("_abck=CLEARED~0~ok"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn analyze_akamai_retry_rejects_a_still_walled_page() {
+        // The sensor POST yields nothing: the seed `_abck` stays and the page is still
+        // the wall, so no candidate is accepted.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = if req.starts_with("GET /ak.js") {
+                    "var bmak=1;"
+                } else {
+                    "<title>Wall</title><script src='/ak.js'></script>"
+                };
+                let resp = format!("HTTP/1.1 200 OK\r\nSet-Cookie: _abck=0~seed~-1~-1; Path=/\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut s = Session::new();
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        let hot = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        assert_eq!(hot["accepted"], Value::Null, "{hot}");
+        for c in hot["candidates"].as_array().unwrap() {
+            assert_eq!(c["accepted"], false);
+        }
+    }
+
+    fn strategy_of(v: Value) -> Strategy {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn json_serps_follow_dotted_paths_and_skip_empty_urls() {
+        let st = strategy_of(
+            json!({ "engine": "j", "query_url": "{query}", "format": "json",
+            "json_path": { "results": "data.hits", "title": "t", "url": "meta.u", "snippet": "s" } }),
+        );
+        let body = r#"{"data":{"hits":[
+            {"t":"One","meta":{"u":"https://a.test/1"},"s":"first"},
+            {"t":"NoUrl","meta":{"u":""}},
+            {"meta":{"u":"https://a.test/3"},"s":""},
+            {"t":"Four","meta":{"u":"https://a.test/4"}}]}}"#;
+        let hits: Vec<Value> = parse_serp(&st, body, 2)
+            .iter()
+            .map(SearchResult::to_json)
+            .collect();
+        assert_eq!(
+            hits,
+            vec![
+                json!({ "title": "One", "url": "https://a.test/1", "snippet": "first" }),
+                json!({ "title": "", "url": "https://a.test/3" }),
+            ]
+        );
+        assert!(parse_serp(&st, "not json", 5).is_empty());
+        assert!(parse_serp(&st, r#"{"data":{"hits":{}}}"#, 5).is_empty());
+        assert!(parse_serp(&st, r#"{"data":[]}"#, 5).is_empty());
+        let no_path =
+            strategy_of(json!({ "engine": "j", "query_url": "{query}", "format": "json" }));
+        assert!(parse_serp(&no_path, body, 5).is_empty());
+        assert_eq!(json_lookup(&json!({"a":{"b":1}}), "a.b"), Some(&json!(1)));
+        assert_eq!(json_lookup(&json!({"a":1}), "a.b"), None);
+    }
+
+    #[test]
+    fn redirect_wrappers_unwrap_their_target_parameter() {
+        assert_eq!(
+            decode_redirect(None, "https://x.test/").as_deref(),
+            Some("https://x.test/")
+        );
+        assert_eq!(
+            decode_redirect(Some("q"), "/url?q=https://a.test/p&sa=U").as_deref(),
+            Some("https://a.test/p")
+        );
+        assert_eq!(
+            decode_redirect(
+                Some("uddg"),
+                "//duckduckgo.com/l/?uddg=https%3A%2F%2Fb.test%2F"
+            )
+            .as_deref(),
+            Some("https://b.test/")
+        );
+        // No wrapper parameter: the href stands; an unparsable href is dropped.
+        assert_eq!(
+            decode_redirect(Some("q"), "https://c.test/direct").as_deref(),
+            Some("https://c.test/direct")
+        );
+        assert_eq!(decode_redirect(Some("q"), "http://[bad"), None);
+    }
+
+    #[test]
+    fn user_strategy_dir_loads_only_valid_json_strategies() {
+        // Initialise the process-wide registry first so this env change cannot leak
+        // into it; then exercise the loader directly.
+        let _ = static_registry();
+        let dir = std::env::temp_dir().join(format!("surf-strategies-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("ok.json"),
+            r#"{"engine":"mine","query_url":"https://m.test/?q={query}","format":"structural"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("blank.json"),
+            r#"{"engine":" ","query_url":"{query}"}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("broken.json"), "{").unwrap();
+        std::fs::write(dir.join("notes.txt"), "{}").unwrap();
+        std::fs::create_dir_all(dir.join("sub.json")).unwrap();
+        std::env::set_var("TURBO_SURF_SEARCH_STRATEGIES", &dir);
+        let loaded = load_user_dir();
+        std::env::set_var("TURBO_SURF_SEARCH_STRATEGIES", "");
+        let empty = load_user_dir();
+        std::env::set_var("TURBO_SURF_SEARCH_STRATEGIES", dir.join("missing"));
+        let missing = load_user_dir();
+        std::env::remove_var("TURBO_SURF_SEARCH_STRATEGIES");
+        let unset = load_user_dir();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(loaded.keys().collect::<Vec<_>>(), vec!["mine"]);
+        assert_eq!(loaded["mine"].format, "structural");
+        assert!(empty.is_empty() && missing.is_empty() && unset.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn strategy_listing_reports_each_engines_winning_layer() {
+        let mut s = Session::new();
+        call(
+            &mut s,
+            "web_search_load_strategy",
+            json!({ "strategy": { "engine": "bing", "version": "v9", "query_url": "{query}", "format": "structural" } }),
+        )
+        .await
+        .unwrap();
+        let list = call(&mut s, "web_search_strategies", json!({}))
+            .await
+            .unwrap();
+        let by = |engine: &str| {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["engine"] == engine)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            by("bing"),
+            json!({ "engine": "bing", "version": "v9", "source": "custom", "format": "structural" })
+        );
+        assert_eq!(by("duckduckgo")["source"], "built-in");
+        let engines: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["engine"].as_str().unwrap())
+            .collect();
+        let mut sorted = engines.clone();
+        sorted.sort();
+        assert_eq!(engines, sorted);
+        // Set engine: unknown is an error, a known one becomes the session default.
+        assert_eq!(
+            call(&mut s, "web_search_set_engine", json!({ "engine": "nope" }))
+                .await
+                .unwrap_err(),
+            "unknown engine 'nope' (load one with web_search_load_strategy)"
+        );
+        assert_eq!(
+            call(&mut s, "web_search_set_engine", json!({ "engine": "bing" }))
+                .await
+                .unwrap(),
+            json!({ "engine": "bing", "ok": true })
+        );
+        assert_eq!(pick_search_engine(&s, &json!({})), "bing");
+        assert_eq!(pick_search_engine(&s, &json!({ "engine": "x" })), "x");
+        assert_eq!(
+            pick_search_engine(&Session::new(), &json!({})),
+            "duckduckgo"
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                "web_search_reset_strategy",
+                json!({ "engine": "bing" })
+            )
+            .await
+            .unwrap(),
+            json!({ "engine": "bing", "dropped": true })
+        );
+        assert_eq!(
+            call(&mut s, "web_search_reset_strategy", json!({}))
+                .await
+                .unwrap(),
+            json!({ "dropped": [] })
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_sidecar_failures_are_explicit() {
+        let fail = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write('boom');process.exitCode=3",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            fail.starts_with("browser sidecar failed (exit status: 3): boom"),
+            "{fail}"
+        );
+        let junk = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write('x')",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            junk.starts_with("browser sidecar returned non-JSON: "),
+            "{junk}"
+        );
+        let no_html = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write('{}')",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(no_html, "browser sidecar response has no 'html'");
+        assert_eq!(
+            browser_fetch_serp_cmd("https://e/", "  ", None)
+                .await
+                .unwrap_err(),
+            "TURBO_SURF_BROWSER_FETCH_CMD is empty"
+        );
+        assert!(
+            browser_fetch_serp_cmd("https://e/", "/no/such/sidecar", None)
+                .await
+                .unwrap_err()
+                .starts_with("spawn browser sidecar (/no/such/sidecar): ")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn setup_browser_runs_the_sidecar_setup_script() {
+        let dir = std::env::temp_dir().join(format!("surf-sidecar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.display().to_string();
+        let missing = call(
+            &mut Session::new(),
+            "web_search_setup_browser",
+            json!({ "dir": d }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            missing.starts_with(&format!("setup script not found at {d}/setup.sh")),
+            "{missing}"
+        );
+        std::fs::write(
+            dir.join("setup.sh"),
+            "echo installed; echo warn >&2; exit 2\n",
+        )
+        .unwrap();
+        let out = call(
+            &mut Session::new(),
+            "web_search_setup_browser",
+            json!({ "dir": d }),
+        )
+        .await
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(out["ok"], false);
+        assert_eq!(out["output"], "installed\n");
+        assert_eq!(out["stderr"], "warn\n");
+        assert!(
+            out.to_string()
+                .contains(&format!("node {d}/fetch-serp.mjs")),
+            "{out}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dispatch_covers_checks_consent_socs_eval_render_and_names() {
+        let mut s = Session::new();
+        s.load(
+            "https://x.test/",
+            "<body><input id=c type=checkbox><button aria-label='Send it'>S</button>\
+             <p id=p>a</p><script>document.getElementById('p').textContent='ran'</script></body>",
+        );
+        assert_eq!(
+            call(&mut s, "check", json!({ "selector": "#c" }))
+                .await
+                .unwrap(),
+            json!({ "ok": true })
+        );
+        assert_eq!(
+            call(&mut s, "is_checked", json!({ "selector": "#c" }))
+                .await
+                .unwrap(),
+            json!(true)
+        );
+        call(&mut s, "uncheck", json!({ "selector": "#c" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "is_checked", json!({ "selector": "#c" }))
+                .await
+                .unwrap(),
+            json!(false)
+        );
+        assert_eq!(
+            call(&mut s, "check", json!({})).await.unwrap_err(),
+            "check: missing 'selector'"
+        );
+        assert_eq!(
+            call(&mut s, "accessible_name", json!({ "selector": "button" }))
+                .await
+                .unwrap(),
+            json!("Send it")
+        );
+        assert_eq!(
+            call(&mut s, "set_consent_socs", json!({ "socs": "" }))
+                .await
+                .unwrap(),
+            json!({ "consentSocs": "" })
+        );
+        assert_eq!(
+            call(&mut s, "set_consent_socs", json!({})).await.unwrap(),
+            json!({ "consentSocs": null })
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                "evaluate",
+                json!({ "script": "document.getElementById('p').textContent" })
+            )
+            .await
+            .unwrap(),
+            json!("a")
+        );
+        assert_eq!(
+            call(&mut s, "eval_js", json!({})).await.unwrap_err(),
+            "eval_js: missing 'script'"
+        );
+        // render without a script runs the page's own scripts; with one, injects it.
+        assert_eq!(
+            call(&mut s, "render", json!({})).await.unwrap(),
+            json!({ "ok": true })
+        );
+        assert_eq!(
+            call(&mut s, "text_content", json!({ "selector": "#p" }))
+                .await
+                .unwrap(),
+            json!("ran")
+        );
+        call(
+            &mut s,
+            "render",
+            json!({ "script": "document.getElementById('p').textContent='again'" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            call(&mut s, "text_content", json!({ "selector": "#p" }))
+                .await
+                .unwrap(),
+            json!("again")
+        );
+        assert_eq!(
+            call(&mut s, "get_cookies", json!({})).await.unwrap(),
+            json!([])
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_follows_links_submits_forms_and_reports_inert_targets() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        call(&mut s, "set_user_agent", json!({ "value": "ClickBot/1" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            s.request_headers().get("user-agent").map(String::as_str),
+            Some("ClickBot/1")
+        );
+        call(&mut s, "goto", json!({ "url": format!("{base}/search?c") }))
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&mut s, "click", json!({ "selector": "#q" }))
+                .await
+                .unwrap(),
+            json!({ "action": "inert" })
+        );
+        call(&mut s, "click_selector", json!({ "selector": "a" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/"));
+        // A form control: submits its form (GET) and records history.
+        call(&mut s, "click", json!({ "selector": "#f input" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/search?q=cats&s=a"));
+        call(&mut s, "go_back", json!({})).await.unwrap();
+        // A POST form: the submission's method and body reach the site.
+        call(&mut s, "click", json!({ "selector": "#p input" }))
+            .await
+            .unwrap();
+        assert_eq!(s.url, format!("{base}/post"));
+        assert_eq!(
+            call(&mut s, "click", json!({ "selector": "#none" }))
+                .await
+                .unwrap_err(),
+            "no element matches #none"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_mint_reports_reads_and_cookies_earned_by_the_page_scripts() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = if req.starts_with("GET /p.js") {
+                    "navigator.userAgent;document.cookie='__Secure-ENID=e1; Secure';"
+                } else {
+                    "<title>P</title><script>document.cookie='seen=1'</script><script src='/p.js'></script>"
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let out = call(
+            &mut Session::new(),
+            "probe_mint",
+            json!({ "url": format!("{base}/") }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["url"], format!("{base}/"));
+        assert_eq!(out["status"], 200);
+        assert!(out["scripts_bytes"].as_u64().unwrap() > 40, "{out}");
+        assert!(out["accesses"].to_string().contains("userAgent"), "{out}");
+        assert!(
+            out["earned_cookies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c == "seen"),
+            "{out}"
+        );
+        assert_eq!(
+            call(&mut Session::new(), "probe_mint", json!({}))
+                .await
+                .unwrap_err(),
+            "probe_mint: missing 'url'"
+        );
+        assert_eq!(earned_cookie_names("not json"), Vec::<String>::new());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_serp_bounced_to_a_keyless_sorry_wall_fails_explicitly() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = if req.starts_with("GET /search") {
+                    "HTTP/1.1 302 Found\r\nLocation: /sorry/index?continue=x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                } else {
+                    let body = "<p>Our systems have detected unusual traffic from your computer network.</p><form action='/sorry/index' method='post'><input name='continue' value='x'></form>";
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                };
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut s = Session::new();
+        call(
+            &mut s,
+            "web_search_load_strategy",
+            json!({ "strategy": { "engine": "walled", "query_url": "{base}/search?q={query}", "format": "structural" } }),
+        )
+        .await
+        .unwrap();
+        let err = call(
+            &mut s,
+            "web_search",
+            json!({ "query": "q", "engine": "walled", "base": base }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "google /sorry clearance failed: solver response parse error: recaptcha: no site key found on the page"
+        );
+    }
+
+    async fn spawn_routes(routes: Vec<(&'static str, &'static str, String)>) -> String {
+        // (request-line prefix, extra headers, body); first match wins, else 404.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let (status, head, body) = routes
+                    .iter()
+                    .find(|(p, _, _)| req.starts_with(p))
+                    .map_or(("404 Not Found", "", String::new()), |(_, h, b)| {
+                        ("200 OK", *h, b.clone())
+                    });
+                let resp = format!("HTTP/1.1 {status}\r\nContent-Type: text/html\r\n{head}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        base
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browserless_serp_runs_home_scripts_and_replays_the_jar_on_search() {
+        let base = spawn_routes(vec![
+            (
+                "GET /search",
+                "",
+                "<div id=\"rso\"><a href=\"https://r.test/1\"><h3>One</h3></a></div>".into(),
+            ),
+            ("GET /shell", "", "<p>enablejs</p>".into()),
+            (
+                "GET / ",
+                "Set-Cookie: AEC=a1; Path=/\r\n",
+                "<title>Home</title><script>document.cookie='JS=1'</script>".into(),
+            ),
+        ])
+        .await;
+        let st = |path: &str| -> Strategy {
+            serde_json::from_value(json!({ "engine": "g", "format": "structural",
+                "query_url": format!("{base}{path}?q={{query}}") }))
+            .unwrap()
+        };
+        let out = browserless_serp(&st("/search"), &format!("{base}/"), "q")
+            .await
+            .unwrap();
+        assert_eq!(out["consent_handshake"], false);
+        assert_eq!(out["has_aec"], true);
+        assert_eq!(out["has_nid"], false);
+        assert_eq!(out["has_serp_markers"], true);
+        assert_eq!(out["marker"], "id=rso");
+        assert_eq!(
+            out["results"],
+            json!([{ "title": "One", "url": "https://r.test/1" }])
+        );
+        assert!(
+            out["earned_cookies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c == "JS"),
+            "{out}"
+        );
+        let shell = browserless_serp(&st("/shell"), &format!("{base}/"), "q")
+            .await
+            .unwrap();
+        assert_eq!(shell["has_serp_markers"], false);
+        assert_eq!(shell["marker"], "");
+        assert_eq!(shell["results"], json!([]));
+        assert_eq!(
+            shell["verdict"],
+            "no SERP markers — search challenge not executed; cookie trust unknown"
+        );
+        // A consent interstitial at home: the accept form is replayed (NID earned) and
+        // its continue page is the home whose scripts run.
+        let consent = spawn_consent_site().await;
+        let st2: Strategy = serde_json::from_value(json!({ "engine": "g", "format": "structural",
+            "query_url": format!("{consent}/search?q={{query}}") }))
+        .unwrap();
+        let handshaken = browserless_serp(&st2, &format!("{consent}/"), "q")
+            .await
+            .unwrap();
+        assert_eq!(handshaken["consent_handshake"], true);
+        assert_eq!(handshaken["has_nid"], true);
+        turbo_surf_render::set_fingerprint("{}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_v2_checkbox_sorry_wall_without_an_external_solver_is_explained() {
+        let base = spawn_routes(vec![(
+            "GET /sorry",
+            "",
+            "<p>Our systems have detected unusual traffic from your computer network.</p><form action='/sorry/index'><input name='continue' value='x'><div class='g-recaptcha' data-sitekey='K'></div></form>".into(),
+        )])
+        .await;
+        let mut jar = CookieJar::new();
+        let page = format!("{base}/sorry/index");
+        let html = String::from("<p>unusual traffic from your computer network</p><form action='/sorry/index'><input name='continue' value='x'><div class='g-recaptcha' data-sitekey='K'></div></form>");
+        let err = maybe_clear_sorry(&mut jar, page, html).await.unwrap_err();
+        assert!(err.starts_with("google /sorry is a v2 image / score-gated challenge the in-isolate flow can't clear (reCAPTCHA v2 image-grid"), "{err}");
+        // A page that is not a wall passes through untouched.
+        let (u, h) = maybe_clear_sorry(&mut jar, format!("{base}/x"), "<p>ok</p>".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            (u.as_str(), h.as_str()),
+            (format!("{base}/x").as_str(), "<p>ok</p>")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_misc_tools_and_parsing_edges() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        // fetch_raw returns the body verbatim; accessible_description reads aria.
+        assert_eq!(
+            call(
+                &mut s,
+                "fetch_raw",
+                json!({ "url": format!("{base}/bad.json") })
+            )
+            .await
+            .unwrap(),
+            json!("{nope")
+        );
+        assert_eq!(
+            call(&mut s, "fetch_raw", json!({})).await.unwrap_err(),
+            "fetch_raw: missing 'url'"
+        );
+        s.load(
+            "https://x.test/",
+            "<p id=d>hint</p><button aria-describedby=d>B</button>",
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                "accessible_description",
+                json!({ "selector": "button" })
+            )
+            .await
+            .unwrap(),
+            json!("hint")
+        );
+        assert_eq!(
+            call(&mut s, "set_viewport", json!({ "height": 77 }))
+                .await
+                .unwrap()["viewport"]["height"],
+            77
+        );
+        // run_playwright on a session with no URL uses about:blank as the base.
+        let mut blank = Session::new();
+        blank.load("", "<p>x</p>");
+        let run = call(
+            &mut blank,
+            "run_playwright",
+            json!({ "script": "console.log(location.href)" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run["ok"], true, "{run}");
+        // Screenshot: a non-URL stylesheet href and a duplicated image are fetched once.
+        s.load(
+            &format!("{base}/"),
+            "<link rel=stylesheet href='http://[bad'><img src='/red.png'><img src='/red.png'><img src='http://[bad'>",
+        );
+        s.requests.clear();
+        call(&mut s, "screenshot", json!({ "width": 20, "height": 20 }))
+            .await
+            .unwrap();
+        assert_eq!(s.requests, vec![format!("{base}/red.png")]);
+        // Structural and html SERP parsing honour the limit and skip href-less/non-http links.
+        let structural: Strategy = serde_json::from_value(
+            json!({ "engine": "s", "query_url": "{query}", "format": "structural" }),
+        )
+        .unwrap();
+        let three = "<a href='https://a.test/1'><h3>1</h3></a><a href='https://a.test/2'><h3>2</h3></a><a href='https://a.test/3'><h3>3</h3></a>";
+        assert_eq!(parse_serp(&structural, three, 2).len(), 2);
+        let html: Strategy = serde_json::from_value(json!({ "engine": "h", "query_url": "{query}",
+            "result_container": ".r", "title": "b", "link": "a" }))
+        .unwrap();
+        let body = "<div class=r><i>no link</i></div><div class=r><a>none</a></div><div class=r><a href='mailto:x'>m</a></div><div class=r><b>T</b><a href='https://a.test/'>a</a></div><div class=r><a href='https://b.test/'>b</a></div>";
+        let hits: Vec<Value> = parse_serp(&html, body, 1)
+            .iter()
+            .map(SearchResult::to_json)
+            .collect();
+        assert_eq!(
+            hits,
+            vec![json!({ "title": "T", "url": "https://a.test/" })]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn solver_tokens_set_session_headers_and_unearned_consent_leaves_the_wall() {
+        // A Cloudflare-style wall cleared by a header token from the sidecar solver.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let wall = format!(
+            "http://127.0.0.1:{}/",
+            listener.local_addr().unwrap().port()
+        );
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+                let (status, extra, body) = if req.contains("\r\nx-pass: 1\r\n") {
+                    ("200 OK", "", "<title>Open</title>")
+                } else {
+                    ("403 Forbidden", "", "<title>Wall</title><script src='/cdn-cgi/challenge-platform/h/b'></script>")
+                };
+                let resp = format!("HTTP/1.1 {status}\r\n{extra}Content-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let solver = Box::new(challenge::BrowserSolver::new(
+            r#"cat >/dev/null; echo '{"headers":{"X-Pass":"1"}}'"#.into(),
+        ));
+        let mut s = Session::with_solver(solver);
+        let out = call(&mut s, "goto", json!({ "url": wall })).await.unwrap();
+        assert_eq!(
+            (out["status"].as_u64(), out["title"].as_str()),
+            (Some(200), Some("Open"))
+        );
+        assert_eq!(s.headers.get("x-pass").map(String::as_str), Some("1"));
+
+        // A consent wall whose accept POST earns no NID stays as fetched.
+        let base = spawn_routes(vec![
+            ("POST /save", "", "<p>saved</p>".into()),
+            ("GET /", "", "<title>Before you continue to Google</title><form action=\"/save\" method=\"post\"><input name=\"set_aps\" value=\"true\"><input name=\"set_sc\" value=\"true\"></form>".into()),
+        ])
+        .await;
+        let mut c = Session::new();
+        let out = call(&mut c, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        assert_eq!(out["title"], "Before you continue to Google");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn analyze_akamai_retry_survives_transport_failures() {
+        // Serves the gate and the script, then drops the connection for the sensor POST
+        // (first round) and for the re-fetch after a successful POST (second round).
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let drop_get = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = drop_get.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let posting = req.starts_with("POST");
+                let dropping = flag.load(std::sync::atomic::Ordering::SeqCst);
+                if (posting && !dropping)
+                    || (!posting && dropping && !req.starts_with("GET /ak.js"))
+                {
+                    continue; // close without a response
+                }
+                let body = if req.starts_with("GET /ak.js") {
+                    "var bmak=1;"
+                } else if posting {
+                    "{}"
+                } else {
+                    "<title>Gate</title><script src='/ak.js'></script>"
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut s = Session::new();
+        call(&mut s, "goto", json!({ "url": format!("{base}/") }))
+            .await
+            .unwrap();
+        let first = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        assert_eq!(first["accepted"], Value::Null);
+        drop_get.store(true, std::sync::atomic::Ordering::SeqCst);
+        let second = call(&mut s, "analyze_akamai", json!({ "retry": true }))
+            .await
+            .unwrap();
+        assert_eq!(second["accepted"], Value::Null);
+        assert!(second["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["accepted"] == false));
+    }
+
+    #[test]
+    fn user_dir_strategies_rank_between_built_ins_and_session_overrides() {
+        let mine: Strategy = serde_json::from_value(json!({ "engine": "bing", "version": "u1", "query_url": "{query}", "format": "structural" })).unwrap();
+        let reg = StaticRegistry {
+            built_in: strategies_from_json_array(BUNDLED_STRATEGIES_JSON),
+            user_dir: HashMap::from([("bing".to_string(), mine)]),
+        };
+        let mut s = Session::new();
+        let (st, source) = resolve_strategy_in(&reg, &s, "bing").unwrap();
+        assert_eq!((st.version.as_str(), source), ("u1", "user-dir"));
+        assert_eq!(
+            resolve_strategy_in(&reg, &s, "duckduckgo").unwrap().1,
+            "built-in"
+        );
+        let listed = list_active_strategies_in(&reg, &s);
+        let bing = listed.iter().find(|e| e["engine"] == "bing").unwrap();
+        assert_eq!(bing["source"], "user-dir");
+        s.search_overrides.insert(
+            "bing".into(),
+            serde_json::from_value(
+                json!({ "engine": "bing", "query_url": "{query}", "format": "structural" }),
+            )
+            .unwrap(),
+        );
+        assert_eq!(resolve_strategy_in(&reg, &s, "bing").unwrap().1, "custom");
+    }
+
+    // Answers the /sorry clearance as an external solver would (exemption cookie), or fails.
+    struct ExemptSolver(bool);
+    #[async_trait::async_trait]
+    impl ChallengeSolver for ExemptSolver {
+        fn name(&self) -> &'static str {
+            "exempt-stub"
+        }
+        async fn solve(
+            &self,
+            _: &challenge::Challenge,
+            _: &SolveContext,
+        ) -> Result<challenge::SolvedToken, challenge::SolveError> {
+            if !self.0 {
+                return Err(challenge::SolveError::Http("down".into()));
+            }
+            Ok(challenge::SolvedToken {
+                cookies: vec![("GOOGLE_ABUSE_EXEMPTION".into(), "EX".into())],
+                headers: Vec::new(),
+                ttl: std::time::Duration::from_secs(1),
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_v2_sorry_wall_defers_to_the_external_solver() {
+        let base = spawn_routes(vec![(
+            "GET /search",
+            "",
+            "<div id=rso>cleared</div>".into(),
+        )])
+        .await;
+        let html = format!("<p>unusual traffic from your computer network</p><form action='/sorry/index'><input name='continue' value='{base}/search?q=1'><div class='g-recaptcha' data-sitekey='K'></div></form>");
+        // The v2 wall page the in-isolate solver re-fetches is served from the URL itself.
+        let wall = spawn_routes(vec![("GET /sorry", "", html.clone())]).await;
+        let page = format!("{wall}/sorry/index");
+        let mut jar = CookieJar::new();
+        fn ok() -> Option<Box<dyn ChallengeSolver>> {
+            Some(Box::new(ExemptSolver(true)))
+        }
+        fn down() -> Option<Box<dyn ChallengeSolver>> {
+            Some(Box::new(ExemptSolver(false)))
+        }
+        let (u, h) = maybe_clear_sorry_with(&mut jar, page.clone(), html.clone(), ok)
+            .await
+            .unwrap();
+        assert_eq!(
+            (u, h.as_str()),
+            (format!("{base}/search?q=1"), "<div id=rso>cleared</div>")
+        );
+        let err = maybe_clear_sorry_with(&mut jar, page, html, down)
+            .await
+            .unwrap_err();
+        assert!(
+            err.starts_with("google /sorry clearance failed (in-isolate: reCAPTCHA v2 image-grid"),
+            "{err}"
+        );
+        assert!(
+            err.ends_with("external exempt-stub: solver HTTP error: down)"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn serp_tracing_changes_no_results() {
+        // With tracing forced on, the diagnostics are formatted and the outcomes are the
+        // same as untraced runs: a cached-token hit, a shell → re-mint → shell error, and
+        // probe_mint.
+        FORCE_TRACE.with(|f| f.set(true));
+        let port = super::tests::enid_server_for_trace().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let cache = EnidCache::new(
+            std::env::temp_dir().join(format!("surf-trace-{}.json", std::process::id())),
+        );
+        cache
+            .set(&[serde_json::from_value(json!({ "name": "__Secure-ENID", "value": "TRUSTED", "domain": "127.0.0.1", "path": "/" })).unwrap()])
+            .unwrap();
+        let hit = google_enid_flow(&url, &cache, "false", None, false, &BTreeMap::new())
+            .await
+            .unwrap();
+        assert!(hit.contains("id=\"rso\""));
+        let stale = super::tests::stale_mint_cmd();
+        let err = google_enid_flow(&url, &cache, &stale, None, true, &BTreeMap::new())
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("google served the enablejs shell"), "{err}");
+        let probe = call(&mut Session::new(), "probe_mint", json!({ "url": url }))
+            .await
+            .unwrap();
+        assert_eq!(probe["status"], 200);
+        let _ = std::fs::remove_file(
+            std::env::temp_dir().join(format!("surf-trace-{}.json", std::process::id())),
+        );
+        FORCE_TRACE.with(|f| f.set(false));
     }
 }

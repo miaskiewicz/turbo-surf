@@ -12,7 +12,7 @@ pub fn active_mixed_content_allowed(source: &str, target: &str) -> bool {
         Some(url::Host::Domain(host)) => host == "localhost" || host.ends_with(".localhost"),
         Some(url::Host::Ipv4(address)) => address.is_loopback(),
         Some(url::Host::Ipv6(address)) => address.is_loopback(),
-        None => false,
+        None => unreachable!("an http: URL always has a host"),
     }
 }
 
@@ -369,5 +369,35 @@ mod measured_embedder_headers {
                 "{value}"
             );
         }
+    }
+
+    #[test]
+    fn mixed_content_allows_only_potentially_trustworthy_http_hosts() {
+        let from = "https://page.test/";
+        assert!(!active_mixed_content_allowed("not a url", "http://x.test/"));
+        assert!(!active_mixed_content_allowed(from, "not a url"));
+        assert!(!active_mixed_content_allowed(from, "http://x.test/a.js"));
+        for ok in [
+            "http://localhost/a.js",
+            "http://app.localhost/a.js",
+            "http://127.0.0.1:8080/a.js",
+            "http://[::1]/a.js",
+            "https://x.test/a.js",
+        ] {
+            assert!(active_mixed_content_allowed(from, ok), "{ok}");
+        }
+        assert!(!active_mixed_content_allowed(from, "http://10.0.0.1/a.js"));
+        assert!(active_mixed_content_allowed(
+            "http://page.test/",
+            "http://x.test/a.js"
+        ));
+    }
+
+    #[test]
+    fn corp_site_comparison_rejects_unparsable_and_scheme_incompatible_targets() {
+        assert!(!corp_same_site("not a url", "https://x.test/"));
+        assert!(!corp_same_site("https://x.test/", "data:text/plain,x"));
+        assert!(!corp_same_site("http://x.test/", "https://x.test/"));
+        assert!(corp_same_site("https://a.x.test/", "http://b.x.test/"));
     }
 }

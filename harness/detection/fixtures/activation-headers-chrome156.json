@@ -1,0 +1,608 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "sourceSha256": "f6a694c11756dd23f61da73b5499cc7502c0f28ce4e3c54a8c1f527bc6c1da3f",
+  "freshProfile": true,
+  "headless": true,
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--headless=new",
+    "about:blank"
+  ],
+  "activationShape": {
+    "global": {
+      "configurable": true,
+      "enumerable": false,
+      "writable": true,
+      "valueType": "function",
+      "name": "UserActivation",
+      "length": 0
+    },
+    "prototype": {
+      "configurable": false,
+      "enumerable": false,
+      "writable": false,
+      "valueType": "object"
+    },
+    "ownKeys": ["hasBeenActive", "isActive", "constructor", "Symbol(Symbol.toStringTag)"],
+    "members": {
+      "hasBeenActive": {
+        "configurable": true,
+        "enumerable": true,
+        "getter": {
+          "name": "get hasBeenActive",
+          "length": 0
+        }
+      },
+      "isActive": {
+        "configurable": true,
+        "enumerable": true,
+        "getter": {
+          "name": "get isActive",
+          "length": 0
+        }
+      },
+      "constructor": {
+        "configurable": true,
+        "enumerable": false,
+        "writable": true,
+        "valueType": "function",
+        "name": "UserActivation",
+        "length": 0
+      }
+    },
+    "navigator": {
+      "configurable": true,
+      "enumerable": true,
+      "getter": {
+        "name": "get userActivation",
+        "length": 0
+      }
+    },
+    "sameObject": true,
+    "illegalConstructor": {
+      "name": "TypeError",
+      "message": "Failed to construct 'UserActivation': Illegal constructor"
+    },
+    "forgedGetter": {
+      "name": "TypeError",
+      "message": "Illegal invocation"
+    },
+    "crossRealm": {
+      "parentGetterOnChild": false,
+      "childGetterOnParent": false
+    }
+  },
+  "realElapsedExpiryMs": 5200,
+  "errors": [],
+  "results": [
+    {
+      "name": "script-submit",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "requests": [
+        {
+          "name": "script-submit",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "script-submit",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "script-submit",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "script-request-submit",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "requests": [
+        {
+          "name": "script-request-submit",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "script-request-submit",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "script-request-submit",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "untrusted-dispatch",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "requests": [
+        {
+          "name": "untrusted-dispatch",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "untrusted-dispatch",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "untrusted-dispatch",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-click",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "trusted-click",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-click",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-click",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-enter",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "trusted-enter",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-enter",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-enter",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-handler-submit",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "trusted-handler-submit",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-handler-submit",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-handler-submit",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-click-location",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "trusted-click-location",
+          "phase": "next",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1",
+          "activation": {
+            "isActive": true,
+            "hasBeenActive": true
+          }
+        },
+        {
+          "name": "trusted-click-location",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-click-location",
+          "phase": "retry",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "trusted-click-location",
+          "phase": "final",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-keydown-location",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "trusted-keydown-location",
+          "phase": "next",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1",
+          "activation": {
+            "isActive": true,
+            "hasBeenActive": true
+          }
+        },
+        {
+          "name": "trusted-keydown-location",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-keydown-location",
+          "phase": "retry",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "trusted-keydown-location",
+          "phase": "final",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-pointerdown-submit",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "trusted-pointerdown-submit",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-pointerdown-submit",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-pointerdown-submit",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "canceled-pointerdown-submit",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "canceled-pointerdown-submit",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "canceled-pointerdown-submit",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "canceled-pointerdown-submit",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "expired-activation",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "expiredActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "expired-activation",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "expired-activation",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "expired-activation",
+          "phase": "newdoc",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "automatic-retry",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": true
+      },
+      "requests": [
+        {
+          "name": "automatic-retry",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "automatic-retry",
+          "phase": "destination",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "automatic-retry",
+          "phase": "retry",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "automatic-retry",
+          "phase": "final",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-cross-origin-form",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "requests": [
+        {
+          "name": "trusted-cross-origin-form",
+          "phase": "submit",
+          "origin": "secondary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-cross-origin-form",
+          "phase": "destination",
+          "origin": "secondary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-cross-origin-form",
+          "phase": "retry",
+          "origin": "secondary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "trusted-cross-origin-form",
+          "phase": "final",
+          "origin": "secondary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    },
+    {
+      "name": "trusted-cross-origin-redirect",
+      "initialActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "destinationActivation": {
+        "isActive": false,
+        "hasBeenActive": false
+      },
+      "requests": [
+        {
+          "name": "trusted-cross-origin-redirect",
+          "phase": "submit",
+          "origin": "primary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-cross-origin-redirect",
+          "phase": "destination",
+          "origin": "secondary",
+          "method": "GET",
+          "secFetchUser": "?1"
+        },
+        {
+          "name": "trusted-cross-origin-redirect",
+          "phase": "retry",
+          "origin": "secondary",
+          "method": "GET",
+          "secFetchUser": null
+        },
+        {
+          "name": "trusted-cross-origin-redirect",
+          "phase": "final",
+          "origin": "secondary",
+          "method": "GET",
+          "secFetchUser": null
+        }
+      ]
+    }
+  ]
+}

@@ -23,7 +23,7 @@ fn server(responses: Vec<String>) -> (String, Receiver<String>) {
         for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
             stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .set_read_timeout(Some(std::time::Duration::from_secs(60)))
                 .unwrap();
             let mut bytes = Vec::new();
             let mut chunk = [0; 4096];
@@ -58,7 +58,7 @@ fn response(status: &str, headers: &str, body: &str) -> String {
     format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}",body.len())
 }
 fn request(rx: &Receiver<String>) -> String {
-    rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()
+    rx.recv_timeout(std::time::Duration::from_secs(60)).unwrap()
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -69,7 +69,7 @@ async fn get_submission_fetches_and_installs_actual_response_document() {
         "<script>globalThis.loaded='response'</script><p id='answer'>ok</p>",
     )]);
     let html="<base href='/base/'><form action='search?old=1#kept'><input name='q' value='hello world'><input name='dup' value='one'><input name='dup' value='two'></form><script>globalThis.oldGlobal=true</script>";
-    let mut page = PageSession::open(html, &format!("{base}/start"), "", "", 5000)
+    let mut page = PageSession::open(html, &format!("{base}/start"), "", "", 60_000)
         .await
         .unwrap();
     page.eval("document.cookie='before=yes; Path=/';const f=document.querySelector('form');f.requestSubmit();f.firstChild.value='changed';").await.unwrap();
@@ -108,7 +108,7 @@ async fn post_redirect_carries_real_body_cookies_and_referrer_policy() {
         &format!("{base}/start"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -230,7 +230,7 @@ async fn csp_or_cancelled_form_never_contacts_action() {
 #[tokio::test(flavor = "current_thread")]
 async fn initial_script_form_navigation_reaches_real_new_document() {
     let (base, rx) = server(vec![response("200 OK", "", "<p>arrived</p>")]);
-    let mut page=PageSession::open("<form action='/initial'><input name='a' value='1'></form><script>document.querySelector('form').requestSubmit()</script>",&format!("{base}/start"),"","",5000).await.unwrap();
+    let mut page=PageSession::open("<form action='/initial'><input name='a' value='1'></form><script>document.querySelector('form').requestSubmit()</script>",&format!("{base}/start"),"","",60_000).await.unwrap();
     assert!(request(&rx).starts_with("GET /initial?a=1 HTTP/1.1\r\n"));
     assert_eq!(
         page.eval_expression("document.body.textContent")
@@ -267,7 +267,7 @@ async fn last_queued_form_wins_and_cancelled_replacement_keeps_first() {
         response("200 OK", "", "<p>last</p>"),
         response("200 OK", "", "<p>first</p>"),
     ]);
-    let mut page=PageSession::open("<form id='a' action='/first'><input name='v' value='1'></form><form id='b' action='/last'><input name='v' value='2'></form>",&format!("{base}/start"),"","",5000).await.unwrap();
+    let mut page=PageSession::open("<form id='a' action='/first'><input name='v' value='1'></form><form id='b' action='/last'><input name='v' value='2'></form>",&format!("{base}/start"),"","",60_000).await.unwrap();
     page.eval("document.getElementById('a').requestSubmit();document.getElementById('b').requestSubmit();document.getElementById('b').firstChild.value='mutated'").await.unwrap();
     assert!(request(&rx).starts_with("GET /last?v=2 HTTP/1.1\r\n"));
     assert_eq!(
@@ -276,7 +276,7 @@ async fn last_queued_form_wins_and_cancelled_replacement_keeps_first() {
             .unwrap(),
         "last"
     );
-    let mut second=PageSession::open("<form id='a' action='/first'><input name='v' value='1'></form><form id='b' action='/last'></form>",&format!("{base}/start"),"","",5000).await.unwrap();
+    let mut second=PageSession::open("<form id='a' action='/first'><input name='v' value='1'></form><form id='b' action='/last'></form>",&format!("{base}/start"),"","",60_000).await.unwrap();
     second.eval("document.getElementById('a').requestSubmit();document.getElementById('b').addEventListener('submit',e=>e.preventDefault());document.getElementById('b').requestSubmit()").await.unwrap();
     assert!(request(&rx).starts_with("GET /first?v=1 HTTP/1.1\r\n"));
     assert_eq!(

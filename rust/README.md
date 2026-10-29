@@ -6,19 +6,13 @@ so the browserless crawler is Rust too. The only piece that *must* stay JS is th
 process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
-`rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace resolves registry `turbo-dom`0.5.7 from tagged merge
-`5ec17065`, including [PR15](https://github.com/miaskiewicz/turbo-dom/pull/15)
-and PR13/PR14 custom states, checkedness and detached contextual fragments.
-The release also repairs scalar/original-UTF16
-attribute case modifiers and measured HTML name/type defaults; the shared native
-search selector now excludes hidden query fields correctly.
-The release adds native custom states and live checked-state reads to the original
-0.5.6 capabilities, including original UTF-16
-payload/name/parser APIs, native mutation batches and bounded storage collection.
-The earlier published0.5.6 annotated release tag identifies PR #12 merge commit
-`ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`; npm platform/WASM metadata,
-the successful release workflow and official registry checksums were verified.
+`rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
+requires `turbo-dom` 0.6 (the consolidation release, published with
+turbo-dom-layout / -raster / -browser-env 0.6.0; until then the pre-publish
+`[patch.crates-io]` table resolves them from a turbo-dom Git rev). turbo-dom 0.6 brings the one Chrome-checked selector engine, the
+original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
+mutation batches and bounded storage collection (the per-release history is in
+[CHANGELOG.md](../CHANGELOG.md)).
 The canonical binding consumes collection through the public API with genuine
 weak wrapper roots and native job pins. Real V8 GC notifications schedule a
 bounded scan after completed host operations; no Tree traversal runs inside the
@@ -36,46 +30,60 @@ restore the caller before yielding.
 | `turbo-surf-core` | Tier 1 — net / cookies / robots / url / frontier / crawl scheduling / cache / measure |
 | `turbo-surf-page` | Tier 2 — `TurboNavigator` (fetch+parse over `rtdom::Tree`) |
 | `turbo-surf-view` | extraction & views — extract / visible / aria / ax / locator / markdown / text / schema / query / xpath / hydration / dom-ops / actions |
-| `turbo-surf-render` | Tier 3 — `deno_core` isolate + the rtdom↔V8 DOM binding (JS execution / hydration) |
-| `turbo-surf-raster` | native layout/paint, canvas rasterization and system text measurement; optional Metal WebGL and CoreText |
+| `turbo-surf-render` | Tier 3 — `deno_core` isolate + the rtdom↔V8 DOM binding (JS execution / hydration); native live layout over `turbo-dom-layout` |
 | `turbo-surf-py` | PyO3 binding and PyPI wheels |
 | `turbo-surf-transform` | swc TS/JSX → classic JS for the render tier |
 | `turbo-surf-napi` | the `.node` addon — in-process bridge from the core to Node (+ stateful `Session`) |
 | `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 80-tool surface over a stateful session |
 
+Native layout/paint, canvas rasterization and system text measurement (optional
+Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.6.0 crate, which
+mcp/napi/py depend on (forwarding its `gpu-metal` / `coretext` features, and its
+`avif` / `jxl` image decoders, which are on by default); the layout engine is
+`turbo-dom-layout` 0.6.0. turbo-surf no longer depends on
+turbo-html2pdf.
+
 `cargo test --workspace` runs the offline engine suite. Required gates also include
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
 the root npm test command checks versions, the addon/shim and detection harness too.
 
-The render tier consumes registry `turbo-html2pdf-core`0.3.8 from tagged merge
-`9591fe69`, including producer PRs23–25, for native live-tree
-box geometry, transforms, element scroll metrics and point-hit regions. It reads
-private actual CSSOM state without guest getters or HTML rewriting. Supported
+The render tier consumes `turbo-dom-layout` 0.6.0 (the layout half of
+turbo-html2pdf-core 0.3.9, relocated verbatim into turbo-dom) for native live-tree
+box geometry, transforms, element scroll metrics and point-hit regions: its live-DOM
+input (`turbo_dom_layout::live`) styles the page's own composed tree in place from the
+rules surf matched per tree scope, and its `cssom_view` modules (moved from this crate)
+compute the CSSOM-View answers. Each read lays out the DOM as it is at that read:
+a capture that a mutation outdated (the tree's version moved) is taken again rather
+than laid out stale. Installed fonts come from turbo-dom-layout's process-wide
+`FontRegistry::system(SystemFontPolicy::Html)`. It reads private actual CSSOM state
+without guest getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in
 [LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 
 ## Registry dependency identity
 
-The 0.5.4 candidate resolves the reviewed named dependency graph directly;
-no root Cargo patch is needed. The seven direct Rust dependency aliases retain
-the existing source/API names. The complete thirteen-package distribution family
-is:
+The seven direct Rust dependency aliases retain the existing source/API names.
+Until the turbo-dom consolidation crates are published, `rust/Cargo.toml` carries a
+pre-publish `[patch.crates-io]` table (Git revs of the Deno 0.x.1 candidates,
+`turbo-dom-v8` and the turbo-dom 0.6.0 crates); it is removed at release. The
+named distribution family is (turbo-surf publishes twelve; the V8 binding comes
+from turbo-dom):
 
-| Registry package | Exact initial version | Direct Surf alias or graph role |
+| Registry package | Exact version | Direct Surf alias or graph role |
 | --- | --- | --- |
 | `turbo-surf-wreq` | 0.16.1 | `wreq` |
 | `turbo-surf-wreq-util` | 0.2.0 | `wreq-util` |
 | `turbo-surf-btls-sys` | 0.5.6 | transport native dependency |
 | `turbo-surf-btls` | 0.5.6 | transport dependency |
 | `turbo-surf-tokio-btls` | 0.5.6 | transport runtime dependency |
-| `turbo-surf-v8` | 150.4.0 | stock native V8 binding |
-| `turbo-surf-deno-v8` | 0.4.0 | `v8` (the shared facade) |
-| `turbo-surf-serde-v8` | 0.321.0 | shared value conversion |
-| `turbo-surf-deno-core` | 0.412.0 | `deno_core` |
-| `turbo-surf-deno-bench-util` | 0.253.0 | upstream test/benchmark identity |
-| `turbo-surf-deno-crypto` | 0.273.0 | `deno_crypto` |
-| `turbo-surf-deno-webidl` | 0.259.0 | `deno_webidl` |
-| `turbo-surf-deno-web` | 0.290.0 | `deno_web` |
+| `turbo-dom-v8` | 150.4.0 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
+| `turbo-surf-deno-v8` | 0.4.1 | `v8` (the shared facade) |
+| `turbo-surf-serde-v8` | 0.321.1 | shared value conversion |
+| `turbo-surf-deno-core` | 0.412.1 | `deno_core` |
+| `turbo-surf-deno-bench-util` | 0.253.1 | upstream test/benchmark identity |
+| `turbo-surf-deno-crypto` | 0.273.1 | `deno_crypto` |
+| `turbo-surf-deno-webidl` | 0.259.1 | `deno_webidl` |
+| `turbo-surf-deno-web` | 0.290.1 | `deno_web` |
 
 The distribution generators retain upstream versions, native archive URLs,
 licenses and reviewed source pins while mapping every internal dependency to the
@@ -83,9 +91,9 @@ same named family. Transport uses wreq `4ed3cf0c`, wreq-util `5715529`,
 btls `f5a8a48` and BoringSSL `f1f2556`; the V8/crypto sources retain native weak-slot
 teardown and private-key construction/clone hardening. Reproduction, source pins
 and actual-archive/registry consumer procedures are in
-[release-deps](release-deps/README.md),
-[DENO_CRYPTO.md](vendor/DENO_CRYPTO.md) and
-[RUSTY_V8.md](vendor/RUSTY_V8.md).
+[release-deps](release-deps/README.md) and
+[DENO_CRYPTO.md](release-deps/deno/DENO_CRYPTO.md); the V8 fork's patches, pins and
+generator live in turbo-dom (`crates/turbo-dom-v8`).
 
 Stock releases still embed V8 150, not Chrome 155. The experimental native155 SDK
 is an explicit, separately built and validated profile; its package aliases do
@@ -146,15 +154,16 @@ place, and the render returns the hydrated HTML (the Lane B contract).
 
 - Boots a **`deno_core` V8 isolate** (true isolate — host heap unreachable from
   guest; a runaway-execution **budget** watchdog terminates a wedged script).
-- **The DOM is a native `rtdom`↔V8 binding** — `browser_env`, vendored from
-  [turbo-test](../../turbo-test) (its battle-tested binding that runs React +
-  Testing Library). A JS DOM node is a V8 object holding a turbo-dom handle in an
-  internal field; methods/accessors are native callbacks straight onto `Tree`. No
-  JS-DOM-in-JS-VM indirection. See [`src/browser_env.rs`](crates/turbo-surf-render/src/browser_env.rs)
-  for the vendor/sync story: the one-command script copies committed canonical
-  Rust/JS/CSS grammar and generates the surf adapter from
-  `scripts/browser-env-adapter.rs.in`. Seeded installation delegates to the
-  canonical API; surf additions remain outside the upstream binding.
+- **The DOM is a native `rtdom`↔V8 binding** — `browser_env` from the
+  [`turbo-dom-browser-env`](https://github.com/miaskiewicz/turbo-dom) crate (the
+  battle-tested binding turbo-test also runs React + Testing Library on; it moved
+  there from turbo-test). A JS DOM node is a V8 object holding a turbo-dom handle in
+  an internal field; methods/accessors are native callbacks straight onto `Tree`. No
+  JS-DOM-in-JS-VM indirection. turbo-surf-render depends on it (feature
+  `host-internals`) and keeps no copy: page loads use its `install_html` /
+  `install_independent_*` / `document_html`, and surf's native services over its
+  documents (`src/live_layout_dom.rs`, `src/compression_dictionary_dom.rs`) use its
+  host-only `host_internals`. Binding changes land in turbo-dom.
 - The runtime in [`src/runtime.rs`](crates/turbo-surf-render/src/runtime.rs) grafts
   that binding onto deno_core's context, then layers the non-DOM `window` env a real
   page needs (`navigator`, `location`, virtual timers + real microtasks, `fetch`/XHR

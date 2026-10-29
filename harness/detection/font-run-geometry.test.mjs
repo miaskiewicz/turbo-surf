@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const fixture = JSON.parse(
-  readFileSync(new URL("./fixtures/font-run-geometry-chrome155.json", import.meta.url)),
+  readFileSync(new URL("./fixtures/font-run-geometry-chrome156.json", import.meta.url)),
 );
 const sha = (path) =>
   createHash("sha256")
@@ -12,8 +12,8 @@ const sha = (path) =>
     .digest("hex");
 
 test("same-font oracle retains normal Chrome policy, executed sources and actual font provenance", () => {
-  assert.match(fixture.browser, /^Chrome\/155\./);
-  assert.equal(fixture.v8, "15.5.35.23");
+  assert.match(fixture.browser, /^Chrome\/156\./);
+  assert.equal(fixture.v8, "15.6.75");
   assert.equal(fixture.mode, "headed-direct-cdp");
   assert.equal(fixture.probeSha256, sha("./font-run-geometry-probe.js"));
   assert.equal(fixture.collectorSha256, sha("./font-run-geometry-chrome-control.mjs"));
@@ -85,7 +85,7 @@ test("same-font partial Range evidence preserves independent interval rounding",
 
 test("Range transform sibling retains exact source provenance and distinct real boundaries", () => {
   const control = JSON.parse(
-    readFileSync(new URL("./fixtures/range-transform-stages-chrome155.json", import.meta.url)),
+    readFileSync(new URL("./fixtures/range-transform-stages-chrome156.json", import.meta.url)),
   );
   assert.equal(control.mode, "headed-direct-cdp");
   assert.equal(control.probeKind, "range-transforms");
@@ -121,7 +121,7 @@ test("Range transform sibling retains exact source provenance and distinct real 
 
 test("leading-space oracle preserves real inline ownership and collapsed source offsets", () => {
   const control = JSON.parse(
-    readFileSync(new URL("./fixtures/leading-space-geometry-chrome155.json", import.meta.url)),
+    readFileSync(new URL("./fixtures/leading-space-geometry-chrome156.json", import.meta.url)),
   );
   assert.equal(control.mode, "headed-direct-cdp");
   assert.equal(control.probeKind, "leading-spaces");
@@ -169,7 +169,7 @@ test("leading-space oracle preserves real inline ownership and collapsed source 
 
 test("ordinary whitespace separates wrapped Range boundaries from caret affinity", () => {
   const control = JSON.parse(
-    readFileSync(new URL("./fixtures/leading-space-geometry-chrome155.json", import.meta.url)),
+    readFileSync(new URL("./fixtures/leading-space-geometry-chrome156.json", import.meta.url)),
   );
   const ordinary = control.result[0].geometry.cases.filter((entry) => entry.mode === "ordinary");
   assert.equal(ordinary.length, 4);

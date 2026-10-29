@@ -204,3 +204,54 @@ fn response_observer_owns_only_native_storage_and_releases_it_on_drop() {
     drop(observer);
     assert_eq!(weak.strong_count(), 0);
 }
+
+#[test]
+fn unparsable_targets_sources_and_poisoned_state_leave_storage_untouched() {
+    let untouched = |storage: &BrowserStorage| {
+        storage
+            .0
+            .lock()
+            .unwrap()
+            .values
+            .values()
+            .all(|value| !value.is_empty())
+    };
+    for target in ["not a url", "file:///clear", "data:,clear"] {
+        let storage = seeded();
+        storage.clear_from_response(0, &context(), target, &headers("\"*\""));
+        assert!(untouched(&storage), "{target}");
+    }
+    let storage = seeded();
+    let mut invalid_source = context();
+    invalid_source.top_level_source = Some("::".into());
+    storage.clear_from_response(
+        0,
+        &invalid_source,
+        "https://target.test/",
+        &headers("\"*\""),
+    );
+    assert!(untouched(&storage));
+
+    // A poisoned inbox is skipped; the clear itself still applies.
+    let storage = seeded();
+    let inbox = std::sync::Arc::new(std::sync::Mutex::new(storage_events::Inbox::default()));
+    storage
+        .0
+        .lock()
+        .unwrap()
+        .subscribers
+        .push(std::sync::Arc::downgrade(&inbox));
+    let poison = inbox.clone();
+    let _ = std::thread::spawn(move || {
+        let _guard = poison.lock().unwrap();
+        panic!("poison the inbox");
+    })
+    .join();
+    storage.clear_from_response(
+        0,
+        &context(),
+        "https://target.test/",
+        &headers("\"storage\""),
+    );
+    assert!(storage.0.lock().unwrap().values[&1].is_empty());
+}

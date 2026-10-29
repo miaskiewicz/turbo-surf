@@ -63,15 +63,14 @@ fn evaluate(condition: &SupportsCondition<'_>) -> Result<bool, String> {
 }
 
 fn zoom(value: &str) -> bool {
-    if crate::browser_env::css_zoom_value(value).is_some() || css_wide(value) {
+    if turbo_dom_browser_env::css_values::zoom_value(value).is_some() || css_wide(value) {
         return true;
     }
+    // Lightning CSS has no `zoom` property id, so `zoom` parses as an unknown custom
+    // property (zoom_is_an_unknown_property_to_lightning_css): only var()/env()
+    // values remain to accept.
     Property::parse_string(PropertyId::from("zoom"), value, ParserOptions::default()).is_ok_and(
-        |property| match property {
-            Property::Custom(property) => deferred(&property.value),
-            Property::Unparsed(property) => deferred(&property.value),
-            _ => false,
-        },
+        |property| matches!(property, Property::Custom(property) if deferred(&property.value)),
     )
 }
 
@@ -115,73 +114,11 @@ fn property(name: &str, value: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// `selector(…)`: supported when turbo-dom's selector engine (the one the DOM APIs
+/// and every native cascade use) parses it as one unforgiving complex selector, as
+/// Chrome does (`harness/detection/fixtures/css-supports-chrome156.json`).
 fn selector(source: &str) -> bool {
-    use lightningcss::rules::CssRule;
-    use lightningcss::stylesheet::StyleSheet;
-    let text = format!("{source}{{}}");
-    let Ok(sheet) = StyleSheet::parse(&text, ParserOptions::default()) else {
-        return false;
-    };
-    let [CssRule::Style(style)] = sheet.rules.0.as_slice() else {
-        return false;
-    };
-    if style.selectors.0.len() != 1 || !selector_components(&style.selectors.0[0]) {
-        return false;
-    }
-    // Validate with the actual native DOM matcher as well as the CSS grammar.
-    let tree = turbo_dom_parser::rtdom::Tree::parse("<div></div>");
-    tree.matches_checked(tree.root(), source).is_ok()
-}
-
-fn selector_components(selector: &lightningcss::selector::Selector<'_>) -> bool {
-    selector_components_relative(selector, false)
-}
-
-fn selector_components_relative(
-    selector: &lightningcss::selector::Selector<'_>,
-    relative: bool,
-) -> bool {
-    use lightningcss::selector::{Combinator, Component, PseudoClass};
-    selector.iter_raw_match_order().all(|part| match part {
-        Component::Is(values) | Component::Where(values) | Component::Negation(values) => {
-            values.iter().all(selector_components)
-        }
-        Component::Has(values) => values
-            .iter()
-            .all(|value| selector_components_relative(value, true)),
-        Component::Scope => relative,
-        Component::Host(Some(value)) | Component::Slotted(value) => selector_components(value),
-        Component::Host(None) => true,
-        Component::NonTSPseudoClass(
-            PseudoClass::ReadOnly(prefix) | PseudoClass::ReadWrite(prefix),
-        ) => prefix.contains(lightningcss::vendor_prefix::VendorPrefix::None),
-        Component::NonTSPseudoClass(value) => matches!(
-            value,
-            PseudoClass::Checked
-                | PseudoClass::Disabled
-                | PseudoClass::Enabled
-                | PseudoClass::Required
-                | PseudoClass::Optional
-        ),
-        Component::Combinator(value) => matches!(
-            value,
-            Combinator::Child
-                | Combinator::Descendant
-                | Combinator::NextSibling
-                | Combinator::LaterSibling
-                | Combinator::SlotAssignment
-        ),
-        Component::Root
-        | Component::Empty
-        | Component::Nth(_)
-        | Component::ExplicitUniversalType
-        | Component::LocalName(_)
-        | Component::ID(_)
-        | Component::Class(_)
-        | Component::AttributeInNoNamespaceExists { .. }
-        | Component::AttributeInNoNamespace { .. } => true,
-        _ => false,
-    })
+    turbo_dom_parser::rtdom::query::parse_for_supports(source).is_ok()
 }
 
 fn css_wide(value: &str) -> bool {
@@ -198,7 +135,41 @@ fn deferred(tokens: &TokenList<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::matches;
+    use super::{matches, property};
+    #[test]
+    fn css_supports_two_argument_form_and_zoom_follow_chrome() {
+        // CSS.supports(name, value): the name must be exactly one identifier.
+        assert!(property("width", "1px"));
+        assert!(!property(" width", "1px"));
+        assert!(!property("width height", "1px"));
+        assert!(!property("1px", "1px"));
+        // zoom: numbers/percentages, CSS-wide keywords and var() are supported.
+        assert!(property("zoom", "1.5"));
+        assert!(property("zoom", "inherit"));
+        assert!(property("zoom", "var(--z)"));
+        assert!(!property("zoom", "big"));
+        assert_eq!(matches("(zoom: 50%)"), Ok(true));
+        assert_eq!(matches("(zoom: var(--z))"), Ok(true));
+        assert_eq!(matches("(zoom: wide)"), Ok(false));
+        // An `or` with no supported branch is false.
+        assert_eq!(matches("(unknown: 1) or (width: nonsense)"), Ok(false));
+        // Chrome 156: Gecko/Trident/Presto-prefixed declarations are unsupported even
+        // when the unprefixed value is valid; -webkit- ones Chrome implements are.
+        assert_eq!(matches("(-moz-appearance: none)"), Ok(false));
+        assert_eq!(matches("(-ms-transform: none)"), Ok(false));
+        assert_eq!(matches("(-o-transition: none)"), Ok(false));
+        assert_eq!(matches("(-webkit-transform: none)"), Ok(true));
+    }
+    #[test]
+    fn zoom_is_an_unknown_property_to_lightning_css() {
+        use lightningcss::properties::custom::CustomPropertyName;
+        assert!(matches!(
+            super::PropertyId::from("zoom"),
+            super::PropertyId::Custom(CustomPropertyName::Unknown(_))
+        ));
+        assert!(super::zoom("env(safe-area-inset-top)"));
+        assert!(!super::zoom("calc(1 +)"));
+    }
     #[test]
     fn native_declarations_validate_values_and_nested_boolean_grammar() {
         for source in [
@@ -226,5 +197,24 @@ mod tests {
         assert!(matches("(width: 2px) and").is_err());
         assert_eq!(matches("selector(div > .x)"), Ok(true));
         assert_eq!(matches("selector(:bogus)"), Ok(false));
+        // Changed@S4 (Chrome 156 control css-supports-chrome156.json): the any-namespace
+        // type selector, escapes and Chrome's other valid selectors are supported;
+        // forgiving lists are evaluated unforgivingly.
+        for source in [
+            "selector(*|p)",
+            r"selector(.\31 23)",
+            r"selector(\64iv > .x)",
+            "selector(:hover)",
+            "selector(::before)",
+        ] {
+            assert_eq!(matches(source), Ok(true), "{source}");
+        }
+        for source in [
+            "selector(ns|p)",
+            "selector(:is(:bogus))",
+            "selector(div, span)",
+        ] {
+            assert_eq!(matches(source), Ok(false), "{source}");
+        }
     }
 }

@@ -139,3 +139,54 @@ pub(crate) fn render(node: &Node, rate: f32, length: usize, parameters: &[Values
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // An 8 Hz context playing an 8 Hz buffer: one buffer frame per output frame, so
+    // loop points in seconds are frame / 8 and outputs are exact sample values.
+    const RATE: f32 = 8.;
+    fn ramp(looped: bool, loop_start: f64, loop_end: f64, offset: f64) -> Node {
+        Node {
+            kind: "buffer".into(),
+            started: true,
+            data: vec![(0..8).map(|v| v as f32).collect()],
+            buffer_rate: RATE,
+            looped,
+            loop_start: loop_start / RATE as f64,
+            loop_end: loop_end / RATE as f64,
+            offset: offset / RATE as f64,
+            ..Default::default()
+        }
+    }
+    fn speed(value: f32, length: usize) -> Vec<Values> {
+        vec![Values {
+            samples: vec![value; length],
+            sample_accurate: vec![false; length],
+        }]
+    }
+    #[test]
+    fn an_empty_buffer_plays_silence_without_ending() {
+        let mut node = ramp(false, 0., 0., 0.);
+        node.data = vec![vec![]];
+        let played = render(&node, RATE, 4, &[]);
+        assert_eq!(played.channels, vec![vec![0.; 4]]);
+        assert_eq!((played.ended, played.active), (None, vec![false]));
+    }
+    #[test]
+    fn looped_playback_wraps_forward_and_backward_inside_the_loop() {
+        // AudioBufferSourceNode: an offset past loopEnd starts at loopStart.
+        let forward = render(&ramp(true, 2., 5., 6.), RATE, 7, &[]);
+        assert_eq!(forward.channels[0], [2., 3., 4., 2., 3., 4., 2.]);
+        // Played backwards, an offset before loopStart starts at loopStart and
+        // wraps from loopStart to just under loopEnd.
+        let backward = render(&ramp(true, 2., 5., 0.), RATE, 7, &speed(-1., 7));
+        assert_eq!(backward.channels[0], [2., 4., 3., 2., 4., 3., 2.]);
+        assert_eq!(backward.ended, None);
+    }
+    #[test]
+    fn a_sub_frame_loop_holds_its_start_sample() {
+        let held = render(&ramp(true, 2., 2.5, 2.), RATE, 4, &[]);
+        assert_eq!(held.channels[0], [2.; 4]);
+    }
+}

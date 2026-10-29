@@ -11,7 +11,7 @@ async fn evaluate(source: &str) -> Value {
     )
     .await
     .unwrap();
-    let result = page.eval_expression(source).await.unwrap();
+    let result = page.eval_engine_expression(source).await.unwrap();
     page.close();
     serde_json::from_str(&result).unwrap()
 }
@@ -19,7 +19,7 @@ async fn evaluate(source: &str) -> Value {
 async fn native_anchor_activation_honors_cancellation_detachment_and_repeated_downloads() {
     let value=evaluate(r#"(()=>{
       const anchor=document.createElement('a'),url=URL.createObjectURL(new Blob(['actual bytes']));anchor.href=url;anchor.download='fixture.txt';document.body.appendChild(anchor);
-      const records=globalThis[Symbol.for('ts')].downloads ||= [];const before=records.length;
+      const records=__tsNs.downloads ||= [];const before=records.length;
       let events=[],recursive=false;const cancel=event=>event.preventDefault();anchor.addEventListener('click',cancel);anchor.click();anchor.removeEventListener('click',cancel);
       anchor.addEventListener('click',event=>{events.push({brand:Object.prototype.toString.call(event),trusted:event.isTrusted,bubbles:event.bubbles,cancelable:event.cancelable,composed:event.composed,pointerId:event.pointerId});if(!recursive){recursive=true;anchor.click();recursive=false;}});
       const result=anchor.click();anchor.click();anchor.remove();anchor.click();

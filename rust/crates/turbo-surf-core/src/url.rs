@@ -39,7 +39,7 @@ fn is_tracking(key: &str) -> bool {
 
 /// Canonical form of a URL for dedupe (SPEC §9): lowercase host (the `url` crate
 /// does this on parse), drop fragment, strip known tracking params, sort the
-/// remaining query, and ensure a non-empty path.
+/// remaining query.
 pub fn canonicalize(url: &str) -> Option<String> {
     let mut u = Url::parse(url).ok()?;
     u.set_fragment(None);
@@ -51,13 +51,9 @@ pub fn canonicalize(url: &str) -> Option<String> {
         .collect();
     kept.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
+    // The path is left as parsed: the `url` crate already gives special schemes
+    // (http/https) "/", and an opaque path cannot be set (as in the JS canonicalizer).
     apply_query(&mut u, &kept);
-    // Defensive mirror of the JS canonicalizer: the `url` crate already
-    // normalizes special-scheme (http/https) paths to "/", so this is
-    // effectively unreachable for the URLs we canonicalize.
-    if u.path().is_empty() {
-        u.set_path("/");
-    }
     Some(u.to_string())
 }
 
@@ -154,5 +150,15 @@ mod tests {
             Some("http://x.test:81")
         );
         assert_eq!(origin_of("not a url"), None);
+    }
+
+    #[test]
+    fn canonicalize_leaves_an_empty_opaque_path_alone() {
+        // Like the JS canonicalizer (an opaque path's pathname cannot be set), only the
+        // fragment and query change: `new URL("foo:?b=2&a=1")` keeps `foo:` (turbo-surf#57).
+        assert_eq!(
+            canonicalize("foo:?b=2&a=1#frag").as_deref(),
+            Some("foo:?a=1&b=2")
+        );
     }
 }

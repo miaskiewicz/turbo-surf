@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { bindingSource } from "./binding-files.mjs";
 
 const read = (file) => readFileSync(new URL(file, import.meta.url));
 const digest = (file) => createHash("sha256").update(read(file)).digest("hex");
@@ -12,10 +13,7 @@ test("private abort boundary controls stay pinned to independently collected Chr
   assert.deepEqual(control.errors, []);
   assert.equal(control.probeSha256, digest("./abort-any-private-probe.js"));
   assert.equal(control.collectorSha256, digest("./trusted-types-code-chrome.mjs"));
-  assert.equal(
-    control.casesSha256,
-    digest("../../rust/crates/turbo-surf-render/src/radio_dirty_cases.json"),
-  );
+  assert.equal(control.casesSha256, digest(`${bindingSource()}radio_dirty_cases.json`));
   const result = control.result[0].result;
   assert.deepEqual(result.arrayFrom, { calls: 0, rawExposed: false });
   assert.deepEqual(result.arrayIterator, { calls: 0, rawExposed: false });
@@ -44,10 +42,7 @@ test("stream-controller privacy control stays pinned to the independent hostile-
   assert.deepEqual(control.errors, []);
   assert.equal(control.probeSha256, digest("./stream-controller-private-probe.js"));
   assert.equal(control.collectorSha256, digest("./trusted-types-code-chrome.mjs"));
-  assert.equal(
-    control.casesSha256,
-    digest("../../rust/crates/turbo-surf-render/src/radio_dirty_cases.json"),
-  );
+  assert.equal(control.casesSha256, digest(`${bindingSource()}radio_dirty_cases.json`));
   assert.deepEqual(control.result[0].result, {
     rawExposed: false,
     callback: true,

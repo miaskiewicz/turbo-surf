@@ -1,13 +1,11 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/deno_crypto", "vendor/rusty_v8"]
 members = [
     "crates/turbo-surf-core",
     "crates/turbo-surf-napi",
     "crates/turbo-surf-mcp",
     "crates/turbo-surf-page",
     "crates/turbo-surf-py",
-    "crates/turbo-surf-raster",
     "crates/turbo-surf-render",
     "crates/turbo-surf-transform",
     "crates/turbo-surf-view",
@@ -15,7 +13,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.5.5"
+version = "0.6.0"
 license = "MIT"
 repository = "https://github.com/miaskiewicz/turbo-surf"
 
@@ -27,3 +25,25 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 opt-level = 3
 lto = "thin"
 
+# PRE-PUBLISH ONLY (turbo-dom consolidation): resolve the not-yet-published crates
+# from Git. Removed at release, before tagging: drop this table, then re-lock with a
+# targeted `cargo update -p` once each crate is on crates.io (see PUBLISHING.md).
+# - the seven Deno-family 0.x.1 candidates (rust/release-deps/push-candidates.sh,
+#   orphan branch consolidation/deno-candidates);
+# - turbo-dom-v8, the generated rusty_v8 fork (turbo-dom orphan branch
+#   consolidation/turbo-dom-v8-candidate);
+# - turbo-dom 0.6.0 (consolidation branch) and its new turbo-dom-layout,
+#   turbo-dom-raster and turbo-dom-browser-env 0.6.0 crates.
+[patch.crates-io]
+turbo-surf-deno-v8 = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
+turbo-surf-serde-v8 = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
+turbo-surf-deno-core = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
+turbo-surf-deno-bench-util = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
+turbo-surf-deno-crypto = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
+turbo-surf-deno-web = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
+turbo-surf-deno-webidl = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
+turbo-dom-v8 = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "e9b36c8733ef1cf1073f7053a8c5931381c978c5" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "223c4c894e698334a73bac52b292229dc2113025" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "223c4c894e698334a73bac52b292229dc2113025" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "223c4c894e698334a73bac52b292229dc2113025" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "223c4c894e698334a73bac52b292229dc2113025" }

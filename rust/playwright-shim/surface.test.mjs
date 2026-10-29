@@ -101,7 +101,7 @@ test("response events drain host records while opaque bodies stay hidden in page
     await page.goto(`http://127.0.0.1:${source.address().port}/`, { waitUntil: "networkidle" });
     assert.equal(await page.locator("body").getAttribute("data-body"), "");
     assert.equal(
-      await page.evaluate(() => String(globalThis[Symbol.for("ts")].netLog !== undefined)),
+      await page.evaluate(() => String(globalThis[Symbol.for("ts")] !== undefined)),
       "false",
     );
     assert.equal(observed.length, 1);
@@ -891,6 +891,27 @@ test("live hydration retains native response policy, status and selected referre
     assert.equal(await page.locator("body").getAttribute("data-init"), "true");
   } finally {
     await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// A getBy handle passed to the static waitForFunction resolves through the engine
+// namespace (turbo-dom#222): no live session, the handle is still the element.
+test("static waitForFunction resolves a getBy element handle", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end('<button id="go">Save</button>');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/`, { waitUntil: "commit" });
+    const handle = await p.getByRole("button", { name: "Save" }).elementHandle();
+    assert.equal(await p.waitForFunction((el) => el && el.id, handle), "go");
+    assert.equal(p._session, null);
+  } finally {
+    await p.close();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }

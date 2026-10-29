@@ -1,5 +1,511 @@
 # Changelog
 
+## [0.6.0] — 2026-10-26 — turbo-dom consolidation
+
+turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of
+vendored or sibling-repo copies. For users of the npm launcher, the MCP binary,
+the PyPI wheel and the five Rust crates nothing is renamed and no tool or API
+changes (beyond the MCP error shapes in review round 3); the visible differences are the Chrome-correct selector fixes, `t:*` in
+static screenshots and the live-geometry re-capture listed below. Dependency map:
+
+| was | now |
+|---|---|
+| vendored turbo-test binding (`scripts/vendor-browser-env.sh`) | `turbo-dom-browser-env` 0.6.0 |
+| turbo-html2pdf-core 0.3.9 (layout) | `turbo-dom-layout` 0.6.0 |
+| `turbo-surf-raster` (this workspace) | `turbo-dom-raster` 0.6.0 (not published from here any more) |
+| `turbo-surf-v8` / vendored rusty_v8 | `turbo-dom-v8` 150.4.0 (one V8 in the graph) |
+| vendored Deno extension JS | the Deno family 0.x.1 `embedded_sources` |
+| turbo-dom 0.5.8 | turbo-dom 0.6.0 |
+
+Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
+`turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
+render → mcp.
+
+### Fixed (turbo-dom #222, #223)
+- The engine namespace is no longer page-reachable: it moved from
+  `globalThis[Symbol.for('ts')]` to a V8 private (turbo-dom#222). Driver scripts
+  use `PageSession::eval_engine*`, `run_engine_with_dom` or the napi
+  `liveEvalEngine`, which bind it to `__tsNs`; the playwright shim uses them.
+- `window` keeps Chrome's Window -> WindowProperties -> EventTarget chain with the
+  binding's own Window interface work (turbo-dom#223); the stock-engine global is
+  a `Window` instance with an immutable prototype, so `Object.setPrototypeOf(window, …)`
+  throws a TypeError as in Chrome 156.
+- The playwright shim's static `waitForFunction` resolves a getBy element handle
+  through the new napi `evaluateEngine` (`run_engine_with_dom`).
+- Template-contents (inert) documents answer `hidden`/`visibilityState` like Chrome
+  156 again now that the binding keeps document members on `Document.prototype`
+  (turbo-dom#221).
+
+### Fixed (review round 3)
+- MCP stdio errors follow JSON-RPC 2.0 and MCP 2024-11-05 (#119): a failing tool
+  is a result with `isError: true` (was a `-32000` error); unknown methods answer
+  `-32601`, bad `tools/call` params and unknown tools `-32602`, non-request
+  messages `-32600`, and an unparseable line `-32700` with `id: null` (was
+  silently dropped); `ping` answers `{}`. The message text is unchanged.
+- `screenshot` refuses surfaces over 16384x16384 px and `screenshot`/`set_viewport`
+  a dimension over Chrome's 10,000,000 px bound; a 200000x200000 request used to
+  grow the server to 14 GB and stop it answering.
+
+### Fixed (turbo-dom consolidation, coverage phase)
+- DOMMatrix keeps Blink's axis-aligned fast path (#120): a matrix built only from 2D
+  translations and scales (`new DOMMatrix()`, `"none"`, translate/scale CSS strings)
+  stores float members and keeps a NaN in its own member; a non-trailing `undefined`
+  scaleY is NaN; full-matrix translate/scale are column operations; unit scales, zero
+  translations and zero turns/skews are no-ops. A non-iterable init object (another
+  DOMMatrix) converts to a string, as in Chrome 156.
+- A page rule the native scoped parser rejects (`::selection:window-inactive`) no
+  longer fails live layout for the whole page; it gets no targets.
+- The effective CSS `zoom` is capped at 1e6, like Chrome 156 (currentCSSZoom and
+  layout no longer use a 1e30 factor).
+- A style rule whose selector list Chrome drops (an unknown pseudo-class) now
+  matches nothing instead of failing live layout for the whole page (#117); with
+  turbo-dom 4769e3e (in c9f991c) Google's consent-page view-transition rules are valid, so the
+  "Reject all" click finds its geometry again.
+- turbo-dom crates repinned to turbo-dom c9f991c, the final consolidation head (browser-env #183/#184 panic fixes;
+  `browser_env::try_install_with_html` is available, unused: surf installs the DOM
+  before arming the render watchdog).
+- The document-hooks test server (#102) serves a case's cross-origin children in
+  document order, the order Chrome's control committed them; agent-cluster keying
+  follows the first committed document, so load-dependent response order flaked it.
+- Timer tasks schedule from their own due time (#101), so host load can no longer put
+  a rendering frame between two chained tasks (the element view-transition flake).
+- A form whose action is a `javascript:` URL (#100) runs the URL's script in a later
+  task of the same document (subject to the inline-script policy), like Chrome 156,
+  instead of throwing `requires an HTTP(S) action`.
+- Extreme `zoom` (#99): the effective zoom never drops below 1e-6 and used lengths and
+  unzoomed CSSOM metrics saturate at Chrome 156's layout range, so `zoom: 1e-30` on a
+  `1e30px` box reports 33554432 instead of throwing `native CSSOM metric is outside its
+  integer range`.
+- Transfer lists longer than 4096 entries (#96): structuredClone, window postMessage and
+  MessagePort.postMessage transfer every entry like Chrome 156 instead of throwing
+  `Native transfer sequence budget exceeded` (the 64 MiB serialization bound stays).
+- No-JS form submission through an `<input type=image>` submitter (#55): like Chrome 156
+  it contributes the click coordinates `name.x=0&name.y=0` (`x=0&y=0` when unnamed)
+  instead of `name=value`.
+- Google `/sorry` clearing with solver-returned cookies (#56): the cookies are stored
+  under the continue URL's bare host, so a non-default-port origin replays them on the
+  SERP re-fetch (they were keyed by `host:port` and never sent).
+- URL canonicalization (#57) leaves an empty opaque path alone (`foo:?a=1` stayed
+  `foo:%2F?a=1`), like the JS canonicalizer it mirrors.
+- `Permissions-Policy` bare-token allowlists (#59): `feature=self` narrows the feature
+  to the document's origin and `feature=<other token>` disables it, like Chrome 156
+  (both kept the feature's default allowlist).
+- Google `/sorry` and consent forms (#60): an unquoted attribute value keeps its `/`
+  (`action=/save`, `value=https://…`), like Chrome's HTML parser; it was cut at the
+  first `/`.
+- MCP `analyze_akamai {retry:true}` (#58) can accept a candidate sensor: acceptance
+  needs a 200 re-fetch with no wall markers and a cleared (`~0~`) `_abck`; the jar's
+  ever-present `_abck`/`bm_sz` no longer count as a wall.
+- No-JS form submission of a single `<select>` (#61) follows HTML selectedness like
+  Chrome 156: the last `selected` option, else the first non-disabled one (it sent every
+  `selected` option, or nothing).
+- String-handler timers under CSP (#63): a `setTimeout("…")` / `setInterval("…")` that
+  `script-src` blocks returns id `0` like Chrome 156 (it returned a fresh id), and its
+  `'report-sample'` sample is the 40-unit prefix with ASCII whitespace trimmed.
+- Media queries with unknown features or invalid values (#65) evaluate as *unknown*
+  like Chrome 156 (`matchMedia` and live layout `@media`): `not (unknown-x)`,
+  `not (orientation: 1px)` and `(width: 800px) and (not (unknown-x))` no longer match,
+  and `(width: red)` is unknown instead of an error.
+- Classic `<script src="data:…">` (#67) runs like Chrome 156 (parser-inserted,
+  dynamic and child-frame scripts were dropped as "not an allowed HTTP URL"): script
+  fetch decodes the data: URL as a basic response (MIME charset, else windows-1252 for
+  the default `text/plain;charset=US-ASCII`; integrity applies; errors are not muted),
+  and a redirect to a data: URL stays a network error.
+- Structured clone of DOMPoint, DOMPointReadOnly, DOMMatrix and DOMMatrixReadOnly
+  (#66: `structuredClone`, `postMessage`, `MessagePort.postMessage`) reconstructs the
+  platform object with its interface and values like Chrome 156 (they arrived as empty
+  plain objects); the interface is the constructor that created the object (a subclass
+  clones as its base), and the clone hooks use intrinsics captured at bootstrap.
+- Window messages and timers across same-agent windows (#72) run as one FIFO like
+  Chrome 156: every timer and posted message carries its posting time and an
+  agent-wide sequence, and the cross-realm scheduler breaks deadline ties by it (a
+  message to a child no longer runs after later parent tasks). A posted message no
+  longer consumes a `setTimeout` id, and `clearTimeout(0)` cannot cancel one.
+- A DOMMatrix dictionary with `is2D: true` and 3D members (#91) throws Chrome 156's
+  `Failed to execute '<method>' on '<interface>': The is2D member is set to true but the
+  input matrix is a 3d matrix.` (`fromMatrix`, `multiply`, `multiplySelf`,
+  `preMultiplySelf`, `matrixTransform`; it was a generic message).
+- `rotateAxisAngle` / `rotateAxisAngleSelf` with a NaN or infinite axis (#92) give a
+  NaN 3x3 part like Chrome 156 (the matrix stayed unchanged); a zero turn stays the
+  identity about any axis, and a NaN z axis drops `is2D` unless the turn is zero.
+- The axis-aligned 2D `DOMMatrix` inverse (#93) stays in doubles like Chrome 156
+  (cofactor times the reciprocal determinant: `new DOMMatrix([3,0,0,3,1,1]).inverse()`
+  is `0.3333333333333333`, not the float32 `0.3333333432674408`).
+- Large pages open (#75): compression-dictionary link discovery, which runs for every
+  document, threw a `RangeError` past 100,000 nodes or 256 dictionary links and failed
+  the whole page. It has no such bound now; every link settles like Chrome 156 (300
+  links, 300 `error` events under a blocking CSP).
+- Transfer-list validation (#62: `postMessage`, `MessagePort.postMessage`,
+  `structuredClone`) throws Chrome 156's errors: the `Failed to execute '…' on '…'`
+  prefix, the transfer index (`Port at index 0 is already neutered.`, `ArrayBuffer at
+  index 1 is a duplicate of an earlier ArrayBuffer.`, `Value at index 0 does not have a
+  transferable type.`, `Port at index 0 contains the source port.`), Chrome's check order
+  (list scan for types and duplicates, then the value is serialized, then detached and
+  non-detachable buffers, locked streams, the source port and neutered ports, so guest
+  getters run first), `A ReadableStream could not be cloned because it was locked` /
+  `… not transferred.` for streams and ports the value references, and `TypeError` for a
+  locked stream, a non-detachable buffer and a primitive entry (they were generic
+  `DataCloneError`s).
+- Structured serialization errors (#76) carry the caller's Chrome prefix
+  (`Failed to execute 'postMessage' on 'Window': function f(){} could not be cloned.`,
+  `… HTMLBodyElement object could not be cloned.`, History's `'pushState' on 'History'`),
+  and transfer/options conversion uses Chrome's Web IDL text (`The object must have a
+  callable @@iterator property.`, `The provided value cannot be converted to a
+  sequence.`, `Overload resolution failed.`, `… is not of type
+  'StructuredSerializeOptions'.`). Internal stream-chunk posts stay unprefixed.
+- Named access on the Window object (#77): `window.f` / bare `f` resolve
+  `<div id=f>` like Chrome 156 through a native, non-masking `WindowProperties`
+  interceptor (child browsing contexts by `window.name` first, then elements by id and
+  HTML embed/form/img/object by name, one live `HTMLCollection` per shared name). Own
+  globals, declarations and the whole prototype chain shadow named items; the object
+  rejects sets/defines/deletes and prototype changes like Blink. It is enabled after the
+  bootstrap, reads the native tree on each lookup (nothing retains removed elements) and
+  never resolves the host result channel `__RESULT`.
+- `DOMQuad` (#69) is implemented (it was an empty stub): live `p1`..`p4` DOMPoints,
+  `fromRect`/`fromQuad`, `getBounds()`, `toJSON()`, WebIDL dictionary conversion and
+  messages, and structured clone / `postMessage`.
+- Geometry interfaces no longer call page-replaceable intrinsics at use time (#70, #82):
+  DOMPoint/DOMMatrix members use builtins captured at bootstrap and private helpers, and
+  the CSS transform parser scans characters instead of calling String/RegExp methods.
+- DOMPointInit/DOMMatrixInit arguments convert like WebIDL (#79: lexicographic member
+  order, non-objects rejected, Blink's messages); `DOMMatrixReadOnly.toJSON()` lists
+  `is2D`/`isIdentity` last (#80); rotations by multiples of 45/90 degrees are exact like
+  gfx::Transform (#81).
+- A frame's `queueMicrotask` is its own realm's brand-checked function (#73): a foreign
+  `this` throws `Illegal invocation`; a detached window still queues.
+- Engine bookkeeping is private (#83): the in-flight fetch count behind idle/settle and
+  the frame nesting depth are no longer the page-writable globals `__pendingFetches` /
+  `__depth`.
+- User Timing `detail` clone errors carry the caller's Chrome prefix (#78:
+  `Failed to execute 'mark' on 'Performance': …`, `'measure'`, `Failed to construct
+  'PerformanceMark': …`).
+- The PerformanceObserver window-interfaces probe gives its marks explicit start times
+  (#88), so entry order no longer depends on the clock tick (the test was flaky).
+- Native engine build (`TURBO_SURF_ENGINE=155`): `tests/interceptor_mode_agreement.rs`
+  compiles and runs in both engine configurations (#68; the setter/definer interceptor
+  return type differs between the turbo-dom-v8 fork and the native SDK), and the
+  native `Location` and `Window` interface objects match Chrome 156 (#71):
+  `location instanceof Location` holds (the native install no longer replaces the
+  realm's `Location` global) and `Window`/`Location` are non-enumerable globals.
+- Sandboxed iframes (#84): a same-origin frame sandboxed without `allow-top-navigation`
+  can no longer navigate the top-level document through `top.location`; like Chrome it
+  throws `SecurityError` (the check existed only on the native engine's cross-origin
+  path). On the native engine an allowed cross-origin frame's top navigation now goes
+  through the document's own Location, so fragment navigations update its URL and
+  history.
+
+- `DOMMatrix.is2D` is state like Blink's (#89), not derived from the values: a
+  16-value sequence, a CSS transform with a 3D function (`matrix3d`, `translate3d`,
+  `translateZ`, `scale3d`, `scaleZ`, `rotateX`/`Y`, `rotate3d`, `perspective`), a
+  DOMMatrixInit with `is2D: false`, 3D operations (`translate` with `tz`, `scale` with
+  `scaleZ`/`originZ`, `rotate` about x/y, `rotateAxisAngle` off the z axis, multiplying
+  by a 3D matrix), a 3D member setter or a failed inversion make the matrix 3D even
+  when its values are 2D-shaped, so `toString()` gives `matrix3d(...)` and
+  `toJSON().is2D` is `false` like Chrome 156. Structured clone keeps the flag.
+
+- Interface constructors called without `new` (#86) throw Chrome 156's TypeError:
+  `Failed to construct 'Headers': Please use the 'new' operator, this DOM object
+  constructor cannot be called as a function.`, or `Illegal constructor` for interfaces
+  without a constructor (Navigator, MessagePort, Crypto, ...), instead of V8's generic
+  `Constructor requires 'new'`. Every constructor turbo-surf's bootstrap creates through
+  the native factory gets the message (interfaces created by turbo-dom's bootstrap,
+  such as Node or CustomEvent, still use the factory's generic message).
+
+- A page that replaces builtins no longer breaks loading or node insertion (#87):
+  the host's lifecycle turns call the bootstrap's functions through the V8 API
+  instead of compiling `globalThis[Symbol.for('ts')].…` source (the load gates, the
+  hydration passes, the module-script queue, idle checks and frame timers), and the
+  engine JS on the load/insert path (resource loading, the hydration script order,
+  `performance` navigation phases, `document.head`/`body`/`documentElement`, frame
+  records and loading, the insertion delegates, `Promise.all`/`finally`-style waits)
+  uses intrinsics captured at install time and prototype-less internal lists, so
+  replaced prototype methods/accessors, statics and Array/Object index accessors are
+  never consulted, like Chrome 156. The members turbo-dom's own bootstrap still reads
+  on this path are tracked in miaskiewicz/turbo-dom#172.
+- Patchright detection collector cleanup (#64): Patchright spawns Chrome detached, so the
+  owned child is the group leader; after `context.close()` macOS answers `killpg` with
+  EPERM a few ms before Node reaps that leader. `stop()` now waits (up to the grace
+  period) for the leader's `exit` before judging the EPERM: a reaped group is retired, a
+  live one still fails. The resource-scan-order and window-timer controls, which pin
+  `collector-lifecycle.mjs`, are recaptured on Chrome for Testing 156.0.8078.4 (same
+  results; only timing noise and `pageState.focused` differ).
+
+### Fixed (turbo-dom consolidation P5b)
+- Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,
+  `naturalHeight` and `currentSrc` are `HTMLImageElement.prototype` accessors
+  (turbo-dom-browser-env), fed by surf's loader through the document's private
+  `imageHost` record; `src` and `decode()` are prototype members too, so an `<img>`
+  has no own properties (`__tcImagePatched`, own `src`/`decode`/state getters and
+  the own `document.createElement` override are gone). `decode()` rejects a bad
+  receiver with Blink's TypeError and an undecodable image with an `EncodingError`
+  `DOMException`. `render(html, base, script)` now starts the parser's image and
+  stylesheet loads before its script, so parser images load and fire `load`/`error`
+  (they never loaded there).
+- `data:` images decode synchronously (#38): like Chrome, an image whose source is a
+  `data:` URL is complete with its natural size the moment the source is set (parser
+  images at the first script read, `new Image().src`, fragment-parsed and connected
+  images); its `load`/`error` event still fires as a later task, and a broken script-set
+  one stays pending until that `error`. Chrome 156 controls
+  `html_image_render_chrome156.json` (now exact) and `html_image_sync_chrome156.json`.
+- `HTMLImageElement` is entirely the binding's (turbo-dom#23): surf's plain-function
+  `globalThis.Image`, its `src` setter and `decode()` overrides are gone, so `Image` is
+  the native legacy factory (`new`-only, `length` 0, NewTarget-aware) and `decode()`
+  settles with the image's load state. Loads start from the document's mutation
+  consumer, so a detached image loads like Chrome — `new Image().src = …`,
+  `setAttribute("src")` on a created image, detached `innerHTML` /
+  `insertAdjacentHTML` / `createContextualFragment` images (they never loaded) — while
+  images of inert documents (template contents, `DOMParser`, `createHTMLDocument`)
+  no longer load, and removing `src` resets the natural size to 0x0. Chrome 156
+  control: `tests/fixtures/html_image_loads_chrome156.json`; the binding's
+  `HTML_IMAGE_*` (factory/own/decode) and `CUSTOM_ELEMENTS_DEFINED_*` controls also run
+  through `PageSession`. Known gaps (pinned): the binding's `decode()` EncodingError is
+  not `instanceof` surf's `DOMException` (#42; `dom_exception_identity.rs` pins it
+  against a new Chrome 156 control, and the fix needs turbo-dom-browser-env's
+  DOMException to brand-check across realms and expose its state to serializers so surf
+  can drop its own); parsed `is=` elements read `:defined` once a session has opened
+  (#41: turbo-dom's storage collection, which surf runs after a V8 GC, rebuilds
+  parser-created elements without their creation-time `is` state — a turbo-dom fix).
+- Live `<img>` loads decode like Chrome 156 (#30): success and `naturalWidth` /
+  `naturalHeight` come from turbo-dom-layout's shared probe (`probe_natural` and its
+  raster probe) instead of a full `image` crate decode, and every `data:` form goes
+  through `decode_data_url` (percent-encoded and raw `image/svg+xml`, whitespace /
+  unpadded / percent-escaped base64; it was `;base64` only). Newly loading: BMP, ICO/CUR
+  (the largest entry), AVIF, SVG served as `image/svg+xml` (Chrome's natural sizes, e.g.
+  300x150 for a sizeless root), truncated or corrupt-IDAT bodies with a readable header,
+  and image bodies of HTTP error responses; SVG under any other type and raster bytes
+  labelled `image/svg+xml` now fail. `turbo_surf_core::net::fetch_typed_bytes` also
+  returns the response's Content-Type. Chrome 156 control:
+  `tests/fixtures/image_formats_chrome156.json` (49 rows differed before; 10 pinned
+  probe gaps remain: header-only JPEG/GIF/WebP and a namespace-less SVG root load). The
+  render crate no longer depends on the `image` crate.
+- Screenshots paint AVIF (#30): the MCP binary, the napi addon and the Python wheel
+  forward a new default-on `avif` feature to turbo-dom-raster (rav1d, pure Rust,
+  BSD-2-Clause — notice added to `THIRD_PARTY_NOTICES.md`; +1.4 MB napi, ~4 s release
+  compile). Live loads already size AVIF and image requests advertise `image/avif` as
+  Chrome does, so CDNs serve it; without the feature it painted as a placeholder. BMP and
+  ICO/CUR paint through the repinned raster. napi `fetchBytes` sends Chrome's image
+  `Accept` again when built with `avif`. Chrome 156 control:
+  `turbo-surf-mcp/tests/fixtures/screenshot_image_formats_chrome156.json`.
+- Screenshots paint JPEG XL (#43): the MCP binary, the napi addon and the Python wheel
+  forward a new default-on `jxl` feature to turbo-dom-raster (jxl-oxide 0.12.6, pure Rust,
+  single-threaded, MIT OR Apache-2.0; notice added to `THIRD_PARTY_NOTICES.md`). Chrome 156
+  decodes JPEG XL, its image `Accept` starts with `image/jxl` (which surf sends), and live
+  loads size JPEG XL since the turbo-dom 5561a5f repin (turbo-dom#45), so without the
+  feature a served JPEG XL painted as a placeholder. napi `fetchBytes` advertises
+  `image/jxl` / `image/avif` only when the addon paints them. Chrome 156 controls: the JPEG
+  XL rows of `image_formats_chrome156.json` (live loads) and
+  `screenshot_image_formats_chrome156.json` (pixels).
+- `img.width`/`height`/`x`/`y` read surf's live layout (turbo-dom#26): surf answers the
+  binding's `imageHost.setLayoutQuery` from a new native op (content box pixel-snapped
+  and zoom-adjusted, border-box document position; null without a box), and live layout
+  sizes a loaded `<img>` from its natural size (#39: it laid out every image without one,
+  e.g. a `display:block` image as 1280x0). The binding's whole `HTML_IMAGE_*` control,
+  including its `dimensions` section, holds through `PageSession`.
+- Acceptance of the turbo-dom 5157913 fixes through `PageSession`: live geometry no
+  longer throws for table rows/row groups or positioned inlines (#31,
+  `live_geometry_throws.rs` has no known gaps), and getComputedStyle reports the UA
+  `display`/`position`/`visibility` with no injected `<title>` (#36 items 1-2,
+  `computed_defaults.rs`).
+- `srcset` is honoured (#40): an `<img>` loads the candidate Chrome 156 picks — density
+  and `w` descriptors (`sizes`, default 100vw), `src` as the 1x candidate, the first
+  candidate whose density reaches `devicePixelRatio`, else the densest — and reports its
+  natural size divided by that density; a `sizes` change reselects. Since the turbo-dom
+  1b6c9fa repin the loader uses the binding's selection instead (turbo-dom#71:
+  `imageHost.selectSource` / `naturalSize`, incl. `<picture>` sources by media and type);
+  `<source>` changes and insertions/removals reselect (`html_image_srcset_selection.rs`:
+  the binding's 95-case `HTML_IMAGE_SRCSET_*` control at devicePixelRatio 1 and 2 and a
+  `<picture>` mutation control). A relevant mutation restarts the load and fires `load`
+  again even when the choice is unchanged (#49; `src` set to its own value, an `<img>`
+  `srcset` under a winning `<source>`, a losing `<source>` removed), while moving a loaded
+  image does not (`html_image_restart_chrome156.json`). The binding's template-contents
+  document is an inert document, so `defaultView` is `null` there instead of throwing
+  (#48). Chrome 156 control `html_image_srcset_chrome156.json` (uncached HTTP
+  candidates at devicePixelRatio 2).
+- The font-run geometry Chrome collector reads its fonts only from the pinned
+  turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
+  three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,
+  identical measurements).
+- Flaky tests made deterministic: the smoke-release interrupt control waits for the
+  fake executable instead of a fixed 5 s (#34); the credentialless partition control
+  no longer times the host with a 5 s budget (#35); the reentrant CSP event test awaits
+  both events instead of a 50 ms timer (#37, plus a slow-host variant). Audit of the
+  remaining 5 s session budgets: the 40 that bound real localhost work, and the host-side
+  caps on server effects, are generous caps now (60 s / 30 s), and fixed waits for
+  real-time deliveries (storage events, BroadcastChannel, CSP task capacity) are
+  condition waits. The child-supervision "retired collector leader" test retires the
+  leader once it has reported its helper instead of racing a 1 s deadline against two
+  Node startups (#44). The smoke-release helper treats a process group of zombies
+  (macOS answers `killpg` with EPERM, not ESRCH) as gone (#45). `csp_document_policy`
+  and `frame_gc_contracts` use 60 s session caps, the opaque-srcdoc probe waits up to
+  60 s for its frame's message (control recaptured on Chrome 156), and the frame
+  lifetime test awaits its probe instead of reading it before the frames loaded (#46).
+  `host_input`'s interruption tests run only the interrupted operation under their tiny
+  budget (new `#[doc(hidden)] PageSession::set_execution_budget_for_testing`) and check
+  the session afterwards under a 60 s cap (#47).
+- Detection "fixed Enter window" test (#51): its failures were not timing. A headed
+  Chrome takes the OS keyboard focus on launch, so keys typed on the host landed in the
+  fixture's textarea next to CDP's (`fixtture query`, `hfixture query`, 27 key events
+  for 26) and the collector refused to send Enter. Authored loopback controls can now set
+  `headless: true` (`--headless=new`, loopback-only like `disableExtensions`); this test
+  does and asserts the effective flags. A retry's terminal document committed near the
+  fixed deadline may be `interactive` at the snapshot, and the per-collection (120 s)
+  and test (15 min) caps are generous caps. 30/30 under 3 concurrent runs.
+- Every other keyboard-driven localhost Chrome control runs headless too (#52), so host
+  keystrokes cannot reach its trusted input: `action-parity` and the cdp worker/iframe
+  and rootless-Enter tests set `headless: true` and assert `--headless=new`; the
+  Patchright backend of `chrome-trace.mjs` honours `headless` through the same
+  loopback-only policy (recorded as `trace.headless`, previously always headed); and
+  `activation-headers-chrome.mjs` / `user-activation-gates-chrome.mjs` always launch
+  headless (the `TURBO_SURF_CHROME_HEADLESS` opt-in is gone from the latter). Both
+  controls were recaptured on Chrome 156.0.8078.47: the activation-headers results are
+  identical to the headed Chrome 155 control (renamed
+  `activation-headers-chrome156.json`, now recording `headless` and `flags`); the
+  activation-gates control now shows fullscreen's window matching the screen 300 ms
+  later (`matchesScreenLater: true`, a new known gap beside `sizeLater`).
+- The browser sidecar pins Patchright to exactly 1.59.4 and commits its
+  `package-lock.json` (#53; `setup.sh` installs with `npm ci`). `patchright@^1` resolved
+  1.64.2 on a fresh install, which rejects `chrome-trace.mjs`'s 3-argument
+  `evaluate(fn, arg, isolatedContext)` ("Too many arguments"), so every Patchright Chrome
+  test failed; 1.59.4 is the release the Chrome 156 fixtures were recorded with.
+  `browser-sidecar-pin.test.mjs` asserts the pin and the committed lockfile.
+- `user-activation-gates-chrome.mjs` escape-* captures are deterministic (#54): trusted
+  input raced the page's queued work, so setup `toggle` tasks landed on either side of
+  an Escape and a dialog's `close` task (with the focus fixup) on either side of the
+  keyup. The collector now waits for two rendering updates and a task before, between
+  and after its trusted input events (no wall-clock wait). Five full captures on Chrome
+  156.0.8078.47 are byte-identical and their results equal the committed control, so the
+  recapture only updates its `collectorSha256`; `user-activation-gates-chrome.test.mjs`
+  repeats the escape-* captures five times against it on that build.
+- turbo-dom crates repinned to turbo-dom 443f4d8 (the consolidation head d660013 + turbo-dom#180 fix, plus test/CI-only changes) (turbo-dom#172/#173 fixed; `page_patched_intrinsics_full_set_like_chrome156` un-ignored)
+  (turbo-dom#99 track key order on re-install, #104 `<selectedcontent>`, #106 textarea
+  `dir=auto`, #107 undecodable images paint nothing / truncated AVIF is broken, #94 /
+  #109 corrupt AVIF never aborts, #95 raster paint and colour fixes, #108 / #110 / #111
+  canvas colours and save()/restore() state, #112 DOM ownership amortised, turbo-test
+  #125 / #127 computed-style reuse, kept fresh across realms by turbo-dom#113). The
+  child-frame `HTMLTrackElement` key-order pin is gone: the initial about:blank frame
+  now matches Chrome 156 like every other frame.
+- turbo-dom crates repinned to turbo-dom refactor edde7dc (turbo-dom#90 / #97 CSSOM
+  shorthands, longhands and Typed OM, #99 `HTMLTrackElement` key order, #100 positioned
+  percentages, #101 block-in-inline splitting, #103 DOCTYPE quirks, and the turbo-dom#102
+  control). The child-frame `HTMLTrackElement` key-order pin (turbo-dom#99) stays: the
+  initial about:blank frame still lists the frozen constants right after `kind`.
+- turbo-dom crates repinned to turbo-dom refactor 8965838 (P5b-X4/W3/X5/W4/W5/X6/X7/W6 and
+  the core coverage slice: layout turbo-dom#28, #41, #48-#53, #55, #56, #62-#65, #69, #70,
+  #75-#78, #86, #88, #93; dialog/top layer, fullscreen, `::before`/`::after`, composed
+  events across shadow trees, `<track>`, CE reactions on adoption; raster `data:` images,
+  AVIF orientation, JPEG XL, clip:rect, truncated images; the realm DOMException (#42),
+  parsed `is=` state after a GC (#41), base-URL reflection, `<picture>` / `srcset` selection;
+  selector/parser fixes #91 #92 #96 #98). The pins this closes are dropped
+  (`custom_elements_defined`, `dom_exception_identity`, `html_image`, `image_formats`,
+  `pointer_capture`); the binding's new controls run through `PageSession`
+  (`binding_dom_controls.rs`, the async `fullscreen` case of `computed_defaults.rs` with a
+  trusted host click per `__cdpGesture()`); a child frame's `HTMLTrackElement` key order is
+  pinned as turbo-dom#99. Screenshots paint `<img src="data:…">`
+  without a caller asset map (turbo-dom#60, verified by the screenshot control with an
+  empty map — the screenshot tool's real input); live loads size JPEG XL.
+- turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and
+  HTMLOptionsCollection accessor definitions, #32 image accessors); the interceptor
+  runtime control has no known gaps left.
+
+### Changed (0.6.0 consolidation, final step)
+- Live geometry reads re-capture a stale capture: when the DOM changed between a
+  read's capture and its layout, surf now captures again and lays out the current
+  tree (as Chrome's layout reflects the current DOM) instead of failing with
+  "native layout tree changed after its capture", and a stale capture is no longer
+  answered from the layout cache of its old version. A tree that keeps changing
+  under its own capture, or a node that left its document, still reports an error.
+  No production path mutated there, so no corpus or test output changes.
+- Live layout's installed-font registry is turbo-dom-layout's process-wide
+  `FontRegistry::system(SystemFontPolicy::Html)` (one load per process, shared with
+  any other embedder); the faces and their order are unchanged.
+- turbo-dom crates pinned to the turbo-dom 0.6.0 consolidation head (S5a: one image
+  layer, legacy owned-node layout input removed, workspace lints); no surf API
+  change.
+- Release: `rust-crates-publish.yml` gains a tag-only `release-guard` job
+  (`rust/release-deps/release_guard.py`): no `[patch]` table, no Git/path sources,
+  and the turbo-dom crates + Deno family locked from crates.io at published
+  versions. PUBLISHING.md lists the exact pre-tag steps.
+
+### Changed
+- The DOM binding is no longer vendored: `turbo-surf-render` depends on the
+  `turbo-dom-browser-env` 0.6.0 crate (the same binding, moved from turbo-test
+  `cb5c64e` into turbo-dom) with feature `host-internals`. Deleted
+  `scripts/vendor-browser-env.sh`, `scripts/browser-env-adapter.rs.in`, the generated
+  adapter and the 398 files it copied; surf's native layout capture
+  (`live_layout_dom.rs`) and compression-dictionary discovery
+  (`compression_dictionary_dom.rs`) are ordinary modules over the crate's
+  `host_internals`. Integration tests read probe/control data from
+  `turbo_dom_browser_env::test_support`; Node detection tests locate the package via
+  `cargo metadata`. New forwarding feature `native-sdk-frame-read` on
+  render/mcp/napi/py (enabled by the engine-154/155 native-SDK overlay).
+- turbo-dom 0.6.0 (turbo-dom#18 S3a: Chrome-correct selector
+  escapes, non-ASCII idents, `*|p`, `:empty`, `:read-only`/`:read-write`,
+  `:nth-child(An+B of S)`, `:link`/`:any-link`; S2/S3b: turbo-dom-layout styles a
+  turbo-dom `Tree` and matches with turbo-dom's selector engine). The static
+  screenshot tier treats `t:*` elements as unknown inline elements, as Chrome does
+  (no surf fixture contains one).
+- Native live layout no longer copies the DOM: the live-tree copier
+  (`live_layout.rs`), the composed styler (`style_composed_tree`) and the separate
+  `collect_styles` walk are gone. turbo-dom-layout's live-DOM input
+  (`turbo_dom_layout::live`) captures the composed tree's provenance under the same
+  budgets and errors (pinned by `live_layout_budget_tests.rs`) and styles the live
+  tree from surf's pre-matched scoped rules; zoom scaling and style collection share
+  one post-cascade walk. The pure CSSOM-View modules (`live_layout_{metrics,hit,scroll,
+  visibility,inline,text,range}.rs` and the composition graph) moved to
+  turbo-dom-layout's `cssom_view`. No output change.
+- `@supports selector(…)` and `CSS.supports("selector(…)")` use turbo-dom's selector
+  engine (one unforgiving complex selector), matching Chrome 156: `*|p`, `|p`,
+  `[*|title]`, escapes, `:hover`, `::before`, `:link`, `:empty`, `:host`, `::slotted()`
+  and `:nth-child(… of S)` are now supported, `ns|p` and `:is(:bogus)` are not
+  (control `harness/detection/fixtures/css-supports-chrome156.json`, which replaces the
+  Chrome 155 one).
+- The interceptor ShouldThrowOnError fix is active: strict `[[Set]]`/`[[Delete]]` and
+  `Object.defineProperty` on interceptor-backed collections (`document.all`,
+  `<select>`, `select.options`) throw Chrome's TypeError, sloppy writes and the
+  `Reflect` forms stay quiet (`tests/interceptor_mode_runtime.rs` against a Chrome 156
+  control; raw V8 and accessor-vs-frame-read checks in
+  `tests/interceptor_should_throw.rs` / `tests/interceptor_mode_agreement.rs`).
+- The DOM binding is turbo-test `cb5c64e`'s (v0.4.8; 0.5.5 vendored `602b267`),
+  first re-vendored with the old copy script, whose file list gained the
+  selection, editing and EditContext modules, then moved into
+  `turbo-dom-browser-env` unchanged. This brings the genuine Selection API
+  (`Selection`, text-control selection, `createValueRange`/OpaqueRange), the editing
+  engine (`execCommand`/`queryCommand*`, contenteditable/designMode, `EditContext`,
+  `ariaNotify`) and the `scroll-behavior`/`scroll-snap-*` CSSOM keyword properties.
+  The 0.5.5 entry listed editing and Selection, but the binding vendored in 0.5.5
+  (`602b267`) did not contain them yet.
+- `document.getSelection` is now the binding's `Document.prototype` member over
+  per-document state, no longer a creation-context delegate: a retired (navigated)
+  or parsed document returns `null`, as in Chrome, instead of the old document's
+  selection object.
+- Host typing replaces a text control's selection through the binding's trusted
+  InsertText path: live value ranges follow the edit and no `select` event fires
+  per typed character.
+
+### Consolidation onto the turbo-dom crates (layout / raster / Deno)
+- Layout: `turbo-surf-render` depends on `turbo-dom-layout` 0.6.0 (the layout half
+  of turbo-html2pdf-core 0.3.9, relocated verbatim into turbo-dom; default features
+  only) instead of turbo-html2pdf-core. turbo-surf no longer depends on
+  turbo-html2pdf.
+- Raster: the `turbo-surf-raster` crate moved to turbo-dom as `turbo-dom-raster`
+  0.6.0 (verbatim, incl. WebGL; its tests run there). mcp/napi/py depend on it and
+  forward `gpu-metal` / `coretext`; the workspace has eight crates and
+  `rust-crates-publish.yml` publishes five.
+- Deno: the render crate uses the 0.x.1 family (deno_core 0.412.1, deno_crypto
+  0.273.1, deno_web 0.290.1, deno_webidl 0.259.1, facade 0.4.1) on turbo-dom's
+  `turbo-dom-v8` 150.4.0 fork; `turbo-surf-v8` and `v8x` left the graph and
+  `scripts/check-single-v8.sh` (in `npm test`) requires exactly one V8.
+- No vendored sources: the Deno extension JS comes from the distributions'
+  `embedded_sources` tables (the vendored `src/vendor/deno_extensions` copy, its
+  generated table and `vendor-deno-extension-sources.py` are gone; the reviewed
+  SHA-256/length pins moved into the render tests). `rust/vendor/` is removed: the
+  rusty_v8 fork lives in turbo-dom, and deno_crypto is generated by
+  `rust/release-deps/deno/prepare.py` from the pinned upstream archive plus
+  `patches/deno_crypto.patch`.
+- Pre-publish only: `rust/Cargo.toml` `[patch.crates-io]` resolves the Deno
+  candidates and the turbo-dom crates from Git; it is removed before the v0.6.0 tag
+  (PUBLISHING.md) and the release guard refuses a tag that still has it.
+
 ## [0.5.5] — 2026-10-25 — Chrome-156 parity batch + re-version
 
 Lands the Chrome-156 parity batch tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28):

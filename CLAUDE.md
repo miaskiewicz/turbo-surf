@@ -14,40 +14,65 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
 
 ## Stack & layout
 
-- **Engine: Rust** (`rust/` — a 9-crate workspace on the `turbo-dom` crate, edition
+- **Engine: Rust** (`rust/` — an 8-crate workspace on the `turbo-dom` crates, edition
   2021). Source is `.mjs`-free except a thin JS launcher + the dev harness.
 - **Crates:** `turbo-surf-core` (net/cookies/robots/url/frontier/crawl/cache),
   `turbo-surf-page` (navigator), `turbo-surf-view` (extract/visible/aria/locator/
   markdown/query/xpath/hydration/actions/…), `turbo-surf-render` (deno_core V8 +
-  the vendored `browser_env` rtdom↔V8 DOM binding), `turbo-surf-raster` (synthetic
-  screenshot tier — native layout+paint over `turbo-html2pdf-core`, + `measure_text`),
-  `turbo-surf-transform` (swc), `turbo-surf-napi` (dev/harness in-process addon),
-  `turbo-surf-py` (PyO3 binding → PyPI wheels), `turbo-surf-mcp` (the stdio MCP
-  **binary** the launcher spawns).
+  the `turbo-dom-browser-env` rtdom↔V8 DOM binding; native live layout over
+  `turbo-dom-layout`), `turbo-surf-transform` (swc), `turbo-surf-napi` (dev/harness
+  in-process addon), `turbo-surf-py` (PyO3 binding → PyPI wheels), `turbo-surf-mcp` (the stdio MCP
+  **binary** the launcher spawns). The synthetic screenshot tier (layout+paint,
+  canvas raster, `measure_text`) is turbo-dom's `turbo-dom-raster` crate, used by
+  mcp/napi/py with its AVIF / JPEG XL decoders on (default `avif` / `jxl` features,
+  like Chrome 156); the V8 binding is turbo-dom's `turbo-dom-v8` fork (one V8 in the
+  graph: `scripts/check-single-v8.sh`).
 - **JS surface:** `cli.js` + `index.js` (the launcher), `harness/` (benchmarks),
   `rust/playwright-shim/` (a drop-in `@playwright/test` façade over the
   `turbo-surf-napi` addon — Page/Locator/expect/context/fixtures, no browser;
   see its [`LIMITATIONS.md`](./rust/playwright-shim/LIMITATIONS.md)).
-- **Vendored, never hand-edit:** `rust/crates/turbo-surf-render/src/browser_env{.rs,_upstream.rs,.js}`
-  — re-vendor from turbo-test's committed HEAD via
-  `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
+- **DOM binding = the `turbo-dom-browser-env` crate (a dependency, never vendored):**
+  the rtdom↔V8 browser binding (`window`/`document`/CSSOM/forms/events, its JS and
+  its Chrome probes/controls) lives in
+  [turbo-dom](https://github.com/miaskiewicz/turbo-dom) (`crates/turbo-dom-browser-env`);
+  binding fixes land there, never as copies here. `turbo-surf-render` uses it with
+  feature `host-internals` for surf's native services over its documents
+  (`src/live_layout_dom.rs` layout capture, `src/compression_dictionary_dom.rs`
+  link discovery); native live layout runs turbo-dom-layout's live-DOM input
+  (`turbo_dom_layout::live`, no tree copy; a read whose capture a DOM mutation outdated
+  captures again) and its `cssom_view` geometry modules over turbo-dom-layout's
+  process-wide `FontRegistry::system(SystemFontPolicy::Html)`, while
+  surf keeps media/supports evaluation, scoped-sheet preparation, `zoom` and the
+  neutral/resource admission policy; integration tests read probe/control data from
+  `turbo_dom_browser_env::test_support` (dev feature `test-support`), and Node
+  detection tests locate the resolved package via `cargo metadata`
+  (`harness/detection/binding-files.mjs`). `native-sdk-frame-read` on
+  render/mcp/napi/py forwards to the crate for the engine-154/155 native-SDK overlay.
 
 ## The gates
 
 The engine gate is **Rust** (`cd rust`): `cargo test --workspace`, `cargo clippy
 --workspace --all-targets` (0 warnings), `cargo fmt --check`. The pre-commit hook
 (`.githooks/pre-commit`, wired by `npm run prepare`) lints/formats staged JS
-(oxlint + biome over the launcher/harness; the vendored `browser_env.js` is
-skipped). `npm run check` runs the JS lint/format + the Rust gate + the Playwright
+(oxlint + biome over the launcher/harness; source-hashed
+Chrome probes are skipped). `npm run check` runs the JS lint/format + the Rust gate + the Playwright
 shim tests (`test:playwright` = `build:addon` then `test:shim` + `test:e2e`). Never
 bypass with `--no-verify`.
+
+CI also gates **line coverage** (`coverage` job over the `coverage-shard` matrix, the sharded equivalent of `cd rust && cargo tarpaulin`, reading
+`rust/tarpaulin.toml` fail-under 93.0, then per-crate floors in `rust/coverage-floors.json` (the napi/py bindings are excluded);
+measured values, raised toward >= 99.5 by the coverage phase) and **cyclomatic complexity**
+(`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /
+`complexity:js`, one limit, no allow-list; report-only (`continue-on-error`) until the post-0.6.0 refactor, see
+[`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md) for the commands, the floors and the
+backlog). Never lower a floor or raise the limit to pass a change.
 
 ## Testing rules
 
 - Rust: `cargo test` — `node:test`-style unit tests live in each crate; deno_core
   render tests are in `rust/crates/turbo-surf-render/tests/render.rs` (a separate
-  binary, so they don't share a V8-platform init with the vendored binding's
-  standalone-V8 unit test).
+  binary, so deno_core's V8-platform init stays out of the lib unit-test process;
+  the binding's own standalone-V8 tests run in turbo-dom-browser-env).
 - **Deterministic + offline**: tests parse fixtures / hit a localhost server, never
   the live network. New code must be covered.
 - Live-network checks (the competitive + crawler harnesses) live in `harness/` and

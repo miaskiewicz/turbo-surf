@@ -201,16 +201,24 @@ test(
         });
         process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000);
       `;
+      // Retire the leader once it has reported its helper (turbo-surf#44): a 1 s deadline
+      // raced two Node startups on a busy host. The abort takes the deadline's stop() path;
+      // timeoutMs is only a generous cap.
+      const retire = new AbortController();
       const result = await superviseChild(process.execPath, ["-e", fixture], {
-        timeoutMs: 1000,
+        signal: retire.signal,
+        timeoutMs: 60_000,
         killGraceMs: 100,
         onOutput: (name, bytes) => {
-          if (name === "stdout") reported += bytes;
+          if (name !== "stdout") return;
+          reported += bytes;
+          if (reported.endsWith("}")) retire.abort();
         },
       });
       descendant = JSON.parse(reported).pid;
       assert.equal(result.code, 0, result.stderr);
-      assert.equal(result.timedOut, true);
+      assert.equal(result.aborted, true);
+      assert.equal(result.timedOut, false);
       assert.equal(result.error, null);
       assert.ok(descendant > 0, "the resistant descendant acknowledged readiness");
       const deadline = Date.now() + 1000;

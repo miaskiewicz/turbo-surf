@@ -10,8 +10,8 @@ mod session;
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
 pub use session::{
-    live_close, live_cookies, live_eval, live_eval_expression, live_network_log, live_open,
-    live_serialize,
+    live_close, live_cookies, live_eval, live_eval_engine, live_eval_expression, live_network_log,
+    live_open, live_serialize,
 };
 
 use napi::bindgen_prelude::*;
@@ -22,11 +22,11 @@ use std::sync::Arc;
 use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
+use turbo_dom_raster as raster;
 use turbo_surf_core::crawl::{crawl as run_crawl, CrawlOptions, Record};
 use turbo_surf_core::net::{build_client, fetch_html as net_fetch, FetchOptions};
 use turbo_surf_core::request_context::{ClientHints, Destination, RequestContext, RequestMode};
 use turbo_surf_page::TurboNavigator;
-use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 
 /// Install process-global render hooks once, then ensure the V8 platform. The render crate has no
@@ -193,8 +193,9 @@ fn to_assets(images: std::collections::HashMap<String, Buffer>) -> raster::Image
 }
 
 /// PNG screenshot of `html` with caller-fetched `external_css` and `images` (a
-/// map from each `imageUrls` ref to its fetched bytes). PNG/JPEG images are
-/// painted into their layout box; others fall back to a placeholder.
+/// map from each `imageUrls` ref to its fetched bytes). PNG/JPEG/GIF/WebP/SVG/BMP/ICO
+/// (and, with the default `avif` / `jxl` features, AVIF / JPEG XL) images are painted
+/// into their layout box; others fall back to a placeholder.
 #[napi]
 pub fn screenshot_with_assets(
     html: String,
@@ -409,6 +410,15 @@ fn parse_field(spec: &Value) -> Field {
 pub fn evaluate(html: String, script: String) -> Result<String> {
     ensure_render_init();
     turbo_surf_render::run_with_dom(&html, &script).map_err(Error::from_reason)
+}
+
+/// [`evaluate`] for a driver script that needs the engine namespace: `script` is a
+/// function body whose `__tsNs` parameter is the namespace and whose `return` value
+/// is read (turbo-dom#222).
+#[napi]
+pub fn evaluate_engine(html: String, script: String) -> Result<String> {
+    ensure_render_init();
+    turbo_surf_render::run_engine_with_dom(&html, &script).map_err(Error::from_reason)
 }
 
 /// Run the page's own `script` over its DOM (promises/await + virtual timers +
@@ -1016,11 +1026,12 @@ pub async fn fetch_html(url: String) -> Result<String> {
 /// resources — images for `screenshotWithAssets` — that a `fetchHtml` string
 /// would corrupt. Uses the shared pooled client; non-HTML content types allowed.
 ///
-/// Advertises only the raster image formats turbo can decode (PNG/JPEG/WebP/GIF/
-/// SVG) — crucially **not** `image/avif`. Content-negotiating CDNs (`f_auto` on
-/// Nike/Cloudinary/etc.) serve AVIF to a Chrome UA that accepts it; turbo has no
-/// AVIF decoder, so those images would silently drop. Omitting AVIF makes the CDN
-/// fall back to WebP, which turbo does decode.
+/// Sends Chrome's image `Accept` (the image destination's: `image/jxl,image/avif,…`)
+/// when the addon is built with its default `avif` and `jxl` features, which paint
+/// AVIF and JPEG XL. Without one of them the request advertises only formats the
+/// screenshot raster paints (PNG/JPEG/WebP/GIF/SVG, plus whichever of JPEG XL / AVIF is
+/// built), so a content-negotiating CDN (`f_auto` on Nike/Cloudinary/etc.) falls back
+/// to WebP instead of serving an image that would paint as a placeholder.
 #[napi]
 pub async fn fetch_bytes(
     url: String,
@@ -1029,10 +1040,12 @@ pub async fn fetch_bytes(
     cookies: Option<String>,
 ) -> Result<Buffer> {
     let mut headers = std::collections::BTreeMap::new();
-    headers.insert(
-        "accept".to_string(),
-        "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
-    );
+    if let Some(accept) = turbo_surf_core::request_context::paintable_image_accept(
+        cfg!(feature = "avif"),
+        cfg!(feature = "jxl"),
+    ) {
+        headers.insert("accept".to_string(), accept);
+    }
     let RequestState {
         client_hints,
         storage,

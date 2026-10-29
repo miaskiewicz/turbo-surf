@@ -186,7 +186,12 @@ fn extract_challenge_script(html: &str) -> Option<String> {
         let after = &rest[open..];
         let start = after.find('>')? + 1;
         let end = after.find("</script>")?;
-        let code = &after[start..end];
+        // A `</script>` before the open tag's `>` is malformed: skip past it
+        // (turbo-surf#97) instead of slicing backwards.
+        let Some(code) = after.get(start..end) else {
+            rest = &after[end + "</script>".len()..];
+            continue;
+        };
         if code.contains("_cf_chl_opt") || code.contains("jschl") || code.contains("chl_answer") {
             body.push_str(code);
             body.push('\n');
@@ -326,6 +331,29 @@ mod tests {
         assert_eq!(cf2.answer(INTERSTITIAL, &p), solve_pow(&p));
     }
 
+    // With an engine wired but no inline challenge script to run (or a malformed
+    // `<script` tag), the solver falls back to the structural answer; the engine
+    // is never consulted.
+    #[test]
+    fn missing_challenge_script_falls_back_without_the_engine() {
+        struct Unreachable;
+        impl crate::challenge::PowEngine for Unreachable {
+            fn compute(&self, script: &str) -> Result<String, String> {
+                panic!("engine ran without a challenge script: {script}")
+            }
+        }
+        assert_eq!(
+            extract_challenge_script("<script>var a = 1;</script>"),
+            None
+        );
+        assert_eq!(extract_challenge_script("<script _cf_chl_opt"), None);
+        assert_eq!(extract_challenge_script("<script>_cf_chl_opt"), None);
+        let page = r#"<div data-x="window._cf_chl_opt={cRay:'r9'}"></div>"#;
+        let p = parse_challenge(page).unwrap();
+        let cf = CloudflareSolver::new().with_pow_engine(Box::new(Unreachable));
+        assert_eq!(cf.answer(page, &p), solve_pow(&p));
+    }
+
     // The HARNESS: each generation is detected from its marker and every
     // self-solvable version yields a deterministic, distinct answer; Turnstile is
     // recognised as NOT self-solvable (routes to the browser sidecar). "Store
@@ -378,6 +406,11 @@ mod tests {
                     let req = String::from_utf8_lossy(&buf[..n]);
                     let resp = if req.starts_with("POST") {
                         assert!(req.contains("cf_chl_answer"), "expected answer POST: {req}");
+                        // No submit URL configured: the page origin's challenge platform.
+                        assert!(
+                            req.starts_with("POST /cdn-cgi/challenge-platform/ "),
+                            "{req}"
+                        );
                         let b = "{}";
                         format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: cf_clearance=CF~cleared~1; Path=/\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", b.len(), b)
                     } else {
@@ -389,9 +422,8 @@ mod tests {
             }
         });
         let base = format!("http://127.0.0.1:{port}");
-        let solver =
-            CloudflareSolver::new().with_submit_url(format!("{base}/cdn-cgi/challenge-platform/"));
-        let ch = Challenge::new(Vendor::Cloudflare, format!("{base}/"));
+        let solver = CloudflareSolver::new();
+        let ch = Challenge::new(Vendor::Cloudflare, format!("{base}/wall?x=1"));
         let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
         let cf = token.cookies.iter().find(|(k, _)| k == "cf_clearance");
         assert!(cf.is_some(), "must return cf_clearance");
@@ -399,5 +431,16 @@ mod tests {
             cf.unwrap().1.starts_with("CF~"),
             "must parse cf_clearance value"
         );
+    }
+
+    // turbo-surf#97: a `</script>` before the open tag's `>` must not panic.
+    #[test]
+    fn challenge_script_with_close_before_open_end_does_not_panic() {
+        assert_eq!(
+            super::extract_challenge_script("<script</script>>jschl"),
+            None
+        );
+        let found = super::extract_challenge_script("<script</script>><script>jschl=1</script>");
+        assert!(found.is_some_and(|code| code.contains("jschl=1")));
     }
 }

@@ -262,6 +262,21 @@ mod tests {
             &headers
         ));
         assert!(!preflight_allowed(&context, "DELETE", &[], &headers));
+        // The preflight response itself must pass the CORS check: methods and headers
+        // granted without (or with another) Access-Control-Allow-Origin do not count.
+        for allow_origin in [None, Some("https://source.test")] {
+            let headers: Vec<(String, String)> = allow_origin
+                .map(|origin| ("access-control-allow-origin".into(), origin.into()))
+                .into_iter()
+                .chain(headers[1..].iter().cloned())
+                .collect();
+            assert!(!preflight_allowed(
+                &context,
+                "PUT",
+                &["x-token".into()],
+                &headers
+            ));
+        }
         assert!(!preflight_allowed(
             &context,
             "PUT",
@@ -275,5 +290,86 @@ mod tests {
             ])),
             vec!["content-type"]
         );
+    }
+
+    fn unsafe_one(name: &str, value: &str) -> bool {
+        !unsafe_headers(&BTreeMap::from([(name.to_string(), value.to_string())])).is_empty()
+    }
+
+    #[test]
+    fn cors_safelisted_request_headers_follow_the_fetch_spec() {
+        // Values over 128 bytes are never safelisted.
+        assert!(!unsafe_one("Accept", &"a".repeat(128)));
+        assert!(unsafe_one("Accept", &"a".repeat(129)));
+        assert!(unsafe_one("accept", "a\"b"));
+        assert!(!unsafe_one("Accept-Language", "en-US,en;q=0.9"));
+        assert!(!unsafe_one("content-language", "de *"));
+        assert!(unsafe_one("content-language", "en_US"));
+        assert!(!unsafe_one("content-type", "text/plain; charset=utf-8"));
+        assert!(unsafe_one("content-type", "text/plain; x=\"a\""));
+        assert!(!unsafe_one("range", "bytes=0-10"));
+        assert!(!unsafe_one("range", "bytes=5-"));
+        assert!(!unsafe_one("range", "bytes=7-7"));
+        for range in [
+            "bytes=-5",
+            "bytes=5-1",
+            "bytes=a-1",
+            "bytes=1-b",
+            "items=0-1",
+            "bytes=0",
+            "bytes=0-1,2-3",
+        ] {
+            assert!(unsafe_one("range", range), "{range}");
+        }
+        assert_eq!(
+            unsafe_headers(&BTreeMap::from([
+                ("X-B".into(), "1".into()),
+                ("x-a".into(), "1".into()),
+                ("X-A".into(), "2".into()),
+            ])),
+            vec!["x-a", "x-b"]
+        );
+    }
+
+    #[test]
+    fn cross_origin_cors_responses_expose_only_safelisted_and_listed_headers() {
+        let mut context = RequestContext::resource(
+            "https://source.test/page",
+            Destination::Empty,
+            RequestMode::Cors,
+        );
+        let headers = vec![
+            ("Content-Type".to_string(), "text/plain".to_string()),
+            (
+                "Access-Control-Expose-Headers".to_string(),
+                "X-One, x-two".to_string(),
+            ),
+            ("X-One".to_string(), "1".to_string()),
+            ("X-Two".to_string(), "2".to_string()),
+            ("X-Three".to_string(), "3".to_string()),
+            ("Set-Cookie".to_string(), "a=1".to_string()),
+        ];
+        let names =
+            |list: Vec<(String, String)>| list.into_iter().map(|(n, _)| n).collect::<Vec<_>>();
+        assert_eq!(
+            names(exposed_headers(&context, headers.clone(), true)),
+            vec!["Content-Type", "X-One", "X-Two"]
+        );
+        // Same-origin: everything but Set-Cookie.
+        assert_eq!(
+            names(exposed_headers(&context, headers.clone(), false)).len(),
+            5
+        );
+        // `*` exposes everything for uncredentialed requests only.
+        let star = vec![
+            ("Access-Control-Expose-Headers".to_string(), "*".to_string()),
+            ("X-Three".to_string(), "3".to_string()),
+        ];
+        assert_eq!(
+            names(exposed_headers(&context, star.clone(), true)).len(),
+            2
+        );
+        context.credentials = Credentials::Include;
+        assert!(names(exposed_headers(&context, star, true)).is_empty());
     }
 }

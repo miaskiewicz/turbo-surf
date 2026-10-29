@@ -1,0 +1,12 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "035c4dc7a72fdac0975caa4d8cb57531042cab92899a39beeee7c8c46fee3f92",
+  "pageSha256": "5f3c5cad0b7577e1e7836a606d441335a3e7f59c1c549e3ccb320acdc1800944",
+  "collectorSha256": "f8dc5630464ae0b9012fcac17d5808bad02ebb4b3ac3976cb3d88ee49db8bead",
+  "errors": [],
+  "result": {
+    "early": [true, 3, 2],
+    "late": [true, 3, 2, "load"],
+    "own": []
+  }
+}

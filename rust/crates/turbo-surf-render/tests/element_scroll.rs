@@ -28,7 +28,7 @@ async fn observe(probe: &str) -> Value {
         "http://127.0.0.1/",
         "",
         "",
-        20000,
+        60_000,
     )
     .await
     .unwrap();

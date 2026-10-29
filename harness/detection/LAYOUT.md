@@ -2,6 +2,11 @@
 
 Read-only audit, 2026-10-13. No geometry implementation or parity claim.
 
+> Paths below are as of the audit. Since the turbo-dom consolidation the raster
+> adapter lives in turbo-dom's `turbo-dom-raster` crate and the html2pdf layout
+> half (incl. `html_layout.rs`) in `turbo-dom-layout`; turbo-surf no longer
+> depends on turbo-html2pdf.
+
 ## What exists
 
 - Surf `rust/crates/turbo-surf-raster/src/lib.rs:350` has a private `lay_out` adapter using real turbo-html2pdf CSS/layout/fonts/image sizing. The public APIs return screenshots, not a stable browser geometry index. The adapter rewrites lazy images, strips non-visual markup, concatenates sheets in screenshot order, and uses no root percentage-height basis. Reusing it unchanged would change page semantics.

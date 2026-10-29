@@ -28,8 +28,8 @@ surfaces remain unavailable or approximate:
   is supported via a *synthetic* native layout+paint (see below) — a
   representative render, not a browser-faithful capture. It fetches the page's
   external `<link>` stylesheets and cascades them (`{externalCss:false}` opts
-  out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP +
-  SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
+  out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP/BMP/ICO/
+  AVIF + SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
   models
   `position:absolute/fixed/relative` + `z-index` for block flow (painted
   back-to-front per CSS stacking order), propagates the root/body background, and
@@ -84,8 +84,13 @@ lifecycle remain separate coverage work.
 
 Live hydration loads linked/imported stylesheets, enforces inline style CSP against native
 attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
-CSS getters share private interface brands. It decodes PNG/JPEG/GIF/WebP image resources with load/error events; responsive images,
-SVG/AVIF and CSS image/font resource loading are incomplete. CSSOM changes made with
+CSS getters share private interface brands. It sizes PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL and `image/svg+xml` image resources (any `data:`
+form) with load/error events like Chrome and selects `<picture>` / `srcset` / `sizes`
+sources like Chrome (the binding's selection); CSS image/font resource loading is incomplete. Known gaps: a
+DOMException raised by a binding module (e.g. `img.decode()`'s `EncodingError`) is not
+`instanceof DOMException` and `structuredClone`s to `{}` (turbo-surf#42), and a parser-created
+`is=` element can match `:defined` once a GC has run turbo-dom's storage collection
+(turbo-surf#41). CSSOM changes made with
 `insertRule` do not alter
 serialized HTML and therefore are not automatically painted by snapshot screenshots.
 

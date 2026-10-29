@@ -275,7 +275,7 @@ const SNAPSHOT: &str = concat!(
   })(),
   readyState:document.readyState,
   nav: (() => {
-    const g=globalThis[Symbol.for('ts')];
+    const g=__tsNs;
     const v=g && (g.rscNav || g.nav);
     if(v) return new URL(v,location.href).href;
     return location.href;
@@ -337,7 +337,7 @@ async fn snapshot(
     let mut stable = None;
     for _ in 0..3 {
         let before = page.navigation_snapshot().0;
-        let raw = page.eval_json_expression(&source).await?;
+        let raw = page.eval_engine_json_expression(&source).await?;
         let installed = page.navigation_snapshot();
         if before == installed.0 {
             stable = Some((raw, installed));
@@ -618,9 +618,9 @@ async fn capture(
                 }
                 let installed = page.navigation_snapshot().1;
                 let raw = page
-                    .eval_json_expression(
+                    .eval_engine_json_expression(
                         r#"(() => {
-                const state=globalThis[Symbol.for('ts')];
+                const state=__tsNs;
                 return new URL(state?.rscNav || state?.nav || location.href,location.href).href;
             })()"#,
                     )

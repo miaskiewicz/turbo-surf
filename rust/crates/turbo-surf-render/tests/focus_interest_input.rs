@@ -1,4 +1,4 @@
-//! Trusted host input drives the vendored focusgroup and interest-invoker default actions:
+//! Trusted host input drives the binding's focusgroup and interest-invoker default actions:
 //! arrow keys move focus within a focusgroup, and hover/focus show an `interestfor` popover
 //! after its CSS-timed delay on the virtual timers. Guest-dispatched events never do.
 use serde_json::json;

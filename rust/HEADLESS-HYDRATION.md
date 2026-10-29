@@ -52,7 +52,7 @@ Requirements and where each stands:
 | Requirement | Status |
 |---|---|
 | Real V8 isolate, host heap unreachable from guest (+ runaway budget) | ✅ deno_core + watchdog |
-| Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test); partial Web IDL coverage |
+| Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (the `turbo-dom-browser-env` crate); partial Web IDL coverage |
 | `window`/`navigator`/`location`/`localStorage`/`console` + Event classes | ✅ binding + env bootstrap |
 | Timers (setTimeout/rAF/queueMicrotask) | Fast virtual scheduling by default; opt-in real-time Window/frame deadlines through PageSessionOptions before hydration; individual Window timer tasks finish their microtask checkpoints, with measured per-Window nesting clamps; broader cadence/task-source parity remains open |
 | Promise / `async`-`await` / microtask resolution (event loop) | ✅ `render_html_async` |
@@ -69,7 +69,9 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 
 **October19 trusted input follow-up:** the private driver captures native current
 layout geometry for target centers, replaces live input/textarea selections and
-preserves cancellation. Geometry setup initializes the unchanged shared system
+preserves cancellation. Replacement goes through the binding's trusted typing entry
+(`replaceControlSelection`, Blink's InsertText): value ranges follow the edit and
+selectionchange fires, never select. Geometry setup initializes the unchanged shared system
 font registry before guest execution; cold discovery is an engine startup cost
 rather than a later input-budget cost. The detection example applies actual
 readiness checks, real dwell/character cadence and per-step snapshots. The
@@ -117,7 +119,7 @@ SERP in one baseline while another fails effective consent dismissal. The later
   composition. Non-extractable key material never crosses a page cloning hook;
   the private V8 serializer carries native key handles out of band. The original
   inherited-setter leak and graph/permission/realm behavior have regressions.
-  See [`vendor/DENO_CRYPTO.md`](./vendor/DENO_CRYPTO.md) for the reproducible patch.
+  See [`release-deps/deno/DENO_CRYPTO.md`](./release-deps/deno/DENO_CRYPTO.md) for the reproducible patch.
 - SHA256/384/512 resource integrity is checked against decoded response bytes
   before fetch/script/module/frame/style consumption. Module entry integrity does
   not become the hash for imported dependencies. Native CORP and active HTTPS
@@ -293,8 +295,9 @@ SERP in one baseline while another fails effective consent dismissal. The later
   Trusted lifecycle, message delivery and script/module completion callbacks live in
   native context slots. Privileged callbacks use strict calling semantics and captured
   Event/ErrorEvent constructors, preventing guest replacements or Function.caller from
-  obtaining a trust-minting capability. The internal Symbol.for('ts') support namespace
-  remains observable; its remaining frame records do not grant cross-origin document access.
+  obtaining a trust-minting capability. The internal engine namespace is a V8 private
+  (turbo-dom#222): page script cannot reach it, and embedder driver scripts run through
+  `eval_engine*` / `liveEvalEngine`, which bind it to `__tsNs`.
   Resource, lifecycle and frame events use a host-only dispatch entry point. Event fields
   are read-only accessors. Element property handlers use private state and the native
   listener registry, retaining assignment order and cancellation behavior. Window load
@@ -352,8 +355,38 @@ SERP in one baseline while another fails effective consent dismissal. The later
   defaults and does not preserve every live control value across a new runtime.
 - Live hydration advances the document through loading/interactive/complete, runs deferred
   scripts before DOMContentLoaded, and waits for image/resource loads before window load.
-  PNG/JPEG/GIF/WebP images are fetched as bytes and decoded before success/dimensions are
-  exposed. SVG/AVIF, responsive image selection, CSS image/font initiation, incremental
+  Images are fetched as bytes (`data:` URLs through the Fetch data: URL processor: base64,
+  percent-encoded and raw payloads) and sized by turbo-dom-layout's shared image probe:
+  PNG/JPEG/GIF/WebP/BMP/ICO/CUR/AVIF/JPEG XL from their bytes whatever the declared type or HTTP
+  status (EXIF orientation applied), SVG only when served as `image/svg+xml` (its natural
+  size from the root's `width`/`height`/`viewBox`, as Chrome); TIFF and any undecodable
+  body fail with `error` (turbo-surf#30, `tests/image_formats.rs` against a Chrome 156
+  control). Remaining gaps: a header-only JPEG/GIF/WebP body loads where Chrome waits for
+  the first scan/frame, and an SVG root outside the SVG namespace loads. Each image's state reaches the binding's `HTMLImageElement.prototype`
+  accessors (`complete`, `naturalWidth`, `naturalHeight`, `currentSrc`) through the
+  document's private `imageHost` record. The binding owns the rest of the element (the
+  reflected `src`, `decode()` and the native `Image()` factory), so an `<img>` has no own
+  properties, as in Chrome. Loads start from the document's mutation consumer: a
+  `src`/`srcset` change on any `<img>` the document owns, connected or not
+  (`new Image().src = …`), and images a tree inserts (detached `innerHTML`, contextual
+  fragments); images of inert documents (template contents, `DOMParser`,
+  `createHTMLDocument`) never load. A decoded image's natural size also sizes its replaced
+  box in live layout (turbo-surf#39), and `width`/`height`/`x`/`y` read that box through the
+  binding's `imageHost.setLayoutQuery` (turbo-dom#26: the pixel-snapped, zoom-adjusted
+  content box and the untransformed border-box document position; not rendered → the
+  attribute or natural size, 0). A `render(html, base, script)`
+  starts the parser's image and stylesheet loads before its script runs, and a `data:`
+  image is decoded synchronously when its source is set, so the first script read sees
+  it complete with its natural size, as in Chrome (turbo-surf#38); its `load`/`error`
+  event still fires as a later task. The source is the one turbo-dom-browser-env's
+  `imageHost.selectSource` picks for the window's viewport and `devicePixelRatio`
+  (turbo-dom#71: `<picture>` sources by `media` and `type`, `srcset` density and `w`
+  descriptors against `sizes`, `src` as the 1x candidate) and the natural size is
+  `imageHost.naturalSize` of the decoded candidate; a `<source>` attribute change, or a
+  `<source>` inserted into or removed from the `<picture>`, reselects. Every such relevant
+  mutation (and a `src`/`srcset`/`sizes` set, even to the same value) restarts the load and
+  fires `load` again like Chrome, while moving a loaded image does not (turbo-surf#49); CSS
+  image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration
   in the performance resource timeline; unavailable wire sizes and transport phases remain zero.
@@ -594,8 +627,8 @@ work* so the next person doesn't re-walk it.
 - **Fetch-aware drain.** `drain_to_quiescence`/`__pendingWork` tracked timers +
   un-run scripts but NOT in-flight fetches, so a save `POST` could resolve *after* the
   drain quiesced (the DOM looks "stable" while waiting) and its success re-render — a
-  modal close, a redirect — was lost. A `__pendingFetches` counter now keeps the drain
-  pumping until requests settle.
+  modal close, a redirect — was lost. A bootstrap-private in-flight fetch counter (not a
+  page global since turbo-surf#83) now keeps the drain pumping until requests settle.
 - **Network log → events.** Each live-app `fetch` is recorded in private native op-state; the shim
   drains it through the host-only `liveNetworkLog` accessor to emit `page.on('response')` and back a real `waitForResponse`. Tests use
   these to capture API payloads (payroll period, employments lists).
@@ -1302,7 +1335,10 @@ now fixed:
    has no AVIF decoder → every hero/product image silently dropped. Fix: `fetch_bytes`
    (napi) now sends an image `Accept` **without** `image/avif`
    (`image/webp,image/png,image/jpeg,…`), so the CDN falls back to WebP, which turbo
-   decodes. General: fixes every `f_auto`/Cloudinary site.
+   decodes. General: fixes every `f_auto`/Cloudinary site. (P5b, turbo-surf#30: the
+   screenshot raster now decodes AVIF under the default `avif` feature and, turbo-surf#43,
+   JPEG XL under the default `jxl` feature, so `fetchBytes` sends Chrome's image `Accept`
+   (`image/jxl,image/avif,…`) again; an addon built without one of them drops that type.)
 2. **`width:100%` collapse.** Even fetched, the images were 0×0 — `size_replaced`
    resolved `%` against a 0 basis (html2pdf 0.2.10 fix). Together the Ronaldo hero,
    Mercurial boots, and tennis imagery now render (verified).
@@ -1364,7 +1400,8 @@ sizes 0. Single-site, unbounded; lower ROI than the general engine features abov
 ### Nike — Emotion CSS-in-JS WORKS; barren = consent overlay + weak overlay chrome + images-behind-modal
 - Nike's styling is **258 inline `<style>` blocks / 991 `.css-xxxxx` Emotion rules** (not
   external). CSS-in-JS is **already supported** — proved by a committed harness
-  (`turbo-surf-raster/tests/screenshot.rs::css_in_js_inline_style_blocks_apply`: hashed classes +
+  (`turbo-surf-raster/tests/screenshot.rs::css_in_js_inline_style_blocks_apply`, now
+  turbo-dom's `turbo-dom-raster`: hashed classes +
   `>` combinator + `@media` all cascade). So barrenness is NOT a cascade gap.
 - Nike serves a **cookie-consent wall** (Portuguese, geo/bot-triggered). Chromium shows it as a
   styled white card over the nav+hero; turbo shows the consent TEXT unstyled → the overlay
@@ -1431,8 +1468,9 @@ browser comparison; this is not a claim of complete Sanitizer API coverage.
 
 The binding uses weak native lookups with private V8 Document/subtree edges.
 Crypto's native objects trace their actual JavaScript edges through cppgc. The
-workspace consumes a reproducible Rusty V8 150.4.0 ownership teardown fix; see
-[`vendor/RUSTY_V8.md`](./vendor/RUSTY_V8.md). This does not upgrade the default
+workspace consumes a reproducible Rusty V8 150.4.0 ownership teardown fix through
+turbo-dom's generated `turbo-dom-v8` fork (patches + pins + generator in turbo-dom's
+`crates/turbo-dom-v8`). This does not upgrade the default
 engine to Chrome 155.
 
 MutationObserver records are native semantic batches delivered through a V8

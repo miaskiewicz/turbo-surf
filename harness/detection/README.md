@@ -49,16 +49,17 @@ node harness/detection/font-run-geometry-chrome-control.mjs \
   --producer /path/to/turbo-html2pdf --out /private/tmp/font-run-oracle.json
 ```
 
-Use Node22 or newer and a fresh output path. The producer checkout must contain
-commit2eac7f6; the collector verifies its pinned font bytes before serving them.
-It launches fresh normal headed Chrome with the established direct-CDP policy,
+Use Node22 or newer and a fresh output path. The producer is any turbo-html2pdf
+clone that contains commit 2eac7f6: the collector serves each font from that
+commit's blob (`git show`), never from the working tree, so clones at or after
+0.6.0 (whose bundled fonts moved to turbo-dom-layout) work too. It launches fresh normal headed Chrome with the established direct-CDP policy,
 records actual selected fonts, source/font hashes and natural/emulated device
 scales, and closes the browser/server afterward. Optional `--headless` records a
 separate mode with potentially different metrics; it cannot replace the headed
-oracle. The saved [control](./fixtures/font-run-geometry-chrome155.json) preserves
+oracle. The saved [control](./fixtures/font-run-geometry-chrome156.json) preserves
 all measured values, including unequal widths for adjacent partial intervals.
 
-The sibling [Range transform control](./fixtures/range-transform-stages-chrome155.json)
+The sibling [Range transform control](./fixtures/range-transform-stages-chrome156.json)
 separates body-margin, padding, absolute/fixed positioning, nested rotation,
 transform origins and identity/integer-translation stages:
 
@@ -110,7 +111,7 @@ On a Mac with a real Metal GPU:
 ```bash
 npm install
 # Optional: legacy Playwright/Patchright collectors only; raw CDP needs neither.
-# npm install --prefix scripts/browser-sidecar
+# npm ci --prefix scripts/browser-sidecar   # pinned Patchright 1.59.4 (turbo-surf#53)
 cd rust
 cargo build --release -p turbo-surf-mcp --features trust-anchors,gpu-metal,coretext --example detection_trace
 cd ..
@@ -836,7 +837,15 @@ configuration. This adds only `--disable-extensions`, rejects non-loopback targe
 URLs and records `effectiveExtensionFlags` in the trace. The prototype/API
 comparison and worker/iframe regression use this explicit isolation so installed
 system extensions cannot delay their control targets. Normal live Chrome launches
-keep their default extension behavior.
+keep their default extension behavior. Keyboard-driven authored controls can also
+set `headless: true` (`--headless=new`, loopback-only as well): a headed window takes
+the OS keyboard focus on launch, and keys typed on the host would land in the focused
+field next to the collector's trusted input (turbo-surf#51). Every localhost control
+that types uses it (turbo-surf#52): navigation-observation, action-parity, and the cdp
+worker/iframe and rootless-Enter tests (all assert `--headless=new` in
+`effectiveExtensionFlags`). The Patchright backend of `chrome-trace.mjs` honours the
+same option through the same policy and records `headless` in its trace; live
+configurations leave it unset and stay headed.
 
 `range-live-probe.js` and its saved Chrome 155.0.8059.79 / V815.5.35.23 fixture
 cover live boundary changes for text, splitting, insertion/removal, replacements,
@@ -871,7 +880,8 @@ snapshots remain local; they can contain page memory.
 Keep unfinished source candidates and their exact patches, source hashes and test
 receipts under repository-local `.native-builds/recovery/`, which is ignored.
 Temporary-directory candidates can disappear across restarts. Save reviewed
-canonical changes in turbo-test before re-vendoring; preserve an unfinished source
+canonical binding changes in turbo-dom (`turbo-dom-browser-env`) and consume
+them as a dependency (no copies); preserve an unfinished source
 packet until its tested equivalent is committed. Raw live traces stay under the
 ignored artifacts directory. Remove obsolete owned build outputs after integration.
 
@@ -918,6 +928,7 @@ node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-probe.
 node harness/detection/authored-dom-chrome.mjs harness/detection/csp-meta-probe.js harness/detection/fixtures/csp-meta-chrome155.json
 node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-order-probe.js harness/detection/fixtures/csp-base-order-chrome155.json
 node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-retired-probe.js harness/detection/fixtures/csp-base-retired-chrome155.json
+TURBO_SURF_CHROME_PATH=".../Google Chrome for Testing" node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-opaque-probe.js harness/detection/fixtures/csp-base-opaque-chrome156.json
 cargo test --manifest-path rust/Cargo.toml -p turbo-surf-render --test csp_document_policy
 ```
 
@@ -1032,7 +1043,16 @@ aggregate durations may overlap. Promise results retain identity and are never
 awaited; these measurements cover synchronous invocation only.
 
 The localhost activation oracle uses real Chrome input and records outgoing
-`Sec-Fetch-User` headers alongside public activation state:
+`Sec-Fetch-User` headers alongside public activation state. It always launches
+headless (`--headless=new`, recorded with the other `flags`), as does
+`user-activation-gates-chrome.mjs`, so host keystrokes cannot reach their trusted
+Enter/Space/Escape input (turbo-surf#52). The gates collector also lets the page run
+two rendering updates and a task before, between and after its trusted input events
+(keydown/keyup, press/release), so queued `toggle`/`close` tasks and the focus fixup
+cannot race the input and repeated captures agree (turbo-surf#54); on the recording
+build (`TURBO_SURF_CHROME_PATH` pointing at Chrome 156.0.8078.47)
+`node --test harness/detection/user-activation-gates-chrome.test.mjs` repeats the
+escape-* captures five times against the control:
 
 ```bash
 node harness/detection/activation-headers-chrome.mjs /tmp/activation-headers.json
@@ -1081,8 +1101,8 @@ rejections remain errors; interrupted operations are not silently discarded. See
 ### Regenerate the parser resource-order Chrome control
 
 ```sh
-node harness/detection/resource-scan-order-chrome.mjs harness/detection/fixtures/resource-scan-order-chrome155.json
-npx --no-install biome format --write harness/detection/fixtures/resource-scan-order-chrome155.json
+node harness/detection/resource-scan-order-chrome.mjs harness/detection/fixtures/resource-scan-order-chrome156.json
+npx --no-install biome format --write harness/detection/fixtures/resource-scan-order-chrome156.json
 ```
 
 This uses installed Chrome and the exact HTML fixture in the Rust resource-order

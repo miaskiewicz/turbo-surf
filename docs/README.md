@@ -9,13 +9,15 @@ anymore (the engine is Rust; its modules are crates). Start here:
 - [`../CHANGELOG.md`](../CHANGELOG.md) — what shipped.
 - [`../PUBLISHING.md`](../PUBLISHING.md) — how releases cut (npm launcher + crates).
 - [`../AGENTS.md`](../AGENTS.md) — working rules for contributors.
+- [`QUALITY-GATES.md`](./QUALITY-GATES.md) — the CI coverage and complexity gates, their
+  floors and the complexity refactor backlog.
 
 ## Engine (the Rust workspace)
 - [`../rust/README.md`](../rust/README.md) — the 9-crate workspace, the tiers
   (net/crawl → view/extract → V8 render), and how they fit.
 - [`../rust/HEADLESS-HYDRATION.md`](../rust/HEADLESS-HYDRATION.md) — the no-browser
-  JS render tier (a `deno_core` V8 isolate over the native rtdom DOM + the vendored
-  `browser_env` binding).
+  JS render tier (a `deno_core` V8 isolate over the native rtdom DOM + the
+  `turbo-dom-browser-env` binding).
 - [`../rust/crates/turbo-surf-napi/README.md`](../rust/crates/turbo-surf-napi/README.md)
   — the dev/harness in-process addon (not published).
 

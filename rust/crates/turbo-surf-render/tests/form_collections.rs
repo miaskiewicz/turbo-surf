@@ -1,8 +1,9 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const CASES: &str = include_str!("../src/form_collections_cases.json");
+const CASES: &str = test_support::FORM_COLLECTIONS_CASES_JSON;
 
 fn control(probe: &str, oracle: &str) -> Value {
     let value: Value = serde_json::from_str(oracle).unwrap();
@@ -40,11 +41,8 @@ async fn read(page: &mut PageSession, source: &str) -> Value {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn form_collections_use_real_child_realm_brands_and_retained_objects() {
-    let probe = include_str!("../src/form_collections_realm_probe.js");
-    let expected = control(
-        probe,
-        include_str!("../src/form_collections_realm_chrome155.json"),
-    );
+    let probe = test_support::FORM_COLLECTIONS_REALM_PROBE_JS;
+    let expected = control(probe, test_support::FORM_COLLECTIONS_REALM_CHROME155_JSON);
     let mut page = open().await;
     assert_eq!(
         read(&mut page, probe).await,
@@ -54,10 +52,10 @@ async fn form_collections_use_real_child_realm_brands_and_retained_objects() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn retained_form_collection_keeps_only_its_own_guest_realm() {
-    let probe = include_str!("../src/form_collections_lifecycle_probe.js");
+    let probe = test_support::FORM_COLLECTIONS_LIFECYCLE_PROBE_JS;
     let expected = control(
         probe,
-        include_str!("../src/form_collections_lifecycle_chrome155.json"),
+        test_support::FORM_COLLECTIONS_LIFECYCLE_CHROME155_JSON,
     );
     let mut page = open().await;
     assert_eq!(read(&mut page, probe).await, serde_json::json!("prepared"));

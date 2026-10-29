@@ -1,0 +1,7 @@
+[
+  {
+    "id": "picture-mutations",
+    "url": "http://127.0.0.1/page/",
+    "html": "<!doctype html><body><picture id=pic><source id=first srcset=\"/img/40x20/first.png\" type=\"image/png\"><source srcset=\"/img/50x25/second.png\"><img id=img src=\"/img/30x15/fallback.png\"></picture>"
+  }
+]

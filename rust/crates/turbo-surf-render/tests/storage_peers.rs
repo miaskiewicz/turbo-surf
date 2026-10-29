@@ -35,6 +35,41 @@ async fn queued_peer_mutations_exclude_later_realms_and_keep_handler_microtasks(
     assert_eq!(peer.pending_storage_events_for_testing(), 0);
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn storage_event_signal_wakes_an_idle_host_when_a_peer_commits() {
+    use std::time::Duration;
+    let profile = BrowserStorage::default();
+    let mut source = open(profile.new_tab().unwrap(), "signal-writer").await;
+    let mut peer = open(profile.new_tab().unwrap(), "signal-peer").await;
+    peer.eval_expression(
+        "globalThis.keys=[];addEventListener('storage',event=>keys.push(event.key))",
+    )
+    .await
+    .unwrap();
+    // Nothing is queued: the idle signal stays pending.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), peer.storage_event_signal())
+            .await
+            .is_err()
+    );
+    let signal = peer.storage_event_signal();
+    source
+        .eval_expression("localStorage.setItem('wake','1')")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), signal)
+        .await
+        .expect("a peer commit wakes the idle host driver");
+    peer.eval("globalThis.__RESULT=''").await.unwrap();
+    assert_eq!(peer.eval_expression("keys.join()").await.unwrap(), "wake");
+    // Delivered: a fresh signal is pending again.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), peer.storage_event_signal())
+            .await
+            .is_err()
+    );
+}
+
 #[cfg(turbo_surf_native_proxy)]
 #[tokio::test(flavor = "current_thread")]
 async fn native_peer_inbox_payloads_do_not_root_retired_receiving_realms() {
@@ -74,7 +109,7 @@ async fn nested_peer_dispatch_releases_each_queued_batch_before_guest_callbacks(
     let profile = BrowserStorage::default();
     let mut source = open(profile.new_tab().unwrap(), "source").await;
     let mut peer = open(profile.new_tab().unwrap(), "receiver").await;
-    peer.eval_expression("globalThis.received=0;globalThis.nested=0;const frame=document.createElement('iframe');document.body.append(frame);frame.contentWindow.addEventListener('storage',()=>{received++;nested++});addEventListener('storage',()=>{received++;globalThis[Symbol.for('ts')].runTimers()})").await.unwrap();
+    peer.eval_engine("globalThis.received=0;globalThis.nested=0;const frame=document.createElement('iframe');document.body.append(frame);frame.contentWindow.addEventListener('storage',()=>{received++;nested++});addEventListener('storage',()=>{received++;__tsNs.runTimers()})").await.unwrap();
     for round in 0..24 {
         source
             .eval_expression(&format!(
@@ -149,9 +184,9 @@ async fn pending_peer_tasks_use_native_dispatch_and_checkpoint_each_handler() {
     let profile = BrowserStorage::default();
     let mut source = open(profile.new_tab().unwrap(), "source").await;
     let mut peer = open(profile.new_tab().unwrap(), "receiver").await;
-    let waiting = peer.eval_expression(
+    let waiting = peer.eval_engine_expression(
         r#"new Promise(resolve=>{
-      const environment=globalThis[Symbol.for('ts')], original=environment.runTimers, observed=[];
+      const environment=__tsNs, original=environment.runTimers, observed=[];
       environment.runTimers=()=>{throw new Error('public timer driver was called')};
       function receive(event){
         observed.push(event.key);

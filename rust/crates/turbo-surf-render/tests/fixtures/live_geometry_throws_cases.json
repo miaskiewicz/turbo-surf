@@ -1,0 +1,22 @@
+[
+  {
+    "id": "table",
+    "html": "<!doctype html><table><tr><td>a</td></tr></table>"
+  },
+  {
+    "id": "table-decorated",
+    "html": "<!doctype html><style>#t{border-collapse:collapse;table-layout:fixed;width:240px}#t td{width:120px;height:30px;padding:6px;border:1px solid #333}</style><table id=\"t\"><tr><td>A1</td><td>B1</td></tr><tr><td>A2</td><td>B2</td></tr></table>"
+  },
+  {
+    "id": "table-shadow-cell",
+    "html": "<!doctype html><table><tr><td id=\"cell\"><template shadowrootmode=\"open\"><b>cell</b></template></td></tr></table>"
+  },
+  {
+    "id": "sr-only",
+    "html": "<!doctype html><style>#real{height:40px}#sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}</style><div id=\"real\">visible</div><span id=\"sr\">screen-reader only</span>"
+  },
+  {
+    "id": "sr-only-inline",
+    "html": "<!doctype html><style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style><p id=\"p\">Read <a id=\"more\" href=\"#\">more<span id=\"hidden\" class=\"sr-only\"> about tables</span></a> here.</p>"
+  }
+]

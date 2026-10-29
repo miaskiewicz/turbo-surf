@@ -1,0 +1,19 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "522cd98666691ddcd1c746dec327f66bdd99e3fe1a0f386b3d4783428f853461",
+  "casesSha256": "b066f3850a90fa3d2feab1da1b2586d220cd59e33d004169002ce8cbc24e7a94",
+  "collectorSha256": "0df53411b8617c09be157f43a1422bca308e1b3176c2305ac9b6137e7be9f1d5",
+  "errors": [],
+  "result": [
+    {
+      "id": "image-restart",
+      "result": {
+        "sameSrc": [["load"], "/img/20x10/plain.png", 20],
+        "moved": [[], "/img/20x10/plain.png", 20],
+        "removeLosingSource": [["load"], "/img/50x25/winning.png", 50],
+        "imageSrcsetUnderSource": [["load"], "/img/50x25/winning.png", 50],
+        "unrelated": [[], "/img/50x25/winning.png", 50]
+      }
+    }
+  ]
+}

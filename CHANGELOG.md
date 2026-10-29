@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- Timer tasks schedule from their own due time (#101), so host load can no longer put
+  a rendering frame between two chained tasks (the element view-transition flake).
 - A form whose action is a `javascript:` URL (#100) runs the URL's script in a later
   task of the same document (subject to the inline-script policy), like Chrome 156,
   instead of throwing `requires an HTTP(S) action`.

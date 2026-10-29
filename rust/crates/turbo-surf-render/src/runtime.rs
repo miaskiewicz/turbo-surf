@@ -7832,6 +7832,12 @@ let __taskEpoch = 0;
 // work (microtasks / the React scheduler) still drains promptly (it never advances the
 // clock); only delayed polls are time-gated.
 const __timerNow = () => ops.op_timer_clock();
+// The clock a timer task (and its microtasks) schedules from: the task's own due time,
+// not the host's elapsed real time, so a loaded host cannot reorder a task queued by a
+// task behind a rendering frame queued earlier (turbo-surf#101). Outside timer tasks, and
+// with real-time window timers, it is the live clock.
+let __taskBase = null, __taskBaseEpoch = -1;
+const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers ? __taskBase : __timerNow();
 const __realWindowTimers = ops.op_window_timers_realtime();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
@@ -7856,7 +7862,7 @@ const __createTimer = (name, repeat, handler, delay, args) => {
   const id=__tid++;
   const level=ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
-  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args,sequence:ops.op_task_sequence()};
+  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__taskClock()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args,sequence:ops.op_task_sequence()};
   __timerSet(id,timer);__timerPush(timer);return id;
 };
 // A non-timer task (id 0: never cancellable, no timer id consumed) in the same
@@ -8050,7 +8056,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const timer=__timers[index];
     // Every caller, including hydration and child-frame drains, obeys this policy.
     if(__realWindowTimers && timer.due>__timerNow())break;
-    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.due;__taskBaseEpoch=__taskEpoch;
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);

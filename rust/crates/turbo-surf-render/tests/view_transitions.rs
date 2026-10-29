@@ -162,7 +162,6 @@ async fn view_transitions_never_see_a_hidden_page() {
 /// update callback must not depend on it: every frame callback here burns 30ms of real time
 /// after running (past the next frame's 16ms deadline), every page timer task before running.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#101: fails until the fix"]
 async fn view_transition_lifecycle_logs_do_not_depend_on_host_load() {
     let control = control();
     let load = "(() => { const burn = () => { const end = performance.now() + 30; while (performance.now() < end); }; \

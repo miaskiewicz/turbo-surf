@@ -520,4 +520,21 @@ mod tests {
         let s = build_submission(&tree, first(&tree, "form"), BASE, None);
         assert_eq!(s.url, "https://x.test/page?s=a&d=y&t=2");
     }
+
+    #[test]
+    fn select_entries_skip_disabled_options_and_listbox_defaults_like_chrome() {
+        // Chrome 156 FormData: a selected-but-disabled option (or one in a disabled
+        // optgroup) is not submitted and suppresses the fallback, a size>1 select has
+        // no default selection, and option text is whitespace stripped and collapsed.
+        let tree = Tree::parse(
+            "<form method='get'><select name='a'><option selected disabled value='1'>1</option><option value='2'>2</option></select>\
+             <select name='b'><optgroup disabled><option value='g'>g</option></optgroup><option value='h'>h</option></select>\
+             <select name='c' size='3'><option value='c1'>c1</option></select>\
+             <select name='d'><option>  x   y  </option></select>\
+             <select name='e' multiple><option selected disabled value='e1'>e</option></select>\
+             <select name='f'><optgroup disabled><option selected value='q'>q</option></optgroup></select></form>",
+        );
+        let s = build_submission(&tree, first(&tree, "form"), BASE, None);
+        assert_eq!(s.url, "https://x.test/page?b=h&d=x+y");
+    }
 }

@@ -156,3 +156,37 @@ async fn view_transitions_never_see_a_hidden_page() {
         serde_json::json!({"ucd": "ok", "ready": "ok", "finished": "ok"})
     );
 }
+
+/// turbo-surf#101: a loaded host stretches the real time between frames and tasks. The
+/// trace log (consecutive identical frames collapsed) and the frames counted inside the
+/// update callback must not depend on it: every frame callback here burns 30ms of real time
+/// after running (past the next frame's 16ms deadline), every page timer task before running.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#101: fails until the fix"]
+async fn view_transition_lifecycle_logs_do_not_depend_on_host_load() {
+    let control = control();
+    let load = "(() => { const burn = () => { const end = performance.now() + 30; while (performance.now() < end); }; \
+        const raf = requestAnimationFrame, timeout = setTimeout; \
+        globalThis.requestAnimationFrame = (f) => raf((t) => { f(t); burn(); }); \
+        globalThis.setTimeout = (f, ...rest) => timeout(typeof f === 'function' ? (...a) => { burn(); f(...a); } : f, ...rest); })()";
+    let probe = format!("{load}, {}", PROBE.trim().trim_end_matches(';'));
+    let actual = observe(&probe, &[&["lifecycle"], &["frameFromCallback"]]).await;
+    let mut differences = Vec::new();
+    for (case, expected) in control["result"]["lifecycle"].as_object().unwrap() {
+        for field in ["log", "framesDuringCallback"] {
+            if actual["lifecycle"][case][field] != expected[field] {
+                differences.push(format!(
+                    "lifecycle.{case}.{field}\n  native: {}\n  chrome: {}",
+                    actual["lifecycle"][case][field], expected[field]
+                ));
+            }
+        }
+    }
+    if actual["frameFromCallback"] != control["result"]["frameFromCallback"] {
+        differences.push(format!(
+            "frameFromCallback: {}",
+            actual["frameFromCallback"]
+        ));
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}

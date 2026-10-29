@@ -266,4 +266,12 @@ mod tests {
         assert_eq!(token.cookies[0].0, "aws-waf-token");
         assert!(!token.cookies[0].1.is_empty());
     }
+
+    // turbo-surf#97: a `</script>` before the open tag's `>` must not panic.
+    #[test]
+    fn challenge_js_with_close_before_open_end_does_not_panic() {
+        assert_eq!(super::extract_challenge_js("<script</script>>awswaf"), None);
+        let found = super::extract_challenge_js("<script</script>><script>awswaf()</script>");
+        assert!(found.is_some_and(|code| code.contains("awswaf()")));
+    }
 }

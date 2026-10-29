@@ -427,4 +427,15 @@ mod tests {
             "must parse cf_clearance value"
         );
     }
+
+    // turbo-surf#97: a `</script>` before the open tag's `>` must not panic.
+    #[test]
+    fn challenge_script_with_close_before_open_end_does_not_panic() {
+        assert_eq!(
+            super::extract_challenge_script("<script</script>>jschl"),
+            None
+        );
+        let found = super::extract_challenge_script("<script</script>><script>jschl=1</script>");
+        assert!(found.is_some_and(|code| code.contains("jschl=1")));
+    }
 }

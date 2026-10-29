@@ -872,4 +872,12 @@ mod tests {
         assert!(earned.earned_nid);
         assert_eq!(earned.minted, vec!["NID".to_string()]);
     }
+
+    // turbo-surf#97: a `\\x` escape whose hex digits split a multibyte char must
+    // not panic, and non-ASCII text passes through intact.
+    #[test]
+    fn js_unescape_keeps_multibyte_text_after_a_truncated_escape() {
+        assert_eq!(super::js_unescape("a\\x1\u{e9}b"), "a\\x1\u{e9}b");
+        assert_eq!(super::js_unescape("\u{e9}\\x3d"), "\u{e9}=");
+    }
 }

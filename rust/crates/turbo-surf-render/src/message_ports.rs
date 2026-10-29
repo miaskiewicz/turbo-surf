@@ -43,6 +43,11 @@ struct Registry {
     max_bytes: usize,
     endpoints: HashMap<u32, EndpointHandle>,
     dirty: HashSet<u32>,
+    /// The GC epoch of the last full sweep. An endpoint becomes collectable only
+    /// when a collection empties its anchor or its last reservation ends, so
+    /// `sweep` skips the endpoint scan otherwise (#98: per-op scans were O(n^2)).
+    swept_epoch: Option<u64>,
+    reservation_released: bool,
 }
 impl Default for Registry {
     fn default() -> Self {
@@ -54,6 +59,8 @@ impl Default for Registry {
             max_bytes: 128 * 1024 * 1024,
             endpoints: HashMap::new(),
             dirty: HashSet::new(),
+            swept_epoch: None,
+            reservation_released: false,
         }
     }
 }
@@ -135,8 +142,11 @@ impl Reservation {
 }
 impl Drop for Reservation {
     fn drop(&mut self) {
-        self.endpoint.borrow_mut().reservations -= 1;
-        self.registry.borrow_mut().reserved_bytes -= self.bytes;
+        let mut endpoint = self.endpoint.borrow_mut();
+        endpoint.reservations -= 1;
+        let mut registry = self.registry.borrow_mut();
+        registry.reserved_bytes -= self.bytes;
+        registry.reservation_released |= endpoint.reservations == 0;
     }
 }
 type RegistryHandle = Rc<RefCell<Registry>>;
@@ -243,8 +253,14 @@ fn listener_changed(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) {
 pub(crate) fn sweep(scope: &mut v8::PinScope) {
     let registry = registry(scope);
     refresh_dirty(scope, &registry);
+    let epoch = crate::storage_gc::epoch(scope);
     let removed = {
         let mut registry = registry.borrow_mut();
+        if epoch.is_some() && registry.swept_epoch == epoch && !registry.reservation_released {
+            return;
+        }
+        registry.swept_epoch = epoch;
+        registry.reservation_released = false;
         let ids = registry
             .endpoints
             .iter()
@@ -358,12 +374,8 @@ pub(crate) fn validate_transfer(
 pub(crate) fn is_endpoint(transfer: &PortTransfer, id: u32) -> bool {
     transfer.token.id == id
 }
-pub(crate) fn transfer_matches(
-    scope: &mut v8::PinScope,
-    object: v8::Local<v8::Object>,
-    transfer: &PortTransfer,
-) -> bool {
-    token(scope, object) == Some(transfer.token)
+pub(crate) fn transfer_token(transfer: &PortTransfer) -> PortToken {
+    transfer.token
 }
 pub(crate) fn revalidate(transfer: &PortTransfer) -> bool {
     transfer

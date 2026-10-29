@@ -45,7 +45,7 @@ struct CloneHandles {
     /// Every port/stream named by the transfer list, live or not: the value may
     /// reference a neutered port or locked stream that the post-serialization
     /// checks reject with Chrome's text.
-    listed_ports: RefCell<Vec<crate::message_ports::PortToken>>,
+    listed_ports: RefCell<std::collections::HashSet<crate::message_ports::PortToken>>,
     listed_streams: RefCell<Vec<v8::Global<v8::Object>>>,
     /// The public caller's prefix for V8's own serialization errors (empty for
     /// internal clones such as stream chunks, whose callers add their context).
@@ -58,6 +58,9 @@ struct CloneHandles {
     wasm: RefCell<Vec<v8::CompiledWasmModule>>,
     ports: RefCell<Vec<crate::message_ports::PortTransfer>>,
     port_objects: RefCell<Vec<v8::Global<v8::Object>>>,
+    /// Each transferred port's first index in `ports`, so serializing a value
+    /// that references N ports stays linear (#98).
+    port_index: RefCell<std::collections::HashMap<crate::message_ports::PortToken, usize>>,
 }
 
 impl Drop for CloneHandles {
@@ -296,12 +299,9 @@ impl v8::ValueSerializerImpl for Delegate {
         let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
         let scope = &mut scope.init();
         let snapshot = if crate::message_ports::token(scope, object).is_some() {
-            let ports = self.0.ports.borrow();
-            let index = ports
-                .iter()
-                .position(|port| crate::message_ports::transfer_matches(scope, object, port));
-            let listed = crate::message_ports::token(scope, object)
-                .is_some_and(|token| self.0.listed_ports.borrow().contains(&token));
+            let token = crate::message_ports::token(scope, object);
+            let index = token.and_then(|token| self.0.port_index.borrow().get(&token).copied());
+            let listed = token.is_some_and(|token| self.0.listed_ports.borrow().contains(&token));
             match index {
                 Some(index) => NativeSnapshot::Port(index),
                 // A listed neutered port: the post-serialization check rejects it.
@@ -574,6 +574,7 @@ fn validate_transfers<'s>(
     let mut port_objects =
         Vec::<(v8::Local<'s, v8::Object>, crate::message_ports::PortToken)>::new();
     let mut stream_objects = Vec::<(v8::Local<'s, v8::Object>, i32)>::new();
+    let mut seen_ports = std::collections::HashSet::new();
     for index in 0..array.length() {
         if scope.is_execution_terminating() {
             return Err(JsErrorBox::generic("Clone interrupted"));
@@ -587,7 +588,7 @@ fn validate_transfers<'s>(
             )));
         };
         if let Some(token) = crate::message_ports::token(scope, object) {
-            if port_objects.iter().any(|(_, existing)| *existing == token) {
+            if !seen_ports.insert(token) {
                 return Err(data_clone_error(
                     scope,
                     &format!(
@@ -876,6 +877,14 @@ fn prepare_transfer_with_mode<'s>(
         .map(|stream| v8::Global::new(scope, *stream))
         .collect();
     let handles = Rc::new(handles);
+    {
+        let mut index = handles.port_index.borrow_mut();
+        for (position, port) in ports.iter().enumerate() {
+            index
+                .entry(crate::message_ports::transfer_token(port))
+                .or_insert(position);
+        }
+    }
     handles.ports.borrow_mut().extend_from_slice(&ports);
     handles.public_ports.set(public_ports);
     handles.stream_plans.borrow_mut().extend(streams);

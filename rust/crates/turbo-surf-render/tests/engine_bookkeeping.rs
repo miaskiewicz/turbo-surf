@@ -15,11 +15,11 @@ fetch('data:text/plain,hi').then(()=>{out.fetched=true},()=>{out.fetched=true});
     let mut page = PageSession::open(html, "https://bookkeeping.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval("globalThis[Symbol.for('ts')].runTimers(200)")
+    page.eval_engine("__tsNs.runTimers(200)")
         .await
         .unwrap();
     assert_eq!(
-        page.eval_json_expression("globalThis[Symbol.for('ts')].pendingFetchCount()")
+        page.eval_engine_json_expression("__tsNs.pendingFetchCount()")
             .await
             .unwrap(),
         r#""0""#

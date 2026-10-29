@@ -110,7 +110,7 @@ setTimeout(()=>{{out.timer=true}},0);
     let mut page = PageSession::open(&html, "https://engine-names.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval("globalThis[Symbol.for('ts')].runTimers(200)")
+    page.eval_engine("__tsNs.runTimers(200)")
         .await
         .unwrap();
     let got: Value =
@@ -129,7 +129,7 @@ setTimeout(()=>{{out.timer=true}},0);
     );
     // Fetch accounting is private: a page element named `__pendingFetches` is not it.
     assert_eq!(
-        page.eval_json_expression("globalThis[Symbol.for('ts')].pendingFetchCount()")
+        page.eval_engine_json_expression("__tsNs.pendingFetchCount()")
             .await
             .unwrap(),
         r#""0""#

@@ -45,12 +45,12 @@ async fn opaque_bodies_and_response_headers_stay_private_when_guest_intrinsics_c
         r#"const originalJSON=JSON.stringify;
       JSON.stringify=()=>originalJSON({{source:'{target}',mode:'same-origin'}});
       Object.defineProperty(URL.prototype,'origin',{{get(){{return 'https://source.test'}}}});
-      globalThis[Symbol.for('ts')].responseFromNetwork=()=>{{throw new Error('public hook')}};
+      (globalThis[Symbol.for('ts')]||{{}}).responseFromNetwork=()=>{{throw new Error('public hook')}};
       (async()=>{{
         const opaque=await fetch('{target}',{{mode:'no-cors'}});
         const opaqueBody=await opaque.text();
         const cors=await fetch('{target}');
-        globalThis.__RESULT=originalJSON({{opaque:[opaque.type,opaque.status,opaqueBody,Array.from(opaque.headers)],cors:[cors.type,cors.headers.get('x-secret'),cors.headers.get('set-cookie'),await cors.text()],publicLog:globalThis[Symbol.for('ts')].netLog!==undefined}});
+        globalThis.__RESULT=originalJSON({{opaque:[opaque.type,opaque.status,opaqueBody,Array.from(opaque.headers)],cors:[cors.type,cors.headers.get('x-secret'),cors.headers.get('set-cookie'),await cors.text()],publicLog:globalThis[Symbol.for('ts')]!==undefined}});
       }})();"#
     );
     let value: serde_json::Value =

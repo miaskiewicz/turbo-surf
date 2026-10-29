@@ -117,11 +117,7 @@ pub(crate) fn install<'s>(
     crate::live_layout_backend::initialize_system_fonts();
     crate::live_layout_backend::capture_viewport(scope)?;
     let global = scope.get_current_context().global(scope);
-    let name = v8::String::new(scope, "ts").ok_or("Geometry namespace allocation interrupted")?;
-    let key = v8::Symbol::for_key(scope, name);
-    let namespace = global
-        .get(scope, key.into())
-        .and_then(|value| value.to_object(scope))
+    let namespace = crate::browser_env::engine_namespace(scope)
         .ok_or("Geometry private namespace unavailable")?;
     let key = v8::String::new(scope, "makeNativeFunction")
         .ok_or("Geometry factory allocation interrupted")?;
@@ -148,7 +144,7 @@ pub(crate) fn install<'s>(
             .call(
                 scope,
                 undefined.into(),
-                &[core.into(), factory.into(), frame_window.into(), scheduler],
+                &[core.into(), factory.into(), frame_window.into(), scheduler, namespace.into()],
             )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {

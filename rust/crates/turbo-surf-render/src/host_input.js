@@ -216,7 +216,7 @@
   // live value ranges follow the edit and selectionchange fires, but never a select event.
   // The API value setter + setSelectionRange below would collapse value ranges and fire
   // select per character; they remain only for controls without a selection API.
-  const replaceControlSelection = globalThis[Symbol.for("ts")]?.replaceControlSelection;
+  const replaceControlSelection = __G.replaceControlSelection;
   function replaceSelection(target, getters, text) {
     if (typeof replaceControlSelection === "function" && replaceControlSelection(target, text))
       return;

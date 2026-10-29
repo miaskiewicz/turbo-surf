@@ -3,7 +3,7 @@
 //! each V8 platform initialization in its own process (the binding's standalone-V8
 //! tests run in the turbo-dom-browser-env crate).
 
-use turbo_surf_render::{
+use turbo_surf_render::{run_engine_with_dom, 
     render_html, render_html_async, render_hydrate, render_hydrate_with_budget, render_page,
     render_page_pooled, render_page_with_budget, run_with_dom, PageSession,
     DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
@@ -97,7 +97,7 @@ fn window_event_methods_are_inherited_not_own() {
 
 // turbo-surf's internal render machinery must NOT sit as `__*` string globals on window
 // (getOwnPropertyNames(window) would expose them — a bot tell; real Chrome has none). They live
-// on a Symbol-keyed namespace instead, reachable cross-context but absent from own-prop NAMES.
+// on the engine namespace instead, a V8 private page script cannot reach (turbo-dom#222).
 #[test]
 fn internal_globals_are_off_window() {
     let out = run_with_dom(
@@ -106,8 +106,7 @@ fn internal_globals_are_off_window() {
            names: Object.getOwnPropertyNames(globalThis).filter(k => k.startsWith('__')),\
            runTimersOnWin: ('__runTimers' in globalThis),\
            hydrateOnWin: ('__hydrate' in globalThis),\
-           nsHasRunTimers: (typeof globalThis[Symbol.for('ts')].runTimers === 'function'),\
-           nsHasHydrate: (typeof globalThis[Symbol.for('ts')].hydrate === 'function'),\
+           nsHidden: globalThis[Symbol.for('ts')] === undefined && Object.getOwnPropertySymbols(globalThis).length === 0,\
            nsSymbolInNames: Object.getOwnPropertyNames(globalThis).includes('Symbol(ts)'),\
          })",
     )
@@ -139,15 +138,14 @@ fn internal_globals_are_off_window() {
     }
     assert_eq!(v["runTimersOnWin"], false, "__runTimers not on window: {v}");
     assert_eq!(v["hydrateOnWin"], false, "__hydrate not on window: {v}");
-    // Still reachable + functional via the namespace.
-    assert_eq!(
-        v["nsHasRunTimers"], true,
-        "runTimers reachable via namespace: {v}"
-    );
-    assert_eq!(
-        v["nsHasHydrate"], true,
-        "hydrate reachable via namespace: {v}"
-    );
+    // The engine namespace is a V8 private (turbo-dom#222): no page route reaches it.
+    assert_eq!(v["nsHidden"], true, "engine namespace unreachable: {v}");
+    let engine = run_engine_with_dom(
+        "<body></body>",
+        "return [typeof __tsNs.runTimers, typeof __tsNs.hydrate].join()",
+    )
+    .unwrap();
+    assert_eq!(engine, "function,function", "runTimers/hydrate reachable by the engine");
     // The Symbol namespace is a Symbol key (not a string), so it's absent from getOwnPropertyNames.
     assert_eq!(
         v["nsSymbolInNames"], false,
@@ -354,14 +352,14 @@ fn window_and_navigator_present() {
 // timer queue, so drain before asserting delivery.
 #[test]
 fn window_post_message_delivers_to_listeners() {
-    let out = run_with_dom(
+    let out = run_engine_with_dom(
         "<body></body>",
         r#"
         globalThis.__got = "";
         window.addEventListener('message', function (e) { globalThis.__got = String(e.data) + ':' + (e.source === window); });
         window.postMessage('hi', '*');
-        globalThis[Symbol.for('ts')].runTimers();
-        globalThis.__got
+        __tsNs.runTimers();
+        return globalThis.__got;
         "#,
     )
     .unwrap();
@@ -1879,7 +1877,7 @@ async fn live_session_dispatches_events_into_running_app() {
 
 // RSC soft-nav must preserve the target's QUERY STRING. Next App Router client
 // navigation (`router.push('/x?employeeIds=42')`) fetches the target's RSC flight with
-// an `RSC` header; we record the target on `globalThis[Symbol.for('ts')].rscNav` and the live-session driver hard-
+// an `RSC` header; we record the target on `the engine namespace.rscNav` and the live-session driver hard-
 // reloads it. Recording only `u.pathname` dropped the query, so the off-cycle termination
 // flow (which passes the selected employee as `?employeeIds=`) landed on the bare route and
 // `waitForURL(/…\/termination\?employeeIds=/)` never matched. The recorded target must keep
@@ -1899,23 +1897,23 @@ async fn rsc_soft_nav_preserves_query_and_strips_rsc_param() {
     .expect("session opens");
 
     let nav = session
-        .eval(
-            r#"globalThis[Symbol.for('ts')].rscNav = '';
+        .eval_engine(
+            r#"__tsNs.rscNav = '';
         globalThis.fetch('/entity/x/admin/payroll/off-cycle/new/termination?employeeIds=42&_rsc=abc123',
             { headers: { RSC: '1' } }).catch(() => {});
-        globalThis.__RESULT = globalThis[Symbol.for('ts')].rscNav || '';"#,
+        globalThis.__RESULT = __tsNs.rscNav || '';"#,
         )
         .await
         .unwrap();
     assert_eq!(
         nav, "/entity/x/admin/payroll/off-cycle/new/termination?employeeIds=42",
-        "globalThis[Symbol.for('ts')].rscNav must preserve the app query string (employeeIds) and drop Next's _rsc param"
+        "__tsNs.rscNav must preserve the app query string (employeeIds) and drop Next's _rsc param"
     );
 
     session.close();
 }
 
-// globalThis[Symbol.for('ts')].tcResolveScoped must apply a Locator.filter({hasNotText}) BEFORE indexing, so
+// the engine namespace.tcResolveScoped must apply a Locator.filter({hasNotText}) BEFORE indexing, so
 // `cards.filter({hasNotText: x}).first().getByTestId('y')` scopes the child to the SAME
 // element the static read path picks. The pay-schedule delete-409 guard does exactly this
 // (target a SEEDED card by filtering OUT the just-created one); without filter-in-scope the
@@ -1940,8 +1938,8 @@ async fn scoped_resolve_applies_filter_before_indexing() {
     // Scope: `.card` filtered to NOT contain "alpha cycle", first → the beta card; leaf = its
     // del button. The resolved element's parent card text must be the BETA card's.
     let card_text = session
-        .eval(
-            r#"globalThis[Symbol.for('ts')].tcResolveScoped(
+        .eval_engine(
+            r#"__tsNs.tcResolveScoped(
             [{ sel: '.card', idx: 0, filter: { hasNotText: 'alpha cycle' } }],
             { selector: '[data-test-id="del"]' });
         const arr = JSON.parse(globalThis.__RESULT);
@@ -3117,7 +3115,7 @@ async fn react_document_root_hydrates_and_commits() {
         .await
         .unwrap();
     let clicked = session
-        .eval(r#"globalThis.__RESULT = String(!!window.__clicked);"#)
+        .eval_engine(r#"globalThis.__RESULT = String(!!window.__clicked);"#)
         .await
         .unwrap();
     assert_eq!(
@@ -3129,7 +3127,7 @@ async fn react_document_root_hydrates_and_commits() {
 }
 
 // Client-side export capture: `URL.createObjectURL(blob)` → `<a download href=…>` →
-// `link.click()` must be recorded in `globalThis[Symbol.for('ts')].downloads` (filename + bytes) so the shim's
+// `link.click()` must be recorded in `the engine namespace.downloads` (filename + bytes) so the shim's
 // page.waitForEvent('download') + download.path() work (CSV-template / file exports).
 #[tokio::test]
 async fn createobjecturl_anchor_download_is_captured() {
@@ -3141,7 +3139,7 @@ async fn createobjecturl_anchor_download_is_captured() {
         a.setAttribute('download', 'template.csv');
         a.setAttribute('href', url);
         a.click();
-        var d = (globalThis[Symbol.for('ts')].downloads || [])[0] || {};
+        var d = (__tsNs.downloads || [])[0] || {};
         document.body.setAttribute('data-fn', String(d.filename));
         document.body.setAttribute('data-content', String(d.content));
       </script></body>"#;
@@ -3156,7 +3154,7 @@ async fn createobjecturl_anchor_download_is_captured() {
     );
 }
 
-// globalThis[Symbol.for('ts')].tcGetBy resolves getByRole/getByText/getByLabel IN the live isolate, returning each
+// the engine namespace.tcGetBy resolves getByRole/getByText/getByLabel IN the live isolate, returning each
 // match's LIVE document-order index (querySelectorAll('*') position) so the shim dispatches
 // on the SAME node it matched (a re-serialized snapshot can reorder portal'd nodes → wrong
 // index). Guards role + accessible-name matching + that the returned idx maps to the right
@@ -3178,7 +3176,7 @@ async fn live_getby_returns_live_indices() {
     .expect("session opens");
     // role=option → two matches; verify each idx points at an <li role=option> in the live tree.
     let r = session
-        .eval(r#"globalThis[Symbol.for('ts')].tcGetBy('role','option',null);
+        .eval_engine(r#"__tsNs.tcGetBy('role','option',null);
           var hits=JSON.parse(globalThis.__RESULT);
           var all=Array.prototype.slice.call(document.querySelectorAll('*'));
           globalThis.__RESULT = JSON.stringify(hits.map(function(h){ var e=all[h.idx]; return e.tagName+'/'+e.getAttribute('role')+'/'+e.textContent; }));"#)
@@ -3190,7 +3188,7 @@ async fn live_getby_returns_live_indices() {
     );
     // role=button with accessible-name filter → the Cancel button only.
     let b = session
-        .eval(r#"globalThis[Symbol.for('ts')].tcGetBy('role','button','Cancel');
+        .eval_engine(r#"__tsNs.tcGetBy('role','button','Cancel');
           var hits=JSON.parse(globalThis.__RESULT);
           var all=Array.prototype.slice.call(document.querySelectorAll('*'));
           globalThis.__RESULT = JSON.stringify(hits.map(function(h){ return all[h.idx].tagName+':'+all[h.idx].textContent; }));"#)
@@ -3224,7 +3222,7 @@ async fn portal_element_onclick_dispatches() {
     // Let the post-hydration effect mount the portal.
     for _ in 0..5 {
         session
-            .eval(r#"if(globalThis[Symbol.for('ts')].runTimers)globalThis[Symbol.for('ts')].runTimers(2000); globalThis.__RESULT = String(!!document.getElementById('leaf'));"#)
+            .eval_engine(r#"if(__tsNs.runTimers)__tsNs.runTimers(2000); globalThis.__RESULT = String(!!document.getElementById('leaf'));"#)
             .await
             .unwrap();
     }
@@ -3936,7 +3934,7 @@ async fn spawn_capture_server() -> (u16, std::sync::Arc<std::sync::Mutex<Option<
 // CSS :hover-revealed content (a hover dropdown / menu) must become visible when the shim
 // hovers the trigger. turbo-dom's cascade does not apply the :hover pseudo-class (no pointer
 // state), so a menu shown via `.trigger:hover .menu { display:block }` stays display:none and
-// waitFor(visible) hangs. globalThis[Symbol.for('ts')].tcApplyHover marks the hovered chain with [data-tc-hover], rewrites
+// waitFor(visible) hangs. the engine namespace.tcApplyHover marks the hovered chain with [data-tc-hover], rewrites
 // each stylesheet rule's `:hover` → `[data-tc-hover]`, and applies the matched rules' decls
 // INLINE so both the JS getComputedStyle and rtdom's native cascade (is_visible) see the reveal.
 // Real case: the app's UserMenu (overridden to open on hover) — the logout item lives in a
@@ -3959,14 +3957,14 @@ async fn hover_reveals_css_hover_menu() {
     .expect("session opens");
     // The `<style>` rule lives in rtdom's cascade (which is_visible reads); this env's
     // getComputedStyle doesn't parse <style> text, so assert on the inline style
-    // globalThis[Symbol.for('ts')].tcApplyHover applies — exactly what feeds the Rust cascade / is_visible.
+    // the engine namespace.tcApplyHover applies — exactly what feeds the Rust cascade / is_visible.
     let before = session
         .eval(r#"globalThis.__RESULT = document.getElementById('d').style.visibility || '';"#)
         .await
         .unwrap();
     assert_eq!(before, "", "no inline visibility before hover");
     session
-        .eval(r#"globalThis[Symbol.for('ts')].tcApplyHover(document.getElementById('m')); globalThis.__RESULT = 'ok';"#)
+        .eval_engine(r#"__tsNs.tcApplyHover(document.getElementById('m')); globalThis.__RESULT = 'ok';"#)
         .await
         .unwrap();
     let after = session
@@ -3987,7 +3985,7 @@ async fn hover_reveals_css_hover_menu() {
     session.close();
 }
 
-// globalThis[Symbol.for('ts')].tcGetBy(kind,value,name,root) scopes role/text/label matching to within elements matching
+// the engine namespace.tcGetBy(kind,value,name,root) scopes role/text/label matching to within elements matching
 // `root` (descendant-or-self) — backs the shim's `parentLocator.getByRole/getByText/getByLabel`,
 // so `step.getByTestId('x').getByRole('combobox')` drives the combobox INSIDE that step, not the
 // first one in the document. idx stays the GLOBAL position so the shim dispatches on `*`[idx].
@@ -4007,16 +4005,16 @@ async fn tcgetby_scopes_to_root() {
     .await
     .expect("session opens");
     let unscoped = session
-        .eval(
-            r#"globalThis[Symbol.for('ts')].tcGetBy('role','combobox',null,null);
+        .eval_engine(
+            r#"__tsNs.tcGetBy('role','combobox',null,null);
                globalThis.__RESULT = String(JSON.parse(globalThis.__RESULT).length);"#,
         )
         .await
         .unwrap();
     assert_eq!(unscoped, "2", "unscoped sees both comboboxes");
     let scoped = session
-        .eval(
-            r#"globalThis[Symbol.for('ts')].tcGetBy('role','combobox',null,'#a');
+        .eval_engine(
+            r#"__tsNs.tcGetBy('role','combobox',null,'#a');
                var h = JSON.parse(globalThis.__RESULT);
                var all = Array.prototype.slice.call(document.querySelectorAll('*'));
                globalThis.__RESULT = h.length + ':' + (h[0] ? all[h[0].idx].textContent : '');"#,
@@ -4030,7 +4028,7 @@ async fn tcgetby_scopes_to_root() {
 // nth-scoped descendant resolution: `steps.nth(i).getByTestId('x').getByRole('combobox')` must
 // drive the combobox inside the i-th step, not the first in the document. A CSS-concat selector
 // can't express "the nth match's subtree", so the shim carries a scope CHAIN of {sel, idx} and
-// globalThis[Symbol.for('ts')].tcResolveScoped walks it (picking idx at each level) before matching the leaf (a selector OR
+// the engine namespace.tcResolveScoped walks it (picking idx at each level) before matching the leaf (a selector OR
 // a getBy). idx stays the GLOBAL position so the shim dispatches on `*`[idx]. Backs the
 // payroll-approval-chain flow (two steps, each configured independently).
 #[tokio::test]
@@ -4050,8 +4048,8 @@ async fn tcresolvescoped_walks_nth_chain() {
     .expect("session opens");
     // getBy leaf scoped to the 2nd step → combobox "B"
     let b = session
-        .eval(
-            r#"globalThis[Symbol.for('ts')].tcResolveScoped(
+        .eval_engine(
+            r#"__tsNs.tcResolveScoped(
                  [{"sel":".s","idx":1},{"sel":"[data-testid=\"x\"]","idx":null}],
                  {"getBy":{"kind":"role","value":"combobox","name":null}});
                var h = JSON.parse(globalThis.__RESULT);
@@ -4063,8 +4061,8 @@ async fn tcresolvescoped_walks_nth_chain() {
     assert_eq!(b, "1:B", "scope chain picks the 2nd step's combobox");
     // selector leaf scoped to the 1st step → its [data-testid=x]
     let a = session
-        .eval(
-            r#"globalThis[Symbol.for('ts')].tcResolveScoped([{"sel":".s","idx":0}], {"selector":"[data-testid=\"x\"]"});
+        .eval_engine(
+            r#"__tsNs.tcResolveScoped([{"sel":".s","idx":0}], {"selector":"[data-testid=\"x\"]"});
                var h = JSON.parse(globalThis.__RESULT);
                var all = Array.prototype.slice.call(document.querySelectorAll('*'));
                globalThis.__RESULT = h.length + ':' + (h[0] ? all[h[0].idx].querySelector('[role=combobox]').textContent : '');"#,

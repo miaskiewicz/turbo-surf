@@ -19,7 +19,7 @@ async fn nested_timers_queue_behind_due_siblings_in_chrome_order() {
     let mut page = PageSession::open(&html, "https://order.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval("globalThis[Symbol.for('ts')].runTimers(200)")
+    page.eval_engine("__tsNs.runTimers(200)")
         .await
         .unwrap();
     let log = page.eval_json_expression("log").await.unwrap();

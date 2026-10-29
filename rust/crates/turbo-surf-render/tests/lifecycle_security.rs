@@ -31,7 +31,7 @@ async fn fixture_server() -> (u16, tokio::task::JoinHandle<()>) {
 #[tokio::test]
 async fn guest_namespace_cannot_mint_trusted_lifecycle_or_mouse_events() {
     let html = render_page("<!doctype html><body>", "https://example.test/", r#"
-      const ns=globalThis[Symbol.for('ts')];
+      const ns=globalThis[Symbol.for('ts')]||{};
       const names=['frameParsingDone','frameDomReady','fireFrameLoad','deliverWindowMessage','markDocumentInteractive','dispatchDocumentInteractive','dispatchDocumentComplete','completeClassicScript','completeModuleGraph'];
       document.body.setAttribute('data-hidden',String(names.every(name=>ns[name]===undefined)));
       let clicks=0,loads=0;
@@ -93,7 +93,7 @@ async fn frame_records_do_not_expose_a_cross_origin_document() {
         r#"
       const frame=document.createElement('iframe');frame.src='http://127.0.0.1:{port}/frame';
       frame.onload=()=>{{
-        const namespace=globalThis[Symbol.for('ts')];
+        const namespace=globalThis[Symbol.for('ts')]||{{}};
         let blocked=false;try{{void frame.contentWindow.document;}}catch(error){{blocked=error.name==='SecurityError';}}
         document.body.setAttribute('data-safe',String(blocked&&frame.contentDocument===null&&namespace.frameRecordFor===undefined));
       }};document.body.appendChild(frame);

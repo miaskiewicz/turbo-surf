@@ -13,7 +13,7 @@ async fn observe(html: &str, expression: &str) -> Value {
         .await
         .unwrap();
     let raw = page
-        .eval_json_expression(expression.trim().trim_end_matches(';'))
+        .eval_engine_json_expression(expression.trim().trim_end_matches(';'))
         .await
         .unwrap();
     page.close();
@@ -56,7 +56,7 @@ async fn animation_frames_stay_engine_owned() {
     let actual = observe(
         "<!doctype html><body><div id=t></div>",
         r#"(async () => {
-          const ns = globalThis[Symbol.for('ts')];
+          const ns = __tsNs;
           const host = typeof ns.installAnimationHost;
           const t = document.getElementById('t');
           globalThis.setTimeout = () => { throw new Error('guest timer'); };

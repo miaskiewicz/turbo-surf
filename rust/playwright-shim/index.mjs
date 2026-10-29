@@ -345,9 +345,9 @@ class Locator {
           ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
           : null;
       if (leaf) {
-        const raw = await native.liveEval(
+        const raw = await native.liveEvalEngine(
           this._page._session,
-          `globalThis[Symbol.for('ts')].tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
+          `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
         );
         let matches = [];
         try {
@@ -370,9 +370,9 @@ class Locator {
     // over a re-serialized snapshot can reorder portal'd nodes → wrong element clicked.
     if (this._getBy && this._page._session != null) {
       const g = this._getBy;
-      const raw = await native.liveEval(
+      const raw = await native.liveEvalEngine(
         this._page._session,
-        `globalThis[Symbol.for('ts')].tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
+        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
       );
       let matches = [];
       try {
@@ -683,7 +683,7 @@ function interactionScript(selector, index, kind, value) {
       t.dispatchEvent(new MouseEvent("mousemove", o));
       // Also apply CSS :hover styles — a menu revealed purely by a hover descendant rule has
       // no JS handler; without this it stays display:none (no pointer state in the cascade).
-      if (typeof globalThis[Symbol.for('ts')].tcApplyHover === "function") globalThis[Symbol.for('ts')].tcApplyHover(el);
+      if (typeof __tsNs.tcApplyHover === "function") __tsNs.tcApplyHover(el);
       globalThis.__RESULT = "OK";
     } })();`;
   }
@@ -806,7 +806,10 @@ class Page {
     if (this._session == null) return;
     this._html = native.liveSerialize(this._session);
     try {
-      const href = await native.liveEval(this._session, "globalThis.__RESULT = location.href;");
+      const href = await native.liveEvalEngine(
+        this._session,
+        "globalThis.__RESULT = location.href;",
+      );
       if (href) this._url = href;
     } catch {
       /* keep prior url */
@@ -815,9 +818,9 @@ class Page {
     // engine — it fetches the target's RSC flight, which the runtime records on __rscNav.
     // Treat that as the navigation target (the post-login redirect chain rides this).
     try {
-      const nav = await native.liveEval(
+      const nav = await native.liveEvalEngine(
         this._session,
-        "globalThis.__RESULT = globalThis[Symbol.for('ts')].rscNav || ''; globalThis[Symbol.for('ts')].rscNav = '';",
+        "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
       if (nav && pathOf(nav) !== this._loadedPath) {
         this._url = this._resolveUrl(nav);
@@ -854,7 +857,7 @@ class Page {
   async _redrain() {
     if (this._session == null) return;
     try {
-      await native.liveEval(this._session, "globalThis.__RESULT = '';");
+      await native.liveEvalEngine(this._session, "globalThis.__RESULT = '';");
     } catch {
       /* terminated mid-drain — refresh reads best-effort state */
     }
@@ -916,7 +919,7 @@ class Page {
     // A new user interaction: responses produced by THIS action (and after) are "fresh"
     // for any waitForResponse paired with it; responses from before are stale.
     this._actionSeq++;
-    const r = await native.liveEval(
+    const r = await native.liveEvalEngine(
       this._session,
       interactionScript(selector, index ?? 0, kind, value),
     );
@@ -928,7 +931,7 @@ class Page {
   // keyboard (key-event dispatch) and other live-only side effects.
   async _sessionEval(script) {
     if (this._session == null) return undefined;
-    const r = await native.liveEval(this._session, script);
+    const r = await native.liveEvalEngine(this._session, script);
     await this._refreshFromSession();
     return r;
   }
@@ -1305,7 +1308,7 @@ class Page {
     if (this._live) {
       const rounds = Math.max(1, Math.ceil((opts.timeout ?? 15000) / 1000));
       for (let i = 0; i < rounds && !match(this._url); i++) {
-        await native.liveEval(this._session, "globalThis.__RESULT = location.href;");
+        await native.liveEvalEngine(this._session, "globalThis.__RESULT = location.href;");
         await this._refreshFromSession();
       }
       if (match(this._url)) return undefined;
@@ -1332,7 +1335,7 @@ class Page {
       } else if (arg.getBy) {
         const g = arg.getBy;
         argExpr =
-          `(function(){ globalThis[Symbol.for('ts')].tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
+          `(function(){ if (typeof __tsNs !== "undefined") __tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
           `var h=JSON.parse(globalThis.__RESULT||"[]"); var all=document.querySelectorAll("*"); return h[${arg.index}]?all[h[${arg.index}].idx]:undefined; })()`;
       } else {
         argExpr = "undefined";
@@ -1348,7 +1351,7 @@ class Page {
       let raw;
       if (this._session != null) {
         try {
-          raw = await native.liveEval(this._session, `globalThis.__RESULT = ${probe};`);
+          raw = await native.liveEvalEngine(this._session, `globalThis.__RESULT = ${probe};`);
         } catch {
           raw = null;
         }
@@ -1392,9 +1395,9 @@ class Page {
     while (Date.now() - start < timeout) {
       let raw;
       try {
-        raw = await native.liveEval(
+        raw = await native.liveEvalEngine(
           this._session,
-          "globalThis.__RESULT = JSON.stringify((globalThis[Symbol.for('ts')].downloads || []).splice(0));",
+          "globalThis.__RESULT = JSON.stringify((__tsNs.downloads || []).splice(0));",
         );
       } catch {
         raw = null;

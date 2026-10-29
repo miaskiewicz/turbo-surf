@@ -78,7 +78,7 @@ async fn dom_quad_matches_chrome156() {
     let mut page = PageSession::open(&html, "https://quad.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval("globalThis[Symbol.for('ts')].runTimers(200)")
+    page.eval_engine("__tsNs.runTimers(200)")
         .await
         .unwrap();
     let got: Value =

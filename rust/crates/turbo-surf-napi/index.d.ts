@@ -58,6 +58,8 @@ export function liveOpen(
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
+/** `liveEval` for a driver script that needs the engine namespace (its `__tsNs` parameter). */
+export function liveEvalEngine(id: number, script: string): Promise<string>;
 /** Await an expression’s actual native Promise completion. */
 export function liveEvalExpression(id: number, expression: string): Promise<string>;
 /** Serialize the live session's current DOM to HTML. */

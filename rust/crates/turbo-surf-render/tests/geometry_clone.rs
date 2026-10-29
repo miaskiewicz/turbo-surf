@@ -36,7 +36,7 @@ async fn geometry_interfaces_survive_structured_clone_like_chrome() {
     let mut page = PageSession::open(&html, "https://geometry.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval("globalThis[Symbol.for('ts')].runTimers(200)")
+    page.eval_engine("__tsNs.runTimers(200)")
         .await
         .unwrap();
     let log: serde_json::Value =

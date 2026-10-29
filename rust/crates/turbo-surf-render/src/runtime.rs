@@ -4204,10 +4204,7 @@ fn frame_namespace<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s,
     if let Some(environment) = context.get_slot::<FrameEnvironment>() {
         return Some(crate::context_ownership::local(scope, &environment.0));
     }
-    let global = context.global(scope);
-    let name = v8::String::new(scope, "ts").unwrap();
-    let key = v8::Symbol::for_key(scope, name);
-    global.get(scope, key.into())?.to_object(scope)
+    crate::browser_env::engine_namespace(scope)
 }
 /// A function the realm's own bootstrap registered through `op_set_host_capabilities`
 /// (never a page-reachable namespace lookup).
@@ -5624,11 +5621,7 @@ fn allocate_frame<'s>(
         install_document_facts(scope, facts);
         window_proxy::install_document(scope);
 
-        let name = v8::String::new(scope, "ts").unwrap();
-        let namespace_key = v8::Symbol::for_key(scope, name);
-        let namespace = global
-            .get(scope, namespace_key.into())
-            .and_then(|v| v.to_object(scope))
+        let namespace = crate::browser_env::engine_namespace(scope)
             .ok_or_else(|| {
                 storage_events::retire(context);
                 context.set_slot(Rc::new(FrameRetired));
@@ -6853,6 +6846,8 @@ fn install_environment<'s>(
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         .ok_or("Native stream initialization failed")?;
+    let namespace = crate::browser_env::engine_namespace(scope)
+        .ok_or("Native environment namespace unavailable")?;
     let code = v8::String::new(scope, ENV_BOOTSTRAP).unwrap();
     let function = v8::Script::compile(scope, code, None)
         .and_then(|script| script.run(scope))
@@ -6860,7 +6855,7 @@ fn install_environment<'s>(
     if let Some(function) = function {
         let receiver = v8::undefined(scope);
         if function
-            .call(scope, receiver.into(), &[core, web_factory.into()])
+            .call(scope, receiver.into(), &[core, web_factory.into(), namespace.into()])
             .is_some()
         {
             crate::browser_env::capture_popover_scheduler(scope);
@@ -7169,7 +7164,7 @@ deno_core::extension!(
 // inside the IIFE they're per-invocation. Globals are assigned to `globalThis`
 // (idempotent) and the cookie bridge re-applies to the current `document`.
 const ENV_BOOTSTRAP: &str = concat!(
-    r##"((__core, __webFactory) => {
+    r##"((__core, __webFactory, __tsNs) => {
 "use strict";
 // Core is a private embedder argument; no page global temporarily exposes ops.
 const ops = __core.ops;
@@ -7177,8 +7172,9 @@ const __print = __core.print;
 let __web;
 ops.op_capture_runtime_core(__core);
 if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
-const __NS = Symbol.for("ts");
-const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
+// The engine namespace (turbo-dom#222): a V8 private on the global, handed to this
+// bootstrap by Rust; page script cannot reach it.
+const __G = __tsNs;
 // Blink's message for an interface constructor called without `new` (turbo-surf#86):
 // interfaces without a constructor say "Illegal constructor", the others "Failed to
 // construct 'X': Please use the 'new' operator, ...". Every constructor this bootstrap
@@ -9316,7 +9312,7 @@ if (typeof globalThis.CSS === "undefined") {
   };
   // CSS Typed OM numeric factories (CSS.px() …) come from the binding; Chrome's namespace
   // lists its operations in code-unit order.
-  const factories = globalThis[Symbol.for("ts")]?.typedOmFactories?.();
+  const factories = __G.typedOmFactories?.();
   if (factories) {
     const members = [["escape", globalThis.CSS.escape], ["supports", globalThis.CSS.supports], ...factories].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     const namespace = {};
@@ -9949,7 +9945,8 @@ function __trackResource(promise) {
 }
 function __resourceNow() { return __perfNow(); }
 function __recordResource(win, url, kind, start) {
-  const ns = win[Symbol.for("ts")];
+  // `win` is this realm's own window (each frame runs its own bootstrap).
+  const ns = __G;
   if (ns && typeof ns.recordResourceTiming === "function") ns.recordResourceTiming(url, kind, start, __resourceNow(win));
 }
 async function __loadSheetImports(sheet, source, win, depth = 0) {
@@ -10113,7 +10110,8 @@ function __fireScriptEvent(el, kind, err) {
 __G.rewriteEsmForClassic = function (code) {
   if (typeof code !== "string" || !code) return code;
   if (__regexpTest(/import\s*\.\s*meta/, code)) {
-    code = code.replace(/import\s*\.\s*meta/g, "globalThis[Symbol.for('ts')].importMeta");
+    // An inline stand-in (the engine namespace is not page-reachable, turbo-dom#222).
+    code = code.replace(/import\s*\.\s*meta/g, "({get url(){return (globalThis.location&&globalThis.location.href)||\"\"},env:{},resolve(s){try{return new globalThis.URL(s,globalThis.location.href).href}catch(_e){return String(s)}}})");
   }
   return code;
 }
@@ -12970,9 +12968,8 @@ enum HostArg {
 }
 
 /// Calls a function of the main realm's bootstrap namespace natively (turbo-surf#87).
-/// Host turns never compile `globalThis[Symbol.for('ts')].…` source: `Symbol.for`, the
-/// namespace lookups and any method called on the result are page-replaceable, while
-/// [`call_frame_helper`] resolves the namespace through the V8 API.
+/// Host turns never compile namespace-reading source: any method called on a looked-up
+/// result is page-replaceable, while [`call_frame_helper`] resolves the function natively.
 fn namespace_call(
     rt: &mut JsRuntime,
     name: &str,
@@ -13001,6 +12998,26 @@ fn namespace_call(
         }
     }
     Err(format!("Namespace function {name} failed"))
+}
+
+/// Runs an embedder (driver) script in the main realm as a function body whose `__tsNs`
+/// parameter is the engine namespace (turbo-dom#222); returns the body's `return` value.
+pub(crate) fn execute_engine_script(
+    rt: &mut JsRuntime,
+    source: &str,
+) -> Result<v8::Global<v8::Value>, String> {
+    let context = rt.main_context();
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    v8::tc_scope!(let scope, scope);
+    if let Some(value) = crate::browser_env::run_engine_script(scope, source) {
+        return Ok(v8::Global::new(scope, value));
+    }
+    Err(scope
+        .exception()
+        .map(|error| error.to_rust_string_lossy(scope))
+        .unwrap_or_else(|| "Engine script failed".into()))
 }
 
 /// Reads a data property of the main realm's bootstrap namespace natively
@@ -13083,6 +13100,16 @@ fn sync_task_runtime() -> &'static tokio::runtime::Runtime {
 /// and intrinsics. Same-HTML evaluates share the page's globals/DOM, which matches
 /// Playwright's page-scoped `evaluate` semantics.
 pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
+    run_with_dom_in(html, script, false)
+}
+
+/// [`run_with_dom`] for an embedder script that needs the engine namespace: `script` is a
+/// function body whose `__tsNs` parameter is the namespace; its `return` value is read.
+pub fn run_engine_with_dom(html: &str, script: &str) -> Result<String, String> {
+    run_with_dom_in(html, script, true)
+}
+
+fn run_with_dom_in(html: &str, script: &str, engine: bool) -> Result<String, String> {
     let _task_context = sync_task_runtime().enter();
     EVAL_RT.with(|cell| {
         let mut slot = cell.borrow_mut();
@@ -13104,9 +13131,12 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
         }
         let (rt, _) = slot.as_mut().expect("eval runtime present");
         let _activation = rt.activation_key().enter();
-        let global = rt
-            .execute_script(page_script_name("about:blank"), script.to_string())
-            .map_err(|e| e.to_string())?;
+        let global = if engine {
+            execute_engine_script(rt, script)?
+        } else {
+            rt.execute_script(page_script_name("about:blank"), script.to_string())
+                .map_err(|e| e.to_string())?
+        };
         let result = read_string(rt, global);
         crate::storage_gc::boundary(rt.v8_isolate());
         result
@@ -14543,7 +14573,7 @@ async fn hydrate_installed_document(
     Ok(crate::browser_env::document_html())
 }
 
-// Compatibility only: evaluate module syntax in classic script elements (claimed via `globalThis[Symbol.for('ts')].takeModuleScript`) through
+// Compatibility only: evaluate module syntax in classic script elements (claimed via the engine namespace's `takeModuleScript`) through
 // deno_core's real module graph: inline modules load from their own code, `src` modules
 // load by URL (the `NetModuleLoader` fetches them + their imports over the host net).
 // This is the path a Next dev / turbopack build (served as ES modules) needs to hydrate.
@@ -14572,7 +14602,7 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
             continue;
         };
         // Code in hand (inline module, OR a `<script src>` chunk whose fetched body was
-        // ESM — `globalThis[Symbol.for('ts')].execScriptEl` already fetched it and queued it) → evaluate from that
+        // ESM — the engine namespace's `execScriptEl` already fetched it and queued it) → evaluate from that
         // code with `spec` as its identity so the import graph still resolves relative to
         // the src URL. Only a bare `src` with no body re-fetches through the loader.
         let loaded = if code.is_empty() {
@@ -15138,13 +15168,24 @@ impl PageSession {
     /// `String(globalThis.__RESULT || '')` — scripts that need to return a value stash
     /// it there.
     pub async fn eval(&mut self, script: &str) -> Result<String, String> {
+        self.eval_in(script, false).await
+    }
+
+    /// [`Self::eval`] for an embedder (driver) script that needs the engine namespace:
+    /// `script` runs as a function body whose `__tsNs` parameter is the main realm's
+    /// namespace (turbo-dom#222), which page script cannot reach.
+    pub async fn eval_engine(&mut self, script: &str) -> Result<String, String> {
+        self.eval_in(script, true).await
+    }
+
+    async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
         let key = self.rt.activation_key();
-        let result = key.during(self.eval_active(script)).await;
+        let result = key.during(self.eval_active(script, engine)).await;
         self.follow_form_navigation().await?;
         result
     }
 
-    async fn eval_active(&mut self, script: &str) -> Result<String, String> {
+    async fn eval_active(&mut self, script: &str, engine: bool) -> Result<String, String> {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
         let drained = {
@@ -15154,9 +15195,13 @@ impl PageSession {
                 budget,
                 &watchdog.exceeded,
                 async {
-                    self.rt
-                        .execute_script("<session-eval>", script.to_string())
-                        .map_err(|e| e.to_string())?;
+                    if engine {
+                        execute_engine_script(&mut self.rt, script)?;
+                    } else {
+                        self.rt
+                            .execute_script("<session-eval>", script.to_string())
+                            .map_err(|e| e.to_string())?;
+                    }
                     drain_to_quiescence(&mut self.rt).await
                 },
             )
@@ -15181,22 +15226,36 @@ impl PageSession {
     /// Evaluate an expression and await its own result without a page-global result slot.
     /// Background page work does not postpone a completed collector Promise.
     pub async fn eval_expression(&mut self, expression: &str) -> Result<String, String> {
-        self.eval_expression_result(expression, false).await
+        self.eval_expression_result(expression, false, false).await
     }
 
     /// Await a collector and serialize its actual value with V8's intrinsic JSON.
     pub async fn eval_json_expression(&mut self, expression: &str) -> Result<String, String> {
-        self.eval_expression_result(expression, true).await
+        self.eval_expression_result(expression, true, false).await
+    }
+
+    /// [`Self::eval_expression`] with the engine namespace bound to `__tsNs`.
+    pub async fn eval_engine_expression(&mut self, expression: &str) -> Result<String, String> {
+        self.eval_expression_result(expression, false, true).await
+    }
+
+    /// [`Self::eval_json_expression`] with the engine namespace bound to `__tsNs`.
+    pub async fn eval_engine_json_expression(
+        &mut self,
+        expression: &str,
+    ) -> Result<String, String> {
+        self.eval_expression_result(expression, true, true).await
     }
 
     async fn eval_expression_result(
         &mut self,
         expression: &str,
         json: bool,
+        engine: bool,
     ) -> Result<String, String> {
         let key = self.rt.activation_key();
         let result = key
-            .during(self.eval_expression_active(expression, json))
+            .during(self.eval_expression_active(expression, json, engine))
             .await;
         self.follow_form_navigation().await?;
         result
@@ -15206,6 +15265,7 @@ impl PageSession {
         &mut self,
         expression: &str,
         json: bool,
+        engine: bool,
     ) -> Result<String, String> {
         if self.closed {
             return Err("Page session is closed".into());
@@ -15213,10 +15273,14 @@ impl PageSession {
         let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
-                let value = self
-                    .rt
-                    .execute_script("<session-expression>", expression.to_owned())
-                    .map_err(|error| error.to_string())?;
+                let value = if engine {
+                    let body = format!("return (\n{}\n)", expression.trim_end().trim_end_matches(';'));
+                    execute_engine_script(&mut self.rt, &body)?
+                } else {
+                    self.rt
+                        .execute_script("<session-expression>", expression.to_owned())
+                        .map_err(|error| error.to_string())?
+                };
                 let completion = self.rt.resolve(value.clone());
                 namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
                 drain_event_loop_until_completion(&mut self.rt, None, Some(&value)).await?;
@@ -15791,7 +15855,7 @@ mod window_timer_task_tests {
     async fn legacy_reentrancy() {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        page.rt.execute_script("<nested-legacy-batch>", "setTimeout(()=>{setTimeout(()=>{},0);globalThis[Symbol.for('ts')].runTimers(1);setTimeout(()=>{},0);},0)").unwrap();
+        execute_engine_script(&mut page.rt, "setTimeout(()=>{setTimeout(()=>{},0);__tsNs.runTimers(1);setTimeout(()=>{},0);},0)").unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
         assert_eq!(turn.fired, 1);
         assert_eq!(turn._task.as_ref().unwrap().nesting.level.get(), 1);
@@ -15806,11 +15870,14 @@ mod window_timer_task_tests {
     async fn interrupted_checkpoint(legacy: bool) {
         let mut page = page(100).await;
         let expression = if legacy {
-            "(()=>{setTimeout(()=>{while(true){}},0);globalThis[Symbol.for('ts')].runTimers();return 'unreachable';})()"
+            "(()=>{setTimeout(()=>{while(true){}},0);__tsNs.runTimers();return 'unreachable';})()"
         } else {
             "new Promise(()=>setTimeout(()=>Promise.resolve().then(()=>{while(true){}}),0))"
         };
-        let error = page.eval_json_expression(expression).await.unwrap_err();
+        let error = page
+            .eval_engine_json_expression(expression)
+            .await
+            .unwrap_err();
         assert!(error.contains("budget"), "{error}");
         let _activation = page.rt.activation_key().enter();
         let nesting = {

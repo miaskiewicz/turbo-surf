@@ -101,7 +101,7 @@ test("response events drain host records while opaque bodies stay hidden in page
     await page.goto(`http://127.0.0.1:${source.address().port}/`, { waitUntil: "networkidle" });
     assert.equal(await page.locator("body").getAttribute("data-body"), "");
     assert.equal(
-      await page.evaluate(() => String(globalThis[Symbol.for("ts")].netLog !== undefined)),
+      await page.evaluate(() => String(globalThis[Symbol.for("ts")] !== undefined)),
       "false",
     );
     assert.equal(observed.length, 1);

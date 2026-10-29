@@ -10,7 +10,7 @@ mod session;
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
 pub use session::{
-    live_close, live_cookies, live_eval, live_eval_expression, live_network_log, live_open,
+    live_close, live_cookies, live_eval, live_eval_engine, live_eval_expression, live_network_log, live_open,
     live_serialize,
 };
 

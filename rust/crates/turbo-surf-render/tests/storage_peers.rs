@@ -109,7 +109,7 @@ async fn nested_peer_dispatch_releases_each_queued_batch_before_guest_callbacks(
     let profile = BrowserStorage::default();
     let mut source = open(profile.new_tab().unwrap(), "source").await;
     let mut peer = open(profile.new_tab().unwrap(), "receiver").await;
-    peer.eval_expression("globalThis.received=0;globalThis.nested=0;const frame=document.createElement('iframe');document.body.append(frame);frame.contentWindow.addEventListener('storage',()=>{received++;nested++});addEventListener('storage',()=>{received++;globalThis[Symbol.for('ts')].runTimers()})").await.unwrap();
+    peer.eval_engine_expression("globalThis.received=0;globalThis.nested=0;const frame=document.createElement('iframe');document.body.append(frame);frame.contentWindow.addEventListener('storage',()=>{received++;nested++});addEventListener('storage',()=>{received++;__tsNs.runTimers()})").await.unwrap();
     for round in 0..24 {
         source
             .eval_expression(&format!(
@@ -184,9 +184,9 @@ async fn pending_peer_tasks_use_native_dispatch_and_checkpoint_each_handler() {
     let profile = BrowserStorage::default();
     let mut source = open(profile.new_tab().unwrap(), "source").await;
     let mut peer = open(profile.new_tab().unwrap(), "receiver").await;
-    let waiting = peer.eval_expression(
+    let waiting = peer.eval_engine_expression(
         r#"new Promise(resolve=>{
-      const environment=globalThis[Symbol.for('ts')], original=environment.runTimers, observed=[];
+      const environment=__tsNs, original=environment.runTimers, observed=[];
       environment.runTimers=()=>{throw new Error('public timer driver was called')};
       function receive(event){
         observed.push(event.key);

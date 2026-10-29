@@ -295,8 +295,9 @@ SERP in one baseline while another fails effective consent dismissal. The later
   Trusted lifecycle, message delivery and script/module completion callbacks live in
   native context slots. Privileged callbacks use strict calling semantics and captured
   Event/ErrorEvent constructors, preventing guest replacements or Function.caller from
-  obtaining a trust-minting capability. The internal Symbol.for('ts') support namespace
-  remains observable; its remaining frame records do not grant cross-origin document access.
+  obtaining a trust-minting capability. The internal engine namespace is a V8 private
+  (turbo-dom#222): page script cannot reach it, and embedder driver scripts run through
+  `eval_engine*` / `liveEvalEngine`, which bind it to `__tsNs`.
   Resource, lifecycle and frame events use a host-only dispatch entry point. Event fields
   are read-only accessors. Element property handlers use private state and the native
   listener registry, retaining assignment order and cancellation behavior. Window load

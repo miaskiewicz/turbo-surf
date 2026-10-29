@@ -4,9 +4,16 @@
 //! the 13th level gets no window.
 use turbo_surf_render::PageSession;
 
+const NO_BUDGET_MS: u64 = 600_000;
+
 #[tokio::test(flavor = "current_thread")]
 async fn inactive_parents_and_the_native_depth_cap_create_no_window() {
-    let mut page = PageSession::open("<body>", "https://nesting.test/", "", "", 10000)
+    // The session budget is wall-clock time, and it is not what this test checks.
+    // Each nested frame bootstraps a full window realm: about 0.7 to 2.2 s apiece in a
+    // debug build at load average 50 to 90 (round 3 measurement), so 13 levels overran
+    // a 10 s budget on a busy machine. The bound below cannot be reached by the
+    // 14 frame creations, so the result depends only on the nesting rules.
+    let mut page = PageSession::open("<body>", "https://nesting.test/", "", "", NO_BUDGET_MS)
         .await
         .unwrap();
     let value = page

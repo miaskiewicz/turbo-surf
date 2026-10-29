@@ -134,10 +134,12 @@ fn submit<'s>(
         result.set_bool(true);
         return;
     }
-    if url::Url::parse(&action).is_ok_and(|url| url.scheme() == "javascript")
-        && (target.is_empty() || target.eq_ignore_ascii_case("_self"))
-    {
-        queue_javascript_url(scope, context, &action);
+    if url::Url::parse(&action).is_ok_and(|url| url.scheme() == "javascript") {
+        // Chrome 156 runs the URL in the targeted browsing context: this document, a
+        // named child frame, or a new window (`_blank`, unknown names) outside it.
+        if let Some(target) = javascript_target(scope, context, &target) {
+            queue_javascript_url(scope, target, &action);
+        }
         result.set_bool(true);
         return;
     }
@@ -175,7 +177,12 @@ fn submit<'s>(
 /// Navigating to a `javascript:` URL runs its percent-decoded script in a later task of
 /// the same document (Chrome 156; the document stays in place, turbo-surf#100), subject
 /// to the document's inline-script policy.
-fn queue_javascript_url(scope: &mut v8::PinScope, context: v8::Local<v8::Context>, url: &str) {
+fn queue_javascript_url<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    url: &str,
+) {
+    let scope = &mut v8::ContextScope::new(scope, context);
     let allowed = context.get_slot::<CspHandle>().is_none_or(|handle| {
         handle
             .policy
@@ -189,6 +196,9 @@ fn queue_javascript_url(scope: &mut v8::PinScope, context: v8::Local<v8::Context
     let body = &url[url.find(':').map_or(url.len(), |colon| colon + 1)..];
     let source = percent_encoding::percent_decode_str(body).decode_utf8_lossy();
     let Some(source) = v8::String::new(scope, &source) else {
+        return;
+    };
+    let Some(source) = trusted_javascript_url(scope, context, source) else {
         return;
     };
     let Some(task) = v8::Function::builder(run_javascript_url)
@@ -207,6 +217,84 @@ fn queue_javascript_url(scope: &mut v8::PinScope, context: v8::Local<v8::Context
     };
     let receiver = global.into();
     schedule.call(scope, receiver, &[task.into()]);
+}
+
+/// The context a `javascript:` navigation runs in, or `None` when it leaves this
+/// frame tree (a new window).
+fn javascript_target<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    target: &str,
+) -> Option<v8::Local<'s, v8::Context>> {
+    if target.is_empty() || target.eq_ignore_ascii_case("_self") {
+        return Some(context);
+    }
+    if target.starts_with('_') {
+        return None;
+    }
+    // A frame's browsing-context name is its container's `name` attribute.
+    let global = context.global(scope);
+    let key = v8::String::new(scope, "document")?;
+    let document = global.get(scope, key.into())?.to_object(scope)?;
+    let key = v8::String::new(scope, "querySelectorAll")?;
+    let query = v8::Local::<v8::Function>::try_from(document.get(scope, key.into())?).ok()?;
+    let selector = v8::String::new(scope, "iframe,frame")?;
+    let containers = query
+        .call(scope, document.into(), &[selector.into()])?
+        .to_object(scope)?;
+    let key = v8::String::new(scope, "length")?;
+    let length = containers.get(scope, key.into())?.uint32_value(scope)?;
+    let get_attribute = v8::String::new(scope, "getAttribute")?;
+    let name = v8::String::new(scope, "name")?;
+    let content_window = v8::String::new(scope, "contentWindow")?;
+    (0..length).find_map(|index| {
+        let container = containers.get_index(scope, index)?.to_object(scope)?;
+        let read = container.get(scope, get_attribute.into())?;
+        let read = v8::Local::<v8::Function>::try_from(read).ok()?;
+        let value = read.call(scope, container.into(), &[name.into()])?;
+        if value.to_rust_string_lossy(scope) != target {
+            return None;
+        }
+        let window = container
+            .get(scope, content_window.into())?
+            .to_object(scope)?;
+        window.get_creation_context(scope)
+    })
+}
+
+/// Under `require-trusted-types-for 'script'` a `javascript:` URL's script passes the
+/// default policy's `createScript` (sink "Location href") or is blocked (Chrome 156).
+fn trusted_javascript_url<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    source: v8::Local<'s, v8::String>,
+) -> Option<v8::Local<'s, v8::String>> {
+    let required = context.get_slot::<CspHandle>().is_some_and(|handle| {
+        let policy = handle.policy.borrow();
+        policy.current().requires_trusted_types() || policy.report_only.requires_trusted_types()
+    });
+    if !required {
+        return Some(source);
+    }
+    let key = v8::String::new(scope, "turbo-dom.ownership.window-document")?;
+    let key = v8::Private::for_api(scope, Some(key));
+    let document = context
+        .global(scope)
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
+    v8::tc_scope!(let scope, scope);
+    let converted = crate::browser_env::trusted_type_string(
+        scope,
+        document,
+        source.into(),
+        "TrustedScript",
+        "Location href",
+        "",
+    );
+    if converted.is_none() {
+        scope.reset();
+    }
+    converted
 }
 
 fn run_javascript_url(

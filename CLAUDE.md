@@ -63,7 +63,7 @@ CI also gates **line coverage** (`coverage` job over the `coverage-shard` matrix
 `rust/tarpaulin.toml` fail-under 93.0, then per-crate floors in `rust/coverage-floors.json` (the napi/py bindings are excluded);
 measured values, raised toward >= 99.5 by the coverage phase) and **cyclomatic complexity**
 (`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /
-`complexity:js`, one limit, no allow-list; expected red until the post-coverage refactor, see
+`complexity:js`, one limit, no allow-list; report-only (`continue-on-error`) until the post-0.6.0 refactor, see
 [`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md) for the commands, the floors and the
 backlog). Never lower a floor or raise the limit to pass a change.
 

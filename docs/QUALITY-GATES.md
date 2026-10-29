@@ -120,7 +120,7 @@ npm run complexity:js     # CI job `complexity / js (cc <= 15)`
   (`.oxlintrc.complexity.json`, which enables only that rule). It runs `oxlint@1.87.0`
   through npx because the `lint` script's oxlint 0.11 has no `complexity` rule.
 
-Both jobs are **expected red** until the post-coverage refactor: the functions above 15 when
+Both jobs are **expected red** (report-only) until the post-0.6.0 complexity refactor: the functions above 15 when
 the gate landed are the refactor backlog below, refactored only once their unit-test coverage
 is complete (refactoring without full tests can change behaviour silently). Meanwhile both run
 with `continue-on-error` (red job, green workflow) and are not required checks. New code stays

@@ -5409,10 +5409,19 @@ mod tests {
         let e = handle(&mut s, &json!({"jsonrpc":"2.0","id":1,"method":"bogus"}))
             .await
             .unwrap();
-        assert!(e["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("unknown method"));
+        assert_eq!(
+            e["error"],
+            json!({"code": -32601, "message": "Method not found: bogus"})
+        );
+        // a failing tool is an MCP result with isError, not a JSON-RPC error
+        let e = handle(
+            &mut s,
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"goto","arguments":{}}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(e["result"]["isError"], true, "{e}");
+        assert!(e.get("error").is_none(), "{e}");
         // unknown tool
         assert!(call_tool(&mut s, "nope", &json!({})).await.is_err());
         // read tool with no page loaded
@@ -5420,6 +5429,56 @@ mod tests {
         assert!(call_tool(&mut empty, "text", &json!({})).await.is_err());
         // goto missing url
         assert!(call_tool(&mut s, "goto", &json!({})).await.is_err());
+    }
+
+    // Screenshot size limits: a dimension over Chrome's 10,000,000 px
+    // `Emulation.setDeviceMetricsOverride` bound is rejected with Chrome's
+    // message, and a surface over 16384 x 16384 px is refused before any
+    // allocation (an unbounded request made the stdio server allocate 14 GB
+    // and stop answering).
+    #[tokio::test(flavor = "current_thread")]
+    async fn screenshot_and_viewport_reject_oversized_surfaces() {
+        let mut s = loaded();
+        let shot = |w: u64, h: u64| json!({"width": w, "height": h, "format": "svg", "external_css": false, "images": false});
+        assert_eq!(
+            call_tool(&mut s, "screenshot", &shot(10_000_001, 10))
+                .await
+                .unwrap_err(),
+            "screenshot: width and height values must be positive, not greater than 10000000"
+        );
+        assert_eq!(
+            call_tool(&mut s, "screenshot", &shot(16_385, 16_384))
+                .await
+                .unwrap_err(),
+            "screenshot: 16385x16384 exceeds the 268435456-pixel limit (16384x16384)"
+        );
+        assert!(call_tool(&mut s, "screenshot", &shot(16_384, 16_384))
+            .await
+            .is_ok());
+        assert_eq!(
+            call_tool(&mut s, "set_viewport", &json!({"width": 10_000_001}))
+                .await
+                .unwrap_err(),
+            "set_viewport: width and height values must be positive, not greater than 10000000"
+        );
+        assert_eq!(s.viewport.width, Session::new().viewport.width);
+        call_tool(
+            &mut s,
+            "set_viewport",
+            &json!({"width": 20_000, "height": 20_000}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            call_tool(
+                &mut s,
+                "screenshot",
+                &json!({"format": "svg", "external_css": false, "images": false})
+            )
+            .await
+            .unwrap_err(),
+            "screenshot: 20000x20000 exceeds the 268435456-pixel limit (16384x16384)"
+        );
     }
 
     // --- web search (SERP parser) -------------------------------------------

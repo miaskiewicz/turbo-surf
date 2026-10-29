@@ -24,9 +24,9 @@ render → mcp.
 ### Fixed (turbo-dom consolidation, coverage phase)
 - A style rule whose selector list Chrome drops (an unknown pseudo-class) now
   matches nothing instead of failing live layout for the whole page (#117); with
-  turbo-dom 4769e3e Google's consent-page view-transition rules are valid, so the
+  turbo-dom 4769e3e (in c9f991c) Google's consent-page view-transition rules are valid, so the
   "Reject all" click finds its geometry again.
-- turbo-dom crates repinned to turbo-dom 0189e4d (browser-env #183/#184 panic fixes;
+- turbo-dom crates repinned to turbo-dom c9f991c, the final consolidation head (browser-env #183/#184 panic fixes;
   `browser_env::try_install_with_html` is available, unused: surf installs the DOM
   before arming the render watchdog).
 - The document-hooks test server (#102) serves a case's cross-origin children in

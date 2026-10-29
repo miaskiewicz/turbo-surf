@@ -186,7 +186,12 @@ fn extract_challenge_script(html: &str) -> Option<String> {
         let after = &rest[open..];
         let start = after.find('>')? + 1;
         let end = after.find("</script>")?;
-        let code = &after[start..end];
+        // A `</script>` before the open tag's `>` is malformed: skip past it
+        // (turbo-surf#97) instead of slicing backwards.
+        let Some(code) = after.get(start..end) else {
+            rest = &after[end + "</script>".len()..];
+            continue;
+        };
         if code.contains("_cf_chl_opt") || code.contains("jschl") || code.contains("chl_answer") {
             body.push_str(code);
             body.push('\n');
@@ -426,5 +431,16 @@ mod tests {
             cf.unwrap().1.starts_with("CF~"),
             "must parse cf_clearance value"
         );
+    }
+
+    // turbo-surf#97: a `</script>` before the open tag's `>` must not panic.
+    #[test]
+    fn challenge_script_with_close_before_open_end_does_not_panic() {
+        assert_eq!(
+            super::extract_challenge_script("<script</script>>jschl"),
+            None
+        );
+        let found = super::extract_challenge_script("<script</script>><script>jschl=1</script>");
+        assert!(found.is_some_and(|code| code.contains("jschl=1")));
     }
 }

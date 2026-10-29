@@ -178,21 +178,31 @@ fn extract_js_save_url(html: &str) -> Option<String> {
 // Decode JS `\xHH` hex escapes (Google encodes `=`→`\x3d`, `&`→`\x26` in the save URL).
 // Non-escape bytes pass through; the payload is ASCII.
 fn js_unescape(s: &str) -> String {
+    // Decode on bytes so a `\\x` whose digits split a multibyte char cannot slice
+    // off a char boundary, and keep the rest UTF-8 intact (turbo-surf#97).
     let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
+    let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' && i + 4 <= b.len() && b[i + 1] == b'x' {
-            if let Ok(v) = u8::from_str_radix(&s[i + 2..i + 4], 16) {
-                out.push(v as char);
+        if let [b'\\', b'x', high, low, ..] = b[i..] {
+            if let (Some(high), Some(low)) = (hex(high), hex(low)) {
+                let value = high << 4 | low;
+                // A decoded non-ASCII byte is a Latin-1 code point, as in JS.
+                let mut buffer = [0; 4];
+                out.extend_from_slice(char::from(value).encode_utf8(&mut buffer).as_bytes());
                 i += 4;
                 continue;
             }
         }
-        out.push(b[i] as char);
+        out.push(b[i]);
         i += 1;
     }
-    out
+    // invariant: only whole ASCII escapes are replaced by UTF-8, so the bytes stay UTF-8.
+    String::from_utf8(out).unwrap_or_default()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    char::from(byte).to_digit(16).map(|digit| digit as u8)
 }
 
 // True when a form's fields select "accept all": both `set_aps` and `set_sc` present
@@ -871,5 +881,13 @@ mod tests {
             .unwrap();
         assert!(earned.earned_nid);
         assert_eq!(earned.minted, vec!["NID".to_string()]);
+    }
+
+    // turbo-surf#97: a `\\x` escape whose hex digits split a multibyte char must
+    // not panic, and non-ASCII text passes through intact.
+    #[test]
+    fn js_unescape_keeps_multibyte_text_after_a_truncated_escape() {
+        assert_eq!(super::js_unescape("a\\x1\u{e9}b"), "a\\x1\u{e9}b");
+        assert_eq!(super::js_unescape("\u{e9}\\x3d"), "\u{e9}=");
     }
 }

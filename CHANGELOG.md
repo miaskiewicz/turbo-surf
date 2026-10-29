@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- turbo-dom crates repinned to turbo-dom 0189e4d (browser-env #183/#184 panic fixes;
+  `browser_env::try_install_with_html` is available, unused: surf installs the DOM
+  before arming the render watchdog).
 - The document-hooks test server (#102) serves a case's cross-origin children in
   document order, the order Chrome's control committed them; agent-cluster keying
   follows the first committed document, so load-dependent response order flaked it.

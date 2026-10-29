@@ -47,15 +47,21 @@
     apply(weakSet, map, [receiver, values]);
   };
   const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  // A matrix copy that never touches the page-replaceable Array iterator.
+  const copied = (values) => {
+    const result = [];
+    for (let index = 0; index < 16; index++) result[index] = values[index];
+    return result;
+  };
   // Axis fast path steps in float (Blink's AxisTransform2d), on float arguments.
   const axisTranslated = (values, tx, ty) => {
-    const result = arrayFrom(values);
+    const result = copied(values);
     result[12] = fround(values[12] + fround(values[0] * tx));
     result[13] = fround(values[13] + fround(values[5] * ty));
     return result;
   };
   const axisScaled = (values, sx, sy) => {
-    const result = arrayFrom(values);
+    const result = copied(values);
     result[0] = fround(values[0] * sx);
     result[5] = fround(values[5] * sy);
     return result;
@@ -303,7 +309,7 @@
   // only rewrites the last column, a scale multiplies its own column, so a NaN or
   // infinite member never spreads through a zero entry (turbo-surf#120).
   const translated = (values, tx, ty, tz) => {
-    const result = arrayFrom(values),
+    const result = copied(values),
       x = toNumber(tx),
       y = toNumber(ty),
       z = toNumber(tz);
@@ -318,7 +324,7 @@
       z = toNumber(originZ),
       moved = x !== 0 || y !== 0 || z !== 0,
       factors = [toNumber(scaleX), toNumber(scaleY), toNumber(scaleZ)];
-    const result = moved ? translated(values, x, y, z) : arrayFrom(values);
+    const result = moved ? translated(values, x, y, z) : copied(values);
     for (let column = 0; column < 3; column++)
       for (let row = 0; row < 4; row++) result[column * 4 + row] *= factors[column];
     return moved ? translated(result, -x, -y, -z) : result;
@@ -726,7 +732,7 @@
       z = toNumber(tz);
     // Blink narrows the offsets to float; is2D is decided on the doubles. A zero
     // offset is no step at all.
-    if (x === 0 && y === 0 && z === 0) return [arrayFrom(current[0]), current[1], current[2]];
+    if (x === 0 && y === 0 && z === 0) return [copied(current[0]), current[1], current[2]];
     if (current[2] && z === 0)
       return [axisTranslated(current[0], fround(x), fround(y)), current[1], true];
     return [translated(current[0], fround(x), fround(y), fround(z)), current[1] && z === 0, false];
@@ -741,7 +747,7 @@
     // Blink narrows the factors and origin to float; is2D is decided on the doubles.
     // A unit scale is no step at all (its origin included).
     const flat = current[1] && sz === 1 && oz === 0;
-    if (sx === 1 && sy === 1 && sz === 1) return [arrayFrom(current[0]), flat, current[2]];
+    if (sx === 1 && sy === 1 && sz === 1) return [copied(current[0]), flat, current[2]];
     if (current[2] && sz === 1 && oz === 0) {
       const x = fround(ox),
         y = fround(oy),
@@ -775,10 +781,10 @@
     ];
   };
   // A zero turn or skew is no step at all.
-  const unchanged = (current) => [arrayFrom(current[0]), current[1], current[2]];
+  const unchanged = (current) => [copied(current[0]), current[1], current[2]];
   const rotatedState = (current, rotX, rotY, rotZ) => {
     const result = rotated(current[0], rotX, rotY, rotZ);
-    if (result[2]) return [arrayFrom(current[0]), current[1] && result[1], current[2]];
+    if (result[2]) return [copied(current[0]), current[1] && result[1], current[2]];
     return [result[0], current[1] && result[1], false];
   };
   const rotatedAxisAngleState = (current, x, y, z, degrees) => {
@@ -788,7 +794,7 @@
       turn = toNumber(degrees);
     // Chrome 156 drops is2D for a NaN z axis unless the turn is zero.
     const flat = current[1] && ax === 0 && ay === 0 && (az === az || isZeroTurn(turn));
-    if (turn === 0) return [arrayFrom(current[0]), flat, current[2]];
+    if (turn === 0) return [copied(current[0]), flat, current[2]];
     return [rotatedAxisAngle(current[0], ax, ay, az, turn), flat, false];
   };
   const fromVectorState = (current, x, y) => {

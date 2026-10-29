@@ -36,7 +36,7 @@ fn walk(
         let StyledNode::Element(element) = node else {
             continue;
         };
-        let effective = (zoom * factor(&element.style)).max(MIN_ZOOM);
+        let effective = (zoom * factor(&element.style)).clamp(MIN_ZOOM, MAX_ZOOM);
         if effective != 1.0 {
             element.style = scaled(&element.style, effective);
         } else if element
@@ -76,6 +76,8 @@ fn source_style(element: &StyledElement, parent: Option<SourceId>, zoom: f32) ->
 /// Chrome 156 never lets the effective zoom fall below 1e-6 (measured: `zoom: 1e-30`
 /// computes a 1e30px width to its saturated layout size divided by 1e-6).
 const MIN_ZOOM: f32 = 1e-6;
+/// ... nor rise above 1e6 (measured: `zoom: 1e30` reports currentCSSZoom 1000000).
+const MAX_ZOOM: f32 = 1e6;
 /// The largest used length Chrome 156 reports for a saturated box (its layout-unit
 /// range, as the float it stores): `width: 1e30px` measures 33554428px.
 pub(crate) const LAYOUT_MAX: f32 = 33_554_428.0;

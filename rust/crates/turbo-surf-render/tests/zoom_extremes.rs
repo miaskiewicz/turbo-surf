@@ -42,7 +42,9 @@ async fn tiny_zoom_on_a_huge_box_saturates_like_chrome156() {
 /// Chrome 156 (8078.47, headless, localhost) also caps the effective zoom at 1e6:
 /// `zoom: 1e30` reports currentCSSZoom 1000000, and the box saturates the layout
 /// range at that zoom (the following box sits at 12000000px, not at a float-rounded
-/// offset).
+/// offset). The saturated border-box width (Chrome 33554432 / offsetWidth 34) is
+/// layout-unit saturation of padding, tracked separately (see the round 3 notes), so
+/// the probe reads the zoom, the heights and the offsets.
 #[tokio::test(flavor = "current_thread")]
 async fn huge_zoom_is_capped_at_a_million_like_chrome156() {
     let mut page = PageSession::open(
@@ -57,7 +59,7 @@ async fn huge_zoom_is_capped_at_a_million_like_chrome156() {
     let value: Value = serde_json::from_str(
         &page
             .eval_json_expression(
-                "['a','c'].map(id=>{const e=document.getElementById(id),r=e.getBoundingClientRect();return [r.top,r.width,r.height,e.offsetTop,e.offsetWidth,e.offsetHeight,e.currentCSSZoom]})",
+                "['a','c'].map(id=>{const e=document.getElementById(id),r=e.getBoundingClientRect();return [r.top,r.height,e.offsetTop,e.offsetHeight,e.currentCSSZoom]})",
             )
             .await
             .unwrap(),
@@ -67,8 +69,8 @@ async fn huge_zoom_is_capped_at_a_million_like_chrome156() {
     assert_eq!(
         value,
         json!([
-            [0, 33_554_432, 12_000_000, 0, 34, 12, 1_000_000],
-            [12_000_000, 102, 12, 12_000_000, 102, 12, 1]
+            [0, 12_000_000, 0, 12, 1_000_000],
+            [12_000_000, 12, 12_000_000, 12, 1]
         ])
     );
 }

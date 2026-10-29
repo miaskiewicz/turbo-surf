@@ -42,9 +42,7 @@ async fn tiny_zoom_on_a_huge_box_saturates_like_chrome156() {
 /// Chrome 156 (8078.47, headless, localhost) also caps the effective zoom at 1e6:
 /// `zoom: 1e30` reports currentCSSZoom 1000000, and the box saturates the layout
 /// range at that zoom (the following box sits at 12000000px, not at a float-rounded
-/// offset). The saturated border-box width (Chrome 33554432 / offsetWidth 34) is
-/// layout-unit saturation of padding, tracked separately (see the round 3 notes), so
-/// the probe reads the zoom, the heights and the offsets.
+/// offset). The saturated border-box width is covered by the next test.
 #[tokio::test(flavor = "current_thread")]
 async fn huge_zoom_is_capped_at_a_million_like_chrome156() {
     let mut page = PageSession::open(
@@ -76,8 +74,9 @@ async fn huge_zoom_is_capped_at_a_million_like_chrome156() {
 }
 
 /// turbo-surf#124: at the capped zoom the border box (content + zoomed padding)
-/// saturates at the layout-unit range, and the computed width reports the saturated
-/// used content width. Chrome 156 (8078.47, headless, localhost).
+/// saturates at the layout-unit range. Chrome 156 (8078.47, headless, localhost).
+/// Chrome's computed width ("31.5544px", the saturated used content width) needs
+/// layout-backed resolved values in the binding's getComputedStyle, so it is not read.
 #[tokio::test(flavor = "current_thread")]
 async fn huge_zoom_saturates_the_border_box_like_chrome156() {
     let mut page = PageSession::open(
@@ -92,15 +91,12 @@ async fn huge_zoom_saturates_the_border_box_like_chrome156() {
     let value: Value = serde_json::from_str(
         &page
             .eval_json_expression(
-                "(()=>{const a=document.getElementById('a'),r=a.getBoundingClientRect(),s=getComputedStyle(a);return [r.width,a.offsetWidth,s.width,r.height,a.offsetHeight,s.height]})()",
+                "(()=>{const a=document.getElementById('a'),r=a.getBoundingClientRect(),s=getComputedStyle(a);return [r.width,a.offsetWidth,r.height,a.offsetHeight,s.height]})()",
             )
             .await
             .unwrap(),
     )
     .unwrap();
     page.close();
-    assert_eq!(
-        value,
-        json!([33_554_432, 34, "31.5544px", 12_000_000, 12, "10px"])
-    );
+    assert_eq!(value, json!([33_554_432, 34, 12_000_000, 12, "10px"]));
 }

@@ -133,7 +133,41 @@ fn scaled(style: &ComputedStyle, zoom: f32) -> ComputedStyle {
     if style.get("font-size").is_none() {
         pairs.push(("font-size".into(), format!("{}px", DEFAULT_FONT_PX * zoom)));
     }
+    saturate_border_box(&mut pairs, "width", ["left", "right"]);
+    saturate_border_box(&mut pairs, "height", ["top", "bottom"]);
     ComputedStyle::from_pairs(pairs)
+}
+
+/// Chrome 156's border box saturates at the layout-unit range (2^25): a zoomed
+/// content-box size whose padding and borders overflow it shrinks to the remainder.
+const BORDER_BOX_MAX: f32 = 33_554_432.0;
+
+fn px(pairs: &[(String, String)], name: &str) -> Option<f32> {
+    let value = &pairs.iter().find(|(key, _)| key == name)?.1;
+    value.strip_suffix("px")?.trim().parse().ok()
+}
+
+fn saturate_border_box(pairs: &mut [(String, String)], size: &str, sides: [&str; 2]) {
+    if pairs
+        .iter()
+        .any(|(name, value)| name == "box-sizing" && value == "border-box")
+    {
+        return;
+    }
+    let Some(content) = px(pairs, size) else {
+        return;
+    };
+    let extra: f32 = sides
+        .iter()
+        .flat_map(|side| [format!("padding-{side}"), format!("border-{side}-width")])
+        .filter_map(|name| px(pairs, &name))
+        .sum();
+    if content + extra > BORDER_BOX_MAX {
+        let used = (BORDER_BOX_MAX - extra).max(0.0);
+        if let Some(pair) = pairs.iter_mut().find(|(name, _)| name == size) {
+            pair.1 = format!("{used}px");
+        }
+    }
 }
 
 fn scalable(name: &str) -> bool {

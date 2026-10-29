@@ -18,7 +18,10 @@ runner): the `coverage-shard` matrix runs `python3 ../scripts/coverage-shard.py 
 <crates>` from `rust/` for render, mcp and core+view+page+transform, with `tarpaulin.toml`'s
 settings, and the `coverage` job merges the shard reports (`scripts/merge-coverage-reports.py`:
 each crate keeps its own shard's coverable lines, a line is covered when any shard hits it)
-and applies the workspace `fail-under` and the per-crate floors to the merge.
+and applies the workspace `fail-under` and the per-crate floors to the merge. The render
+shard passes `--chunks 4`: every test process writes a profraw of all instrumented code, so
+render's test binaries are run in four chunks over one build, the profraws deleted between
+chunks (one run filled the 145G runner disk), and the chunk reports unioned.
 
 Then every crate must meet its own floor (`rust/coverage-floors.json`, checked by
 `python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json

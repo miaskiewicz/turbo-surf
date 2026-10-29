@@ -71,8 +71,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # --chunks: render's ~190 test binaries' profraws alone fill the disk in one run
+          # (run 40899746815); scripts/coverage-shard.py runs them in 4 chunks, clearing
+          # the profraws between chunks, and unions the reports.
           - shard: render
-            crates: turbo-surf-render
+            crates: --chunks 4 turbo-surf-render
           - shard: mcp
             crates: turbo-surf-mcp
           - shard: rest

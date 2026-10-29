@@ -14,6 +14,11 @@
     // Blink's `is2d_` (turbo-surf#89): whether a matrix is 2D is state set by its
     // input and operations, not derived from its values.
     flatMatrices = new WeakMap(),
+    // Blink's gfx::Transform axis fast path (turbo-surf#120): a matrix built only from
+    // 2D translations and scales is a float scale plus a float translation, so each
+    // operation updates its own members (a NaN stays put). Any other step uses the
+    // full matrix for good.
+    axisMatrices = new WeakMap(),
     points = new WeakMap(),
     // DOMPoint/DOMMatrix platform objects (not their read-only bases), recorded by the
     // interface constructor that ran, as Chrome serializes the wrapper's interface.
@@ -31,6 +36,7 @@
     Text = String,
     Float32 = Float32Array,
     Float64 = Float64Array,
+    iteratorSymbol = Symbol.iterator,
     IdlTypeError = TypeError,
     IdlDOMException = DOMException,
     { abs, atan2, cos, fround, hypot, max, min, sin, tan, PI, SQRT1_2 } = Math;
@@ -41,16 +47,36 @@
     apply(weakSet, map, [receiver, values]);
   };
   const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  // Axis fast path steps in float (Blink's AxisTransform2d), on float arguments.
+  const axisTranslated = (values, tx, ty) => {
+    const result = arrayFrom(values);
+    result[12] = fround(values[12] + fround(values[0] * tx));
+    result[13] = fround(values[13] + fround(values[5] * ty));
+    return result;
+  };
+  const axisScaled = (values, sx, sy) => {
+    const result = arrayFrom(values);
+    result[0] = fround(values[0] * sx);
+    result[5] = fround(values[5] * sy);
+    return result;
+  };
+  // Invertible only with normal (finite, non-zero, non-subnormal) float scales.
+  const normalFloat = (value) => finite(value) && abs(value) >= 1.1754943508222875e-38;
   const matrix = (receiver) => {
     const data = read(matrices, receiver);
     if (!data) throw new IdlTypeError("Illegal invocation");
     return data;
   };
-  // A matrix's state: [16 column-major values, is2D flag].
-  const state = (receiver) => [matrix(receiver), read(flatMatrices, receiver) === true];
-  const assign = (receiver, values, flat) => {
+  // A matrix's state: [16 column-major values, is2D flag, axis fast path flag].
+  const state = (receiver) => [
+    matrix(receiver),
+    read(flatMatrices, receiver) === true,
+    read(axisMatrices, receiver) === true,
+  ];
+  const assign = (receiver, values, flat, axis = false) => {
     store(matrices, receiver, values);
     store(flatMatrices, receiver, flat);
+    store(axisMatrices, receiver, axis);
   };
   const point = (receiver) => {
     const data = read(points, receiver);
@@ -64,9 +90,9 @@
     apply(markWritable, writable, [result]);
     return result;
   };
-  const newMatrix = (values, flat, mutable = true) => {
+  const newMatrix = (values, flat, mutable = true, axis = false) => {
     const result = create(mutable ? DOMMatrix.prototype : DOMMatrixReadOnly.prototype);
-    assign(result, values, flat);
+    assign(result, values, flat, axis);
     if (mutable) apply(markWritable, writable, [result]);
     return result;
   };
@@ -273,22 +299,29 @@
     ];
   };
   // Value transforms shared by the copying and the *Self members.
+  // Blink's full-matrix PreTranslate/PreScale are column operations: a translation
+  // only rewrites the last column, a scale multiplies its own column, so a NaN or
+  // infinite member never spreads through a zero entry (turbo-surf#120).
   const translated = (values, tx, ty, tz) => {
-    const value = identity();
-    value[12] = toNumber(tx);
-    value[13] = toNumber(ty);
-    value[14] = toNumber(tz);
-    return multiply(values, value);
+    const result = arrayFrom(values),
+      x = toNumber(tx),
+      y = toNumber(ty),
+      z = toNumber(tz);
+    for (let row = 0; row < 4; row++)
+      result[12 + row] =
+        values[row] * x + values[4 + row] * y + values[8 + row] * z + values[12 + row];
+    return result;
   };
   const scaled = (values, scaleX, scaleY, scaleZ, originX, originY, originZ) => {
-    const value = identity();
-    value[0] = toNumber(scaleX);
-    value[5] = toNumber(scaleY);
-    value[10] = toNumber(scaleZ);
     const x = toNumber(originX),
       y = toNumber(originY),
-      z = toNumber(originZ);
-    return translated(multiply(translated(values, x, y, z), value), -x, -y, -z);
+      z = toNumber(originZ),
+      moved = x !== 0 || y !== 0 || z !== 0,
+      factors = [toNumber(scaleX), toNumber(scaleY), toNumber(scaleZ)];
+    const result = moved ? translated(values, x, y, z) : arrayFrom(values);
+    for (let column = 0; column < 3; column++)
+      for (let row = 0; row < 4; row++) result[column * 4 + row] *= factors[column];
+    return moved ? translated(result, -x, -y, -z) : result;
   };
   const rotatedAxisAngle = (values, x, y, z, degrees) =>
     multiply(values, rotation(toNumber(x), toNumber(y), toNumber(z), toNumber(degrees)));
@@ -308,8 +341,9 @@
       0,
       x,
     );
-    // Blink: a rotation about the x or y axis makes the matrix 3D.
-    return [result, x === 0 && y === 0];
+    // Blink: a rotation about the x or y axis makes the matrix 3D. The third entry
+    // says whether every turn was zero (no step at all).
+    return [result, x === 0 && y === 0, x === 0 && y === 0 && z === 0];
   };
   const skewed = (values, index, degrees) => {
     const value = identity();
@@ -452,9 +486,12 @@
       end = source.length;
     while (start < end && space(source[start])) start++;
     while (end > start && space(source[end - 1])) end--;
-    if (start === end || substring(source, start, end) === "none") return [identity(), true];
+    // An empty string builds the full matrix; `none` keeps the axis path.
+    if (start === end) return [identity(), true, false];
+    if (substring(source, start, end) === "none") return [identity(), true, true];
     let result = identity(),
       flat = true,
+      axis = true,
       at = start;
     const invalid = () => new IdlDOMException("Invalid CSS transform", "SyntaxError");
     while (at < end) {
@@ -481,11 +518,19 @@
       if (source[at] !== ")") throw invalid();
       if (token) args[args.length] = token;
       at++;
-      result = multiply(result, transformFunction(name, args));
+      const step = transformFunction(name, args);
+      if (axis && translations[name] && step[14] === 0)
+        result = axisTranslated(result, step[12], step[13]);
+      else if (axis && scalings[name] && step[10] === 1)
+        result = axisScaled(result, step[0], step[5]);
+      else if (!(axis && rotations[name] && isIdentity(step))) {
+        axis = false;
+        result = multiply(result, step);
+      }
       if (threeDFunctions[name]) flat = false;
       while (at < end && space(source[at])) at++;
     }
-    return [result, flat];
+    return [result, flat, axis];
   };
   const isObject = (value) =>
     value !== null && (typeof value === "object" || typeof value === "function");
@@ -679,8 +724,12 @@
     const x = toNumber(tx),
       y = toNumber(ty),
       z = toNumber(tz);
-    // Blink narrows the offsets to float; is2D is decided on the doubles.
-    return [translated(current[0], fround(x), fround(y), fround(z)), current[1] && z === 0];
+    // Blink narrows the offsets to float; is2D is decided on the doubles. A zero
+    // offset is no step at all.
+    if (x === 0 && y === 0 && z === 0) return [arrayFrom(current[0]), current[1], current[2]];
+    if (current[2] && z === 0)
+      return [axisTranslated(current[0], fround(x), fround(y)), current[1], true];
+    return [translated(current[0], fround(x), fround(y), fround(z)), current[1] && z === 0, false];
   };
   const scaledState = (current, scaleX, scaleY, scaleZ, originX, originY, originZ) => {
     const sx = toNumber(scaleX),
@@ -690,44 +739,103 @@
       oy = toNumber(originY),
       oz = toNumber(originZ);
     // Blink narrows the factors and origin to float; is2D is decided on the doubles.
+    // A unit scale is no step at all (its origin included).
+    const flat = current[1] && sz === 1 && oz === 0;
+    if (sx === 1 && sy === 1 && sz === 1) return [arrayFrom(current[0]), flat, current[2]];
+    if (current[2] && sz === 1 && oz === 0) {
+      const x = fround(ox),
+        y = fround(oy),
+        moved = x !== 0 || y !== 0;
+      let values = moved ? axisTranslated(current[0], x, y) : current[0];
+      values = axisScaled(values, fround(sx), fround(sy));
+      return [moved ? axisTranslated(values, -x, -y) : values, flat, true];
+    }
     return [
       scaled(current[0], fround(sx), fround(sy), fround(sz), fround(ox), fround(oy), fround(oz)),
-      current[1] && sz === 1 && oz === 0,
+      flat,
+      false,
     ];
   };
+  // scale()/scaleSelf(): only trailing undefined arguments are missing; a scaleY
+  // given as undefined is NaN, a missing one is scaleX (Chrome 156).
+  const scaleArguments = (args) => {
+    let count = args.length;
+    while (count > 0 && args[count - 1] === undefined) count--;
+    // Members with an IDL default take it for undefined; scaleY has none.
+    const given = (index, fallback) =>
+      args[index] === undefined ? fallback : toNumber(args[index]);
+    const sx = given(0, 1);
+    return [
+      sx,
+      count > 1 ? toNumber(args[1]) : sx,
+      given(2, 1),
+      given(3, 0),
+      given(4, 0),
+      given(5, 0),
+    ];
+  };
+  // A zero turn or skew is no step at all.
+  const unchanged = (current) => [arrayFrom(current[0]), current[1], current[2]];
   const rotatedState = (current, rotX, rotY, rotZ) => {
     const result = rotated(current[0], rotX, rotY, rotZ);
-    return [result[0], current[1] && result[1]];
+    if (result[2]) return [arrayFrom(current[0]), current[1] && result[1], current[2]];
+    return [result[0], current[1] && result[1], false];
   };
   const rotatedAxisAngleState = (current, x, y, z, degrees) => {
     const ax = toNumber(x),
       ay = toNumber(y),
       az = toNumber(z),
       turn = toNumber(degrees);
-    return [
-      rotatedAxisAngle(current[0], ax, ay, az, turn),
-      // Chrome 156 drops is2D for a NaN z axis unless the turn is zero.
-      current[1] && ax === 0 && ay === 0 && (az === az || isZeroTurn(turn)),
-    ];
+    // Chrome 156 drops is2D for a NaN z axis unless the turn is zero.
+    const flat = current[1] && ax === 0 && ay === 0 && (az === az || isZeroTurn(turn));
+    if (turn === 0) return [arrayFrom(current[0]), flat, current[2]];
+    return [rotatedAxisAngle(current[0], ax, ay, az, turn), flat, false];
   };
-  const fromVectorState = (current, x, y) => [
-    rotated(current[0], (atan2(y, x) * 180) / PI)[0],
-    current[1],
+  const fromVectorState = (current, x, y) => {
+    const turn = (atan2(y, x) * 180) / PI;
+    if (turn === 0) return unchanged(current);
+    return [rotated(current[0], turn)[0], current[1], false];
+  };
+  const skewedState = (current, index, degrees) => {
+    const turn = toNumber(degrees);
+    if (turn === 0) return unchanged(current);
+    return [skewed(current[0], index, turn), current[1], false];
+  };
+  const multipliedState = (left, right) => [
+    multiply(left[0], right[0]),
+    left[1] && right[1],
+    false,
   ];
-  const multipliedState = (left, right) => [multiply(left[0], right[0]), left[1] && right[1]];
   const invertedState = (current) => {
+    if (current[2]) {
+      const values = current[0];
+      if (!normalFloat(values[0]) || !normalFloat(values[5])) {
+        const result = identity();
+        for (let index = 0; index < 16; index++) result[index] = NaN;
+        return [result, false, false];
+      }
+      const result = identity();
+      result[0] = fround(1 / values[0]);
+      result[5] = fround(1 / values[5]);
+      result[12] = fround(-values[12] * result[0]);
+      result[13] = fround(-values[13] * result[5]);
+      return [result, current[1], true];
+    }
     const result = inverse(current[0]);
-    return [result[0], current[1] && result[1]];
+    return [result[0], current[1] && result[1], false];
   };
   class DOMMatrixReadOnly {
     constructor(init = undefined) {
+      // (DOMString or sequence<unrestricted double>): an object with @@iterator is a
+      // sequence, anything else (another DOMMatrix included) converts to a string.
+      const iterator = isObject(init) ? init[iteratorSymbol] : undefined;
       const initial =
         init === undefined
-          ? [identity(), true]
-          : typeof init === "string"
-            ? parse(init)
-            : fromSequence(init);
-      assign(this, initial[0], initial[1]);
+          ? [identity(), true, true]
+          : iterator !== undefined && iterator !== null
+            ? fromSequence(init)
+            : parse(`${init}`);
+      assign(this, initial[0], initial[1], initial[2]);
     }
     static fromMatrix(other = undefined) {
       const result = dictionary(other, "Failed to execute 'fromMatrix' on 'DOMMatrixReadOnly': ");
@@ -753,43 +861,53 @@
         current,
         dictionary(other, "Failed to execute 'multiply' on 'DOMMatrixReadOnly': "),
       );
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     translate(tx = 0, ty = 0, tz = 0) {
       const result = translatedState(state(this), tx, ty, tz);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
-    scale(scaleX = 1, scaleY = scaleX, scaleZ = 1, originX = 0, originY = 0, originZ = 0) {
-      const result = scaledState(state(this), scaleX, scaleY, scaleZ, originX, originY, originZ);
-      return newMatrix(result[0], result[1]);
+    scale(...args) {
+      const current = state(this),
+        given = scaleArguments(args);
+      const result = scaledState(
+        current,
+        given[0],
+        given[1],
+        given[2],
+        given[3],
+        given[4],
+        given[5],
+      );
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     scaleNonUniform(scaleX = 1, scaleY = 1) {
       const result = scaledState(state(this), scaleX, scaleY, 1, 0, 0, 0);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     scale3d(scale = 1, originX = 0, originY = 0, originZ = 0) {
       const result = scaledState(state(this), scale, scale, scale, originX, originY, originZ);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     rotate(rotX = 0, rotY = undefined, rotZ = undefined) {
       const result = rotatedState(state(this), rotX, rotY, rotZ);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     rotateAxisAngle(x = 0, y = 0, z = 0, degrees = 0) {
       const result = rotatedAxisAngleState(state(this), x, y, z, degrees);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     rotateFromVector(x = 0, y = 0) {
       const result = fromVectorState(state(this), x, y);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     skewX(degrees = 0) {
-      const current = state(this);
-      return newMatrix(skewed(current[0], 4, degrees), current[1]);
+      const result = skewedState(state(this), 4, degrees);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     skewY(degrees = 0) {
-      const current = state(this);
-      return newMatrix(skewed(current[0], 1, degrees), current[1]);
+      const result = skewedState(state(this), 1, degrees);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     flipX() {
       const current = state(this);
@@ -801,7 +919,7 @@
     }
     inverse() {
       const result = invertedState(state(this));
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     transformPoint(other = undefined) {
       const value = matrix(this);
@@ -878,15 +996,15 @@
     }
     static fromMatrix(other = undefined) {
       const result = dictionary(other, "Failed to execute 'fromMatrix' on 'DOMMatrix': ");
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     static fromFloat32Array(input) {
       const result = sequenceArgument(arguments.length, input);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     static fromFloat64Array(input) {
       const result = sequenceArgument(arguments.length, input);
-      return newMatrix(result[0], result[1]);
+      return newMatrix(result[0], result[1], true, result[2]);
     }
     multiplySelf(other = undefined) {
       const current = state(this);
@@ -894,64 +1012,74 @@
         current,
         dictionary(other, "Failed to execute 'multiplySelf' on 'DOMMatrix': "),
       );
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     preMultiplySelf(other = undefined) {
       const init = dictionary(other, "Failed to execute 'preMultiplySelf' on 'DOMMatrix': ");
       const result = multipliedState(init, state(this));
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     translateSelf(tx = 0, ty = 0, tz = 0) {
       const result = translatedState(state(this), tx, ty, tz);
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
-    scaleSelf(scaleX = 1, scaleY = scaleX, scaleZ = 1, originX = 0, originY = 0, originZ = 0) {
-      const result = scaledState(state(this), scaleX, scaleY, scaleZ, originX, originY, originZ);
-      assign(this, result[0], result[1]);
+    scaleSelf(...args) {
+      const current = state(this),
+        given = scaleArguments(args);
+      const result = scaledState(
+        current,
+        given[0],
+        given[1],
+        given[2],
+        given[3],
+        given[4],
+        given[5],
+      );
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     scale3dSelf(scale = 1, originX = 0, originY = 0, originZ = 0) {
       const result = scaledState(state(this), scale, scale, scale, originX, originY, originZ);
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     rotateSelf(rotX = 0, rotY = undefined, rotZ = undefined) {
       const result = rotatedState(state(this), rotX, rotY, rotZ);
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     rotateAxisAngleSelf(x = 0, y = 0, z = 0, degrees = 0) {
       const result = rotatedAxisAngleState(state(this), x, y, z, degrees);
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     rotateFromVectorSelf(x = 0, y = 0) {
       const result = fromVectorState(state(this), x, y);
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     skewXSelf(degrees = 0) {
-      const current = state(this);
-      assign(this, skewed(current[0], 4, degrees), current[1]);
+      const result = skewedState(state(this), 4, degrees);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     skewYSelf(degrees = 0) {
-      const current = state(this);
-      assign(this, skewed(current[0], 1, degrees), current[1]);
+      const result = skewedState(state(this), 1, degrees);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     invertSelf() {
       const result = invertedState(state(this));
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
     setMatrixValue(source) {
       if (!arguments.length) throw new IdlTypeError("A CSS transform is required");
       const result = parse(Text(source));
-      assign(this, result[0], result[1]);
+      assign(this, result[0], result[1], result[2]);
       return this;
     }
   }
@@ -978,6 +1106,7 @@
           const values = matrix(this),
             number = toNumber(value);
           values[index] = number;
+          store(axisMatrices, this, false);
           if (threeD && number !== unit) store(flatMatrices, this, false);
         },
         enumerable: true,
@@ -998,6 +1127,7 @@
       },
       set(value) {
         matrix(this)[index] = toNumber(value);
+        store(axisMatrices, this, false);
       },
       enumerable: true,
       configurable: true,

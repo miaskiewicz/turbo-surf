@@ -22,6 +22,16 @@ Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
 render → mcp.
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- DOMMatrix keeps Blink's axis-aligned fast path (#120): a matrix built only from 2D
+  translations and scales (`new DOMMatrix()`, `"none"`, translate/scale CSS strings)
+  stores float members and keeps a NaN in its own member; a non-trailing `undefined`
+  scaleY is NaN; full-matrix translate/scale are column operations; unit scales, zero
+  translations and zero turns/skews are no-ops. A non-iterable init object (another
+  DOMMatrix) converts to a string, as in Chrome 156.
+- A page rule the native scoped parser rejects (`::selection:window-inactive`) no
+  longer fails live layout for the whole page; it gets no targets.
+- The effective CSS `zoom` is capped at 1e6, like Chrome 156 (currentCSSZoom and
+  layout no longer use a 1e30 factor).
 - A style rule whose selector list Chrome drops (an unknown pseudo-class) now
   matches nothing instead of failing live layout for the whole page (#117); with
   turbo-dom 4769e3e (in c9f991c) Google's consent-page view-transition rules are valid, so the

@@ -2,9 +2,8 @@
 //! script on a local page):
 //! - translate/scale/scale3d/scaleNonUniform (and CSS lengths and scale factors) narrow
 //!   their arguments to float, while is2D is decided on the doubles;
-//! - a trailing `undefined` scaleY defaults to scaleX. (A non-trailing one is NaN in
-//!   Chrome, but Blink's axis-aligned gfx::Transform keeps that NaN out of the other
-//!   members; that propagation gap is tracked separately.)
+//! - a trailing `undefined` scaleY defaults to scaleX. (A non-trailing one is NaN;
+//!   see dom_matrix_axis_transform.rs for the axis-aligned fast path, turbo-surf#120.)
 use serde_json::Value;
 use turbo_surf_render::PageSession;
 

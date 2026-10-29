@@ -30,10 +30,11 @@ const WINDOW_CHAIN: &str = r#"(() => {
   const tag = o => Object.prototype.hasOwnProperty.call(o, Symbol.toStringTag) ? o[Symbol.toStringTag] : null;
   const chain = [];
   for (let o = Object.getPrototypeOf(window); o; o = Object.getPrototypeOf(o)) chain.push([tag(o), Object.prototype.hasOwnProperty.call(o, 'constructor') ? o.constructor.name : null]);
+  let setProto; try { Object.setPrototypeOf(window, {}); setProto = 'ok'; } catch (e) { setProto = e.constructor.name; }
   let call; try { Window(); } catch (e) { call = e.message; }
   let construct; try { new Window(); } catch (e) { construct = e.message; }
   return {
-    chain, call, construct,
+    chain, setProto, call, construct,
     instanceWindow: window instanceof Window, instanceEventTarget: window instanceof EventTarget,
     own: ['addEventListener', 'removeEventListener', 'dispatchEvent'].map(k => Object.hasOwn(window, k)),
     constants: [Window.TEMPORARY, Window.PERSISTENT, Window.prototype.TEMPORARY, Window.prototype.PERSISTENT],
@@ -76,6 +77,7 @@ async fn window_has_chromes_window_interface_chain() {
         out,
         serde_json::json!({
             "chain": [["Window", "Window"], ["WindowProperties", null], ["EventTarget", "EventTarget"], [null, "Object"]],
+            "setProto": "TypeError",
             "call": "Illegal constructor",
             "construct": "Failed to construct 'Window': Illegal constructor",
             "instanceWindow": true, "instanceEventTarget": true,

@@ -895,3 +895,24 @@ test("live hydration retains native response policy, status and selected referre
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+// A getBy handle passed to the static waitForFunction resolves through the engine
+// namespace (turbo-dom#222): no live session, the handle is still the element.
+test("static waitForFunction resolves a getBy element handle", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end('<button id="go">Save</button>');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/`, { waitUntil: "commit" });
+    const handle = await p.getByRole("button", { name: "Save" }).elementHandle();
+    assert.equal(await p.waitForFunction((el) => el && el.id, handle), "go");
+    assert.equal(p._session, null);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

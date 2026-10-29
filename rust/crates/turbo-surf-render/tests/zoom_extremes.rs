@@ -74,3 +74,33 @@ async fn huge_zoom_is_capped_at_a_million_like_chrome156() {
         ])
     );
 }
+
+/// turbo-surf#124: at the capped zoom the border box (content + zoomed padding)
+/// saturates at the layout-unit range, and the computed width reports the saturated
+/// used content width. Chrome 156 (8078.47, headless, localhost).
+#[tokio::test(flavor = "current_thread")]
+async fn huge_zoom_saturates_the_border_box_like_chrome156() {
+    let mut page = PageSession::open(
+        "<body style=\"margin:0\"><div id=a style=\"zoom:1e30;width:100px;height:10px;padding:1px\">x</div>",
+        "http://127.0.0.1/",
+        "",
+        "",
+        10000,
+    )
+    .await
+    .unwrap();
+    let value: Value = serde_json::from_str(
+        &page
+            .eval_json_expression(
+                "(()=>{const a=document.getElementById('a'),r=a.getBoundingClientRect(),s=getComputedStyle(a);return [r.width,a.offsetWidth,s.width,r.height,a.offsetHeight,s.height]})()",
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    page.close();
+    assert_eq!(
+        value,
+        json!([33_554_432, 34, "31.5544px", 12_000_000, 12, "10px"])
+    );
+}

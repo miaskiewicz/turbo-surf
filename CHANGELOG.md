@@ -5,7 +5,7 @@
 turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of
 vendored or sibling-repo copies. For users of the npm launcher, the MCP binary,
 the PyPI wheel and the five Rust crates nothing is renamed and no tool or API
-changes; the visible differences are the Chrome-correct selector fixes, `t:*` in
+changes (beyond the MCP error shapes in review round 3); the visible differences are the Chrome-correct selector fixes, `t:*` in
 static screenshots and the live-geometry re-capture listed below. Dependency map:
 
 | was | now |
@@ -20,6 +20,16 @@ static screenshots and the live-geometry re-capture listed below. Dependency map
 Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
 `turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
 render → mcp.
+
+### Fixed (review round 3)
+- MCP stdio errors follow JSON-RPC 2.0 and MCP 2024-11-05 (#119): a failing tool
+  is a result with `isError: true` (was a `-32000` error); unknown methods answer
+  `-32601`, bad `tools/call` params and unknown tools `-32602`, non-request
+  messages `-32600`, and an unparseable line `-32700` with `id: null` (was
+  silently dropped); `ping` answers `{}`. The message text is unchanged.
+- `screenshot` refuses surfaces over 16384x16384 px and `screenshot`/`set_viewport`
+  a dimension over Chrome's 10,000,000 px bound; a 200000x200000 request used to
+  grow the server to 14 GB and stop it answering.
 
 ### Fixed (turbo-dom consolidation, coverage phase)
 - A style rule whose selector list Chrome drops (an unknown pseudo-class) now

@@ -49,11 +49,11 @@ fn stdio_server_answers_requests_with_jsonrpc_and_mcp_error_shapes() {
     assert_eq!(lines[0]["result"]["serverInfo"]["name"], "turbo-surf");
     assert_eq!(lines[0]["result"]["protocolVersion"], "2024-11-05");
     assert_eq!(
-        lines[1],
+        lines[2],
         json!({"jsonrpc":"2.0","id":"two","result":{"content":[{"type":"text","text":"{\"mode\":\"js\"}"}]}})
     );
     assert_eq!(
-        lines[2],
+        lines[1],
         json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}})
     );
     assert_eq!(

@@ -38,3 +38,36 @@ async fn unsupported_form_navigations_throw_a_named_type_error() {
         })
     );
 }
+
+/// turbo-surf#100: a `javascript:` action navigates to the javascript: URL, which runs its
+/// script in a later task of the same document (Chrome 156: `submit()` returns, the script
+/// sees the page's globals, the location is unchanged).
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#100: fails until the fix"]
+async fn javascript_form_action_runs_the_script_like_chrome156() {
+    let mut page = PageSession::open("<body>", "https://forms.test/page", "", "", 5000)
+        .await
+        .unwrap();
+    let raw = page
+        .eval_json_expression(
+            r#"new Promise(resolve=>{
+  const log=[];globalThis.hit=(x)=>log.push('ran:'+x);
+  const f=document.createElement('form');f.action="javascript:hit(typeof%20q)";
+  const input=document.createElement('input');input.name='q';input.value='v';f.append(input);document.body.append(f);
+  let r;try{f.submit();r='submitted';}catch(e){r=e.name+': '+e.message;}
+  log.push('sync:'+r+':'+log.length);
+  setTimeout(()=>{log.push('href:'+location.href);resolve(log);},200);
+})"#,
+        )
+        .await
+        .unwrap();
+    page.close();
+    assert_eq!(
+        serde_json::from_str::<Value>(&raw).unwrap(),
+        json!([
+            "sync:submitted:0",
+            "ran:undefined",
+            "href:https://forms.test/page"
+        ])
+    );
+}

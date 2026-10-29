@@ -7832,10 +7832,10 @@ let __taskEpoch = 0;
 // work (microtasks / the React scheduler) still drains promptly (it never advances the
 // clock); only delayed polls are time-gated.
 const __timerNow = () => ops.op_timer_clock();
-// The clock a timer task (and its microtasks) schedules from: the task's own due time,
-// not the host's elapsed real time, so a loaded host cannot reorder a task queued by a
-// task behind a rendering frame queued earlier (turbo-surf#101). Outside timer tasks, and
-// with real-time window timers, it is the live clock.
+// The clock an unclamped timer queued by a timer task (or its microtasks) counts its
+// delay from: that task's own due time, not the host's elapsed real time, so a loaded host cannot reorder a task queued by a
+// task behind a rendering frame queued earlier (turbo-surf#101). The nesting clamp, timers
+// outside timer tasks and real-time window timers use the live clock.
 let __taskBase = null, __taskBaseEpoch = -1;
 const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers ? __taskBase : __timerNow();
 const __realWindowTimers = ops.op_window_timers_realtime();
@@ -7853,16 +7853,17 @@ __G.resetTimerBudget = () => { __budgetBase = __timerNow(); };
 const __timerDocument = globalThis.document;
 const __activeTimers = new Map();
 const __timerGet = Map.prototype.get.bind(__activeTimers), __timerSet = Map.prototype.set.bind(__activeTimers), __timerDelete = Map.prototype.delete.bind(__activeTimers), __timerClear = Map.prototype.clear.bind(__activeTimers);
-const __createTimer = (name, repeat, handler, delay, args) => {
+const __createTimer = (name, repeat, handler, delay, args, rendering = false) => {
   const source=typeof handler === "function" ? null : ops.op_trusted_type_string(__timerDocument,handler,"TrustedScript","Window "+name,"Failed to execute '"+name+"' on 'Window': ");
   // Window timers take a signed32-bit delay before negative values clamp to zero.
   delay=(+delay)|0;if(delay<0)delay=0;
   // Chrome returns 0 for a string handler its CSP check rejects, without consuming an id.
   if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return 0;
   const id=__tid++;
-  const level=ops.op_timer_nesting(__timerDocument);
+  // A rendering frame is not a timer task: it neither nests nor is clamped (turbo-surf#101).
+  const level=rendering?-1:ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
-  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__taskClock()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args,sequence:ops.op_task_sequence()};
+  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:(nesting>6?__timerNow()+__timerMax(4,delay):__taskClock()+delay),delay,nesting,repeat,args,sequence:ops.op_task_sequence()};
   __timerSet(id,timer);__timerPush(timer);return id;
 };
 // A non-timer task (id 0: never cancellable, no timer id consumed) in the same
@@ -7941,7 +7942,7 @@ let __rafQueue = [], __frameSteps = [];
 // a step may queue more, so snapshot-and-clear each frame.
 let __renderingSteps = [], __viewTransitionSteps = [], __renderingSuppressed = false;
 // Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
-const __frameTimer = globalThis.setTimeout;
+const __frameTimer = (fn, delay) => __createTimer("setTimeout", false, fn, delay, [], true);
 // Web Animations frame host: the binding's handler for the next frame, the running frame's
 // time and the last frame time the between-frames document timeline advances from.
 let __animationFrame = null, __frameNow = null, __frameLast = null, __clockEpoch = -1, __clockTime = 0;

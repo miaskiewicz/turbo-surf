@@ -1,6 +1,25 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] — 2026-10-26 — turbo-dom consolidation
+
+turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of
+vendored or sibling-repo copies. For users of the npm launcher, the MCP binary,
+the PyPI wheel and the five Rust crates nothing is renamed and no tool or API
+changes; the visible differences are the Chrome-correct selector fixes, `t:*` in
+static screenshots and the live-geometry re-capture listed below. Dependency map:
+
+| was | now |
+|---|---|
+| vendored turbo-test binding (`scripts/vendor-browser-env.sh`) | `turbo-dom-browser-env` 0.6.0 |
+| turbo-html2pdf-core 0.3.9 (layout) | `turbo-dom-layout` 0.6.0 |
+| `turbo-surf-raster` (this workspace) | `turbo-dom-raster` 0.6.0 (not published from here any more) |
+| `turbo-surf-v8` / vendored rusty_v8 | `turbo-dom-v8` 150.4.0 (one V8 in the graph) |
+| vendored Deno extension JS | the Deno family 0.x.1 `embedded_sources` |
+| turbo-dom 0.5.8 | turbo-dom 0.6.0 |
+
+Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
+`turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
+render → mcp.
 
 ### Fixed (turbo-dom consolidation, coverage phase)
 - turbo-dom crates repinned to turbo-dom 0189e4d (browser-env #183/#184 panic fixes;
@@ -348,28 +367,6 @@
 - turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and
   HTMLOptionsCollection accessor definitions, #32 image accessors); the interceptor
   runtime control has no known gaps left.
-
-
-## [0.6.0] — 2026-10-26 — turbo-dom consolidation
-
-turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of
-vendored or sibling-repo copies. For users of the npm launcher, the MCP binary,
-the PyPI wheel and the five Rust crates nothing is renamed and no tool or API
-changes; the visible differences are the Chrome-correct selector fixes, `t:*` in
-static screenshots and the live-geometry re-capture listed below. Dependency map:
-
-| was | now |
-|---|---|
-| vendored turbo-test binding (`scripts/vendor-browser-env.sh`) | `turbo-dom-browser-env` 0.6.0 |
-| turbo-html2pdf-core 0.3.9 (layout) | `turbo-dom-layout` 0.6.0 |
-| `turbo-surf-raster` (this workspace) | `turbo-dom-raster` 0.6.0 (not published from here any more) |
-| `turbo-surf-v8` / vendored rusty_v8 | `turbo-dom-v8` 150.4.0 (one V8 in the graph) |
-| vendored Deno extension JS | the Deno family 0.x.1 `embedded_sources` |
-| turbo-dom 0.5.8 | turbo-dom 0.6.0 |
-
-Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
-`turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
-render → mcp.
 
 ### Changed (0.6.0 consolidation, final step)
 - Live geometry reads re-capture a stale capture: when the DOM changed between a

@@ -1335,7 +1335,7 @@ class Page {
       } else if (arg.getBy) {
         const g = arg.getBy;
         argExpr =
-          `(function(){ if (typeof __tsNs !== "undefined") __tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
+          `(function(){ __tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
           `var h=JSON.parse(globalThis.__RESULT||"[]"); var all=document.querySelectorAll("*"); return h[${arg.index}]?all[h[${arg.index}].idx]:undefined; })()`;
       } else {
         argExpr = "undefined";
@@ -1358,7 +1358,7 @@ class Page {
         await this._refreshFromSession();
       } else {
         try {
-          raw = native.evaluate(this._html, probe);
+          raw = native.evaluateEngine(this._html, `return ${probe};`);
         } catch {
           raw = null;
         }

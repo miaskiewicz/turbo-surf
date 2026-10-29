@@ -31,7 +31,6 @@ pub(crate) fn install<'s>(
     core: v8::Local<'s, v8::Object>,
     secure: bool,
 ) -> Result<(), String> {
-    let global = scope.get_current_context().global(scope);
     let namespace = crate::browser_env::engine_namespace(scope)
         .ok_or("native DOM function factory namespace missing")?;
     let key = v8::String::new(scope, "makeNativeFunction").unwrap();

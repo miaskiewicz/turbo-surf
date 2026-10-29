@@ -26,6 +26,7 @@ export function crawl(optsJson: string): Promise<string>;
 
 /** Evaluate JS against the page DOM → result as a string (no event loop). */
 export function evaluate(html: string, script: string): string;
+export function evaluateEngine(html: string, script: string): string;
 
 /** Run the page's own JS (promises/timers/fetch/cookies) → hydrated HTML. */
 export function render(html: string, baseUrl: string, script: string): string;

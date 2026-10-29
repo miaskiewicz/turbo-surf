@@ -78,9 +78,7 @@ async fn dom_quad_matches_chrome156() {
     let mut page = PageSession::open(&html, "https://quad.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval_engine("__tsNs.runTimers(200)")
-        .await
-        .unwrap();
+    page.eval_engine("__tsNs.runTimers(200)").await.unwrap();
     let got: Value =
         serde_json::from_str(&page.eval_json_expression("out").await.unwrap()).unwrap();
     let chrome: Value = serde_json::from_str(CHROME_156).unwrap();

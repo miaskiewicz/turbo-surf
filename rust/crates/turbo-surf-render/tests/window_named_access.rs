@@ -110,9 +110,7 @@ setTimeout(()=>{{out.timer=true}},0);
     let mut page = PageSession::open(&html, "https://engine-names.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval_engine("__tsNs.runTimers(200)")
-        .await
-        .unwrap();
+    page.eval_engine("__tsNs.runTimers(200)").await.unwrap();
     let got: Value =
         serde_json::from_str(&page.eval_json_expression("out").await.unwrap()).unwrap();
     assert_eq!(

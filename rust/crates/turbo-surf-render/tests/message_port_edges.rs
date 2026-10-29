@@ -32,9 +32,7 @@ async fn neutered_closed_and_late_started_ports_match_chrome() {
     let mut page = PageSession::open(&html, "https://ports.test/", "", "", 5000)
         .await
         .unwrap();
-    page.eval_engine("__tsNs.runTimers(200)")
-        .await
-        .unwrap();
+    page.eval_engine("__tsNs.runTimers(200)").await.unwrap();
     let log: serde_json::Value =
         serde_json::from_str(&page.eval_json_expression("log").await.unwrap()).unwrap();
     let chrome: serde_json::Value = serde_json::from_str(CHROME_156).unwrap();

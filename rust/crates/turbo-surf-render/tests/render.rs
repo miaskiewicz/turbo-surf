@@ -3,9 +3,9 @@
 //! each V8 platform initialization in its own process (the binding's standalone-V8
 //! tests run in the turbo-dom-browser-env crate).
 
-use turbo_surf_render::{run_engine_with_dom, 
+use turbo_surf_render::{
     render_html, render_html_async, render_hydrate, render_hydrate_with_budget, render_page,
-    render_page_pooled, render_page_with_budget, run_with_dom, PageSession,
+    render_page_pooled, render_page_with_budget, run_engine_with_dom, run_with_dom, PageSession,
     DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
 };
 
@@ -145,7 +145,10 @@ fn internal_globals_are_off_window() {
         "return [typeof __tsNs.runTimers, typeof __tsNs.hydrate].join()",
     )
     .unwrap();
-    assert_eq!(engine, "function,function", "runTimers/hydrate reachable by the engine");
+    assert_eq!(
+        engine, "function,function",
+        "runTimers/hydrate reachable by the engine"
+    );
     // The Symbol namespace is a Symbol key (not a string), so it's absent from getOwnPropertyNames.
     assert_eq!(
         v["nsSymbolInNames"], false,
@@ -2088,7 +2091,8 @@ async fn readable_stream_and_abort_controller_present() {
         "ReadableStream reader must yield chunks: {html}"
     );
     assert!(
-        html.contains(r#"data-abort="false->true""#),
+        // Chrome 156 escapes `>` in serialized attribute values.
+        html.contains(r#"data-abort="false-&gt;true""#),
         "AbortController.abort must flip signal: {html}"
     );
 }
@@ -3139,17 +3143,31 @@ async fn createobjecturl_anchor_download_is_captured() {
         a.setAttribute('download', 'template.csv');
         a.setAttribute('href', url);
         a.click();
-        var d = (__tsNs.downloads || [])[0] || {};
-        document.body.setAttribute('data-fn', String(d.filename));
-        document.body.setAttribute('data-content', String(d.content));
       </script></body>"#;
-    let out = render_hydrate(html, "https://example.test/").await.unwrap();
-    assert!(
-        out.contains(r#"data-fn="template.csv""#),
+    let mut session = PageSession::open(
+        html,
+        "https://example.test/",
+        "",
+        "",
+        DEFAULT_RENDER_BUDGET_MS,
+    )
+    .await
+    .expect("session opens");
+    // The capture lives on the engine namespace, which only driver scripts reach.
+    let out = session
+        .eval_engine_json_expression("((__tsNs.downloads || [])[0] || {})")
+        .await
+        .unwrap();
+    session.close();
+    let download: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        download["filename"], "template.csv",
         "download filename must be captured: {out}"
     );
     assert!(
-        out.contains("a,b,c"),
+        download["content"]
+            .as_str()
+            .is_some_and(|c| c.contains("a,b,c")),
         "download blob content must be captured: {out}"
     );
 }
@@ -3964,7 +3982,9 @@ async fn hover_reveals_css_hover_menu() {
         .unwrap();
     assert_eq!(before, "", "no inline visibility before hover");
     session
-        .eval_engine(r#"__tsNs.tcApplyHover(document.getElementById('m')); globalThis.__RESULT = 'ok';"#)
+        .eval_engine(
+            r#"__tsNs.tcApplyHover(document.getElementById('m')); globalThis.__RESULT = 'ok';"#,
+        )
         .await
         .unwrap();
     let after = session

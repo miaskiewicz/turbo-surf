@@ -144,7 +144,13 @@ pub(crate) fn install<'s>(
             .call(
                 scope,
                 undefined.into(),
-                &[core.into(), factory.into(), frame_window.into(), scheduler, namespace.into()],
+                &[
+                    core.into(),
+                    factory.into(),
+                    frame_window.into(),
+                    scheduler,
+                    namespace.into(),
+                ],
             )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {

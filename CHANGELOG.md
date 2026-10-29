@@ -27,7 +27,14 @@ render → mcp.
   use `PageSession::eval_engine*`, `run_engine_with_dom` or the napi
   `liveEvalEngine`, which bind it to `__tsNs`; the playwright shim uses them.
 - `window` keeps Chrome's Window -> WindowProperties -> EventTarget chain with the
-  binding's own Window interface work (turbo-dom#223).
+  binding's own Window interface work (turbo-dom#223); the stock-engine global is
+  a `Window` instance with an immutable prototype, so `Object.setPrototypeOf(window, …)`
+  throws a TypeError as in Chrome 156.
+- The playwright shim's static `waitForFunction` resolves a getBy element handle
+  through the new napi `evaluateEngine` (`run_engine_with_dom`).
+- Template-contents (inert) documents answer `hidden`/`visibilityState` like Chrome
+  156 again now that the binding keeps document members on `Document.prototype`
+  (turbo-dom#221).
 
 ### Fixed (review round 3)
 - MCP stdio errors follow JSON-RPC 2.0 and MCP 2024-11-05 (#119): a failing tool

@@ -15,6 +15,42 @@ pub(super) mod window_proxy {
     pub(in crate::runtime) fn location_url(_: v8::Local<v8::Context>) -> Option<String> {
         None
     }
+    fn illegal_window_constructor(
+        scope: &mut v8::PinScope,
+        args: v8::FunctionCallbackArguments,
+        _result: v8::ReturnValue,
+    ) {
+        let text = if args.new_target().is_undefined() {
+            "Illegal constructor"
+        } else {
+            "Failed to construct 'Window': Illegal constructor"
+        };
+        let message = v8::String::new(scope, text).unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+    }
+
+    /// The main realm's global is a `Window` instance whose [[SetPrototypeOf]] refuses any
+    /// other prototype, as in Chrome (an immutable-prototype exotic object); the binding
+    /// completes the chain above `Window.prototype` (turbo-dom#223).
+    pub(in crate::runtime) fn template<'s>(
+        scope: &mut v8::PinScope<'s, '_, ()>,
+        _template: v8::Local<'s, v8::ObjectTemplate>,
+    ) -> v8::Local<'s, v8::ObjectTemplate> {
+        let constructor = v8::FunctionTemplate::new(scope, illegal_window_constructor);
+        let name = v8::String::new(scope, "Window").unwrap();
+        constructor.set_class_name(name);
+        constructor.read_only_prototype();
+        let template = constructor.instance_template(scope);
+        template.set_with_attr(
+            name.into(),
+            constructor.into(),
+            v8::PropertyAttribute::DONT_ENUM,
+        );
+        template.set_immutable_proto();
+        template
+    }
+
     pub(in crate::runtime) fn context<'s>(
         scope: &mut v8::PinScope<'s, '_>,
         _previous: Option<v8::Local<'s, v8::Context>>,

@@ -109,7 +109,7 @@ async fn nested_peer_dispatch_releases_each_queued_batch_before_guest_callbacks(
     let profile = BrowserStorage::default();
     let mut source = open(profile.new_tab().unwrap(), "source").await;
     let mut peer = open(profile.new_tab().unwrap(), "receiver").await;
-    peer.eval_engine_expression("globalThis.received=0;globalThis.nested=0;const frame=document.createElement('iframe');document.body.append(frame);frame.contentWindow.addEventListener('storage',()=>{received++;nested++});addEventListener('storage',()=>{received++;__tsNs.runTimers()})").await.unwrap();
+    peer.eval_engine("globalThis.received=0;globalThis.nested=0;const frame=document.createElement('iframe');document.body.append(frame);frame.contentWindow.addEventListener('storage',()=>{received++;nested++});addEventListener('storage',()=>{received++;__tsNs.runTimers()})").await.unwrap();
     for round in 0..24 {
         source
             .eval_expression(&format!(

@@ -5621,13 +5621,12 @@ fn allocate_frame<'s>(
         install_document_facts(scope, facts);
         window_proxy::install_document(scope);
 
-        let namespace = crate::browser_env::engine_namespace(scope)
-            .ok_or_else(|| {
-                storage_events::retire(context);
-                context.set_slot(Rc::new(FrameRetired));
-                crate::context_ownership::release_parent(scope, context);
-                JsErrorBox::generic("frame initialization was interrupted")
-            })?;
+        let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
+            storage_events::retire(context);
+            context.set_slot(Rc::new(FrameRetired));
+            crate::context_ownership::release_parent(scope, context);
+            JsErrorBox::generic("frame initialization was interrupted")
+        })?;
         let name = v8::String::new(scope, "isFrame").unwrap();
         let flag = v8::Boolean::new(scope, true);
         namespace.set(scope, name.into(), flag.into());
@@ -6855,7 +6854,11 @@ fn install_environment<'s>(
     if let Some(function) = function {
         let receiver = v8::undefined(scope);
         if function
-            .call(scope, receiver.into(), &[core, web_factory.into(), namespace.into()])
+            .call(
+                scope,
+                receiver.into(),
+                &[core, web_factory.into(), namespace.into()],
+            )
             .is_some()
         {
             crate::browser_env::capture_popover_scheduler(scope);
@@ -12110,7 +12113,9 @@ __G.domSig = (() => {
   // document already gets its own answer (null without a browsing context).
   __documentRuntimeState.members = __newDocumentMembers();
   for (const name of ["close", "open", "write", "writeln", "createEvent", "createNodeIterator", "createRange", "createTreeWalker", "elementFromPoint", "elementsFromPoint", "hasFocus", "implementation", "adoptedStyleSheets", "styleSheets", "contentType", "hidden", "visibilityState", "fullscreenElement"]) {
-    const descriptor = Object.getOwnPropertyDescriptor(__document, name);
+    // The binding moves bootstrap members off the document onto Document.prototype
+    // (Chrome's document owns only `location`, turbo-dom#221): capture either.
+    const descriptor = Object.getOwnPropertyDescriptor(__document, name) ?? Object.getOwnPropertyDescriptor(Document.prototype, name);
     if (!descriptor || descriptor.configurable === false) continue;
     __documentRuntimeState.members.set(name, descriptor);
     if (typeof descriptor.value === "function") {
@@ -12695,7 +12700,6 @@ fn make_runtime_with_storage_and_options(
         inspector: std::env::var_os("TURBO_SURF_JS_TRACE").is_some(),
         extensions: {
             let extension = turbo_dom::init();
-            #[cfg(turbo_surf_native_proxy)]
             let extension = {
                 let mut extension = extension;
                 extension.global_template_middleware = Some(window_proxy::template);
@@ -15274,7 +15278,10 @@ impl PageSession {
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
                 let value = if engine {
-                    let body = format!("return (\n{}\n)", expression.trim_end().trim_end_matches(';'));
+                    let body = format!(
+                        "return (\n{}\n)",
+                        expression.trim_end().trim_end_matches(';')
+                    );
                     execute_engine_script(&mut self.rt, &body)?
                 } else {
                     self.rt
@@ -15855,7 +15862,11 @@ mod window_timer_task_tests {
     async fn legacy_reentrancy() {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        execute_engine_script(&mut page.rt, "setTimeout(()=>{setTimeout(()=>{},0);__tsNs.runTimers(1);setTimeout(()=>{},0);},0)").unwrap();
+        execute_engine_script(
+            &mut page.rt,
+            "setTimeout(()=>{setTimeout(()=>{},0);__tsNs.runTimers(1);setTimeout(()=>{},0);},0)",
+        )
+        .unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
         assert_eq!(turn.fired, 1);
         assert_eq!(turn._task.as_ref().unwrap().nesting.level.get(), 1);

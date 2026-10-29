@@ -10,8 +10,8 @@ mod session;
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
 pub use session::{
-    live_close, live_cookies, live_eval, live_eval_engine, live_eval_expression, live_network_log, live_open,
-    live_serialize,
+    live_close, live_cookies, live_eval, live_eval_engine, live_eval_expression, live_network_log,
+    live_open, live_serialize,
 };
 
 use napi::bindgen_prelude::*;
@@ -410,6 +410,15 @@ fn parse_field(spec: &Value) -> Field {
 pub fn evaluate(html: String, script: String) -> Result<String> {
     ensure_render_init();
     turbo_surf_render::run_with_dom(&html, &script).map_err(Error::from_reason)
+}
+
+/// [`evaluate`] for a driver script that needs the engine namespace: `script` is a
+/// function body whose `__tsNs` parameter is the namespace and whose `return` value
+/// is read (turbo-dom#222).
+#[napi]
+pub fn evaluate_engine(html: String, script: String) -> Result<String> {
+    ensure_render_init();
+    turbo_surf_render::run_engine_with_dom(&html, &script).map_err(Error::from_reason)
 }
 
 /// Run the page's own `script` over its DOM (promises/await + virtual timers +

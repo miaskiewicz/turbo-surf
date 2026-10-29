@@ -5026,3 +5026,33 @@ async fn frame_native_location_reseeds_pooled_pages_and_reads_components() {
         assert!(html.contains("data-child=\"true\""), "{base}: {html}");
     }
 }
+
+// A watchdog terminate that lands while the runtime is still installing the DOM
+// (a slow or contended host) must still stop the runaway script.
+#[test]
+fn runaway_script_stops_when_budget_expires_during_setup() {
+    for budget in [0, 1, 2, 3, 5, 8, 13, 20] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let r = rt.block_on(render_page_with_budget(
+                "<body><div id='app'></div></body>",
+                "https://x.test/",
+                "while (true) {}",
+                budget,
+            ));
+            let _ = tx.send(r);
+        });
+        let r = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .unwrap_or_else(|_| panic!("budget {budget}ms: runaway script never stopped"));
+        let err = r.unwrap_err();
+        assert!(
+            err.contains("budget exceeded"),
+            "budget {budget}ms got: {err}"
+        );
+    }
+}

@@ -80,7 +80,7 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-**v0.6.0** — the turbo-dom consolidation release
+Status: **v0.6.0 — the turbo-dom consolidation release**
 ([npm](https://www.npmjs.com/package/turbo-surf)). The engine ships hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl

@@ -57,17 +57,41 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.6.0 — Rust engine** ([npm](https://www.npmjs.com/package/turbo-surf)).
-A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
+## Built on turbo-dom
+
+Since 0.6.0 turbo-surf keeps no copies of shared engine code: it links the
+[turbo-dom](https://github.com/miaskiewicz/turbo-dom) crates that turbo-test and
+turbo-html2pdf use too —
+
+- **`turbo-dom`** — HTML parser, copy-on-write DOM, CSSOM and the one selector engine;
+- **`turbo-dom-layout`** — style cascade and layout behind live geometry
+  (`getBoundingClientRect`, scroll, ranges) and the screenshot tier;
+- **`turbo-dom-raster`** — the synthetic-screenshot painter (PNG/SVG, canvas 2D, WebGL
+  recorder), formerly `turbo-surf-raster`;
+- **`turbo-dom-browser-env`** — the browser-environment binding JS that the render tier
+  installs into its V8 isolate (formerly copied in by a vendoring script);
+- **`turbo-dom-v8`** — the rusty_v8 fork under the render tier's V8 (through
+  `turbo-surf-deno-v8`).
+
+The surf workspace (`rust/`) has eight crates: `turbo-surf-core` (network, cookies,
+crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped page API),
+`-render` (the `deno_core` V8 render tier), `-mcp` (the MCP server binary),
+`-transform`, and the `-napi` / `-py` bindings.
+
+## Status
+
+**v0.6.0** — the turbo-dom consolidation release
+([npm](https://www.npmjs.com/package/turbo-surf)). The engine ships hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
 orchestration (global + per-host concurrency, token-bucket politeness, backoff/retry,
 canonical dedupe, depth/page caps), structured extraction, CSS+XPath query, a
 no-Chromium JS render tier (a true V8 isolate over the native DOM) with re-enterable
 live-heap `eval_js`/`inject_js` + a DOM-history trail, **synthetic screenshots**
-(PNG/SVG from a native layout+paint of any HTML snapshot — still no browser), and a
-80-tool MCP server (native binary). Benchmarked against real browsers + other
-crawlers (below).
+(PNG/SVG from a native layout+paint of any HTML snapshot — still no browser), and an
+80-tool MCP server (native binary). Chrome parity is measured, not complete — see
+[Chrome parity (0.6.0)](#chrome-parity-060). Benchmarks are pending a re-run
+([below](#benchmarks--pending-re-run)).
 
 ## Install
 
@@ -90,9 +114,9 @@ tag ships the PyPI wheels.
 
 | Artifact | Registry | What it is | For |
 |---|---|---|---|
-| [`turbo-surf`](https://www.npmjs.com/package/turbo-surf) | **npm** | A thin launcher (`cli.js`/`index.js`) **+ prebuilt `turbo-surf-mcp` binaries** for each platform in `bin/` (darwin x64/arm64, linux x64/arm64-gnu, win x64). `npx` resolves the right one and spawns it. | Running the **MCP server** / CLI. No Rust toolchain, no Chromium, no Node hosting Rust. |
+| [`turbo-surf`](https://www.npmjs.com/package/turbo-surf) | **npm** | A thin launcher (`cli.js`/`index.js`) **+ prebuilt `turbo-surf-mcp` binaries** for each platform in `bin/` (darwin arm64, linux x64/arm64-gnu, win x64; Intel macOS builds from source). `npx` resolves the right one and spawns it. | Running the **MCP server** / CLI. No Rust toolchain, no Chromium, no Node hosting Rust. |
 | [`turbo-surf`](https://pypi.org/project/turbo-surf/) | **PyPI** | A PyO3 binding, shipped as prebuilt abi3 wheels (CPython 3.8+) for Linux (x86_64/aarch64), macOS (arm64), Windows (x64). | Calling the engine **from Python** — `markdown`/`text`/`links`/`extract`/`render`/…. No Rust toolchain, no Chromium. |
-| `turbo-surf-core`, `-view`, `-page`, `-render`, `-raster`, `-mcp` | **crates.io** | The Rust crates, in dependency order (`-raster` = the synthetic screenshot tier). | **Embedding** the engine in a Rust program. |
+| `turbo-surf-core`, `-view`, `-page`, `-render`, `-mcp` | **crates.io** | The Rust crates, in dependency order (the screenshot tier is turbo-dom's `turbo-dom-raster`). | **Embedding** the engine in a Rust program. |
 
 The `turbo-surf-napi` cdylib and `turbo-surf-transform` crate are **not**
 published — napi is for the dev harness + the Playwright shim only. The Playwright
@@ -368,52 +392,51 @@ for acceptance results and remaining limits.
 A shell must be executed before classifying the final outcome; `/sorry` alone does not
 prove IP reputation is the cause.
 
-The October17 implementation (`a005140`) passes full stock/native155 workspace gates
-(1,411/1,456 tests), strict checks and rebuilt addon/Node/CDP controls. Fresh API
-measurement still records64 original-interface missing own members and374
-measured descriptor differences. In its frozen two-repeat Google run, both Chrome
-and native baselines receive429 with no SERP markers; native homepage hydration
-also exhausts its20-second budget. These are explicit remaining limits, not a
-claim of full Chrome parity. See the [current evidence](./harness/detection/FINDINGS.md)
-and [remaining work](./harness/detection/PARITY-GAPS.md).
+### Chrome parity (0.6.0)
 
-The October20 collector checkpoint is546d511. The full stock/native workspace
-gates pass1,451/1,496 Rust tests on their recorded3a77122 source, with strict
-checks and formatting. The later collector repair passes200 Node22 detection
-tests without skips,191 Node20 tests with nine documented browser skips,
-sixteen paired controls and the focused Rust resource control. Explicit source
-bridges preserve the unchanged optimized native engine and earlier addon results.
+Remeasured on 2026-10-29 (turbo-surf 166d2d6, turbo-dom 0189e4d) against frozen headless
+Chrome 156.0.8078.47 / V8 15.6.75.19, localhost only, with the stock V8 15.0 engine and all
+four features (`impersonate`, `trust-anchors`, `gpu-metal`, `coretext`):
 
-That October20 signed-out comparison reached a real HTTP200 search with nine result
-markers in one Chrome baseline. The other Chrome baseline stopped before typing
-because consent dismissal had no observable effect and the query was obscured.
-Both native baselines completed all six actions, saved consent through native
-requests and used native form navigation, but ended at HTTP429 with zero results.
-Early native homepage hydration still exceeded its budget; a completed final429
-document does not erase that earlier failure. Native SERP clearance is unresolved.
+| measure | before | 0.6.0 |
+|---|---|---|
+| API inventory, same 75 interfaces: missing own members | 142 (Chrome 155, 2026-10-21); 52 (0.5.5) | **2** (`HTMLCanvasElement` `captureStream`, `transferControlToOffscreen`) |
+| API inventory difference paths | 374; 264 | **4** (370 resolved, none introduced) |
+| Render parity, surf corpora (383 outputs) | — | 52 changed, all declared (turbo-dom#142, #176); 0 undeclared |
 
-The October21 startup follow-up adds shared immutable font programs, per-read
-ancestor snapshots, selector-first CSS matching and timer task checkpoints with
-measured per-Window nesting. Its latest optimized all-feature homepage diagnostic
-completes HTTP200 hydration under the unchanged20-second budget:16.35s whole run
-and957MB peak RSS including profiling. Current combined gates pass1,509 native
-and1,464 stock Rust tests, strict checks, formatting and rebuilt addon consumers.
-In the fresh9304df9 Google run, both native baselines finish initial hydration
-with one pump inside the unchanged budget, save consent and submit real forms,
-then end429 with zero results. The two interface-instrumented captures still
-exhaust initial hydration. Chrome consent clicks have no observed save effect
-in either baseline, so the latest SERP comparison is incomplete. Homepage
-completion does not establish search clearance or full timing parity. The known CSSOM
-color-sync and selector-admission gaps remain explicitly tracked in issue28.
+These are descriptor/ownership measurements, not a claim of full Chrome parity. The
+comparison crosses an oracle change (Chrome 155 → 156) and an engine change.
+Google SERP acceptance for 0.6.0 is a separate run: see GOOGLE-SERP-0.6.0 (pending,
+[turbo-surf#114](https://github.com/miaskiewicz/turbo-surf/issues/114)).
 
-The current75-interface audit records142 missing own members across its expanded
-inventory, including64 in the original four interfaces, and374 difference paths.
-These are descriptor/ownership measurements, not142 wholly absent features.
-See the [fresh evidence](./harness/detection/FINDINGS.md),
-[exact configuration](./harness/detection/CHROME-PARITY-RUNBOOK.md) and
-[remaining work](./harness/detection/PARITY-GAPS.md). Audio stays in issue27;
-the other measured residuals, including live clearance and consent reliability,
-stay in issue28. Full Chrome parity is not established.
+Known gaps, each tracked in its own issue:
+[unhandledrejection](https://github.com/miaskiewicz/turbo-surf/issues/103),
+[workers](https://github.com/miaskiewicz/turbo-surf/issues/104),
+[container queries in live layout](https://github.com/miaskiewicz/turbo-surf/issues/105),
+[canvas captureStream / offscreen / PiP, WebGL](https://github.com/miaskiewicz/turbo-surf/issues/106),
+[IndexedDB](https://github.com/miaskiewicz/turbo-surf/issues/107),
+[placeholder APIs (caches, cookieStore, Navigation, locks, WebSocket)](https://github.com/miaskiewicz/turbo-surf/issues/108),
+[fetch/stream residuals](https://github.com/miaskiewicz/turbo-surf/issues/109),
+[CSP directives / reporting](https://github.com/miaskiewicz/turbo-surf/issues/110),
+[child-frame form navigation](https://github.com/miaskiewicz/turbo-surf/issues/111),
+[V8 15.0 vs 15.6](https://github.com/miaskiewicz/turbo-surf/issues/112),
+[transport identity](https://github.com/miaskiewicz/turbo-surf/issues/113),
+[Google SERP](https://github.com/miaskiewicz/turbo-surf/issues/114),
+[GC / memory reclamation](https://github.com/miaskiewicz/turbo-surf/issues/115),
+[Observable / `document.domain`](https://github.com/miaskiewicz/turbo-surf/issues/116),
+audio ([#27](https://github.com/miaskiewicz/turbo-surf/issues/27)); in turbo-dom:
+[XPath](https://github.com/miaskiewicz/turbo-dom/issues/185),
+[XML parsing](https://github.com/miaskiewicz/turbo-dom/issues/186),
+[CSS animations](https://github.com/miaskiewicz/turbo-dom/issues/187),
+[focus / pickers / dialog](https://github.com/miaskiewicz/turbo-dom/issues/188),
+[FileList / selector error text](https://github.com/miaskiewicz/turbo-dom/issues/189),
+[RTL / vertical writing / quirks](https://github.com/miaskiewicz/turbo-dom/issues/190),
+[shaping / font metrics](https://github.com/miaskiewicz/turbo-dom/issues/191),
+[inset box-shadow](https://github.com/miaskiewicz/turbo-dom/issues/192), plus the
+block/table layout residuals already filed there. Measurement history:
+[findings](./harness/detection/FINDINGS.md),
+[runbook](./harness/detection/CHROME-PARITY-RUNBOOK.md),
+[remaining work](./harness/detection/PARITY-GAPS.md).
 
 
 ---
@@ -666,122 +689,18 @@ Fatal faults (malformed schema JSON, a render-tier failure) raise
 `turbo_surf.TurboSurfError`; the non-JS views never raise. Full function table:
 [`rust/crates/turbo-surf-py/README.md`](./rust/crates/turbo-surf-py/README.md).
 
-## Competitive benchmark
+## Benchmarks — pending re-run
 
-`harness/competitive/` runs the **same Playwright script** on turbo-surf and a
-fleet of real browsers, scoring output **parity** against a Chromium oracle and
-timing each. `npm run harness`. turbo-surf drives every routine through its native
-engine — turbo-dom + a `deno_core` V8 render tier for page JS — with **no Chromium**.
-Median ms over 8 runs (live network), parity is each engine's observations vs the
-Chromium oracle:
-
-| engine | wikipedia | js-quotes | parity |
-|---|---|---|---|
-| **turbo-surf (no-JS)** | **142** | — *(needs JS)* | ✓ |
-| **turbo-surf (JS)** | —‡ | **132** | ✓ |
-| chromium *(oracle)* | 932 | 933 | — |
-| firefox | 727 | 925 | ✓ |
-| webkit | 1232 | 964 | ✓ |
-
-Every engine produces the **same observations** as Chromium / Firefox / WebKit
-(parity ✓) — and turbo-surf is the **fastest in the table** on both axes. The
-Wikipedia click-through runs in **142 ms** (**~6.6× faster than Chromium**, 932),
-and the **real jQuery on `quotes.toscrape.com/js`** — the same 10 quotes Chromium
-extracts — in **132 ms** (**~7× faster than Chromium**, 933), inside a true V8
-isolate over a native rtdom DOM, **no Chromium process**. It stays network-bound
-via a **pooled HTTP client** (connection/TLS reuse across pages), a **persistent V8
-isolate** whose **DOM install is reused across same-page `page.evaluate`s** (parse
-once per page, ~0.5 ms/call after; a different page gets a fresh realm), an **external-script cache** (jQuery fetched
-once, not per page), a **per-page parse cache**, and a back-forward snapshot cache
-so `goBack` restores instead of re-fetching. Profilers: `cargo bench -p
-turbo-surf-view` (Rust microbench) + `harness/hotpath/rust-hotpath.mjs`.
-
-‡ JS mode runs the *page's own* scripts; on a server-rendered page like Wikipedia
-that over-runs (use no-JS there — 142 ms, 4/4). The `form` routine is omitted this
-run (httpbin.org was returning 503/timeouts for every engine).
-
-The harness auto-detects installed engines (`firefox`/`webkit`, and anti-detect
-browsers like `playwright-extra`/`patchright`/`rebrowser-playwright`); see
-[harness/competitive/README.md](./harness/competitive/README.md). (Numbers are
-network-bound and machine/run dependent.)
-
-## Crawler-vs-crawler benchmark
-
-`harness/crawlers/` races turbo-surf against other open-source crawlers on a
-real, paginated site — **same** 20-page same-host crawl of `books.toscrape.com`,
-**same** ~150 ms per-request politeness on every engine, items counted with the
-**same** CSS selector. Median of 3 timed runs, live network (`npm run
-crawl-bench`):
-
-| crawler | runtime model | items | median ms | pages/s |
-|---|---|---|---|---|
-| crawlee `CheerioCrawler` | Node | 339 | 2767 | 7.2 |
-| **turbo-surf (no-js)** | **native Rust, browserless** | 339 | 3271 | **6.1** |
-| spider-rs | Rust + N-API | 194 | 3486 | 5.7 |
-| got + cheerio (hand-rolled) | Node | 339 | 5590 | 3.6 |
-| node-crawler (`crawler`) | Node | 339 | 49624 | 0.4 |
-| Scrapy | Python *(subprocess)* | 246 | 49270 | 0.4 |
-| Colly | Go *(subprocess)* | 320 | 45664 | 0.4 |
-
-**Head-to-head vs CheerioCrawler** (the closest competitor) — the **same** 20-page
-crawl, `maxConcurrency = 2`, median of 5 warm runs
-(`node harness/crawlers/head-to-head.mjs`). With throttling **off** (raw engine
-speed — the truest apples-to-apples, since the two *throttle models* differ)
-turbo-surf is clearly ahead:
-
-| engine | politeness | median ms | pages/s |
-|---|---|---|---|
-| **turbo-surf (no-js)** | none (raw) | **1977** | **10.1** |
-| crawlee CheerioCrawler | none (raw) | 2748 | 7.3 |
-| crawlee CheerioCrawler | 150 ms rate | 2634 | 7.6 |
-| **turbo-surf (no-js)** | 150 ms (strict) | 3307 | 6.0 |
-
-Raw, **turbo-surf is ~1.4× faster**. Under the "150 ms politeness" rows it looks
-slower only because turbo-surf's per-host gate is a **strict** interval (it really
-waits 150 ms between requests), whereas crawlee's `maxRequestsPerMinute` is a
-lenient sliding window that lets a short 20-page burst through near-raw. Same
-content (339 items), no browser.
-
-At equal politeness the multi-engine wall-clock is **network-bound**, so the
-in-process crawlers cluster together: turbo-surf sits in the **top tier** alongside
-the dedicated speed engines (crawlee, spider-rs) and ahead of a hand-rolled
-got+cheerio loop — while extracting equivalent content and running **no
-browser**. turbo-surf runs the whole BFS — fetch, parse, same-host gate, per-page
-item count — in its native Rust engine, and is **~13× ahead of Scrapy / Colly**.
-The heavyweight
-engines trail ~15×: Scrapy and Colly pay a fresh
-process startup per crawl (the harness shells out to their CLIs), and
-node-crawler's per-request overhead is high. turbo-dom's raw parse advantage
-doesn't show here — at 20 live pages, network swamps a sub-millisecond parse;
-it shows in-memory instead (links ~18k/s, crawl ~14k pages/s, below). And unlike
-every engine in this table, the *same* turbo-surf also runs Playwright scripts
-(parity table above).
-
-### JS-executing crawlers — turbo-surf vs real browsers
-
-The other set targets `quotes.toscrape.com/js`, where quotes are built
-client-side (a non-JS crawler sees ~0). turbo-surf runs the page's own scripts in
-a true V8 isolate over its native DOM, while every competitor drives a **real
-headless Chromium** (`npm run crawl-bench:js`, 11 pages, median of 3):
-
-| crawler | JS engine | items | median ms | pages/s |
-|---|---|---|---|---|
-| **turbo-surf (JS)** | **V8 isolate, no browser** | 110 | **3031** | **3.63** |
-| crawlee `PuppeteerCrawler` | headless Chromium | 110 | 4330 | 2.54 |
-| crawlee `PlaywrightCrawler` | headless Chromium | 110 | 5569 | 1.98 |
-| puppeteer-cluster | headless Chromium | 110 | 20024 | 0.55 |
-
-turbo-surf runs each page's own scripts in a **true V8 isolate** over the native
-rtdom DOM (the same path that renders `quotes.toscrape.com/js`, external scripts
-cached across pages) — the **fastest engine here**, extracting the same 110 quotes
-a real browser does **~1.4–6.6× faster than the browser-driving crawlers**, with no
-Chromium process and honoring the 150 ms politeness delay. Running page JS in a
-true isolate against a lightweight DOM is rare — most crawlers either drive a full
-browser (this table) or use an in-process fake DOM with no real isolation. See
-[harness/crawlers/README.md](./harness/crawlers/README.md) — competitors
-auto-detect and missing ones are skipped; install them with
-`npm i -D @spider-rs/spider-rs crawlee cheerio got crawler` (+ `brew install
-pipx go && pipx install scrapy` for Scrapy/Colly). (Machine/run dependent.)
+0.6.0 has not been re-benchmarked: the DOM, layout, raster and browser-environment code
+moved into the shared turbo-dom crates and the render tier moved engines in this release,
+so the earlier numbers no longer describe the shipped code. A re-run of all four turbo-*
+repos together is planned after the release. The last measured (pre-consolidation) runs
+— the Playwright-routine comparison against Chromium/Firefox/WebKit and the
+crawler-vs-crawler races — are kept in
+[`docs/BENCHMARKS-history.md`](./docs/BENCHMARKS-history.md). Harnesses:
+[`harness/competitive/`](./harness/competitive/README.md) (`npm run harness`) and
+[`harness/crawlers/`](./harness/crawlers/README.md) (`npm run crawl-bench`,
+`crawl-bench:js`).
 
 ## Development
 
@@ -803,9 +722,21 @@ gate, and runs the **Playwright shim** suites (`npm run test:playwright` =
 `register.mjs`, no Chromium). `npm run harness` / `crawl-bench` / `hotpath` run the
 benchmarks (install `playwright` + `crawlee` ad-hoc for the competitor engines).
 
-CI also gates line coverage (`cd rust && cargo tarpaulin`, `rust/tarpaulin.toml`) and
-cyclomatic complexity (`npm run complexity:rust` / `complexity:js`, cc <= 15 per function);
-see [`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md).
+### Gates
+
+PR CI (`.github/workflows/ci.yml`) runs on ubuntu:
+
+- **lint + test** on Node 20 and 22 (launcher lint, the Rust workspace, the Playwright shim).
+- **Coverage, blocking**: a sharded `cargo tarpaulin` (`coverage-shard` matrix: render,
+  mcp, and core+view+page+transform), merged by the `coverage` job, which fails below the
+  workspace `fail-under` (93.0, `rust/tarpaulin.toml`) or any per-crate floor in
+  `rust/coverage-floors.json` — render 95.0, core 99.4, mcp 99.6, view 99.9, page and
+  transform 100; the napi/py bindings are excluded.
+- **Complexity, report-only**: `complexity / rust` and `complexity / js` (cc <= 15 per
+  function) run with `continue-on-error` until the post-0.6.0 refactor clears the backlog.
+
+macOS, Windows and Linux binaries and wheels are built only by the release workflows
+(`release.yml`, `release-py.yml`). Details: [`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md).
 
 ## License
 

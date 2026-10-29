@@ -148,6 +148,14 @@ npx turbo-surf-mcp          # stdio MCP server (80 tools), e.g.:
 # session:     get_cookies, set_cookie, set_extra_headers, robots_check
 ```
 
+The server speaks newline-delimited JSON-RPC 2.0 (MCP `2024-11-05`, `ping`
+included). A tool that runs and fails answers a normal result with `isError: true`
+and the message as its text; protocol failures use the JSON-RPC codes (`-32700`
+unparseable line, with `id: null`; `-32600` not a request; `-32601` unknown
+method; `-32602` missing `name`, non-object `arguments` or unknown tool).
+`screenshot` refuses surfaces over 16384x16384 px, and `screenshot`/`set_viewport`
+refuse a dimension over Chrome's 10,000,000 px bound.
+
 `render`/`set_mode` switch the Page into the JS render tier (a true V8 isolate over
 the native DOM); then `eval_js` and `inject_js` run against the **live render heap**
 (page globals, handlers) and each mutation appends to a DOM-history trail readable

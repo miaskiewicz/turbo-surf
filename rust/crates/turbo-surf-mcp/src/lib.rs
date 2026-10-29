@@ -1067,6 +1067,7 @@ impl Session {
     // Set the session's default layout viewport (px). Zero/absent dimensions are
     // left unchanged. Drives `screenshot` layout when a call omits its own size.
     fn set_viewport(&mut self, args: &Value) -> Result<Value, String> {
+        check_dimensions("set_viewport", args)?;
         if let Some(w) = arg_u32(args, "width") {
             self.viewport.width = w;
         }
@@ -1094,10 +1095,18 @@ impl Session {
             })?,
             None => serialize_doc(self.tree()?),
         };
+        check_dimensions("screenshot", args)?;
         let vp = raster::Viewport {
             width: arg_u32(args, "width").unwrap_or(self.viewport.width),
             height: arg_u32(args, "height").unwrap_or(self.viewport.height),
         };
+        let pixels = u64::from(vp.width) * u64::from(vp.height);
+        if pixels > MAX_SCREENSHOT_PIXELS {
+            return Err(format!(
+                "screenshot: {}x{} exceeds the {MAX_SCREENSHOT_PIXELS}-pixel limit (16384x16384)",
+                vp.width, vp.height
+            ));
+        }
         let want_css = args
             .get("external_css")
             .and_then(Value::as_bool)
@@ -3033,8 +3042,8 @@ pub fn tools() -> Value {
              stylesheets and its <img>/background-image bytes (via the session \
              client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG/BMP/ICO/AVIF/JPEG XL \
              images are painted, others fall back to a placeholder. Args: format (png|svg), \
-             snapshot? (dom_history index), width?/height? (override viewport), \
-             external_css? (default true), images? (default true), \
+             snapshot? (dom_history index), width?/height? (override viewport; \
+             at most 16384x16384 px in all), external_css? (default true), images? (default true), \
              full_page? (default false — true grows height to full content). \
              PNG returns base64; SVG returns the document string.",
         ),
@@ -3089,6 +3098,29 @@ pub fn tools() -> Value {
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str)
+}
+
+/// Chrome's per-dimension bound (`Emulation.setDeviceMetricsOverride` rejects
+/// larger widths/heights with the message `check_dimensions` reuses).
+const MAX_DIMENSION: u64 = 10_000_000;
+
+/// The largest surface `screenshot` rasterizes: 16384 x 16384 px (1 GiB RGBA).
+/// Larger requests used to allocate unboundedly and stall the stdio server.
+const MAX_SCREENSHOT_PIXELS: u64 = 16384 * 16384;
+
+/// Reject a `width`/`height` argument above Chrome's 10,000,000 px bound.
+fn check_dimensions(tool: &str, args: &Value) -> Result<(), String> {
+    let over = |k| {
+        args.get(k)
+            .and_then(Value::as_u64)
+            .is_some_and(|n| n > MAX_DIMENSION)
+    };
+    if over("width") || over("height") {
+        return Err(format!(
+            "{tool}: width and height values must be positive, not greater than {MAX_DIMENSION}"
+        ));
+    }
+    Ok(())
 }
 
 /// A positive integer argument as `u32` (`0` and non-numbers yield `None`).
@@ -3509,8 +3541,19 @@ fn ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-fn err(id: Value, message: &str) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32000, "message": message } })
+// JSON-RPC 2.0 error codes (spec section 5.1).
+const PARSE_ERROR: i64 = -32700;
+const INVALID_REQUEST: i64 = -32600;
+const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
+
+fn err(id: Value, code: i64, message: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+/// The response to a stdin line that is not JSON: `-32700` with `id: null`.
+pub fn parse_error() -> Value {
+    err(Value::Null, PARSE_ERROR, "Parse error")
 }
 
 fn initialize_result() -> Value {
@@ -3521,41 +3564,59 @@ fn initialize_result() -> Value {
     })
 }
 
-async fn tools_call(session: &mut Session, params: &Value) -> Result<Value, String> {
-    let name = arg_str(params, "name").ok_or("tools/call: missing 'name'")?;
-    let args = params
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let value = call_tool(session, name, &args).await?;
-    // MCP content envelope: a single text block carrying the serialized result.
-    let text = match &value {
-        Value::String(s) => s.clone(),
-        other => serde_json::to_string(other).unwrap_or_default(),
-    };
-    Ok(json!({ "content": [{ "type": "text", "text": text }] }))
+/// Whether `tools/list` advertises `name`.
+fn is_listed_tool(name: &str) -> bool {
+    tools()["tools"]
+        .as_array()
+        .is_some_and(|list| list.iter().any(|t| t["name"] == name))
 }
 
-/// Handle one JSON-RPC request object, returning the response object (or `None`
-/// for a notification, which has no `id`).
-pub async fn handle(session: &mut Session, req: &Value) -> Option<Value> {
-    let id = req.get("id").cloned();
-    let method = req.get("method").and_then(Value::as_str).unwrap_or("");
-    let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
-
-    // Notifications (no id) get no response.
-    id.as_ref()?;
-    let id = id.unwrap();
-
-    let result = match method {
-        "initialize" => Ok(initialize_result()),
-        "tools/list" => Ok(tools()),
-        "tools/call" => tools_call(session, &params).await,
-        other => Err(format!("unknown method: {other}")),
+/// `tools/call`: bad params and unknown tools are `Err` (JSON-RPC `-32602`);
+/// a tool that runs and fails is an MCP result with `isError: true`, so the
+/// model sees the message (MCP 2024-11-05, Tools > Error Handling).
+async fn tools_call(session: &mut Session, params: &Value) -> Result<Value, String> {
+    let name = arg_str(params, "name").ok_or("tools/call: missing 'name'")?;
+    let args = match params.get("arguments") {
+        None | Some(Value::Null) => json!({}),
+        Some(v @ Value::Object(_)) => v.clone(),
+        Some(_) => return Err("tools/call: 'arguments' must be an object".into()),
     };
-    Some(match result {
-        Ok(r) => ok(id, r),
-        Err(e) => err(id, &e),
+    if !is_listed_tool(name) {
+        return Err(format!("unknown tool: {name}"));
+    }
+    // MCP content envelope: a single text block carrying the serialized result.
+    Ok(match call_tool(session, name, &args).await {
+        Ok(Value::String(s)) => json!({ "content": [{ "type": "text", "text": s }] }),
+        Ok(other) => json!({ "content": [{ "type": "text",
+            "text": serde_json::to_string(&other).unwrap_or_default() }] }),
+        Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
+    })
+}
+
+/// Handle one JSON-RPC message, returning the response object (or `None` for a
+/// notification, which has no `id`). A message that is not a request object
+/// (no string `method`) is `-32600`.
+pub async fn handle(session: &mut Session, req: &Value) -> Option<Value> {
+    let Some(obj) = req.as_object() else {
+        return Some(err(Value::Null, INVALID_REQUEST, "Invalid Request"));
+    };
+    let id = obj.get("id").cloned();
+    let Some(method) = obj.get("method").and_then(Value::as_str) else {
+        return id.map(|id| err(id, INVALID_REQUEST, "Invalid Request"));
+    };
+    // Notifications (no id) get no response.
+    let id = id?;
+    let params = obj.get("params").cloned().unwrap_or_else(|| json!({}));
+
+    Some(match method {
+        "initialize" => ok(id, initialize_result()),
+        "ping" => ok(id, json!({})),
+        "tools/list" => ok(id, tools()),
+        "tools/call" => match tools_call(session, &params).await {
+            Ok(r) => ok(id, r),
+            Err(e) => err(id, INVALID_PARAMS, &e),
+        },
+        other => err(id, METHOD_NOT_FOUND, &format!("Method not found: {other}")),
     })
 }
 
@@ -5409,10 +5470,19 @@ mod tests {
         let e = handle(&mut s, &json!({"jsonrpc":"2.0","id":1,"method":"bogus"}))
             .await
             .unwrap();
-        assert!(e["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("unknown method"));
+        assert_eq!(
+            e["error"],
+            json!({"code": -32601, "message": "Method not found: bogus"})
+        );
+        // a failing tool is an MCP result with isError, not a JSON-RPC error
+        let e = handle(
+            &mut s,
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"goto","arguments":{}}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(e["result"]["isError"], true, "{e}");
+        assert!(e.get("error").is_none(), "{e}");
         // unknown tool
         assert!(call_tool(&mut s, "nope", &json!({})).await.is_err());
         // read tool with no page loaded
@@ -5420,6 +5490,56 @@ mod tests {
         assert!(call_tool(&mut empty, "text", &json!({})).await.is_err());
         // goto missing url
         assert!(call_tool(&mut s, "goto", &json!({})).await.is_err());
+    }
+
+    // Screenshot size limits: a dimension over Chrome's 10,000,000 px
+    // `Emulation.setDeviceMetricsOverride` bound is rejected with Chrome's
+    // message, and a surface over 16384 x 16384 px is refused before any
+    // allocation (an unbounded request made the stdio server allocate 14 GB
+    // and stop answering).
+    #[tokio::test(flavor = "current_thread")]
+    async fn screenshot_and_viewport_reject_oversized_surfaces() {
+        let mut s = loaded();
+        let shot = |w: u64, h: u64| json!({"width": w, "height": h, "format": "svg", "external_css": false, "images": false});
+        assert_eq!(
+            call_tool(&mut s, "screenshot", &shot(10_000_001, 10))
+                .await
+                .unwrap_err(),
+            "screenshot: width and height values must be positive, not greater than 10000000"
+        );
+        assert_eq!(
+            call_tool(&mut s, "screenshot", &shot(16_385, 16_384))
+                .await
+                .unwrap_err(),
+            "screenshot: 16385x16384 exceeds the 268435456-pixel limit (16384x16384)"
+        );
+        assert!(call_tool(&mut s, "screenshot", &shot(16_384, 16_384))
+            .await
+            .is_ok());
+        assert_eq!(
+            call_tool(&mut s, "set_viewport", &json!({"width": 10_000_001}))
+                .await
+                .unwrap_err(),
+            "set_viewport: width and height values must be positive, not greater than 10000000"
+        );
+        assert_eq!(s.viewport.width, Session::new().viewport.width);
+        call_tool(
+            &mut s,
+            "set_viewport",
+            &json!({"width": 20_000, "height": 20_000}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            call_tool(
+                &mut s,
+                "screenshot",
+                &json!({"format": "svg", "external_css": false, "images": false})
+            )
+            .await
+            .unwrap_err(),
+            "screenshot: 20000x20000 exceeds the 268435456-pixel limit (16384x16384)"
+        );
     }
 
     // --- web search (SERP parser) -------------------------------------------

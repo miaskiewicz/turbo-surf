@@ -134,6 +134,13 @@ fn submit<'s>(
         result.set_bool(true);
         return;
     }
+    if url::Url::parse(&action).is_ok_and(|url| url.scheme() == "javascript")
+        && (target.is_empty() || target.eq_ignore_ascii_case("_self"))
+    {
+        queue_javascript_url(scope, context, &action);
+        result.set_bool(true);
+        return;
+    }
     let plan = match form_navigation::prepare(
         &source,
         &action,
@@ -163,6 +170,57 @@ fn submit<'s>(
         referrer_policy: policy.referrer_policy,
     });
     result.set_bool(true);
+}
+
+/// Navigating to a `javascript:` URL runs its percent-decoded script in a later task of
+/// the same document (Chrome 156; the document stays in place, turbo-surf#100), subject
+/// to the document's inline-script policy.
+fn queue_javascript_url(scope: &mut v8::PinScope, context: v8::Local<v8::Context>, url: &str) {
+    let allowed = context.get_slot::<CspHandle>().is_none_or(|handle| {
+        handle
+            .policy
+            .borrow()
+            .active
+            .allows_inline("script-src-elem", url, "")
+    });
+    if !allowed {
+        return;
+    }
+    let body = &url[url.find(':').map_or(url.len(), |colon| colon + 1)..];
+    let source = percent_encoding::percent_decode_str(body).decode_utf8_lossy();
+    let Some(source) = v8::String::new(scope, &source) else {
+        return;
+    };
+    let Some(task) = v8::Function::builder(run_javascript_url)
+        .data(source.into())
+        .build(scope)
+    else {
+        return;
+    };
+    let global = context.global(scope);
+    let key = v8::String::new(scope, "setTimeout").unwrap();
+    let Some(schedule) = global
+        .get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    else {
+        return;
+    };
+    let receiver = global.into();
+    schedule.call(scope, receiver, &[task.into()]);
+}
+
+fn run_javascript_url(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _result: v8::ReturnValue,
+) {
+    let Ok(source) = v8::Local::<v8::String>::try_from(args.data()) else {
+        return;
+    };
+    // A compile or runtime error propagates to the task runner, like any task's.
+    if let Some(script) = v8::Script::compile(scope, source, None) {
+        let _ = script.run(scope);
+    }
 }
 
 fn document_encoding(state: &OpState, accept_charset: &str) -> &'static encoding_rs::Encoding {

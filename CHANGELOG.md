@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- A form whose action is a `javascript:` URL (#100) runs the URL's script in a later
+  task of the same document (subject to the inline-script policy), like Chrome 156,
+  instead of throwing `requires an HTTP(S) action`.
 - Extreme `zoom` (#99): the effective zoom never drops below 1e-6 and used lengths and
   unzoomed CSSOM metrics saturate at Chrome 156's layout range, so `zoom: 1e-30` on a
   `1e30px` box reports 33554432 instead of throwing `native CSSOM metric is outside its

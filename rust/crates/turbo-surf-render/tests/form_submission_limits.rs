@@ -30,7 +30,7 @@ async fn unsupported_form_navigations_throw_a_named_type_error() {
         value,
         json!({
             "mailto":"TypeError: Native form submission requires an HTTP(S) action",
-            "javascript":"TypeError: Native form submission requires an HTTP(S) action",
+            "javascript":"submitted",
             "unresolvable":"TypeError: Native form action cannot be resolved",
             "blank target":"TypeError: Native form submission to another browsing context is not supported",
             "child":"TypeError: Native form navigation from child frames is not supported",
@@ -43,7 +43,6 @@ async fn unsupported_form_navigations_throw_a_named_type_error() {
 /// script in a later task of the same document (Chrome 156: `submit()` returns, the script
 /// sees the page's globals, the location is unchanged).
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#100: fails until the fix"]
 async fn javascript_form_action_runs_the_script_like_chrome156() {
     let mut page = PageSession::open("<body>", "https://forms.test/page", "", "", 5000)
         .await

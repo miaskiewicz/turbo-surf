@@ -6128,6 +6128,7 @@ dependencies = [
  "getrandom 0.4.3",
  "httpdate",
  "lightningcss",
+ "percent-encoding",
  "psl",
  "rustfft",
  "serde",

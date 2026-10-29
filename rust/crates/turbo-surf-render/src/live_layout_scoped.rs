@@ -51,8 +51,20 @@ fn prepare_rule(
     graph: &Composition,
     rule: &RuleSnapshot,
 ) -> Result<ScopedRule, String> {
-    let parsed = StyleSheet::parse(&rule.css_text, ParserOptions::default())
-        .map_err(|error| format!("native scoped CSS parse failed: {error:?}"))?;
+    let depth = *graph
+        .depths
+        .get(&root)
+        .ok_or("native CSS scope depth missing")?;
+    // The CSSOM kept this rule, so Chrome keeps it too; a selector the native parser
+    // rejects (`::selection:window-inactive`) cannot match a laid-out box, so the rule
+    // gets no targets instead of failing the whole layout (like #117).
+    let Ok(parsed) = StyleSheet::parse(&rule.css_text, ParserOptions::default()) else {
+        return Ok(ScopedRule {
+            declarations: Vec::new(),
+            depth,
+            targets: Vec::new(),
+        });
+    };
     let [CssRule::Style(style)] = parsed.rules.0.as_slice() else {
         return Err("native scoped CSS requires one qualified rule".into());
     };
@@ -64,10 +76,6 @@ fn prepare_rule(
     if sources.len() != style.selectors.0.len() {
         return Err("native selector source provenance mismatch".into());
     }
-    let depth = *graph
-        .depths
-        .get(&root)
-        .ok_or("native CSS scope depth missing")?;
     // A selector list Chrome drops (an unknown pseudo-class, a misplaced
     // pseudo-element) makes the rule invalid on its own: it matches nothing, and
     // the rest of the page keeps its layout (#117).

@@ -8078,6 +8078,17 @@ const __nextLocalTimer = () => {
   const due=__timers[index].due;
   return !__realWindowTimers && due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
 };
+// A timer task's nested timers count from the latest due time among the timers already
+// due with it (within the same millisecond of its own due time): in Chrome the parent
+// runs no earlier than those siblings were due, so a nested zero-delay timer queues
+// behind an equal-delay sibling set slightly later by the live clock (turbo-surf#118).
+// Rendering frames are not siblings (turbo-surf#101); only queued dues are read, never
+// the live clock, so the order stays deterministic.
+const __taskBaseFor = (due) => {
+  let base=due;
+  for(let i=0;i<__timers.length;i++){const t=__timers[i];if(!t.rendering&&t.due>base&&t.due<due+1)base=t.due;}
+  return base;
+};
 const __runLocalTimers = (max=100000,keepTask=false) => {
   let fired=0;
   while(fired<max){
@@ -8085,7 +8096,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const timer=__timers[index];
     // Every caller, including hydration and child-frame drains, obeys this policy.
     if(__realWindowTimers && timer.due>__timerNow())break;
-    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:timer.due;__taskBaseEpoch=__taskEpoch;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:__taskBaseFor(timer.due);__taskBaseEpoch=__taskEpoch;
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);

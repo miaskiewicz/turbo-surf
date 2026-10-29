@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- The document-hooks test server (#102) serves a case's cross-origin children in
+  document order, the order Chrome's control committed them; agent-cluster keying
+  follows the first committed document, so load-dependent response order flaked it.
 - Timer tasks schedule from their own due time (#101), so host load can no longer put
   a rendering frame between two chained tasks (the element view-transition flake).
 - A form whose action is a `javascript:` URL (#100) runs the URL's script in a later

@@ -73,9 +73,14 @@ async fn serve_delayed(cases: Value, delays: &'static [(&'static str, u64)]) -> 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let cases = std::sync::Arc::new(cases);
+    let served = std::sync::Arc::new((
+        std::sync::Mutex::new(std::collections::HashSet::<String>::new()),
+        tokio::sync::Notify::new(),
+    ));
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let cases = cases.clone();
+            let served = served.clone();
             tokio::spawn(async move {
                 let mut request = Vec::new();
                 while !request.windows(4).any(|part| part == b"\r\n\r\n") {
@@ -92,6 +97,23 @@ async fn serve_delayed(cases: Value, delays: &'static [(&'static str, u64)]) -> 
                 if let Some((_, ms)) = delays.iter().find(|(name, _)| path.ends_with(name)) {
                     tokio::time::sleep(std::time::Duration::from_millis(*ms)).await;
                 }
+                // Chrome's control committed the cross-origin children in document order,
+                // and an origin's agent-cluster keying follows its first committed document
+                // (turbo-surf#102): serve them in that order, whatever the host's load.
+                let earlier = earlier_cross_children(&cases, path);
+                let wait = async {
+                    loop {
+                        let notified = served.1.notified();
+                        if earlier
+                            .iter()
+                            .all(|key| served.0.lock().unwrap().contains(key))
+                        {
+                            break;
+                        }
+                        notified.await;
+                    }
+                };
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), wait).await;
                 let (status, fields, body) = respond(&cases, path, port);
                 let mut head = format!("HTTP/1.1 {status}\r\nCache-Control: no-store\r\n");
                 for (name, value) in fields {
@@ -103,10 +125,42 @@ async fn serve_delayed(cases: Value, delays: &'static [(&'static str, u64)]) -> 
                 ));
                 let _ = socket.write_all(head.as_bytes()).await;
                 let _ = socket.write_all(body.as_bytes()).await;
+                served.0.lock().unwrap().insert(path.to_string());
+                served.1.notify_waiters();
             });
         }
     });
     port
+}
+
+/// The `/<index>/<name>` paths of the case's cross-origin children before `path`'s, in
+/// document order (empty when `path` is not one of them).
+fn earlier_cross_children(cases: &Value, path: &str) -> Vec<String> {
+    let Some((index, name)) = path.strip_prefix('/').and_then(|rest| rest.split_once('/')) else {
+        return Vec::new();
+    };
+    let Some(html) = index
+        .parse::<usize>()
+        .ok()
+        .and_then(|index| cases.get(index))
+        .and_then(|case| case["html"].as_str())
+    else {
+        return Vec::new();
+    };
+    let mut order: Vec<&str> = Vec::new();
+    for part in html.split("{{cross}}").skip(1) {
+        let child = part.split(['?', '\'', '"']).next().unwrap_or("");
+        if !order.contains(&child) {
+            order.push(child);
+        }
+    }
+    match order.iter().position(|child| *child == name) {
+        Some(position) => order[..position]
+            .iter()
+            .map(|child| format!("/{index}/{child}"))
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 fn respond(cases: &Value, path: &str, port: u16) -> (&'static str, Vec<(String, String)>, String) {
@@ -215,7 +269,6 @@ async fn case_divergences(
 /// measured with the children committing in document order, so the comparison must not
 /// depend on which loopback response the host happens to finish first under load.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#102: fails until the fix"]
 async fn agent_cluster_children_compare_independently_of_response_timing() {
     let control = control();
     let cases: Value = serde_json::from_str(CASES).unwrap();

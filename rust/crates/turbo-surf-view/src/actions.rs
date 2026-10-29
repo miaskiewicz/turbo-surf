@@ -76,7 +76,9 @@ fn is_checkable(tag: &str, ty: Option<&str>) -> bool {
 }
 
 // HTML selectedness: a `multiple` select submits its `selected` options; a single
-// select submits its last `selected` option, else its first non-disabled option.
+// select submits its last `selected` option, else (display size 1 only) its first
+// non-disabled option. A disabled option (own attribute or a disabled optgroup parent)
+// is never submitted, and option text is whitespace stripped and collapsed.
 fn select_pairs(tree: &Tree, select: Handle, name: &str) -> Vec<(String, String)> {
     let options: Vec<Handle> = tree
         .node(select)
@@ -84,33 +86,57 @@ fn select_pairs(tree: &Tree, select: Handle, name: &str) -> Vec<(String, String)
         .iter()
         .map(|o| o.handle())
         .collect();
+    let multiple = tree.get_attribute(select, "multiple").is_some();
     let selected = options
         .iter()
         .copied()
         .filter(|&o| tree.get_attribute(o, "selected").is_some());
-    let chosen: Vec<Handle> = if tree.get_attribute(select, "multiple").is_some() {
+    let chosen: Vec<Handle> = if multiple {
         selected.collect()
     } else {
         selected
             .last()
             .or_else(|| {
-                options
-                    .iter()
-                    .copied()
-                    .find(|&o| tree.get_attribute(o, "disabled").is_none())
+                if display_size(tree, select) != 1 {
+                    return None;
+                }
+                options.iter().copied().find(|&o| !option_disabled(tree, o))
             })
             .into_iter()
             .collect()
     };
     chosen
         .into_iter()
+        .filter(|&o| !option_disabled(tree, o))
         .map(|o| {
-            let v = tree
-                .get_attribute(o, "value")
-                .map_or_else(|| text_of(tree, o), str::to_string);
+            let v = tree.get_attribute(o, "value").map_or_else(
+                || {
+                    text_of(tree, o)
+                        .split_ascii_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                },
+                str::to_string,
+            );
             (name.to_string(), v)
         })
         .collect()
+}
+
+// A non-multiple select's display size: its `size` when a positive integer, else 1.
+fn display_size(tree: &Tree, select: Handle) -> u32 {
+    tree.get_attribute(select, "size")
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(1)
+}
+
+// An option is disabled by its own attribute or by a disabled optgroup parent.
+fn option_disabled(tree: &Tree, option: Handle) -> bool {
+    tree.get_attribute(option, "disabled").is_some()
+        || tree.parent(option).is_some_and(|p| {
+            lower_tag(tree, p) == "optgroup" && tree.get_attribute(p, "disabled").is_some()
+        })
 }
 
 fn typed_pairs(

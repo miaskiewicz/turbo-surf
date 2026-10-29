@@ -13642,6 +13642,16 @@ pub async fn render_page_with_budget(
     use std::sync::Arc;
 
     let mut rt = make_runtime(base, "", "");
+    // Trusted DOM setup runs before the guest budget starts (as in
+    // `prepare_hydration`): a terminate landing in bootstrap could be swallowed by
+    // its native callbacks and leave the guest script unbounded.
+    {
+        let _activation = rt.activation_key().enter();
+        if let Err(error) = install_dom(&mut rt, html, base) {
+            crate::browser_env::reset_isolate(rt.v8_isolate());
+            return Err(error);
+        }
+    }
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
@@ -13652,8 +13662,9 @@ pub async fn render_page_with_budget(
         while !watch.load(Ordering::Relaxed) {
             if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
                 timeout.store(true, Ordering::Relaxed);
+                // Setup and nested native callbacks can clear V8's termination state
+                // (#98 CI hang): keep enforcing the deadline until the owner finishes.
                 handle.terminate_execution();
-                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -13661,7 +13672,7 @@ pub async fn render_page_with_budget(
 
     rt.park();
     let key = rt.activation_key();
-    let result = key.during(run_async(&mut rt, html, base, script)).await;
+    let result = key.during(run_async(&mut rt, base, script)).await;
     let _activation = key.enter();
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
@@ -13808,6 +13819,16 @@ pub async fn render_capture_cookies_with_request_state(
     use std::sync::Arc;
 
     let mut rt = make_runtime_with_hints(base, cookies, ua, client_hints);
+    // Trusted DOM setup runs before the guest budget starts (as in
+    // `prepare_hydration`): a terminate landing in bootstrap could be swallowed by
+    // its native callbacks and leave the guest script unbounded.
+    {
+        let _activation = rt.activation_key().enter();
+        if let Err(error) = install_dom(&mut rt, html, base) {
+            crate::browser_env::reset_isolate(rt.v8_isolate());
+            return Err(error);
+        }
+    }
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
@@ -13815,8 +13836,9 @@ pub async fn render_capture_cookies_with_request_state(
         let start = std::time::Instant::now();
         while !watch.load(Ordering::Relaxed) {
             if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                // Setup and nested native callbacks can clear V8's termination state
+                // (#98 CI hang): keep enforcing the deadline until the owner finishes.
                 handle.terminate_execution();
-                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -13824,7 +13846,7 @@ pub async fn render_capture_cookies_with_request_state(
 
     rt.park();
     let key = rt.activation_key();
-    let result = key.during(run_async(&mut rt, html, base, script)).await;
+    let result = key.during(run_async(&mut rt, base, script)).await;
     let _activation = key.enter();
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
@@ -14240,13 +14262,8 @@ fn run_lifecycle(rt: &mut JsRuntime, phase: &str) -> Result<(), String> {
         .ok_or_else(|| format!("Native lifecycle {phase} failed"))
 }
 
-async fn run_async(
-    rt: &mut JsRuntime,
-    html: &str,
-    base: &str,
-    script: &str,
-) -> Result<String, String> {
-    install_dom(rt, html, base)?;
+async fn run_async(rt: &mut JsRuntime, base: &str, script: &str) -> Result<String, String> {
+    // The caller installs the DOM before arming its budget watchdog.
     run_lifecycle(rt, "documentLoading")?; // readyState "loading" while scripts run
     run_lifecycle(rt, "loadDocumentResources")?; // parser images/sheets load before scripts
     exec_page_scripts(rt, script, base)?;
@@ -14342,6 +14359,16 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     let mut rt = make_runtime(base, "", "");
+    // Trusted DOM setup runs before the guest budget starts (as in
+    // `prepare_hydration`): a terminate landing in bootstrap could be swallowed by
+    // its native callbacks and leave the guest script unbounded.
+    {
+        let _activation = rt.activation_key().enter();
+        if let Err(error) = install_dom(&mut rt, html, base) {
+            crate::browser_env::reset_isolate(rt.v8_isolate());
+            return Err(error);
+        }
+    }
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
@@ -14349,8 +14376,9 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
         let start = std::time::Instant::now();
         while !watch.load(Ordering::Relaxed) {
             if start.elapsed() >= std::time::Duration::from_millis(DEFAULT_RENDER_BUDGET_MS) {
+                // Setup and nested native callbacks can clear V8's termination state
+                // (#98 CI hang): keep enforcing the deadline until the owner finishes.
                 handle.terminate_execution();
-                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -14359,7 +14387,6 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
     let key = rt.activation_key();
     let result = key
         .during(async {
-            install_dom(&mut rt, html, base)?;
             rt.execute_script("<script>", script.to_string())
                 .map_err(|e| e.to_string())?;
             drain_event_loop(&mut rt).await?;

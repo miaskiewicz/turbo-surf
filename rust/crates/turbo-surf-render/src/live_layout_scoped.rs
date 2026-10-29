@@ -9,6 +9,7 @@ use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::CssRule;
 use lightningcss::selector::{Combinator, Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+use turbo_dom_parser::rtdom::query::parse_for_cascade;
 use turbo_dom_parser::rtdom::{tree::Handle, Tree};
 
 /// A rule matched against one original tree scope: turbo-dom-layout's live-DOM
@@ -63,6 +64,20 @@ fn prepare_rule(
     if sources.len() != style.selectors.0.len() {
         return Err("native selector source provenance mismatch".into());
     }
+    let depth = *graph
+        .depths
+        .get(&root)
+        .ok_or("native CSS scope depth missing")?;
+    // A selector list Chrome drops (an unknown pseudo-class, a misplaced
+    // pseudo-element) makes the rule invalid on its own: it matches nothing, and
+    // the rest of the page keeps its layout (#117).
+    if parse_for_cascade(&sources.join(",")).is_err() {
+        return Ok(ScopedRule {
+            declarations,
+            depth,
+            targets: Vec::new(),
+        });
+    }
     let matcher = Matcher { tree, root, graph };
     let mut specificity_by_node = std::collections::HashMap::<Handle, u32>::new();
     for (selector, source) in style.selectors.0.iter().zip(&sources) {
@@ -111,10 +126,7 @@ fn prepare_rule(
     targets.sort_by_key(|target| target.source.0);
     Ok(ScopedRule {
         declarations,
-        depth: *graph
-            .depths
-            .get(&root)
-            .ok_or("native CSS scope depth missing")?,
+        depth,
         targets,
     })
 }
@@ -651,6 +663,32 @@ mod tests {
             .unwrap_err()
             .contains("native selector match failed"));
         assert!(!validated);
+    }
+
+    /// turbo-surf#117: a rule whose selector list Chrome drops (an unknown pseudo-class)
+    /// matches nothing instead of failing the page; Google's view-transition rules are
+    /// valid and never match an element; the rules around them keep matching.
+    #[test]
+    fn invalid_selector_rule_is_skipped_not_page_fatal() {
+        let tree = Tree::parse("<body><div id=a class=pick></div></body>");
+        let a = tree.get_element_by_id("a").unwrap();
+        let graph = Composition::scopes(&tree).unwrap();
+        let root = tree.root();
+        let targets = |css: &str| prepared(&tree, root, &graph, css).targets;
+        assert_eq!(targets("html:bogus .pick{width:1px}"), Vec::<Target>::new());
+        assert_eq!(
+            targets(".pick, html:bogus{width:1px}"),
+            Vec::<Target>::new()
+        );
+        assert_eq!(
+            targets("html:active-view-transition-type(aimc)::view-transition-new(sb):only-child{width:1px}"),
+            Vec::<Target>::new()
+        );
+        let kept = targets(".pick, html:active-view-transition-type(aimc) .pick{width:1px}");
+        assert_eq!(
+            kept.iter().map(|t| t.source).collect::<Vec<_>>(),
+            vec![source_id(1, a)]
+        );
     }
 
     #[test]

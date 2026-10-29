@@ -440,3 +440,22 @@ fn original_utf16_system_font_geometry_matches_independent_macos_chrome() {
     let (actual, expected) = utf16_geometry_observation();
     assert_eq!(actual, expected);
 }
+
+/// turbo-surf#117: Google's consent page carries view-transition rules turbo-dom rejected
+/// ("unknown pseudo-class"), which failed live layout for the whole page, so the trusted
+/// click on "Reject all" (`#W0wltc`) found no geometry. Chrome 156.0.8078.47 on the same
+/// fixture: `[18,10,120,36,1,11]` (rect, one click, 11 kept rules: `html:bogus` dropped).
+#[test]
+fn invalid_and_view_transition_rules_keep_live_layout_and_click_geometry() {
+    let html =
+        include_str!("../../../../harness/detection/fixtures/google-consent-view-transition.html");
+    let actual = run_with_dom(
+        html,
+        r#"(()=>{const b=document.getElementById('W0wltc'),r=b.getBoundingClientRect();let c=0;
+        b.addEventListener('click',()=>c++);
+        document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).click();
+        return JSON.stringify([r.x,r.y,r.width,r.height,c,document.styleSheets[0].cssRules.length]);})()"#,
+    )
+    .unwrap();
+    assert_eq!(actual, "[18,10,120,36,1,11]");
+}

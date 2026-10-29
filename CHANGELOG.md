@@ -22,6 +22,10 @@ Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
 render → mcp.
 
 ### Fixed (turbo-dom consolidation, coverage phase)
+- A style rule whose selector list Chrome drops (an unknown pseudo-class) now
+  matches nothing instead of failing live layout for the whole page (#117); with
+  turbo-dom 4769e3e Google's consent-page view-transition rules are valid, so the
+  "Reject all" click finds its geometry again.
 - turbo-dom crates repinned to turbo-dom 0189e4d (browser-env #183/#184 panic fixes;
   `browser_env::try_install_with_html` is available, unused: surf installs the DOM
   before arming the render watchdog).

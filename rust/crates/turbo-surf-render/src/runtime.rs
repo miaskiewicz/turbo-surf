@@ -3510,6 +3510,8 @@ pub struct PageSessionOptions {
 #[derive(Default)]
 struct WindowTimerNesting {
     level: std::cell::Cell<u32>,
+    /// Whether a timer task (with its microtask checkpoint) is running in this realm.
+    task: std::cell::Cell<bool>,
 }
 
 fn window_timer_nesting(context: v8::Local<v8::Context>) -> Rc<WindowTimerNesting> {
@@ -3528,6 +3530,13 @@ fn op_timer_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -
 }
 
 #[op2(fast)]
+fn op_timer_task_active(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(|context| window_timer_nesting(context).task.get())
+}
+
+#[op2(fast)]
 fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>, level: u32) {
     if let Some(context) = document.get_creation_context(scope) {
         window_timer_nesting(context).level.set(level);
@@ -3540,17 +3549,24 @@ fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object
 struct WindowTimerTask {
     nesting: Rc<WindowTimerNesting>,
     previous: u32,
+    previous_task: bool,
 }
 impl WindowTimerTask {
     fn new(context: v8::Local<v8::Context>) -> Self {
         let nesting = window_timer_nesting(context);
         let previous = nesting.level.get();
-        Self { nesting, previous }
+        let previous_task = nesting.task.replace(true);
+        Self {
+            nesting,
+            previous,
+            previous_task,
+        }
     }
 }
 impl Drop for WindowTimerTask {
     fn drop(&mut self) {
         self.nesting.level.set(self.previous);
+        self.nesting.task.set(self.previous_task);
     }
 }
 
@@ -7000,6 +7016,7 @@ deno_core::extension!(
         op_timer_advance,
         op_timer_nesting,
         op_timer_set_nesting,
+        op_timer_task_active,
         op_run_local_timers,
         op_run_frame_timers,
         op_frame_pending,
@@ -7837,9 +7854,9 @@ const __timerNow = () => ops.op_timer_clock();
 // task behind a rendering frame queued earlier (turbo-surf#101). The nesting clamp, timers
 // outside timer tasks and real-time window timers use the live clock.
 let __taskBase = null, __taskBaseEpoch = -1;
-// A nonzero nesting level marks a running timer task (and its microtask checkpoint); a
-// rendering frame runs at level 1.
-const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers && ops.op_timer_nesting(__timerDocument) > 0 ? __taskBase : __timerNow();
+// Only while the host runs a timer task (and its microtask checkpoint) in this realm; a
+// rendering frame's own tasks keep the live clock.
+const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers && ops.op_timer_task_active(__timerDocument) ? __taskBase : __timerNow();
 const __realWindowTimers = ops.op_window_timers_realtime();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
@@ -7855,6 +7872,15 @@ __G.resetTimerBudget = () => { __budgetBase = __timerNow(); };
 const __timerDocument = globalThis.document;
 const __activeTimers = new Map();
 const __timerGet = Map.prototype.get.bind(__activeTimers), __timerSet = Map.prototype.set.bind(__activeTimers), __timerDelete = Map.prototype.delete.bind(__activeTimers), __timerClear = Map.prototype.clear.bind(__activeTimers);
+// Zero-delay tasks stay first-in first-out: one queued from a task's earlier clock never
+// overtakes a zero-delay task queued before it.
+let __lastTaskDue = -Infinity;
+const __timerDue = (nesting, delay, rendering) => {
+  if (nesting > 6) return __timerNow() + __timerMax(4, delay);
+  const due = __taskClock() + delay;
+  if (delay !== 0 || rendering) return due;
+  return __lastTaskDue = __timerMax(due, __lastTaskDue);
+};
 const __createTimer = (name, repeat, handler, delay, args, rendering = false) => {
   const source=typeof handler === "function" ? null : ops.op_trusted_type_string(__timerDocument,handler,"TrustedScript","Window "+name,"Failed to execute '"+name+"' on 'Window': ");
   // Window timers take a signed32-bit delay before negative values clamp to zero.
@@ -7865,7 +7891,7 @@ const __createTimer = (name, repeat, handler, delay, args, rendering = false) =>
   // A rendering frame is not a timer task: it neither nests nor is clamped (turbo-surf#101).
   const level=rendering?-1:ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
-  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:(nesting>6?__timerNow()+__timerMax(4,delay):__taskClock()+delay),delay,nesting,repeat,args,sequence:ops.op_task_sequence()};
+  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerDue(nesting,delay,rendering),delay,nesting,repeat,args,sequence:ops.op_task_sequence(),rendering};
   __timerSet(id,timer);__timerPush(timer);return id;
 };
 // A non-timer task (id 0: never cancellable, no timer id consumed) in the same
@@ -8059,10 +8085,10 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const timer=__timers[index];
     // Every caller, including hydration and child-frame drains, obeys this policy.
     if(__realWindowTimers && timer.due>__timerNow())break;
-    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.due;__taskBaseEpoch=__taskEpoch;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:timer.due;__taskBaseEpoch=__taskEpoch;
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
-    ops.op_timer_set_nesting(__timerDocument,timer.nesting||1);
+    ops.op_timer_set_nesting(__timerDocument,timer.nesting);
     try{
       try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){

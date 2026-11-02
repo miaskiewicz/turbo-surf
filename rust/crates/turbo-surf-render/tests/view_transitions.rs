@@ -108,27 +108,7 @@ async fn view_transitions_match_chrome156_on_the_frame_loop() {
     // KNOWN_GAP: the render tier never dispatches unhandledrejection (no host promise
     // rejection tracker), for these promises or any other.
     assert_eq!(actual["unhandled"], serde_json::json!([]));
-    // KNOWN_GAP: the binding's selector-method SyntaxError (matches, closest,
-    // querySelector*) omits Chrome's "Failed to execute 'matches' on 'Element': " prefix;
-    // the rejected selectors, exception names and DOMException identity agree.
-    let prefix = "Failed to execute 'matches' on 'Element': ";
-    for (index, expected) in control["result"]["selectors"]["syntax"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .enumerate()
-    {
-        let message = expected[1].as_str().unwrap().strip_prefix(prefix).unwrap();
-        assert_eq!(
-            actual["selectors"]["syntax"][index],
-            serde_json::json!([expected[0], message, expected[2]])
-        );
-    }
-    let differences = mismatches(
-        &actual,
-        &control["result"],
-        &[("unhandled", ""), ("selectors", "syntax")],
-    );
+    let differences = mismatches(&actual, &control["result"], &[("unhandled", "")]);
     assert!(
         differences.is_empty(),
         "{} differences:\n{}",

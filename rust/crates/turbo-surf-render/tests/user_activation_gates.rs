@@ -16,36 +16,16 @@ const CONTROL: &str =
 
 /// Measured Chrome behavior the engine does not reproduce, as `case/path = engine value`.
 const KNOWN_GAPS: &[&str] = &[
-    // showPicker() succeeds and consumes activation, but no picker UI exists: Chrome's
-    // control then matches `:open` (date/color/select) until the picker closes.
-    "picker-activation-date/1/open = false",
-    "picker-activation-date/1/openLater = false",
-    "picker-activation-color/1/open = false",
-    "picker-activation-color/1/openLater = false",
-    "picker-activation-select/1/open = false",
-    // The binding's focus events are not composed (Chrome's FocusEvent is).
-    "picker-activation-date/1/log/0/6 = false",
-    "picker-activation-color/1/log/0/6 = false",
-    "picker-activation-file/1/log/0/6 = false",
-    "picker-activation-text/1/log/0/6 = false",
-    "picker-activation-checkbox/1/log/0/6 = false",
-    "picker-activation-select/1/log/0/6 = false",
     // Headless Chrome resizes its window to the screen in fullscreen; the engine's
     // viewport is fixed, so innerWidth/innerHeight never change.
     "fullscreen-activation/1/sizeChanged = false",
     "fullscreen-activation/1/sizeLater = false",
     // ...and 300 ms later Chrome's window matches the screen (turbo-surf#52 recapture).
     "fullscreen-activation/1/matchesScreenLater = false",
-    // Chrome dispatches the dialog `close` event before already-queued toggle tasks
-    // during Esc processing (batch-1 leaves close-vs-task order unpinned).
-    // Closing a modal dialog whose focused control had no prior focus to restore leaves
-    // ACTIVE on that control; Chrome resets focus to <body> because the closed dialog is
-    // no longer focusable. The following keyup then targets the control, not <body>.
-    r#"escape-modal-no-activation/1/log/3/1 = "inner""#,
-    r#"escape-dialog-and-popover/1/log/5/0 = "toggle""#,
-    r#"escape-dialog-and-popover/1/log/5/1 = "p""#,
-    r#"escape-dialog-and-popover/1/log/6/1 = "d""#,
-    r#"escape-dialog-and-popover/1/log/7/0 = "close""#,
+    // A shown select picker stays `:open` (turbo-dom#188). This control (full Chrome,
+    // --headless=new) has dismissed the popup 100 ms later; the Chrome 156.0.8078.47
+    // headless shell and turbo-dom's activation_focus_chrome156.json still match `:open`.
+    "picker-activation-select/1/openLater = true",
 ];
 
 fn control() -> Value {

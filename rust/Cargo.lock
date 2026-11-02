@@ -1605,7 +1605,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2631,7 +2631,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5776,7 +5776,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=d6da581f1b5f186fa3444179f5bd6e85368c32e5#d6da581f1b5f186fa3444179f5bd6e85368c32e5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b303483c680df80d6e0edab986f798532f1ceb3af40d95c8156b9c9b580bc94f"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5791,7 +5792,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom-browser-env"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=d6da581f1b5f186fa3444179f5bd6e85368c32e5#d6da581f1b5f186fa3444179f5bd6e85368c32e5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8eb8d17b0d3d77da950e9e5d36c6cc6ee85851930e6d334f0fcb110e1fcc150"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5806,7 +5808,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom-layout"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=d6da581f1b5f186fa3444179f5bd6e85368c32e5#d6da581f1b5f186fa3444179f5bd6e85368c32e5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41f2e415ea1c2856d24636a94bc38c2054a9112f420708b09f43465e1e05d83f"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5826,7 +5829,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom-raster"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=d6da581f1b5f186fa3444179f5bd6e85368c32e5#d6da581f1b5f186fa3444179f5bd6e85368c32e5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17d67a9d208a9bd367a28d07143c974dea46d44c6e5e17499d9f2f3f128d1a5c"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5849,7 +5853,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom-v8"
 version = "150.4.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=e9b36c8733ef1cf1073f7053a8c5931381c978c5#e9b36c8733ef1cf1073f7053a8c5931381c978c5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e2d9f01e54a3ce5574b9a1e21cfe74edbca8c85226b0f14098e97302811cc68"
 dependencies = [
  "bindgen 0.72.1",
  "bitflags 2.13.0",
@@ -5926,7 +5931,8 @@ dependencies = [
 [[package]]
 name = "turbo-surf-deno-core"
 version = "0.412.1"
-source = "git+https://github.com/miaskiewicz/turbo-surf?rev=9f5fdd72342f0a3afd91fafe1148ee7f477362ba#9f5fdd72342f0a3afd91fafe1148ee7f477362ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cdf46a5f9a831c4b7bb1f912ae7f2b72dc78400c5613b662eded0bf8661087b"
 dependencies = [
  "anyhow",
  "base64",
@@ -5966,7 +5972,8 @@ dependencies = [
 [[package]]
 name = "turbo-surf-deno-crypto"
 version = "0.273.1"
-source = "git+https://github.com/miaskiewicz/turbo-surf?rev=9f5fdd72342f0a3afd91fafe1148ee7f477362ba#9f5fdd72342f0a3afd91fafe1148ee7f477362ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d314907590eb033d6576366fb182337ee34e8bf5761c50576e4e8689fa3ac3b8"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6012,7 +6019,8 @@ dependencies = [
 [[package]]
 name = "turbo-surf-deno-v8"
 version = "0.4.1"
-source = "git+https://github.com/miaskiewicz/turbo-surf?rev=9f5fdd72342f0a3afd91fafe1148ee7f477362ba#9f5fdd72342f0a3afd91fafe1148ee7f477362ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "babfa55d13caf3b4d7ac1830c64180e26ae1c8465343a2645616367f5d76e810"
 dependencies = [
  "turbo-dom-v8",
 ]
@@ -6020,7 +6028,8 @@ dependencies = [
 [[package]]
 name = "turbo-surf-deno-web"
 version = "0.290.1"
-source = "git+https://github.com/miaskiewicz/turbo-surf?rev=9f5fdd72342f0a3afd91fafe1148ee7f477362ba#9f5fdd72342f0a3afd91fafe1148ee7f477362ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98b5fc0f567eb6f1c32e1aae0f46d96940941adefb72628e767531d30418c7e8"
 dependencies = [
  "async-trait",
  "brotli 6.0.0",
@@ -6042,7 +6051,8 @@ dependencies = [
 [[package]]
 name = "turbo-surf-deno-webidl"
 version = "0.259.1"
-source = "git+https://github.com/miaskiewicz/turbo-surf?rev=9f5fdd72342f0a3afd91fafe1148ee7f477362ba#9f5fdd72342f0a3afd91fafe1148ee7f477362ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ebfb8d192c7f5215d43ffea4e9a7ff17b9c3885c12617984c7218c8a1342b75"
 dependencies = [
  "turbo-surf-deno-core",
 ]
@@ -6156,7 +6166,8 @@ dependencies = [
 [[package]]
 name = "turbo-surf-serde-v8"
 version = "0.321.1"
-source = "git+https://github.com/miaskiewicz/turbo-surf?rev=9f5fdd72342f0a3afd91fafe1148ee7f477362ba#9f5fdd72342f0a3afd91fafe1148ee7f477362ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13b1d2a949c1e218c814aecc88e92e0dbfd4a4bcd6fa7023e3dc549e1522577"
 dependencies = [
  "deno_error",
  "num-bigint",
@@ -6791,7 +6802,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7209,8 +7220,3 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "turbo-surf-deno-bench-util"
-version = "0.253.1"
-source = "git+https://github.com/miaskiewicz/turbo-surf?rev=9f5fdd72342f0a3afd91fafe1148ee7f477362ba#9f5fdd72342f0a3afd91fafe1148ee7f477362ba"

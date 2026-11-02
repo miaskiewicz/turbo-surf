@@ -8,8 +8,7 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
 requires `turbo-dom` 0.6 (the consolidation release, published with
-turbo-dom-layout / -raster / -browser-env 0.6.0; until then the pre-publish
-`[patch.crates-io]` table resolves them from a turbo-dom Git rev). turbo-dom 0.6 brings the one Chrome-checked selector engine, the
+turbo-dom-layout / -raster / -browser-env 0.6.0, all from crates.io). turbo-dom 0.6 brings the one Chrome-checked selector engine, the
 original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
 mutation batches and bounded storage collection (the per-release history is in
 [CHANGELOG.md](../CHANGELOG.md)).
@@ -63,9 +62,8 @@ contracts and remaining inline/caret/scroll/layout limits are recorded in
 ## Registry dependency identity
 
 The seven direct Rust dependency aliases retain the existing source/API names.
-Until the turbo-dom consolidation crates are published, `rust/Cargo.toml` carries a
-pre-publish `[patch.crates-io]` table (Git revs of the Deno 0.x.1 candidates,
-`turbo-dom-v8` and the turbo-dom 0.6.0 crates); it is removed at release. The
+All of them (the Deno 0.x.1 family, `turbo-dom-v8` and the turbo-dom 0.6.0 crates)
+resolve from crates.io; `rust/Cargo.toml` has no `[patch.crates-io]` table. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):
 

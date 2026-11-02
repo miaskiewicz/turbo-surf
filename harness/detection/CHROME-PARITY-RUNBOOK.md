@@ -359,6 +359,7 @@ imports or reuse a signed-in UI session. Consent dispatch is conditional; verify
 | `--url`, `--query`, `--selector` | Google homepage, `rust lang`, shared nonhidden `q` control by default. |
 | `--dismiss-selector` | Google `#W0wltc`; empty string disables dismissal. |
 | `--chrome-path`, `--chrome-backend`, `--chrome-incognito` | Explicit executable in both CDP and Patchright; `cdp` default; verified Incognito context requires CDP. |
+| `--chrome-arg FLAG` (repeatable; also `--chrome-arg=FLAG`), env `TURBO_SURF_CHROME_ARGS` | Extra Chrome switches appended verbatim to both collectors' launch (env entries whitespace-separated, first). Only `--flag[=value]`; none by default. On macOS pass `--chrome-arg=--use-mock-keychain --chrome-arg=--password-store=basic` so Chrome never opens a keychain prompt. |
 | `--repeat`, `--native-first` | 1..10 repeats; reverse Chrome/native order within each pair. |
 | `--probes`, repeatable `--probe PATH` | Shared post-verdict probes and separate localhost pair; hashes retained. |
 | `--debugger`, `--native-cpu-profile` | Instrumented source inventory; native CPU flag implies debugger. |

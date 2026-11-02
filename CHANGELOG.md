@@ -21,6 +21,10 @@ Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
 `turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
 render → mcp.
 
+The render-parity baseline (turbo-dom `tools/parity` checkpoint `b-0.6.0`, surf corpora) was
+regenerated on the published turbo-dom 0.6.0: 219 static screenshots moved by ≤0.5px glyph
+snapping (plus the visibility:hidden space fix and empty opacity groups), all checked against Chrome 156.
+
 ### Fixed (turbo-dom #222, #223)
 - The engine namespace is no longer page-reachable: it moved from
   `globalThis[Symbol.for('ts')]` to a V8 private (turbo-dom#222). Driver scripts

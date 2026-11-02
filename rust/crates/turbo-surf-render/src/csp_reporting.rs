@@ -321,7 +321,7 @@ impl Reporter {
                 let mut target_url = endpoint.url;
                 let mut method = "POST";
                 let mut body = body;
-                for hop in 0..=20 {
+                for hop in 0.. {
                     let credentials = context.sends_credentials(&target_url);
                     let origin = if context.opaque_origin || context.origin_tainted {
                         "null".into()
@@ -494,10 +494,111 @@ impl Reporter {
                         body.clear();
                     }
                 }
-                None
+                // Every hop returns; hop 20 stops redirects before the range ends.
+                unreachable!("report redirect loop is bounded by hop 20")
             };
             tokio::select! {_ = request=>{},_ = canceled.changed()=>{}}
             drop(permit);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect()
+    }
+
+    fn summary(endpoints: &BTreeMap<String, Endpoint>) -> Vec<(String, String, bool)> {
+        endpoints
+            .iter()
+            .map(|(name, endpoint)| {
+                assert!(endpoint.modern);
+                (name.clone(), endpoint.url.clone(), endpoint.credentials)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn endpoints_require_a_secure_document_and_secure_endpoints() {
+        let both = headers(&[
+            ("Reporting-Endpoints", "a=\"/r\""),
+            (
+                "Report-To",
+                r#"{"group":"g","max_age":1,"endpoints":[{"url":"https://r.test/g"}]}"#,
+            ),
+        ]);
+        assert!(endpoints("not a url", &both).is_empty());
+        assert!(endpoints("http://site.test/", &both).is_empty());
+        assert_eq!(
+            summary(&endpoints("https://site.test/page", &both)),
+            [
+                ("a".into(), "https://site.test/r".into(), true),
+                ("g".into(), "https://r.test/g".into(), false)
+            ]
+        );
+    }
+
+    #[test]
+    fn reporting_endpoints_skip_inner_lists_tokens_and_insecure_urls() {
+        let list = headers(&[(
+            "reporting-endpoints",
+            "list=(\"/a\" \"/b\"), token=bare, plain=\"http://x.test/r\", ok=\"https://ok.test/r\"",
+        )]);
+        assert_eq!(
+            summary(&endpoints("https://site.test/", &list)),
+            [("ok".into(), "https://ok.test/r".into(), true)]
+        );
+    }
+
+    #[test]
+    fn report_to_skips_invalid_expired_endpointless_and_insecure_groups() {
+        let groups = headers(&[
+            ("report-to", "{not json"),
+            (
+                "report-to",
+                r#"{"group":"expired","max_age":0,"endpoints":[{"url":"https://e.test/"}]}"#,
+            ),
+            (
+                "report-to",
+                r#"{"group":"none","max_age":5,"endpoints":[]}"#,
+            ),
+            (
+                "report-to",
+                r#"{"group":"bad","max_age":5,"endpoints":[{"url":"::"}]}"#,
+            ),
+            (
+                "report-to",
+                r#"{"group":"plain","max_age":5,"endpoints":[{"url":"http://p.test/"}]}"#,
+            ),
+            (
+                "report-to",
+                r#"[{"max_age":5,"endpoints":[{"url":"https://d.test/1"}]},{"max_age":5,"endpoints":[{"url":"https://d.test/2"}]}]"#,
+            ),
+        ]);
+        assert_eq!(
+            summary(&endpoints("https://site.test/", &groups)),
+            [("default".into(), "https://d.test/1".into(), false)]
+        );
+    }
+
+    #[test]
+    fn report_samples_serialize_escapes_and_every_utf8_width() {
+        let text = "\"\\\u{8}\u{c}\n\r\t\u{1}aé€😀";
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        let encoded = sample_json(&units);
+        assert_eq!(
+            encoded,
+            "\"\\\"\\\\\\b\\f\\n\\r\\t\\u0001aé€😀\"".as_bytes()
+        );
+        assert_eq!(serde_json::from_slice::<String>(&encoded).unwrap(), text);
+        // A high surrogate without its pair is encoded alone, not merged with the next unit.
+        assert_eq!(sample_json(&[0xd83d, 0x41]), b"\"\xed\xa0\xbdA\"");
+        assert_eq!(sample_json(&[0xd83d]), b"\"\xed\xa0\xbd\"");
     }
 }

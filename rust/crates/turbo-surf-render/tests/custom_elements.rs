@@ -1,5 +1,6 @@
 //! Exercise the committed native registry through the production PageSession.
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
 async fn check(probe: &str, fixture: &str) {
@@ -33,37 +34,37 @@ async fn check(probe: &str, fixture: &str) {
 }
 
 macro_rules! contract {
-    ($name:ident, $probe:literal, $fixture:literal) => {
+    ($name:ident, $probe:ident, $fixture:ident) => {
         #[tokio::test(flavor = "current_thread")]
         async fn $name() {
-            check(include_str!($probe), include_str!($fixture)).await;
+            check(test_support::$probe, test_support::$fixture).await;
         }
     };
 }
 contract!(
     registry_construction_and_lifecycle,
-    "../src/custom_elements_probe.js",
-    "../src/custom_elements_chrome155.json"
+    CUSTOM_ELEMENTS_PROBE_JS,
+    CUSTOM_ELEMENTS_CHROME155_JSON
 );
 contract!(
     extensions_failures_and_scoped_registries,
-    "../src/custom_elements_extended_probe.js",
-    "../src/custom_elements_extended_chrome155.json"
+    CUSTOM_ELEMENTS_EXTENDED_PROBE_JS,
+    CUSTOM_ELEMENTS_EXTENDED_CHROME155_JSON
 );
 contract!(
     reactions_and_clone_import_lifecycle,
-    "../src/custom_elements_reactions_probe.js",
-    "../src/custom_elements_reactions_chrome155.json"
+    CUSTOM_ELEMENTS_REACTIONS_PROBE_JS,
+    CUSTOM_ELEMENTS_REACTIONS_CHROME155_JSON
 );
 contract!(
     idl_conversion_and_failure_atomicity,
-    "../src/custom_elements_idl_probe.js",
-    "../src/custom_elements_idl_chrome155.json"
+    CUSTOM_ELEMENTS_IDL_PROBE_JS,
+    CUSTOM_ELEMENTS_IDL_CHROME155_JSON
 );
 contract!(
     move_before_reaction_order_and_callbacks,
-    "../src/custom_elements_moves_probe.js",
-    "../src/custom_elements_moves_chrome155.json"
+    CUSTOM_ELEMENTS_MOVES_PROBE_JS,
+    CUSTOM_ELEMENTS_MOVES_CHROME155_JSON
 );
 
 #[tokio::test(flavor = "current_thread")]
@@ -72,32 +73,32 @@ async fn cross_realm_adoption_and_borrowed_registry_methods() {
         return;
     }
     check(
-        include_str!("../src/custom_elements_realms_probe.js"),
-        include_str!("../src/custom_elements_realms_chrome155.json"),
+        test_support::CUSTOM_ELEMENTS_REALMS_PROBE_JS,
+        test_support::CUSTOM_ELEMENTS_REALMS_CHROME155_JSON,
     )
     .await;
 }
 
 contract!(
     callback_realms_errors_and_reentrant_adoption,
-    "../src/custom_elements_callbacks_probe.js",
-    "../src/custom_elements_callbacks_chrome155.json"
+    CUSTOM_ELEMENTS_CALLBACKS_PROBE_JS,
+    CUSTOM_ELEMENTS_CALLBACKS_CHROME155_JSON
 );
 
 contract!(
     contextual_parser_and_observer_lifecycle,
-    "../src/dom_parser_observer_lifecycle_probe.js",
-    "../src/dom_parser_observer_lifecycle_chrome155.json"
+    DOM_PARSER_OBSERVER_LIFECYCLE_PROBE_JS,
+    DOM_PARSER_OBSERVER_LIFECYCLE_CHROME155_JSON
 );
 
 contract!(
     cross_document_shadow_stylesheet_adoption_lifecycle,
-    "../src/css_adoption_lifecycle_probe.js",
-    "../src/css_adoption_lifecycle_chrome155.json"
+    CSS_ADOPTION_LIFECYCLE_PROBE_JS,
+    CSS_ADOPTION_LIFECYCLE_CHROME155_JSON
 );
 
 contract!(
     retired_frame_preserves_registry_but_suppresses_automatic_custom_element_lifecycle,
-    "../src/custom_elements_retired_probe.js",
-    "../src/custom_elements_retired_chrome155.json"
+    CUSTOM_ELEMENTS_RETIRED_PROBE_JS,
+    CUSTOM_ELEMENTS_RETIRED_CHROME155_JSON
 );

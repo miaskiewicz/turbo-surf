@@ -146,4 +146,22 @@ mod tests {
         let r = query(&tree, tree.root(), "//b", QueryType::Xpath);
         assert_eq!(r.len(), 1);
     }
+
+    #[test]
+    fn matches_serialize_handles_as_raw_indices_and_values_as_null_nodes() {
+        // The JSON wire format (pre-0.4): an element match carries its handle's raw u32
+        // index, an XPath value match carries `"node": null`.
+        let tree = Tree::parse("<a href='/x'>x</a>");
+        let el = query_first(&tree, tree.root(), "a", QueryType::Css).unwrap();
+        let raw = el.node.unwrap().raw();
+        let json = serde_json::to_value(&el).unwrap();
+        assert_eq!(json["node"], serde_json::json!(raw));
+        assert_eq!(json["text"], "x");
+        assert_eq!(json["value"], serde_json::Value::Null);
+        let attr = query_first(&tree, tree.root(), "//a/@href", QueryType::Auto).unwrap();
+        assert_eq!(
+            serde_json::to_value(&attr).unwrap(),
+            serde_json::json!({"node": null, "html": null, "text": "/x", "value": "/x"})
+        );
+    }
 }

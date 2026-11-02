@@ -27,7 +27,7 @@ mod tests {
         turbo_surf_render::ensure_platform();
         assert_eq!(turbo_surf_render::v8_version(), "15.0.245.2-rusty");
 
-        let pixels = turbo_surf_raster::canvas_ops_rgba(
+        let pixels = turbo_dom_raster::canvas_ops_rgba(
             1,
             1,
             r##"[["fillRect", [0, 0, 1, 1], "#ff0000"]]"##,

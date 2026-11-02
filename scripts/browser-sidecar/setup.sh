@@ -3,14 +3,14 @@
 # `web_search { browser:true }` (and the google engine, which requires it).
 #
 # What it does — all local, all reproducible:
-#   1. installs patchright (a CDP-hardened, drop-in playwright) into THIS dir's
-#      node_modules (gitignored),
+#   1. installs the pinned patchright (a CDP-hardened, drop-in playwright) from the
+#      committed package-lock.json into THIS dir's node_modules (gitignored),
 #   2. verifies a real Google Chrome is available (patchright drives it via
 #      channel:'chrome' — genuine surface + no CDP Runtime.enable tell),
 #   3. prints the TURBO_SURF_BROWSER_FETCH_CMD to export.
 #
 # Chrome + node_modules stay OUT of git; only this script + fetch-serp.mjs +
-# package.json are committed, so any user runs `bash scripts/browser-sidecar/setup.sh`.
+# package.json + package-lock.json are committed, so any user runs `bash scripts/browser-sidecar/setup.sh`.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,7 +18,7 @@ cd "$HERE"
 
 echo "[sidecar] installing patchright (CDP-hardened playwright) …"
 if command -v npm >/dev/null 2>&1; then
-  npm install --no-audit --no-fund
+  npm ci --no-audit --no-fund
 else
   echo "  ! npm not found — install Node.js first" >&2
   exit 1

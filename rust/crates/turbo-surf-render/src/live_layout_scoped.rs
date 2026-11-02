@@ -9,20 +9,12 @@ use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::CssRule;
 use lightningcss::selector::{Combinator, Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+use turbo_dom_parser::rtdom::query::parse_for_cascade;
 use turbo_dom_parser::rtdom::{tree::Handle, Tree};
-use turbo_html2pdf_core::layout_snapshot::SourceId;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Target {
-    pub(crate) source: SourceId,
-    pub(crate) specificity: (u32, u32, u32),
-}
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ScopedRule {
-    pub(crate) depth: u32,
-    pub(crate) declarations: Vec<turbo_html2pdf_core::style::Declaration>,
-    pub(crate) targets: Vec<Target>,
-}
+/// A rule matched against one original tree scope: turbo-dom-layout's live-DOM
+/// input applies its declarations to its targets at the scope's depth.
+pub(crate) use turbo_dom_layout::live::{MatchedTarget as Target, PreMatched as ScopedRule};
 
 pub(crate) fn prepare_sheet(
     tree: &Tree,
@@ -59,8 +51,20 @@ fn prepare_rule(
     graph: &Composition,
     rule: &RuleSnapshot,
 ) -> Result<ScopedRule, String> {
-    let parsed = StyleSheet::parse(&rule.css_text, ParserOptions::default())
-        .map_err(|error| format!("native scoped CSS parse failed: {error:?}"))?;
+    let depth = *graph
+        .depths
+        .get(&root)
+        .ok_or("native CSS scope depth missing")?;
+    // The CSSOM kept this rule, so Chrome keeps it too; a selector the native parser
+    // rejects (`::selection:window-inactive`) cannot match a laid-out box, so the rule
+    // gets no targets instead of failing the whole layout (like #117).
+    let Ok(parsed) = StyleSheet::parse(&rule.css_text, ParserOptions::default()) else {
+        return Ok(ScopedRule {
+            declarations: Vec::new(),
+            depth,
+            targets: Vec::new(),
+        });
+    };
     let [CssRule::Style(style)] = parsed.rules.0.as_slice() else {
         return Err("native scoped CSS requires one qualified rule".into());
     };
@@ -71,6 +75,16 @@ fn prepare_rule(
     let sources = selector_sources(&rule.css_text)?;
     if sources.len() != style.selectors.0.len() {
         return Err("native selector source provenance mismatch".into());
+    }
+    // A selector list Chrome drops (an unknown pseudo-class, a misplaced
+    // pseudo-element) makes the rule invalid on its own: it matches nothing, and
+    // the rest of the page keeps its layout (#117).
+    if parse_for_cascade(&sources.join(",")).is_err() {
+        return Ok(ScopedRule {
+            declarations,
+            depth,
+            targets: Vec::new(),
+        });
     }
     let matcher = Matcher { tree, root, graph };
     let mut specificity_by_node = std::collections::HashMap::<Handle, u32>::new();
@@ -120,10 +134,7 @@ fn prepare_rule(
     targets.sort_by_key(|target| target.source.0);
     Ok(ScopedRule {
         declarations,
-        depth: *graph
-            .depths
-            .get(&root)
-            .ok_or("native CSS scope depth missing")?,
+        depth,
         targets,
     })
 }
@@ -174,7 +185,7 @@ fn shadow_selector(selector: &Selector<'_>) -> bool {
 
 fn declarations(
     block: &DeclarationBlock<'_>,
-) -> Result<Vec<turbo_html2pdf_core::style::Declaration>, String> {
+) -> Result<Vec<turbo_dom_layout::style::Declaration>, String> {
     use lightningcss::stylesheet::PrinterOptions;
     let mut result = Vec::new();
     for (important, properties) in [
@@ -216,7 +227,7 @@ fn declarations(
             };
             if let Some(value) = wide {
                 for id in PropertyId::Font.longhands().unwrap_or_default() {
-                    result.push(turbo_html2pdf_core::style::Declaration {
+                    result.push(turbo_dom_layout::style::Declaration {
                         property: lightningcss::traits::ToCss::to_css_string(
                             &id,
                             PrinterOptions::default(),
@@ -240,14 +251,16 @@ fn declarations(
                     .map_err(|error| {
                         format!("native CSS declaration serialization failed: {error:?}")
                     })?;
-                result.extend(turbo_html2pdf_core::style::parse_declarations(&text));
+                result.extend(turbo_dom_layout::style::parse_declarations(&text));
             }
         }
     }
     Ok(result)
 }
 
-fn inline_declarations(text: &str) -> Result<Vec<turbo_html2pdf_core::style::Declaration>, String> {
+pub(crate) fn inline_declarations(
+    text: &str,
+) -> Result<Vec<turbo_dom_layout::style::Declaration>, String> {
     let block = DeclarationBlock::parse_string(
         text,
         ParserOptions {
@@ -406,6 +419,8 @@ impl Matcher<'_> {
     }
 }
 
+/// The UA stylesheet (turbo-dom-layout's + surf's live supplement + `slot`) matched
+/// in every tree scope of `graph`.
 pub(crate) fn ua_rules(
     tree: &Tree,
     document: u32,
@@ -413,7 +428,7 @@ pub(crate) fn ua_rules(
 ) -> Result<Vec<crate::live_stylesheets::ActiveRule>, String> {
     let css = format!(
         "{} {} slot{{display:contents}}",
-        turbo_html2pdf_core::style::user_agent_css(),
+        turbo_dom_layout::style::user_agent_css(),
         crate::live_layout::LIVE_UA
     );
     let parsed = StyleSheet::parse(&css, ParserOptions::default())
@@ -443,158 +458,6 @@ pub(crate) fn ua_rules(
         }
     }
     Ok(result)
-}
-
-pub(crate) fn style_composed_tree(
-    input: &crate::live_layout::LiveTreeInput,
-    rules: &[crate::live_stylesheets::ActiveRule],
-) -> Result<Vec<turbo_html2pdf_core::StyledNode>, String> {
-    use turbo_html2pdf_core::style::{CascadeOrigin, MatchedDeclaration};
-    let graph = input
-        .composition
-        .as_ref()
-        .ok_or("native composed style graph unavailable")?;
-    let mut declarations = std::collections::HashMap::<SourceId, Vec<MatchedDeclaration>>::new();
-    let mut count = 0usize;
-    for (origin, rules) in [
-        (CascadeOrigin::UserAgent, graph.ua_rules.as_slice()),
-        (CascadeOrigin::Author, rules),
-    ] {
-        for (order, rule) in rules.iter().enumerate() {
-            let scoped = rule
-                .scoped
-                .as_ref()
-                .ok_or("native stylesheet scope provenance missing")?;
-            for target in &scoped.targets {
-                for declaration in &scoped.declarations {
-                    count += 1;
-                    if count > 500_000 {
-                        return Err("native scoped declaration budget exceeded".into());
-                    }
-                    declarations
-                        .entry(target.source)
-                        .or_default()
-                        .push(MatchedDeclaration {
-                            declaration: declaration.clone(),
-                            origin,
-                            scope_depth: scoped.depth,
-                            inline: false,
-                            specificity: target.specificity,
-                            order,
-                        });
-                }
-            }
-        }
-    }
-    let identities = input
-        .identities
-        .iter()
-        .map(|source| (source.path.clone(), source.id))
-        .collect::<std::collections::HashMap<_, _>>();
-    struct Styler<'a> {
-        graph: &'a Composition,
-        identities: &'a std::collections::HashMap<Vec<usize>, SourceId>,
-        declarations: &'a std::collections::HashMap<SourceId, Vec<MatchedDeclaration>>,
-    }
-    impl Styler<'_> {
-        fn nodes(
-            &self,
-            nodes: &[turbo_html2pdf_core::Node],
-            path: &[usize],
-            parent: &turbo_html2pdf_core::ComputedStyle,
-        ) -> Result<Vec<turbo_html2pdf_core::StyledNode>, String> {
-            use turbo_html2pdf_core::{Node, StyledNode};
-            let mut result = Vec::with_capacity(nodes.len());
-            for (index, node) in nodes.iter().enumerate() {
-                let mut path = path.to_vec();
-                path.push(index);
-                match node {
-                    Node::Text(text) => result.push(StyledNode::Text(text.clone())),
-                    Node::Element(element) => {
-                        let source = *self
-                            .identities
-                            .get(&path)
-                            .ok_or("native composed source identity unavailable")?;
-                        let handle = Handle::from_raw(source.0 as u32);
-                        let root = self
-                            .graph
-                            .scopes
-                            .get(&handle)
-                            .ok_or("native composed source scope unavailable")?;
-                        let depth = *self
-                            .graph
-                            .depths
-                            .get(root)
-                            .ok_or("native composed source depth unavailable")?;
-                        let mut declarations = Vec::new();
-                        for declaration in
-                            turbo_html2pdf_core::style::presentational_declarations(element)
-                        {
-                            declarations.push(MatchedDeclaration {
-                                declaration,
-                                origin: CascadeOrigin::Author,
-                                scope_depth: depth,
-                                inline: false,
-                                specificity: (0, 0, 0),
-                                order: 0,
-                            });
-                        }
-                        declarations.extend(
-                            self.declarations
-                                .get(&source)
-                                .into_iter()
-                                .flatten()
-                                .cloned()
-                                .map(|mut d| {
-                                    d.order += 1;
-                                    d
-                                }),
-                        );
-                        if let Some(style) = element
-                            .attrs
-                            .iter()
-                            .find(|attribute| attribute.name == "style")
-                        {
-                            for declaration in inline_declarations(&style.value)? {
-                                declarations.push(MatchedDeclaration {
-                                    declaration,
-                                    origin: CascadeOrigin::Author,
-                                    scope_depth: depth,
-                                    inline: true,
-                                    specificity: (0, 0, 0),
-                                    order: usize::MAX,
-                                });
-                            }
-                        }
-                        let style = turbo_html2pdf_core::style::resolve_matched_style(
-                            parent,
-                            &declarations,
-                        );
-                        let children = self.nodes(&element.children, &path, &style)?;
-                        result.push(StyledNode::Element(
-                            turbo_html2pdf_core::style::StyledElement {
-                                tag: element.tag.clone(),
-                                attrs: element.attrs.clone(),
-                                style,
-                                children,
-                            },
-                        ));
-                    }
-                }
-            }
-            Ok(result)
-        }
-    }
-    Styler {
-        graph,
-        identities: &identities,
-        declarations: &declarations,
-    }
-    .nodes(
-        &input.nodes,
-        &[],
-        &turbo_html2pdf_core::ComputedStyle::default(),
-    )
 }
 
 #[cfg(test)]
@@ -808,6 +671,32 @@ mod tests {
             .unwrap_err()
             .contains("native selector match failed"));
         assert!(!validated);
+    }
+
+    /// turbo-surf#117: a rule whose selector list Chrome drops (an unknown pseudo-class)
+    /// matches nothing instead of failing the page; Google's view-transition rules are
+    /// valid and never match an element; the rules around them keep matching.
+    #[test]
+    fn invalid_selector_rule_is_skipped_not_page_fatal() {
+        let tree = Tree::parse("<body><div id=a class=pick></div></body>");
+        let a = tree.get_element_by_id("a").unwrap();
+        let graph = Composition::scopes(&tree).unwrap();
+        let root = tree.root();
+        let targets = |css: &str| prepared(&tree, root, &graph, css).targets;
+        assert_eq!(targets("html:bogus .pick{width:1px}"), Vec::<Target>::new());
+        assert_eq!(
+            targets(".pick, html:bogus{width:1px}"),
+            Vec::<Target>::new()
+        );
+        assert_eq!(
+            targets("html:active-view-transition-type(aimc)::view-transition-new(sb):only-child{width:1px}"),
+            Vec::<Target>::new()
+        );
+        let kept = targets(".pick, html:active-view-transition-type(aimc) .pick{width:1px}");
+        assert_eq!(
+            kept.iter().map(|t| t.source).collect::<Vec<_>>(),
+            vec![source_id(1, a)]
+        );
     }
 
     #[test]

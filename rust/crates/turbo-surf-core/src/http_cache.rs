@@ -317,9 +317,10 @@ impl HttpCache {
         {
             return;
         }
-        let Some(origin) = crate::request_context::origin(url) else {
-            return;
-        };
+        // trustworthy() admits only parsed http(s) URLs, and every parsed http(s)
+        // URL has a tuple origin, so origin() is always Some here.
+        let origin = crate::request_context::origin(url)
+            .expect("a trustworthy URL is a parsed http(s) URL with a tuple origin");
         self.dictionary_store().clear_origin(url);
         let mut state = self.0.lock().unwrap();
         state
@@ -624,5 +625,268 @@ mod tests {
         assert_eq!(entry.vary, vec![("x-flavor".into(), Some("new".into()))]);
         assert_eq!(values(&entry.headers, "content-length"), "");
         assert_eq!(values(&entry.headers, "set-cookie"), "");
+    }
+
+    fn cached(cache: &HttpCache, key_url: &str) -> Option<Entry> {
+        cache
+            .lookup("partition", key_url, &BTreeMap::new())
+            .map(|(entry, _)| entry)
+    }
+    fn keyed(url: &str, headers: &[(&str, String)], body: Vec<u8>) -> Entry {
+        let mut entry = entry(headers);
+        entry.key = format!("partition\n{url}");
+        entry.url = url.into();
+        entry.body = body;
+        entry
+    }
+    fn partial(range: (usize, usize), total: usize, body: &[u8], etag: &str) -> Entry {
+        let mut entry = entry(&[
+            ("etag", etag.into()),
+            (
+                "content-range",
+                format!("bytes {}-{}/{total}", range.0, range.1 - 1),
+            ),
+        ]);
+        entry.status = 206;
+        entry.body = body.to_vec();
+        entry.sparse = Some(SparseBody::new(total));
+        entry.received_range = Some(ByteRange {
+            start: range.0,
+            end: range.1,
+        });
+        entry
+    }
+    #[test]
+    fn cache_mode_parses_exactly_the_fetch_request_cache_tokens() {
+        // Fetch's RequestCache enum: lowercase tokens only.
+        for (token, mode) in [
+            ("default", CacheMode::Default),
+            ("no-store", CacheMode::NoStore),
+            ("reload", CacheMode::Reload),
+            ("no-cache", CacheMode::NoCache),
+            ("force-cache", CacheMode::ForceCache),
+            ("only-if-cached", CacheMode::OnlyIfCached),
+        ] {
+            assert_eq!(CacheMode::parse(token), Some(mode));
+        }
+        for token in ["", "Default", "NO-STORE", "only-if-cached ", "max-age"] {
+            assert_eq!(CacheMode::parse(token), None, "{token:?}");
+        }
+    }
+    #[test]
+    fn complete_body_prefix_and_range_metadata_follow_rfc_9110() {
+        let mut entry = keyed(
+            "https://cache.test/r",
+            &[
+                ("Content-Length", "6".into()),
+                ("Content-Range", "bytes 0-5/6".into()),
+                ("x-other", "kept".into()),
+            ],
+            b"abcdef".to_vec(),
+        );
+        assert_eq!(entry.prefix(ByteRange { start: 1, end: 4 }), b"bcd");
+        assert_eq!(entry.prefix(ByteRange { start: 4, end: 9 }), b"");
+        assert!(!entry.sparse());
+        // RFC 9110 15.3.7: a 206 carries Content-Range and the part's length.
+        let part = entry.range_response(Some("bytes=2-3")).unwrap();
+        assert_eq!(part.status, 206);
+        assert_eq!(part.status_text, "Partial Content");
+        assert_eq!(part.body, b"cd");
+        assert_eq!(values(&part.headers, "content-range"), "bytes 2-3/6");
+        assert_eq!(values(&part.headers, "content-length"), "2");
+        assert_eq!(values(&part.headers, "x-other"), "kept");
+        // HTTP/2 has no reason phrase (RFC 9113 8.3.2).
+        entry.version = http::Version::HTTP_2;
+        let whole = entry.response_metadata(ByteRange { start: 0, end: 6 }, false);
+        assert_eq!((whole.status, whole.status_text.as_str()), (200, ""));
+        assert_eq!(values(&whole.headers, "content-range"), "");
+        assert_eq!(values(&whole.headers, "content-length"), "6");
+        // Only a stored 200/206 representation can satisfy a range request.
+        entry.status = 404;
+        assert!(entry.range_response(Some("bytes=0-1")).is_none());
+        assert_eq!(entry.range_response(None).unwrap().status, 404);
+    }
+    #[test]
+    fn a_partial_response_is_stored_only_with_a_strong_validator() {
+        let cache = HttpCache::default();
+        // A 206 is heuristically uncacheable; explicit freshness makes it storable.
+        let fresh = |mut part: Entry| {
+            part.headers
+                .push(("cache-control".into(), "max-age=60".into()));
+            part.response()
+        };
+        let response = fresh(partial((0, 2), 4, b"ab", "W/\"v1\""));
+        assert!(cache
+            .pending(
+                "p",
+                "https://cache.test/",
+                &BTreeMap::new(),
+                &response,
+                "".into(),
+                0
+            )
+            .is_none());
+        let strong = fresh(partial((0, 2), 4, b"ab", "\"v1\""));
+        let pending = cache
+            .pending(
+                "p",
+                "https://cache.test/#frag",
+                &BTreeMap::new(),
+                &strong,
+                "".into(),
+                0,
+            )
+            .unwrap();
+        assert_eq!(pending.entry.url, "https://cache.test/");
+        assert_eq!(
+            pending.entry.received_range,
+            Some(ByteRange { start: 0, end: 2 })
+        );
+        assert_eq!(normalized_url("not a url#x"), "not a url#x");
+        assert_eq!(normalized_url("https://a.test/p?q#x"), "https://a.test/p?q");
+    }
+    #[test]
+    fn store_drops_mismatched_parts_oversize_bodies_and_no_store_entries() {
+        let url = "https://cache.test/";
+        let cache = HttpCache::default();
+        // A part whose byte count disagrees with its Content-Range is not stored.
+        cache.store(partial((0, 3), 4, b"ab", "\"v1\""));
+        assert!(cached(&cache, url).is_none());
+        // Over the 32 MiB cache budget: not stored.
+        cache.store(keyed(url, &[], vec![7; 32 * 1024 * 1024 + 1]));
+        assert!(cached(&cache, url).is_none());
+        cache.store(keyed(url, &[], vec![7; 32 * 1024 * 1024]));
+        assert_eq!(cached(&cache, url).unwrap().body.len(), 32 * 1024 * 1024);
+        // A later no-store response for the same key evicts the stored one.
+        cache.store(keyed(
+            url,
+            &[("cache-control", "no-store".into())],
+            b"x".to_vec(),
+        ));
+        assert!(cached(&cache, url).is_none());
+    }
+    #[test]
+    fn a_part_completing_a_stored_200_merges_into_the_full_representation() {
+        let url = "https://cache.test/";
+        let cache = HttpCache::default();
+        cache.store(keyed(
+            url,
+            &[("etag", "\"v1\"".into()), ("x-old", "kept".into())],
+            b"abcd".to_vec(),
+        ));
+        let mut part = partial((1, 3), 4, b"bc", "\"v1\"");
+        part.headers.push(("x-new".into(), "fresh".into()));
+        cache.store(part);
+        let stored = cached(&cache, url).unwrap();
+        assert_eq!((stored.status, stored.body.as_slice()), (200, &b"abcd"[..]));
+        assert!(!stored.sparse());
+        assert_eq!(values(&stored.headers, "x-old"), "kept");
+        assert_eq!(values(&stored.headers, "x-new"), "fresh");
+        assert_eq!(values(&stored.headers, "content-range"), "");
+        // A part of a different length (another representation) does not merge.
+        cache.store(partial((0, 2), 8, b"zz", "\"v1\""));
+        let stored = cached(&cache, url).unwrap();
+        assert_eq!((stored.status, stored.sparse()), (206, true));
+        assert_eq!(stored.prefix(ByteRange { start: 0, end: 2 }), b"zz");
+    }
+    #[test]
+    fn a_part_merges_only_with_the_same_key_variant_and_strong_validator() {
+        let url = "https://cache.test/";
+        let complete = |etag: &str| keyed(url, &[("etag", etag.into())], b"abcd".to_vec());
+        let part_of = |cache: &HttpCache, part: Entry| {
+            cache.store(part);
+            let stored = cached(cache, url).unwrap();
+            (stored.status, stored.sparse())
+        };
+        // Another URL's complete body of the same length is never borrowed.
+        let cache = HttpCache::default();
+        cache.store(keyed(
+            "https://cache.test/other",
+            &[("etag", "\"v1\"".into())],
+            b"wxyz".to_vec(),
+        ));
+        assert_eq!(
+            part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+            (206, true)
+        );
+        // A different Vary selection is another stored response.
+        let cache = HttpCache::default();
+        let mut varied = complete("\"v1\"");
+        varied.vary = vec![("accept".into(), Some("text/html".into()))];
+        cache.store(varied);
+        assert_eq!(
+            part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+            (206, true)
+        );
+        // A changed (or weak) validator is another representation.
+        for etag in ["\"v2\"", "W/\"v1\""] {
+            let cache = HttpCache::default();
+            cache.store(complete(etag));
+            assert_eq!(
+                part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+                (206, true)
+            );
+        }
+        let cache = HttpCache::default();
+        cache.store(complete("\"v1\""));
+        assert_eq!(
+            part_of(&cache, partial((0, 2), 4, b"ab", "\"v1\"")),
+            (200, false)
+        );
+    }
+    #[test]
+    fn eviction_counts_the_sum_of_stored_bytes() {
+        let cache = HttpCache::default();
+        cache.store(keyed("https://cache.test/small", &[], vec![1, 2]));
+        cache.store(keyed(
+            "https://cache.test/large",
+            &[],
+            vec![0; 20 * 1024 * 1024],
+        ));
+        assert_eq!(
+            cached(&cache, "https://cache.test/small").unwrap().body,
+            [1, 2]
+        );
+        cache.store(keyed(
+            "https://cache.test/more",
+            &[],
+            vec![0; 12 * 1024 * 1024],
+        ));
+        assert!(cached(&cache, "https://cache.test/small").is_none());
+        assert!(cached(&cache, "https://cache.test/large").is_some());
+    }
+
+    #[test]
+    fn merged_parts_over_the_budget_keep_the_previous_parts() {
+        const HALF: usize = 20 * 1024 * 1024;
+        let url = "https://cache.test/";
+        let cache = HttpCache::default();
+        cache.store(partial((0, HALF), 2 * HALF, &vec![1; HALF], "\"v1\""));
+        cache.store(partial(
+            (HALF, 2 * HALF),
+            2 * HALF,
+            &vec![2; HALF],
+            "\"v1\"",
+        ));
+        let stored = cached(&cache, url).unwrap();
+        assert_eq!(stored.size(), HALF);
+        assert!(stored
+            .range_response(Some(&format!("bytes={HALF}-{HALF}")))
+            .is_none());
+    }
+    #[test]
+    fn the_cache_evicts_oldest_first_past_512_entries() {
+        let cache = HttpCache::default();
+        for n in 0..513 {
+            cache.store(keyed(
+                &format!("https://cache.test/{n}"),
+                &[],
+                vec![n as u8],
+            ));
+        }
+        assert!(cached(&cache, "https://cache.test/0").is_none());
+        assert_eq!(cached(&cache, "https://cache.test/1").unwrap().body, [1]);
+        assert_eq!(cached(&cache, "https://cache.test/512").unwrap().body, [0]);
+        assert_eq!(cache.0.lock().unwrap().entries.len(), 512);
     }
 }

@@ -1,0 +1,33 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "7a5d715d7225c4942d0fed39ffc92a6e24aa437362e37aba5e53e2e6ef77eb7f",
+  "casesSha256": "77b0e455581f4a92a7606f1b5d8d4fec633ed0ca1dbdff5c2df53cc62d374b7d",
+  "collectorSha256": "cd5e4c05011dae1e6dc9afa876cf9a93ba924959aef11dbf3fc1863a46156124",
+  "errors": [],
+  "result": [
+    {
+      "id": "html-image-loads",
+      "result": {
+        "factorySrc": [["load"], true, 3, 2, []],
+        "factorySized": [["load"], true, 5, 4, []],
+        "createdSetAttribute": [["load"], true, 3, 2, []],
+        "createdBroken": [["error"], true, 0, 0, []],
+        "srcset": [["load"], true, 3, 2, []],
+        "detachedInnerHTML": [[["load", "img"]], true, 3, 2, false],
+        "detachedInsertAdjacent": [[["load", "img"]], true, 5, 4, false],
+        "contextualFragment": [[["load", "img"]], true, 3, 2, false],
+        "appendedCreated": [[["load", "img"]], true, 5, 4, false],
+        "template": [[], true, 0, 0, []],
+        "templateDocument": [[], true, 0, 0, []],
+        "domParser": [[], true, 0, 0, []],
+        "htmlDocument": [[], true, 0, 0, []],
+        "srcChange": [["load", "load"], true, 5, 4, []],
+        "srcRemoved": [["load", "load"], true, 0, 0, []],
+        "unrelatedAttribute": [[], true, 3, 2, []],
+        "movedAfterLoad": [["load"], true, 5, 4, []],
+        "decodeDetached": ["resolved", true, 5, 4],
+        "decodeBroken": ["rejected", "EncodingError", true]
+      }
+    }
+  ]
+}

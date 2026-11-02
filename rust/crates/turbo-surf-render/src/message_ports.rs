@@ -43,6 +43,11 @@ struct Registry {
     max_bytes: usize,
     endpoints: HashMap<u32, EndpointHandle>,
     dirty: HashSet<u32>,
+    /// The GC epoch of the last full sweep. An endpoint becomes collectable only
+    /// when a collection empties its anchor or its last reservation ends, so
+    /// `sweep` skips the endpoint scan otherwise (#98: per-op scans were O(n^2)).
+    swept_epoch: Option<u64>,
+    reservation_released: bool,
 }
 impl Default for Registry {
     fn default() -> Self {
@@ -54,6 +59,8 @@ impl Default for Registry {
             max_bytes: 128 * 1024 * 1024,
             endpoints: HashMap::new(),
             dirty: HashSet::new(),
+            swept_epoch: None,
+            reservation_released: false,
         }
     }
 }
@@ -135,8 +142,11 @@ impl Reservation {
 }
 impl Drop for Reservation {
     fn drop(&mut self) {
-        self.endpoint.borrow_mut().reservations -= 1;
-        self.registry.borrow_mut().reserved_bytes -= self.bytes;
+        let mut endpoint = self.endpoint.borrow_mut();
+        endpoint.reservations -= 1;
+        let mut registry = self.registry.borrow_mut();
+        registry.reserved_bytes -= self.bytes;
+        registry.reservation_released |= endpoint.reservations == 0;
     }
 }
 type RegistryHandle = Rc<RefCell<Registry>>;
@@ -243,8 +253,14 @@ fn listener_changed(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) {
 pub(crate) fn sweep(scope: &mut v8::PinScope) {
     let registry = registry(scope);
     refresh_dirty(scope, &registry);
+    let epoch = crate::storage_gc::epoch(scope);
     let removed = {
         let mut registry = registry.borrow_mut();
+        if epoch.is_some() && registry.swept_epoch == epoch && !registry.reservation_released {
+            return;
+        }
+        registry.swept_epoch = epoch;
+        registry.reservation_released = false;
         let ids = registry
             .endpoints
             .iter()
@@ -337,20 +353,18 @@ fn transfer_contains_endpoint(
     }
     false
 }
+/// The live endpoint a transfer-list port moves, or `None` for a neutered
+/// (already transferred or collected) port; callers own the exception text.
 pub(crate) fn validate_transfer(
     scope: &mut v8::PinScope,
     object: v8::Local<v8::Object>,
-) -> Result<PortTransfer, JsErrorBox> {
-    let (token, endpoint) = lookup_endpoint(scope, object)?;
-    let endpoint = endpoint
-        .ok_or_else(|| crate::crypto_clone::data_clone_error(scope, "MessagePort is detached"))?;
+) -> Option<PortTransfer> {
+    let (token, endpoint) = lookup_endpoint(scope, object).ok()?;
+    let endpoint = endpoint?;
     if endpoint.borrow().generation != token.generation || token.generation == u32::MAX {
-        return Err(crate::crypto_clone::data_clone_error(
-            scope,
-            "MessagePort is already detached",
-        ));
+        return None;
     }
-    Ok(PortTransfer {
+    Some(PortTransfer {
         token,
         endpoint: Rc::downgrade(&endpoint),
         registry: Rc::downgrade(&registry(scope)),
@@ -360,15 +374,8 @@ pub(crate) fn validate_transfer(
 pub(crate) fn is_endpoint(transfer: &PortTransfer, id: u32) -> bool {
     transfer.token.id == id
 }
-pub(crate) fn same_transfer(a: &PortTransfer, b: &PortTransfer) -> bool {
-    a.token.id == b.token.id
-}
-pub(crate) fn transfer_matches(
-    scope: &mut v8::PinScope,
-    object: v8::Local<v8::Object>,
-    transfer: &PortTransfer,
-) -> bool {
-    token(scope, object) == Some(transfer.token)
+pub(crate) fn transfer_token(transfer: &PortTransfer) -> PortToken {
+    transfer.token
 }
 pub(crate) fn revalidate(transfer: &PortTransfer) -> bool {
     transfer
@@ -590,6 +597,9 @@ fn op_port_post_message<'s>(
     value: v8::Local<'s, v8::Value>,
     transfer: Option<v8::Local<'s, v8::Value>>,
     include_activation: bool,
+    // The public MessagePort.postMessage (Chrome's error prefix) vs internal
+    // stream-chunk posts, whose callers add their own context.
+    public: bool,
 ) -> Result<(), JsErrorBox> {
     let activation = if include_activation {
         crate::runtime::activation_snapshot_bits(scope.get_entered_or_microtask_context())
@@ -614,7 +624,8 @@ fn op_port_post_message<'s>(
         .map(|destination| Reservation::new(scope, registry.clone(), destination.clone()))
         .transpose()?;
     v8::tc_scope!(let scope,scope);
-    let result = crate::crypto_clone::prepare_transfer(scope, value, transfer, Some(object));
+    let result =
+        crate::crypto_clone::prepare_transfer(scope, value, transfer, Some(object), public);
     if scope.has_caught() || scope.has_terminated() {
         scope.rethrow();
         return Ok(());

@@ -1,0 +1,318 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "79a62ea7f4c21dd530efa6657839d4d631c9160d19fc32dea16d92f87079716f",
+  "collectorSha256": "090439f09d40915cf5724ddaa2c0fdae057e1de2b60557b1399d82a4911ac32d",
+  "errors": [],
+  "result": {
+    "allSetSloppy": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allSetStrict": {
+      "threw": "TypeError",
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allSetMissingSloppy": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allSetMissingStrict": {
+      "threw": "TypeError",
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allSetNamedSloppy": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allSetNamedStrict": {
+      "threw": "TypeError",
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allReflectSet": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allDeleteSloppy": {
+      "threw": null,
+      "value": false,
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allDeleteStrict": {
+      "threw": "TypeError",
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allDeleteNamedStrict": {
+      "threw": "TypeError",
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allDefine": {
+      "threw": "TypeError",
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allDefineMissing": {
+      "threw": "TypeError",
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "allReflectDefine": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "first": true,
+        "missing": false,
+        "named": true
+      }
+    },
+    "selectSetSloppy": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "selectSetStrict": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "selectSetNullSloppy": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "b",
+        "length": 1
+      }
+    },
+    "selectSetNullStrict": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "b",
+        "length": 1
+      }
+    },
+    "selectSetWrongTypeSloppy": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "selectSetWrongTypeStrict": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "selectReflectSet": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "selectDefineData": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "selectDefineAccessor": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "selectReflectDefineAccessor": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "selectDeleteSloppy": {
+      "threw": null,
+      "value": false,
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "selectDeleteStrict": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "selectDeleteMissingStrict": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "optionsSetSloppy": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "optionsSetStrict": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "optionsSetNullSloppy": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "b",
+        "length": 1
+      }
+    },
+    "optionsSetNullStrict": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "b",
+        "length": 1
+      }
+    },
+    "optionsSetWrongTypeSloppy": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "optionsSetWrongTypeStrict": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "optionsReflectSet": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "optionsDefineData": {
+      "threw": null,
+      "value": null,
+      "state": {
+        "texts": "a,b,c",
+        "length": 3
+      }
+    },
+    "optionsDefineAccessor": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "optionsReflectDefineAccessor": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "optionsDeleteSloppy": {
+      "threw": null,
+      "value": false,
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "optionsDeleteStrict": {
+      "threw": "TypeError",
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    },
+    "optionsDeleteMissingStrict": {
+      "threw": null,
+      "value": true,
+      "state": {
+        "texts": "a,b",
+        "length": 2
+      }
+    }
+  }
+}

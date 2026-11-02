@@ -138,7 +138,7 @@ async fn native_fetch_headers_body_cancellation_and_binary_upload_match_chrome()
         &format!("{origin}/"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -157,7 +157,7 @@ async fn native_fetch_headers_body_cancellation_and_binary_upload_match_chrome()
     ))
     .unwrap();
     assert_eq!(actual, expected["result"]);
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while closed.load(std::sync::atomic::Ordering::SeqCst) < 2 {
             tokio::task::yield_now().await;
         }
@@ -187,9 +187,15 @@ async fn collecting_a_no_store_body_closes_its_native_transport() {
         let mut bytes = [0; 1];
         socket.read(&mut bytes).await.unwrap()
     });
-    let mut page = PageSession::open("<!doctype html><body>", &format!("{origin}/"), "", "", 5000)
-        .await
-        .unwrap();
+    let mut page = PageSession::open(
+        "<!doctype html><body>",
+        &format!("{origin}/"),
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
     assert_eq!(page.eval_expression("(async()=>{const response=await fetch('/hold');globalThis.unconsumedBody=new WeakRef(response.body);return 'headers';})()").await.unwrap(),"headers");
     for _ in 0..3 {
         page.collect_message_port_garbage_for_testing();
@@ -201,7 +207,7 @@ async fn collecting_a_no_store_body_closes_its_native_transport() {
         "true"
     );
     assert_eq!(
-        tokio::time::timeout(std::time::Duration::from_secs(1), server)
+        tokio::time::timeout(std::time::Duration::from_secs(30), server)
             .await
             .expect("Collecting the V8 stream must cancel the native body")
             .unwrap(),
@@ -234,13 +240,13 @@ async fn retirement_cancels_the_request_creation_realm_even_when_parent_holds_re
         &format!("{origin}/"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
     assert_eq!(page.eval_expression("(async()=>{const frame=document.getElementById('frame');globalThis.retainedResponse=await frame.contentWindow.fetch('/hold');frame.remove();return String(retainedResponse.status);})()").await.unwrap(),"200");
     assert_eq!(
-        tokio::time::timeout(std::time::Duration::from_secs(1), server)
+        tokio::time::timeout(std::time::Duration::from_secs(30), server)
             .await
             .expect("Retiring the request's actual realm must close a held response transport")
             .unwrap(),

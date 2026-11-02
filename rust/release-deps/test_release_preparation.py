@@ -89,14 +89,17 @@ version = "0.253.0"
 [target.'cfg(windows)'.dev-dependencies.deno_webidl]
 version = "0.259.0"
 """
-        result = tomllib.loads(deno.manifest(source, 'deno_web', '0.290.0', 'turbo-surf-deno-web'))
+        web = next(p for p in deno.PACKAGES if p.upstream == 'deno_web')
+        result = tomllib.loads(deno.manifest(source, web))
+        self.assertEqual(result['package']['version'], '0.290.1')
+        self.assertEqual(result['dependencies']['deno_core']['version'], '=0.412.1')
         self.assertEqual(result['lib']['name'], 'deno_web')
         self.assertEqual(result['dependencies']['deno_core']['package'], 'turbo-surf-deno-core')
         self.assertEqual(result['features'], {'default': ['v8'], 'v8': ['deno_core/v8']})
         self.assertFalse(result['dependencies']['deno_core']['default-features'])
         self.assertEqual(result['dev-dependencies']['deno_bench_util']['package'], 'turbo-surf-deno-bench-util')
         self.assertEqual(result['target']['cfg(windows)']['dev-dependencies']['deno_webidl']['package'], 'turbo-surf-deno-webidl')
-        self.assertEqual(result['dev-dependencies']['deno_bench_util']['version'], '=0.253.0')
+        self.assertEqual(result['dev-dependencies']['deno_bench_util']['version'], '=0.253.1')
 
     def test_source_acquisition_rejects_existing_paths_and_cargo_home(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -118,11 +121,11 @@ version = "0.259.0"
 
     def test_bootstrap_removes_git_paths_and_patches_without_changing_alias(self):
         manifest = {'package': {'name': 'example', 'version': '1.0.0'},
-                    'dependencies': {'v8': {'package': 'turbo-surf-v8', 'version': '=150.4.0',
-                                            'path': '../v8', 'git': 'https://upstream.invalid', 'rev': 'x'}},
+                    'dependencies': {'rusty_v8': {'package': 'turbo-dom-v8', 'version': '~150.4',
+                                                  'path': '../v8', 'git': 'https://upstream.invalid', 'rev': 'x'}},
                     'patch': {'crates-io': {}}}
         parsed = tomllib.loads(stage.normalize(transport.dump(manifest)))
-        self.assertEqual(parsed['dependencies']['v8'], {'package': 'turbo-surf-v8', 'version': '=150.4.0'})
+        self.assertEqual(parsed['dependencies']['rusty_v8'], {'package': 'turbo-dom-v8', 'version': '~150.4'})
         self.assertNotIn('patch', parsed)
         with self.assertRaises(ValueError):
             stage.normalize('[package]\nname="example"\nversion.workspace=true\n')

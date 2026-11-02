@@ -1,9 +1,14 @@
 //! JS-execution tier (tier 3): a `deno_core` V8 isolate with a real rtdom↔V8 DOM
-//! binding ([`browser_env`], vendored from turbo-test) so page scripts hydrate
+//! binding ([`browser_env`], the `turbo-dom-browser-env` crate) so page scripts hydrate
 //! against a genuine `document`. [`runtime`] is the browser-environment runtime — it
 //! grafts the binding onto deno_core's context, installs the non-DOM `window` globals
 //! a real page needs (timers/fetch/URL/crypto/streams/…), and drives the event
 //! loop + hydration pump + execution budget.
+
+// The binding is a dependency (not a module): surf code names its items as
+// `crate::browser_env::*`; surf's native services over its documents
+// (live_layout_dom, compression_dictionary_dom) use its `host_internals`.
+use turbo_dom_browser_env::browser_env;
 
 mod audio_backend;
 mod audio_buffer;
@@ -11,7 +16,7 @@ mod audio_dsp;
 mod audio_effects;
 mod audio_fft;
 mod audio_timeline;
-mod browser_env;
+mod compression_dictionary_dom;
 mod context_ownership;
 mod crypto_backend;
 mod crypto_clone;
@@ -26,19 +31,15 @@ mod integrity;
 mod layout_profile;
 mod live_layout;
 mod live_layout_backend;
+#[cfg(test)]
+mod live_layout_budget_tests;
 mod live_layout_composed;
-mod live_layout_hit;
-mod live_layout_inline;
+mod live_layout_dom;
 mod live_layout_media;
-mod live_layout_metrics;
 mod live_layout_neutral;
-mod live_layout_range;
 mod live_layout_resources;
 mod live_layout_scoped;
-mod live_layout_scroll;
 mod live_layout_supports;
-mod live_layout_text;
-mod live_layout_visibility;
 mod live_layout_zoom;
 mod live_stylesheets;
 mod message_ports;
@@ -54,6 +55,7 @@ mod storage_inbox;
 pub use storage_inbox::StorageEventSignal;
 mod stream_transfers;
 mod web_streams_backend;
+mod window_named_properties;
 
 pub use document_response::DocumentResponseMetadata;
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
@@ -62,10 +64,10 @@ pub use runtime::{
     render_capture_cookies_with_document_response, render_capture_cookies_with_request_state,
     render_capture_cookies_with_response_headers, render_html, render_html_async, render_hydrate,
     render_hydrate_with_budget, render_page, render_page_pooled, render_page_with_budget,
-    run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn, set_raster_rgba_fn, set_webgl_fn,
-    set_webgl_metadata_fn, BrowserStorage, HydrationDiagnostics, HydrationPhase, HydrationProgress,
-    NavigationActivationSnapshot, PageSession, PageSessionOptions, WindowTimerMode,
-    DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
+    run_engine_with_dom, run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn,
+    set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, BrowserStorage, HydrationDiagnostics,
+    HydrationPhase, HydrationProgress, NavigationActivationSnapshot, PageSession,
+    PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
 
 /// Actual native engine version, independently of navigator's browser identity.
@@ -139,18 +141,15 @@ impl V8RecaptchaEngine {
     }
 
     // Read the token the driver stored in the sink node out of the serialized DOM.
+    // A page that removed the sink yields an empty token.
     fn extract_token(html: &str) -> String {
-        let Some(i) = html.find(RECAPTCHA_TOKEN_SINK) else {
-            return String::new();
+        let token = || {
+            let sink = html.find(RECAPTCHA_TOKEN_SINK)?;
+            let start = sink + html[sink..].find('>')? + 1;
+            let end = start + html[start..].find('<')?;
+            Some(html[start..end].trim().to_string())
         };
-        let Some(gt) = html[i..].find('>') else {
-            return String::new();
-        };
-        let start = i + gt + 1;
-        match html[start..].find('<') {
-            Some(lt) => html[start..start + lt].trim().to_string(),
-            None => String::new(),
-        }
+        token().unwrap_or_default()
     }
 }
 
@@ -202,5 +201,24 @@ impl turbo_surf_core::challenge::RecaptchaEngine for V8RecaptchaEngine {
             .await
             .map_err(|_| "recaptcha render thread panicked".to_string())??;
         Ok(Self::extract_token(&out))
+    }
+}
+
+#[cfg(test)]
+mod recaptcha_token_tests {
+    use super::{V8RecaptchaEngine, RECAPTCHA_TOKEN_SINK};
+
+    #[test]
+    fn the_token_is_the_trimmed_text_of_the_sink_node() {
+        let html =
+            format!("<p>x</p><div id=\"{RECAPTCHA_TOKEN_SINK}\" hidden> tok-1 </div></body>");
+        assert_eq!(V8RecaptchaEngine::extract_token(&html), "tok-1");
+        for html in [
+            "<body>no sink</body>".to_string(),
+            format!("<div id={RECAPTCHA_TOKEN_SINK}"),
+            format!("<div id={RECAPTCHA_TOKEN_SINK}>dangling"),
+        ] {
+            assert_eq!(V8RecaptchaEngine::extract_token(&html), "", "{html}");
+        }
     }
 }

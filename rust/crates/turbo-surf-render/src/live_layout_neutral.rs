@@ -82,6 +82,7 @@ impl Uses {
     }
 }
 pub(crate) fn validate(
+    tree: &turbo_dom_parser::rtdom::Tree,
     input: &crate::live_layout::LiveTreeInput,
     rules: &[crate::live_stylesheets::ActiveRule],
 ) -> Result<(), String> {
@@ -103,16 +104,10 @@ pub(crate) fn validate(
             .map_err(|_| "native layout cannot parse at-rule dependency source")?;
         uses.rules(&parsed.rules.0)?;
     }
-    let mut pending = input.nodes.iter().collect::<Vec<_>>();
-    while let Some(node) = pending.pop() {
-        if let turbo_html2pdf_core::Node::Element(element) = node {
-            for attr in element.attrs.iter().filter(|attr| attr.name == "style") {
-                let block = DeclarationBlock::parse_string(&attr.value, ParserOptions::default())
-                    .map_err(|_| "native layout cannot parse inline at-rule dependency")?;
-                uses.declarations(&block)?;
-            }
-            pending.extend(&element.children);
-        }
+    for value in inline_styles(tree, input) {
+        let block = DeclarationBlock::parse_string(&value, ParserOptions::default())
+            .map_err(|_| "native layout cannot parse inline at-rule dependency")?;
+        uses.declarations(&block)?;
     }
     for definition in definitions {
         match definition {
@@ -126,6 +121,36 @@ pub(crate) fn validate(
         }
     }
     Ok(())
+}
+/// Every `style` attribute value layout sees on the composed elements, in the
+/// order the dependency scan visits them (last composed sibling first, each
+/// element before its descendants); a CSSOM inline override replaces the first.
+fn inline_styles(
+    tree: &turbo_dom_parser::rtdom::Tree,
+    input: &crate::live_layout::LiveTreeInput,
+) -> Vec<String> {
+    let Some(graph) = &input.composition else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    let mut pending = graph.children_of(tree.root()).to_vec();
+    while let Some(node) = pending.pop() {
+        if tree.node_type_id(node) != 1 {
+            continue;
+        }
+        let mut replacement = graph.inline_overrides.get(&node);
+        tree.for_each_attr(node, |name, value| {
+            if name == "style" {
+                values.push(
+                    replacement
+                        .take()
+                        .map_or_else(|| value.to_owned(), String::clone),
+                );
+            }
+        });
+        pending.extend(graph.children_of(node));
+    }
+    values
 }
 fn references(source: &str) -> Result<HashSet<String>, String> {
     let mut input = cssparser::ParserInput::new(source);
@@ -217,6 +242,42 @@ mod tests {
             assert!(uses.color("--paint").is_err(), "{source}");
         }
     }
+    #[test]
+    fn nested_rule_scan_reaches_conditional_and_keyframe_declarations() {
+        let sheet = StyleSheet::parse(
+            "@media screen{a{--m:var(--paint)}}@supports (color:red){b{--s:var(--m)}}\
+             @keyframes k{from{width:var(--s)}}@font-face{font-family:x}",
+            ParserOptions::default(),
+        )
+        .unwrap();
+        let mut uses = Uses::default();
+        uses.rules(&sheet.rules.0).unwrap();
+        // --paint flows through @media and @supports into a keyframe width.
+        assert!(uses.color("--paint").unwrap_err().contains("width"));
+        let layer = StyleSheet::parse("@layer l{a{color:red}}", ParserOptions::default()).unwrap();
+        assert_eq!(
+            Uses::default().rules(&layer.rules.0).unwrap_err(),
+            "native layout cannot prove unknown nested at-rule geometry neutral"
+        );
+    }
+    #[test]
+    fn dependency_scan_rejects_unresolvable_variable_syntax() {
+        let error = "native layout cannot resolve CSS variable dependency syntax";
+        let deep = format!("{}x{}", "(".repeat(130), ")".repeat(130));
+        for source in [
+            "var(paint)",
+            "url(a b)",
+            "content:\"open\n\"",
+            deep.as_str(),
+        ] {
+            assert_eq!(references(source).unwrap_err(), error, "{source}");
+        }
+        let nested = references("a[x=var(--q)]{b:(var(--r))}").unwrap();
+        assert_eq!(
+            nested,
+            HashSet::from(["--q".to_string(), "--r".to_string()])
+        );
+    }
     /// Opt-in replay of an existing saved CSS capture; no scripts or network.
     #[test]
     fn captured_css_dependency_graph_can_be_replayed_offline() {
@@ -231,6 +292,7 @@ mod tests {
             .unwrap_or_else(|| "<!doctype html><body>".into());
         let tree = turbo_dom_parser::rtdom::Tree::parse(&html);
         let input = crate::live_layout::capture_tree(&tree, 1).unwrap();
+        // Adapted@S4: the dependency scan reads the live tree.
         let rules = parsed
             .rules
             .0
@@ -252,6 +314,6 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        validate(&input, &rules).unwrap();
+        validate(&tree, &input, &rules).unwrap();
     }
 }

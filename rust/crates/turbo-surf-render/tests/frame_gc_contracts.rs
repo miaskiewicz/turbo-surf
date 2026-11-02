@@ -7,13 +7,20 @@ use turbo_surf_render::PageSession;
 async fn shared_chrome_frame_ownership_oracle_preserves_retained_documents_and_collects_released_realms(
 ) {
     let mut page =
-        turbo_surf_render::PageSession::open("<body>", "https://ownership.test/", "", "", 10000)
+        // A generous cap for real work, not a timing (turbo-surf#46).
+        turbo_surf_render::PageSession::open("<body>", "https://ownership.test/", "", "", 60_000)
             .await
             .unwrap();
     let source = include_str!("../../../../harness/detection/frame-message-lifetime-probe.js");
-    page.eval(&(source.to_owned() + ";globalThis.__RESULT='prepared';"))
-        .await
-        .unwrap();
+    // Await the probe's frame loads: it defines __readPortLifetime only once they have
+    // finished, which a loaded host may not reach before the next read (turbo-surf#46).
+    let source = source.trim().trim_end_matches(';');
+    assert_eq!(
+        page.eval_json_expression(&format!("({source}).then(()=>'prepared')"))
+            .await
+            .unwrap(),
+        "\"prepared\""
+    );
     for _ in 0..3 {
         page.collect_message_port_garbage_for_testing();
     }
@@ -61,7 +68,8 @@ async fn shared_chrome_frame_ownership_oracle_preserves_retained_documents_and_c
 #[tokio::test(flavor = "current_thread")]
 async fn shared_chrome_frame_owner_getter_has_real_receiver_and_retirement_state() {
     let mut page =
-        turbo_surf_render::PageSession::open("<body>", "https://ownership.test/", "", "", 10000)
+        // A generous cap for real work, not a timing (turbo-surf#46).
+        turbo_surf_render::PageSession::open("<body>", "https://ownership.test/", "", "", 60_000)
             .await
             .unwrap();
     let result = page
@@ -108,7 +116,7 @@ async fn nested_frame_documents_and_functions_retain_only_their_actual_retired_r
     ] {
         assert_eq!(control[field], format!("{:x}", Sha256::digest(bytes)));
     }
-    let mut page = PageSession::open("<body>", "https://ownership.test/", "", "", 10000)
+    let mut page = PageSession::open("<body>", "https://ownership.test/", "", "", 60_000)
         .await
         .unwrap();
     assert_eq!(
@@ -148,7 +156,7 @@ async fn nested_frame_documents_and_functions_retain_only_their_actual_retired_r
 
 #[tokio::test(flavor = "current_thread")]
 async fn collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents() {
-    let mut page = PageSession::open("<body>", "https://ownership.test/", "", "", 10000)
+    let mut page = PageSession::open("<body>", "https://ownership.test/", "", "", 60_000)
         .await
         .unwrap();
     for _ in 0..3 {

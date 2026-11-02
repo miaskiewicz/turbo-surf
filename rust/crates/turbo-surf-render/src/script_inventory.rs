@@ -311,4 +311,125 @@ mod tests {
         assert_eq!(records.failures.len(), 1);
         assert!(records.failures[0].contains("Profiler.setSamplingInterval"));
     }
+
+    fn message(value: Value) -> InspectorMsg {
+        InspectorMsg::notification(value)
+    }
+    fn parsed(id: &str) -> InspectorMsg {
+        message(json!({"method":"Debugger.scriptParsed","params":{"scriptId":id,"url":"x.js"}}))
+    }
+
+    #[test]
+    fn script_records_are_bounded_and_sources_saved_by_content_hash() {
+        let directory = std::env::temp_dir().join(format!("surf-inventory-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let records = RefCell::new(Records::default());
+        // Non-JSON inspector traffic is ignored.
+        record(
+            InspectorMsg {
+                kind: deno_core::InspectorMsgKind::Notification,
+                content: "not json".into(),
+            },
+            &records,
+            &directory,
+        );
+        record(parsed("1"), &records, &directory);
+        record(parsed("2"), &records, &directory);
+        record(parsed("3"), &records, &directory);
+        {
+            let mut records = records.borrow_mut();
+            records.requests.insert(10, "1".into());
+            records.requests.insert(11, "2".into());
+            records.requests.insert(12, "3".into());
+        }
+        let source = "console.log(1)";
+        record(
+            message(json!({"id":10,"result":{"scriptSource":source}})),
+            &records,
+            &directory,
+        );
+        record(
+            message(json!({"id":11,"error":{"message":"No script for id"}})),
+            &records,
+            &directory,
+        );
+        records.borrow_mut().bytes = SOURCE_LIMIT;
+        record(
+            message(json!({"id":12,"result":{"scriptSource":"x"}})),
+            &records,
+            &directory,
+        );
+        // A response for a request nobody made is ignored.
+        record(message(json!({"id":99,"result":{}})), &records, &directory);
+        let hash = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let records = records.borrow();
+        assert_eq!(
+            records.scripts["1"]["sourceFile"],
+            format!("script-{hash}.js")
+        );
+        assert_eq!(records.scripts["1"]["sourceBytes"], 14);
+        assert_eq!(
+            fs::read_to_string(directory.join(format!("script-{hash}.js"))).unwrap(),
+            source
+        );
+        assert_eq!(
+            records.scripts["2"]["sourceError"]["message"],
+            "No script for id"
+        );
+        assert_eq!(
+            records.scripts["3"]["sourceError"],
+            "source byte budget exceeded"
+        );
+        assert_eq!(records.dropped, 1);
+        assert!(records.requests.is_empty());
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn the_script_table_and_failed_writes_are_reported_not_fatal() {
+        let missing = Path::new("/nonexistent-surf-inventory-dir");
+        let records = RefCell::new(Records::default());
+        for id in 0..SCRIPT_LIMIT + 2 {
+            record(parsed(&id.to_string()), &records, missing);
+        }
+        assert_eq!(records.borrow().scripts.len(), SCRIPT_LIMIT);
+        assert_eq!(records.borrow().dropped, 2);
+        records.borrow_mut().requests.insert(5, "0".into());
+        record(
+            message(json!({"id":5,"result":{"scriptSource":"a"}})),
+            &records,
+            missing,
+        );
+        records.borrow_mut().profile_request = Some(6);
+        record(
+            message(json!({"id":6,"result":{"profile":{"nodes":[]}}})),
+            &records,
+            missing,
+        );
+        records.borrow_mut().profile_request = Some(7);
+        record(
+            message(json!({"id":7,"error":{"message":"no profile"}})),
+            &records,
+            missing,
+        );
+        let records = records.borrow();
+        assert_eq!(records.failures.len(), 3);
+        assert!(
+            records.failures[0].contains("No such file"),
+            "{}",
+            records.failures[0]
+        );
+        assert!(
+            records.failures[1].contains("No such file"),
+            "{}",
+            records.failures[1]
+        );
+        assert_eq!(
+            records.failures[2],
+            r#"CPU profile failed: {"message":"no profile"}"#
+        );
+        assert!(!records.profile_saved);
+        assert_eq!(records.profile_request, None);
+        assert_eq!(records.bytes, 0);
+    }
 }

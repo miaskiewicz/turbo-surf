@@ -1,5 +1,6 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
 fn control(source: &str, fixture: &str, collector: &[u8]) -> Value {
@@ -46,8 +47,8 @@ async fn compare(source: &str, fixture: &str) {
 #[tokio::test(flavor = "current_thread")]
 async fn abstract_node_and_static_range_interfaces_keep_native_boundary_semantics() {
     compare(
-        include_str!("../src/abstract_ranges_probe.js"),
-        include_str!("../src/abstract_ranges_chrome155.json"),
+        test_support::ABSTRACT_RANGES_PROBE_JS,
+        test_support::ABSTRACT_RANGES_CHROME155_JSON,
     )
     .await;
 }
@@ -56,8 +57,8 @@ async fn abstract_node_and_static_range_interfaces_keep_native_boundary_semantic
 #[tokio::test(flavor = "current_thread")]
 async fn static_boundaries_and_borrowed_accessors_survive_real_iframe_retirement() {
     compare(
-        include_str!("../src/abstract_ranges_frames_probe.js"),
-        include_str!("../src/abstract_ranges_frames_chrome155.json"),
+        test_support::ABSTRACT_RANGES_FRAMES_PROBE_JS,
+        test_support::ABSTRACT_RANGES_FRAMES_CHROME155_JSON,
     )
     .await;
 }

@@ -108,7 +108,7 @@ fn slice_balanced(text: &str, start: usize) -> Option<&str> {
 // Whether `text[i..]` begins with `key` followed (after optional whitespace) by '='.
 fn assignment_at(bytes: &[u8], i: usize, key: &[u8]) -> Option<usize> {
     if !bytes[i..].starts_with(key) {
-        return None; // defensive: callers locate `key` via find() first
+        unreachable!("callers locate `key` at `i` with find() first");
     }
     let mut j = i + key.len();
     while j < bytes.len() && bytes[j].is_ascii_whitespace() {

@@ -496,7 +496,9 @@ async fn broadcast_channel_dispatches_native_targets_and_cloned_messages() {
       let closedError='',brandError='';
       try{closed.postMessage('blocked')}catch(error){closedError=error.name}
       try{BroadcastChannel.prototype.postMessage.call(Object.create(BroadcastChannel.prototype),'forged')}catch(error){brandError=error.name}
-      setTimeout(()=>{globalThis.__RESULT=JSON.stringify({messages,closedError,brandError,keys:Object.keys(sender)})},20);
+      // Report 20 ms after the delivery (a second message would land by then), not 20 ms
+      // after posting: the delivery is a real-time task.
+      receiver.addEventListener('message',()=>setTimeout(()=>{globalThis.__RESULT=JSON.stringify({messages,closedError,brandError,keys:Object.keys(sender)})},20),{once:true});
     "#).await.unwrap();
     let value: serde_json::Value = serde_json::from_str(&result).unwrap();
     assert_eq!(

@@ -1,8 +1,9 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const CASES: &str = include_str!("../src/radio_dirty_cases.json");
+const CASES: &str = test_support::RADIO_DIRTY_CASES_JSON;
 
 fn control(probe: &str, oracle: &str) -> Value {
     let value: Value = serde_json::from_str(oracle).unwrap();
@@ -42,12 +43,12 @@ async fn read(page: &mut PageSession, source: &str) -> Value {
 async fn native_control_labels_match_independent_chrome_and_borrowed_receiver_realms() {
     for (probe, oracle) in [
         (
-            include_str!("../src/control_labels_probe.js"),
-            include_str!("../src/control_labels_chrome155.json"),
+            test_support::CONTROL_LABELS_PROBE_JS,
+            test_support::CONTROL_LABELS_CHROME155_JSON,
         ),
         (
-            include_str!("../src/control_labels_realm_probe.js"),
-            include_str!("../src/control_labels_realm_chrome155.json"),
+            test_support::CONTROL_LABELS_REALM_PROBE_JS,
+            test_support::CONTROL_LABELS_REALM_CHROME155_JSON,
         ),
     ] {
         let expected = control(probe, oracle);
@@ -61,8 +62,8 @@ async fn native_control_labels_match_independent_chrome_and_borrowed_receiver_re
 }
 #[tokio::test(flavor = "current_thread")]
 async fn native_control_labels_preserve_adopted_live_list_and_retired_realm_ownership() {
-    let probe = include_str!("../src/control_labels_gc_probe.js");
-    let oracle = include_str!("../src/control_labels_gc_chrome155.json");
+    let probe = test_support::CONTROL_LABELS_GC_PROBE_JS;
+    let oracle = test_support::CONTROL_LABELS_GC_CHROME155_JSON;
     let expected = control(probe, oracle);
     assert_eq!(
         expected["gcPolicy"],

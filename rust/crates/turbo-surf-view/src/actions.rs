@@ -75,18 +75,68 @@ fn is_checkable(tag: &str, ty: Option<&str>) -> bool {
     tag == "input" && matches!(ty, Some("checkbox") | Some("radio"))
 }
 
+// HTML selectedness: a `multiple` select submits its `selected` options; a single
+// select submits its last `selected` option, else (display size 1 only) its first
+// non-disabled option. A disabled option (own attribute or a disabled optgroup parent)
+// is never submitted, and option text is whitespace stripped and collapsed.
 fn select_pairs(tree: &Tree, select: Handle, name: &str) -> Vec<(String, String)> {
-    tree.node(select)
+    let options: Vec<Handle> = tree
+        .node(select)
         .query_selector_all("option")
         .iter()
-        .filter(|o| tree.get_attribute(o.handle(), "selected").is_some())
+        .map(|o| o.handle())
+        .collect();
+    let multiple = tree.get_attribute(select, "multiple").is_some();
+    let selected = options
+        .iter()
+        .copied()
+        .filter(|&o| tree.get_attribute(o, "selected").is_some());
+    let chosen: Vec<Handle> = if multiple {
+        selected.collect()
+    } else {
+        selected
+            .last()
+            .or_else(|| {
+                if display_size(tree, select) != 1 {
+                    return None;
+                }
+                options.iter().copied().find(|&o| !option_disabled(tree, o))
+            })
+            .into_iter()
+            .collect()
+    };
+    chosen
+        .into_iter()
+        .filter(|&o| !option_disabled(tree, o))
         .map(|o| {
-            let v = tree
-                .get_attribute(o.handle(), "value")
-                .map_or_else(|| text_of(tree, o.handle()), str::to_string);
+            let v = tree.get_attribute(o, "value").map_or_else(
+                || {
+                    text_of(tree, o)
+                        .split_ascii_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                },
+                str::to_string,
+            );
             (name.to_string(), v)
         })
         .collect()
+}
+
+// A non-multiple select's display size: its `size` when a positive integer, else 1.
+fn display_size(tree: &Tree, select: Handle) -> u32 {
+    tree.get_attribute(select, "size")
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(1)
+}
+
+// An option is disabled by its own attribute or by a disabled optgroup parent.
+fn option_disabled(tree: &Tree, option: Handle) -> bool {
+    tree.get_attribute(option, "disabled").is_some()
+        || tree.parent(option).is_some_and(|p| {
+            lower_tag(tree, p) == "optgroup" && tree.get_attribute(p, "disabled").is_some()
+        })
 }
 
 fn typed_pairs(
@@ -111,8 +161,30 @@ fn typed_pairs(
     vec![(name.to_string(), control_value(tree, h))]
 }
 
+fn is_image_button(tree: &Tree, h: Handle) -> bool {
+    lower_tag(tree, h) == "input" && lower_type(tree, h).as_deref() == Some("image")
+}
+
+// HTML "constructing the entry list": an image-button submitter contributes the click
+// coordinates as `name.x`/`name.y` (bare `x`/`y` when unnamed), never its value. A
+// synthetic click has no position, so both are 0, as in Chrome.
+fn image_coordinate_pairs(name: &str) -> Vec<(String, String)> {
+    let prefix = if name.is_empty() {
+        String::new()
+    } else {
+        format!("{name}.")
+    };
+    vec![
+        (format!("{prefix}x"), "0".to_string()),
+        (format!("{prefix}y"), "0".to_string()),
+    ]
+}
+
 // One control → its successful [name,value] pairs (HTML successful-controls).
 fn control_pairs(tree: &Tree, h: Handle, submitter: Option<Handle>) -> Vec<(String, String)> {
+    if Some(h) == submitter && is_image_button(tree, h) {
+        return image_coordinate_pairs(tree.get_attribute(h, "name").unwrap_or(""));
+    }
     let Some(name) = tree.get_attribute(h, "name") else {
         return Vec::new();
     };
@@ -391,5 +463,104 @@ mod tests {
         let tree = Tree::parse("<form method='get'><input name='a' value='1'></form>");
         let s = build_submission(&tree, first(&tree, "form"), BASE, None);
         assert_eq!(s.url, "https://x.test/page?a=1");
+    }
+
+    #[test]
+    fn click_intent_submits_the_owning_form_with_only_a_real_submitter() {
+        let tree = Tree::parse(
+            "<form action='/s' method='get'><span id='inner'><b id='deep'>x</b></span>\
+             <input id='q' name='q' value='v'><button id='b' name='go' value='1'>Go</button>\
+             <input id='sub' type='Submit' name='t' value='3'>\
+             <input id='ib' type='button' name='b' value='4'><input id='ir' type='reset' name='r' value='5'></form>\
+             <p id='out'>outside</p><a href='/l'><em id='em'>link</em></a>",
+        );
+        let submit = |sel: &str| match click_intent(&tree, first(&tree, sel), BASE) {
+            ClickIntent::Submit(s) => s.url,
+            other => panic!("{sel}: expected a submit, got {other:?}"),
+        };
+        // A non-submitter (text input, or any descendant) submits without a submitter entry.
+        assert_eq!(submit("#q"), "https://x.test/s?q=v");
+        assert_eq!(submit("#deep"), "https://x.test/s?q=v");
+        // <button> (any type) and input type=submit (case-insensitive) are submitters.
+        assert_eq!(submit("#b"), "https://x.test/s?q=v&go=1");
+        assert_eq!(submit("#sub"), "https://x.test/s?q=v&t=3");
+        // input type=button / type=reset are not submitters: never their own pair.
+        assert_eq!(submit("#ib"), "https://x.test/s?q=v");
+        assert_eq!(submit("#ir"), "https://x.test/s?q=v");
+        assert_eq!(
+            click_intent(&tree, first(&tree, "#out"), BASE),
+            ClickIntent::Inert
+        );
+        assert_eq!(
+            click_intent(&tree, first(&tree, "#em"), BASE),
+            ClickIntent::Navigate("https://x.test/l".into())
+        );
+    }
+
+    #[test]
+    fn image_submitter_contributes_click_coordinates_like_chrome() {
+        // Chrome 156: `new FormData(form, submitter)` for an element.click() on an
+        // <input type=image> gives `q=v&i.x=0&i.y=0` (named) and `q=v&x=0&y=0` (unnamed);
+        // the image button's value is never submitted (turbo-surf#55).
+        let tree = Tree::parse(
+            "<form action='/s' method='get'><input name='q' value='v'>\
+             <input id='named' type='IMAGE' name='i' value='2'><input id='bare' type='image' value='5'></form>",
+        );
+        let submit = |sel: &str| match click_intent(&tree, first(&tree, sel), BASE) {
+            ClickIntent::Submit(s) => s.url,
+            other => panic!("{sel}: expected a submit, got {other:?}"),
+        };
+        assert_eq!(submit("#named"), "https://x.test/s?q=v&i.x=0&i.y=0");
+        assert_eq!(submit("#bare"), "https://x.test/s?q=v&x=0&y=0");
+        // Not the submitter: an image button contributes nothing.
+        let form = first(&tree, "form");
+        assert_eq!(
+            build_submission(&tree, form, BASE, None).url,
+            "https://x.test/s?q=v"
+        );
+    }
+
+    #[test]
+    fn get_submission_keeps_an_unparseable_action_verbatim() {
+        // With no absolute base the action cannot be resolved; the submission keeps the
+        // raw action (no query appended) rather than inventing a URL.
+        let tree = Tree::parse("<form method='get'><input name='a' value='1'></form>");
+        let s = build_submission(&tree, first(&tree, "form"), "relative/base", None);
+        assert_eq!(s.method, "GET");
+        assert_eq!(s.url, "relative/base");
+        assert_eq!(s.body, None);
+        assert_eq!(s.content_type, None);
+    }
+
+    #[test]
+    fn single_selects_submit_their_default_selectedness_like_chrome() {
+        // Chrome 156 FormData: first option when none is selected, first non-disabled
+        // option, the last of several `selected`; multiple/empty selects submit nothing
+        // without a selection (turbo-surf#61).
+        let tree = Tree::parse(
+            "<form method='get'><select name='s'><option value='a'>A</option><option value='b'>B</option></select>\
+             <select name='d'><option disabled value='z'>Z</option><option value='y'>Y</option></select>\
+             <select name='t'><option selected value='1'>1</option><option selected value='2'>2</option></select>\
+             <select name='m' multiple><option value='x'>X</option></select><select name='e'></select></form>",
+        );
+        let s = build_submission(&tree, first(&tree, "form"), BASE, None);
+        assert_eq!(s.url, "https://x.test/page?s=a&d=y&t=2");
+    }
+
+    #[test]
+    fn select_entries_skip_disabled_options_and_listbox_defaults_like_chrome() {
+        // Chrome 156 FormData: a selected-but-disabled option (or one in a disabled
+        // optgroup) is not submitted and suppresses the fallback, a size>1 select has
+        // no default selection, and option text is whitespace stripped and collapsed.
+        let tree = Tree::parse(
+            "<form method='get'><select name='a'><option selected disabled value='1'>1</option><option value='2'>2</option></select>\
+             <select name='b'><optgroup disabled><option value='g'>g</option></optgroup><option value='h'>h</option></select>\
+             <select name='c' size='3'><option value='c1'>c1</option></select>\
+             <select name='d'><option>  x   y  </option></select>\
+             <select name='e' multiple><option selected disabled value='e1'>e</option></select>\
+             <select name='f'><optgroup disabled><option selected value='q'>q</option></optgroup></select></form>",
+        );
+        let s = build_submission(&tree, first(&tree, "form"), BASE, None);
+        assert_eq!(s.url, "https://x.test/page?b=h&d=x+y");
     }
 }

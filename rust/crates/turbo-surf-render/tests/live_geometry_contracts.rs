@@ -1,3 +1,4 @@
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::run_with_dom;
 
 #[test]
@@ -36,11 +37,11 @@ fn rectangle_clone_preserves_exact_values_kind_aliases_and_private_ownership() {
 
 #[test]
 fn live_css_adoption_matches_independent_chrome_observable_array_control() {
-    let probe = include_str!("../src/css_adoption_probe.js")
+    let probe = test_support::CSS_ADOPTION_PROBE_JS
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value =
-        serde_json::from_str(include_str!("../src/css_adoption_chrome155.json")).unwrap();
+        serde_json::from_str(test_support::CSS_ADOPTION_CHROME155_JSON).unwrap();
     let actual = run_with_dom(
         "<!doctype html><html><head></head><body></body></html>",
         &format!("JSON.stringify({probe})"),
@@ -88,11 +89,11 @@ fn real_live_element_geometry_tracks_cssom_adoption_mutations_and_private_owners
 
 #[test]
 fn adopted_sheet_shadow_ownership_brand_and_integrity_match_chrome() {
-    let probe = include_str!("../src/css_adoption_ownership_probe.js")
+    let probe = test_support::CSS_ADOPTION_OWNERSHIP_PROBE_JS
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value =
-        serde_json::from_str(include_str!("../src/css_adoption_ownership_chrome155.json")).unwrap();
+        serde_json::from_str(test_support::CSS_ADOPTION_OWNERSHIP_CHROME155_JSON).unwrap();
     let actual = run_with_dom(
         "<!doctype html><html><head></head><body></body></html>",
         &format!("JSON.stringify({probe})"),
@@ -106,11 +107,11 @@ fn adopted_sheet_shadow_ownership_brand_and_integrity_match_chrome() {
 
 #[test]
 fn genuine_native_document_implementation_matches_chrome_independent_factories_and_errors() {
-    let probe = include_str!("../src/dom_implementation_probe.js")
+    let probe = test_support::DOM_IMPLEMENTATION_PROBE_JS
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value =
-        serde_json::from_str(include_str!("../src/dom_implementation_chrome155.json")).unwrap();
+        serde_json::from_str(test_support::DOM_IMPLEMENTATION_CHROME155_JSON).unwrap();
     let actual = run_with_dom(
         "<!doctype html><html><head></head><body></body></html>",
         &format!("JSON.stringify({probe})"),
@@ -295,7 +296,7 @@ fn native_geometry_edge_conversion_offset_rounding_and_device_pixel_scroll_match
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/geometry-edges-chrome155.json"
+        "../../../../harness/detection/fixtures/geometry-edges-chrome156.json"
     ))
     .unwrap();
     let actual = run_with_dom(
@@ -438,4 +439,23 @@ fn original_utf16_boundaries_and_private_range_caret_lifecycle_match_chrome() {
 fn original_utf16_system_font_geometry_matches_independent_macos_chrome() {
     let (actual, expected) = utf16_geometry_observation();
     assert_eq!(actual, expected);
+}
+
+/// turbo-surf#117: Google's consent page carries view-transition rules turbo-dom rejected
+/// ("unknown pseudo-class"), which failed live layout for the whole page, so the trusted
+/// click on "Reject all" (`#W0wltc`) found no geometry. Chrome 156.0.8078.47 on the same
+/// fixture: `[18,10,120,36,1,11]` (rect, one click, 11 kept rules: `html:bogus` dropped).
+#[test]
+fn invalid_and_view_transition_rules_keep_live_layout_and_click_geometry() {
+    let html =
+        include_str!("../../../../harness/detection/fixtures/google-consent-view-transition.html");
+    let actual = run_with_dom(
+        html,
+        r#"(()=>{const b=document.getElementById('W0wltc'),r=b.getBoundingClientRect();let c=0;
+        b.addEventListener('click',()=>c++);
+        document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).click();
+        return JSON.stringify([r.x,r.y,r.width,r.height,c,document.styleSheets[0].cssRules.length]);})()"#,
+    )
+    .unwrap();
+    assert_eq!(actual, "[18,10,120,36,1,11]");
 }

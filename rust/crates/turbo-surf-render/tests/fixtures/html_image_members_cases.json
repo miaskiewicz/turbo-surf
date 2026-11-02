@@ -1,0 +1,7 @@
+[
+  {
+    "id": "html-image-members",
+    "url": "https://html-image.test/",
+    "html": "<!doctype html><body><img id=\"loaded\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGP4z8DwH4YZkDkAm34L9XKwuTwAAAAASUVORK5CYII=\">"
+  }
+]

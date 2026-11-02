@@ -217,6 +217,7 @@ use turbo_surf_render::{PageSession, DEFAULT_RENDER_BUDGET_MS};
 
 enum LiveJob {
     Eval(String, SyncSender<std::result::Result<String, String>>),
+    EngineEval(String, SyncSender<std::result::Result<String, String>>),
     Expression(String, SyncSender<std::result::Result<String, String>>),
     Serialize(SyncSender<String>),
     Cookies(SyncSender<String>),
@@ -340,6 +341,9 @@ impl Task for LiveOpenTask {
                     LiveJob::Eval(script, reply) => {
                         let _ = reply.send(rt.block_on(session.eval(&script)));
                     }
+                    LiveJob::EngineEval(script, reply) => {
+                        let _ = reply.send(rt.block_on(session.eval_engine(&script)));
+                    }
                     LiveJob::Expression(script, reply) => {
                         let _ = reply.send(rt.block_on(session.eval_expression(&script)));
                     }
@@ -410,6 +414,7 @@ pub struct LiveEvalTask {
     id: u32,
     script: String,
     expression: bool,
+    engine: bool,
 }
 
 #[napi]
@@ -423,6 +428,8 @@ impl Task for LiveEvalTask {
             self.id,
             if self.expression {
                 LiveJob::Expression(std::mem::take(&mut self.script), reply)
+            } else if self.engine {
+                LiveJob::EngineEval(std::mem::take(&mut self.script), reply)
             } else {
                 LiveJob::Eval(std::mem::take(&mut self.script), reply)
             },
@@ -445,6 +452,19 @@ pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
         id,
         script,
         expression: false,
+        engine: false,
+    })
+}
+
+/// [`live_eval`] for a driver script that needs the engine namespace: the script runs as
+/// a function body whose `__tsNs` parameter is the namespace (turbo-dom#222).
+#[napi]
+pub fn live_eval_engine(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: false,
+        engine: true,
     })
 }
 
@@ -455,6 +475,7 @@ pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> 
         id,
         script,
         expression: true,
+        engine: false,
     })
 }
 

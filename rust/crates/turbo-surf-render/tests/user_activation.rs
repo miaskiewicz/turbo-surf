@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use turbo_surf_render::{BrowserStorage, DocumentResponseMetadata, PageSession};
 
 const FIXTURE: &str =
-    include_str!("../../../../harness/detection/fixtures/activation-headers-chrome155.json");
+    include_str!("../../../../harness/detection/fixtures/activation-headers-chrome156.json");
 const COLLECTOR: &str = include_str!("../../../../harness/detection/activation-headers-chrome.mjs");
 const READ: &str = "({isActive:navigator.userActivation.isActive,hasBeenActive:navigator.userActivation.hasBeenActive})";
 

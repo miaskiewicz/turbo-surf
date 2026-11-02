@@ -162,26 +162,24 @@ fn macos_product_version() -> &'static str {
     static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     VERSION.get_or_init(|| {
         #[cfg(target_os = "macos")]
-        if let Ok(plist) =
-            std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist")
-        {
-            if let Some(rest) = plist.split("<key>ProductVersion</key>").nth(1) {
-                if let Some(value) = rest
-                    .split("<string>")
-                    .nth(1)
-                    .and_then(|s| s.split("</string>").next())
-                {
-                    if let Some(version) = normalize_product_version(value) {
-                        return version;
-                    }
-                }
-            }
-        }
-        "15.0.0".to_string()
+        let plist =
+            std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist").ok();
+        #[cfg(not(target_os = "macos"))]
+        let plist: Option<String> = None;
+        plist
+            .as_deref()
+            .and_then(plist_product_version)
+            .unwrap_or_else(|| "15.0.0".to_string())
     })
 }
 
-#[cfg(any(target_os = "macos", test))]
+// ProductVersion from a SystemVersion.plist (XML property list).
+fn plist_product_version(plist: &str) -> Option<String> {
+    let rest = plist.split("<key>ProductVersion</key>").nth(1)?;
+    let value = rest.split("<string>").nth(1)?.split("</string>").next()?;
+    normalize_product_version(value)
+}
+
 fn normalize_product_version(value: &str) -> Option<String> {
     let mut parts: Vec<&str> = value.trim().split('.').collect();
     if parts.len() > 3
@@ -370,7 +368,38 @@ mod tests {
     }
 
     #[test]
+    fn the_host_macos_version_is_the_normalized_plist_value_or_the_fallback() {
+        let expected = std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist")
+            .ok()
+            .filter(|_| cfg!(target_os = "macos"))
+            .and_then(|plist| plist_product_version(&plist))
+            .unwrap_or_else(|| "15.0.0".to_string());
+        assert_eq!(macos_product_version(), expected);
+        assert_eq!(
+            normalize_product_version(macos_product_version()).as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
     fn product_versions_are_normalized_without_accepting_markup() {
+        // The shape of macOS's /System/Library/CoreServices/SystemVersion.plist.
+        let plist = |version: &str| {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n\
+                 \t<key>ProductBuildVersion</key>\n\t<string>25C56</string>\n\
+                 \t<key>ProductName</key>\n\t<string>macOS</string>\n\
+                 \t<key>ProductVersion</key>\n\t<string>{version}</string>\n</dict>\n</plist>\n"
+            )
+        };
+        assert_eq!(plist_product_version(&plist("26.1")), Some("26.1.0".into()));
+        assert_eq!(
+            plist_product_version(&plist("15.7.2")),
+            Some("15.7.2".into())
+        );
+        assert_eq!(plist_product_version(&plist("26.x")), None);
+        assert_eq!(plist_product_version("<key>ProductName</key>"), None);
+        assert_eq!(plist_product_version("<key>ProductVersion</key>"), None);
         assert_eq!(normalize_product_version("27.2"), Some("27.2.0".into()));
         assert_eq!(normalize_product_version(" 15.0.1 "), Some("15.0.1".into()));
         for value in ["", "27..2", "27.2.extra", "27.2.0.1", "<string>"] {
@@ -466,5 +495,23 @@ mod tests {
                 crate::browser::release(p.chrome_major).full_version
             );
         }
+    }
+
+    #[test]
+    fn non_mac_profiles_report_x86_and_their_platform_version() {
+        let mut p = default_profile();
+        p.nav_platform = "Win32";
+        assert_eq!(p.architecture(), "x86");
+        assert_eq!(p.platform_version(), "10.0.0");
+        p.nav_platform = "Linux x86_64";
+        assert_eq!(p.architecture(), "x86");
+        assert_eq!(p.platform_version(), "");
+        p.nav_platform = "MacIntel";
+        let mac = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            "x86"
+        } else {
+            "arm"
+        };
+        assert_eq!(p.architecture(), mac);
     }
 }

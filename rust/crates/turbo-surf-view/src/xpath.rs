@@ -237,9 +237,7 @@ fn pred_matches(tree: &Tree, h: Handle, pred: &Pred) -> bool {
         Pred::Contains(t, want) => read_term(tree, h, t).is_some_and(|v| v.contains(want)),
         Pred::Exists(name) => tree.get_attribute(h, name).is_some(),
         Pred::Never => false,
-        // Positional is resolved in apply_predicate before pred_matches is
-        // reached; this arm exists only to keep the match exhaustive.
-        Pred::Pos(_) => true,
+        Pred::Pos(_) => unreachable!("apply_predicate resolves positional predicates itself"),
     }
 }
 

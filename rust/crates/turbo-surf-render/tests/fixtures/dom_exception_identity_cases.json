@@ -1,0 +1,7 @@
+[
+  {
+    "id": "frame",
+    "url": "https://exception.test/",
+    "html": "<!doctype html><body><iframe id=f></iframe>"
+  }
+]

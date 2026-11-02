@@ -20,7 +20,7 @@ fn context<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::Context>> {
-    if !crate::browser_env::valid_native_geometry_receiver(scope, document.into(), 9)
+    if !crate::live_layout_dom::valid_receiver(scope, document.into(), 9)
         || !crate::browser_env::node_has_window_owner(scope, document)
         || !crate::browser_env::is_light_document_node(scope, document)
     {
@@ -65,7 +65,7 @@ pub(super) fn op_dictionary_links<'s>(
     root: v8::Local<v8::Object>,
 ) -> Result<v8::Local<'s, v8::Array>, super::JsErrorBox> {
     let links = if context(scope, document).is_some() {
-        crate::browser_env::native_compression_dictionary_links(scope, root)
+        crate::compression_dictionary_dom::links(scope, root)
             .map_err(super::JsErrorBox::range_error)?
     } else {
         Vec::new()
@@ -182,21 +182,23 @@ fn parameter(value: &str) -> Option<String> {
     let mut output = String::new();
     let mut escaped = false;
     let mut chars = value[1..].chars();
-    while let Some(ch) = chars.next() {
+    // An unterminated quoted string ends the input (`?`) without a value.
+    let rest = loop {
+        let ch = chars.next()?;
         if escaped {
             output.push(ch);
             escaped = false;
         } else if ch == '\\' {
             escaped = true;
         } else if ch == '"' {
-            return chars.as_str().trim().is_empty().then_some(output);
+            break chars.as_str();
         } else if ch.is_ascii_control() && ch != '\t' {
             return None;
         } else {
             output.push(ch);
         }
-    }
-    None
+    };
+    rest.trim().is_empty().then_some(output)
 }
 
 /// Parse Link fields without treating quoted or URI commas as field separators.
@@ -302,5 +304,55 @@ mod tests {
             assert!(links("https://site.test/", value).is_empty(), "{value}");
         }
         assert!(links("http://site.test/", "</dict>; rel=compression-dictionary").is_empty());
+    }
+    #[test]
+    fn quoted_escapes_controls_and_malformed_fields_follow_link_grammar() {
+        // A quoted-pair keeps an escaped quote and separators inside the parameter.
+        assert_eq!(
+            links(
+                "https://site.test/",
+                r#"</q>; title="x\",y"; rel="compression-\dictionary", </r>; rel="compression-dictionary""#
+            ),
+            ["https://site.test/q", "https://site.test/r"]
+        );
+        for value in [
+            "</c>; rel=\"compression-dictionary\u{1}\"",
+            "</t>; rel=\"compression-dictionary\t\"",
+            r#"</u>; rel="compression-dictionary"#,
+            r#"</e>; rel="compression-dictionary\"#,
+            "no-target; rel=compression-dictionary",
+            "<unclosed; rel=compression-dictionary",
+            "<http://[::1>; rel=compression-dictionary",
+        ] {
+            let expected: &[&str] = if value.starts_with("</t>") {
+                &["https://site.test/t"]
+            } else {
+                &[]
+            };
+            assert_eq!(links("https://site.test/", value), expected, "{value:?}");
+        }
+        assert!(links("not a url", "</d>; rel=compression-dictionary").is_empty());
+        assert_eq!(parameter(" \"a\\\"b\" "), Some("a\"b".into()));
+        assert_eq!(parameter("\"open"), None);
+        assert_eq!(parameter("\"a\" b"), None);
+        assert_eq!(parameter("tok-en!"), Some("tok-en!".into()));
+        assert_eq!(parameter("tok en"), None);
+        assert_eq!(parameter("  "), None);
+    }
+    #[test]
+    fn header_discovery_stops_at_sixteen_distinct_dictionaries() {
+        let value = (0..20)
+            .map(|index| format!("</d{}>; rel=compression-dictionary", index % 18))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let expected = (0..16)
+            .map(|index| format!("https://site.test/d{index}"))
+            .collect::<Vec<_>>();
+        assert_eq!(links("https://site.test/", &value), expected);
+        let repeated = "</a>; rel=compression-dictionary, </a>; rel=compression-dictionary";
+        assert_eq!(
+            links("https://site.test/", repeated),
+            ["https://site.test/a"]
+        );
     }
 }

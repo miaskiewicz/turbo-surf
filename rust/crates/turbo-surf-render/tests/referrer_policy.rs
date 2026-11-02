@@ -73,7 +73,7 @@ async fn native_document_request_and_redirect_referrer_policy_matches_chrome_hea
         &url,
         "",
         "",
-        5000,
+        60_000,
         "",
         Default::default(),
         &[("Referrer-Policy".into(), "same-origin".into())],

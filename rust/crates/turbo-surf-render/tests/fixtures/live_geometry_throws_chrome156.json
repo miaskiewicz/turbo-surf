@@ -1,0 +1,170 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "viewport": [1280, 800],
+  "probeSha256": "ea907e9e86fdb9410e32c2e7b08eb155830eaa120dde645994f40241a8aa7044",
+  "casesSha256": "5cf30f8be60fd84ef372d5312f473045602ed1f9158a1490b1a97a9701c222fc",
+  "collectorSha256": "808f1855020742af09e5fb65e6dc59578a4b2f9bdcd540446c265ccac11f0fb3",
+  "errors": [],
+  "result": [
+    {
+      "id": "table",
+      "result": [
+        ["HTML", ["ok", [0, 0, 1280, 40]], ["ok", ["block", "static", "visible"]], ["ok", "BODY"]],
+        ["HEAD", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        ["BODY", ["ok", [8, 8, 1264, 24]], ["ok", ["block", "static", "visible"]], ["ok", "BODY"]],
+        [
+          "TABLE",
+          ["ok", [8, 8, 13.109375, 24]],
+          ["ok", ["table", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TBODY",
+          ["ok", [10, 10, 9.109375, 20]],
+          ["ok", ["table-row-group", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TR",
+          ["ok", [10, 10, 9.109375, 20]],
+          ["ok", ["table-row", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TD",
+          ["ok", [10, 10, 9.109375, 20]],
+          ["ok", ["table-cell", "static", "visible"]],
+          ["ok", "TD"]
+        ]
+      ]
+    },
+    {
+      "id": "table-decorated",
+      "result": [
+        ["HTML", ["ok", [0, 0, 1280, 103]], ["ok", ["block", "static", "visible"]], ["ok", "BODY"]],
+        ["HEAD", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        ["STYLE", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        ["BODY", ["ok", [8, 8, 1264, 87]], ["ok", ["block", "static", "visible"]], ["ok", "BODY"]],
+        ["TABLE#t", ["ok", [8, 8, 267, 87]], ["ok", ["table", "static", "visible"]], ["ok", "TD"]],
+        [
+          "TBODY",
+          ["ok", [8.5, 8.5, 266, 86]],
+          ["ok", ["table-row-group", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TR",
+          ["ok", [8.5, 8.5, 266, 43]],
+          ["ok", ["table-row", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TD",
+          ["ok", [8.5, 8.5, 133, 43]],
+          ["ok", ["table-cell", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TD",
+          ["ok", [141.5, 8.5, 133, 43]],
+          ["ok", ["table-cell", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TR",
+          ["ok", [8.5, 51.5, 266, 43]],
+          ["ok", ["table-row", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TD",
+          ["ok", [8.5, 51.5, 133, 43]],
+          ["ok", ["table-cell", "static", "visible"]],
+          ["ok", "TD"]
+        ],
+        [
+          "TD",
+          ["ok", [141.5, 51.5, 133, 43]],
+          ["ok", ["table-cell", "static", "visible"]],
+          ["ok", "TD"]
+        ]
+      ]
+    },
+    {
+      "id": "table-shadow-cell",
+      "result": [
+        ["HTML", ["ok", [0, 0, 1280, 22]], ["ok", ["block", "static", "visible"]], ["ok", "BODY"]],
+        ["HEAD", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        ["BODY", ["ok", [8, 8, 1264, 6]], ["ok", ["block", "static", "visible"]], ["ok", "BODY"]],
+        ["TABLE", ["ok", [8, 8, 6, 6]], ["ok", ["table", "static", "visible"]], ["ok", "TD#cell"]],
+        [
+          "TBODY",
+          ["ok", [10, 10, 2, 2]],
+          ["ok", ["table-row-group", "static", "visible"]],
+          ["ok", "TD#cell"]
+        ],
+        [
+          "TR",
+          ["ok", [10, 10, 2, 2]],
+          ["ok", ["table-row", "static", "visible"]],
+          ["ok", "TD#cell"]
+        ],
+        [
+          "TD#cell",
+          ["ok", [10, 10, 2, 2]],
+          ["ok", ["table-cell", "static", "visible"]],
+          ["ok", "TD#cell"]
+        ],
+        ["TEMPLATE", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]]
+      ]
+    },
+    {
+      "id": "sr-only",
+      "result": [
+        [
+          "HTML",
+          ["ok", [0, 0, 1280, 56]],
+          ["ok", ["block", "static", "visible"]],
+          ["ok", "DIV#real"]
+        ],
+        ["HEAD", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        ["STYLE", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        [
+          "BODY",
+          ["ok", [8, 8, 1264, 40]],
+          ["ok", ["block", "static", "visible"]],
+          ["ok", "DIV#real"]
+        ],
+        [
+          "DIV#real",
+          ["ok", [8, 8, 1264, 40]],
+          ["ok", ["block", "static", "visible"]],
+          ["ok", "DIV#real"]
+        ],
+        ["SPAN#sr", ["ok", [8, 48, 1, 1]], ["ok", ["block", "absolute", "visible"]], ["ok", "HTML"]]
+      ]
+    },
+    {
+      "id": "sr-only-inline",
+      "result": [
+        ["HTML", ["ok", [0, 0, 1280, 50]], ["ok", ["block", "static", "visible"]], ["ok", "P#p"]],
+        ["HEAD", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        ["STYLE", ["ok", [0, 0, 0, 0]], ["ok", ["none", "static", "visible"]], ["ok", "HTML"]],
+        ["BODY", ["ok", [8, 16, 1264, 18]], ["ok", ["block", "static", "visible"]], ["ok", "P#p"]],
+        ["P#p", ["ok", [8, 16, 1264, 18]], ["ok", ["block", "static", "visible"]], ["ok", "P#p"]],
+        [
+          "A#more",
+          ["ok", [44.875, 16, 32.875, 18]],
+          ["ok", ["inline", "static", "visible"]],
+          ["ok", "A#more"]
+        ],
+        [
+          "SPAN#hidden",
+          ["ok", [76.75, 15, 1, 1]],
+          ["ok", ["block", "absolute", "visible"]],
+          ["ok", "P#p"]
+        ]
+      ]
+    }
+  ]
+}

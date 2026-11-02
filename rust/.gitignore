@@ -1,3 +1,7 @@
 /target
 **/node_modules
 crates/turbo-surf-napi/*.node
+# tarpaulin (LLVM engine) leaves build-script profiles in the working directory
+*.profraw
+# analyze_akamai saves accepted sensors here by default (TURBO_SURF_SENSOR_DIR)
+**/akamai-sensors/

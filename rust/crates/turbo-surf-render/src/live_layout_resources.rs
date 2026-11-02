@@ -3,7 +3,7 @@ use lightningcss::properties::{animation::AnimationName, font::FontFamily, Prope
 use lightningcss::rules::{font_face::FontFaceProperty, keyframes::KeyframesName, CssRule};
 use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
 use lightningcss::traits::ToCss;
-use turbo_html2pdf_core::{ComputedStyle, StyledNode};
+use turbo_dom_layout::{ComputedStyle, StyledNode};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Definition {
@@ -133,8 +133,8 @@ pub(crate) fn validate(
         let StyledNode::Element(element) = node else {
             continue;
         };
-        if turbo_html2pdf_core::layout::value::display_of(&element.style)
-            == turbo_html2pdf_core::layout::value::Display::None
+        if turbo_dom_layout::layout::value::display_of(&element.style)
+            == turbo_dom_layout::layout::value::Display::None
         {
             continue;
         }
@@ -235,4 +235,56 @@ fn validate_animations<'a>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod definition_tests {
+    use super::*;
+    #[test]
+    fn resource_rules_classify_by_what_they_can_define() {
+        let cases = [
+            (
+                "@font-face{font-family:\"My Font\";src:url(a.woff2)}",
+                Ok(Definition::Font("My Font".into())),
+            ),
+            // A generic family keyword or a missing source defines nothing usable.
+            (
+                "@font-face{font-family:serif;src:url(a.woff2)}",
+                Ok(Definition::Inert),
+            ),
+            ("@font-face{font-family:x}", Ok(Definition::Inert)),
+            (
+                "@keyframes spin{to{opacity:0}}",
+                Ok(Definition::Animation("spin".into())),
+            ),
+            (
+                "@keyframes \"spin it\"{to{opacity:0}}",
+                Ok(Definition::Animation("spin it".into())),
+            ),
+            (
+                "@container card (width>1px){p{color:red}}",
+                Ok(Definition::Container("card".into())),
+            ),
+            (
+                "@property --c{syntax:'<color>';inherits:false;initial-value:red}",
+                Ok(Definition::RegisteredColor("--c".into())),
+            ),
+            (
+                "@view-transition{navigation:auto}",
+                Ok(Definition::ViewTransition),
+            ),
+        ];
+        for (source, expected) in cases {
+            assert_eq!(definition(source), expected, "{source}");
+        }
+        for source in [
+            "@container (width>1px){p{color:red}}",
+            "@property --n{syntax:'<length>';inherits:false;initial-value:1px}",
+            "@view-transition{navigation:auto;types:slide}",
+            "p{color:red}",
+            "@media screen{p{color:red}}",
+        ] {
+            assert!(definition(source).is_err(), "{source}");
+        }
+    }
 }

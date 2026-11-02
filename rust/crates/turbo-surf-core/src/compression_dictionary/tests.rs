@@ -446,19 +446,19 @@ fn dictionary_transport_requires_https_even_for_trustworthy_http_loopback() {
 #[tokio::test]
 async fn dictionary_decoder_admission_is_bounded_and_cancelled_waiters_release_capacity() {
     let _serial = decode::TEST_SERIAL.lock().await;
-    let first = decode::reserve().await.unwrap();
-    let second = decode::reserve().await.unwrap();
+    let first = decode::reserve().await;
+    let second = decode::reserve().await;
     let mut blocked = Box::pin(decode::reserve());
     assert!(futures_util::poll!(&mut blocked).is_pending());
     drop(blocked);
     let mut next = Box::pin(decode::reserve());
     assert!(futures_util::poll!(&mut next).is_pending());
     drop(first);
-    let admitted = next.await.unwrap();
+    let admitted = next.await;
     drop(second);
     drop(admitted);
-    let first = decode::reserve().await.unwrap();
-    let second = decode::reserve().await.unwrap();
+    let first = decode::reserve().await;
+    let second = decode::reserve().await;
     drop((first, second));
 }
 
@@ -479,6 +479,12 @@ fn dictionary_storage_rejects_oversize_entries_and_evicts_under_both_cache_bound
             &format!(r#"match="/result-{index}""#),
             &body,
         ));
+        if index == 3 {
+            // Exactly the 32 MiB store budget: nothing is evicted yet.
+            assert!(dictionaries
+                .select("partition", "https://dict.test/result-0", &context())
+                .is_some());
+        }
     }
     assert!(dictionaries
         .select("partition", "https://dict.test/result-0", &context())
@@ -501,4 +507,197 @@ fn dictionary_storage_rejects_oversize_entries_and_evicts_under_both_cache_bound
     assert!(dictionaries
         .select("partition", "https://dict.test/result-64", &context())
         .is_some());
+}
+
+#[test]
+fn re_registering_a_url_replaces_only_that_partitions_entry() {
+    let dictionaries = DictionaryStore::default();
+    let put = |partition: &str, path: &str, pattern: &str, body: &[u8]| {
+        assert!(dictionaries.store_response(
+            partition,
+            &format!("https://dict.test/{path}"),
+            &context(),
+            200,
+            &headers(&format!("match=\"{pattern}\"")),
+            body,
+        ));
+    };
+    put("p", "one", "/a/*", b"first");
+    put("p", "two", "/b/*", b"other url");
+    put("q", "one", "/a/*", b"other partition");
+    put("p", "one", "/a/*", b"replaced");
+    let body = |partition: &str, path: &str| {
+        dictionaries
+            .select(partition, &format!("https://dict.test/{path}"), &context())
+            .map(|selected| selected.body.as_ref().clone())
+    };
+    assert_eq!(body("p", "a/x"), Some(b"replaced".to_vec()));
+    assert_eq!(body("p", "b/x"), Some(b"other url".to_vec()));
+    assert_eq!(body("q", "a/x"), Some(b"other partition".to_vec()));
+    assert_eq!(dictionaries.0.lock().unwrap().entries.len(), 3);
+}
+
+#[test]
+fn use_as_dictionary_header_is_capped_at_sixteen_kib() {
+    let dictionaries = DictionaryStore::default();
+    // Unknown dictionary members are ignored, so padding only changes the length.
+    let header = |length: usize| {
+        let prefix = r#"match="/*", pad=""#;
+        format!("{prefix}{}\"", "p".repeat(length - prefix.len() - 1))
+    };
+    assert_eq!(header(16 * 1024).len(), 16 * 1024);
+    assert!(!store(&dictionaries, "d", &header(16 * 1024 + 1), b"x"));
+    assert!(store(&dictionaries, "d", &header(16 * 1024), b"x"));
+}
+
+#[test]
+fn use_as_dictionary_rejects_malformed_or_unsupported_fields() {
+    let dictionaries = DictionaryStore::default();
+    for bad in [
+        r#"match=("/a")"#,                    // match must be a string item
+        r#"match="/(\\d+)""#,                 // regexp groups are not allowed
+        r#"match="/*", type=br"#,             // only type=raw
+        r#"match="/*", type="raw""#,          // type must be a token
+        r#"match="/*", id=7"#,                // id must be a string
+        r#"match="/*", match-dest="script""#, // match-dest must be an inner list
+        r#"match="/*", match-dest=(script)"#, // of strings
+        "match=",                             // not a structured dictionary
+    ] {
+        assert!(!store(&dictionaries, "d", bad, b"x"), "{bad}");
+    }
+    let long_id = format!(r#"match="/*", id="{}""#, "i".repeat(1025));
+    assert!(!store(&dictionaries, "d", &long_id, b"x"));
+    let huge = format!(r#"match="/*", id="{}""#, "i".repeat(16 * 1024));
+    assert!(!store(&dictionaries, "d", &huge, b"x"));
+    assert!(dictionaries
+        .select("partition", "https://dict.test/a", &context())
+        .is_none());
+    // An exactly 1024-byte id is accepted.
+    let max_id = format!(r#"match="/*", id="{}""#, "i".repeat(1024));
+    assert!(store(&dictionaries, "d", &max_id, b"x"));
+}
+
+#[test]
+fn match_patterns_new_urlpattern_rejects_never_publish() {
+    // Each of these throws a TypeError from `new URLPattern(match, dictionaryURL)`
+    // in Chrome 156 (checked with that base URL), so the response is not
+    // registered as a dictionary. (`/a)` is accepted there, as here.)
+    let dictionaries = DictionaryStore::default();
+    for bad in [
+        r#"match="/{""#,           // unterminated group
+        r#"match="/:""#,           // parameter without a name
+        r#"match="/(""#,           // unterminated regexp
+        r#"match="/a}""#,          // unbalanced brace
+        r#"match="https://[:1/""#, // invalid IPv6 hostname pattern
+        r#"match="/:a/:a""#,       // duplicate group name
+    ] {
+        assert!(!store(&dictionaries, "d", bad, b"x"), "{bad}");
+    }
+    assert!(dictionaries
+        .select("partition", "https://dict.test/a", &context())
+        .is_none());
+}
+
+#[test]
+fn a_streamed_dictionary_body_is_capped_at_eight_mib() {
+    let dictionaries = DictionaryStore::default();
+    let mut pending = PendingDictionary::new(
+        &dictionaries,
+        dictionaries.generation(),
+        "partition",
+        "https://dict.test/d",
+        &context(),
+        200,
+        headers(r#"match="/*""#),
+        SystemTime::now(),
+    )
+    .unwrap();
+    assert!(pending.append(&vec![1; MAX_DICTIONARY_BYTES - 1]));
+    assert!(!pending.append(&[2, 3]));
+    assert!(pending.append(&[4]));
+    assert!(!pending.append(&[5]));
+    pending.commit();
+    let selected = dictionaries
+        .select("partition", "https://dict.test/a", &context())
+        .unwrap();
+    assert_eq!(selected.body.len(), MAX_DICTIONARY_BYTES);
+    assert_eq!(selected.body[MAX_DICTIONARY_BYTES - 1], 4);
+    // A response without Use-As-Dictionary never starts a pending dictionary.
+    assert!(PendingDictionary::new(
+        &dictionaries,
+        0,
+        "partition",
+        "https://dict.test/d",
+        &context(),
+        200,
+        vec![("Cache-Control".into(), "max-age=60".into())],
+        SystemTime::now(),
+    )
+    .is_none());
+}
+
+#[test]
+fn dictionaries_are_admitted_only_from_secure_untainted_same_origin_or_cors_responses() {
+    let dictionaries = DictionaryStore::default();
+    let put = |url: &str, ctx: &RequestContext| {
+        dictionaries.store_response("partition", url, ctx, 200, &headers(r#"match="/*""#), b"x")
+    };
+    assert!(!put("http://dict.test/d", &context()));
+    let mut opaque = context();
+    opaque.opaque_origin = true;
+    assert!(!put("https://dict.test/d", &opaque));
+    let mut tainted = context();
+    tainted.origin_tainted = true;
+    assert!(!put("https://dict.test/d", &tainted));
+    let mut sourceless = context();
+    sourceless.source = None;
+    assert!(put("https://dict.test/d", &sourceless));
+    // Non-200 responses and no-store responses are never dictionaries.
+    assert!(!dictionaries.store_response(
+        "p",
+        "https://dict.test/d",
+        &context(),
+        206,
+        &headers(r#"match="/*""#),
+        b"x"
+    ));
+    let no_store = vec![
+        ("Use-As-Dictionary".to_string(), r#"match="/*""#.to_string()),
+        (
+            "Cache-Control".to_string(),
+            "max-age=60, no-store".to_string(),
+        ),
+    ];
+    assert!(!dictionaries.store_response(
+        "p",
+        "https://dict.test/d",
+        &context(),
+        200,
+        &no_store,
+        b"x"
+    ));
+}
+
+#[test]
+fn every_destination_has_its_fetch_dest_name() {
+    let names: Vec<&str> = [
+        Destination::Document,
+        Destination::Iframe,
+        Destination::Script,
+        Destination::Style,
+        Destination::Image,
+        Destination::Empty,
+        Destination::Report,
+    ]
+    .into_iter()
+    .map(|d| {
+        let mut c = context();
+        c.destination = d;
+        destination(&c)
+    })
+    .collect();
+    assert_eq!(
+        names,
+        ["document", "iframe", "script", "style", "image", "", "report"]
+    );
 }

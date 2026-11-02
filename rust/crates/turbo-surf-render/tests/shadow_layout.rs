@@ -3,8 +3,17 @@ use turbo_surf_render::run_with_dom;
 
 fn observe_control(source: &str, fixture: &str) -> (serde_json::Value, serde_json::Value) {
     let expected: serde_json::Value = serde_json::from_str(fixture).unwrap();
-    assert_eq!(expected["browser"], "Chrome/155.0.8059.80");
-    assert_eq!(expected["v8"], "15.5.35.23");
+    // The recorded control browsers: Chrome 155 and (css-supports since
+    // consolidation S4) Chrome for Testing 156.
+    let browser = (expected["browser"].as_str(), expected["v8"].as_str());
+    assert!(
+        [
+            (Some("Chrome/155.0.8059.80"), Some("15.5.35.23")),
+            (Some("Chrome/156.0.8078.4"), Some("15.6.75")),
+        ]
+        .contains(&browser),
+        "{browser:?}"
+    );
     assert_eq!(
         expected["probeSha256"],
         format!("{:x}", Sha256::digest(source.as_bytes()))
@@ -247,7 +256,7 @@ fn real_supports_declarations_boolean_groups_and_live_source_order_match_chrome(
 fn genuine_css_supports_overloads_native_grammar_selectors_and_private_coercion_match_chrome() {
     compare_control(
         include_str!("../../../../harness/detection/css-supports-probe.js"),
-        include_str!("../../../../harness/detection/fixtures/css-supports-chrome155.json"),
+        include_str!("../../../../harness/detection/fixtures/css-supports-chrome156.json"),
     );
 }
 

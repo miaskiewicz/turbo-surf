@@ -13,6 +13,7 @@ jobs:
   test:
     name: lint + test (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
@@ -51,3 +52,158 @@ jobs:
 
       - name: Test
         run: npm test
+
+  # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine) ----
+  # Sharded: one instrumented link of every workspace test binary exhausts the ubuntu runner
+  # (rust-lld bus error, run 40788261228), so each shard runs tarpaulin over its crates' tests
+  # with rust/tarpaulin.toml's settings (scripts/coverage-shard.py) and uploads its JSON. The
+  # `coverage` job merges them (scripts/merge-coverage-reports.py: a line is covered when any
+  # shard hits it, so the union equals one whole-workspace run), fails below the workspace
+  # fail-under (rust/tarpaulin.toml), then every crate must meet its own floor
+  # (rust/coverage-floors.json). Floors are measured values (docs/QUALITY-GATES.md); never
+  # lower one to pass a change. Runs on ubuntu-latest (macOS runners unavailable); floors were
+  # first measured on macOS arm64.
+  coverage-shard:
+    name: coverage shard (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --chunks: render's ~190 test binaries' profraws alone fill the disk in one run
+          # (run 40899746815); scripts/coverage-shard.py runs them in 4 chunks, clearing
+          # the profraws between chunks, and unions the reports.
+          - shard: render
+            crates: --chunks 4 turbo-surf-render
+          - shard: mcp
+            crates: turbo-surf-mcp
+          - shard: rest
+            crates: turbo-surf-core turbo-surf-view turbo-surf-page turbo-surf-transform
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+      CARGO_INCREMENTAL: 0
+      # Fewer concurrent rust-lld links of V8-sized test binaries (memory, not just disk).
+      CARGO_BUILD_JOBS: 2
+    steps:
+      # Drop the preinstalled toolchains this job never uses (Android, .NET, GHC, CodeQL,
+      # Boost, images) before the instrumented build.
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af
+          df -h
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: llvm-tools-preview
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-tarpaulin@0.37.5
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target/cov
+          key: coverage-${{ matrix.shard }}
+      - name: Install
+        run: npm ci
+      - name: cargo tarpaulin (${{ matrix.crates }})
+        working-directory: rust
+        run: python3 ../scripts/coverage-shard.py ${{ matrix.shard }} ${{ matrix.crates }}
+      - run: df -h
+        if: always()
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: rust/target/cov/report-${{ matrix.shard }}/tarpaulin-report.json
+          if-no-files-found: error
+
+  coverage:
+    name: coverage (rust workspace, tarpaulin fail-under)
+    needs: coverage-shard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-*
+          path: shards
+      - name: Merge shards (fails below rust/tarpaulin.toml fail-under)
+        run: >
+          python3 scripts/merge-coverage-reports.py rust/tarpaulin.toml coverage-merged.json
+          turbo-surf-render=shards/coverage-shard-render/tarpaulin-report.json
+          turbo-surf-mcp=shards/coverage-shard-mcp/tarpaulin-report.json
+          turbo-surf-core,turbo-surf-view,turbo-surf-page,turbo-surf-transform=shards/coverage-shard-rest/tarpaulin-report.json
+      - name: Per-crate floors (rust/coverage-floors.json)
+        run: python3 scripts/check-coverage-floors.py coverage-merged.json rust/coverage-floors.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-rust
+          path: coverage-merged.json
+          if-no-files-found: ignore
+
+  # ---- Complexity: cyclomatic complexity <= 15 per function, no allow-list, no baseline ----
+  # EXPECTED RED until the post-coverage refactor: the functions above 15 when the gate landed
+  # are the refactor backlog (docs/QUALITY-GATES.md); refactoring waits until unit-test coverage
+  # is complete so it cannot break behaviour silently. Never raise the limit or skip a file to
+  # turn it green. Rust: turbo-html2pdf's tools/cc-check installed from its home at a pinned
+  # rev (not copied here) over every tracked .rs file; JS: oxlint's `complexity` rule
+  # (.oxlintrc.complexity.json) over cli.js, index.js and harness/.
+  # `continue-on-error` keeps the red jobs from failing the workflow while the backlog exists;
+  # the failing job and its step summary list every function over the limit. Drop
+  # `continue-on-error` (and make both checks required) once the backlog is cleared.
+  complexity-rust:
+    name: complexity / rust (cc <= 15)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      CC_CHECK_REV: 923c89f791f3a89cb089a59626a25cef0a9cbd5f
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cc-check
+          key: cc-check-${{ runner.os }}-${{ env.CC_CHECK_REV }}
+      - name: Install cc-check (turbo-html2pdf tools/cc-check @ CC_CHECK_REV)
+        run: |
+          if [ ! -x "$HOME/.cc-check/bin/cc-check" ]; then
+            cargo install --locked --root "$HOME/.cc-check" \
+              --git https://github.com/miaskiewicz/turbo-html2pdf --rev "$CC_CHECK_REV" cc-check
+          fi
+          echo "$HOME/.cc-check/bin" >> "$GITHUB_PATH"
+      - name: cc-check --max 15 (every tracked .rs file)
+        shell: bash  # -eo pipefail: tee must not mask the gate's exit code
+        run: npm run -s complexity:rust 2>&1 | tee complexity.txt
+      - name: List the functions over the limit (refactor backlog)
+        if: failure()
+        run: |
+          { echo '### Rust functions above cc 15'; echo '```'; grep 'cyclomatic complexity' complexity.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  complexity-js:
+    name: complexity / js (cc <= 15)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: oxlint complexity max 15 (cli.js, index.js, harness/)
+        shell: bash  # -eo pipefail: tee must not mask the gate's exit code
+        run: npm run -s complexity:js 2>&1 | tee complexity.txt
+      - name: List the functions over the limit (refactor backlog)
+        if: failure()
+        run: |
+          { echo '### JS functions above cc 15'; echo '```'; grep 'complexity of' complexity.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

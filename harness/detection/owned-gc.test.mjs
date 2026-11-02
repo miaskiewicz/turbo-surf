@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { bindingSource } from "./binding-files.mjs";
 const read = (file) => readFileSync(new URL(file, import.meta.url));
 const digest = (file) => createHash("sha256").update(read(file)).digest("hex");
-const dom = "../../rust/crates/turbo-surf-render/src/";
+const dom = bindingSource();
 test("radio ownership controls retain their independently measured real-task GC policy", () => {
   const control = JSON.parse(read(`${dom}radio_dirty_adoption_gc_chrome155.json`));
   const review = JSON.parse(read(`${dom}radio_dirty_adoption_gc_review_chrome155.json`));

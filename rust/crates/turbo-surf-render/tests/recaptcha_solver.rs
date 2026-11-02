@@ -2,7 +2,7 @@
 //! render tier's [`V8RecaptchaEngine`], all offline against a localhost fixture that
 //! stands in for google's reCAPTCHA endpoints (page + `api.js` main VM + bframe
 //! document + bframe VM). Its own test binary so it doesn't share a V8-platform init
-//! with the vendored binding's standalone-V8 unit test (see `render.rs`).
+//! with other V8-platform users (see `render.rs`).
 
 use turbo_surf_core::challenge::{Challenge, ChallengeSolver, SolveContext, SolveError, Vendor};
 use turbo_surf_core::recaptcha::RecaptchaSolver;

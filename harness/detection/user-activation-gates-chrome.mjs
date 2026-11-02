@@ -18,7 +18,6 @@ if (!casesArgument || !outputArgument)
 const output = resolve(outputArgument),
   casesText = readFileSync(resolve(casesArgument), "utf8"),
   { prelude, cases } = JSON.parse(casesText);
-const headless = process.env.TURBO_SURF_CHROME_HEADLESS === "1";
 const only = process.env.TURBO_SURF_CASES ? process.env.TURBO_SURF_CASES.split(",") : null;
 const profile = mkdtempSync(join(tmpdir(), "turbo-activation-gates-"));
 // The page is the case's HTML after the shared prelude, exactly as the offline test composes it.
@@ -54,8 +53,14 @@ try {
     `--user-data-dir=${profile}`,
     "--no-first-run",
     "--no-default-browser-check",
-    ...chromeExtensionArgs({ url: origin, disableExtensions: true, foregroundFrames: true }),
-    ...(headless ? ["--headless=new"] : []),
+    // Always headless: a headed window takes the OS keyboard focus on launch, and host
+    // keystrokes would land next to the trusted Escape/Enter input (turbo-surf#52).
+    ...chromeExtensionArgs({
+      url: origin,
+      disableExtensions: true,
+      foregroundFrames: true,
+      headless: true,
+    }),
     "about:blank",
   ];
   chrome = spawn(
@@ -132,20 +137,44 @@ try {
       if (Date.now() > ready) throw new Error(`Case ${item.id} did not load`);
       await pause(25);
     }
+    // Trusted input races the page's queued work: setup `toggle` tasks could land on
+    // either side of an Escape, and a dialog's `close` task plus the focus fixup could
+    // land on either side of the keyup (turbo-surf#54). Before, between and after the
+    // input events, wait until the page has run two rendering updates and a task after
+    // them, as it does between a person's keydown and keyup.
+    const settle = () =>
+      evaluate(
+        "new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(done))))",
+      );
     const values = [];
     for (const step of item.steps) {
+      if (step.click != null || step.press != null) await settle();
       if (step.eval != null) values.push(await evaluate(step.eval));
       else if (step.click != null) {
         const point = await evaluate(
           `(()=>{const r=document.querySelector(${JSON.stringify(step.click)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
         );
-        for (const type of ["mousePressed", "mouseReleased"])
-          await call("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+        await call("Input.dispatchMouseEvent", {
+          type: "mousePressed",
+          ...point,
+          button: "left",
+          clickCount: 1,
+        });
+        await settle();
+        await call("Input.dispatchMouseEvent", {
+          type: "mouseReleased",
+          ...point,
+          button: "left",
+          clickCount: 1,
+        });
+        await settle();
       } else if (step.press != null) {
         const keyCode = { Escape: 27, Enter: 13 }[step.press];
         const key = { key: step.press, code: step.press, windowsVirtualKeyCode: keyCode };
         await call("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key });
+        await settle();
         await call("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+        await settle();
       } else if (step.wait != null) await pause(step.wait);
       else throw new Error(`${item.id}: unsupported step`);
     }
@@ -159,7 +188,7 @@ try {
     collectorSha256: createHash("sha256")
       .update(readFileSync(new URL(import.meta.url)))
       .digest("hex"),
-    headless,
+    headless: true,
     flags: flags.map((flag) =>
       flag.startsWith("--user-data-dir=") ? "--user-data-dir=<fresh-profile>" : flag,
     ),

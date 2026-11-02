@@ -1,0 +1,41 @@
+# Line-coverage gate for the turbo-surf Rust workspace (the member crates' `src/`, minus the
+# exclusions below).
+# Run from rust/: `cargo tarpaulin` (reads this file). CI: the `coverage-shard` matrix
+# (scripts/coverage-shard.py reads [surf] below) merged by the `coverage` job in
+# .github/workflows/ci.yml (ubuntu-latest; the floor was first measured on macOS arm64).
+#
+# fail-under is the workspace total MEASURED on 2026-10-28 at consol/cov-c4 5895357
+# (tarpaulin 0.37.5, LLVM engine, macOS arm64, simdutf rusty_v8 150.4.0, with the
+# exclusions below): 93.07%, 19287/20723 lines, rounded down to 93.0. Per-crate floors from
+# the same run are in coverage-floors.json (CI: scripts/check-coverage-floors.py). The
+# coverage phase raises both toward >= 99.5 with behaviour-asserting tests; never lower
+# them to pass a change.
+[surf]
+engine = "Llvm"
+workspace = true
+include-files = ["crates/*/src/*"]
+# Not measured here (see docs/QUALITY-GATES.md "Coverage"):
+# - turbo-surf-napi, turbo-surf-py: the Node / Python bindings. Their code runs only inside
+#   node / python processes (the Playwright shim and detection suites, the PyPI wheel tests),
+#   which tarpaulin does not instrument; they have no Rust tests of their own.
+# - render's window_proxy.rs / frame_location.rs / frame_ancestors.rs / code_generation.rs /
+#   frame_modules.rs: compiled only under
+#   cfg(turbo_surf_native_proxy), i.e. the TURBO_SURF_ENGINE=154/155 source-built native V8
+#   (harness/detection/engine-15x); absent from this build, so they have no lines to cover.
+exclude = ["turbo-surf-napi", "turbo-surf-py"]
+exclude-files = [
+    "crates/turbo-surf-napi/*",
+    "crates/turbo-surf-py/*",
+    "crates/turbo-surf-render/src/window_proxy.rs",
+    "crates/turbo-surf-render/src/frame_location.rs",
+    "crates/turbo-surf-render/src/frame_ancestors.rs",
+    "crates/turbo-surf-render/src/code_generation.rs",
+    "crates/turbo-surf-render/src/frame_modules.rs",
+]
+target-dir = "target/cov"
+timeout = "600s"
+# Run every test binary even after a failure, so a red run still reports full coverage.
+no-fail-fast = true
+out = ["Stdout", "Json"]
+output-dir = "target/cov/report"
+fail-under = 93.0

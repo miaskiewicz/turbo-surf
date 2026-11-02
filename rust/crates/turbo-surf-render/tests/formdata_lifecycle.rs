@@ -2,6 +2,7 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc::{channel, Receiver};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 fn server(responses: Vec<String>) -> (String, Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -11,7 +12,7 @@ fn server(responses: Vec<String>) -> (String, Receiver<String>) {
         for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
             stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .set_read_timeout(Some(std::time::Duration::from_secs(60)))
                 .unwrap();
             let mut bytes = Vec::new();
             let mut chunk = [0; 4096];
@@ -46,19 +47,19 @@ fn response(status: &str, headers: &str, body: &str) -> String {
     format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}",body.len())
 }
 fn request(rx: &Receiver<String>) -> String {
-    rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()
+    rx.recv_timeout(std::time::Duration::from_secs(60)).unwrap()
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn actual_formdata_interface_and_constructor_reentrancy_match_chrome() {
     for (probe, raw) in [
         (
-            include_str!("../src/formdata_event_probe.js"),
-            include_str!("../src/formdata_event_chrome155.json"),
+            test_support::FORMDATA_EVENT_PROBE_JS,
+            test_support::FORMDATA_EVENT_CHROME155_JSON,
         ),
         (
-            include_str!("../src/formdata_guards_probe.js"),
-            include_str!("../src/formdata_guards_chrome155.json"),
+            test_support::FORMDATA_GUARDS_PROBE_JS,
+            test_support::FORMDATA_GUARDS_CHROME155_JSON,
         ),
     ] {
         let control: serde_json::Value = serde_json::from_str(raw).unwrap();
@@ -112,7 +113,7 @@ async fn formdata_listener_changes_real_wire_entries_but_not_accepted_metadata()
             &format!("{base}/start"),
             "",
             "",
-            5000,
+            60_000,
         )
         .await
         .unwrap();

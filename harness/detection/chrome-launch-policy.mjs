@@ -15,6 +15,9 @@ export function chromeExtensionArgs(config) {
         "--disable-background-timer-throttling",
       ],
     ],
+    // Keyboard-driven controls: a headed window takes the OS keyboard focus on launch,
+    // so keys typed on the host land in the focused field next to CDP's (turbo-surf#51).
+    ["headless", ["--headless=new"]],
   ]) {
     if (config[option] !== true) continue;
     const host = new URL(config.url).hostname;

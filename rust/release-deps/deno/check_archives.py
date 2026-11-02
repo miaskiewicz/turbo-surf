@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("deno_prepare", ROOT / "prepare.py")
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
+# The family links exactly one native V8: turbo-dom-v8 (a registry prerequisite).
+RETIRED_NATIVE = {"v8", "v8x", "turbo-surf-v8"}
 
 
 def normalized(manifest, resolver=None):
@@ -34,7 +36,7 @@ def check(prepared, archives):
     receipt = json.loads((prepared / "prepared-source-identity.json").read_text())
     workspace = prepared / "Cargo.toml"
     resolver = tomllib.loads(workspace.read_text())["workspace"].get("resolver") if workspace.exists() else None
-    expected = {(new, version) for _, version, new, _ in prepare.PACKAGES}
+    expected = {(p.name, p.publish) for p in prepare.PACKAGES}
     if {(p["name"], p["version"]) for p in receipt["packages"]} != expected or len(receipt["packages"]) != len(expected):
         raise ValueError("Unexpected candidate package closure")
     results = []
@@ -67,6 +69,8 @@ def check(prepared, archives):
                 for alias, dep in section.get(category, {}).items():
                     if isinstance(dep, dict) and any(k in dep for k in ["path", "git", "rev", "branch", "tag", "workspace"]):
                         raise ValueError("Packaged dependency retains a nonregistry source")
+                    if (dep.get("package", alias) if isinstance(dep, dict) else alias) in RETIRED_NATIVE:
+                        raise ValueError(f"Packaged dependency selects a retired native V8: {name}/{alias}")
         if "patch" in actual or "workspace" in actual:
             raise ValueError("Packaged manifest retains a root override")
         for path, payload in contents.items():

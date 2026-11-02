@@ -1,0 +1,6 @@
+[
+  {
+    "id": "image-restart",
+    "html": "<!doctype html><body><img id=plain src=\"/img/20x10/plain.png\"><picture id=pic><source id=losing srcset=\"/img/40x20/losing.png\" type=\"image/x-unsupported\"><source srcset=\"/img/50x25/winning.png\"><img id=img src=\"/img/30x15/fallback.png\"></picture>"
+  }
+]

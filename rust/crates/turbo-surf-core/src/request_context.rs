@@ -484,9 +484,9 @@ impl ClientHints {
         {
             return headers;
         }
-        let Some(origin) = origin(target) else {
-            return headers;
-        };
+        // trustworthy(target) above admitted only parsed http(s) URLs, which have a
+        // tuple origin.
+        let origin = origin(target).expect("a trustworthy URL has a tuple origin");
         let origins = self.0.origins.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(requested) = origins.get(&origin) {
             for name in requested {
@@ -523,9 +523,42 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
     Some(value)
 }
 
+/// The image `Accept` for a client whose screenshot raster paints AVIF and/or JPEG XL only
+/// when built with those decoders (turbo-surf#43): `None` when it paints both, so the
+/// request keeps Chrome's measured image `Accept`; otherwise only the types it paints
+/// (PNG/JPEG/GIF/WebP/SVG plus the built ones), so a content-negotiating CDN falls back to
+/// a format that does not paint as a placeholder.
+pub fn paintable_image_accept(avif: bool, jxl: bool) -> Option<String> {
+    if avif && jxl {
+        return None;
+    }
+    let jxl = if jxl { "image/jxl," } else { "" };
+    let avif = if avif { "image/avif," } else { "" };
+    Some(format!(
+        "{jxl}{avif}image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paintable_image_accept_drops_only_the_unpainted_types() {
+        assert_eq!(paintable_image_accept(true, true), None);
+        assert_eq!(
+            paintable_image_accept(true, false).as_deref(),
+            Some("image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8")
+        );
+        assert_eq!(
+            paintable_image_accept(false, true).as_deref(),
+            Some("image/jxl,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8")
+        );
+        assert_eq!(
+            paintable_image_accept(false, false).as_deref(),
+            Some("image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8")
+        );
+    }
 
     #[test]
     fn browser_pool_does_not_depend_on_a_parked_previous_runtime() {
@@ -844,6 +877,91 @@ mod credentialless_tests {
         context.opaque_origin = true;
         assert!(!context.sends_credentials(source));
     }
+
+    #[test]
+    fn sec_fetch_site_stays_none_for_browser_navigations_and_cross_site_for_opaque_sources() {
+        // Fetch Metadata: a user-initiated navigation (no initiator) is `none`, and
+        // its redirects keep `none`; an opaque-origin initiator is always
+        // `cross-site`, even toward its own precursor's host.
+        let mut typed = RequestContext::navigation(None, true);
+        typed.follow_redirect("https://a.test/", "https://b.example/");
+        assert_eq!(typed.redirect_site.as_deref(), Some("none"));
+        assert_eq!(
+            typed.headers("https://b.example/", "GET")["sec-fetch-site"],
+            "none"
+        );
+        assert!(!typed.origin_tainted);
+        let mut sandboxed = RequestContext::resource(
+            "https://a.test/frame",
+            Destination::Script,
+            RequestMode::NoCors,
+        );
+        sandboxed.opaque_origin = true;
+        sandboxed.follow_redirect("https://a.test/x.js", "https://a.test/y.js");
+        assert_eq!(sandboxed.redirect_site.as_deref(), Some("cross-site"));
+        assert!(!sandboxed.origin_tainted);
+    }
+
+    #[test]
+    fn opt_in_hints_go_to_same_origin_subresources_and_navigations_only() {
+        // Client Hints Infrastructure: an origin's Accept-CH applies to its own
+        // navigations and same-origin subresources; a cross-origin subresource gets
+        // only the low-entropy defaults (no Permissions-Policy delegation here).
+        let hints = ClientHints::default();
+        hints.observe("https://a.test/", Some("Sec-CH-UA-Arch"), false);
+        let profile = crate::fingerprint::default_profile();
+        let arch = |source: &str, destination| {
+            let context = RequestContext::resource(source, destination, RequestMode::NoCors);
+            let headers = hints.headers("https://a.test/x", &context, &profile);
+            assert!(headers.contains_key("sec-ch-ua"));
+            headers.contains_key("sec-ch-ua-arch")
+        };
+        assert!(arch("https://a.test/page", Destination::Script));
+        assert!(!arch("https://b.test/page", Destination::Script));
+        assert!(arch("https://b.test/page", Destination::Document));
+    }
+
+    #[test]
+    fn destinations_use_their_sec_fetch_dest_tokens() {
+        use Destination::*;
+        assert_eq!(
+            [Document, Iframe, Script, Style, Image, Empty, Report].map(Destination::as_str),
+            ["document", "iframe", "script", "style", "image", "empty", "report"]
+        );
+    }
+
+    #[test]
+    fn referrer_policy_headers_use_the_last_recognised_token() {
+        // Referrer Policy 8.1: split the combined header on commas and keep the
+        // last token that parses; an unknown token alone changes nothing.
+        let mut context = RequestContext::navigation(None, false);
+        let header = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        context.apply_referrer_policy_headers(&header(&[("Content-Type", "no-referrer")]));
+        assert_eq!(
+            context.referrer_policy,
+            crate::referrer_policy::ReferrerPolicy::StrictOriginWhenCrossOrigin
+        );
+        context.apply_referrer_policy_headers(&header(&[
+            ("Referrer-Policy", "origin"),
+            ("referrer-policy", "unsafe-url, bogus"),
+        ]));
+        assert_eq!(
+            context.referrer_policy,
+            crate::referrer_policy::ReferrerPolicy::UnsafeUrl
+        );
+        context.apply_referrer_policy_headers(&header(&[("Referrer-Policy", "bogus")]));
+        assert_eq!(
+            context.referrer_policy,
+            crate::referrer_policy::ReferrerPolicy::UnsafeUrl
+        );
+        assert!(!trustworthy("not a url"));
+        assert!(!trustworthy("ftp://localhost/"));
+    }
 }
 
 #[cfg(test)]
@@ -890,5 +1008,34 @@ mod configured_transport_tests {
         assert!(hints.manual_client().is_err());
         assert!(hints.manual_client().is_err());
         assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn builder_and_build_failures_reach_both_pools_as_network_errors() {
+        let failing = ClientHints::with_client_builder(|| {
+            crate::net::client_builder_with_trust(b"not a certificate")
+        });
+        let error = failing.upload_client().err().unwrap();
+        assert_eq!(error.code, crate::net::ErrorCode::Network);
+        // A header value with a newline makes the configured builder's build() fail.
+        let invalid = ClientHints::with_client_builder(|| {
+            Ok(crate::net::client_builder().user_agent("bad\nagent"))
+        });
+        for error in [
+            invalid.manual_client().err().unwrap(),
+            invalid.upload_client().err().unwrap(),
+        ] {
+            assert_eq!(error.code, crate::net::ErrorCode::Network);
+            assert!(
+                error.message.starts_with("builder error"),
+                "{}",
+                error.message
+            );
+        }
+        // Without a configured transport both pools come from the stock builders.
+        let stock = ClientHints::default();
+        assert!(stock.manual_client().is_ok());
+        assert!(stock.upload_client().is_ok());
+        assert_eq!(format!("{stock:?}"), "ClientHints { .. }");
     }
 }

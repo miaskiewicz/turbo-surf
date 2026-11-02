@@ -55,7 +55,7 @@ async fn realtime_hydration_and_manual_drains_leave_future_timers_queued() {
         "https://timer.test/", 500,
     ).await;
     assert!(!page.hydration_diagnostics().budget_exceeded);
-    page.eval("globalThis[Symbol.for('ts')].runTimers(2000);globalThis.__RESULT='done';")
+    page.eval_engine("__tsNs.runTimers(2000);globalThis.__RESULT='done';")
         .await
         .unwrap();
     assert_eq!(value(&mut page, "[ticks,once]").await, json!([0, false]));
@@ -107,7 +107,7 @@ async fn child_frames_and_parent_share_realtime_deadlines_without_future_leaps()
         2000,
     )
     .await;
-    page.eval("globalThis.parentTick=false;const w=document.querySelector('iframe').contentWindow;w.childTick=false;setTimeout(()=>parentTick=true,60000);w.setTimeout(()=>w.childTick=true,60000);globalThis[Symbol.for('ts')].runTimers();").await.unwrap();
+    page.eval_engine("globalThis.parentTick=false;const w=document.querySelector('iframe').contentWindow;w.childTick=false;setTimeout(()=>parentTick=true,60000);w.setTimeout(()=>w.childTick=true,60000);__tsNs.runTimers();").await.unwrap();
     assert_eq!(
         value(
             &mut page,

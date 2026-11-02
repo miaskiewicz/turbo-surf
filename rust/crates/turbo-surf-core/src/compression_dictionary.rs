@@ -219,9 +219,8 @@ impl DictionaryStore {
         {
             return false;
         }
-        let Ok(base) = Url::parse(url) else {
-            return false;
-        };
+        // admitted() already required `url` to parse as an https URL.
+        let base = Url::parse(url).expect("admitted() parsed the dictionary URL");
         let input = values(headers, "use-as-dictionary");
         if input.len() > 16 * 1024 {
             return false;

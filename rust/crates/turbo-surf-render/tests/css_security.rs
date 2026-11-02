@@ -128,7 +128,7 @@ async fn parser_resources_preserve_earlier_style_blocking_and_later_listener_reg
     document.addEventListener('DOMContentLoaded',()=>{globalThis.laterAtDcl=!!document.getElementById('later').sheet;});
     window.addEventListener('load',()=>{globalThis.__browserFixture={earlierReady,laterAtDcl,observed:stylesObserved,laterReady:!!document.getElementById('later').sheet};});
     </script><link id=later rel=stylesheet href=/later.css></head><body><div id=earlier-target></div><div id=later-target></div></body></html>"#;
-    let mut page = PageSession::open(html, &source, "", "", 5000)
+    let mut page = PageSession::open(html, &source, "", "", 60_000)
         .await
         .unwrap();
     let result = page

@@ -1,5 +1,5 @@
 // Private, native-branded rectangle data; no guest-visible host registry.
-(function (core, make, frameWindow, frameStep) {
+(function (core, make, frameWindow, frameStep, ns) {
   "use strict";
   const ops = core.ops;
   const getRecord = ops.op_interface_record_get;
@@ -361,7 +361,7 @@
     return object("DOMRect", prototypes.DOMRect, values[0], values[1], values[2], values[3]);
   }
   // Observer entries (observers.js) report DOMRectReadOnly values built here.
-  define(globalThis[Symbol.for("ts")], "readOnlyRect", {
+  define(ns, "readOnlyRect", {
     __proto__: null,
     value: (x, y, width, height) =>
       object("DOMRectReadOnly", prototypes.DOMRectReadOnly, x, y, width, height),

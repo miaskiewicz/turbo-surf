@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import tarfile
 import tempfile
 import tomllib
@@ -19,6 +20,10 @@ spec.loader.exec_module(prepare)
 archive_spec = importlib.util.spec_from_file_location("deno_archive_check", ROOT / "check_archives.py")
 archive_check = importlib.util.module_from_spec(archive_spec)
 archive_spec.loader.exec_module(archive_check)
+tree_spec = importlib.util.spec_from_file_location("deno_candidate_tree", ROOT / "candidate_tree.py")
+candidate_tree = importlib.util.module_from_spec(tree_spec)
+tree_spec.loader.exec_module(candidate_tree)
+RENDER_PINS = ROOT.parents[1] / "crates/turbo-surf-render/src/deno_extension_sources_tests.rs"
 
 
 class ArchiveContracts(unittest.TestCase):
@@ -68,30 +73,135 @@ class ArchiveContracts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "outside Cargo"):
                 prepare.source_archive("example", "1.0.0", self.pin(b"right"), root / "cargo", root / "cargo/private", True)
 
-    def test_manifest_keeps_aliases_features_and_native_archive_version(self):
-        source = '''[package]
+    FACADE = '''[package]
 name = "deno_v8"
 version = "0.4.0"
 repository = "https://github.com/denoland/deno"
+
+[features]
+default = ["v8"]
+quickjs = [
+    "dep:v8x_backend",
+    "v8x_backend/quickjs",
+]
+simdutf = [
+    "rusty_v8?/simdutf",
+    "v8x_backend?/simdutf",
+]
+use_custom_libcxx = [
+    "rusty_v8?/use_custom_libcxx",
+    "v8x_backend?/use_custom_libcxx",
+]
+v8 = ["dep:rusty_v8"]
+v8_enable_pointer_compression = [
+    "rusty_v8?/v8_enable_pointer_compression",
+    "v8x_backend?/v8_enable_pointer_compression",
+]
+v8_enable_sandbox = [
+    "rusty_v8?/v8_enable_sandbox",
+    "v8x_backend?/v8_enable_sandbox",
+]
+v8_enable_v8_checks = [
+    "rusty_v8?/v8_enable_v8_checks",
+    "v8x_backend?/v8_enable_v8_checks",
+]
+
 [lib]
 name = "deno_v8"
+path = "lib.rs"
+
 [dependencies.rusty_v8]
-package = "v8"
 version = "150.4.0"
+optional = true
 default-features = false
-[features]
-v8 = ["dep:rusty_v8"]
+package = "v8"
+
+[dependencies.v8x_backend]
+version = "=149.4.0-rc.4"
+optional = true
+default-features = false
+package = "v8x"
 '''
-        result = tomllib.loads(prepare.manifest(source, "deno_v8", "0.4.0", "turbo-surf-deno-v8"))
-        self.assertEqual(result["lib"]["name"], "deno_v8")
-        self.assertEqual(result["features"], {"v8": ["dep:rusty_v8"]})
-        self.assertEqual(result["dependencies"]["rusty_v8"]["package"], "turbo-surf-v8")
-        self.assertEqual(result["dependencies"]["rusty_v8"]["version"], "=150.4.0")
+
+    def package(self, upstream):
+        return next(p for p in prepare.PACKAGES if p.upstream == upstream)
+
+    def test_facade_requires_registry_turbo_dom_v8_and_drops_second_backend(self):
+        result = tomllib.loads(prepare.manifest(self.FACADE, self.package("deno_v8")))
+        self.assertEqual(result["package"]["name"], "turbo-surf-deno-v8")
+        self.assertEqual(result["package"]["version"], "0.4.1")
+        self.assertEqual(result["package"]["metadata"]["turbo-surf-upstream"]["version"], "0.4.0")
+        self.assertEqual(result["lib"], {"name": "deno_v8", "path": "lib.rs"})
+        self.assertEqual(result["dependencies"], {"rusty_v8": {
+            "version": "~150.4", "optional": True, "default-features": False, "package": "turbo-dom-v8"}})
+        self.assertEqual(result["features"], {
+            "default": ["v8"], "v8": ["dep:rusty_v8"], "simdutf": ["rusty_v8?/simdutf"],
+            "use_custom_libcxx": ["rusty_v8?/use_custom_libcxx"],
+            "v8_enable_pointer_compression": ["rusty_v8?/v8_enable_pointer_compression"],
+            "v8_enable_sandbox": ["rusty_v8?/v8_enable_sandbox"],
+            "v8_enable_v8_checks": ["rusty_v8?/v8_enable_v8_checks"]})
+
+    def test_facade_feature_drift_is_not_silently_rewritten(self):
+        changed = self.FACADE.replace('default = ["v8"]', 'default = ["v8", "simdutf"]', 1)
+        with self.assertRaisesRegex(ValueError, "facade features changed"):
+            prepare.manifest(changed, self.package("deno_v8"))
+        stray = self.FACADE.replace('name = "deno_v8"\nversion = "0.4.0"', 'name = "serde_v8"\nversion = "0.321.0"')
+        with self.assertRaises(ValueError):
+            prepare.manifest(stray, self.package("serde_v8"))
+
+    def test_core_and_serde_drop_quickjs_forwarding_and_pin_publish_versions(self):
+        for upstream, forwards in prepare.QUICKJS_FORWARDS.items():
+            package = self.package(upstream)
+            with self.subTest(package=upstream):
+                source = f'''[package]
+name = "{upstream}"
+version = "{package.version}"
+repository = "https://github.com/denoland/deno"
+
+[features]
+default = ["v8"]
+quickjs = {json.dumps(forwards)}
+v8 = ["v8/v8"]
+
+[lib]
+name = "{upstream}"
+
+[dependencies.v8]
+version = "=0.4.0"
+features = ["simdutf"]
+default-features = false
+package = "deno_v8"
+
+[dependencies.serde_v8]
+version = "=0.321.0"
+'''
+                result = tomllib.loads(prepare.manifest(source, package))
+                self.assertEqual(result["features"], {"default": ["v8"], "v8": ["v8/v8"]})
+                self.assertEqual(result["package"]["version"], package.publish)
+                self.assertEqual(result["dependencies"]["v8"]["package"], "turbo-surf-deno-v8")
+                self.assertEqual(result["dependencies"]["v8"]["version"], "=0.4.1")
+                self.assertEqual(result["dependencies"]["v8"]["features"], ["simdutf"])
+                self.assertEqual(result["dependencies"]["serde_v8"]["version"], "=0.321.1")
+                with self.assertRaisesRegex(ValueError, "quickjs forwarding changed"):
+                    prepare.manifest(source.replace("quickjs = ", "quickjs_old = "), package)
+
+    def test_closure_and_pins_name_seven_distributions_without_native_v8(self):
+        pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
+        self.assertEqual(len(prepare.PACKAGES), 7)
+        self.assertNotIn("v8", pins)
+        self.assertEqual({p.upstream: (p.version, p.name, p.publish) for p in prepare.PACKAGES},
+                         {k: (v["version"], v["candidateName"], v["publishVersion"]) for k, v in pins.items()})
+        for package in prepare.PACKAGES:
+            major, minor, patch_level = package.version.split(".")
+            self.assertEqual(package.publish, f"{major}.{minor}.{int(patch_level) + 1}")
+        self.assertEqual({k for k, v in pins.items() if "embeddedSources" in v}, prepare.EMBEDDED_LEAVES)
+        self.assertFalse((ROOT / "v8-teardown-tests.patch").exists())
 
     def test_each_standalone_leaf_selects_v8_only_through_own_default_feature(self):
         leaves = {"deno_bench_util", "deno_crypto", "deno_webidl", "deno_web"}
         self.assertEqual(prepare.V8_DEFAULT_LEAVES, leaves)
-        for old, version, new, _ in prepare.PACKAGES:
+        for package in prepare.PACKAGES:
+            old, version, new = package.upstream, package.version, package.name
             if old not in leaves:
                 continue
             with self.subTest(package=old):
@@ -107,14 +217,16 @@ version = "0.412.0"
 default-features = false
 features = ["reactor-tokio", "v8_use_custom_libcxx"]
 '''
-                result = tomllib.loads(prepare.manifest(source, old, version, new))
+                result = tomllib.loads(prepare.manifest(source, package))
                 self.assertEqual(result["features"], {"default": ["v8"], "v8": ["deno_core/v8"]})
                 core = result["dependencies"]["deno_core"]
                 self.assertFalse(core["default-features"])
                 self.assertEqual(core["features"], ["reactor-tokio", "v8_use_custom_libcxx"])
                 self.assertEqual(core["package"], "turbo-surf-deno-core")
-                self.assertEqual(core["version"], "=0.412.0")
+                self.assertEqual(core["version"], "=0.412.1")
+                self.assertEqual(core["path"], "../turbo-surf-deno-core")
                 self.assertEqual(result["package"]["license"], "MIT")
+                self.assertEqual(result["package"]["version"], package.publish)
                 self.assertEqual(result["lib"]["name"], old)
 
     def test_new_upstream_leaf_feature_policy_is_not_silently_overwritten(self):
@@ -147,7 +259,7 @@ features = ["reactor-tokio", "v8_use_custom_libcxx"]
     def test_actual_archive_normalizes_paths_and_keeps_source_and_license(self):
         with tempfile.TemporaryDirectory() as directory:
             prepared, archives = self.packaged_fixture(Path(directory))
-            with patch.object(archive_check.prepare, "PACKAGES", [("example", "1.0.0", "example", None)]):
+            with patch.object(archive_check.prepare, "PACKAGES", [prepare.Package("example", "0.9.0", "example", "1.0.0", None)]):
                 result = archive_check.check(prepared, archives)
             self.assertEqual(result["packages"][0]["licenses"], ["LICENSE.md"])
             self.assertTrue(result["packages"][0]["sourceAndNormalizedManifestVerified"])
@@ -162,7 +274,7 @@ features = ["reactor-tokio", "v8_use_custom_libcxx"]
     def test_actual_archive_rejects_source_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             prepared, archives = self.packaged_fixture(Path(directory), lambda files: files.update({"lib.rs": b"changed code"}))
-            with patch.object(archive_check.prepare, "PACKAGES", [("example", "1.0.0", "example", None)]):
+            with patch.object(archive_check.prepare, "PACKAGES", [prepare.Package("example", "0.9.0", "example", "1.0.0", None)]):
                 with self.assertRaisesRegex(ValueError, "Packaged source changed"):
                     archive_check.check(prepared, archives)
 
@@ -170,9 +282,169 @@ features = ["reactor-tokio", "v8_use_custom_libcxx"]
         for missing, message in [("LICENSE.md", "license missing"), ("extension.js", "source missing")]:
             with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
                 prepared, archives = self.packaged_fixture(Path(directory), lambda files: files.pop(missing))
-                with patch.object(archive_check.prepare, "PACKAGES", [("example", "1.0.0", "example", None)]):
+                with patch.object(archive_check.prepare, "PACKAGES", [prepare.Package("example", "0.9.0", "example", "1.0.0", None)]):
                     with self.assertRaisesRegex(ValueError, message):
                         archive_check.check(prepared, archives)
+
+
+
+class EmbeddedSourceContracts(unittest.TestCase):
+    def fixture(self, root):
+        target = root / "deno_x"
+        target.mkdir()
+        files = {"lib.rs": b'deno_core::extension!(deno_x,\n  esm = [ "a.js" ],\n  lazy_loaded_js = [ "c.js", "b.js" ],\n);\n',
+                 "a.js": b"export const a = 1;\n", "b.js": b"globalThis.b = 2;\n", "c.js": b"globalThis.c = 3;\n",
+                 "LICENSE.md": b"MIT License\n"}
+        for name, payload in files.items():
+            (target / name).write_bytes(payload)
+        pin = {"declarationSha256": hashlib.sha256(files["lib.rs"]).hexdigest(), "licenseFile": "LICENSE.md",
+               "licenseSha256": hashlib.sha256(files["LICENSE.md"]).hexdigest(),
+               "sources": [{"kind": kind, "file": name, "sha256": hashlib.sha256(files[name]).hexdigest(), "bytes": len(files[name])}
+                           for kind, name in [("esm", "a.js"), ("lazy_loaded_js", "c.js"), ("lazy_loaded_js", "b.js")]]}
+        return target, files, pin
+
+    def test_module_lists_declared_sources_in_order_and_keeps_upstream_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target, files, pin = self.fixture(Path(directory))
+            prepare.embedded_module("deno_x", pin, target)
+            module = (target / "embedded_sources.rs").read_text()
+            rows = [line for line in module.splitlines() if line.startswith("    EmbeddedSource {")]
+            self.assertEqual(len(rows), 3)
+            for row, (kind, name) in zip(rows, [("Esm", "a.js"), ("LazyJs", "c.js"), ("LazyJs", "b.js")]):
+                self.assertIn(f'kind: SourceKind::{kind}, specifier: "ext:deno_x/{name}", code: deno_core::ascii_str_include!("{name}")', row)
+                self.assertIn(f'sha256: "{hashlib.sha256(files[name]).hexdigest()}", bytes: {len(files[name])} }}', row)
+            self.assertIn('pub const EXTENSION: &str = "deno_x";', module)
+            self.assertIn('pub const LICENSE: &str = include_str!("LICENSE.md");', module)
+            self.assertEqual((target / "lib.rs").read_bytes(), files["lib.rs"] + prepare.LIB_SUFFIX.encode())
+            for name in ["a.js", "b.js", "c.js", "LICENSE.md"]:
+                self.assertEqual((target / name).read_bytes(), files[name])
+
+    def test_inventory_bytes_declaration_and_license_drift_are_rejected(self):
+        cases = [
+            ("inventory", lambda target, pin: pin["sources"].reverse()),
+            ("source bytes", lambda target, pin: (target / "b.js").write_bytes(b"globalThis.b = 9;\n")),
+            ("source bytes", lambda target, pin: pin["sources"][0].update(bytes=1)),
+            ("declaration", lambda target, pin: (target / "lib.rs").write_text("// changed\n")),
+            ("license", lambda target, pin: (target / "LICENSE.md").write_text("changed\n")),
+            ("already has", lambda target, pin: (target / "embedded_sources.rs").write_text("")),
+        ]
+        for message, mutate in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
+                target, _, pin = self.fixture(Path(directory))
+                mutate(target, pin)
+                with self.assertRaisesRegex(ValueError, message):
+                    prepare.embedded_module("deno_x", pin, target)
+
+    def test_non_ascii_source_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target, _, pin = self.fixture(Path(directory))
+            payload = "globalThis.b = '\u00e9';\n".encode()
+            (target / "b.js").write_bytes(payload)
+            pin["sources"][2].update(sha256=hashlib.sha256(payload).hexdigest(), bytes=len(payload))
+            with self.assertRaisesRegex(ValueError, "source bytes"):
+                prepare.embedded_module("deno_x", pin, target)
+
+    def test_pins_match_the_reviewed_render_pins(self):
+        # turbo-surf-render re-checks the distributions' embedded tables against its
+        # own reviewed SOURCE_PINS / LICENSE_SHA256; both pin sets must agree.
+        text = RENDER_PINS.read_text()
+        render = [(s, h, int(n)) for s, h, n in re.findall(r'\("(ext:[^"]+)", "([0-9a-f]{64})", (\d+)\),', text)]
+        license_pin = re.search(r'const LICENSE_SHA256: &str = "([0-9a-f]{64})";', text)[1]
+        pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
+        expected = []
+        for old in ["deno_web", "deno_webidl", "deno_crypto"]:
+            embedded = pins[old]["embeddedSources"]
+            self.assertEqual(embedded["licenseSha256"], license_pin)
+            expected += [(f"ext:{old}/{row['file']}", row["sha256"], row["bytes"]) for row in embedded["sources"]]
+        self.assertEqual(set(pins) & prepare.EMBEDDED_LEAVES, {"deno_web", "deno_webidl", "deno_crypto"})
+        self.assertEqual(render, expected)
+
+
+class PatchedSourceContracts(unittest.TestCase):
+    """deno_crypto is the upstream archive plus a committed patch, never a vendored tree."""
+
+    def test_only_deno_crypto_is_patched_and_its_patch_and_pins_exist(self):
+        pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
+        patched = {p.upstream: p.patch for p in prepare.PACKAGES if p.patch}
+        self.assertEqual(patched, {"deno_crypto": "deno_crypto.patch"})
+        self.assertTrue((prepare.PATCHES / "deno_crypto.patch").is_file())
+        self.assertEqual({name for name, pin in pins.items() if "patchedFiles" in pin}, {"deno_crypto"})
+        files = pins["deno_crypto"]["patchedFiles"]
+        # The patch adds the license and the clone helper to the upstream archive.
+        self.assertIn("LICENSE.md", files)
+        self.assertIn("clone_key.rs", files)
+        self.assertFalse((ROOT.parents[1] / "vendor").exists())
+
+    def test_patch_is_applied_in_place_and_failures_are_fatal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "patches").mkdir()
+            (root / "patches" / "x.patch").write_text(
+                "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+                "--- /dev/null\n+++ b/LICENSE.md\n@@ -0,0 +1 @@\n+MIT\n")
+            target = root / "src"
+            target.mkdir()
+            (target / "a.txt").write_text("old\n")
+            with patch.object(prepare, "PATCHES", root / "patches"):
+                prepare.apply_patch(target, "x.patch")
+                self.assertEqual(prepare.tree(target), {
+                    "LICENSE.md": hashlib.sha256(b"MIT\n").hexdigest(),
+                    "a.txt": hashlib.sha256(b"new\n").hexdigest()})
+                (target / "a.txt").write_text("drifted\n")
+                (target / "LICENSE.md").unlink()
+                with self.assertRaises(prepare.subprocess.CalledProcessError):
+                    prepare.apply_patch(target, "x.patch")
+
+
+class CandidateTreeContracts(unittest.TestCase):
+    MANIFEST = '''[package]
+name = "turbo-surf-deno-web"
+version = "0.290.1"
+
+[lib]
+name = "deno_web"
+path = "lib.rs"
+
+[[bench]]
+name = "encoding"
+path = "benches/encoding.rs"
+
+[dependencies.deno_core]
+version = "=0.412.1"
+default-features = false
+package = "turbo-surf-deno-core"
+path = "../turbo-surf-deno-core"
+
+[target.'cfg(windows)'.dev-dependencies.deno_webidl]
+version = "=0.259.1"
+package = "turbo-surf-deno-webidl"
+path = "../turbo-surf-deno-webidl"
+'''
+
+    def test_registry_form_drops_only_dependency_paths(self):
+        result = tomllib.loads(candidate_tree.without_paths(self.MANIFEST))
+        self.assertEqual(result["lib"]["path"], "lib.rs")
+        self.assertEqual(result["bench"][0]["path"], "benches/encoding.rs")
+        self.assertNotIn("path", result["dependencies"]["deno_core"])
+        self.assertEqual(result["dependencies"]["deno_core"]["version"], "=0.412.1")
+        self.assertNotIn("path", result["target"]["cfg(windows)"]["dev-dependencies"]["deno_webidl"])
+        with self.assertRaisesRegex(ValueError, "more than dependency paths"):
+            # An inline dependency path would survive line removal; refuse it.
+            candidate_tree.without_paths(self.MANIFEST + '[dev-dependencies]\nfoo = { version = "1", path = "../foo" }\n')
+
+    def test_duplicate_package_names_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for folder in ["a", "b/nested"]:
+                (root / folder).mkdir(parents=True)
+                (root / folder / "Cargo.toml").write_text('[package]\nname = "same"\nversion = "1.0.0"\n')
+            with self.assertRaisesRegex(ValueError, "Duplicate candidate package name"):
+                candidate_tree.manifests(root)
+
+    def test_patch_snippet_pins_every_distribution_to_one_revision(self):
+        snippet = tomllib.loads(candidate_tree.patch_snippet("a" * 40))["patch"]["crates-io"]
+        self.assertEqual(set(snippet), {p.name for p in prepare.PACKAGES})
+        self.assertEqual({(v["git"], v["rev"]) for v in snippet.values()}, {(candidate_tree.REPOSITORY, "a" * 40)})
 
 
 if __name__ == "__main__":

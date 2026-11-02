@@ -452,3 +452,89 @@ impl RustFft {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Naive DFT X[k] = sum x[n] e^{-2 pi i k n / N} in f64.
+    fn dft(x: &[f32], k: usize) -> (f64, f64) {
+        let n = x.len() as f64;
+        x.iter().enumerate().fold((0.0, 0.0), |(re, im), (j, &v)| {
+            let a = -2.0 * std::f64::consts::PI * (k * j) as f64 / n;
+            (re + v as f64 * a.cos(), im + v as f64 * a.sin())
+        })
+    }
+
+    fn signal(n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| ((i * 7 + 3) % 11) as f32 / 5.0 - 1.0)
+            .collect()
+    }
+
+    fn close(a: f64, b: f64) {
+        assert!((a - b).abs() < 1e-4 * (1.0 + b.abs()), "{a} != {b}");
+    }
+
+    // The packed layout WebAudio's FFTFrame uses: bins 0..ceil(N/2) as (re, im), with
+    // the (real) Nyquist bin of an even size in imag[0].
+    fn assert_forward(size: usize) {
+        let x = signal(size);
+        let packed = size.div_ceil(2);
+        let (mut re, mut im) = (vec![9.0; packed], vec![9.0; packed]);
+        rustfft_new(size).do_fft(&x, &mut re, &mut im);
+        close(re[0] as f64, dft(&x, 0).0);
+        if size.is_multiple_of(2) {
+            close(im[0] as f64, dft(&x, size / 2).0);
+        } else {
+            assert_eq!(im[0], 0.0);
+        }
+        for k in 1..packed {
+            let (dr, di) = dft(&x, k);
+            close(re[k] as f64, dr);
+            close(im[k] as f64, di);
+        }
+    }
+
+    #[test]
+    fn forward_fft_matches_the_dft_in_the_packed_layout() {
+        // Even sizes with an even half (middle bin) and an odd half; odd sizes.
+        for size in [2, 4, 6, 8, 10, 16, 3, 5, 7, 9] {
+            assert_forward(size);
+        }
+    }
+
+    #[test]
+    fn inverse_fft_reconstructs_the_signal() {
+        for size in [4, 6, 8, 10, 16, 5, 7, 9] {
+            let x = signal(size);
+            let packed = size.div_ceil(2);
+            let (mut re, mut im) = (vec![0.0; packed], vec![0.0; packed]);
+            let mut fft = rustfft_new(size);
+            fft.do_fft(&x, &mut re, &mut im);
+            let mut back = vec![0.0; size];
+            fft.do_inverse_fft(&re, &im, &mut back);
+            for (a, b) in back.iter().zip(&x) {
+                close(*a as f64, *b as f64);
+            }
+        }
+    }
+
+    #[test]
+    fn plans_are_cached_per_size() {
+        let a = rustfft_new(12);
+        let b = rustfft_new(12);
+        let (
+            FftStrategy::Even {
+                fft_forward: fa, ..
+            },
+            FftStrategy::Even {
+                fft_forward: fb, ..
+            },
+        ) = (&a.strategy, &b.strategy)
+        else {
+            panic!("12 is even");
+        };
+        assert!(Arc::ptr_eq(fa, fb));
+    }
+}

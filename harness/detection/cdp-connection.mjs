@@ -1,5 +1,7 @@
 // Flattened CDP sessions share a socket, but commands and events retain their target.
-export function cdpConnection(socket, onEvent, timeoutMs = 10000) {
+// The per-command timeout is a generous cap, not a timing: a loaded host can keep a
+// healthy Chrome from answering for seconds (turbo-surf#50).
+export function cdpConnection(socket, onEvent, timeoutMs = 60000) {
   let sequence = 0;
   const pending = new Map();
   socket.onmessage = ({ data }) => {

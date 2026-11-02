@@ -1,26 +1,18 @@
 //! File-state inputs, FileList and DataTransfer over the production File/Blob/FormData,
-//! against the vendored binding's source-pinned Chrome 156 control.
+//! against the binding's source-pinned Chrome 156 control.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const PROBE: &str = include_str!("../src/file_inputs_probe.js");
-const CASES: &str = include_str!("../src/file_inputs_cases.json");
-const CONTROL: &str = include_str!("../src/file_inputs_chrome156.json");
+const PROBE: &str = test_support::FILE_INPUTS_PROBE_JS;
+const CASES: &str = test_support::FILE_INPUTS_CASES_JSON;
+const CONTROL: &str = test_support::FILE_INPUTS_CHROME156_JSON;
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`
 /// prefixes. These are the binding's own pinned gaps (Rusty V8 reports
 /// ShouldThrowOnError as false; Blink's KURL escapes a space in a URL host).
-const KNOWN_GAPS: &[&str] = &[
-    ".strings[7][0] = \"http://c/\"",
-    ".strictMutation[0][1] = \"Cannot assign to property '0' of #<FileList>\"",
-    ".strictMutation[1][1] = \"Cannot assign to property '3' of #<FileList>\"",
-    ".strictMutation[2][1] = \"Cannot delete property '0' of #<FileList>\"",
-    ".strictMutation[4] = false",
-    ".strictMutation[5] = false",
-    ".strictMutation[6] = [\"TypeError\",\"Failed to set an indexed property [0] on 'FileList': Index property setter is not supported.\"]",
-    ".itemListMutation[1][1] = \"Cannot assign to property '0' of #<DataTransferItemList>\"",
-];
+const KNOWN_GAPS: &[&str] = &[".strings[7][0] = \"http://c/\""];
 
 fn differences(path: &str, actual: &Value, expected: &Value, out: &mut Vec<String>) {
     match (actual, expected) {

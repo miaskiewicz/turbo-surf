@@ -97,7 +97,7 @@ pub fn by_attr_text(tree: &Tree, attr: &str, want: &str, mode: TextMode) -> Vec<
         .copied()
         .filter(|&h| match tree.get_attribute(h, attr) {
             Some(v) => text_match(v, want, mode),
-            None => false, // unreachable: the [attr] selector guarantees presence
+            None => unreachable!("the [attr] selector only matches elements with {attr}"),
         })
         .collect()
 }

@@ -11,7 +11,7 @@ async fn timer_task_semantics_match_the_source_pinned_chrome_control() {
     let html = include_str!("../../../../harness/detection/window-timer-semantics.html");
     let probe = include_str!("../../../../harness/detection/window-timer-semantics-probe.js");
     let control: Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/window-timer-semantics-chrome155.json"
+        "../../../../harness/detection/fixtures/window-timer-semantics-chrome156.json"
     ))
     .unwrap();
     for (name, bytes) in [

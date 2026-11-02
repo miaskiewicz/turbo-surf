@@ -4,13 +4,14 @@ use serde_json::Value;
 async fn collect(source: &str) -> Value {
     let source = source.trim().trim_end_matches(';');
     let source = format!("(async()=>{{try{{globalThis.__RESULT=await ({source});}}catch(error){{globalThis.__RESULT=JSON.stringify({{collectorError:error.name,message:error.message,stack:error.stack}});}}}})()");
-    let result = turbo_surf_render::eval_async(
-        "<!doctype html><html><head></head><body>Authored iframe ownership control</body></html>",
-        "https://frames.test/",
-        &source,
-    )
-    .await
-    .unwrap();
+    let result = {
+        // A generous 60 s cap for real work, not the 10 s render budget of eval_async
+        // (turbo-surf#46: a loaded host interrupted it).
+        let mut page = turbo_surf_render::PageSession::open("<!doctype html><html><head></head><body>Authored iframe ownership control</body></html>", "https://frames.test/", "", "", 60_000)
+            .await
+            .unwrap();
+        page.eval(&source).await.unwrap()
+    };
     serde_json::from_str(&result).unwrap_or_else(|_| panic!("invalid iframe result: {result}"))
 }
 

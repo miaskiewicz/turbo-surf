@@ -1,13 +1,11 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/deno_crypto", "vendor/rusty_v8"]
 members = [
     "crates/turbo-surf-core",
     "crates/turbo-surf-napi",
     "crates/turbo-surf-mcp",
     "crates/turbo-surf-page",
     "crates/turbo-surf-py",
-    "crates/turbo-surf-raster",
     "crates/turbo-surf-render",
     "crates/turbo-surf-transform",
     "crates/turbo-surf-view",
@@ -15,7 +13,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.5.5"
+version = "0.6.0"
 license = "MIT"
 repository = "https://github.com/miaskiewicz/turbo-surf"
 
@@ -26,4 +24,3 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
-

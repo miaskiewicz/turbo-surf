@@ -88,13 +88,20 @@ async fn failed_native_insertions_retire_only_frames_detached_by_actual_conversi
         .trim()
         .trim_end_matches(';');
     let source = format!("(async()=>{{try{{globalThis.__RESULT=JSON.stringify(await({probe}));}}catch(error){{globalThis.__RESULT=JSON.stringify({{collectorError:error.name,message:error.message,stack:error.stack}});}}}})()");
-    let actual = turbo_surf_render::eval_async(
-        "<!doctype html><body>Authored iframe insertion control</body>",
-        "https://adoption.test/",
-        &source,
-    )
-    .await
-    .unwrap();
+    let actual = {
+        // A generous 60 s cap for real work, not the 10 s render budget of eval_async
+        // (turbo-surf#46: a loaded host interrupted it).
+        let mut page = turbo_surf_render::PageSession::open(
+            "<!doctype html><body>Authored iframe insertion control</body>",
+            "https://adoption.test/",
+            "",
+            "",
+            60_000,
+        )
+        .await
+        .unwrap();
+        page.eval(&source).await.unwrap()
+    };
     let actual: serde_json::Value = serde_json::from_str(&actual).unwrap();
     assert_eq!(actual, fixture["result"]);
 }

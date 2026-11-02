@@ -66,7 +66,7 @@ fn integrity(bytes: &[u8]) -> String {
 async fn fetch_checks_raw_bytes_strongest_hashes_and_opaque_eligibility() {
     let (origin, server) = server().await;
     let (cross, cross_server) = self::server().await;
-    let mut page = PageSession::open("<body></body>", &format!("{origin}/page"), "", "", 5000)
+    let mut page = PageSession::open("<body></body>", &format!("{origin}/page"), "", "", 60_000)
         .await
         .unwrap();
     let script = format!(
@@ -160,7 +160,7 @@ async fn corp_controls_native_opaque_fetch_and_classic_script_admission() {
       <script src='{cross}/corp-origin.js' crossorigin></script>
       </body>"#
     );
-    let mut page = PageSession::open(&html, &format!("{origin}/page"), "", "", 5000)
+    let mut page = PageSession::open(&html, &format!("{origin}/page"), "", "", 60_000)
         .await
         .unwrap();
     let value: Value = serde_json::from_str(&page.eval_expression(&format!(r#"(async()=>{{
@@ -188,9 +188,15 @@ async fn corp_controls_native_opaque_fetch_and_classic_script_admission() {
     );
     page.close();
     let local_host = origin.replace("127.0.0.1", "localhost");
-    let mut page = PageSession::open("<body></body>", &format!("{local_host}/page"), "", "", 5000)
-        .await
-        .unwrap();
+    let mut page = PageSession::open(
+        "<body></body>",
+        &format!("{local_host}/page"),
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
     assert_eq!(page.eval_expression(&format!(r#"fetch({cross:?}+'/corp-site.js',{{mode:'no-cors'}}).then(()=> 'unexpected',error=>error.name)"#)).await.unwrap(), "TypeError");
     server.abort();
     cross_server.abort();
@@ -199,7 +205,7 @@ async fn corp_controls_native_opaque_fetch_and_classic_script_admission() {
 #[tokio::test(flavor = "current_thread")]
 async fn active_mixed_content_is_blocked_before_a_request_and_loopback_remains_usable() {
     let (origin, server) = server().await;
-    let mut page = PageSession::open("<body></body>", "https://secure.test/page", "", "", 5000)
+    let mut page = PageSession::open("<body></body>", "https://secure.test/page", "", "", 60_000)
         .await
         .unwrap();
     let value: Value = serde_json::from_str(&page.eval_expression(&format!(r#"(async()=>{{

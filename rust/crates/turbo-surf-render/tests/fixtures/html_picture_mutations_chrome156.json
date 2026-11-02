@@ -1,0 +1,19 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "82f09e361f4cba92b76b850471378cb7a7a12337a262864b6f39adc6879c8bfe",
+  "casesSha256": "f59fe157fdb07fea389cfe8ee1e113693c0aa1aebd7d3e09661028c9b0c7a0b0",
+  "collectorSha256": "d26b5b3cb6d59f0cbc08dacf74f0feb5ac9c955ac38ff4397da8cbe1470fc994",
+  "errors": [],
+  "result": [
+    {
+      "id": "picture-mutations",
+      "result": {
+        "initial": ["/img/40x20/first.png", true, 40, 20],
+        "sourceSrcset": ["/img/60x30/changed.png", true, 60, 30],
+        "sourceType": ["/img/50x25/second.png", true, 50, 25],
+        "insertedSource": ["/img/80x40/inserted.png", true, 80, 40],
+        "removedSource": ["/img/50x25/second.png", true, 50, 25]
+      }
+    }
+  ]
+}

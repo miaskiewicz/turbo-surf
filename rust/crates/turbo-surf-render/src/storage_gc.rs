@@ -16,6 +16,8 @@ const MAX_DOCUMENTS: usize = 256;
 struct State {
     context: Option<v8::Weak<v8::Context>>,
     pending: Cell<bool>,
+    /// Completed V8 collections; weak handles can only empty when it moves.
+    epoch: Cell<u64>,
     collections: Cell<usize>,
     reclaimed: Cell<usize>,
     rejected: Cell<usize>,
@@ -30,7 +32,17 @@ unsafe extern "C" fn collected(
 ) {
     // The isolate-owned Rc allocation stays fixed until unregister. Never
     // localize handles or traverse native Trees from within V8's GC callback.
-    unsafe { &*data.cast::<State>() }.pending.set(true);
+    let state = unsafe { &*data.cast::<State>() };
+    state.pending.set(true);
+    state.epoch.set(state.epoch.get().wrapping_add(1));
+}
+
+/// The isolate's collection count, or `None` before `install` (callers then
+/// cannot tell whether a weak handle emptied and must assume it did).
+pub(crate) fn epoch(isolate: &v8::Isolate) -> Option<u64> {
+    isolate
+        .get_slot::<Rc<State>>()
+        .map(|state| state.epoch.get())
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope) {

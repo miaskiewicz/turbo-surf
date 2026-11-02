@@ -46,7 +46,32 @@ runs do not establish that the intermittent hang was fixed.
 
 The shared helpers also support the pinned [Chrome 155 profile](../engine-155/README.md). `prepare.py --profile 155` selects its manifest; the build helper derives the engine requirement from prepared provenance. The 154 profile and its existing artifacts remain available for regression comparisons.
 
-Surf commands use a private manifest/lock workspace beneath the selected ignored
+### Registry-named Surf graphs (release aliases)
+
+When Surf's render crate names the published distributions
+(`turbo-surf-deno-core =0.412.1`, facade `turbo-surf-deno-v8 0.4.1`, native binding
+`turbo-dom-v8 ~150.4`), `release_aliases.py` writes metadata-only alias manifests
+in `<workspace>/sdk-release-aliases/`: the verified SDK originals (`deno_core`
+0.412.0, `deno_v8` 0.4.0, `v8-exact` = rusty_v8 152.2.0) are checked at their own
+versions and exposed as `turbo-surf-deno-core` 0.412.1, `turbo-surf-deno-v8` 0.4.1
+and `turbo-dom-v8` 150.4.0 (library `v8`, `links = "rusty_v8"`). Source files are
+symlinks; only manifests differ. The deno_core alias pins `turbo-surf-deno-v8
+=0.4.1` / `turbo-surf-serde-v8 =0.321.1`; the facade alias points straight at the
+`v8-exact` alias and, like the 0.4.1 distribution, drops the unused `quickjs`/
+`v8x` option. The renamed native binding's build script uses `CARGO_PKG_VERSION`
+only for download URLs, which `RUSTY_V8_ARCHIVE`/`RUSTY_V8_SRC_BINDING_PATH`
+bypass. The generated `[patch.crates-io]` table is passed with `--config`, which
+takes precedence over the workspace's own (e.g. PR Git-rev) patches for those three
+names. A render requirement other than `=0.412.1` is refused rather than silently
+resolving the stock registry engine.
+
+This SDK lacks turbo-dom-v8's ShouldThrowOnError accessor fix, so the build helper
+adds `--features native-sdk-frame-read` whenever a selected workspace member
+declares that forwarding feature (render/mcp/napi/py forward it to
+turbo-dom-browser-env, whose frame-read path then replaces the compile-time
+`FORK_SHOULD_THROW_FIX` assertion). It refuses to run if no member declares it.
+This path is exercised only by this manual macOS overlay.
+
 SDK destination, with current source/fixtures linked from the repository. Cargo's
 experimental SDK resolution cannot overwrite the production lockfile. The
 `engine-workspace.test.mjs` offline gate verifies actual workspace resolution and

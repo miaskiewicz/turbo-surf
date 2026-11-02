@@ -114,13 +114,9 @@ impl PermissionsPolicy {
             }
             let items = match entry {
                 sfv::ListEntry::InnerList(list) => list.items,
-                sfv::ListEntry::Item(item) => {
-                    match item.bare_item.as_token().map(|value| value.as_str()) {
-                        Some("*") => vec![item],
-                        Some(_) => continue,
-                        None => vec![item],
-                    }
-                }
+                // A bare item is a one-item allowlist (Chrome: `f=self` → [self],
+                // `f=<other token>` → []).
+                sfv::ListEntry::Item(item) => vec![item],
             };
             let mut list = Vec::new();
             for item in items {
@@ -294,5 +290,96 @@ fn matches_origin(pattern: &str, target: &str) -> bool {
             .is_some_and(|prefix| prefix.ends_with('.') && prefix.len() > 1)
     } else {
         pattern == target
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn policy(header: &str) -> PermissionsPolicy {
+        PermissionsPolicy::from_headers(
+            "https://site.test",
+            &[("Permissions-Policy".into(), header.into())],
+        )
+    }
+
+    #[test]
+    fn unknown_features_are_ignored_and_a_bare_star_allows_all() {
+        let p = policy("made-up=*");
+        assert!(p.allowlist("made-up", "https://site.test").is_empty());
+        assert!(!p.allows_self("made-up", "https://site.test"));
+        assert!(policy("geolocation=*").allows(
+            "geolocation",
+            "https://site.test",
+            "https://x.test"
+        ));
+    }
+
+    #[test]
+    fn container_allow_tokens_decide_a_cross_origin_child() {
+        // Permissions Policy "define an inherited policy": for a default-self feature
+        // the iframe's allow attribute must name the child ('none' never does).
+        let parent = PermissionsPolicy::from_headers("https://site.test", &[]);
+        let child = |allow: &str| {
+            let mut child = PermissionsPolicy::from_headers("https://child.test", &[]);
+            child.inherit(
+                &parent,
+                "https://site.test",
+                "https://child.test",
+                "https://child.test",
+                allow,
+            );
+            child.allows_self("geolocation", "https://child.test")
+        };
+        assert!(child("geolocation *"));
+        assert!(child("geolocation https://child.test"));
+        assert!(child("geolocation 'src'"));
+        assert!(child("geolocation"));
+        assert!(!child("geolocation 'none'"));
+        assert!(!child("geolocation 'self'"));
+        assert!(!child("geolocation https://other.test"));
+        assert!(!child(""));
+        // Host-less origins never match an allowlist entry.
+        assert!(!matches_origin("file:///", "file:///x"));
+    }
+
+    #[test]
+    fn bare_token_allowlists_match_chrome() {
+        // Chrome 156: `ch-ua=self` → [self origin]; `ch-save-data=bogus` → [] (disabled),
+        // both default-`*` features (turbo-surf#59).
+        let p = policy("ch-ua=self, ch-save-data=bogus");
+        assert_eq!(
+            p.allowlist("ch-ua", "https://site.test"),
+            vec!["https://site.test".to_string()]
+        );
+        assert!(p.allowlist("ch-save-data", "https://site.test").is_empty());
+        assert!(!p.allows("ch-ua", "https://site.test", "https://x.test"));
+    }
+
+    #[test]
+    fn allowlist_origins_match_scheme_port_and_wildcard_hosts() {
+        let p =
+            policy(r#"geolocation=("https://*.cdn.test" "https://a.test:8443" "http://b.test:*")"#);
+        let allows = |target| p.allows("geolocation", "https://site.test", target);
+        assert!(allows("https://img.cdn.test"));
+        assert!(!allows("https://cdn.test"));
+        assert!(!allows("http://img.cdn.test"));
+        assert!(allows("https://a.test:8443"));
+        assert!(!allows("https://a.test"));
+        assert!(allows("http://b.test:9"));
+        assert!(!allows("data:text/plain,x"));
+        assert!(!matches_origin("no-scheme", "https://a.test"));
+        assert!(!matches_origin("https://a.test", "not a url"));
+        assert!(!matches_origin("https://a.test", "file:///x"));
+        assert_eq!(parse_allowlist_origin("data://x"), None);
+        assert_eq!(
+            parse_allowlist_origin("https://a.test:8443/path").as_deref(),
+            Some("https://a.test:8443")
+        );
+        assert_eq!(
+            parse_allowlist_origin("https://*.a.test:*").as_deref(),
+            Some("https://*.a.test:*")
+        );
     }
 }

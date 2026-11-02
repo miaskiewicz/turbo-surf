@@ -394,4 +394,69 @@ mod tests {
             .unwrap();
         assert!(!delay.output_silent());
     }
+
+    #[test]
+    fn effects_reject_unknown_kinds_bad_parameters_and_clocks() {
+        let message = |result: Result<Effect, String>| result.err().unwrap();
+        assert_eq!(
+            message(Effect::new("convolver", 44_100.0, &[], &[])),
+            "Unsupported native audio effect"
+        );
+        assert_eq!(
+            message(Effect::new("panner", 44_100.0, &[f32::NAN], &[])),
+            "Invalid native effect parameters"
+        );
+        assert_eq!(
+            message(Effect::new("biquad:lowpass", 44_100.0, &[1.0; 3], &[])),
+            "Invalid native effect parameters"
+        );
+        assert_eq!(
+            Effect::frequency_response("delay", 44_100.0, &[0.0], &[100.0])
+                .err()
+                .unwrap(),
+            "Invalid or oversized native frequency response"
+        );
+        assert_eq!(
+            Effect::frequency_response(
+                "biquad:lowpass",
+                44_100.0,
+                &[350.0, 0.0, 1.0, 0.0],
+                &vec![1.0; MAX_CURVE + 1]
+            )
+            .err()
+            .unwrap(),
+            "Invalid or oversized native frequency response"
+        );
+        let mut panner = Effect::new("panner", 44_100.0, &[0.0], &[]).unwrap();
+        assert_eq!(panner.output_channels(1), 2);
+        for clock in [f64::NAN, -1.0, f64::INFINITY] {
+            assert_eq!(
+                panner.set_input_silent(true, clock).err().unwrap(),
+                "Invalid native effect clock"
+            );
+        }
+        assert!(panner.set_input_silent(false, 0.0).is_ok());
+        let waveshaper = Effect::new("waveshaper", 44_100.0, &[], &[]).unwrap();
+        assert_eq!(waveshaper.output_channels(1), 1);
+    }
+
+    #[test]
+    fn a_nan_delay_time_uses_the_maximum_delay() {
+        // DelayNode: NaN delayTime samples are replaced by the node's maximum
+        // (as Chrome clamps a non-finite computed value to maxDelayTime).
+        let rate = 32_768.0;
+        let maximum = 128.0 / rate;
+        let mut delay = Effect::new("delay", rate, &[0.0, maximum], &[]).unwrap();
+        let mut impulse = [vec![0.0; QUANTUM], vec![0.0; QUANTUM]];
+        impulse[0][0] = 1.0;
+        delay
+            .process(&mut impulse, 1, &[vec![f32::NAN; QUANTUM]])
+            .unwrap();
+        assert!(impulse[0].iter().all(|sample| *sample == 0.0));
+        let mut tail = [vec![0.0; QUANTUM], vec![0.0; QUANTUM]];
+        delay
+            .process(&mut tail, 1, &[vec![f32::NAN; QUANTUM]])
+            .unwrap();
+        assert_eq!(tail[0][0], 1.0);
+    }
 }

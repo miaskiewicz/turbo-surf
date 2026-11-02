@@ -88,7 +88,7 @@ async fn resource_cutoff_observes_script_moves_and_excludes_svg_scripts() {
         page.hydration_diagnostics()
     );
     let chrome: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/resource-scan-order-chrome155.json"
+        "../../../../harness/detection/fixtures/resource-scan-order-chrome156.json"
     ))
     .unwrap();
     assert_eq!(

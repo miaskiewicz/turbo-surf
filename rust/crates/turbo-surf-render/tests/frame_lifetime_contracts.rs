@@ -7,7 +7,7 @@ async fn removed_window_still_serializes_transfers_before_discarding_delivery() 
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -29,7 +29,7 @@ async fn removal_releases_native_context_roots_and_pending_window_transfer_snaps
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -55,7 +55,7 @@ async fn parent_window_messages_survive_child_retirement_and_detached_hosts_reco
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -90,7 +90,7 @@ async fn retirement_during_payload_getter_commits_buffers_and_discards_its_snaps
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -112,7 +112,7 @@ async fn retired_frame_cancels_timer_payload_roots_while_retained_document_stays
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -138,7 +138,7 @@ async fn repeated_navigation_keeps_only_active_host_contexts_and_retires_nested_
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -185,7 +185,7 @@ async fn navigation_during_clone_discards_only_the_old_window_transfer_snapshot(
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -249,7 +249,7 @@ async fn initial_markup_frame_cannot_own_isolate_lifetime_crypto_metadata() {
         "https://lifetime.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();

@@ -1,8 +1,9 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const CASES: &str = include_str!("../src/radio_dirty_cases.json");
+const CASES: &str = test_support::RADIO_DIRTY_CASES_JSON;
 
 fn control(probe: &str, oracle: &str) -> Value {
     let value: Value = serde_json::from_str(oracle).unwrap();
@@ -42,12 +43,12 @@ async fn read(page: &mut PageSession, source: &str) -> Value {
 async fn native_radio_state_matches_chrome_after_gc_and_source_realm_retirement() {
     for (probe, oracle) in [
         (
-            include_str!("../src/radio_dirty_gc_probe.js"),
-            include_str!("../src/radio_dirty_gc_chrome155.json"),
+            test_support::RADIO_DIRTY_GC_PROBE_JS,
+            test_support::RADIO_DIRTY_GC_CHROME155_JSON,
         ),
         (
-            include_str!("../src/radio_dirty_adoption_gc_probe.js"),
-            include_str!("../src/radio_dirty_adoption_gc_chrome155.json"),
+            test_support::RADIO_DIRTY_ADOPTION_GC_PROBE_JS,
+            test_support::RADIO_DIRTY_ADOPTION_GC_CHROME155_JSON,
         ),
     ] {
         let expected = control(probe, oracle);

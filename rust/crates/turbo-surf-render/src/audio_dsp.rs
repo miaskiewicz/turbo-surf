@@ -304,10 +304,8 @@ fn oscillator_events(
     parameters: &[Values],
     length: usize,
 ) -> Vec<f32> {
+    // Only called for a started source (render() checks `node.started`).
     let mut output = vec![0.; length];
-    if !node.started {
-        return output;
-    }
     let size = tables[0].len();
     let scale = size as f32 / rate;
     let lowest = rate * 0.5 / (size / 2) as f32;
@@ -972,6 +970,160 @@ mod tests {
         ))
         .unwrap_err()
         .contains("limit"));
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    fn node(kind: &str, inputs: Vec<usize>, parameters: Vec<f32>) -> Node {
+        Node {
+            kind: kind.into(),
+            inputs,
+            parameters,
+            shape: "sine".into(),
+            started: true,
+            ..Default::default()
+        }
+    }
+    fn graph(nodes: Vec<Node>) -> Graph {
+        Graph {
+            channels: 1,
+            length: 256,
+            sample_rate: 44100.,
+            nodes,
+        }
+    }
+    fn error(graph: Graph) -> String {
+        render(graph).err().unwrap()
+    }
+    #[test]
+    fn invalid_graphs_are_rejected_with_their_reason() {
+        let osc = || node("oscillator", vec![], vec![440.]);
+        let mut stereo = graph(vec![node("destination", vec![], vec![])]);
+        stereo.channels = 3;
+        assert_eq!(error(stereo), "Offline DSP supports mono and stereo graphs");
+        for rate in [2999., 768001., f32::NAN] {
+            let mut bad = graph(vec![node("destination", vec![], vec![])]);
+            bad.sample_rate = rate;
+            assert_eq!(error(bad), "Invalid offline sample rate");
+        }
+        assert_eq!(
+            error(graph(vec![
+                node("destination", vec![1], vec![]),
+                node("gain", vec![], vec![f32::NAN])
+            ])),
+            "Invalid audio sample or parameter"
+        );
+        assert_eq!(
+            error(graph(vec![node("destination", vec![9], vec![])])),
+            "Invalid audio connection"
+        );
+        let mut square = osc();
+        square.shape = "custom".into();
+        assert_eq!(
+            error(graph(vec![node("destination", vec![1], vec![]), square])),
+            "Unsupported oscillator parameters"
+        );
+        assert_eq!(
+            error(graph(vec![
+                node("destination", vec![1], vec![]),
+                node("oscillator", vec![], vec![])
+            ])),
+            "Unsupported oscillator parameters"
+        );
+        let mut buffer = node("buffer", vec![], vec![]);
+        buffer.data = vec![vec![0.; 4]; 3];
+        assert_eq!(
+            error(graph(vec![node("destination", vec![1], vec![]), buffer])),
+            "Offline buffer sources support mono and stereo"
+        );
+        assert_eq!(
+            error(graph(vec![
+                node("destination", vec![1], vec![]),
+                node("compressor", vec![], vec![0.; 4])
+            ])),
+            "Invalid compressor parameters"
+        );
+        let mut automated = node("gain", vec![2], vec![1.]);
+        automated.automation = vec![audio_timeline::Automation {
+            inputs: vec![2],
+            ..Default::default()
+        }];
+        assert_eq!(
+            error(graph(vec![
+                node("destination", vec![1], vec![]),
+                automated,
+                osc()
+            ])),
+            "AudioParam signal connections are not yet supported by the native graph"
+        );
+    }
+    #[test]
+    fn shared_inputs_render_once_and_sum_at_the_destination() {
+        // A diamond: one oscillator feeding two gains that both reach the destination.
+        let single = render(graph(vec![
+            node("destination", vec![1], vec![]),
+            node("oscillator", vec![], vec![440.]),
+        ]))
+        .unwrap();
+        let diamond = render(graph(vec![
+            node("destination", vec![2, 3], vec![]),
+            node("oscillator", vec![], vec![440.]),
+            node("gain", vec![1], vec![0.25]),
+            node("gain", vec![1], vec![0.75]),
+        ]))
+        .unwrap();
+        for (a, b) in single.channels[0].iter().zip(&diamond.channels[0]) {
+            assert!((a - b).abs() < 1e-6, "{a} vs {b}");
+        }
+        assert!(single.channels[0].iter().any(|value| value.abs() > 0.5));
+    }
+    #[test]
+    fn unstarted_and_stopped_before_start_sources_are_silent() {
+        let mut idle = node("oscillator", vec![], vec![440.]);
+        idle.started = false;
+        let mut late = node("oscillator", vec![], vec![440., 0.]);
+        late.start = 0.004;
+        late.stop = Some(0.001);
+        for source in [idle, late] {
+            let rendered =
+                render(graph(vec![node("destination", vec![1], vec![]), source])).unwrap();
+            assert!(rendered.channels[0].iter().all(|value| *value == 0.));
+        }
+    }
+    #[test]
+    fn sawtooth_ramps_up_from_zero_at_every_table_size() {
+        // Web Audio's sawtooth is the band-limited Fourier series of a rising ramp
+        // that starts at 0, normalized to peak 1; the table size depends on the
+        // sample rate (2048 / 4096 / 16384).
+        for rate in [22050., 44100., 96000.] {
+            let mut saw = node("oscillator", vec![], vec![50.]);
+            saw.shape = "sawtooth".into();
+            let mut rendered = graph(vec![node("destination", vec![1], vec![]), saw]);
+            rendered.sample_rate = rate;
+            rendered.length = 1024;
+            let samples = render(rendered).unwrap().channels.remove(0);
+            assert!(samples[0].abs() < 1e-3, "{rate}: {}", samples[0]);
+            let quarter = (rate / 50. / 4.) as usize;
+            assert!(
+                samples[..quarter]
+                    .iter()
+                    .step_by(16)
+                    .collect::<Vec<_>>()
+                    .windows(2)
+                    .all(|w| w[1] > w[0]),
+                "{rate}"
+            );
+            assert!(
+                samples[quarter] > 0.3 && samples[quarter] < 0.5,
+                "{rate}: {}",
+                samples[quarter]
+            );
+            // Tables are normalized to a peak of 1 (the Gibbs overshoot included).
+            let peak = samples.iter().fold(0f32, |m, v| m.max(v.abs()));
+            assert!(peak <= 1.0 && peak > 0.9, "{rate}: {peak}");
+        }
     }
 }
 

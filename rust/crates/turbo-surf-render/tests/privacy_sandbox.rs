@@ -86,3 +86,30 @@ async fn private_token_issuer_associations_follow_the_top_frame_origin() {
         serde_json::json!([false, false, "OperationError", false, false])
     );
 }
+
+/// A file: top-level document is a secure context without an HTTP(S) top-frame origin:
+/// both queries reject with Chrome 156's NotAllowedError (frozen Chrome on a file: page).
+#[tokio::test(flavor = "current_thread")]
+async fn private_token_queries_need_an_http_family_top_frame_origin() {
+    let mut page = PageSession::open("<!doctype html><body>", "file:///probe.html", "", "", 20000)
+        .await
+        .unwrap();
+    let raw = page
+        .eval_json_expression(
+            "(async()=>{const r=[isSecureContext];for(const m of ['hasPrivateToken','hasRedemptionRecord'])try{r.push(await document[m]('https://a.example'))}catch(e){r.push(e.name+': '+e.message)}return r})()",
+        )
+        .await
+        .unwrap();
+    page.close();
+    let message = |member: &str| {
+        format!("NotAllowedError: Failed to execute '{member}' on 'Document': {member}: Cannot execute in documents without secure, HTTP(S), top-frame origins.")
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(&raw).unwrap(),
+        serde_json::json!([
+            true,
+            message("hasPrivateToken"),
+            message("hasRedemptionRecord")
+        ])
+    );
+}

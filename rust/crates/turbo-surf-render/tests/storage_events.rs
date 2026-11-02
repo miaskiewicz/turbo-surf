@@ -93,10 +93,11 @@ async fn storage_delivery_uses_private_intrinsics_and_receiving_area() {
     let result=page.eval(r#"(async()=>{
       const frame=document.createElement('iframe');const loaded=new Promise(resolve=>frame.onload=resolve);document.body.append(frame);await loaded;
       const child=frame.contentWindow,area=child.localStorage,OriginalEvent=child.StorageEvent;let received;
-      child.addEventListener('storage',event=>{received=[event.storageArea===area,event instanceof OriginalEvent,event.key,event.isTrusted]});
+      let delivered;const arrived=new Promise(resolve=>delivered=resolve);
+      child.addEventListener('storage',event=>{received=[event.storageArea===area,event instanceof OriginalEvent,event.key,event.isTrusted];delivered()});
       Object.defineProperty(child,'localStorage',{get(){throw new Error('public getter')}});
       child.StorageEvent=function(){throw new Error('public constructor')};child.String.prototype.charCodeAt=function(){throw new Error('public intrinsic')};
-      localStorage.setItem('private','value');await new Promise(resolve=>setTimeout(resolve,30));
+      localStorage.setItem('private','value');await arrived;
       frame.remove();globalThis.__RESULT=JSON.stringify(received);
     })()"#).await.unwrap();
     assert_eq!(
@@ -147,9 +148,10 @@ async fn trusted_storage_delivery_does_not_read_polluted_object_prototypes() {
     let result=page.eval(r#"(async()=>{
       const frame=document.createElement('iframe');const loaded=new Promise(resolve=>frame.onload=resolve);document.body.append(frame);await loaded;
       const child=frame.contentWindow;let calls=0,hooks=0;
-      child.addEventListener('storage',event=>{if(event.key==='polluted'&&!event.bubbles&&!event.cancelable&&event.isTrusted)calls++;});
+      let delivered;const arrived=new Promise(resolve=>delivered=resolve);
+      child.addEventListener('storage',event=>{if(event.key==='polluted'&&!event.bubbles&&!event.cancelable&&event.isTrusted)calls++;delivered()});
       for(const name of ['bubbles','cancelable','composed','localStorage','sessionStorage'])Object.defineProperty(child.Object.prototype,name,{configurable:true,get(){hooks++;throw new Error('private inherited getter '+name)}});
-      localStorage.setItem('polluted','value');await new Promise(resolve=>setTimeout(resolve,30));
+      localStorage.setItem('polluted','value');await arrived;await new Promise(resolve=>setTimeout(resolve,30));
       for(const name of ['bubbles','cancelable','composed','localStorage','sessionStorage'])delete child.Object.prototype[name];
       frame.remove();globalThis.__RESULT=JSON.stringify({calls,hooks});
     })()"#).await.unwrap();

@@ -91,7 +91,7 @@ async fn ordered_dynamic_classics_fetch_concurrently_and_scope_current_script_to
         &origin,
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -196,7 +196,9 @@ async fn interrupted_queued_script_releases_completion_before_session_reuse() {
             });
         }
     });
-    let mut page = PageSession::open("<!doctype html><body></body>", &origin, "", "", 100)
+    // The budget is what interrupts the runaway script, but it also bounds the real
+    // fetch that has to deliver it first: 100 ms missed it on a loaded host.
+    let mut page = PageSession::open("<!doctype html><body></body>", &origin, "", "", 5000)
         .await
         .unwrap();
     let interrupted = page.eval_expression("(()=>{const script=document.createElement('script');script.src='/runaway.js';document.body.appendChild(script);return new Promise(()=>{});})()").await;

@@ -203,21 +203,18 @@ impl ViewportMedia {
                 query
                     .condition
                     .as_ref()
-                    .map_or(Ok(true), |c| self.condition(c))
+                    .map_or(Ok(Some(true)), |c| self.condition(c))
             } else {
-                Ok(false)
+                Ok(Some(false))
             };
             match condition {
-                Ok(value) => {
-                    let value = if query.qualifier == Some(Qualifier::Not) {
-                        !value
-                    } else {
-                        value
-                    };
-                    if value {
+                // An unknown result never matches, negated or not.
+                Ok(Some(value)) => {
+                    if value != (query.qualifier == Some(Qualifier::Not)) {
                         return Ok(true);
                     }
                 }
+                Ok(None) => {}
                 Err(error) => {
                     unavailable.get_or_insert(error);
                 }
@@ -226,44 +223,49 @@ impl ViewportMedia {
         unavailable.map_or(Ok(false), Err)
     }
 
-    fn condition(&self, condition: &MediaCondition) -> Result<bool, String> {
+    /// Media Queries 4 three-valued evaluation: `None` is "unknown" (an unknown
+    /// feature name or an invalid value); `not` keeps it unknown and `and`/`or`
+    /// follow Kleene logic. `Err` is a feature the native host cannot evaluate.
+    fn condition(&self, condition: &MediaCondition) -> Result<Option<bool>, String> {
         match condition {
             MediaCondition::Feature(feature) => self.feature(feature),
-            MediaCondition::Not(inner) => Ok(!self.condition(inner)?),
+            MediaCondition::Not(inner) => Ok(self.condition(inner)?.map(|value| !value)),
             MediaCondition::Operation {
                 operator,
                 conditions,
             } => {
                 let and = *operator == Operator::And;
+                let mut unknown = false;
                 let mut unavailable = None;
                 for condition in conditions {
                     match self.condition(condition) {
-                        Ok(value) if value != and => return Ok(value),
-                        Ok(_) => {}
+                        Ok(Some(value)) if value != and => return Ok(Some(value)),
+                        Ok(Some(_)) => {}
+                        Ok(None) => unknown = true,
                         Err(error) => {
                             unavailable.get_or_insert(error);
                         }
                     }
                 }
-                unavailable.map_or(Ok(and), Err)
+                unavailable.map_or(Ok((!unknown).then_some(and)), Err)
             }
-            MediaCondition::Unknown(_) => Ok(false),
+            MediaCondition::Unknown(_) => Ok(None),
         }
     }
 
-    fn feature(&self, feature: &MediaFeature) -> Result<bool, String> {
+    fn feature(&self, feature: &MediaFeature) -> Result<Option<bool>, String> {
         match feature {
             QueryFeature::Plain { name, value } => self.compare(name, value, Compare::Equal, false),
             QueryFeature::Boolean { name } => {
                 if let MediaFeatureName::Standard(Feature::AspectRatio) = name {
-                    return Ok(true);
+                    return Ok(Some(true));
                 }
                 if let MediaFeatureName::Standard(feature) = name {
                     if let Some((_, value)) = self.host.keyword(*feature)? {
-                        return Ok(value);
+                        return Ok(Some(value));
                     }
                 }
-                Ok(self.actual(name)?.is_some_and(|value| value != 0.0))
+                Ok(self.actual(name)?.map(|value| value != 0.0))
             }
             QueryFeature::Range {
                 name,
@@ -276,8 +278,15 @@ impl ViewportMedia {
                 start_operator,
                 end,
                 end_operator,
-            } => Ok(self.compare(name, start, *start_operator, true)?
-                && self.compare(name, end, *end_operator, false)?),
+            } => {
+                let start = self.compare(name, start, *start_operator, true)?;
+                let end = self.compare(name, end, *end_operator, false)?;
+                Ok(match (start, end) {
+                    (Some(false), _) | (_, Some(false)) => Some(false),
+                    (Some(true), Some(true)) => Some(true),
+                    _ => None,
+                })
+            }
         }
     }
 
@@ -287,10 +296,10 @@ impl ViewportMedia {
         value: &MediaFeatureValue,
         operator: Compare,
         reverse: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<bool>, String> {
         if matches!(name, MediaFeatureName::Standard(Feature::AspectRatio)) {
             let MediaFeatureValue::Ratio(value) = value else {
-                return Ok(false);
+                return Ok(Some(false));
             };
             // Compare ratios as products: zero-sized CSS viewports are valid,
             // and dividing either ratio would discard their defined ordering.
@@ -302,34 +311,31 @@ impl ViewportMedia {
                 value.0
             };
             let requested = f64::from(self.height) * f64::from(numerator);
-            return Ok(ordered_compare(actual, requested, operator, reverse));
+            return Ok(Some(ordered_compare(actual, requested, operator, reverse)));
         }
         if let MediaFeatureName::Standard(feature) = name {
             if let Some((actual, _)) = self.host.keyword(*feature)? {
-                return Ok(
+                return Ok(Some(
                     matches!((value,operator),(MediaFeatureValue::Ident(value),Compare::Equal) if actual.eq_ignore_ascii_case(value.0.as_ref())),
-                );
+                ));
             }
         }
         let Some(actual) = self.actual(name)? else {
-            return Ok(false);
+            return Ok(None);
         };
         if matches!(name, MediaFeatureName::Standard(Feature::Orientation)) {
-            let MediaFeatureValue::Ident(value) = value else {
-                return Ok(false);
-            };
-            return Ok(match value.0.as_ref() {
-                "portrait" => self.height >= self.width,
-                "landscape" => self.width > self.height,
-                _ => false,
+            return Ok(match value {
+                MediaFeatureValue::Ident(value) => match value.0.as_ref() {
+                    "portrait" => Some(self.height >= self.width),
+                    "landscape" => Some(self.width > self.height),
+                    _ => None,
+                },
+                _ => None,
             });
         }
-        Ok(ordered_compare(
-            actual,
-            self.value(value)?,
-            operator,
-            reverse,
-        ))
+        Ok(self
+            .value(value)?
+            .map(|value| ordered_compare(actual, value, operator, reverse)))
     }
 
     fn actual(&self, name: &MediaFeatureName<Feature>) -> Result<Option<f64>, String> {
@@ -340,23 +346,24 @@ impl ViewportMedia {
             MediaFeatureName::Standard(feature) => Err(format!(
                 "native live layout media requires host capability {feature:?}"
             )),
-            // Unknown author-defined feature names are false in CSS, including
-            // under an explicit not; they are different from known host features.
+            // Unknown author-defined feature names evaluate as unknown (never a
+            // match, including under `not`); they differ from known host features.
             MediaFeatureName::Custom(_) | MediaFeatureName::Unknown(_) => Ok(None),
         }
     }
 
-    fn value(&self, value: &MediaFeatureValue) -> Result<f64, String> {
+    /// A length for the viewport's width/height features; any other value type is
+    /// invalid there and evaluates as unknown.
+    fn value(&self, value: &MediaFeatureValue) -> Result<Option<f64>, String> {
         match value {
             MediaFeatureValue::Length(Length::Value(LengthValue::Em(v) | LengthValue::Rem(v))) => {
-                Ok(f64::from(*v) * f64::from(self.initial_font_size))
+                Ok(Some(f64::from(*v) * f64::from(self.initial_font_size)))
             }
             MediaFeatureValue::Length(length) => length
                 .to_px()
-                .map(f64::from)
+                .map(|value| Some(f64::from(value)))
                 .ok_or("native media length requires unresolved font/viewport/calc units".into()),
-            MediaFeatureValue::Ratio(value) => Ok(f64::from(value.0) / f64::from(value.1)),
-            _ => Err("native media feature has no available numerical value".into()),
+            _ => Ok(None),
         }
     }
 }
@@ -391,6 +398,47 @@ mod tests {
             host: HostMedia::default(),
         }
     }
+    /// Chrome 156 (156.0.8078.4, headless) `matchMedia(query).matches` in an
+    /// 800x600 iframe on a localhost page.
+    #[test]
+    fn boolean_ratio_orientation_and_unknown_conditions_match_chrome() {
+        for (query, chrome) in [
+            ("(width)", true),
+            ("(height)", true),
+            ("(aspect-ratio)", true),
+            ("(aspect-ratio: 4)", false),
+            ("(orientation: 1px)", false),
+            ("(orientation: diagonal)", false),
+            ("(orientation)", true),
+            ("(width: 1/2)", false),
+            ("(width: red)", false),
+            ("(min-width: 799.5px) and (max-width: 800.5px)", true),
+            ("not ((width: 1px) or (unknown-x: 1))", false),
+            ("(width: 800px) or (height: 1px)", true),
+            ("((width: 1px) and (height: 600px))", false),
+            ("not all and (width: 800px)", false),
+            ("screen and (not (width: 1px))", true),
+            ("(width >= 50em)", true),
+            ("(400px <= width <= 800px)", true),
+            // Unknown features and invalid values are "unknown": `not` keeps them
+            // unknown and an unknown query does not match.
+            ("not (unknown-feature: invalid)", false),
+            ("not screen and (unknown-x)", false),
+            ("not (orientation: 1px)", false),
+            ("not (aspect-ratio: 4)", true),
+            ("not (foo bar)", false),
+            ("(foo bar)", false),
+            ("not (width: red)", false),
+            ("not (width: 1/2)", false),
+            ("(width: 800px) and (not (unknown-x))", false),
+            ("not ((width: 800px) or (unknown-x))", false),
+            ("(width: 800px) or (unknown-x: 1)", true),
+            ("not ((width: 800px) and (unknown-x: 1))", false),
+            ("not (orientation: diagonal)", false),
+        ] {
+            assert_eq!(viewport().matches(query), Ok(chrome), "{query}");
+        }
+    }
     #[test]
     fn viewport_features_use_actual_dimensions_ranges_negation_and_initial_font_units() {
         for query in [
@@ -403,7 +451,6 @@ mod tests {
             "(600px < width <= 800px)",
             "(aspect-ratio: 4 / 3)",
             "(orientation: landscape)",
-            "not (unknown-feature: invalid)",
             "print, screen and (width > 700px)",
         ] {
             assert!(viewport().matches(query).unwrap(), "{query}");

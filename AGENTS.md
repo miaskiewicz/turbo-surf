@@ -14,77 +14,75 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
 
 ## Stack & layout
 
-- **Engine: Rust** (`rust/` — a 9-crate workspace on the `turbo-dom` crate, edition
+- **Engine: Rust** (`rust/` — an 8-crate workspace on the `turbo-dom` crates, edition
   2021). Source is `.mjs`-free except a thin JS launcher + the dev harness.
 - **Crates:** `turbo-surf-core` (net/cookies/robots/url/frontier/crawl/cache),
   `turbo-surf-page` (navigator), `turbo-surf-view` (extract/visible/aria/locator/
   markdown/query/xpath/hydration/actions/…), `turbo-surf-render` (deno_core V8 +
-  the vendored `browser_env` rtdom↔V8 DOM binding), `turbo-surf-raster` (synthetic
-  screenshot tier — native layout+paint over `turbo-html2pdf-core`, + `measure_text`),
-  `turbo-surf-transform` (swc), `turbo-surf-napi` (dev/harness in-process addon),
-  `turbo-surf-py` (PyO3 binding → PyPI wheels), `turbo-surf-mcp` (the stdio MCP
-  **binary** the launcher spawns).
+  the `turbo-dom-browser-env` rtdom↔V8 DOM binding; native live layout over
+  `turbo-dom-layout`), `turbo-surf-transform` (swc), `turbo-surf-napi` (dev/harness
+  in-process addon), `turbo-surf-py` (PyO3 binding → PyPI wheels), `turbo-surf-mcp` (the stdio MCP
+  **binary** the launcher spawns). The synthetic screenshot tier (layout+paint,
+  canvas raster, `measure_text`) is turbo-dom's `turbo-dom-raster` crate, used by
+  mcp/napi/py with its AVIF / JPEG XL decoders on (default `avif` / `jxl` features,
+  like Chrome 156); the V8 binding is turbo-dom's `turbo-dom-v8` fork (one V8 in the
+  graph: `scripts/check-single-v8.sh`).
 - **JS surface:** `cli.js` + `index.js` (the launcher), `harness/` (benchmarks),
   `rust/playwright-shim/` (a drop-in `@playwright/test` façade over the
   `turbo-surf-napi` addon — Page/Locator/expect/context/fixtures, no browser;
   see its [`LIMITATIONS.md`](./rust/playwright-shim/LIMITATIONS.md)).
-- **Vendored, never hand-edit:** `rust/crates/turbo-surf-render/src/browser_env{.rs,_upstream.rs,.js}`, `src/cssom_parser.rs`, its selector-lexeme probe/Chrome control, `src/html_documents.rs`, `src/document_basics.rs`, `src/document_basics.js`, `src/dom_implementation{.rs,.js}`, its tests/probe/control, `src/element_tokens.js`, `src/element_relations.js`,
-  `src/element_relations.rs`, `src/html_text.rs`, `src/html_text.js`,
-  `src/html_popover.js`, `src/html_popover.rs`, `src/collection_records.rs`, `src/css_policy.rs`, `src/event_handlers.rs`, `src/event_brands.rs`, `src/event_listeners.rs`, `src/event_listeners.js`,
-  `src/dom_mutations.rs`, `src/dom_adoption_probe.js`, `src/dom_adoption_chrome155.json`, `src/dom_variadic_errors_probe.js`, `src/dom_variadic_errors_chrome155.json`, `src/dom_projection_tests.rs`, its element-interface probe/Chrome control, `src/range_contents{.rs,.js}`, its abstract/static Range interface and frame probes/Chrome controls, `src/range_probe.js`, `src/range_chrome155.json`, `src/css_adoption_tests.rs`, `src/css_adoption_probe.js`, `src/css_adoption_ownership_probe.js`, `src/css_adoption_chrome155.json`, `src/css_adoption_ownership_chrome155.json`, its stylesheet-lifecycle probe/Chrome control, `src/css_live_tests.rs`, `src/css_live_probe.js`, `src/css_live_chrome155.json`, `src/range_live.rs`, `src/range_live_probe.js`, `src/range_live_chrome155.json`, `src/document_xpath{.rs,.js}`, `src/xpath_provider/` and `src/browser_sanitizer_default.json`
-  and `src/dom_ownership.rs`, `src/realm_ownership.rs`, `src/storage_ownership.rs`,
-  `src/dom_isolation.rs`, `src/ownership_guard_tests.rs`, its computed-color probe/Chrome control,
-  `src/html_meta_tests.rs`, its meta-reflection probe/Chrome control,
-  `src/mutation_observers{.rs,.js}`, its tests/probe/Chrome control
-  and `src/frame_tokens_tests.rs`, `src/frame_tokens_probe.js`, `src/frame_tokens_chrome155.json`
-  and `src/script_state.rs`, its preparation probe/Chrome control,
-  `src/shadow_slots{.rs,.js}`, its tests/probe/Chrome control, iframe
-  credentialless tests/probe/Chrome control, and `src/utf16_contract_tests.rs`
-  with its `src/utf16_*` probes/controls and `src/script_text*.js`/Chrome control
-  and `src/template_contents{.rs,.js}` with its ownership/lifecycle probes/controls
-  and `src/custom_elements{.rs,.js}` with its main, extended, reactions, IDL, realm
-  move, callback and retired-definition probes/Chrome controls
-  and `src/dom_parser_observer_lifecycle_{probe.js,chrome155.json}`
-  and `src/trusted_types{.rs,.js}`, its native mapping, tests/probes/Chrome controls
-  and `src/form_entrylist_{cases.json,probe.js,chrome155.json}`, `src/formdata_constructor_{cases.json,probe.js,chrome155.json}`, `src/form_controls.js` with its form-methods cases/probe/Chrome control,
-  `src/element_internals{.rs,.js}` and its core/associated/state/definition/setlike controls,
-  `src/computed_intrinsics_*`, `src/computed_button_ua_*`, `src/computed_border_priority_*`, `src/css_descriptor_*`, `src/checkedness_*`, `src/control_prototypes_*`, `src/form_reflection_*`
-  and `src/formdata_{event,guards}_*` controls
-  and `src/form_collections.js`, `src/form_checked_state.rs`,
-  `src/{element_registry,submitter_reflection,form_collections,radio_dirty}_*`
-  probes/cases/Chrome controls and `src/radio_{group_moves,owner_review}_*`
-  probes/Chrome controls, `src/control_labels.rs` and its `src/control_labels_*`
-  probes/Chrome controls
-  — re-vendor from turbo-test's committed HEAD via
-  `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
+- **DOM binding = the `turbo-dom-browser-env` crate (a dependency, never vendored):**
+  the rtdom↔V8 browser binding (`window`/`document`/CSSOM/forms/events, its JS and
+  its Chrome probes/controls) lives in
+  [turbo-dom](https://github.com/miaskiewicz/turbo-dom) (`crates/turbo-dom-browser-env`);
+  binding fixes land there, never as copies here. `turbo-surf-render` uses it with
+  feature `host-internals` for surf's native services over its documents
+  (`src/live_layout_dom.rs` layout capture, `src/compression_dictionary_dom.rs`
+  link discovery); native live layout runs turbo-dom-layout's live-DOM input
+  (`turbo_dom_layout::live`, no tree copy; a read whose capture a DOM mutation outdated
+  captures again) and its `cssom_view` geometry modules over turbo-dom-layout's
+  process-wide `FontRegistry::system(SystemFontPolicy::Html)`, while
+  surf keeps media/supports evaluation, scoped-sheet preparation, `zoom` and the
+  neutral/resource admission policy; integration tests read probe/control data from
+  `turbo_dom_browser_env::test_support` (dev feature `test-support`), and Node
+  detection tests locate the resolved package via `cargo metadata`
+  (`harness/detection/binding-files.mjs`). `native-sdk-frame-read` on
+  render/mcp/napi/py forwards to the crate for the engine-154/155 native-SDK overlay.
 
 ## Embedded Deno extension sources
 
-`rust/crates/turbo-surf-render/src/vendor/deno_extensions/` and the generated
-`src/deno_extension_source_table.rs` preserve exact licensed published Deno JS.
-Never hand-edit or format these files. Reproduce them with the render crate's
-`scripts/vendor-deno-extension-sources.py --check` (or `--write` only for a
-reviewed update), using the checksum-pinned `.crate` archives. The crate-local
+Nothing is vendored: `rust/crates/turbo-surf-render/src/deno_extension_sources.rs`
+embeds the exact licensed published Deno JS from the `turbo-surf-deno-web` /
+`-webidl` / `-crypto` distributions' `embedded_sources::SOURCES` tables (generated
+by `rust/release-deps/deno/prepare.py` from checksum-pinned `.crate` archives), and
+its tests re-check every source against the reviewed `SOURCE_PINS`. The crate-local
 `DENO-EXTENSIONS.md` documents source identity and the portability boundary.
-This generator is independent of turbo-test's DOM-binding vendor script.
 
 ## The gates
 
 The engine gate is **Rust** (`cd rust`): `cargo test --workspace`, `cargo clippy
 --workspace --all-targets` (0 warnings), `cargo fmt --check`. The pre-commit hook
 (`.githooks/pre-commit`, wired by `npm run prepare`) lints/formats staged JS
-(oxlint + biome over the launcher/harness; the vendored `browser_env.js` is
-skipped). `npm run check` runs the JS lint/format + the Rust gate + the Playwright
+(oxlint + biome over the launcher/harness; source-hashed
+Chrome probes are skipped). `npm run check` runs the JS lint/format + the Rust gate + the Playwright
 shim tests (`test:playwright` = `build:addon` then `test:shim` + `test:e2e`) and
 the offline detection harness tests (`test:detection`). Never
 bypass with `--no-verify`.
+
+CI also gates **line coverage** (`coverage` job over the `coverage-shard` matrix, the sharded equivalent of `cd rust && cargo tarpaulin`, reading
+`rust/tarpaulin.toml` fail-under 93.0, then per-crate floors in `rust/coverage-floors.json` (the napi/py bindings are excluded);
+measured values, raised toward >= 99.5 by the coverage phase) and **cyclomatic complexity**
+(`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /
+`complexity:js`, one limit, no allow-list; report-only (`continue-on-error`) until the post-0.6.0 refactor, see
+[`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md) for the commands, the floors and the
+backlog). Never lower a floor or raise the limit to pass a change.
 
 ## Testing rules
 
 - Rust: `cargo test` — `node:test`-style unit tests live in each crate; deno_core
   render tests are in `rust/crates/turbo-surf-render/tests/render.rs` (a separate
-  binary, so they don't share a V8-platform init with the vendored binding's
-  standalone-V8 unit test).
+  binary, so deno_core's V8-platform init stays out of the lib unit-test process;
+  the binding's own standalone-V8 tests run in turbo-dom-browser-env).
 - **Deterministic + offline**: tests parse fixtures / hit a localhost server, never
   the live network. New code must be covered.
 - Live-network checks (the competitive + crawler harnesses) live in `harness/` and

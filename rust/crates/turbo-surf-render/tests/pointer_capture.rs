@@ -72,45 +72,6 @@ async fn replay(case: &Value) -> Value {
     json!({ "evaluations": evaluations, "log": log })
 }
 
-/// KNOWN_GAP: the binding's event path stops at a shadow root, so composed pointer, mouse
-/// and capture events dispatched at a shadow-tree target never reach the host's ancestors
-/// and their target/relatedTarget are not retargeted to the host (a general shadow DOM
-/// dispatch gap, not a capture one). Capture itself agrees: the shadow-internal listener
-/// sees got/lost at Chrome's points. This pins the exact native log until dispatch crosses
-/// shadow boundaries; adopting Chrome's log then makes the case pass unmodified.
-const SHADOW_DISPATCH_GAP: &[&str] = &[
-    "--0 move",
-    "pointerover a rel=null b=0",
-    "pointerenter HTML rel=null b=0",
-    "pointerenter BODY rel=null b=0",
-    "pointerenter a rel=null b=0",
-    "mouseover a rel=null b=0",
-    "mouseenter HTML rel=null b=0",
-    "mouseenter BODY rel=null b=0",
-    "mouseenter a rel=null b=0",
-    "pointermove a b=0 btn=-1",
-    "mousemove a b=0 btn=0",
-    "--1 down",
-    "pointerdown a b=1 btn=0",
-    "mousedown a b=1 btn=0",
-    "--2 move",
-    "pointerout a rel=inner b=1",
-    "pointerleave a rel=inner b=1",
-    "pointerenter h rel=a b=1",
-    "inner gotpointercapture target=inner",
-    "mouseout a rel=inner b=1",
-    "mouseleave a rel=inner b=1",
-    "mouseenter h rel=a b=1",
-    "--3 up",
-    "inner lostpointercapture target=inner",
-    "pointerleave h rel=b b=0",
-    "pointerover b rel=inner b=0",
-    "pointerenter b rel=inner b=0",
-    "mouseleave h rel=b b=0",
-    "mouseover b rel=inner b=0",
-    "mouseenter b rel=inner b=0",
-];
-
 #[tokio::test(flavor = "current_thread")]
 async fn trusted_pointer_capture_and_lock_sequences_match_chrome156() {
     let expected = control();
@@ -120,22 +81,6 @@ async fn trusted_pointer_capture_and_lock_sequences_match_chrome156() {
     let mut differences = Vec::new();
     for (name, case) in cases {
         let actual = replay(case).await;
-        if name == "capture-in-shadow-tree" {
-            let chrome = expected[name]["log"].as_array().unwrap();
-            let inner = |log: &[Value]| -> Vec<Value> {
-                log.iter()
-                    .filter(|row| row.as_str().unwrap().starts_with("inner "))
-                    .cloned()
-                    .collect()
-            };
-            assert_ne!(
-                actual, expected[name],
-                "shadow dispatch gap closed: drop the pin"
-            );
-            assert_eq!(actual["log"], json!(SHADOW_DISPATCH_GAP));
-            assert_eq!(inner(actual["log"].as_array().unwrap()), inner(chrome));
-            continue;
-        }
         if actual != expected[name] {
             differences.push(format!(
                 "{name}\n  native: {}\n  chrome: {}",

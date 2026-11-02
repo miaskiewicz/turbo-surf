@@ -197,11 +197,13 @@
     run(() => probe().observe({ type: "bogus" }))[1],
     run(() => probe().observe({ entryTypes: [] }))[1],
   ];
-  performance.mark("before");
+  // Explicit start times: the entry-list order (startTime, then buffer order) must not
+  // depend on whether two marks land in the same clock tick (turbo-surf#88).
+  performance.mark("before", { startTime: 10 });
   pobs.observe({ type: "mark", buffered: true });
   po.modeSwitch = run(() => pobs.observe({ entryTypes: ["measure"] }))[1];
   pobs.observe({ type: "measure" });
-  performance.mark("m1");
+  performance.mark("m1", { startTime: 20 });
   performance.measure("m1", "before", "m1");
   po.sync = delivered.length;
   await settle();

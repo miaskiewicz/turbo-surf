@@ -3,12 +3,13 @@ use serde_json::Value;
 use turbo_surf_render::PageSession;
 
 async fn run(probe: &str, control: &str) {
+    // A generous cap for real work, not a timing (turbo-surf#46).
     let mut page = PageSession::open(
         "<!doctype html><head></head><body></body>",
         "http://localhost/",
         "",
         "",
-        10000,
+        60_000,
     )
     .await
     .unwrap();
@@ -44,7 +45,7 @@ async fn native_base_policy_ignores_guest_tree_hooks_and_prototype_replacements(
         "https://source.test/root",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -78,7 +79,7 @@ async fn retained_retired_documents_reset_written_bases_to_fallback_like_chrome(
 async fn opaque_srcdoc_bootstrap_and_live_base_ignore_public_getter_poisoning() {
     run(
         include_str!("../../../../harness/detection/csp-base-opaque-probe.js"),
-        include_str!("../../../../harness/detection/fixtures/csp-base-opaque-chrome155.json"),
+        include_str!("../../../../harness/detection/fixtures/csp-base-opaque-chrome156.json"),
     )
     .await;
 }

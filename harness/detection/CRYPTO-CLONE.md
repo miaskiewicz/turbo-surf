@@ -33,7 +33,7 @@ User Timing detail uses the same private graph bridge for keys and exceptions.
 
 The official provider's inherited-setter construction bug is fixed by the
 licensed reproducible patch described in
-[`rust/vendor/DENO_CRYPTO.md`](../../rust/vendor/DENO_CRYPTO.md). The adversarial
+[`rust/release-deps/deno/DENO_CRYPTO.md`](../../rust/release-deps/deno/DENO_CRYPTO.md). The adversarial
 tests cover inherited material setters, array-index setters, forged key
 properties, and a poisoned `Deno.core.hostObject` symbol. Native crypto tests
 exercise non-extractable AES encryption, Ed25519 signatures, and ML-KEM/X-Wing

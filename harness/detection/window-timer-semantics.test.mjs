@@ -7,7 +7,7 @@ import { test } from "node:test";
 test("Window timer control pins actual task semantics and separates timing observations", () => {
   const control = JSON.parse(
     readFileSync(
-      new URL("./fixtures/window-timer-semantics-chrome155.json", import.meta.url),
+      new URL("./fixtures/window-timer-semantics-chrome156.json", import.meta.url),
       "utf8",
     ),
   );

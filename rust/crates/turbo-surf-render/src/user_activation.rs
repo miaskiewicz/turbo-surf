@@ -171,7 +171,7 @@ fn consume<'s>(
     }
 }
 
-/// The vendored binding's activation authority for showPicker, fullscreen and close watchers.
+/// The binding's activation authority for showPicker, fullscreen and close watchers.
 fn activation_host(
     scope: &mut v8::PinScope,
     document: v8::Local<v8::Object>,

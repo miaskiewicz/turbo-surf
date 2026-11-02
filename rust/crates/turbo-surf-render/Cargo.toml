@@ -6,13 +6,19 @@ license.workspace = true
 repository.workspace = true
 description = "turbo-surf JS-execution tier (tier 3): deno_core isolate + rtdom↔V8 DOM binding"
 
+[features]
+# Interceptor should-throw mode read from the V8 frame instead of the turbo-dom-v8
+# fork accessor. Only for native V8 SDKs without the fork fix (the engine-154/155
+# overlay enables it); see turbo-dom-browser-env's README.
+native-sdk-frame-read = ["turbo-dom-browser-env/native-sdk-frame-read"]
+
 [dependencies]
-deno_core = { package = "turbo-surf-deno-core", version = "=0.412.0" }
+deno_core = { package = "turbo-surf-deno-core", version = "=0.412.1" }
 # Official native WebCrypto and its lazy Web IDL/console dependencies share the
 # existing deno_core/V8 facade; they do not replace the rtdom DOM globals.
-deno_crypto = { package = "turbo-surf-deno-crypto", version = "=0.273.0" }
-deno_web = { package = "turbo-surf-deno-web", version = "=0.290.0" }
-deno_webidl = { package = "turbo-surf-deno-webidl", version = "=0.259.0" }
+deno_crypto = { package = "turbo-surf-deno-crypto", version = "=0.273.1" }
+deno_web = { package = "turbo-surf-deno-web", version = "=0.290.1" }
+deno_webidl = { package = "turbo-surf-deno-webidl", version = "=0.259.1" }
 # X-Wing uses the same reviewed primitives already pulled in by deno_crypto.
 fips203 = "=0.4.3"
 x25519-dalek = "=2.0.1"
@@ -23,22 +29,29 @@ subtle = "2"
 # pinned to the version deno_core 0.412 resolves so the types unify.
 deno_error = "=0.7.1"
 # Use deno_core's facade for the binding's bare `v8` imports as well. The facade's
-# V8 backend uses official rusty_v8 150.4; mixing in a second native V8 library
-# would make the DOM handles incompatible with the runtime's context.
-v8 = { package = "turbo-surf-deno-v8", version = "=0.4.0" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
-# Public live-tree snapshots preserve source provenance without HTML serialization.
-# Published0.3.8 includes the composed-layout and shared-font producer fixes.
-turbo-html2pdf-core = { version = "0.3.9" }
+# V8 backend is turbo-dom's rusty_v8 150.4 fork (`turbo-dom-v8 ~150.4`); mixing in a
+# second native V8 library would make the DOM handles incompatible with the
+# runtime's context (scripts/check-single-v8.sh guards the graph).
+v8 = { package = "turbo-surf-deno-v8", version = "=0.4.1" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.6" }
+# The rtdom↔V8 DOM binding (window, document, CSSOM, forms, events). host-internals
+# gives surf's native layout capture and resource discovery host-only document access.
+turbo-dom-browser-env = { version = "0.6.0", features = ["host-internals"] }
+# Native layout engine (style cascade, box layout, fonts, layout snapshots). Public
+# live-tree snapshots preserve source provenance without HTML serialization. Default
+# features plus `svg-rasterize` (the shared SVG parser, for live `<img>` natural sizes —
+# turbo-surf#30); never `svg` or the PDF-side `xref`/`pdf-ua`/`print-color` gates.
+turbo-dom-layout = { version = "0.6.0", features = ["serde", "svg-rasterize"] }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) avoid its
 # extra transport build. V8, native crypto and audio still require native toolchains.
 # The shipped mcp binary gets impersonate — it requests
 # `turbo-surf-core/impersonate` explicitly (its own default).
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.5", default-features = false }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.6.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
+percent-encoding = "2"
 psl = "2"
 sfv = "=0.15.0"
 encoding_rs = "0.8"
@@ -49,9 +62,7 @@ rustfft = "=6.4.1"
 base64 = "0.22"
 # CSP hash-source checks operate on the parser's actual UTF-8 script text.
 sha2 = "0.10"
-# Resource loads decode actual image bytes before reporting dimensions/load success.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-# The canonical DOM binding validates CSS grammar before building its CSSOM facade.
+# Scoped sheet preparation, @supports/media evaluation and neutral CSS parsing.
 lightningcss = { version = "1.0.0-alpha.71", default-features = false }
 cssparser = "0.37"
 # For the async `RecaptchaEngine` trait impl (same trait style as turbo-surf-core).
@@ -67,6 +78,8 @@ httpdate = "1"
 cc = "1"
 
 [dev-dependencies]
+# Probe/control data of the binding's Chrome-parity files for the integration tests.
+turbo-dom-browser-env = { version = "0.6.0", features = ["host-internals", "test-support"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }
 
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

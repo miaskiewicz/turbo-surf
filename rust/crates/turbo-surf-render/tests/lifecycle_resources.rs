@@ -101,7 +101,7 @@ async fn session_runs_deferred_scripts_at_interactive_and_waits_for_decoded_reso
         &format!("{base}/"),
         &seed.storage_state(),
         "",
-        5000,
+        60_000,
         init,
     )
     .await
@@ -322,8 +322,8 @@ async fn asynchronous_classic_scripts_do_not_block_dcl_but_delay_load_with_nativ
     });
     let fixture = include_str!("../../../../harness/detection/fixtures/script-lifecycle.html");
     let mut page = tokio::time::timeout(
-        Duration::from_secs(5),
-        PageSession::open(fixture, &base, "[]", "", 5000),
+        Duration::from_secs(60),
+        PageSession::open(fixture, &base, "[]", "", 60_000),
     )
     .await
     .unwrap()

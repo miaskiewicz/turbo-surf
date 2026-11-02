@@ -3,7 +3,7 @@
 //! stdout. The logic lives in the library (`turbo_surf_mcp`).
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use turbo_surf_mcp::{handle, Session};
+use turbo_surf_mcp::{handle, parse_error, Session};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -15,10 +15,12 @@ async fn main() {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(req) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue; // skip malformed input rather than crash the server
+        // A line that is not JSON answers -32700 with `id: null` (JSON-RPC 2.0).
+        let resp = match serde_json::from_str::<serde_json::Value>(&line) {
+            Ok(req) => handle(&mut session, &req).await,
+            Err(_) => Some(parse_error()),
         };
-        if let Some(resp) = handle(&mut session, &req).await {
+        if let Some(resp) = resp {
             let body = serde_json::to_string(&resp).unwrap_or_default();
             let _ = stdout.write_all(body.as_bytes()).await;
             let _ = stdout.write_all(b"\n").await;

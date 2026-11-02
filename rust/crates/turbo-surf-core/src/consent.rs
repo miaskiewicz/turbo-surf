@@ -178,21 +178,31 @@ fn extract_js_save_url(html: &str) -> Option<String> {
 // Decode JS `\xHH` hex escapes (Google encodes `=`→`\x3d`, `&`→`\x26` in the save URL).
 // Non-escape bytes pass through; the payload is ASCII.
 fn js_unescape(s: &str) -> String {
+    // Decode on bytes so a `\\x` whose digits split a multibyte char cannot slice
+    // off a char boundary, and keep the rest UTF-8 intact (turbo-surf#97).
     let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
+    let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' && i + 4 <= b.len() && b[i + 1] == b'x' {
-            if let Ok(v) = u8::from_str_radix(&s[i + 2..i + 4], 16) {
-                out.push(v as char);
+        if let [b'\\', b'x', high, low, ..] = b[i..] {
+            if let (Some(high), Some(low)) = (hex(high), hex(low)) {
+                let value = high << 4 | low;
+                // A decoded non-ASCII byte is a Latin-1 code point, as in JS.
+                let mut buffer = [0; 4];
+                out.extend_from_slice(char::from(value).encode_utf8(&mut buffer).as_bytes());
                 i += 4;
                 continue;
             }
         }
-        out.push(b[i] as char);
+        out.push(b[i]);
         i += 1;
     }
-    out
+    // invariant: only whole ASCII escapes are replaced by UTF-8, so the bytes stay UTF-8.
+    String::from_utf8(out).unwrap_or_default()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    char::from(byte).to_digit(16).map(|digit| digit as u8)
 }
 
 // True when a form's fields select "accept all": both `set_aps` and `set_sc` present
@@ -707,5 +717,177 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_none(), "ordinary page → nothing to do");
+    }
+
+    // Answers every request with `resp` and forwards the raw request text.
+    async fn spawn_recorder(
+        resp: &'static str,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (base, rx)
+    }
+
+    // Not HTML, and a Max-Age cookie: the handshake must accept any content type and
+    // stamp expiry with the caller's clock.
+    const MINT: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: NID=n1; Path=/; Max-Age=60\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+    // Jar clock in epoch milliseconds.
+    const NOW: f64 = 2_000_000_000_000.0;
+
+    #[tokio::test]
+    async fn post_accept_form_sends_fields_in_the_body_with_the_user_agent() {
+        let (base, mut rx) = spawn_recorder(MINT).await;
+        // No action → the page URL; a nameless input is not a field.
+        let html = r#"<p>Before you continue to Google</p><form method="post">
+            <input type="submit" value="Accept all">
+            <input name="set_aps" value="true"><input name="set_sc" value="true">
+            <input name="continue" value="https://www.google.com/?a&amp;b"></form>"#;
+        let page = format!("{base}/consent");
+        let mut jar = CookieJar::new();
+        let earned = handshake_if_consent(&mut jar, &page, html, "UA/2", NOW)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(earned.earned_nid);
+        assert_eq!(earned.minted, vec!["NID".to_string()]);
+        assert_eq!(
+            earned.continue_url.as_deref(),
+            Some("https://www.google.com/?a&b")
+        );
+        let req = rx.recv().await.unwrap();
+        assert!(req.starts_with("POST /consent "), "{req}");
+        let lower = req.to_ascii_lowercase();
+        assert!(lower.contains("\r\nuser-agent: ua/2\r\n"), "{req}");
+        assert!(
+            lower.contains("\r\ncontent-type: application/x-www-form-urlencoded\r\n"),
+            "{req}"
+        );
+        assert!(
+            req.ends_with(
+                "set_aps=true&set_sc=true&continue=https%3A%2F%2Fwww.google.com%2F%3Fa%26b"
+            ),
+            "{req}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_submit_appends_fields_to_an_existing_query_or_none_at_all() {
+        let (base, mut rx) = spawn_recorder(MINT).await;
+        let mut jar = CookieJar::new();
+        let form = ConsentForm {
+            action: format!("{base}/save?x=1"),
+            method: "GET".into(),
+            fields: vec![("set_sc".into(), "true".into())],
+        };
+        let earned = earn_consent_session(&mut jar, &form, "UA/3", NOW)
+            .await
+            .unwrap();
+        assert_eq!(earned.continue_url, None);
+        assert!(earned.earned_nid);
+        let req = rx.recv().await.unwrap();
+        assert!(req.starts_with("GET /save?x=1&set_sc=true "), "{req}");
+        assert!(
+            req.to_ascii_lowercase()
+                .contains("\r\nuser-agent: ua/3\r\n"),
+            "{req}"
+        );
+        // NID already present → not newly minted, but still earned.
+        let bare = ConsentForm {
+            action: format!("{base}/save"),
+            method: "GET".into(),
+            fields: Vec::new(),
+        };
+        let again = earn_consent_session(&mut jar, &bare, "", NOW)
+            .await
+            .unwrap();
+        assert!(again.earned_nid);
+        assert!(again.minted.is_empty());
+        assert!(rx.recv().await.unwrap().starts_with("GET /save "));
+    }
+
+    #[tokio::test]
+    async fn handshake_errors_are_explicit() {
+        let mut jar = CookieJar::new();
+        let err = handshake_if_consent(
+            &mut jar,
+            "https://consent.google.com/m",
+            "<p>no form</p>",
+            "",
+            0.0,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "consent: no parseable \"Accept all\" form on the interstitial"
+        );
+        let form = ConsentForm {
+            action: "http://127.0.0.1:1/save".into(),
+            method: "POST".into(),
+            fields: Vec::new(),
+        };
+        let err = earn_consent_session(&mut jar, &form, "", 0.0)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("consent handshake: "), "{err}");
+    }
+
+    #[test]
+    fn an_empty_form_before_the_accept_form_is_skipped() {
+        let html = "<form></form><form action='/save' method=post>\
+            <input name=set_aps value=true><input name=set_sc value=true></form>";
+        let form = parse_accept_form("https://consent.google.com/m", html).unwrap();
+        assert_eq!(form.action, "https://consent.google.com/save");
+        assert_eq!(form.method, "POST");
+        assert_eq!(form.fields.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_submit_ingests_cookies_set_on_the_redirect_hop() {
+        // Google mints NID on the /save 302; the handshake follows hops itself so the
+        // redirect's Set-Cookie lands in the jar.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let resp = if req.starts_with("GET /save") {
+                    "HTTP/1.1 302 Found\r\nSet-Cookie: NID=hop; Path=/\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                };
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let mut jar = CookieJar::new();
+        let form = ConsentForm {
+            action: format!("{base}/save"),
+            method: "GET".into(),
+            fields: vec![("set_sc".into(), "true".into())],
+        };
+        let earned = earn_consent_session(&mut jar, &form, "", NOW)
+            .await
+            .unwrap();
+        assert!(earned.earned_nid);
+        assert_eq!(earned.minted, vec!["NID".to_string()]);
+    }
+
+    // turbo-surf#97: a `\\x` escape whose hex digits split a multibyte char must
+    // not panic, and non-ASCII text passes through intact.
+    #[test]
+    fn js_unescape_keeps_multibyte_text_after_a_truncated_escape() {
+        assert_eq!(super::js_unescape("a\\x1\u{e9}b"), "a\\x1\u{e9}b");
+        assert_eq!(super::js_unescape("\u{e9}\\x3d"), "\u{e9}=");
     }
 }

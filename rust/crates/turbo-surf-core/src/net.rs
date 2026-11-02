@@ -1020,30 +1020,37 @@ fn dictionary_encoding(res: &http::Response) -> Result<Option<String>, HttpError
     Ok(Some(encoding))
 }
 async fn read_capped(res: http::Response, max_bytes: usize) -> Result<Vec<u8>, HttpError> {
-    let encoding = dictionary_encoding(&res)?;
-    let dictionary = res.extensions().get::<SelectedDictionary>().cloned();
-    if encoding.is_some() && dictionary.is_none() {
-        return Err(HttpError::new(
-            "Dictionary response without an advertised dictionary",
-            ErrorCode::Network,
-        ));
-    }
+    let decoder = match dictionary_encoding(&res)? {
+        Some(encoding) => {
+            let dictionary = res
+                .extensions()
+                .get::<SelectedDictionary>()
+                .cloned()
+                .ok_or_else(|| {
+                    HttpError::new(
+                        "Dictionary response without an advertised dictionary",
+                        ErrorCode::Network,
+                    )
+                })?;
+            Some((encoding, dictionary))
+        }
+        None => None,
+    };
     let mut pending = res.extensions().get::<PendingDictionary>().cloned();
-    let encoded_maximum = if encoding.is_some() {
+    let encoded_maximum = if decoder.is_some() {
         crate::compression_dictionary::decode::MAX_ENCODED_BYTES
     } else {
         max_bytes
     };
     check_content_length(&res, encoded_maximum)?;
     // Bound encoded buffering as well as CPU workers; canceled waiters retain only transport backpressure.
-    let permit = if encoding.is_some() {
-        Some(
-            crate::compression_dictionary::decode::reserve()
-                .await
-                .map_err(|error| HttpError::new(error.to_string(), ErrorCode::Network))?,
-        )
-    } else {
-        None
+    let decoder = match decoder {
+        Some((encoding, dictionary)) => Some((
+            encoding,
+            dictionary,
+            crate::compression_dictionary::decode::reserve().await,
+        )),
+        None => None,
     };
     let mut buf = BytesMut::new();
     let mut stream = res.bytes_stream();
@@ -1057,35 +1064,27 @@ async fn read_capped(res: http::Response, max_bytes: usize) -> Result<Vec<u8>, H
         }
         buf.extend_from_slice(&chunk);
     }
-    let body = match (encoding, dictionary, permit) {
-        (Some(encoding), Some(dictionary), Some(permit)) => {
-            crate::compression_dictionary::decode::decode(
-                encoding,
-                buf.to_vec(),
-                dictionary,
-                max_bytes,
-                permit,
-            )
-            .await
-            .map_err(|error| {
-                let code = if matches!(
-                    error,
-                    crate::compression_dictionary::decode::DecodeError::Size
-                ) {
-                    ErrorCode::BodyTooLarge
-                } else {
-                    ErrorCode::Network
-                };
-                HttpError::new(format!("Dictionary response decode failed: {error}"), code)
-            })?
-        }
-        (None, _, _) => buf.to_vec(),
-        _ => {
-            return Err(HttpError::new(
-                "Missing dictionary decoding permit",
-                ErrorCode::Network,
-            ))
-        }
+    let body = match decoder {
+        Some((encoding, dictionary, permit)) => crate::compression_dictionary::decode::decode(
+            encoding,
+            buf.to_vec(),
+            dictionary,
+            max_bytes,
+            permit,
+        )
+        .await
+        .map_err(|error| {
+            let code = if matches!(
+                error,
+                crate::compression_dictionary::decode::DecodeError::Size
+            ) {
+                ErrorCode::BodyTooLarge
+            } else {
+                ErrorCode::Network
+            };
+            HttpError::new(format!("Dictionary response decode failed: {error}"), code)
+        })?,
+        None => buf.to_vec(),
     };
     if let Some(mut registration) = pending.take() {
         if registration.append(&body) {
@@ -1350,6 +1349,7 @@ fn finish_range_response(
         || span.is_none_or(|(range, total)| {
             range.start != expected_start
                 || range.end != fill.range.end
+                // invariant: selected_range(None) is always Some (the full body).
                 || total != fill.entry.selected_range(None).unwrap().end
         })
     {
@@ -1997,11 +1997,33 @@ pub async fn fetch_stream(
 /// a `String` would corrupt the bytes. Auto-follows redirects (cap 20) over the
 /// shared client with the same headers/cookies as [`fetch_html`]; the byte cap
 /// applies and Set-Cookie is ingested. No content-type gate (the caller asks for
-/// an image on purpose).
+/// an image on purpose); [`fetch_typed_bytes`] also returns the `Content-Type`.
 pub async fn fetch_bytes(
     url: &str,
-    mut opts: FetchOptions<'_>,
+    opts: FetchOptions<'_>,
 ) -> Result<(String, Vec<u8>, u16), HttpError> {
+    fetch_typed_bytes(url, opts)
+        .await
+        .map(|fetched| (fetched.final_url, fetched.bytes, fetched.status))
+}
+
+/// A [`fetch_typed_bytes`] response: raw bytes plus what a resource loader decides with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedBytes {
+    pub final_url: String,
+    pub bytes: Vec<u8>,
+    pub status: u16,
+    /// The final response's `Content-Type` header ("" when absent). An `<img>` load
+    /// needs it: browsers decode SVG only when it is served as `image/svg+xml`, while
+    /// raster formats are sniffed from their bytes.
+    pub content_type: String,
+}
+
+/// [`fetch_bytes`], also returning the final response's `Content-Type`.
+pub async fn fetch_typed_bytes(
+    url: &str,
+    mut opts: FetchOptions<'_>,
+) -> Result<FetchedBytes, HttpError> {
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     if opts.redirect.is_some()
         || opts.max_redirects.is_some()
@@ -2017,13 +2039,19 @@ pub async fn fetch_bytes(
         let redirects = opts.max_redirects.unwrap_or(20);
         let (res, final_url, _) = follow_manually_response(&mut opts, url, redirects).await?;
         let status = res.status().as_u16();
+        let content_type = header_value(&res, "content-type");
         let cache_store = res.extensions().get::<PendingStore>().cloned();
         let bytes = read_capped(res, max_bytes).await?;
         if let Some(mut pending) = cache_store {
             pending.entry.body = bytes[pending.skip_prefix.min(bytes.len())..].to_vec();
             pending.cache.store(pending.entry);
         }
-        return Ok((final_url, bytes, status));
+        return Ok(FetchedBytes {
+            final_url,
+            bytes,
+            status,
+            content_type,
+        });
     }
     let cl = match opts.client {
         Some(c) => c.clone(),
@@ -2046,8 +2074,14 @@ pub async fn fetch_bytes(
     let final_url = final_url(&res);
     ingest_set_cookie(&mut opts, &res, &final_url);
     let status = res.status().as_u16();
+    let content_type = header_value(&res, "content-type");
     let bytes = read_capped(res, max_bytes).await?;
-    Ok((final_url, bytes, status))
+    Ok(FetchedBytes {
+        final_url,
+        bytes,
+        status,
+        content_type,
+    })
 }
 
 #[cfg(test)]
@@ -2580,6 +2614,44 @@ mod io_tests {
     }
 
     #[tokio::test]
+    async fn typed_bytes_report_the_final_content_type_on_both_paths() {
+        let p = spawn().await;
+        let direct = fetch_typed_bytes(&url(p, "/json"), FetchOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                direct.status,
+                direct.bytes.as_slice(),
+                direct.content_type.as_str()
+            ),
+            (200, b"{}".as_slice(), "application/json")
+        );
+        // The manual-follow path (a request policy) reports the redirect target's type.
+        let allow = |_: &str, _: bool| true;
+        let followed = fetch_typed_bytes(
+            &url(p, "/r"),
+            FetchOptions {
+                request_policy: Some(&allow),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(followed.final_url.ends_with("/dest"));
+        assert_eq!(followed.content_type, "text/html");
+        let auto = fetch_typed_bytes(&url(p, "/r"), FetchOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            fetch_bytes(&url(p, "/r"), FetchOptions::default())
+                .await
+                .unwrap(),
+            (auto.final_url, auto.bytes, auto.status)
+        );
+    }
+
+    #[tokio::test]
     async fn auto_redirect_follows() {
         let p = spawn().await;
         let r = fetch_html(&url(p, "/r"), FetchOptions::default())
@@ -2771,6 +2843,88 @@ mod io_tests {
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::Network);
     }
+
+    #[test]
+    fn consent_cookies_merge_without_overriding_an_explicit_cookie() {
+        let google = "https://www.google.com/search?q=1";
+        let mut empty = BTreeMap::new();
+        seed_consent_cookies(&mut empty, google, None);
+        assert_eq!(
+            empty.get("cookie").map(String::as_str),
+            Some(format!("SOCS={}", crate::consent::DEFAULT_SOCS).as_str())
+        );
+        let mut other = BTreeMap::from([("cookie".to_string(), "a=1".to_string())]);
+        seed_consent_cookies(&mut other, google, Some("CUSTOM"));
+        assert_eq!(other["cookie"], "a=1; SOCS=CUSTOM");
+        let mut mine = BTreeMap::from([("cookie".to_string(), "a=1; SOCS = mine".to_string())]);
+        seed_consent_cookies(&mut mine, google, Some("CUSTOM"));
+        assert_eq!(mine["cookie"], "a=1; SOCS = mine");
+        let mut none = BTreeMap::new();
+        seed_consent_cookies(&mut none, google, Some(""));
+        seed_consent_cookies(&mut none, "https://example.test/", None);
+        assert!(none.is_empty());
+    }
+
+    #[tokio::test]
+    async fn manual_redirects_enforce_the_limit_and_same_origin_mode() {
+        let port = spawn().await;
+        let limited = fetch_html(
+            &url(port, "/r"),
+            FetchOptions {
+                redirect: Some(RedirectMode::Follow),
+                max_redirects: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            limited.to_string(),
+            "Network: Request redirect limit exceeded"
+        );
+        let followed = fetch_html(
+            &url(port, "/r"),
+            FetchOptions {
+                redirect: Some(RedirectMode::Follow),
+                max_redirects: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(followed.html, "<html>dest</html>");
+        // A same-origin-mode request may not be redirected to another origin.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bounce = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let resp = format!("HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/dest\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        let source = url(bounce, "/page");
+        let same_origin = fetch_html(
+            &url(bounce, "/go"),
+            FetchOptions {
+                context: Some(RequestContext::resource(
+                    &source,
+                    crate::request_context::Destination::Empty,
+                    crate::request_context::RequestMode::SameOrigin,
+                )),
+                max_redirects: Some(5),
+                allow_non_html: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            same_origin.to_string(),
+            "Network: Request redirect violates same-origin mode"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2828,5 +2982,305 @@ mod response_chunk_tests {
         assert!(matches!(error.code, ErrorCode::Network));
         assert!(response.stream.is_none());
         assert_eq!(response.next_chunk().await.unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Serves `responses` in order and returns each request head it read.
+    async fn serve(
+        responses: Vec<&'static [u8]>,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (sent, heads) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            for response in responses {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut head = Vec::new();
+                while !head.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let mut bytes = [0; 4096];
+                    let n = socket.read(&mut bytes).await.unwrap();
+                    head.extend_from_slice(&bytes[..n]);
+                }
+                let _ = sent.send(String::from_utf8_lossy(&head).to_ascii_lowercase());
+                socket.write_all(response).await.unwrap();
+            }
+        });
+        (origin, heads)
+    }
+
+    #[cfg(feature = "impersonate")]
+    #[test]
+    fn the_transport_reuses_the_chrome_154_recipe() {
+        assert_eq!(transport_base_chrome_major(), Some(154));
+        assert_eq!(
+            transport_base_chrome_major(),
+            Some(crate::browser::default_release().transport_base_major)
+        );
+        assert!(matches!(
+            transport_recipe(154),
+            wreq_util::Profile::Chrome154
+        ));
+    }
+
+    #[cfg(feature = "impersonate")]
+    #[test]
+    #[should_panic(expected = "browser_releases.json names unsupported transport recipe Chrome155")]
+    fn an_unknown_transport_recipe_is_a_registry_error() {
+        let _ = transport_recipe(155);
+    }
+
+    #[tokio::test]
+    async fn a_method_changing_redirect_drops_request_body_headers() {
+        // Fetch 4.4 HTTP-redirect fetch step 12: a POST turned into GET removes the
+        // request-body header names; other author headers stay.
+        let (origin, mut heads) = serve(vec![
+            b"HTTP/1.1 303 See Other\r\nLocation: /landing\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+        ])
+        .await;
+        let mut headers = BTreeMap::new();
+        for (name, value) in [
+            ("content-type", "text/plain"),
+            ("content-language", "en"),
+            ("content-location", "/x"),
+            ("content-encoding", "identity"),
+            ("x-keep", "1"),
+        ] {
+            headers.insert(name.to_owned(), value.to_owned());
+        }
+        let response = fetch_stream(
+            &format!("{origin}/form"),
+            FetchOptions {
+                method: Some("POST".into()),
+                body: Some("a=1".into()),
+                headers,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.final_url, format!("{origin}/landing"));
+        let post = heads.recv().await.unwrap();
+        assert!(post.starts_with("post /form "), "{post}");
+        assert!(post.contains("content-language: en\r\n"), "{post}");
+        let get = heads.recv().await.unwrap();
+        assert!(get.starts_with("get /landing "), "{get}");
+        for gone in [
+            "content-type",
+            "content-language",
+            "content-location",
+            "content-encoding",
+        ] {
+            assert!(!get.contains(&format!("{gone}:")), "{gone} in {get}");
+        }
+        assert!(get.contains("x-keep: 1\r\n"), "{get}");
+    }
+
+    #[tokio::test]
+    async fn streaming_uploads_need_https_and_the_upload_pool() {
+        let (_sender, upload) = crate::upload::upload_channel(16);
+        let error = fetch_stream(
+            "http://127.0.0.1:1/upload",
+            FetchOptions {
+                method: Some("POST".into()),
+                upload_body: Some(upload.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(error.message, "Streaming requests require secure HTTP/2");
+        // An https target builds the dedicated upload pool, then fails to connect.
+        let error = fetch_stream(
+            "https://127.0.0.1:1/upload",
+            FetchOptions {
+                method: Some("POST".into()),
+                upload_body: Some(upload),
+                ..Default::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(error.code, ErrorCode::Network);
+        assert!(
+            error.message.contains("(url: https://127.0.0.1:1/upload)"),
+            "{}",
+            error.message
+        );
+        // With session client hints the session's upload pool is used instead.
+        let hints = ClientHints::default();
+        let (_sender, upload) = crate::upload::upload_channel(16);
+        let error = fetch_stream(
+            "https://127.0.0.1:1/hinted",
+            FetchOptions {
+                method: Some("POST".into()),
+                upload_body: Some(upload),
+                client_hints: Some(&hints),
+                ..Default::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(
+            error.message.contains("(url: https://127.0.0.1:1/hinted)"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_site_data_cache_clears_the_dictionary_store_and_dcb_needs_a_dictionary() {
+        let (origin, _heads) = serve(vec![
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            b"HTTP/1.1 200 OK\r\nClear-Site-Data: \"cookies\", \"cache\"\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Encoding: dcb\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+        ])
+        .await;
+        let store = DictionaryStore::default();
+        let generation = store.generation();
+        for (path, cleared) in [("/plain", 0), ("/clear", 1)] {
+            fetch_stream(
+                &format!("{origin}{path}"),
+                FetchOptions {
+                    dictionary_store: Some(&store),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(store.generation(), generation + cleared, "{path}");
+        }
+        // Content-Encoding: dcb without an advertised dictionary is a network error.
+        let error = fetch_stream(&format!("{origin}/dcb"), FetchOptions::default())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.message,
+            "Dictionary response without an advertised dictionary"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_streamed_dictionary_is_registered_only_within_eight_mib() {
+        use crate::compression_dictionary::MAX_DICTIONARY_BYTES;
+        use crate::request_context::{Destination, RequestMode};
+        let context =
+            RequestContext::resource("https://dict.test/", Destination::Script, RequestMode::Cors);
+        for (extra, stored) in [(0, true), (1, false)] {
+            let store = DictionaryStore::default();
+            let pending = PendingDictionary::new(
+                &store,
+                store.generation(),
+                "p",
+                "https://dict.test/d",
+                &context,
+                200,
+                vec![
+                    ("use-as-dictionary".into(), "match=\"/*\"".into()),
+                    ("cache-control".into(), "max-age=60".into()),
+                ],
+                std::time::SystemTime::now(),
+            );
+            let chunks = vec![
+                Ok(bytes::Bytes::from(vec![1; MAX_DICTIONARY_BYTES - 1])),
+                Ok(bytes::Bytes::from(vec![2; 1 + extra])),
+            ];
+            let mut body = ResponseBody {
+                stream: Some(Box::pin(futures_util::stream::iter(chunks))),
+                received: 0,
+                max_bytes: usize::MAX,
+                trace_id: 0,
+                url: "https://dict.test/d".into(),
+                status: 200,
+                content_type: String::new(),
+                trace_body: None,
+                trace_prefix: 0,
+                trace_skip_prefix: 0,
+                cache_store: None,
+                dictionary_store: pending,
+                background: None,
+            };
+            let mut received = 0;
+            while let Some(chunk) = body.next_chunk().await.unwrap() {
+                received += chunk.len();
+            }
+            assert_eq!(received, MAX_DICTIONARY_BYTES + extra);
+            let selected = store.select("p", "https://dict.test/a", &context);
+            assert_eq!(selected.is_some(), stored, "extra {extra}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_background_fill_honours_a_closed_owner_and_a_detached_consumer() {
+        const CACHEABLE: &[u8] = b"HTTP/1.1 200 OK\r\nCache-Control: max-age=60\r\nContent-Type: text/html\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello";
+        let (origin, _heads) = serve(vec![CACHEABLE, CACHEABLE]).await;
+        let cache = HttpCache::default();
+        let options = |mode| FetchOptions {
+            http_cache: Some(&cache),
+            cache_mode: mode,
+            ..Default::default()
+        };
+        // An owner that is already gone cancels the fill before any transport read.
+        let (_owner, closed) = tokio::sync::watch::channel(true);
+        let mut body = fetch_stream(&format!("{origin}/owned"), options(CacheMode::Default))
+            .await
+            .unwrap()
+            .body
+            .background_cache(closed);
+        let error = body.next_chunk().await.err().unwrap();
+        assert_eq!(error.message, "Response body canceled");
+        assert_eq!(body.background_status(), Some(false));
+        assert!(
+            fetch_stream(&format!("{origin}/owned"), options(CacheMode::OnlyIfCached))
+                .await
+                .is_err()
+        );
+        // A detached consumer queues nothing, but the native fill still completes
+        // and every transport chunk still reaches the observer.
+        let (_owner, open) = tokio::sync::watch::channel(false);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let observer: ResponseChunkObserver =
+            std::sync::Arc::new(move |bytes: &[u8]| sink.lock().unwrap().extend_from_slice(bytes));
+        let mut body = fetch_stream(&format!("{origin}/detached"), options(CacheMode::Default))
+            .await
+            .unwrap()
+            .body
+            .background_cache_with_observer(open, Some(observer));
+        assert!(body.detach_cache_consumer());
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !body.background_complete() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(body.background_status(), Some(true));
+        assert_eq!(*seen.lock().unwrap(), b"hello");
+        assert!(body
+            .background
+            .as_ref()
+            .unwrap()
+            .state
+            .lock()
+            .unwrap()
+            .chunks
+            .is_empty());
+        let mut cached = fetch_stream(
+            &format!("{origin}/detached"),
+            options(CacheMode::OnlyIfCached),
+        )
+        .await
+        .unwrap();
+        assert_eq!(cached.body.next_chunk().await.unwrap().unwrap(), b"hello");
     }
 }

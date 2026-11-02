@@ -39,8 +39,8 @@ async fn collect(
 }
 async fn recovered() {
     tokio::time::timeout(Duration::from_secs(10), async {
-        let first = decode::reserve().await.unwrap();
-        let second = decode::reserve().await.unwrap();
+        let first = decode::reserve().await;
+        let second = decode::reserve().await;
         drop((first, second));
     })
     .await
@@ -141,8 +141,8 @@ async fn late_transport_error_truncation_hash_and_output_caps_never_report_succe
 #[tokio::test]
 async fn transport_is_not_polled_until_worker_admission_and_cancelled_waiters_release() {
     let _serial = decode::TEST_SERIAL.lock().await;
-    let first = decode::reserve().await.unwrap();
-    let second = decode::reserve().await.unwrap();
+    let first = decode::reserve().await;
+    let second = decode::reserve().await;
     let polls = Arc::new(AtomicUsize::new(0));
     let observed = polls.clone();
     let input = Box::pin(futures_util::stream::poll_fn(move |_| {
@@ -310,4 +310,73 @@ async fn panicking_transport_after_complete_codec_frame_cannot_commit_success() 
         assert!(error.to_string().contains("without terminal input success"));
         recovered().await;
     }
+}
+#[tokio::test]
+async fn encoded_transport_over_32_mib_and_an_early_worker_exit_end_the_producer() {
+    let _serial = decode::TEST_SERIAL.lock().await;
+    // One transport chunk past the 32 MiB encoded cap fails before the codec sees it.
+    let huge = source(vec![Ok(Bytes::from(vec![
+        0;
+        decode::MAX_ENCODED_BYTES + 1
+    ]))]);
+    let error = collect(decode::decode_stream(
+        "dcb".into(),
+        huge,
+        dictionary(),
+        usize::MAX,
+    ))
+    .await
+    .unwrap_err();
+    assert!(matches!(error, decode::DecodeError::Size), "{error}");
+    // The worker rejects a bad header and stops reading; the producer then stops
+    // forwarding an endless transport instead of buffering it.
+    let endless: Source = Box::pin(futures_util::stream::repeat_with(|| {
+        Ok(Bytes::from_static(&[0; 1024]))
+    }));
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        collect(decode::decode_stream(
+            "dcz".into(),
+            endless,
+            dictionary(),
+            usize::MAX,
+        )),
+    )
+    .await
+    .expect("the producer must stop once the worker has exited")
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Dictionary response magic or SHA-256 mismatch"
+    );
+    recovered().await;
+}
+
+#[tokio::test]
+async fn the_encoded_cap_is_cumulative_and_inclusive() {
+    let _serial = decode::TEST_SERIAL.lock().await;
+    let run = |chunks: Vec<usize>| {
+        let source = source(
+            chunks
+                .into_iter()
+                .map(|length| Ok(Bytes::from(vec![0; length])))
+                .collect(),
+        );
+        collect(decode::decode_stream(
+            "dcb".into(),
+            source,
+            dictionary(),
+            usize::MAX,
+        ))
+    };
+    // Exactly 32 MiB passes the transport cap and reaches the (mismatching) header check.
+    let error = run(vec![decode::MAX_ENCODED_BYTES]).await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Dictionary response magic or SHA-256 mismatch"
+    );
+    // One byte more, split across chunks, is over the cap.
+    let error = run(vec![1, decode::MAX_ENCODED_BYTES]).await.unwrap_err();
+    assert!(matches!(error, decode::DecodeError::Size), "{error}");
+    recovered().await;
 }

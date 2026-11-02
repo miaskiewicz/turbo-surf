@@ -933,4 +933,49 @@ mod tests {
         // 4 tokens but the date field doesn't split into 3 on '-' → None.
         assert!(httpdate_ms("Mon, 06Nov94 08:49:37 GMT").is_none());
     }
+
+    #[test]
+    fn public_suffix_domain_cookie_from_the_suffix_itself_is_host_only() {
+        // A host that IS a public suffix may set Domain=<itself>; like Chrome the cookie
+        // becomes host-only, so subdomains never receive it.
+        let mut jar = CookieJar::new();
+        jar.set_from_response("https://github.io/", &["a=1; Domain=github.io".into()], 0.0);
+        assert_eq!(jar.cookie_header("https://github.io/x", 0.0), "a=1");
+        assert_eq!(jar.cookie_header("https://user.github.io/", 0.0), "");
+    }
+
+    #[test]
+    fn document_cookie_writes_ignore_bad_urls_bad_lines_and_httponly() {
+        let mut jar = CookieJar::new();
+        jar.set_from_document("not a url", "a=1", 0.0);
+        jar.set_from_document("https://x.test/", "", 0.0);
+        jar.set_from_document("https://x.test/", "h=1; HttpOnly", 0.0);
+        assert_eq!(jar.size(), 0);
+        jar.set_from_document("https://x.test/", "ok=1", 0.0);
+        assert_eq!(jar.cookie_header("https://x.test/", 0.0), "ok=1");
+        // RFC 6265bis 5.7 step 21: a script cannot overwrite a live HttpOnly cookie,
+        // but may set the same name once it has expired.
+        jar.set_from_response(
+            "https://x.test/",
+            &["sid=server; HttpOnly; Max-Age=60".into()],
+            0.0,
+        );
+        jar.set_from_document("https://x.test/", "sid=script", 1.0);
+        assert_eq!(
+            jar.cookie_header("https://x.test/", 1.0),
+            "ok=1; sid=server"
+        );
+        jar.set_from_document("https://x.test/", "sid=script", 120_000.0);
+        assert_eq!(
+            jar.cookie_header("https://x.test/", 120_000.0),
+            "ok=1; sid=script"
+        );
+    }
+
+    #[test]
+    fn document_cookie_domain_attribute_widens_to_the_registrable_domain() {
+        let mut jar = CookieJar::new();
+        jar.set_from_document("https://www.x.test/", "d=1; Domain=x.test", 0.0);
+        assert_eq!(jar.cookie_header("https://api.x.test/", 0.0), "d=1");
+    }
 }

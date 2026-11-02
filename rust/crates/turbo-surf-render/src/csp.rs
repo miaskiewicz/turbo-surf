@@ -460,22 +460,6 @@ pub struct DocumentPolicy {
     referrer_metas: Vec<(usize, turbo_surf_core::referrer_policy::ReferrerPolicy)>,
     next_referrer_meta: usize,
 }
-fn active_parser_node(
-    tree: &turbo_dom_parser::rtdom::Tree,
-    node: turbo_dom_parser::rtdom::Handle,
-) -> bool {
-    let mut ancestor = Some(turbo_dom_parser::rtdom::NodeRef::new(tree, node));
-    while let Some(parent) = ancestor {
-        if tree.node_type_id(parent.handle()) == 11 {
-            return false;
-        }
-        if parent.handle() == tree.root() {
-            return true;
-        }
-        ancestor = parent.parent();
-    }
-    false
-}
 impl DocumentPolicy {
     pub fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
         let values = headers
@@ -497,11 +481,10 @@ impl DocumentPolicy {
         let mut metas = Vec::new();
         let mut referrer_metas = Vec::new();
         for &node in tree.query_selector_all("script,meta").iter() {
-            // The active native script list excludes associated template trees.
-            // Their scripts cannot advance parser phases or activate their metas.
-            if !active_parser_node(&tree, node) {
-                continue;
-            }
+            // The active native script list excludes associated template trees:
+            // query_selector_all walks the document's light tree only, so template
+            // contents (and their scripts and metas) never appear here
+            // (metas_inside_templates_never_activate).
             if tree
                 .tag_name(node)
                 .is_some_and(|name| name.eq_ignore_ascii_case("script"))
@@ -547,7 +530,7 @@ impl DocumentPolicy {
         }
         let mut initial_base = active.clone();
         for &node in tree.query_selector_all("base,meta").iter() {
-            if tree.namespace_id(node) != 0 || !active_parser_node(&tree, node) {
+            if tree.namespace_id(node) != 0 {
                 continue;
             }
             if tree.local_name(node) == Some("base") && tree.get_attribute(node, "href").is_some() {
@@ -658,6 +641,27 @@ mod tests {
             partial.unsupported(),
             vec!["form-action", "sandbox", "script-src: 'strict-dynamic'"]
         );
+    }
+
+    #[test]
+    fn host_sources_match_schemes_with_the_http_to_https_upgrade_only() {
+        // CSP3 6.7.2.8: a host-source's scheme must equal the URL's, except that an
+        // "http" source also matches "https"; a schemeless source takes the
+        // protected resource's scheme.
+        let doc = "https://page.test/";
+        let matches = |source, target| matches_source(source, doc, target, false);
+        assert!(matches("http://a.test", "https://a.test/x.js"));
+        assert!(matches("http://a.test", "http://a.test/x.js"));
+        assert!(!matches("https://a.test", "http://a.test/x.js"));
+        assert!(!matches("http://a.test", "ws://a.test/x"));
+        assert!(matches("a.test", "https://a.test/x.js"));
+        assert!(!matches("a.test", "http://a.test/x.js"));
+        assert!(matches_source(
+            "a.test",
+            "http://page.test/",
+            "https://a.test/",
+            false
+        ));
     }
 
     #[test]
@@ -790,5 +794,101 @@ mod tests {
             "",
             false
         ));
+    }
+
+    #[test]
+    fn source_expressions_match_ports_keywords_and_bad_urls_like_chrome() {
+        let doc = "https://page.test/";
+        // A keyword never matches a URL; an unparsable target never matches.
+        assert!(!matches_source(
+            "'unsafe-inline'",
+            doc,
+            "https://x.test/",
+            false
+        ));
+        assert!(!matches_source("https:", doc, "not a url", false));
+        // Explicit port: exact or the scheme default; `*` any; none = default only.
+        assert!(matches_source(
+            "x.test:8080",
+            doc,
+            "https://x.test:8080/a",
+            false
+        ));
+        assert!(!matches_source(
+            "x.test:8080",
+            doc,
+            "https://x.test:8081/a",
+            false
+        ));
+        assert!(matches_source("x.test:443", doc, "https://x.test/a", false));
+        assert!(!matches_source(
+            "x.test:abc",
+            doc,
+            "https://x.test/a",
+            false
+        ));
+        assert!(matches_source("x.test:*", doc, "https://x.test:9/a", false));
+        assert!(matches_source("x.test", doc, "https://x.test:443/a", false));
+        assert!(!matches_source(
+            "x.test",
+            doc,
+            "https://x.test:8443/a",
+            false
+        ));
+    }
+
+    #[test]
+    fn eval_violations_report_each_policy_without_unsafe_eval() {
+        let policy = Policy::new(
+            "https://eval.test/",
+            [
+                "script-src 'self' 'report-sample'; report-uri /r".into(),
+                "script-src 'unsafe-eval'".into(),
+                "img-src 'none'".into(),
+            ],
+        );
+        let records = policy.eval_violations();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].original,
+            "script-src 'self' 'report-sample'; report-uri /r"
+        );
+        assert!(records[0].sample);
+        assert!(matches!(
+            &records[0].destination,
+            ReportDestination::Legacy(uris) if uris == &["/r".to_string()]
+        ));
+        let quiet = Policy::new("https://eval.test/", ["script-src 'self'".into()]);
+        assert!(!quiet.eval_violations()[0].sample);
+        assert!(
+            Policy::new("https://eval.test/", ["script-src 'unsafe-eval'".into()])
+                .eval_violations()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn metas_inside_templates_never_activate() {
+        let html = "<head><template><meta http-equiv=Content-Security-Policy \
+                    content=\"img-src 'none'\"><script></script></template>\
+                    <meta http-equiv=Content-Security-Policy content=\"script-src 'self'\"></head>";
+        let mut doc = DocumentPolicy::new("https://meta.test/", &[], html);
+        doc.activate(usize::MAX);
+        assert!(doc
+            .current()
+            .allows_request("img-src", "https://other.test/i.png", "", false));
+        assert!(!doc.current().allows_request(
+            "script-src-elem",
+            "https://other.test/s.js",
+            "",
+            false
+        ));
+        // A template's <base> does not end the initial-base meta scan either.
+        let html = "<head><template><base href='/t/'></template>\
+                    <meta http-equiv=Content-Security-Policy content=\"base-uri 'none'\"></head>";
+        let doc = DocumentPolicy::new("https://meta.test/", &[], html);
+        assert!(!doc
+            .initial_base
+            .allows_request("base-uri", "https://meta.test/t/", "", false));
     }
 }

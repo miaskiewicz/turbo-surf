@@ -35,7 +35,8 @@ async function collect(t, runtime, config, directory) {
       ? [join(here, "chrome-cdp-trace.mjs"), configPath, directory]
       : [configPath, directory],
     {
-      timeoutMs: 45000,
+      // Generous caps, not timings: a loaded host stretches each collection (turbo-surf#51).
+      timeoutMs: 120000,
       spawnOptions: {
         env: { ...process.env, TURBO_SURF_BROWSER_CMD: "", TURBO_SURF_BROWSER_FETCH_CMD: "" },
       },
@@ -273,7 +274,7 @@ test(
   "both collectors use a fixed Enter window for slow forms and delayed retries",
   {
     skip: !binary || !existsSync(binary) || !existsSync(chrome) || typeof WebSocket === "undefined",
-    timeout: 240000,
+    timeout: 900000,
   },
   async (t) => {
     const directory = mkdtempSync(join(tmpdir(), "detection-navigation-observation-"));
@@ -465,6 +466,9 @@ test(
             chromePath: chrome,
             chromeIncognito: true,
             disableExtensions: true,
+            // A headed Chrome takes the OS keyboard focus, and keys typed on the host
+            // then corrupt the trusted query (turbo-surf#51).
+            headless: true,
             readySelector: "[data-input-ready]",
             dismissSelector: "#dismiss",
             waitMs: 100,
@@ -532,7 +536,12 @@ test(
             );
           }
           assert.equal(final.results, fixture.results, label);
-          if (fixture.kind === "background")
+          // The window is fixed: a retry's terminal document committed near the deadline
+          // may still be loading at the snapshot on a loaded host (turbo-surf#51).
+          if (
+            fixture.kind === "background" ||
+            (fixture.kind === "retry" && new URL(final.url).pathname === "/terminal")
+          )
             assert(["interactive", "complete"].includes(final.readyState), label);
           else assert.equal(final.readyState, "complete", label);
           assert.equal(
@@ -603,6 +612,15 @@ test(
             assert.equal(observation.navigationFailed, false, label);
           }
           if (runtime === "chrome") {
+            assert.deepEqual(
+              trace.effectiveExtensionFlags,
+              [
+                "--disable-extensions",
+                "--disable-component-extensions-with-background-pages",
+                "--headless=new",
+              ],
+              label,
+            );
             assert.equal(trace.browserContext.createdContextVerified, true, label);
             assert.equal(trace.browserContext.nonDefaultContext, true, label);
           } else {

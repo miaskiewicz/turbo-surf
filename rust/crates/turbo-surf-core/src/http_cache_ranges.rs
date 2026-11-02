@@ -127,4 +127,79 @@ mod tests {
         assert_eq!(ByteRange::content("bytes 4-10/10"), None);
         assert_eq!(ByteRange::content("bytes 4-9/*"), None);
     }
+    #[test]
+    fn appending_past_the_part_limit_keeps_only_the_new_parts() {
+        let mut many = SparseBody::new(4096);
+        for i in 0..1024 {
+            assert!(many.insert(
+                ByteRange {
+                    start: i,
+                    end: i + 1
+                },
+                vec![b'a']
+            ));
+        }
+        assert!(!many.insert(
+            ByteRange {
+                start: 2000,
+                end: 2001
+            },
+            vec![b'z']
+        ));
+        let mut more = SparseBody::new(4096);
+        assert!(more.insert(
+            ByteRange {
+                start: 3000,
+                end: 3002
+            },
+            b"xy".to_vec()
+        ));
+        many.append(more);
+        assert_eq!(many.size(), 2);
+        assert_eq!(
+            many.slice(ByteRange {
+                start: 3000,
+                end: 3002
+            })
+            .unwrap(),
+            b"xy"
+        );
+        assert_eq!(many.slice(ByteRange { start: 0, end: 1 }), None);
+        // Exactly 1024 parts after the append is still within the limit.
+        let mut full = SparseBody::new(4096);
+        for i in 0..1023 {
+            assert!(full.insert(
+                ByteRange {
+                    start: i,
+                    end: i + 1
+                },
+                vec![b'a']
+            ));
+        }
+        let mut last = SparseBody::new(4096);
+        assert!(last.insert(
+            ByteRange {
+                start: 1023,
+                end: 1024
+            },
+            vec![b'b']
+        ));
+        full.append(last);
+        assert_eq!(full.size(), 1024);
+        assert_eq!(
+            full.slice(ByteRange {
+                start: 1022,
+                end: 1024
+            })
+            .unwrap(),
+            b"ab"
+        );
+        // Under the limit, parts merge in start order.
+        let mut a = SparseBody::new(4);
+        assert!(a.insert(ByteRange { start: 2, end: 4 }, b"cd".to_vec()));
+        let mut b = SparseBody::new(4);
+        assert!(b.insert(ByteRange { start: 0, end: 2 }, b"ab".to_vec()));
+        a.append(b);
+        assert_eq!(a.slice(ByteRange { start: 0, end: 4 }).unwrap(), b"abcd");
+    }
 }

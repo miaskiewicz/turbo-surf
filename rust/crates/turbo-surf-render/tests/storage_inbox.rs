@@ -80,7 +80,7 @@ async fn accepted_response_notices_survive_inbox_overflow() {
     }
     // The first checkpoint reports overflow; the accepted notices stay queued.
     let error = page
-        .eval_expression("globalThis[Symbol.for('ts')].runTimers()")
+        .eval_engine_expression("__tsNs.runTimers()")
         .await
         .unwrap_err();
     assert!(

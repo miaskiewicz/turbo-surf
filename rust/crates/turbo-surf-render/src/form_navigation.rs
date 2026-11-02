@@ -19,7 +19,9 @@ pub(super) struct FilePart {
 
 /// Encoding accepts the entry list after successful-controls construction. Modern
 /// HTML form submission selects its native document encoding before normalization.
-#[allow(clippy::too_many_arguments, dead_code)]
+/// `files[i]` holds the File snapshot of entry `i` (whose text is then its file
+/// name), which multipart/form-data encodes as a file part.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn prepare(
     document_url: &str,
     resolved_action: &str,
@@ -27,34 +29,7 @@ pub(super) fn prepare(
     enctype: &str,
     target: &str,
     entries: &[(String, String)],
-    charset_entries: &[usize],
-    encoding: &'static encoding_rs::Encoding,
-) -> Result<Submission, String> {
-    prepare_with_files(
-        document_url,
-        resolved_action,
-        method,
-        enctype,
-        target,
-        entries,
-        &[],
-        charset_entries,
-        encoding,
-    )
-}
-
-/// As [`prepare`]; `files[i]` holds the File snapshot of entry `i` (whose text is
-/// then its file name), which multipart/form-data encodes as a file part.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn prepare_with_files(
-    document_url: &str,
-    resolved_action: &str,
-    method: &str,
-    enctype: &str,
-    target: &str,
-    entries: &[(String, String)],
     files: &[Option<FilePart>],
-    charset_entries: &[usize],
     encoding: &'static encoding_rs::Encoding,
 ) -> Result<Submission, String> {
     if !target.is_empty() && !target.eq_ignore_ascii_case("_self") {
@@ -71,15 +46,7 @@ pub(super) fn prepare_with_files(
     }
     let entries = entries
         .iter()
-        .enumerate()
-        .map(|(index, (name, value))| {
-            let value = if charset_entries.contains(&index) {
-                encoding.name()
-            } else {
-                value
-            };
-            (newlines(name), newlines(value))
-        })
+        .map(|(name, value)| (newlines(name), newlines(value)))
         .collect::<Vec<_>>();
     let encoded = || {
         entries
@@ -229,4 +196,46 @@ pub(super) fn multipart(
     }
     out.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     out
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::prepare;
+
+    fn plan(action: &str, method: &str, enctype: &str) -> Result<super::Submission, String> {
+        let entries = [("q".to_string(), "a b".to_string())];
+        prepare(
+            "https://forms.test/dir/page?old=1",
+            action,
+            method,
+            enctype,
+            "",
+            &entries,
+            &[],
+            encoding_rs::UTF_8,
+        )
+    }
+
+    #[test]
+    fn unsupported_schemes_encodings_and_methods_are_named_errors() {
+        assert_eq!(
+            plan("ftp://forms.test/", "get", "").unwrap_err(),
+            "Native form submission requires an HTTP(S) action"
+        );
+        assert_eq!(
+            plan("relative", "get", "").unwrap_err(),
+            "Native form action is not an absolute URL"
+        );
+        assert_eq!(
+            plan("https://forms.test/", "post", "application/json").unwrap_err(),
+            "Native form encoding is not supported"
+        );
+        assert_eq!(
+            plan("https://forms.test/", "dialog", "").unwrap_err(),
+            "Native form method is not supported"
+        );
+        let text = plan("https://forms.test/t", "post", "text/plain").unwrap();
+        assert_eq!(text.body.unwrap(), b"q=a b\r\n");
+        assert_eq!(text.headers["content-type"], "text/plain");
+    }
 }

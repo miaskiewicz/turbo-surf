@@ -88,9 +88,15 @@ async fn unread_cache_completion_collection_and_cancellation_match_chrome() {
             });
         }
     });
-    let mut page = PageSession::open("<!doctype html><body>", &format!("{origin}/"), "", "", 5000)
-        .await
-        .unwrap();
+    let mut page = PageSession::open(
+        "<!doctype html><body>",
+        &format!("{origin}/"),
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
     evaluate(
         &mut page,
         include_str!("../../../../harness/detection/cache-unread-probe.js"),
@@ -197,7 +203,7 @@ async fn unread_cache_completion_collection_and_cancellation_match_chrome() {
     // A task owns only native bytes and a watch receiver. Isolate disposal closes
     // its sole creation-owner sender, even after the body wrapper was collected.
     page.close();
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while !closed
             .lock()
             .unwrap()

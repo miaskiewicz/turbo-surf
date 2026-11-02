@@ -1,0 +1,22 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "00ee0f7066514c3e7dbf95831c9aea7178fe50e8b1c31d518bd0365fe84e90ee",
+  "casesSha256": "e28006a23d236317e42c74d034d5244f665cae08f80ce79160f7ef136cd43b75",
+  "collectorSha256": "8d8d8c37f60fe89195855586de28943e29ee8f79cee4d38c05f82cdde10d8ae4",
+  "errors": [],
+  "result": [
+    {
+      "id": "frame",
+      "result": {
+        "authored": [true, true, true, "InvalidStateError", 11],
+        "authoredClone": [true, "InvalidStateError", "authored"],
+        "decode": [true, true, true, "EncodingError", 0],
+        "decodeClone": [true, "EncodingError", "The source image cannot be decoded."],
+        "childDecode": [true, false],
+        "selector": [true, true, true, "SyntaxError", 12],
+        "crossRealmGetters": ["SecurityError", "m", 18],
+        "foreignClone": [true, "SecurityError", "m"]
+      }
+    }
+  ]
+}

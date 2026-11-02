@@ -1,7 +1,8 @@
 # browser_env gaps blocking real-SPA hydration (for turbo-test)
 
-turbo-surf's render tier vendors turbo-test's `browser_env` (the rtdom↔V8 DOM
-binding). Driving a **real production SPA** (Next.js + Turbopack + React + PropelAuth,
+turbo-surf's render tier runs turbo-test's `browser_env` (the rtdom↔V8 DOM
+binding; vendored when this was written, now the `turbo-dom-browser-env` crate
+dependency, where binding fixes land). Driving a **real production SPA** (Next.js + Turbopack + React + PropelAuth,
 payroll's `/login`) through it surfaced DOM-element APIs the binding doesn't implement
 yet. The JS-global layer (URL, MessageChannel, performance, TextEncoder, ReadableStream,
 AbortController, the script-injection pump, …) lives in turbo-surf's `ENV_BOOTSTRAP`
@@ -9,7 +10,7 @@ and is done. **These remaining gaps are element/document features that belong in
 binding itself** — i.e. turbo-test's `browser_env.{rs,js}`. Adding them upstream + a
 re-vendor closes them here.
 
-Probed against the current vendored binding (turbo-test @ b3fb989). Each is a real
+Probed against the then-vendored binding (turbo-test @ b3fb989). Each is a real
 property/method a live React/PropelAuth bundle reads during hydration; an `undefined`
 read becomes a `TypeError` (`X.classList`/`X.toLowerCase` of undefined) that aborts the
 mount.

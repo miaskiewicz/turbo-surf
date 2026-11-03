@@ -155,13 +155,6 @@ async fn image_input_width_and_height_match_chrome156() {
         ("/images/hidden/0", 0, 6),
         ("/images/hidden/1", 0, 4),
         ("/images/hiddenAttribute/1", 0, 4),
-        // An unloaded image button takes turbo-dom 0.7.0's broken-image size
-        // (#243, at turbo-dom a539d7c: 57x15, 49x15 under zoom; it was 0x0 at
-        // f201429 and 7f63e99); Chrome reports the image's 6x4 natural size.
-        ("/images/rendered/0", 57, 6),
-        ("/images/rendered/1", 15, 4),
-        ("/images/renderedZoom/0", 49, 6),
-        ("/images/renderedZoom/1", 15, 4),
     ] {
         known_gap(
             &actual,
@@ -171,6 +164,25 @@ async fn image_input_width_and_height_match_chrome156() {
             chrome.into(),
         );
     }
+    // KNOWN_GAP: an unloaded image button takes turbo-dom 0.7.0's broken-image box
+    // (#243, since turbo-dom a539d7c; it was 0x0 before): its size follows the
+    // host's fallback font (57x15 macOS, 59 wide on Linux), so it is pinned as a
+    // non-empty box no larger than the unzoomed one. Chrome reports the image's 6x4
+    // natural size.
+    let size = |pointer: &str| actual.pointer(pointer).and_then(Value::as_f64).unwrap();
+    for (pointer, chrome) in [
+        ("/images/rendered/0", 6),
+        ("/images/rendered/1", 4),
+        ("/images/renderedZoom/0", 6),
+        ("/images/renderedZoom/1", 4),
+    ] {
+        let slot = expected.pointer_mut(pointer).unwrap();
+        assert_eq!(*slot, Value::from(chrome), "Chrome {pointer}");
+        assert!(size(pointer) > 8.0, "native {pointer}: {}", size(pointer));
+        *slot = actual.pointer(pointer).unwrap().clone();
+    }
+    assert!(size("/images/renderedZoom/0") < size("/images/rendered/0"));
+    assert_eq!(size("/images/renderedZoom/1"), size("/images/rendered/1"));
     // KNOWN_GAP: Chrome has no layout object until the next style update after
     // insertion and reports the attribute meanwhile; native layout is always
     // current, so it reports the content box immediately.

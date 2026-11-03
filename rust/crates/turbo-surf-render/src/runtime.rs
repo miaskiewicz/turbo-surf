@@ -3536,6 +3536,31 @@ fn op_timer_task_active(scope: &mut v8::PinScope, document: v8::Local<v8::Object
         .is_some_and(|context| window_timer_nesting(context).task.get())
 }
 
+/// Publish `document`'s realm's timer-task base (NaN for a rendering task) agent-wide.
+#[op2(fast)]
+fn op_timer_publish_task_base(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    base: f64,
+) {
+    let Some(context) = document.get_creation_context(scope) else {
+        return;
+    };
+    let nesting = window_timer_nesting(context);
+    let state = JsRuntime::op_state_from(scope);
+    let state = state.borrow();
+    *state.borrow::<TimerClock>().task_base.borrow_mut() = Some((nesting, base));
+}
+
+/// The agent's running timer-task base, or NaN outside a (non-rendering) timer task.
+#[op2(fast)]
+fn op_timer_agent_task_base(state: &mut OpState) -> f64 {
+    match &*state.borrow::<TimerClock>().task_base.borrow() {
+        Some((nesting, base)) if nesting.task.get() => *base,
+        _ => f64::NAN,
+    }
+}
+
 #[op2(fast)]
 fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>, level: u32) {
     if let Some(context) = document.get_creation_context(scope) {
@@ -3585,6 +3610,10 @@ struct TimerClock {
     /// One task order across the agent's Window realms: timers and posted
     /// messages with the same deadline run in the order they were queued.
     sequence: std::cell::Cell<f64>,
+    /// The running timer task's base clock, agent-wide: a timer queued in any
+    /// same-agent realm during that task counts from it (turbo-surf#128). Valid only
+    /// while the publishing realm's task is still active.
+    task_base: std::cell::RefCell<Option<(Rc<WindowTimerNesting>, f64)>>,
 }
 impl TimerClock {
     fn now(&self) -> f64 {
@@ -3604,6 +3633,7 @@ impl Default for TimerClock {
             advance: std::cell::Cell::new(0.0),
             resource_cursor: std::cell::Cell::new(0),
             sequence: std::cell::Cell::new(0.0),
+            task_base: std::cell::RefCell::new(None),
         }
     }
 }
@@ -7084,6 +7114,8 @@ deno_core::extension!(
         op_timer_nesting,
         op_timer_set_nesting,
         op_timer_task_active,
+        op_timer_publish_task_base,
+        op_timer_agent_task_base,
         op_run_local_timers,
         op_run_frame_timers,
         op_frame_pending,
@@ -7927,7 +7959,13 @@ const __timerNow = () => ops.op_timer_clock();
 let __taskBase = null, __taskBaseEpoch = -1;
 // Only while the host runs a timer task (and its microtask checkpoint) in this realm; a
 // rendering frame's own tasks keep the live clock.
-const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers && ops.op_timer_task_active(__timerDocument) ? __taskBase : __timerNow();
+// A realm outside its own task reads the agent's running timer task (turbo-surf#128).
+const __taskClock = () => {
+  if (__realWindowTimers) return __timerNow();
+  if (__taskBase !== null && __taskBaseEpoch === __taskEpoch && ops.op_timer_task_active(__timerDocument)) return __taskBase;
+  const base = ops.op_timer_agent_task_base();
+  return base === base ? base : __timerNow();
+};
 const __realWindowTimers = ops.op_window_timers_realtime();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
@@ -8167,7 +8205,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const timer=__timers[index];
     // Every caller, including hydration and child-frame drains, obeys this policy.
     if(__realWindowTimers && timer.due>__timerNow())break;
-    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:__taskBaseFor(timer.due);__taskBaseEpoch=__taskEpoch;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:__taskBaseFor(timer.due);__taskBaseEpoch=__taskEpoch;ops.op_timer_publish_task_base(__timerDocument,__taskBase===null?NaN:__taskBase);
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);

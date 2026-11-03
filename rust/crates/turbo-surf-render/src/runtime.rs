@@ -6905,12 +6905,12 @@ fn op_route_promise_rejection(
     promise: v8::Local<v8::Object>,
     reason: v8::Local<v8::Value>,
     handled: bool,
-) {
+) -> bool {
     let (Some(context), Some(key)) = (
         promise.get_creation_context(scope),
         rejection_realm_key(scope),
     ) else {
-        return;
+        return false;
     };
     let scope = &mut v8::ContextScope::new(scope, context);
     let Some(realm) = context
@@ -6918,18 +6918,21 @@ fn op_route_promise_rejection(
         .get_private(scope, key)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
     else {
-        return;
+        return false;
     };
     let name = if handled { "handled" } else { "unhandled" };
     let Some(key) = v8::String::new(scope, name) else {
-        return;
+        return false;
     };
-    if let Some(method) = realm
+    let Some(method) = realm
         .get(scope, key.into())
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
-    {
-        method.call(scope, realm.into(), &[promise.into(), reason]);
-    }
+    else {
+        return false;
+    };
+    method
+        .call(scope, realm.into(), &[promise.into(), reason])
+        .is_some()
 }
 
 fn install_environment<'s>(
@@ -9141,7 +9144,8 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   const queued = new WeakSet();
   const handledBeforeReport = new WeakSet();
   const fire = (type, promise, reason, cancelable) => {
-    const event = new hostRejectionEvent(type, {promise, reason, cancelable});
+    // A null-prototype init: page getters on Object.prototype never run here.
+    const event = new hostRejectionEvent(type, {__proto__: null, promise, reason, cancelable, bubbles: false, composed: false});
     ops.op_event_trust(event, -1);
     ops.op_dispatch_host_event(event, globalThis);
     return event;
@@ -9158,9 +9162,11 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
           return;
         }
         const event = fire("unhandledrejection", promise, reason, true);
-        // preventDefault() suppresses the console report and any later rejectionhandled.
-        if (event.defaultPrevented) return;
+        // HTML: the promise joins the outstanding set either way (a later handler
+        // still queues rejectionhandled, as in Chrome 156); preventDefault() only
+        // suppresses the console report.
         outstanding.add(promise);
+        if (event.defaultPrevented) return;
         if (typeof consoleError === "function") {
           try { Reflect.apply(consoleError, hostConsole, ["Uncaught (in promise)", reason]); } catch (_error) {}
         }
@@ -9182,11 +9188,9 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   // the core would keep a retired frame alive.
   ops.op_register_rejection_realm(realm);
   if (!__G.isFrame) {
-    __core.setUnhandledPromiseRejectionHandler((promise, reason) => {
-      ops.op_route_promise_rejection(promise, reason, false);
-      // Handled here: the report is the event, never a fatal event-loop error.
-      return true;
-    });
+    // Routed reports are handled here (the event, never a fatal event-loop error);
+    // one no realm takes keeps deno_core's default reporting.
+    __core.setUnhandledPromiseRejectionHandler((promise, reason) => ops.op_route_promise_rejection(promise, reason, false));
     __core.setHandledPromiseRejectionHandler((promise, reason) => ops.op_route_promise_rejection(promise, reason, true));
   }
 }

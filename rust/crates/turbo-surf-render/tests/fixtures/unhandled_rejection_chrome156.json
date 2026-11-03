@@ -1,0 +1,82 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "probeSha256": "8595d0bc406321322c7671b434f631cba8d86695a558bb2b4210730a3ef73477",
+  "collectorSha256": "257cf3dbc0780b3cf83837dcf493d68dfa0c011fb2aa317f3aeff68c317a7351",
+  "pageErrors": ["late", "42", "frame"],
+  "result": [
+    ["sync-end"],
+    ["microtask"],
+    ["timer-0"],
+    [
+      "top",
+      "unhandledrejection",
+      "[object PromiseRejectionEvent]",
+      true,
+      false,
+      true,
+      true,
+      true,
+      2,
+      "late",
+      "[object Promise]"
+    ],
+    ["caught-late"],
+    [
+      "top",
+      "rejectionhandled",
+      "[object PromiseRejectionEvent]",
+      true,
+      false,
+      false,
+      true,
+      true,
+      2,
+      "late",
+      "[object Promise]"
+    ],
+    ["rejectionhandled-same-promise", true],
+    [
+      "top",
+      "unhandledrejection",
+      "[object PromiseRejectionEvent]",
+      true,
+      false,
+      true,
+      true,
+      true,
+      2,
+      "prevented",
+      "[object Promise]"
+    ],
+    ["prevented", true],
+    [
+      "top",
+      "unhandledrejection",
+      "[object PromiseRejectionEvent]",
+      true,
+      false,
+      true,
+      true,
+      true,
+      2,
+      "42",
+      "[object Promise]"
+    ],
+    ["attribute", "42"],
+    ["constructed", true, 7, true, false],
+    ["constructor-without-promise", "TypeError"],
+    [
+      "frame",
+      "unhandledrejection",
+      "[object PromiseRejectionEvent]",
+      true,
+      false,
+      true,
+      true,
+      true,
+      2,
+      "frame",
+      "[object Promise]"
+    ]
+  ]
+}

@@ -116,21 +116,10 @@ fn differences(actual: &Value, expected: &Value) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn dom_parser_matches_chrome156_except_xml_documents() {
-    let mut actual = observe("domparser").await;
-    let mut expected = oracle("domparser");
-    // KNOWN_GAP: the HTML Tree engine has no XML parser, so the four XML
-    // SupportedType values reject instead of returning an XMLDocument.
-    let gap = serde_json::json!({
-        "error": "NotSupportedError",
-        "message": "XML document parsing is unsupported by the HTML Tree engine"
-    });
-    for key in ["applicationXml", "svg", "xhtml", "textXml"] {
-        assert_eq!(actual["xml"][key], gap, "{key}");
-        assert_ne!(expected["xml"][key], gap, "{key}");
-    }
-    actual.as_object_mut().unwrap().remove("xml");
-    expected.as_object_mut().unwrap().remove("xml");
+async fn dom_parser_matches_chrome156() {
+    // The XML SupportedType values parse into XMLDocuments (turbo-dom#186).
+    let actual = observe("domparser").await;
+    let expected = oracle("domparser");
     let rows = differences(&actual, &expected);
     assert!(rows.is_empty(), "{}", rows.join("\n"));
     assert_eq!(actual, expected);

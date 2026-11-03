@@ -83,7 +83,7 @@ pub(crate) fn capture_composed_tree(
 // author rules must be able to override it regardless of selector specificity.
 pub(crate) const LIVE_UA: &str = concat!(
     "body{margin:8px;font-family:serif}",
-    "button{display:inline-block;font-family:Arial;font-size:13.3333px;font-style:normal;font-weight:400;font-stretch:normal;font-variant-caps:normal;line-height:normal;margin:0;padding:1px 6px;border-width:2px;vertical-align:baseline}",
+    "button{display:inline-block;font-family:Arial;font-size:13.3333px;font-style:normal;font-weight:400;font-stretch:normal;font-variant-caps:normal;line-height:normal;margin:0;border-width:2px;vertical-align:baseline}",
     "iframe{display:inline;border:2px inset}",
     "head,style,script,title,meta,link,base,noscript{display:none}",
 );

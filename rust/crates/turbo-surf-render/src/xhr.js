@@ -32,9 +32,41 @@
     upper = String.prototype.toUpperCase,
     split = String.prototype.split,
     endsWith = String.prototype.endsWith,
-    byTagNameNS = Document.prototype.getElementsByTagNameNS,
+    fromCharCode = String.fromCharCode,
     trim = String.prototype.trim,
     replace = String.prototype.replace;
+  const getter_ = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
+  const documentElementOf = getter_(Document.prototype, "documentElement"),
+    firstElementOf = getter_(Element.prototype, "firstElementChild"),
+    documentFirstElementOf = getter_(Document.prototype, "firstElementChild"),
+    localNameOf = getter_(Element.prototype, "localName"),
+    namespaceOf = getter_(Element.prototype, "namespaceURI"),
+    textOf = getter_(Node.prototype, "textContent"),
+    hasAttribute = Element.prototype.hasAttribute;
+  const XHTML = "http://www.w3.org/1999/xhtml";
+  const isXhtml = (element, name) =>
+    element !== null &&
+    apply(localNameOf, element, []) === name &&
+    apply(namespaceOf, element, []) === XHTML;
+  // The <parsererror> the XML parser inserts for a well-formedness error: the root's
+  // first child (or html > body > parsererror without a root), styled, opening with
+  // Chrome's heading. A literal <parsererror> in a well-formed document is content.
+  const parseFailed = (doc) => {
+    const root = apply(documentFirstElementOf, doc, []);
+    if (root === null) return false;
+    let candidate = apply(firstElementOf, root, []);
+    if (isXhtml(root, "html") && isXhtml(candidate, "body"))
+      candidate = isXhtml(apply(firstElementOf, candidate, []), "parsererror")
+        ? apply(firstElementOf, candidate, [])
+        : candidate;
+    if (!isXhtml(candidate, "parsererror") || !apply(hasAttribute, candidate, ["style"]))
+      return false;
+    const heading = apply(firstElementOf, candidate, []);
+    return (
+      isXhtml(heading, "h3") &&
+      apply(textOf, heading, []) === "This page contains the following errors:"
+    );
+  };
   const arrayPush = Array.prototype.push,
     arraySort = Array.prototype.sort;
   const states = new WeakMap(),
@@ -205,25 +237,55 @@
           record.response.url,
           "text/html",
         );
-    } else if (
-      essence === "text/xml" ||
-      essence === "application/xml" ||
-      apply(endsWith, essence, ["+xml"])
-    ) {
-      const parsed = ops.op_parse_xml_document(text(record), essence);
-      if (!apply(byTagNameNS, parsed, ["http://www.w3.org/1999/xhtml", "parsererror"]).length)
-        doc = __registerInertDocument(parsed, record.response.url, essence);
+    } else if (isXmlEssence(essence)) {
+      // Bounded by the network body cap (8 MiB); checked again for other sources.
+      if (record.bytes && record.bytes.length <= MAX_DOCUMENT_BYTES) {
+        const parsed = ops.op_parse_xml_document(text(record), essence);
+        if (!parseFailed(parsed))
+          doc = __registerInertDocument(parsed, record.response.url, essence);
+      }
     }
     record.document = doc;
     return doc;
   };
+  const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+  const isXmlEssence = (essence) =>
+    essence === "text/xml" || essence === "application/xml" || apply(endsWith, essence, ["+xml"]);
+  // A byte order mark decides the encoding first.
+  const bomLabel = (bytes) =>
+    bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+      ? "utf-8"
+      : bytes[0] === 0xfe && bytes[1] === 0xff
+        ? "utf-16be"
+        : bytes[0] === 0xff && bytes[1] === 0xfe
+          ? "utf-16le"
+          : null;
+  // The `<?xml ... encoding="…"?>` declaration, read from the ASCII prefix.
+  const declaredLabel = (bytes) => {
+    let prefix = "";
+    for (let i = 0; i < bytes.length && i < 1024; i++) {
+      if (bytes[i] > 0x7f) break;
+      prefix += apply(fromCharCode, null, [bytes[i]]);
+      if (bytes[i] === 0x3e) break;
+    }
+    const match = apply(exec, /^<\?xml\s[^>]*?\bencoding\s*=\s*["']([A-Za-z][A-Za-z0-9._-]*)["']/, [
+      prefix,
+    ]);
+    return match ? match[1] : null;
+  };
+  // XHR text decoding: BOM, then the final MIME type's charset, then (XML types, as
+  // the XML parser sniffs) the declaration, then UTF-8 (Chrome 156 control).
   const text = (record) => {
     if (!record.bytes) return "";
-    const label = charset(finalMime(record));
-    if (label)
-      try {
-        return apply(decode, new Decoder(label), [record.bytes]);
-      } catch {}
+    const mime = finalMime(record);
+    const essence = apply(trim, apply(lower, apply(split, mime ?? "text/xml", [";"])[0], []), []);
+    const labels = [bomLabel(record.bytes), charset(mime)];
+    if (isXmlEssence(essence)) apply(arrayPush, labels, [declaredLabel(record.bytes)]);
+    for (let i = 0; i < labels.length; i++)
+      if (labels[i])
+        try {
+          return apply(decode, new Decoder(labels[i]), [record.bytes]);
+        } catch {}
     return apply(decode, new Decoder(), [record.bytes]);
   };
   const reset = (record) => {

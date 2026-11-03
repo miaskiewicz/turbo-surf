@@ -1,0 +1,91 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "serverSha256": "f0fd7c9a225586702d285fcd353747a9fc2d37769ec24ae2aa9fb786611856df",
+  "probeSha256": "1907a0936d57cd880ca16e9809589c2832c8802409c903216b16a10ae668b968",
+  "collectorSha256": "6a199ad2ad77b4f58c523328169dadeff041c03ba00b1237f56c9145abe69e47",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--use-mock-keychain",
+    "--password-store=basic",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "xml": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\"?><a xmlns:p=\"urn:p\"><b p:c=\"1\">t</b></a>"
+      ],
+      false,
+      60
+    ],
+    "textXml": [
+      ["[object XMLDocument]", "text/xml", null, "a", "<a><![CDATA[x<y]]></a>"],
+      false,
+      22
+    ],
+    "svg": [
+      [
+        "[object XMLDocument]",
+        "image/svg+xml",
+        "http://www.w3.org/2000/svg",
+        "svg",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><g/></svg>"
+      ],
+      false,
+      50
+    ],
+    "xhtml": [
+      [
+        "[object XMLDocument]",
+        "application/xhtml+xml",
+        "http://www.w3.org/1999/xhtml",
+        "html",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>x</body></html>"
+      ],
+      false,
+      64
+    ],
+    "illFormed": [null, false, 10],
+    "html": [null, false, 35],
+    "plain": [null, false, 12],
+    "xmlDocument": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\"?><a xmlns:p=\"urn:p\"><b p:c=\"1\">t</b></a>"
+      ],
+      true,
+      null
+    ],
+    "htmlDocument": [
+      [
+        "[object HTMLDocument]",
+        "text/html",
+        "http://www.w3.org/1999/xhtml",
+        "html",
+        "<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body><p>x</p></body></html>"
+      ],
+      true,
+      null
+    ],
+    "plainDocument": [null, true, null],
+    "override": [["[object XMLDocument]", "text/xml", null, "a", "<a>plain</a>"], false, 12],
+    "unsent": null,
+    "textType": [
+      "InvalidStateError",
+      "Failed to read the 'responseXML' property from 'XMLHttpRequest': The value is only accessible if the object's 'responseType' is '' or 'document' (was 'text')."
+    ]
+  }
+}

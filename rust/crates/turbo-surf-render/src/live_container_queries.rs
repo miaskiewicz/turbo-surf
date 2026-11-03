@@ -56,8 +56,8 @@ enum Condition {
 pub(crate) struct Container {
     names: Vec<String>,
     block_axis: bool,
-    width: f32,
-    height: f32,
+    /// `None`: no box (`display: none` / `contents`), so every query on it is false.
+    size: Option<(f32, f32)>,
 }
 
 /// Parses an `@container` prelude (`@container name (min-width: 200px)`).
@@ -200,11 +200,20 @@ impl Condition {
             Condition::All(all) | Condition::Any(all) => all.iter().any(Condition::block_axis),
         }
     }
-    fn holds(&self, container: &Container) -> bool {
+    fn holds(&self, (width, height): (f32, f32)) -> bool {
         let value = |feature: Feature| match feature {
-            Feature::Width | Feature::InlineSize => container.width,
-            Feature::Height | Feature::BlockSize => container.height,
-            Feature::AspectRatio => container.width / container.height,
+            Feature::Width | Feature::InlineSize => width,
+            Feature::Height | Feature::BlockSize => height,
+            // A zero height is an infinite ratio (Chrome 156: `min-aspect-ratio: 1/1`
+            // holds for 100x0); 0x0 has none, so every comparison is false.
+            Feature::AspectRatio if height == 0.0 => {
+                if width == 0.0 {
+                    f32::NAN
+                } else {
+                    f32::INFINITY
+                }
+            }
+            Feature::AspectRatio => width / height,
             Feature::Orientation => 0.0,
         };
         match self {
@@ -219,17 +228,18 @@ impl Condition {
                     Compare::LessEqual => actual <= expected,
                 })
             }
-            Condition::Portrait(portrait) => (container.height >= container.width) == *portrait,
-            Condition::Not(inner) => !inner.holds(container),
-            Condition::All(all) => all.iter().all(|inner| inner.holds(container)),
-            Condition::Any(all) => all.iter().any(|inner| inner.holds(container)),
+            Condition::Portrait(portrait) => (height >= width) == *portrait,
+            Condition::Not(inner) => !inner.holds((width, height)),
+            Condition::All(all) => all.iter().all(|inner| inner.holds((width, height))),
+            Condition::Any(all) => all.iter().any(|inner| inner.holds((width, height))),
         }
     }
 }
 
 impl Query {
     /// Whether this query holds for an element whose ancestor size containers are
-    /// `ancestors` (nearest first). No eligible container: the query is false.
+    /// `ancestors` (nearest first). No eligible container, or a nearest eligible one
+    /// without a box, makes the query false (Chrome 156: no outer fallback).
     pub(crate) fn holds(&self, ancestors: &[&Container]) -> bool {
         let block_axis = self.condition.block_axis();
         ancestors
@@ -241,9 +251,13 @@ impl Query {
                         .as_ref()
                         .is_none_or(|name| container.names.contains(name))
             })
-            .is_some_and(|container| self.condition.holds(container))
+            .and_then(|container| container.size)
+            .is_some_and(|size| self.condition.holds(size))
     }
 }
+
+/// One layout pass's container states, by source id.
+pub(crate) struct Boxes(HashMap<SourceId, Container>);
 
 /// Each element's ancestor size containers (nearest first), by source id.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -278,35 +292,47 @@ impl Containers {
         result
     }
 
-    /// Whether every query holds for `target` against `snapshot`'s content boxes.
-    pub(crate) fn matches(
-        &self,
-        snapshot: &LayoutSnapshot,
-        target: SourceId,
-        queries: &[Query],
-    ) -> bool {
-        let containers = self
+    /// The deepest chain of nested size containers (each needs one layout pass).
+    pub(crate) fn depth(&self) -> usize {
+        self.ancestors.values().map(Vec::len).max().unwrap_or(0)
+    }
+
+    /// Every container's queried state against one pass's `snapshot`, read once.
+    pub(crate) fn boxes(&self, snapshot: &LayoutSnapshot) -> Boxes {
+        Boxes(
+            self.kinds
+                .iter()
+                .map(|(&id, (names, block_axis))| {
+                    // No box (display: none / contents): the container answers false.
+                    let size = snapshot
+                        .source(id)
+                        .and_then(|source| source.fragment_indices.first())
+                        .and_then(|&fragment| snapshot.fragments().get(fragment))
+                        .and_then(|fragment| fragment.used_box)
+                        .map(|used| (used.content_width, used.content_height));
+                    (
+                        id,
+                        Container {
+                            names: names.clone(),
+                            block_axis: *block_axis,
+                            size,
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// Whether every query holds for `target` against one pass's container `boxes`.
+    pub(crate) fn matches(&self, boxes: &Boxes, target: SourceId, queries: &[Query]) -> bool {
+        let refs = self
             .ancestors
             .get(&target)
             .into_iter()
             .flatten()
-            .filter_map(|&id| self.container(snapshot, id))
+            .filter_map(|id| boxes.0.get(id))
             .collect::<Vec<_>>();
-        let refs = containers.iter().collect::<Vec<_>>();
         queries.iter().all(|query| query.holds(&refs))
-    }
-
-    fn container(&self, snapshot: &LayoutSnapshot, id: SourceId) -> Option<Container> {
-        let (names, block_axis) = self.kinds.get(&id)?;
-        // A container without a box (display: none / contents) cannot be queried.
-        let fragment = snapshot.source(id)?.fragment_indices.first()?;
-        let used = snapshot.fragments().get(*fragment)?.used_box?;
-        Some(Container {
-            names: names.clone(),
-            block_axis: *block_axis,
-            width: used.content_width,
-            height: used.content_height,
-        })
     }
 }
 
@@ -347,8 +373,7 @@ mod tests {
         Container {
             names: names.iter().map(|name| (*name).to_owned()).collect(),
             block_axis,
-            width,
-            height,
+            size: Some((width, height)),
         }
     }
 
@@ -414,6 +439,33 @@ mod tests {
         ));
         assert!(!holds("@container (min-width: 1px)", &[]));
         assert!(!holds("@container (height: 0px)", &[&inline]));
+    }
+
+    #[test]
+    fn a_boxless_nearest_container_answers_false_without_falling_through() {
+        let boxless = Container {
+            names: Vec::new(),
+            block_axis: false,
+            size: None,
+        };
+        let outer = container(&[], false, 500.0, 0.0);
+        assert!(!holds("@container (min-width: 400px)", &[&boxless, &outer]));
+        assert!(!holds(
+            "@container not (min-width: 400px)",
+            &[&boxless, &outer]
+        ));
+        assert!(holds("@container (min-width: 400px)", &[&outer]));
+    }
+
+    #[test]
+    fn aspect_ratio_with_zero_height_is_infinite_and_zero_by_zero_has_none() {
+        let flat = container(&[], true, 100.0, 0.0);
+        assert!(holds("@container (min-aspect-ratio: 1/1)", &[&flat]));
+        assert!(holds("@container (aspect-ratio > 1)", &[&flat]));
+        assert!(!holds("@container (max-aspect-ratio: 1/1)", &[&flat]));
+        let empty = container(&[], true, 0.0, 0.0);
+        assert!(!holds("@container (min-aspect-ratio: 1/1)", &[&empty]));
+        assert!(!holds("@container (max-aspect-ratio: 1/1)", &[&empty]));
     }
 
     #[test]

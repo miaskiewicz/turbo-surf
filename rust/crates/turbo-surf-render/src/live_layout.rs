@@ -252,28 +252,45 @@ pub(crate) fn layout_active_rules_resolved(
         if !conditional {
             return Ok((snapshot, styles));
         }
+        let boxes = containers.boxes(&snapshot);
         let next = qualified
             .iter()
             .map(|rule| {
                 rule.scoped.as_ref().map(|scoped| {
                     select(scoped, rule, |target| {
-                        containers.matches(&snapshot, target, &rule.containers)
+                        containers.matches(&boxes, target, &rule.containers)
                     })
                 })
             })
             .collect::<Vec<_>>();
         passes += 1;
+        // An unchanged selection means this pass's snapshot is final: no extra pass.
+        if next == selected {
+            return Ok((snapshot, styles));
+        }
         // Containment keeps a container's size independent of its contents, so each
-        // pass can only settle one more level of nested containers.
-        if next == selected || passes >= MAX_CONTAINER_PASSES {
+        // pass settles one more level of nested containers: as many passes as the
+        // deepest container chain (top-down), bounded by the pass budget.
+        let limit = (containers.depth() + 1).min(MAX_CONTAINER_PASSES);
+        if passes >= limit {
+            if passes >= MAX_CONTAINER_PASSES {
+                diagnostics.push(
+                    turbo_dom_layout::LintCode::UnsupportedCss,
+                    format!(
+                        "container queries did not settle within {MAX_CONTAINER_PASSES} layout passes"
+                    ),
+                    turbo_dom_layout::Span::default(),
+                );
+            }
             return Ok((snapshot, styles));
         }
         selected = next;
     }
 }
 
-/// Nested container levels resolved before the last selection is kept.
-const MAX_CONTAINER_PASSES: usize = 8;
+/// The layout-pass budget for container queries: nested container levels resolved
+/// before the last selection is kept (with a diagnostic).
+const MAX_CONTAINER_PASSES: usize = 32;
 
 /// `scoped` with only the targets an `@container`-conditioned rule currently selects.
 fn select(

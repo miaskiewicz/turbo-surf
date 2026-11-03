@@ -30,5 +30,21 @@
   {
     "id": "self-not-container",
     "html": "<!doctype html><style>body{margin:0}.cq{container-type:inline-size;width:300px} #t{display:block;width:3px} @container (min-width:200px){.cq{width:100px} #t{width:29px}}</style><div class=\"cq\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "deep-nesting-12",
+    "html": "<!doctype html><style>body{margin:0}.c{container-type:inline-size;width:50px}#r{width:100px} @container (min-width:100px){.c{width:100px} i{display:block;width:13px;height:5px}}</style><div class=\"c\" id=\"r\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><i id=\"t\"></i></div></div></div></div></div></div></div></div></div></div></div></div>"
+  },
+  {
+    "id": "contents-container-boxless",
+    "html": "<!doctype html><style>body{margin:0}.o{container-type:inline-size;width:500px}.n{container-type:inline-size;display:contents} @container (min-width:400px){i{display:block;width:17px;height:3px}}</style><div class=\"o\"><div class=\"n\"><i id=\"t\"></i></div></div>"
+  },
+  {
+    "id": "aspect-ratio-zero-height",
+    "html": "<!doctype html><style>body{margin:0}.s{container-type:size;width:100px;height:0}i{display:block;height:3px;width:1px} @container (aspect-ratio > 1){.s+b{display:block;width:11px;height:3px}} @container (min-aspect-ratio:1/1){i{width:9px}} @container (max-aspect-ratio:1/1){i{width:7px}}</style><div class=\"s\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "size-containment-shrink",
+    "html": "<!doctype html><style>body{margin:0}.f{float:left;container-type:inline-size}.g{float:left;container-type:size}</style><div class=\"f\"><span>some inline text here</span></div><div class=\"g\"><span>more text</span></div>"
   }
 ]

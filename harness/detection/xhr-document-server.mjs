@@ -11,13 +11,32 @@ export const XHR_DOCUMENT_ROUTES = {
   "/bad": ["application/xml", "<a><b></a>"],
   "/html": ["text/html", "<!doctype html><title>t</title><p>x"],
   "/plain": ["text/plain", "<a>plain</a>"],
+  // Byte routes (third entry: the encoding): XML encoding sniffing.
+  "/latin1-decl": [
+    "application/xml",
+    '<?xml version="1.0" encoding="ISO-8859-1"?><a>café</a>',
+    "latin1",
+  ],
+  "/utf16-bom": ["application/xml", "<a>é€</a>", "utf16le-bom"],
+  "/header-latin1": ["application/xml; charset=ISO-8859-1", "<a>café</a>", "latin1"],
+  "/bom-beats-header": ["application/xml; charset=ISO-8859-1", "<a>é</a>", "utf8-bom"],
+  "/literal-parsererror": [
+    "application/xml",
+    '<a><parsererror xmlns="http://www.w3.org/1999/xhtml">x</parsererror></a>',
+  ],
+};
+// A route body's bytes (the BOM variants prepend U+FEFF in that encoding).
+export const routeBytes = ([, body, encoding = "utf8"]) => {
+  const bom = encoding.endsWith("-bom");
+  const name = bom ? encoding.slice(0, -4) : encoding;
+  return Buffer.from((bom ? "\ufeff" : "") + body, name);
 };
 export async function startXhrDocumentServer() {
   const server = createServer((request, response) => {
     const route = XHR_DOCUMENT_ROUTES[request.url];
     response.setHeader("Connection", "close");
     response.setHeader("Content-Type", route ? route[0] : "text/html");
-    response.end(route ? route[1] : "<!doctype html><body>XHR document control");
+    response.end(route ? routeBytes(route) : "<!doctype html><body>XHR document control");
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);

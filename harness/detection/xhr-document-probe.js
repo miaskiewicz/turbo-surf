@@ -31,6 +31,11 @@
     ["htmlDocument", "/html", "document"],
     ["plainDocument", "/plain", "document"],
     ["override", "/plain", "", "text/xml"],
+    ["latin1Declared", "/latin1-decl", ""],
+    ["utf16Bom", "/utf16-bom", ""],
+    ["headerLatin1", "/header-latin1", ""],
+    ["bomBeatsHeader", "/bom-beats-header", ""],
+    ["literalParsererror", "/literal-parsererror", ""],
   ]) {
     const x = await get(path, type, mime);
     out[name] = [

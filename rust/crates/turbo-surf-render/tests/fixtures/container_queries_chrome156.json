@@ -2,7 +2,7 @@
   "browser": "Chrome/156.0.8078.47",
   "viewport": [1280, 800],
   "probeSha256": "387f413444e5acc81ddd54cb67c8355b808d990f0b7f21113e935e5cdaef71b1",
-  "casesSha256": "0d423fd4ceefaad8e197ea9cdce641f2b799bd52b9ee5adb83d5912b49a81e52",
+  "casesSha256": "ea76860b082cb9a48571ab3e95811efb1ec171a0927cb3a742e85ddc9a542a1f",
   "collectorSha256": "257cf3dbc0780b3cf83837dcf493d68dfa0c011fb2aa317f3aeff68c317a7351",
   "errors": [],
   "result": [
@@ -37,6 +37,41 @@
     {
       "id": "self-not-container",
       "result": [["DIV.cq", "ok", 300, 0], ["I#t", "ok", 29, 0]]
+    },
+    {
+      "id": "deep-nesting-12",
+      "result": [
+        ["DIV#r", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["I#t", "ok", 13, 5]
+      ]
+    },
+    {
+      "id": "contents-container-boxless",
+      "result": [["DIV.o", "ok", 500, 0], ["DIV.n", "ok", 0, 0], ["I#t", "ok", 0, 0]]
+    },
+    {
+      "id": "aspect-ratio-zero-height",
+      "result": [["DIV.s", "ok", 100, 0], ["I#t", "ok", 9, 3]]
+    },
+    {
+      "id": "size-containment-shrink",
+      "result": [
+        ["DIV.f", "ok", 0, 72],
+        ["SPAN", "ok", 36.4375, 72],
+        ["DIV.g", "ok", 0, 0],
+        ["SPAN", "ok", 32.875, 36]
+      ]
     }
   ]
 }

@@ -20,8 +20,12 @@
     const record = (e) => log.push([tag, ...shape(e, w)]);
     w.addEventListener("unhandledrejection", record);
     w.addEventListener("rejectionhandled", record);
+    return () => {
+      w.removeEventListener("unhandledrejection", record);
+      w.removeEventListener("rejectionhandled", record);
+    };
   };
-  listen(window, "top");
+  let unlistenTop = listen(window, "top");
   // Unhandled: one event, after the current task and its microtasks.
   const late = Promise.reject(new Error("late"));
   log.push(["sync-end"]);
@@ -48,8 +52,49 @@
       log.push(["prevented", e.defaultPrevented]);
     }
   });
-  Promise.reject(new Error("prevented"));
+  const prevented = Promise.reject(new Error("prevented"));
   await tick();
+  // A prevented rejection handled later (HTML: it stays in the outstanding set).
+  prevented.catch(() => {});
+  log.push(["caught-prevented"]);
+  await tick();
+  // Caught, then a derived chain left unhandled: one event, for the derived promise.
+  const caught = Promise.reject(new Error("caught-then-uncaught"));
+  caught.catch(() => {});
+  const derived = caught.then(() => {});
+  let derivedEvent = null;
+  window.addEventListener("unhandledrejection", (e) => (derivedEvent = e.promise === derived), {
+    once: true,
+  });
+  await tick();
+  log.push(["caught-then-uncaught-derived", derivedEvent]);
+  // Page getters on Object.prototype must not reach the host's event init.
+  const touched = [];
+  for (const key of ["bubbles", "cancelable", "composed", "promise", "reason"])
+    Object.defineProperty(Object.prototype, key, {
+      configurable: true,
+      get() {
+        touched.push(key);
+        return true;
+      },
+    });
+  Promise.reject(new Error("proto-getters"));
+  await tick();
+  for (const key of ["bubbles", "cancelable", "composed", "promise", "reason"])
+    delete Object.prototype[key];
+  log.push(["proto-getters-touched", touched]);
+  // Many rejections in one task: one event each, in order.
+  const stress = [];
+  const onStress = (e) => {
+    if (e.reason && e.reason.stress !== undefined) stress.push(e.reason.stress);
+  };
+  unlistenTop();
+  window.addEventListener("unhandledrejection", onStress);
+  for (let i = 0; i < 200; i++) Promise.reject({ stress: i });
+  await tick();
+  window.removeEventListener("unhandledrejection", onStress);
+  unlistenTop = listen(window, "top");
+  log.push(["stress", stress.length, stress.every((value, index) => value === index)]);
   // The onunhandledrejection attribute, and a non-Error reason.
   window.onunhandledrejection = (e) => log.push(["attribute", String(e.reason)]);
   Promise.reject(42);
@@ -77,6 +122,13 @@
   frame.contentWindow.Promise.reject(new frame.contentWindow.Error("frame"));
   // Waits for the frame realm's own task, however long creating the frame took.
   for (let turn = 0; turn < 50 && !log.some((entry) => entry[0] === "frame"); turn++) await tick();
+  // A rejection in a removed frame's realm: no event on either window.
+  const removed = frame.contentWindow;
   frame.remove();
+  const before = log.length;
+  removed.Promise.reject(new removed.Error("after-remove"));
+  await tick();
+  await tick();
+  log.push(["after-remove-events", log.length - before]);
   return log;
 })();

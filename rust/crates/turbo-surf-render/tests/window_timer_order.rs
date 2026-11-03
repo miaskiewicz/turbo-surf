@@ -128,3 +128,35 @@ async fn frame_timer_queued_in_parent_timer_task_counts_from_the_task_due_time()
         .unwrap();
     assert_eq!(value, r#"["frame-timer","t20"]"#);
 }
+
+// turbo-surf#128 review: a frame whose timer task published the agent's task base and
+// was then removed must not lend that base to later parent timers.
+#[tokio::test(flavor = "current_thread")]
+async fn a_retired_frames_task_base_is_not_reused() {
+    let mut page = PageSession::open(
+        "<!doctype html><body></body>",
+        "https://timer.test/",
+        "",
+        "",
+        10000,
+    )
+    .await
+    .unwrap();
+    let value = page
+        .eval_expression(
+            r#"(async()=>{
+              const log=[];
+              const f=document.createElement('iframe');document.body.append(f);
+              await new Promise(r=>f.contentWindow.setTimeout(r,0));
+              f.remove();
+              const end=Date.now()+60;while(Date.now()<end){}
+              setTimeout(()=>log.push('t10'),10);
+              setTimeout(()=>log.push('t0'),0);
+              await new Promise(r=>setTimeout(r,40));
+              return JSON.stringify(log);
+            })()"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(value, r#"["t0","t10"]"#);
+}

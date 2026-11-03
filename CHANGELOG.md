@@ -43,6 +43,18 @@ the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
   throw. Style and scroll-state queries and font-relative lengths are still refused
   with a clear error. Chrome control:
   `tests/fixtures/container_queries_chrome156.json`.
+- **Fixed (frame timers, #128)**: a timer queued in a frame realm while a parent timer
+  task runs counts from that task's due time, as the parent's own timers do, so it no
+  longer runs after later parent timers (Chrome 156 order; the task base is agent-wide).
+- **Fixed (native155 SDK, #129)**: `new Window()` throws Chrome's
+  `Failed to construct 'Window': Illegal constructor` on the native-proxy build too
+  (`Window()` stays `Illegal constructor`).
+- **Changed (form controls)**: live layout's UA stylesheet no longer sets
+  `button { padding: 1px 6px }`; turbo-dom#239's flow-relative UA padding applies, so
+  vertical-writing buttons are no longer 10px too wide.
+- **Not adopted yet (turbo-dom#240)**: turbo-surf does not fetch `@font-face` faces (live
+  layout refuses a used web font with a clear error, and canvases get the system
+  registry), so `FontFace::from_web_font_bytes` has no call site yet; tracked in #130.
 
 ## [0.6.0] — 2026-10-26 — turbo-dom consolidation
 

@@ -365,7 +365,7 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
   real native functions); the `toString` anti-hook trap is itself shapeless.
 - **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for
-  selected solids/shapes), `measureText` uses the system-font measurer, context
+  selected solids/shapes), `measureText` uses the system faces live layout uses (`@font-face` web fonts are not loaded yet, #130), context
   class-tags as `CanvasRenderingContext2D` + `getContextAttributes`.
 - **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
   `readPixels` matched Chrome for the shared gradient scene when Metal was accessible.

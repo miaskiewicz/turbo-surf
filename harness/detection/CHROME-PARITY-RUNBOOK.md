@@ -167,6 +167,13 @@ needing provenance verification use:
 parity_env python3 harness/detection/engine-155/prepare.py "$PARITY_SDK" --adopt
 ```
 
+A prepared SDK **copied from another checkout** (for example with `cp -cR`) still holds that checkout's
+generated paths: the `surf-workspace` symlink farm, `surf-workspace/sdk-release-aliases` and
+`surf-workspace/rust/.cargo`. `build.py` refuses the stale links (`Unexpected workspace link`). In the copy only,
+delete the symlinks under `surf-workspace` (`find "$PARITY_SDK/surf-workspace" -type l -delete`) and those two
+generated directories, then run `prepare.py --adopt` and `build.py`; both regenerate them for this checkout. Keep
+the copy's `surf-workspace/rust/Cargo.lock`.
+
 For a **new empty destination**, choose a new `PARITY_SDK` path and run preparation without `--adopt`. Never run fresh
 preparation over a nonempty tree:
 
@@ -187,7 +194,8 @@ dependency preparation. It creates metadata aliases inside the private Surf
 workspace (`turbo-surf-deno-core` 0.412.1, `turbo-surf-deno-v8` 0.4.1 and
 `turbo-dom-v8` 150.4.0 over the SDK's `v8-exact`), preserving the verified SDK
 source files, original manifests and native archive, and enables Surf's
-`native-sdk-frame-read` forwarding feature. The facade still points to that SDK's
+`native-sdk-frame-read` forwarding feature. That feature also selects the SDK's v8 152.2.0 interceptor API
+(setter/definer callbacks take `ReturnValue<Boolean>`, not 150.4.0's `ReturnValue<()>`; turbo-surf#126). The facade still points to that SDK's
 `v8-exact`; it must not resolve the stock150 backend. Keep the generated
 `sdk-release-aliases/metadata-bridge.json` with the build evidence. This
 compatibility path has offline guards; a new dependency release still requires

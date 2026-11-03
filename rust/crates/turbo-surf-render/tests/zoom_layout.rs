@@ -148,14 +148,19 @@ async fn image_input_width_and_height_match_chrome156() {
     // KNOWN_GAP: image buttons load no image resource, so there is no natural
     // size (Chrome: 6x4) and no image-derived intrinsic size for width:auto.
     for (pointer, native, chrome) in [
-        ("/cases/imageBlock/0", 1278, 40),
+        // turbo-dom 0.7.0 (#239) gives the image button 3px of horizontal UA
+        // padding+border per side (1278 -> 1272); Chrome gives input[type=image] none
+        // (reported to turbo-dom with the 0.7.0 release, turbo-surf#127).
+        ("/cases/imageBlock/0", 1272, 40),
         ("/images/hidden/0", 0, 6),
         ("/images/hidden/1", 0, 4),
         ("/images/hiddenAttribute/1", 0, 4),
-        ("/images/rendered/0", 150, 6),
-        ("/images/rendered/1", 22, 4),
-        ("/images/renderedZoom/0", 150, 6),
-        ("/images/renderedZoom/1", 22, 4),
+        // An unloaded image button is 0x0 since turbo-dom 0.7.0's unloaded-<img>
+        // sizing (was a 150x22 placeholder); still no natural size here.
+        ("/images/rendered/0", 0, 6),
+        ("/images/rendered/1", 0, 4),
+        ("/images/renderedZoom/0", 0, 6),
+        ("/images/renderedZoom/1", 0, 4),
     ] {
         known_gap(
             &actual,

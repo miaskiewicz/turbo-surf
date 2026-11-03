@@ -25,6 +25,7 @@ export const XHR_DOCUMENT_ROUTES = {
     '<?xml version="1.0" encoding="ISO-8859-1"?><a>café</a>',
     "latin1",
   ],
+  "/utf16-decl": ["application/xml", '<?xml version="1.0" encoding="UTF-16"?><a>café</a>'],
   "/literal-parsererror": [
     "application/xml",
     '<a><parsererror xmlns="http://www.w3.org/1999/xhtml">x</parsererror></a>',

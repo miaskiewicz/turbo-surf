@@ -10,7 +10,7 @@ const FIXTURE: &str =
     include_str!("../../../../harness/detection/fixtures/xhr-document-chrome156.json");
 
 /// The server's routes: path -> (content type, body), as in xhr-document-server.mjs.
-const ROUTES: [(&str, &str, &str); 13] = [
+const ROUTES: [(&str, &str, &str); 14] = [
     (
         "/xml",
         "application/xml",
@@ -50,6 +50,11 @@ const ROUTES: [(&str, &str, &str); 13] = [
         "/header-vs-decl",
         "application/xml; charset=UTF-8",
         r#"<?xml version="1.0" encoding="ISO-8859-1"?><a>café</a>"#,
+    ),
+    (
+        "/utf16-decl",
+        "application/xml",
+        r#"<?xml version="1.0" encoding="UTF-16"?><a>café</a>"#,
     ),
     (
         "/literal-parsererror",

@@ -42,3 +42,36 @@ async fn promise_rejection_events_match_chrome156() {
     }
     assert_eq!(actual.len(), expected.len(), "native log: {actual:?}");
 }
+
+/// A rejection no realm takes (a frame realm before or after its tracker, or once
+/// removed) is logged, never fatal: the session keeps running tasks and evaluating.
+#[tokio::test(flavor = "current_thread")]
+async fn unrouted_rejections_never_abort_the_session() {
+    let mut page = PageSession::open(
+        "<!doctype html><html><head></head><body></body></html>",
+        "http://127.0.0.1/",
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
+    let raw = page
+        .eval_json_expression(
+            r#"(async()=>{
+              const f=document.createElement("iframe");document.body.append(f);
+              const w=f.contentWindow;
+              w.Promise.reject(new w.Error("early"));
+              f.remove();
+              for(let i=0;i<20;i++)w.Promise.reject(new w.Error("removed"));
+              await new Promise(r=>setTimeout(r,30));
+              return "alive";
+            })()"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(raw, "\"alive\"");
+    let again = page.eval_json_expression("1+1").await.unwrap();
+    assert_eq!(again, "2");
+    page.close();
+}

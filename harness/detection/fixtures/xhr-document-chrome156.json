@@ -1,8 +1,8 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "serverSha256": "67c5a44b822ddd91a6abb894e3e294e4ba9e4578acc7881a629ad0c608d8b3f6",
-  "probeSha256": "5377ce7692cc21720a572bfd76778420694579625206834dae5d4eeab5b019dc",
+  "serverSha256": "2d7972a8fe7e42878f4c1138fc238cb927ad90a1079c5cd01f2e81f2e9d13d12",
+  "probeSha256": "8c5a870cfc797ffa2227663c6b8c2ca4dc70829e9419d67083652ac21a006e20",
   "collectorSha256": "6a199ad2ad77b4f58c523328169dadeff041c03ba00b1237f56c9145abe69e47",
   "flags": [
     "--remote-debugging-port=0",
@@ -114,6 +114,17 @@
       ],
       false,
       54
+    ],
+    "utf16Declared": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?><a>café</a>"
+      ],
+      false,
+      50
     ],
     "literalParsererror": [
       [

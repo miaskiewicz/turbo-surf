@@ -87,6 +87,15 @@ fn descriptor<'s>(
     v8::Intercepted::kYes
 }
 
+/// The setter/definer interceptor result type. `turbo-dom-v8` 150.4.0 passes
+/// `ReturnValue<()>`; the engine-154/155 native SDK (v8 152.2.0 over V8 15.5)
+/// reports assignment success as `ReturnValue<Boolean>` (turbo-surf#126). The
+/// SDK build helper enables `native-sdk-frame-read`, which selects it here.
+#[cfg(not(feature = "native-sdk-frame-read"))]
+type SetterReturn<'r> = v8::ReturnValue<'r, ()>;
+#[cfg(feature = "native-sdk-frame-read")]
+type SetterReturn<'r> = v8::ReturnValue<'r, v8::Boolean>;
+
 /// Blink's named property setter is "not supported": strict assignments throw,
 /// sloppy ones and `Reflect.set` are ignored. V8 consults it only when the
 /// object itself is the receiver; `window.f = 1` still lands on the window.
@@ -95,7 +104,7 @@ fn setter<'s>(
     name: v8::Local<'s, v8::Name>,
     _value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    _rv: v8::ReturnValue<()>,
+    _rv: SetterReturn<'_>,
 ) -> v8::Intercepted {
     if args.should_throw_on_error() {
         let text = format!(
@@ -116,7 +125,7 @@ fn definer<'s>(
     _name: v8::Local<'s, v8::Name>,
     _descriptor: &v8::PropertyDescriptor,
     _args: v8::PropertyCallbackArguments<'s>,
-    _rv: v8::ReturnValue<()>,
+    _rv: SetterReturn<'_>,
 ) -> v8::Intercepted {
     v8::Intercepted::kYes
 }

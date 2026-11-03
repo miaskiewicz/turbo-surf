@@ -661,10 +661,16 @@ fn cross_index<'s>(
 
 fn illegal_window_constructor(
     scope: &mut v8::PinScope,
-    _args: v8::FunctionCallbackArguments,
+    args: v8::FunctionCallbackArguments,
     _result: v8::ReturnValue,
 ) {
-    let message = v8::String::new(scope, "Illegal constructor").unwrap();
+    // Chrome prefixes the construct form (`new Window()`) but not the call (#129).
+    let text = if args.new_target().is_undefined() {
+        "Illegal constructor"
+    } else {
+        "Failed to construct 'Window': Illegal constructor"
+    };
+    let message = v8::String::new(scope, text).unwrap();
     let error = v8::Exception::type_error(scope, message);
     scope.throw_exception(error);
 }

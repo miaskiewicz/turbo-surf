@@ -36,8 +36,7 @@
     trim = String.prototype.trim,
     replace = String.prototype.replace;
   const getter_ = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
-  const documentElementOf = getter_(Document.prototype, "documentElement"),
-    firstElementOf = getter_(Element.prototype, "firstElementChild"),
+  const firstElementOf = getter_(Element.prototype, "firstElementChild"),
     documentFirstElementOf = getter_(Document.prototype, "firstElementChild"),
     localNameOf = getter_(Element.prototype, "localName"),
     namespaceOf = getter_(Element.prototype, "namespaceURI"),

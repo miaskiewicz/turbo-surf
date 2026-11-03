@@ -30,6 +30,9 @@ async fn canvas_measure_text_uses_the_page_fonts() {
     let [canvas, span]: [f64; 2] = serde_json::from_str(&value).unwrap();
     assert!(span > 0.0, "{value}");
     // The document rounds advances to 1/64 px LayoutUnits; the canvas keeps Blink's 16.16.
-    assert!((canvas - span).abs() < 0.05, "canvas {canvas} vs layout {span}");
+    assert!(
+        (canvas - span).abs() < 0.05,
+        "canvas {canvas} vs layout {span}"
+    );
     page.close();
 }

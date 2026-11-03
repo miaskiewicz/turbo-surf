@@ -32,7 +32,7 @@ lto = "thin"
 # (`cargo update -p turbo-dom -p turbo-dom-layout -p turbo-dom-raster -p turbo-dom-browser-env`)
 # before tagging (see PUBLISHING.md); the tag-only release guard fails while it is present.
 [patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7f63e99f5fca8b047a99a72b09746fecb4104b0a" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7f63e99f5fca8b047a99a72b09746fecb4104b0a" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7f63e99f5fca8b047a99a72b09746fecb4104b0a" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7f63e99f5fca8b047a99a72b09746fecb4104b0a" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "a539d7cfc6dbe50abfacc852ee2e555f93c9d334" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "a539d7cfc6dbe50abfacc852ee2e555f93c9d334" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "a539d7cfc6dbe50abfacc852ee2e555f93c9d334" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "a539d7cfc6dbe50abfacc852ee2e555f93c9d334" }

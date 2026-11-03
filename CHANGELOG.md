@@ -18,6 +18,12 @@ the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
   parses only for `"document"`; other types give `null`. They were always `null`.
 - **Fixed (canvas)**: a page's canvases measure text with the system faces live layout uses
   (`set_canvas_fonts`, turbo-dom#237), not turbo-dom-layout's bundled faces.
+- **Fixed (native155 SDK, #126)**: the CHROME-PARITY-RUNBOOK engine-155 build (v8 152.2.0,
+  V8 15.5.35.23-rusty) compiles again: the WindowProperties setter/definer take the SDK's
+  `ReturnValue<Boolean>` under `native-sdk-frame-read`. The runbook says how to reuse a
+  prepared SDK copied from another checkout.
+- **Tests (#117)**: `unsupported_pseudo_class_layout` checks that rules with unsupported
+  pseudo-classes, in page and shadow CSS, leave layout and geometry running.
 - **Changed (render, turbo-dom 0.7.0)**: static screenshots and live geometry pick up
   turbo-dom 0.7.0's Chrome 156 fixes (line height, kerning and shaping, `hyphens: auto`,
   bidi and `dir`, list markers, inset `box-shadow`, inline box decoration, background

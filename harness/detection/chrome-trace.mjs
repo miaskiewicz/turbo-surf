@@ -24,7 +24,7 @@ import {
   prepareTypedControl,
   requireEffectiveInput,
 } from "./effective-input.mjs";
-import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
+import { chromeExtensionArgs, chromeExtraArgs } from "./chrome-launch-policy.mjs";
 const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const observationMs = observationMilliseconds(config);
 const observationClock = { monotonic: () => performance.now(), wall: () => Date.now() };
@@ -107,6 +107,7 @@ async function capture() {
         // Playwright's locale override narrows navigator.languages to a single entry.
         // Browser preferences retain the same ordered language list as the native profile.
         args: [
+          ...chromeExtraArgs(config),
           `--lang=${config.locale || "en-US"}`,
           `--accept-lang=${(config.languages || ["en-US", "en"]).join(",")}`,
         ],

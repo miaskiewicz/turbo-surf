@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
-import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
+import { chromeExtensionArgs, chromeExtraArgs } from "./chrome-launch-policy.mjs";
 import { cdpConnection } from "./cdp-connection.mjs";
 import { enrichProtocolHeaders } from "./protocol-headers.mjs";
 import { responseNetworkEvents, responseTransport } from "./chrome-network-metadata.mjs";
@@ -258,6 +258,7 @@ async function capture() {
       "--no-first-run",
       "--no-default-browser-check",
       ...effectiveExtensionFlags,
+      ...chromeExtraArgs(config),
       `--lang=${config.locale || "en-US"}`,
       `--accept-lang=${(config.languages || ["en-US", "en"]).join(",")}`,
       "about:blank",

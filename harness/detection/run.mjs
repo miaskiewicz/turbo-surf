@@ -22,6 +22,7 @@ import { inputCadenceMs, searchSelector, searchSteps } from "./search-plan.mjs";
 import { validateSteps } from "./validate-steps.mjs";
 import { superviseChild } from "./child-supervision.mjs";
 import { observationMilliseconds } from "./observation-window.mjs";
+import { parseChromeArgs } from "./chrome-launch-policy.mjs";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "../..");
 const argv = process.argv.slice(2);
@@ -54,6 +55,7 @@ const config = {
   chromeBackend: flag("--chrome-backend", "cdp"),
   chromeIncognito: argv.includes("--chrome-incognito"),
   chromePath: flag("--chrome-path", process.env.TURBO_SURF_CHROME_PATH),
+  chromeArgs: parseChromeArgs(argv, process.env),
   languages: ["en-US", "en"],
   viewport: { width: Number(flag("--width", "1280")), height: Number(flag("--height", "800")) },
   screen: { width: 1920, height: 1080 },

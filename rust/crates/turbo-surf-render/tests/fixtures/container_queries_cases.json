@@ -45,6 +45,6 @@
   },
   {
     "id": "size-containment-shrink",
-    "html": "<!doctype html><style>body{margin:0}.f{float:left;container-type:inline-size}.g{float:left;container-type:size}</style><div class=\"f\"><span>some inline text here</span></div><div class=\"g\"><span>more text</span></div>"
+    "html": "<!doctype html><style>body{margin:0}.f,.g{float:left;font-size:0}.f{container-type:inline-size}.g{container-type:size}b{display:inline-block;width:40px;height:10px}</style><div class=\"f\"><b></b><b></b><b></b></div><div class=\"g\"><b></b><b></b></div>"
   }
 ]

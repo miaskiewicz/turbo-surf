@@ -27,8 +27,11 @@ the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
 - **Changed (render, turbo-dom 0.7.0)**: static screenshots and live geometry pick up
   turbo-dom 0.7.0's Chrome 156 fixes (line height, kerning and shaping, `hyphens: auto`,
   bidi and `dir`, list markers, inset `box-shadow`, inline box decoration, background
-  layers, unloaded `<img>`, vertical writing modes); measured in turbo-dom's
-  `tools/parity` surf corpora.
+  layers, unloaded `<img>`, vertical writing modes, Chrome's glyph coverage, fractional
+  background tiles, `<img>` transforms, grid sizing, native form-control appearance);
+  measured in turbo-dom's `tools/parity` surf corpora. `container-type` now applies size
+  containment, so a shrink-to-fit size container is as wide as Chrome's (0 without an
+  explicit size).
 - **Fixed (`unhandledrejection` / `rejectionhandled`, #103)**: The render tier now has a
   host promise-rejection tracker. Each realm, iframes included, gets a
   `PromiseRejectionEvent` on its own `window` with Chrome 156's timing (a task after
@@ -46,7 +49,7 @@ the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
 - **Fixed (review round 1)**: XHR XML responses pick their encoding from the BOM,
   then the charset parameter, then the `<?xml encoding?>` declaration (Chrome 156
   control). A literal XHTML `<parsererror>` in a well-formed document no longer nulls
-  `responseXML`. Document parsing stops above the 8 MiB body cap. A prevented
+  `responseXML` (decided by turbo-dom's `ParsedXmlDocument::well_formed`). Document parsing stops above the 8 MiB body cap. A prevented
   `unhandledrejection` still gets `rejectionhandled` when it is handled later, as in
   Chrome. The host event init can no longer run page `Object.prototype` getters. Promise
   rejections that no realm takes keep deno_core's default reporting. Container queries

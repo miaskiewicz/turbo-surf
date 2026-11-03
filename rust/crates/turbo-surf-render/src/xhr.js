@@ -35,37 +35,6 @@
     fromCharCode = String.fromCharCode,
     trim = String.prototype.trim,
     replace = String.prototype.replace;
-  const getter_ = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
-  const firstElementOf = getter_(Element.prototype, "firstElementChild"),
-    documentFirstElementOf = getter_(Document.prototype, "firstElementChild"),
-    localNameOf = getter_(Element.prototype, "localName"),
-    namespaceOf = getter_(Element.prototype, "namespaceURI"),
-    textOf = getter_(Node.prototype, "textContent"),
-    hasAttribute = Element.prototype.hasAttribute;
-  const XHTML = "http://www.w3.org/1999/xhtml";
-  const isXhtml = (element, name) =>
-    element !== null &&
-    apply(localNameOf, element, []) === name &&
-    apply(namespaceOf, element, []) === XHTML;
-  // The <parsererror> the XML parser inserts for a well-formedness error: the root's
-  // first child (or html > body > parsererror without a root), styled, opening with
-  // Chrome's heading. A literal <parsererror> in a well-formed document is content.
-  const parseFailed = (doc) => {
-    const root = apply(documentFirstElementOf, doc, []);
-    if (root === null) return false;
-    let candidate = apply(firstElementOf, root, []);
-    if (isXhtml(root, "html") && isXhtml(candidate, "body"))
-      candidate = isXhtml(apply(firstElementOf, candidate, []), "parsererror")
-        ? apply(firstElementOf, candidate, [])
-        : candidate;
-    if (!isXhtml(candidate, "parsererror") || !apply(hasAttribute, candidate, ["style"]))
-      return false;
-    const heading = apply(firstElementOf, candidate, []);
-    return (
-      isXhtml(heading, "h3") &&
-      apply(textOf, heading, []) === "This page contains the following errors:"
-    );
-  };
   const arrayPush = Array.prototype.push,
     arraySort = Array.prototype.sort;
   const states = new WeakMap(),
@@ -239,9 +208,9 @@
     } else if (isXmlEssence(essence)) {
       // Bounded by the network body cap (8 MiB); checked again for other sources.
       if (record.bytes && record.bytes.length <= MAX_DOCUMENT_BYTES) {
-        const parsed = ops.op_parse_xml_document(text(record), essence);
-        if (!parseFailed(parsed))
-          doc = __registerInertDocument(parsed, record.response.url, essence);
+        // null when not well-formed (turbo-dom's ParsedXmlDocument::well_formed).
+        const parsed = ops.op_parse_xml_response(text(record), essence);
+        if (parsed !== null) doc = __registerInertDocument(parsed, record.response.url, essence);
       }
     }
     record.document = doc;

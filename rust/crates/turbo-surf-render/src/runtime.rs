@@ -6014,7 +6014,22 @@ fn op_parse_xml_document<'s>(
     #[string] content_type: &str,
 ) -> v8::Local<'s, v8::Object> {
     let units = crate::browser_env::string_code_units(scope, xml);
-    crate::browser_env::parse_xml_document_units(scope, &units, content_type)
+    crate::browser_env::parse_xml_document_units(scope, &units, content_type).document
+}
+
+/// XHR `responseXML` parsing: the `XMLDocument`, or `None` when the input is not
+/// well-formed (Chrome's `responseXML` is `null` then). Uses turbo-dom's
+/// `ParsedXmlDocument::well_formed`, so a literal `<parsererror>` in a well-formed
+/// response stays content.
+#[op2(reentrant)]
+fn op_parse_xml_response<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    xml: v8::Local<v8::String>,
+    #[string] content_type: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let units = crate::browser_env::string_code_units(scope, xml);
+    let parsed = crate::browser_env::parse_xml_document_units(scope, &units, content_type);
+    parsed.well_formed.then_some(parsed.document)
 }
 
 #[op2(reentrant)]
@@ -7210,6 +7225,7 @@ deno_core::extension!(
         op_document_cookie_allowed,
         op_parse_html_document,
         op_parse_xml_document,
+        op_parse_xml_response,
         op_parser_scripts,
         op_trusted_type_string,
         op_timer_code_allowed,

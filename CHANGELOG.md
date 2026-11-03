@@ -43,6 +43,16 @@ the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
   throw. Style and scroll-state queries and font-relative lengths are still refused
   with a clear error. Chrome control:
   `tests/fixtures/container_queries_chrome156.json`.
+- **Fixed (review round 1)**: XHR XML responses pick their encoding from the BOM,
+  then the charset parameter, then the `<?xml encoding?>` declaration (Chrome 156
+  control). A literal XHTML `<parsererror>` in a well-formed document no longer nulls
+  `responseXML`. Document parsing stops above the 8 MiB body cap. A prevented
+  `unhandledrejection` still gets `rejectionhandled` when it is handled later, as in
+  Chrome. The host event init can no longer run page `Object.prototype` getters. Promise
+  rejections that no realm takes keep deno_core's default reporting. Container queries
+  settle at any nesting depth (one pass per level, a 32-pass budget with a diagnostic).
+  A boxless nearest container makes its query false. `aspect-ratio` with zero height is
+  handled. A realm's timer-task base is cleared when its task ends.
 - **Fixed (frame timers, #128)**: a timer queued in a frame realm while a parent timer
   task runs counts from that task's due time, as the parent's own timers do, so it no
   longer runs after later parent timers (Chrome 156 order; the task base is agent-wide).

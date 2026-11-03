@@ -10,7 +10,7 @@ const FIXTURE: &str =
     include_str!("../../../../harness/detection/fixtures/xhr-document-chrome156.json");
 
 /// The server's routes: path -> (content type, body), as in xhr-document-server.mjs.
-const ROUTES: [(&str, &str, &str); 12] = [
+const ROUTES: [(&str, &str, &str); 13] = [
     (
         "/xml",
         "application/xml",
@@ -47,6 +47,11 @@ const ROUTES: [(&str, &str, &str); 12] = [
         "<a>é</a>",
     ),
     (
+        "/header-vs-decl",
+        "application/xml; charset=UTF-8",
+        r#"<?xml version="1.0" encoding="ISO-8859-1"?><a>café</a>"#,
+    ),
+    (
         "/literal-parsererror",
         "application/xml",
         r#"<a><parsererror xmlns="http://www.w3.org/1999/xhtml">x</parsererror></a>"#,
@@ -56,7 +61,7 @@ const ROUTES: [(&str, &str, &str); 12] = [
 /// A route's body bytes, encoded as xhr-document-server.mjs's `routeBytes` does.
 fn route_bytes(path: &str, body: &str) -> Vec<u8> {
     match path {
-        "/latin1-decl" | "/header-latin1" => body.chars().map(|c| c as u8).collect(),
+        "/latin1-decl" | "/header-latin1" | "/header-vs-decl" => body.chars().map(|c| c as u8).collect(),
         "/utf16-bom" => std::iter::once('\u{feff}')
             .chain(body.chars())
             .collect::<String>()

@@ -20,6 +20,11 @@ export const XHR_DOCUMENT_ROUTES = {
   "/utf16-bom": ["application/xml", "<a>é€</a>", "utf16le-bom"],
   "/header-latin1": ["application/xml; charset=ISO-8859-1", "<a>café</a>", "latin1"],
   "/bom-beats-header": ["application/xml; charset=ISO-8859-1", "<a>é</a>", "utf8-bom"],
+  "/header-vs-decl": [
+    "application/xml; charset=UTF-8",
+    '<?xml version="1.0" encoding="ISO-8859-1"?><a>café</a>',
+    "latin1",
+  ],
   "/literal-parsererror": [
     "application/xml",
     '<a><parsererror xmlns="http://www.w3.org/1999/xhtml">x</parsererror></a>',

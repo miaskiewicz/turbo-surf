@@ -1,8 +1,8 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "serverSha256": "e1d46805e9eab6d3d0273e04edb0ebf0ffbe0e3982118c6ce98385b0b1e194d2",
-  "probeSha256": "b1f7f8f529130c48c096899c472bf73cf402c908f612d0a7b3ec03d62530e434",
+  "serverSha256": "67c5a44b822ddd91a6abb894e3e294e4ba9e4578acc7881a629ad0c608d8b3f6",
+  "probeSha256": "5377ce7692cc21720a572bfd76778420694579625206834dae5d4eeab5b019dc",
   "collectorSha256": "6a199ad2ad77b4f58c523328169dadeff041c03ba00b1237f56c9145abe69e47",
   "flags": [
     "--remote-debugging-port=0",
@@ -103,6 +103,17 @@
       ["[object XMLDocument]", "application/xml", null, "a", "<a>é</a>"],
       false,
       8
+    ],
+    "headerVsDecl": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a>caf�</a>"
+      ],
+      false,
+      54
     ],
     "literalParsererror": [
       [

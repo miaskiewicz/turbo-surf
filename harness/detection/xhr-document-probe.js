@@ -35,6 +35,7 @@
     ["utf16Bom", "/utf16-bom", ""],
     ["headerLatin1", "/header-latin1", ""],
     ["bomBeatsHeader", "/bom-beats-header", ""],
+    ["headerVsDecl", "/header-vs-decl", ""],
     ["literalParsererror", "/literal-parsererror", ""],
   ]) {
     const x = await get(path, type, mime);

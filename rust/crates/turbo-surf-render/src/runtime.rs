@@ -5957,6 +5957,18 @@ fn op_parse_html_document<'s>(
     crate::browser_env::parse_html_document_units(scope, &units, sanitize)
 }
 
+/// `DOMParser` / XHR `responseXML` XML parsing (turbo-dom#186): an inert `XMLDocument`
+/// of `content_type`, Chrome's `<parsererror>` document for ill-formed input.
+#[op2(reentrant)]
+fn op_parse_xml_document<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    xml: v8::Local<v8::String>,
+    #[string] content_type: &str,
+) -> v8::Local<'s, v8::Object> {
+    let units = crate::browser_env::string_code_units(scope, xml);
+    crate::browser_env::parse_xml_document_units(scope, &units, content_type)
+}
+
 #[op2(reentrant)]
 fn op_document_create_element<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -7076,6 +7088,7 @@ deno_core::extension!(
         op_document_has_active_window,
         op_document_cookie_allowed,
         op_parse_html_document,
+        op_parse_xml_document,
         op_parser_scripts,
         op_trusted_type_string,
         op_timer_code_allowed,
@@ -8281,8 +8294,8 @@ const __registerInertDocument = (doc,documentURL,contentType) => {
 ops.op_set_inert_document_initializer(__registerInertDocument);
 
 // DOMParser (Chrome 156): (TrustedHTML or DOMString) then the SupportedType
-// enum are converted before the Trusted Types check. Only "text/html" can be
-// parsed by the HTML Tree engine; the XML types fail explicitly.
+// enum are converted before the Trusted Types check. "text/html" parses as HTML, the
+// XML types as an XMLDocument (turbo-dom-browser-env's XML parser, turbo-dom#186).
 const __domParserInstances=new WeakSet();
 const __domParserTypes=["text/html","text/xml","application/xml","application/xhtml+xml","image/svg+xml"];
 const __domParserIsHTML=Function.prototype.call.bind(TrustedTypePolicyFactory.prototype.isHTML),__domParserFactory=globalThis.trustedTypes;
@@ -8307,7 +8320,7 @@ Object.defineProperty(__domParserPrototype,"parseFromString",{value:__documentFu
   type=__domParserString(type,prefix);
   if(!__domParserTypes.includes(type))throw new TypeError(prefix+`The provided value '${type}' is not a valid enum value of type SupportedType.`);
   input=ops.op_trusted_type_string(__document,input,"TrustedHTML","DOMParser parseFromString",prefix);
-  if(type!=="text/html")throw new DOMException("XML document parsing is unsupported by the HTML Tree engine", "NotSupportedError");
+  if(type!=="text/html")return __registerInertDocument(ops.op_parse_xml_document(input,type),__document.URL,type);
   return __registerInertDocument(ops.op_parse_html_document(input,false),__document.URL,"text/html");
 },"parseFromString",2),writable:true,enumerable:true,configurable:true});
 Object.defineProperty(__domParserPrototype,"constructor",{value:DOMParser,writable:true,enumerable:false,configurable:true});

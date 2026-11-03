@@ -270,7 +270,10 @@
     const match = apply(exec, /^<\?xml\s[^>]*?\bencoding\s*=\s*["']([A-Za-z][A-Za-z0-9._-]*)["']/, [
       prefix,
     ]);
-    return match ? match[1] : null;
+    if (!match) return null;
+    // An ASCII-readable declaration cannot be UTF-16: sniffing maps it to UTF-8.
+    const label = apply(lower, match[1], []);
+    return label === "utf-16" || label === "utf-16le" || label === "utf-16be" ? "utf-8" : match[1];
   };
   // XHR text decoding: BOM, then the final MIME type's charset, then (XML types, as
   // the XML parser sniffs) the declaration, then UTF-8 (Chrome 156 control).

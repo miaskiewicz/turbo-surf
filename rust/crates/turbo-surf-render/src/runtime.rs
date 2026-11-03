@@ -6924,11 +6924,19 @@ fn op_route_promise_rejection(
     reason: v8::Local<v8::Value>,
     handled: bool,
 ) -> bool {
+    // No creation context or tracker key: not a page realm, so deno_core's default
+    // reporting applies on purpose.
     let (Some(context), Some(key)) = (
         promise.get_creation_context(scope),
         rejection_realm_key(scope),
     ) else {
         return false;
+    };
+    // A page realm the report cannot reach (not yet tracked, or retired) is logged and
+    // handled: a routing miss must never abort the session.
+    let miss = || {
+        eprintln!("turbo-surf: unrouted promise rejection (handled = {handled})");
+        true
     };
     let scope = &mut v8::ContextScope::new(scope, context);
     let Some(realm) = context
@@ -6936,21 +6944,22 @@ fn op_route_promise_rejection(
         .get_private(scope, key)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
     else {
-        return false;
+        return miss();
     };
     let name = if handled { "handled" } else { "unhandled" };
     let Some(key) = v8::String::new(scope, name) else {
-        return false;
+        return miss();
     };
     let Some(method) = realm
         .get(scope, key.into())
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     else {
-        return false;
+        return miss();
     };
     method
         .call(scope, realm.into(), &[promise.into(), reason])
         .is_some()
+        || miss()
 }
 
 fn install_environment<'s>(

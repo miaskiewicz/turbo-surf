@@ -2,9 +2,11 @@
 // harness/detection/transports-probe.js) over the engine's fetch: the XHR state machine,
 // argument validation, header lists, response types and Chrome's trusted event order
 // (readystatechange 2 and 3, progress, readystatechange 4, load, loadend).
-// Not modelled: synchronous requests (async=false still completes asynchronously),
-// responseXML/"document" parsing (null), upload progress events, setAttributionReporting
-// and setPrivateToken.
+// responseXML and responseType "document" parse XML MIME types with turbo-dom-browser-env's
+// XML parser (turbo-dom#186; ill-formed XML is null, as in Chrome) and, for "document",
+// text/html with the HTML parser. Not modelled: synchronous requests (async=false still
+// completes asynchronously), upload progress events, setAttributionReporting and
+// setPrivateToken.
 (() => {
   "use strict";
   const apply = Reflect.apply,
@@ -28,6 +30,9 @@
   const exec = RegExp.prototype.exec,
     lower = String.prototype.toLowerCase,
     upper = String.prototype.toUpperCase,
+    split = String.prototype.split,
+    endsWith = String.prototype.endsWith,
+    byTagNameNS = Document.prototype.getElementsByTagNameNS,
     trim = String.prototype.trim,
     replace = String.prototype.replace;
   const arrayPush = Array.prototype.push,
@@ -125,6 +130,7 @@
         response: null,
         bytes: null,
         cache: undefined,
+        document: undefined,
         controller: null,
         timer: null,
         source: () => ops.op_document_request_url(),
@@ -182,6 +188,35 @@
   const finalMime = (record) =>
     record.override ??
     (record.response ? headerValue(record.response.headers, "content-type") : null);
+  // The XHR "document response" (Chrome 156: harness/detection/xhr-document-probe.js).
+  const documentResponse = (record) => {
+    if (record.state !== 4) return null;
+    if (record.document !== undefined) return record.document;
+    const essence = apply(
+      trim,
+      apply(lower, apply(split, finalMime(record) ?? "text/xml", [";"])[0], []),
+      [],
+    );
+    let doc = null;
+    if (essence === "text/html") {
+      if (record.responseType === "document")
+        doc = __registerInertDocument(
+          ops.op_parse_html_document(text(record), false),
+          record.response.url,
+          "text/html",
+        );
+    } else if (
+      essence === "text/xml" ||
+      essence === "application/xml" ||
+      apply(endsWith, essence, ["+xml"])
+    ) {
+      const parsed = ops.op_parse_xml_document(text(record), essence);
+      if (!apply(byTagNameNS, parsed, ["http://www.w3.org/1999/xhtml", "parsererror"]).length)
+        doc = __registerInertDocument(parsed, record.response.url, essence);
+    }
+    record.document = doc;
+    return doc;
+  };
   const text = (record) => {
     if (!record.bytes) return "";
     const label = charset(finalMime(record));
@@ -199,6 +234,7 @@
     record.timer = null;
     record.response = null;
     record.bytes = null;
+    record.document = undefined;
     record.cache = undefined;
   };
   // XHR "request error steps": DONE, then the error event and loadend.
@@ -263,7 +299,7 @@
       } catch {
         record.cache = null;
       }
-    } else record.cache = null;
+    } else record.cache = documentResponse(record);
     return record.cache;
   });
   getter("responseText", (record) => {
@@ -472,6 +508,6 @@
         `Failed to read the 'responseXML' property from 'XMLHttpRequest': The value is only accessible if the object's 'responseType' is '' or 'document' (was '${record.responseType}').`,
         "InvalidStateError",
       );
-    return null;
+    return documentResponse(record);
   });
 })();

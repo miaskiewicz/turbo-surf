@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.7.0] — turbo-dom 0.7.0
+
+turbo-surf moves to turbo-dom 0.7.0 (`turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster`,
+`turbo-dom-browser-env` 0.7; `turbo-dom-v8` stays 150.4.0). Until those crates are on
+crates.io, `rust/Cargo.toml` pins them to a git rev of turbo-dom#232 through
+`[patch.crates-io]`; the pin is dropped before the tag (see PUBLISHING.md). npm, PyPI and
+the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
+
+- **Fixed (`DOMParser`)**: `parseFromString` with `application/xml`, `text/xml`,
+  `image/svg+xml` or `application/xhtml+xml` returns an `XMLDocument` (turbo-dom-browser-env's
+  `parse_xml_document_units`, turbo-dom#186) instead of throwing `NotSupportedError`; the
+  sanitizer control's XML known gap is gone.
+- **Fixed (XHR)**: `responseXML` and `responseType = "document"` parse the response like
+  Chrome 156 (new control `harness/detection/xhr-document-*`): an XML MIME type (also through
+  `overrideMimeType`) gives an `XMLDocument` and ill-formed XML gives `null`; `text/html`
+  parses only for `"document"`; other types give `null`. They were always `null`.
+- **Fixed (canvas)**: a page's canvases measure text with the system faces live layout uses
+  (`set_canvas_fonts`, turbo-dom#237), not turbo-dom-layout's bundled faces.
+- **Changed (render, turbo-dom 0.7.0)**: static screenshots and live geometry pick up
+  turbo-dom 0.7.0's Chrome 156 fixes (line height, kerning and shaping, `hyphens: auto`,
+  bidi and `dir`, list markers, inset `box-shadow`, inline box decoration, background
+  layers, unloaded `<img>`, vertical writing modes); measured in turbo-dom's
+  `tools/parity` surf corpora.
+
 ## [0.6.0] — 2026-10-26 — turbo-dom consolidation
 
 turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of

@@ -6845,6 +6845,63 @@ fn op_capture_runtime_core(scope: &mut v8::PinScope, core: v8::Local<v8::Object>
         .core = Some(v8::Global::new(scope, core_value));
 }
 
+/// The private key holding a realm's promise-rejection dispatcher (turbo-surf#103),
+/// `{unhandled, handled}`, on that realm's own global: no host handle keeps a retired
+/// frame realm alive.
+fn rejection_realm_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    let name = v8::String::new(scope, "turbo-surf.rejectionRealm")?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+
+#[op2(fast)]
+fn op_register_rejection_realm(scope: &mut v8::PinScope, realm: v8::Local<v8::Object>) {
+    // Frame bootstraps call the main realm's op functions, so the calling context is
+    // not the registering realm: the dispatcher object's own creation context is.
+    let (Some(context), Some(key)) = (
+        realm.get_creation_context(scope),
+        rejection_realm_key(scope),
+    ) else {
+        return;
+    };
+    context.global(scope).set_private(scope, key, realm.into());
+}
+
+/// deno_core's reject callback is isolate-wide and frame contexts borrow the main
+/// realm's state, so its report reaches whichever realm installed the JS handler last.
+/// Chrome reports on the global of the realm that created the promise: route there.
+#[op2(fast, reentrant)]
+fn op_route_promise_rejection(
+    scope: &mut v8::PinScope,
+    promise: v8::Local<v8::Object>,
+    reason: v8::Local<v8::Value>,
+    handled: bool,
+) {
+    let (Some(context), Some(key)) = (
+        promise.get_creation_context(scope),
+        rejection_realm_key(scope),
+    ) else {
+        return;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let Some(realm) = context
+        .global(scope)
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    else {
+        return;
+    };
+    let name = if handled { "handled" } else { "unhandled" };
+    let Some(key) = v8::String::new(scope, name) else {
+        return;
+    };
+    if let Some(method) = realm
+        .get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    {
+        method.call(scope, realm.into(), &[promise.into(), reason]);
+    }
+}
+
 fn install_environment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Value>,
@@ -7033,6 +7090,8 @@ deno_core::extension!(
         op_queue_frame_script,
         op_frame_module,
         op_event_trust,
+        op_register_rejection_realm,
+        op_route_promise_rejection,
         op_set_host_input_driver,
         op_host_user_activation,
         op_host_close_request,
@@ -9007,6 +9066,92 @@ for (const name of ["message", "filename", "lineno", "colno", "error"]) {
   Object.defineProperty(ErrorEvent.prototype, name, {...descriptor, enumerable:true});
 }
 Object.defineProperty(ErrorEvent.prototype, Symbol.toStringTag, {value:"ErrorEvent", configurable:true});
+// PromiseRejectionEvent and the Window promise-rejection tracker (turbo-surf#103).
+// deno_core's V8 reject callback hands over unhandled rejections after the microtask
+// checkpoint; like Chrome, each report is a task queued behind the timers already
+// due, and a handler attached after the report queues rejectionhandled.
+const __rejectionEventState = __interfaceMap("PromiseRejectionEvent");
+const __rejectionEventRecord = event => {
+  const state = __rejectionEventState.get(event);
+  if (!state) throw new TypeError("Illegal invocation");
+  return state;
+};
+globalThis.PromiseRejectionEvent = class PromiseRejectionEvent extends Event {
+  constructor(type, init) {
+    if (arguments.length < 2) throw new TypeError("Failed to construct 'PromiseRejectionEvent': 2 arguments required, but only " + arguments.length + " present.");
+    if (init === null || (typeof init !== "object" && typeof init !== "function")) throw new TypeError("Failed to construct 'PromiseRejectionEvent': The provided value is not of type 'PromiseRejectionEventInit'.");
+    const promise = init.promise;
+    if (promise === undefined) throw new TypeError("Failed to construct 'PromiseRejectionEvent': Failed to read the 'promise' property from 'PromiseRejectionEventInit': Required member is undefined.");
+    super(type, init);
+    __rejectionEventState.set(this, {promise, reason: init.reason});
+  }
+  get promise() {return __rejectionEventRecord(this).promise;}
+  get reason() {return __rejectionEventRecord(this).reason;}
+};
+for (const name of ["promise", "reason"]) {
+  const descriptor = Object.getOwnPropertyDescriptor(PromiseRejectionEvent.prototype, name);
+  Object.defineProperty(PromiseRejectionEvent.prototype, name, {...descriptor, enumerable:true});
+}
+Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {value:"PromiseRejectionEvent", configurable:true});
+{
+  const hostRejectionEvent = PromiseRejectionEvent;
+  const hostConsole = globalThis.console;
+  const consoleError = hostConsole && hostConsole.error;
+  // Reported, not-canceled rejections that may still be handled (Chrome's outstanding set).
+  const outstanding = new WeakSet();
+  // Drained by deno_core but not yet dispatched: a handler attached meanwhile cancels it.
+  const queued = new WeakSet();
+  const handledBeforeReport = new WeakSet();
+  const fire = (type, promise, reason, cancelable) => {
+    const event = new hostRejectionEvent(type, {promise, reason, cancelable});
+    ops.op_event_trust(event, -1);
+    ops.op_dispatch_host_event(event, globalThis);
+    return event;
+  };
+  const task = fn => __queueTimerTask(fn, __timerDue(0, 0, false), ops.op_task_sequence());
+  const realm = {
+    __proto__: null,
+    unhandled(promise, reason) {
+      queued.add(promise);
+      task(() => {
+        queued.delete(promise);
+        if (handledBeforeReport.has(promise)) {
+          handledBeforeReport.delete(promise);
+          return;
+        }
+        const event = fire("unhandledrejection", promise, reason, true);
+        // preventDefault() suppresses the console report and any later rejectionhandled.
+        if (event.defaultPrevented) return;
+        outstanding.add(promise);
+        if (typeof consoleError === "function") {
+          try { Reflect.apply(consoleError, hostConsole, ["Uncaught (in promise)", reason]); } catch (_error) {}
+        }
+      });
+    },
+    handled(promise, reason) {
+      if (queued.has(promise)) {
+        handledBeforeReport.add(promise);
+        return;
+      }
+      if (!outstanding.has(promise)) return;
+      outstanding.delete(promise);
+      task(() => fire("rejectionhandled", promise, reason, false));
+    },
+  };
+  // deno_core's tracker is isolate-wide and frame contexts share this private core;
+  // the host routes each report to the realm that created the promise.
+  // Only the main realm installs the shared handlers: a frame-realm closure held by
+  // the core would keep a retired frame alive.
+  ops.op_register_rejection_realm(realm);
+  if (!__G.isFrame) {
+    __core.setUnhandledPromiseRejectionHandler((promise, reason) => {
+      ops.op_route_promise_rejection(promise, reason, false);
+      // Handled here: the report is the event, never a fatal event-loop error.
+      return true;
+    });
+    __core.setHandledPromiseRejectionHandler((promise, reason) => ops.op_route_promise_rejection(promise, reason, true));
+  }
+}
 "##,
     include_str!("message_ports.js"),
     r##"

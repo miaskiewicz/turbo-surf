@@ -418,9 +418,7 @@ Google SERP acceptance for 0.6.0 is a separate run: see GOOGLE-SERP-0.6.0 (pendi
 [turbo-surf#114](https://github.com/miaskiewicz/turbo-surf/issues/114)).
 
 Known gaps, each tracked in its own issue:
-[unhandledrejection](https://github.com/miaskiewicz/turbo-surf/issues/103),
 [workers](https://github.com/miaskiewicz/turbo-surf/issues/104),
-[container queries in live layout](https://github.com/miaskiewicz/turbo-surf/issues/105),
 [canvas captureStream / offscreen / PiP, WebGL](https://github.com/miaskiewicz/turbo-surf/issues/106),
 [IndexedDB](https://github.com/miaskiewicz/turbo-surf/issues/107),
 [placeholder APIs (caches, cookieStore, Navigation, locks, WebSocket)](https://github.com/miaskiewicz/turbo-surf/issues/108),

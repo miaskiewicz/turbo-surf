@@ -28,7 +28,8 @@ pub(crate) fn prepare_sheet(
             rule.scoped = Some(prepare_rule(tree, document, root, graph, rule)?);
         }
         // Keyframe percentages are animation steps, never DOM selectors.
-        if let Some(rules) = rule.rules.as_mut().filter(|_| matches!(rule.kind, 4 | 12)) {
+        let grouping = matches!(rule.kind, 4 | 12) || crate::live_stylesheets::is_container(rule);
+        if let Some(rules) = rule.rules.as_mut().filter(|_| grouping) {
             let mut nested = SheetSnapshot {
                 cycle: false,
                 disabled: false,
@@ -454,6 +455,7 @@ pub(crate) fn ua_rules(
                 text,
                 scoped: Some(prepare_rule(tree, document, root, graph, &snapshot)?),
                 resource: None,
+                containers: Vec::new(),
             });
         }
     }

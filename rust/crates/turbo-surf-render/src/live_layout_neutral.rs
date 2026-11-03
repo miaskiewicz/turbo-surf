@@ -311,6 +311,7 @@ mod tests {
                     text,
                     scoped: None,
                     resource,
+                    containers: Vec::new(),
                 }
             })
             .collect::<Vec<_>>();

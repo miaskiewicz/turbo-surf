@@ -142,6 +142,7 @@ pub(crate) fn test_rules(
             text,
             scoped: sheet.rules.remove(0).scoped,
             resource: None,
+            containers: Vec::new(),
         });
     }
     Ok(rules)
@@ -225,6 +226,97 @@ pub(crate) fn layout_active_rules_resolved(
             );
         }
     }
+    // Container-query targets start unselected; each pass re-selects them against
+    // the previous pass's container boxes until the selection is stable.
+    let conditional = qualified.iter().any(|rule| !rule.containers.is_empty());
+    let mut selected: Vec<Option<turbo_dom_layout::live::PreMatched>> = qualified
+        .iter()
+        .map(|rule| {
+            rule.scoped
+                .as_ref()
+                .map(|scoped| select(scoped, rule, |_| false))
+        })
+        .collect();
+    let mut passes = 0;
+    loop {
+        let (snapshot, (styles, containers)) = snapshot_pass(
+            tree,
+            input,
+            &qualified,
+            &selected,
+            rules,
+            layout_scale,
+            inputs,
+            diagnostics,
+        )?;
+        if !conditional {
+            return Ok((snapshot, styles));
+        }
+        let next = qualified
+            .iter()
+            .map(|rule| {
+                rule.scoped.as_ref().map(|scoped| {
+                    select(scoped, rule, |target| {
+                        containers.matches(&snapshot, target, &rule.containers)
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        passes += 1;
+        // Containment keeps a container's size independent of its contents, so each
+        // pass can only settle one more level of nested containers.
+        if next == selected || passes >= MAX_CONTAINER_PASSES {
+            return Ok((snapshot, styles));
+        }
+        selected = next;
+    }
+}
+
+/// Nested container levels resolved before the last selection is kept.
+const MAX_CONTAINER_PASSES: usize = 8;
+
+/// `scoped` with only the targets an `@container`-conditioned rule currently selects.
+fn select(
+    scoped: &turbo_dom_layout::live::PreMatched,
+    rule: &crate::live_stylesheets::ActiveRule,
+    applies: impl Fn(turbo_dom_layout::layout_snapshot::SourceId) -> bool,
+) -> turbo_dom_layout::live::PreMatched {
+    if rule.containers.is_empty() {
+        return scoped.clone();
+    }
+    turbo_dom_layout::live::PreMatched {
+        depth: scoped.depth,
+        declarations: scoped.declarations.clone(),
+        targets: scoped
+            .targets
+            .iter()
+            .filter(|target| applies(target.source))
+            .cloned()
+            .collect(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn snapshot_pass(
+    tree: &Tree,
+    input: &LiveTreeInput,
+    qualified: &[&crate::live_stylesheets::ActiveRule],
+    selected: &[Option<turbo_dom_layout::live::PreMatched>],
+    rules: &[crate::live_stylesheets::ActiveRule],
+    layout_scale: f32,
+    inputs: &SnapshotInputs,
+    diagnostics: &mut Diagnostics,
+) -> Result<
+    (
+        LayoutSnapshot,
+        (
+            turbo_dom_layout::cssom_view::scroll::SourceStyles,
+            crate::live_container_queries::Containers,
+        ),
+    ),
+    String,
+> {
+    debug_assert_eq!(qualified.len(), selected.len());
     let graph = input
         .composition
         .as_ref()
@@ -240,7 +332,7 @@ pub(crate) fn layout_active_rules_resolved(
         },
         OriginRules {
             origin: CascadeOrigin::Author,
-            rules: qualified.iter().map(|rule| rule.scoped.as_ref()).collect(),
+            rules: selected.iter().map(Option::as_ref).collect(),
         },
     ];
     let children = |node: Handle| graph.children_of(node);
@@ -275,7 +367,8 @@ pub(crate) fn layout_active_rules_resolved(
         |styled| {
             let styles = crate::live_layout_zoom::apply(styled, document);
             crate::live_layout_resources::validate(styled, rules)?;
-            Ok(styles)
+            let containers = crate::live_container_queries::Containers::collect(styled, document);
+            Ok((styles, containers))
         },
         inputs,
         diagnostics,

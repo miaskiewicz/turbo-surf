@@ -23,6 +23,20 @@ the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
   bidi and `dir`, list markers, inset `box-shadow`, inline box decoration, background
   layers, unloaded `<img>`, vertical writing modes); measured in turbo-dom's
   `tools/parity` surf corpora.
+- **Fixed (`unhandledrejection` / `rejectionhandled`, #103)**: The render tier now has a
+  host promise-rejection tracker. Each realm, iframes included, gets a
+  `PromiseRejectionEvent` on its own `window` with Chrome 156's timing (a task after
+  the rejecting task's microtasks) and shape (`promise`, `reason`, `cancelable`).
+  `preventDefault()` suppresses the `Uncaught (in promise)` console report. An
+  unhandled rejection no longer ends the event loop early. Chrome control:
+  `tests/fixtures/unhandled_rejection_chrome156.json`.
+- **Fixed (size container queries in live layout, #105)**: An unnamed or named
+  `@container` size query (`width`/`height`/`inline-size`/`block-size`/
+  `aspect-ratio`/`orientation`, ranges, `and`/`or`/`not`) is evaluated against the
+  nearest eligible ancestor container's content box, so geometry reads no longer
+  throw. Style and scroll-state queries and font-relative lengths are still refused
+  with a clear error. Chrome control:
+  `tests/fixtures/container_queries_chrome156.json`.
 
 ## [0.6.0] — 2026-10-26 — turbo-dom consolidation
 

@@ -300,6 +300,7 @@ fn scoped_rule(targets: &[Handle], declarations: usize) -> ActiveRule {
                 .collect(),
         }),
         resource: None,
+        containers: Vec::new(),
     }
 }
 

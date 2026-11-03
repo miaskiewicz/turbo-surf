@@ -38,6 +38,8 @@ pub(crate) struct ActiveRule {
     pub(crate) text: String,
     pub(crate) scoped: Option<crate::live_layout_scoped::ScopedRule>,
     pub(crate) resource: Option<crate::live_layout_resources::Definition>,
+    /// Enclosing `@container` queries (outermost first); all must hold per target.
+    pub(crate) containers: Vec<crate::live_container_queries::Query>,
 }
 
 pub(crate) trait Conditions {
@@ -75,7 +77,7 @@ fn append_sheet(
     result: &mut Vec<ActiveRule>,
 ) -> Result<(), String> {
     if !sheet.cycle && !sheet.disabled && conditions.media(&sheet.media)? {
-        append_rules(&sheet.rules, conditions, result)?;
+        append_rules(&sheet.rules, conditions, &[], result)?;
     }
     Ok(())
 }
@@ -83,10 +85,27 @@ fn append_sheet(
 fn append_rules(
     rules: &[RuleSnapshot],
     conditions: &impl Conditions,
+    containers: &[crate::live_container_queries::Query],
     result: &mut Vec<ActiveRule>,
 ) -> Result<(), String> {
     for rule in rules {
         match rule.kind {
+            0 if is_container(rule) => {
+                let prelude = rule
+                    .prelude
+                    .as_deref()
+                    .ok_or("native CSS container rule has no trusted prelude")?;
+                let mut nested = containers.to_vec();
+                nested.push(crate::live_container_queries::parse(prelude)?);
+                append_rules(
+                    rule.rules
+                        .as_deref()
+                        .ok_or("native CSS container rule has no private child list")?,
+                    conditions,
+                    &nested,
+                    result,
+                )?;
+            }
             3 if conditions.media(&rule.media)? => {
                 if let Some(sheet) = &rule.style_sheet {
                     append_sheet(sheet, conditions, result)?;
@@ -115,6 +134,7 @@ fn append_rules(
                             .as_deref()
                             .ok_or("native CSS grouping rule has no private child list")?,
                         conditions,
+                        containers,
                         result,
                     )?;
                 }
@@ -123,6 +143,7 @@ fn append_rules(
                 text: rule.css_text.clone(),
                 scoped: rule.scoped.clone(),
                 resource: None,
+                containers: containers.to_vec(),
             }),
             0 => result.push(ActiveRule {
                 text: rule.css_text.clone(),
@@ -132,11 +153,13 @@ fn append_rules(
                         format!("native live layout does not support CSS rule type 0: {error}")
                     })?,
                 ),
+                containers: Vec::new(),
             }),
             5 | 7 => result.push(ActiveRule {
                 text: rule.css_text.clone(),
                 scoped: None,
                 resource: Some(crate::live_layout_resources::definition(&rule.css_text)?),
+                containers: Vec::new(),
             }),
             _ => {
                 return Err(format!(
@@ -147,6 +170,16 @@ fn append_rules(
         }
     }
     Ok(())
+}
+
+/// A CSSOM `@container` block: an unnamed-type (0) rule with a child list.
+pub(crate) fn is_container(rule: &RuleSnapshot) -> bool {
+    rule.kind == 0
+        && rule.rules.is_some()
+        && rule
+            .prelude
+            .as_deref()
+            .is_some_and(|prelude| prelude.starts_with("@container"))
 }
 
 #[cfg(test)]

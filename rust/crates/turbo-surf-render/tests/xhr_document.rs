@@ -61,7 +61,9 @@ const ROUTES: [(&str, &str, &str); 13] = [
 /// A route's body bytes, encoded as xhr-document-server.mjs's `routeBytes` does.
 fn route_bytes(path: &str, body: &str) -> Vec<u8> {
     match path {
-        "/latin1-decl" | "/header-latin1" | "/header-vs-decl" => body.chars().map(|c| c as u8).collect(),
+        "/latin1-decl" | "/header-latin1" | "/header-vs-decl" => {
+            body.chars().map(|c| c as u8).collect()
+        }
         "/utf16-bom" => std::iter::once('\u{feff}')
             .chain(body.chars())
             .collect::<String>()

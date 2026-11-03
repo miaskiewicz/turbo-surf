@@ -53,7 +53,10 @@ async fn container_query_geometry_matches_chrome156() {
         // containment in turbo-dom-layout, so a shrink-to-fit container keeps its
         // content's width (Chrome: 0). Pinned so a change on either side is noticed.
         if id == "size-containment-shrink" {
-            assert_eq!(chrome["result"][0], serde_json::json!(["DIV.f", "ok", 0, 72]));
+            assert_eq!(
+                chrome["result"][0],
+                serde_json::json!(["DIV.f", "ok", 0, 72])
+            );
             assert_eq!(native[0][2], serde_json::json!(133.734375), "{native}");
             continue;
         }

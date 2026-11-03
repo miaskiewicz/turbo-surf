@@ -3512,6 +3512,9 @@ struct WindowTimerNesting {
     level: std::cell::Cell<u32>,
     /// Whether a timer task (with its microtask checkpoint) is running in this realm.
     task: std::cell::Cell<bool>,
+    /// The task base this realm published for its running timer task; cleared when
+    /// the outermost task ends, so a later task never reads a stale one (#128).
+    published: std::cell::Cell<Option<f64>>,
 }
 
 fn window_timer_nesting(context: v8::Local<v8::Context>) -> Rc<WindowTimerNesting> {
@@ -3547,16 +3550,20 @@ fn op_timer_publish_task_base(
         return;
     };
     let nesting = window_timer_nesting(context);
+    nesting.published.set(Some(base));
     let state = JsRuntime::op_state_from(scope);
     let state = state.borrow();
-    *state.borrow::<TimerClock>().task_base.borrow_mut() = Some((nesting, base));
+    *state.borrow::<TimerClock>().task_base.borrow_mut() = Some(PublishedTaskBase { nesting });
 }
 
 /// The agent's running timer-task base, or NaN outside a (non-rendering) timer task.
+/// The publisher's task must still be running (its base is cleared when it ends).
 #[op2(fast)]
 fn op_timer_agent_task_base(state: &mut OpState) -> f64 {
     match &*state.borrow::<TimerClock>().task_base.borrow() {
-        Some((nesting, base)) if nesting.task.get() => *base,
+        Some(published) if published.nesting.task.get() => {
+            published.nesting.published.get().unwrap_or(f64::NAN)
+        }
         _ => f64::NAN,
     }
 }
@@ -3581,6 +3588,7 @@ impl WindowTimerTask {
         let nesting = window_timer_nesting(context);
         let previous = nesting.level.get();
         let previous_task = nesting.task.replace(true);
+
         Self {
             nesting,
             previous,
@@ -3592,6 +3600,9 @@ impl Drop for WindowTimerTask {
     fn drop(&mut self) {
         self.nesting.level.set(self.previous);
         self.nesting.task.set(self.previous_task);
+        if !self.previous_task {
+            self.nesting.published.set(None);
+        }
     }
 }
 
@@ -3613,8 +3624,15 @@ struct TimerClock {
     /// The running timer task's base clock, agent-wide: a timer queued in any
     /// same-agent realm during that task counts from it (turbo-surf#128). Valid only
     /// while the publishing realm's task is still active.
-    task_base: std::cell::RefCell<Option<(Rc<WindowTimerNesting>, f64)>>,
+    task_base: std::cell::RefCell<Option<PublishedTaskBase>>,
 }
+/// The realm whose running timer task published the agent's task base. It is not
+/// limited to same-origin readers: a srcdoc frame's security token differs while it
+/// loads, and the frame-load-order Chrome 156 control needs the shared base there.
+struct PublishedTaskBase {
+    nesting: Rc<WindowTimerNesting>,
+}
+
 impl TimerClock {
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64() * 1000.0 + self.advance.get()

@@ -12926,6 +12926,11 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         } else {
             crate::browser_env::install_html(&mut scope, html);
         }
+        // Canvas `measureText` resolves `ctx.font` against the faces live layout uses
+        // (turbo-dom#237); a page opened before font discovery keeps the bundled faces.
+        if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {
+            crate::browser_env::set_canvas_fonts(context, fonts.clone());
+        }
         install_css_authorization(&mut scope).map_err(|error| error.to_string())?;
         // Before the environment bootstrap, which already creates the parsed iframes.
         let headers = JsRuntime::op_state_from(&scope)

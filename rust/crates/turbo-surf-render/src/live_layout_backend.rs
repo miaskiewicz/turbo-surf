@@ -23,6 +23,11 @@ pub(crate) fn initialize_system_fonts() -> &'static FontRegistry {
     FontRegistry::system(SystemFontPolicy::Html)
 }
 
+/// The shared system registry if font discovery already ran (no discovery here).
+pub(crate) fn loaded_system_fonts() -> Option<&'static FontRegistry> {
+    system_fonts().get()
+}
+
 pub(crate) async fn initialize_system_fonts_async() -> Result<(), String> {
     if system_fonts().get().is_some() {
         return Ok(());

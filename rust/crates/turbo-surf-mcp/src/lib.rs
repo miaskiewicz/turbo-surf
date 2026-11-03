@@ -6514,10 +6514,11 @@ mod session_tool_tests {
         );
         assert_eq!(shot["mimeType"], "image/png");
         // The fetched <img> (red), the background-image from the linked sheet (red)
-        // and the linked sheet's blue body background.
+        // and the linked sheet's blue body background, sampled beside the <select>
+        // (form controls paint since turbo-dom#239; Chrome 156 is blue there too).
         assert_eq!(pixel(&shot, 5, 5), [255, 0, 0]);
         assert_eq!(pixel(&shot, 5, 25), [255, 0, 0]);
-        assert_eq!(pixel(&shot, 40, 45), [0, 0, 255]);
+        assert_eq!(pixel(&shot, 40, 30), [0, 0, 255]);
         assert!(s.requests.iter().any(|r| r.ends_with("/red.png")));
         // Without external CSS or images: white canvas, nothing fetched.
         s.requests.clear();
@@ -6528,7 +6529,7 @@ mod session_tool_tests {
         )
         .await
         .unwrap();
-        assert_eq!(pixel(&bare, 40, 45), [255, 255, 255]);
+        assert_eq!(pixel(&bare, 40, 30), [255, 255, 255]);
         // The unfetched <img> paints its placeholder, never the image's red.
         assert_ne!(pixel(&bare, 5, 5), [255, 0, 0]);
         assert_ne!(pixel(&bare, 5, 25), [255, 0, 0]);

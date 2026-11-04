@@ -419,8 +419,8 @@ async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() 
             // request does not advertise it (100 ms later it does). Core publishes
             // synchronously at transport EOF and advertises it at once. Pinned on
             // both sides so a change in either is noticed; no artificial delay.
-            assert_eq!(expected_available[1], false, "Chrome immediate read");
-            assert_eq!(actual_available[1], true, "surf immediate read (gap)");
+            assert!(!expected_available[1], "Chrome immediate read");
+            assert!(actual_available[1], "surf immediate read (gap)");
             actual_available.remove(1);
             expected_available.remove(1);
         }

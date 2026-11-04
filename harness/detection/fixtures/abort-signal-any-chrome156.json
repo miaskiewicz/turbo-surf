@@ -1,0 +1,105 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-04T11:05:15.631Z",
+  "fixtures": {
+    "abort-signal-any-probe.js": "444872ccbc098d31a9f7a622604fa35f6bfeb760f73f505fa36c90794339c4b4"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "abort-signal-any-probe.js": {
+      "ownIterator": ["ok", 0],
+      "protoIterator": ["ok", 0],
+      "arrayIteratorNext": ["ok", 0],
+      "subclass": ["ok", 0],
+      "holes": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Failed to convert value to 'AbortSignal'."
+      ],
+      "inheritedIndex": ["ok", 1],
+      "ownGetter": ["ok", 1],
+      "proxy": ["ok", ["Symbol.iterator", "length", "0", "length"]],
+      "set": ["ok", false],
+      "empty": ["ok", false],
+      "abortedInput": ["ok", "why"],
+      "notSignal": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Failed to convert value to 'AbortSignal'."
+      ],
+      "notSignalIterable": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Failed to convert value to 'AbortSignal'."
+      ],
+      "string": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': The provided value cannot be converted to a sequence."
+      ],
+      "noArgument": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': 1 argument required, but only 0 present."
+      ],
+      "null": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': The provided value cannot be converted to a sequence."
+      ],
+      "plainObject": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': The object must have a callable @@iterator property."
+      ],
+      "nonCallableIterator": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': @@iterator must be a callable."
+      ],
+      "iteratorNotObject": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Iterator object must be an object."
+      ],
+      "resultNotObject": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Expected iterator.next() to return an Object."
+      ],
+      "timeoutNegative": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is outside the 'unsigned long long' value range."
+      ],
+      "timeoutNaN": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is not of type 'unsigned long long'."
+      ],
+      "timeoutHuge": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is outside the 'unsigned long long' value range."
+      ],
+      "timeoutString": ["ok", false],
+      "timeoutFraction": ["ok", false],
+      "timeoutInfinity": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is infinite and not of type 'unsigned long long'."
+      ],
+      "timeoutBigInt": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Cannot convert a BigInt value to a number"
+      ],
+      "timeoutSymbol": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Cannot convert a Symbol value to a number"
+      ],
+      "timeoutNoArgument": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': 1 argument required, but only 0 present."
+      ],
+      "timeoutEvents": [
+        ["timed", true, false, true, true],
+        ["microtask"],
+        ["combined", true],
+        ["reason", "[object DOMException]", "TimeoutError", "signal timed out", 23]
+      ]
+    }
+  }
+}

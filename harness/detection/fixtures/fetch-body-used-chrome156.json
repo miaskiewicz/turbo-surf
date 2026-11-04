@@ -1,0 +1,211 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-04T12:11:43.997Z",
+  "fixtures": {
+    "fetch-body-used-probe.js": "47b9a1797010febb707f4455f89ca5b53c6890a984420860274473f64ef59b39"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "fetch-body-used-probe.js": {
+      "Response/used": {
+        "arrayBuffer": [
+          true,
+          ["TypeError", "Failed to execute 'arrayBuffer' on 'Response': body stream already read"]
+        ],
+        "bytes": [
+          true,
+          ["TypeError", "Failed to execute 'bytes' on 'Response': body stream already read"]
+        ],
+        "text": [
+          true,
+          ["TypeError", "Failed to execute 'text' on 'Response': body stream already read"]
+        ],
+        "json": [
+          true,
+          ["TypeError", "Failed to execute 'json' on 'Response': body stream already read"]
+        ],
+        "blob": [
+          true,
+          ["TypeError", "Failed to execute 'blob' on 'Response': body stream already read"]
+        ],
+        "formData": [
+          true,
+          ["TypeError", "Failed to execute 'formData' on 'Response': body stream already read"]
+        ],
+        "clone": [
+          "TypeError",
+          "Failed to execute 'clone' on 'Response': Response body is already used"
+        ]
+      },
+      "Response/locked": {
+        "arrayBuffer": [
+          false,
+          ["TypeError", "Failed to execute 'arrayBuffer' on 'Response': body stream is locked"]
+        ],
+        "bytes": [
+          false,
+          ["TypeError", "Failed to execute 'bytes' on 'Response': body stream is locked"]
+        ],
+        "text": [
+          false,
+          ["TypeError", "Failed to execute 'text' on 'Response': body stream is locked"]
+        ],
+        "json": [
+          false,
+          ["TypeError", "Failed to execute 'json' on 'Response': body stream is locked"]
+        ],
+        "blob": [
+          false,
+          ["TypeError", "Failed to execute 'blob' on 'Response': body stream is locked"]
+        ],
+        "formData": [
+          false,
+          ["TypeError", "Failed to execute 'formData' on 'Response': body stream is locked"]
+        ],
+        "clone": [
+          "TypeError",
+          "Failed to execute 'clone' on 'Response': Response body is already used"
+        ]
+      },
+      "Response/disturbed": {
+        "arrayBuffer": [
+          true,
+          ["TypeError", "Failed to execute 'arrayBuffer' on 'Response': body stream already read"]
+        ],
+        "bytes": [
+          true,
+          ["TypeError", "Failed to execute 'bytes' on 'Response': body stream already read"]
+        ],
+        "text": [
+          true,
+          ["TypeError", "Failed to execute 'text' on 'Response': body stream already read"]
+        ],
+        "json": [
+          true,
+          ["TypeError", "Failed to execute 'json' on 'Response': body stream already read"]
+        ],
+        "blob": [
+          true,
+          ["TypeError", "Failed to execute 'blob' on 'Response': body stream already read"]
+        ],
+        "formData": [
+          true,
+          ["TypeError", "Failed to execute 'formData' on 'Response': body stream already read"]
+        ],
+        "clone": [
+          "TypeError",
+          "Failed to execute 'clone' on 'Response': Response body is already used"
+        ]
+      },
+      "Request/used": {
+        "arrayBuffer": [
+          true,
+          ["TypeError", "Failed to execute 'arrayBuffer' on 'Request': body stream already read"]
+        ],
+        "bytes": [
+          true,
+          ["TypeError", "Failed to execute 'bytes' on 'Request': body stream already read"]
+        ],
+        "text": [
+          true,
+          ["TypeError", "Failed to execute 'text' on 'Request': body stream already read"]
+        ],
+        "json": [
+          true,
+          ["TypeError", "Failed to execute 'json' on 'Request': body stream already read"]
+        ],
+        "blob": [
+          true,
+          ["TypeError", "Failed to execute 'blob' on 'Request': body stream already read"]
+        ],
+        "formData": [
+          true,
+          ["TypeError", "Failed to execute 'formData' on 'Request': body stream already read"]
+        ],
+        "clone": [
+          "TypeError",
+          "Failed to execute 'clone' on 'Request': Request body is already used"
+        ],
+        "construct": [
+          "TypeError",
+          "Failed to construct 'Request': Cannot construct a Request with a Request object that has already been used."
+        ]
+      },
+      "Request/locked": {
+        "arrayBuffer": [
+          false,
+          ["TypeError", "Failed to execute 'arrayBuffer' on 'Request': body stream is locked"]
+        ],
+        "bytes": [
+          false,
+          ["TypeError", "Failed to execute 'bytes' on 'Request': body stream is locked"]
+        ],
+        "text": [
+          false,
+          ["TypeError", "Failed to execute 'text' on 'Request': body stream is locked"]
+        ],
+        "json": [
+          false,
+          ["TypeError", "Failed to execute 'json' on 'Request': body stream is locked"]
+        ],
+        "blob": [
+          false,
+          ["TypeError", "Failed to execute 'blob' on 'Request': body stream is locked"]
+        ],
+        "formData": [
+          false,
+          ["TypeError", "Failed to execute 'formData' on 'Request': body stream is locked"]
+        ],
+        "clone": [
+          "TypeError",
+          "Failed to execute 'clone' on 'Request': Request body is already used"
+        ],
+        "construct": [
+          "TypeError",
+          "Failed to construct 'Request': Cannot construct a Request with a Request object that has already been used."
+        ]
+      },
+      "Request/disturbed": {
+        "arrayBuffer": [
+          true,
+          ["TypeError", "Failed to execute 'arrayBuffer' on 'Request': body stream already read"]
+        ],
+        "bytes": [
+          true,
+          ["TypeError", "Failed to execute 'bytes' on 'Request': body stream already read"]
+        ],
+        "text": [
+          true,
+          ["TypeError", "Failed to execute 'text' on 'Request': body stream already read"]
+        ],
+        "json": [
+          true,
+          ["TypeError", "Failed to execute 'json' on 'Request': body stream already read"]
+        ],
+        "blob": [
+          true,
+          ["TypeError", "Failed to execute 'blob' on 'Request': body stream already read"]
+        ],
+        "formData": [
+          true,
+          ["TypeError", "Failed to execute 'formData' on 'Request': body stream already read"]
+        ],
+        "clone": [
+          "TypeError",
+          "Failed to execute 'clone' on 'Request': Request body is already used"
+        ],
+        "construct": [
+          "TypeError",
+          "Failed to construct 'Request': Cannot construct a Request with a Request object that has already been used."
+        ]
+      }
+    }
+  }
+}

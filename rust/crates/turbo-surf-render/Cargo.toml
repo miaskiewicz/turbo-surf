@@ -73,6 +73,8 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 # document.lastModified reads the navigation response's Last-Modified HTTP date.
 httpdate = "1"
+# WOFF/WOFF2 `@font-face` sources decode to sfnt before turbo-dom parses them (#130).
+wuff = "=0.2.9"
 
 [build-dependencies]
 cc = "1"

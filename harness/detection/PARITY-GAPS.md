@@ -409,8 +409,8 @@ reading source alone.
 
 | Repair | Current evidence | State |
 |---|---|---|
-| Dictionary store, negotiation and incremental decoding | Pushed ec868b7; Core220 and10 HTTPS controls per transport, strict/format pass | Implemented within controls; fresh Google capture complete, publication/Range residuals open |
-| Dictionary discovery and resource task source | Pushed a15d098;32 exact independent Chrome cases pass on stock and actual155 | Implemented; publication timing/encoded Range remain open |
+| Dictionary store, negotiation and incremental decoding | Pushed ec868b7; Core220 and10 HTTPS controls per transport, strict/format pass | Implemented within controls; fresh Google capture complete; Range negotiation matches the Chrome 156 control (#137), publication scheduling pinned |
+| Dictionary discovery and resource task source | Pushed a15d098;32 exact independent Chrome cases pass on stock and actual155 | Implemented; publication timing pinned as a known gap (#137) |
 | Live form collections, submitters and radio ownership | Pushed a15d098/canonical51b5b97; actual155 collection2/navigation12/radio1 pass | Implemented within controls; broader forms remain open |
 | Native control labels and receiver-realm NodeList | Pushed5c0b886/canonical1e93cae; actual155 and stock production behavior/GC2 pass | Integrated; full Rust gates pass, label activation open |
 | Real native deadlines vs virtual Window timers | Pushed5c0b886; source-pinned Chrome4 outcomes, actual155 affected14 and MCP73 pass | Integrated; full Rust gates pass |
@@ -482,7 +482,7 @@ the issue retains the specific unclosed requirements.
 | Events / promises | Stream/listener microtask interleaving and broader Object-prototype descriptor hooks during abort/event dispatch and exception reporting | #28 |
 | CSS / resources | Remaining selectors/at-rules, used downloaded fonts/animations, images/pseudo epochs, inner SVG | #28 |
 | Security | Remaining CSP/reporting/sinks, popup/navigation/sandbox, COOP/COEP and permissions policies | #28 |
-| Fetch / storage | Dictionary publication scheduling and encoded Range behavior; broader streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
+| Fetch / storage | Dictionary publication scheduling (pinned, #137) and decoding of dictionary-encoded 206 bodies; broader streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
 | API inventory | Every unresolved missing/extra member and descriptor/inheritance/behavior path in API-INVENTORY.json; fresh paired measurement | #28 |
 | Distribution | Stock/native V8 alignment, native patch distribution, layout publication and registry-ready transport/crypto dependencies | #28 |
 | Browser lifecycle | Watchdog/async-op admission recovery, timeout-signal delivery/GC, listener-count release and retained detached-window active-time suspension | #28 |
@@ -501,8 +501,14 @@ and [unadapted Deno baseline](./fixtures/abort-bridge-deno-baseline.json) retain
 exact open difference: Chrome runs stream sink-abort/cancel reactions before the
 microtask queued by the signal listener; the native Deno backend runs that listener
 microtask first. The same difference existed before the private event-array fix
-and is tracked in turbo-surf#136 (with the timeout-dependent listener order pinned in
-`tests/abort_signal_any.rs`). Event state, dependent reason identity and timeout
+and is tracked in turbo-surf#136. It is not a microtask-checkpoint difference
+(`controller.abort()` runs from page script, so Chrome performs none either): the
+official Deno pipeTo `shutdownWithAction` waits one more promise hop
+(`waitForWritesToFinish`) before sink abort/cancel, and only a turbo-surf-deno-web
+`06_streams.js` change can remove it. A host-run `AbortSignal.timeout()` now dispatches
+each signal (source, then each dependent) with a microtask checkpoint after it; the
+remaining per-listener checkpoint inside one signal needs a turbo-dom EventTarget
+host hook and is pinned in `tests/abort_signal_any.rs`. Event state, dependent reason identity and timeout
 results are checked against Chrome separately; a passing state control does not
 close this queue-order gap.
 
@@ -524,9 +530,11 @@ Brotli/Zstandard decoding and policy-aware discovery are integrated. Both final
 workspace commands pass, including10 real HTTPS controls per transport and32
 independent Chrome discovery/lifecycle controls on each engine.
 
-Publication scheduling and encoded HTTP Range behavior remain open in#28.
-Chrome's immediate post-GET request lacks the newly stored dictionary, while
-+100ms/+500ms requests advertise it; native EOF publication is synchronous.
+Publication scheduling is a pinned known gap (#137, Chrome 156 control
+`fixtures/compression-dictionary-chrome156.json`). Chrome's immediate post-GET
+request lacks the newly stored dictionary, while +100ms/+500ms requests advertise
+it; native EOF publication is synchronous. Range requests match Chrome 156:
+`Accept-Encoding: identity`, or `identity, dcb, dcz` with a selected dictionary.
 Stable delayed positives do not close that difference. [RFC9842](https://www.rfc-editor.org/rfc/rfc9842.html)
 requires an eligible dictionary before advertising its encodings. Native explicit
 header logs do not enumerate every final wire header. The bounded TLS/H2 and GPU

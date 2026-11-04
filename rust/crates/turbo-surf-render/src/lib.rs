@@ -55,6 +55,7 @@ mod storage_gc;
 mod storage_inbox;
 pub use storage_inbox::StorageEventSignal;
 mod stream_transfers;
+mod web_fonts;
 mod web_streams_backend;
 mod window_named_properties;
 

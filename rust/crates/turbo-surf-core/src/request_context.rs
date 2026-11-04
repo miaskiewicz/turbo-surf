@@ -2,8 +2,9 @@
 //!
 //! A hint store belongs to a browsing session. Clones share the store so page
 //! fetches and navigations can use the same opt-in without leaking it to another
-//! session. This does not implement Permissions-Policy delegation or Critical-CH
-//! retries; cross-origin subresources therefore receive no high-entropy hints.
+//! session. This does not implement Permissions-Policy delegation, so
+//! cross-origin subresources receive no high-entropy hints. Critical-CH
+//! restarts live in net.rs (`critical_restart`).
 
 use crate::fingerprint::Profile;
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +19,7 @@ pub enum Destination {
     Script,
     Style,
     Image,
+    Font,
     Empty,
     Report,
 }
@@ -31,6 +33,7 @@ impl Destination {
             Destination::Script => "script",
             Destination::Style => "style",
             Destination::Image => "image",
+            Destination::Font => "font",
             Destination::Empty => "empty",
             Destination::Report => "report",
         }
@@ -248,12 +251,18 @@ impl RequestContext {
             .priority_for(destination)
             .unwrap_or(match self.destination {
                 Destination::Document | Destination::Iframe => "u=0, i",
-                Destination::Style => "u=0",
+                // Chrome fetches web fonts at VeryHigh priority, like render-blocking CSS.
+                Destination::Style | Destination::Font => "u=0",
                 Destination::Script => "u=1",
                 Destination::Image => "u=2, i",
                 Destination::Empty | Destination::Report => "u=1, i",
             });
-        h.insert("priority".into(), priority.into());
+        // RFC 9218 Priority is an HTTP/2+ header in Chrome, and a cleartext
+        // origin is always HTTP/1.1 (no h2c). net::send drops it for HTTPS
+        // origins already known to speak HTTP/1.1.
+        if !target.starts_with("http:") {
+            h.insert("priority".into(), priority.into());
+        }
         if trustworthy(target) {
             let site = match self.source.as_deref() {
                 None => "none",
@@ -512,6 +521,7 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
             crate::fingerprint::brand_header(profile.chrome_major, profile.full_version, true)
         }
         "device-memory" | "sec-ch-device-memory" => profile.device_memory.to_string(),
+        "sec-ch-dpr" => crate::fingerprint::DEVICE_PIXEL_RATIO.to_string(),
         // Match the render tier's estimated NetworkInformation defaults.
         "downlink" => "10".into(),
         "rtt" => "50".into(),

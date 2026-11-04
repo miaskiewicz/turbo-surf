@@ -1,0 +1,25 @@
+{
+  "pages": [
+    {
+      "name": "plain",
+      "html": "<!doctype html><html data-cross=\"{cross}\"><head></head><body></body></html>",
+      "probes": ["font-face-probe.js"]
+    },
+    {
+      "name": "csp",
+      "html": "<!doctype html><html data-cross=\"{cross}\"><head></head><body></body></html>",
+      "headers": [["Content-Security-Policy", "font-src 'self'"]],
+      "probes": ["font-face-probe.js"]
+    },
+    {
+      "name": "range-block-only",
+      "html": "<!doctype html><html><head><style>@font-face{font-family:\"Embedded Plex\";src:url(/fonts/plex.woff2) format(\"woff2\")}body{font-family:\"Embedded Plex\";font-size:20px;font-weight:400;line-height:24px}h3{font:inherit;margin:12px 0}</style></head><body><div id=scene><a id=link><h3 id=heading>Old result</h3></a></div><button id=dismiss>Reject</button></body></html>",
+      "probes": ["font-face-ready-probe.js", "fixtures/embedded-font-range-probe.js"]
+    },
+    {
+      "name": "range-mixed",
+      "html": "<!doctype html><html><head><style>@font-face{font-family:\"Embedded Plex\";src:url(/fonts/plex.woff2) format(\"woff2\")}body{font-family:\"Embedded Plex\";font-size:20px;font-weight:400;line-height:24px}h3{font:inherit;margin:12px 0}</style></head><body><div id=scene><a id=link>Before<h3 id=heading>Old result</h3>After</a></div><button id=dismiss>Reject</button></body></html>",
+      "probes": ["font-face-ready-probe.js", "fixtures/embedded-font-range-probe.js"]
+    }
+  ]
+}

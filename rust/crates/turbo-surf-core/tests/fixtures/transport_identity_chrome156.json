@@ -1,0 +1,595 @@
+{
+  "schemaVersion": 1,
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "collectedAt": "2026-11-04T12:46:13.632Z",
+  "note": "Loopback-only capture by chrome-identity-battery.mjs; regenerate with transport-identity-control.mjs.",
+  "requests": [
+    {
+      "kind": "h1-nav",
+      "origin": "B",
+      "method": "GET",
+      "protocol": "http/1.1",
+      "headers": [
+        ["Host", "<B-host>"],
+        ["Connection", "keep-alive"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["Upgrade-Insecure-Requests", "1"],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["Sec-Fetch-Site", "none"],
+        ["Sec-Fetch-Mode", "navigate"],
+        ["Sec-Fetch-User", "?1"],
+        ["Sec-Fetch-Dest", "document"],
+        ["Accept-Encoding", "gzip, deflate, br, zstd"],
+        ["Cookie", "battery=1"]
+      ]
+    },
+    {
+      "kind": "http-nav",
+      "origin": "D",
+      "method": "GET",
+      "protocol": "http/1.1",
+      "headers": [
+        ["Host", "<D-host>"],
+        ["Connection", "keep-alive"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["Upgrade-Insecure-Requests", "1"],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["Sec-Fetch-Site", "none"],
+        ["Sec-Fetch-Mode", "navigate"],
+        ["Sec-Fetch-User", "?1"],
+        ["Sec-Fetch-Dest", "document"],
+        ["Accept-Encoding", "gzip, deflate, br, zstd"],
+        ["Cookie", "battery=1"]
+      ]
+    },
+    {
+      "kind": "ch-accept",
+      "origin": "C",
+      "method": "GET",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/ch-accept"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ]
+    },
+    {
+      "kind": "ch-sub",
+      "origin": "C",
+      "method": "GET",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/ch-sub"],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"HeadlessChrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["device-memory", "32"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+        ],
+        ["sec-ch-dpr", "1"],
+        ["sec-ch-ua-model", "\"\""],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-form-factors", "\"Desktop\""],
+        ["sec-ch-ua-bitness", "\"64\""],
+        ["sec-ch-ua-wow64", "?0"],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-viewport-width", "800"],
+        ["sec-ch-device-memory", "32"],
+        ["sec-ch-prefers-reduced-motion", "no-preference"],
+        ["sec-ch-prefers-color-scheme", "light"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+        ],
+        ["sec-ch-ua-platform-version", "\"27.2.0\""],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<C>/t/~/k/ch-accept"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ]
+    },
+    {
+      "kind": "ch-next",
+      "origin": "C",
+      "method": "GET",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/ch-next"],
+        ["device-memory", "32"],
+        ["sec-ch-device-memory", "32"],
+        ["sec-ch-dpr", "1"],
+        ["sec-ch-viewport-width", "800"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["sec-ch-ua-platform-version", "\"27.2.0\""],
+        ["sec-ch-ua-model", "\"\""],
+        ["sec-ch-ua-bitness", "\"64\""],
+        ["sec-ch-ua-wow64", "?0"],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"HeadlessChrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-ch-ua-form-factors", "\"Desktop\""],
+        ["sec-ch-prefers-color-scheme", "light"],
+        ["sec-ch-prefers-reduced-motion", "no-preference"],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ]
+    },
+    {
+      "kind": "critical",
+      "origin": "CX",
+      "method": "GET",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<CX-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/critical"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["priority", "u=0, i"]
+      ]
+    },
+    {
+      "kind": "critical",
+      "origin": "CX",
+      "method": "GET",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<CX-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/critical"],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"HeadlessChrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["priority", "u=0, i"]
+      ]
+    }
+  ],
+  "streams": [
+    {
+      "kind": "nav",
+      "origin": "A",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "style",
+      "origin": "A",
+      "priority": "u=0",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "script",
+      "origin": "A",
+      "priority": "u=1",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 3,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "module",
+      "origin": "A",
+      "priority": "u=1",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 5,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "img",
+      "origin": "A",
+      "priority": "i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 147
+      }
+    },
+    {
+      "kind": "iframe",
+      "origin": "A",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "fetch",
+      "origin": "A",
+      "priority": "u=1, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "font-style",
+      "origin": "A",
+      "priority": "u=0",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "fetch-post",
+      "origin": "A",
+      "priority": "u=1, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "font",
+      "origin": "A",
+      "priority": "u=0",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "fetch-cors",
+      "origin": "AX",
+      "priority": "u=1, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "fetch-preflight",
+      "origin": "AX",
+      "priority": "u=1, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "fetch-preflight",
+      "origin": "AX",
+      "priority": "u=1, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 3,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "xhr",
+      "origin": "A",
+      "priority": "u=1, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "form-post",
+      "origin": "A",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "click-nav",
+      "origin": "A",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "ch-accept",
+      "origin": "C",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "ch-sub",
+      "origin": "C",
+      "priority": "u=1, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "kind": "ch-next",
+      "origin": "C",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "critical",
+      "origin": "CX",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "kind": "critical",
+      "origin": "CX",
+      "priority": "u=0, i",
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    }
+  ],
+  "connections": [
+    {
+      "origin": "A",
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 256
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      }
+    },
+    {
+      "origin": "A",
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 220
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      }
+    },
+    {
+      "origin": "C",
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 256
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      }
+    }
+  ]
+}

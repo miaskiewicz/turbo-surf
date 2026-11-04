@@ -49,10 +49,27 @@ export const dictionaryCases = [
   { name: "link-bad-integrity", integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" },
   { name: "guest-priority-spoof", cross: true, cors: true, prioritySpoof: true },
   { name: "head-does-not-register", head: true },
+  { name: "header-range-request", header: true, range: "bytes=0-3" },
+  { name: "range-outside-match", header: true, match: "target", range: "bytes=0-3" },
   { name: "blocked-delayed-image", csp: "connect-src 'none'", lifecycleDelay: "image" },
   { name: "blocked-delayed-parser-script", csp: "connect-src 'none'", lifecycleDelay: "parser" },
   { name: "blocked-delayed-defer-script", csp: "connect-src 'none'", lifecycleDelay: "defer" },
 ];
+
+// A no-store CORS resource; a `bytes=a-b` Range gets a 206 slice.
+function serveResource(request, response) {
+  const body = "plain authored resource";
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Access-Control-Allow-Origin", "*");
+  const range = /^bytes=(\d+)-(\d+)$/.exec(request.headers.range || "");
+  if (!range) {
+    response.end(body);
+    return;
+  }
+  response.statusCode = 206;
+  response.setHeader("Content-Range", `bytes ${range[1]}-${range[2]}/${body.length}`);
+  response.end(body.slice(Number(range[1]), Number(range[2]) + 1));
+}
 
 export async function startDictionaryServers() {
   const cert = new X509Certificate(
@@ -126,9 +143,7 @@ export async function startDictionaryServers() {
       return;
     }
     if (url.pathname.startsWith("/resource-")) {
-      response.setHeader("Cache-Control", "no-store");
-      response.setHeader("Access-Control-Allow-Origin", "*");
-      response.end("plain authored resource");
+      serveResource(request, response);
       return;
     }
     if (url.pathname !== "/page") {

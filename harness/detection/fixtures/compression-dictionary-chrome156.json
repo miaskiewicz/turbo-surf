@@ -1,0 +1,2787 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "fixtureSha256": "191d857c5bc48870818507461e949cc19084e0018eecdc3a7aaa6d1e7ef7f4d7",
+  "tlsTrust": "Only the checked fixture certificate SPKI is trusted for this localhost control",
+  "cases": [
+    {
+      "name": "manual-exact-hash",
+      "manual": "matching"
+    },
+    {
+      "name": "manual-mismatched-hash",
+      "manual": "mismatch"
+    },
+    {
+      "name": "manual-malformed-hash",
+      "manual": "malformed"
+    },
+    {
+      "name": "manual-known-hash-outside-match",
+      "header": true,
+      "match": "target",
+      "resource": "/sub/target",
+      "manual": "matching"
+    },
+    {
+      "name": "manual-dictionary-id-alone",
+      "header": true,
+      "match": "target",
+      "resource": "/sub/target",
+      "manual": "id"
+    },
+    {
+      "name": "relative-root-target",
+      "header": true,
+      "match": "target",
+      "resource": "/target"
+    },
+    {
+      "name": "relative-nested-target",
+      "header": true,
+      "match": "target",
+      "resource": "/sub/target"
+    },
+    {
+      "name": "header",
+      "header": true
+    },
+    {
+      "name": "parser-link"
+    },
+    {
+      "name": "cache-no-store",
+      "cache": "no-store"
+    },
+    {
+      "name": "cache-reload",
+      "cache": "reload"
+    },
+    {
+      "name": "header-and-parser",
+      "header": true,
+      "both": true
+    },
+    {
+      "name": "dynamic-link",
+      "dynamic": true
+    },
+    {
+      "name": "foreign-svg-link",
+      "dynamic": true,
+      "foreign": true
+    },
+    {
+      "name": "shadow-open",
+      "dynamic": true,
+      "shadow": "open"
+    },
+    {
+      "name": "shadow-closed",
+      "dynamic": true,
+      "shadow": "closed"
+    },
+    {
+      "name": "removed-link",
+      "dynamic": true,
+      "remove": true
+    },
+    {
+      "name": "rel-changed-link",
+      "dynamic": true,
+      "relChange": true
+    },
+    {
+      "name": "href-changed-link",
+      "dynamic": true,
+      "hrefChange": true
+    },
+    {
+      "name": "connect-blocked",
+      "csp": "connect-src 'none'"
+    },
+    {
+      "name": "default-blocked",
+      "csp": "default-src 'none'; script-src 'unsafe-inline'"
+    },
+    {
+      "name": "connect-allowed",
+      "csp": "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'"
+    },
+    {
+      "name": "header-cross-cors",
+      "header": true,
+      "cross": true,
+      "cors": true
+    },
+    {
+      "name": "header-cross-no-cors",
+      "header": true,
+      "cross": true
+    },
+    {
+      "name": "link-cross-cors",
+      "cross": true,
+      "cors": true
+    },
+    {
+      "name": "link-cross-no-cors",
+      "cross": true
+    },
+    {
+      "name": "link-bad-integrity",
+      "integrity": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    {
+      "name": "guest-priority-spoof",
+      "cross": true,
+      "cors": true,
+      "prioritySpoof": true
+    },
+    {
+      "name": "head-does-not-register",
+      "head": true
+    },
+    {
+      "name": "header-range-request",
+      "header": true,
+      "range": "bytes=0-3"
+    },
+    {
+      "name": "range-outside-match",
+      "header": true,
+      "match": "target",
+      "range": "bytes=0-3"
+    },
+    {
+      "name": "blocked-delayed-image",
+      "csp": "connect-src 'none'",
+      "lifecycleDelay": "image"
+    },
+    {
+      "name": "blocked-delayed-parser-script",
+      "csp": "connect-src 'none'",
+      "lifecycleDelay": "parser"
+    },
+    {
+      "name": "blocked-delayed-defer-script",
+      "csp": "connect-src 'none'",
+      "lifecycleDelay": "defer"
+    }
+  ],
+  "collectorSha256": "e85784203051aabf33f6040b5d36e7e391cdcbd7d1892a65ce850c095e945e81",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--ignore-certificate-errors-spki-list=tgZhMuDR4ffcvwcdvk0UExoYIcSg3V4sRX6nubjtqQc=",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "case": 0,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794645770,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 0,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794645781,
+      "finished": 1793794646381,
+      "aborted": false
+    },
+    {
+      "case": 1,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794647602,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 1,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794647609,
+      "finished": 1793794648212,
+      "aborted": false
+    },
+    {
+      "case": 2,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794649448,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 2,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794649453,
+      "finished": 1793794650058,
+      "aborted": false
+    },
+    {
+      "case": 3,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794651277,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 3,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794651282,
+      "finished": 1793794651885,
+      "aborted": false
+    },
+    {
+      "case": 4,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794653109,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 4,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794653117,
+      "finished": 1793794653720,
+      "aborted": false
+    },
+    {
+      "case": 4,
+      "path": "/sub/target",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "dictionary-id": "\"forged\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=4",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794654968,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 5,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794654971,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 5,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794654978,
+      "finished": 1793794655579,
+      "aborted": false
+    },
+    {
+      "case": 5,
+      "path": "/target",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=5",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":7xvFisYCOaJbMtxJlJgSeZZivIUqnLnqJP+vHzuTBDY=:",
+        "dictionary-id": "\"case-5\""
+      },
+      "started": 1793794656783,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 6,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794656792,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 6,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794656796,
+      "finished": 1793794657397,
+      "aborted": false
+    },
+    {
+      "case": 6,
+      "path": "/sub/target",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=6",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794658607,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 7,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794658611,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 7,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794658618,
+      "finished": 1793794659221,
+      "aborted": false
+    },
+    {
+      "case": 7,
+      "path": "/resource-7",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=7",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":9TBJPhQyVUdAuf3X1ieMOFbCF3fR3RfS0Y3iykqmzIQ=:",
+        "dictionary-id": "\"case-7\""
+      },
+      "started": 1793794660419,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 8,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794660424,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 8,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794660428,
+      "finished": 1793794661030,
+      "aborted": false
+    },
+    {
+      "case": 8,
+      "path": "/resource-8",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=8",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":IfzMzrUdWdoijsgC+am4HWjX5J9fLrrWkXBGeYvaXBM=:",
+        "dictionary-id": "\"case-8\""
+      },
+      "started": 1793794662235,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 9,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794662247,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 9,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794662255,
+      "finished": 1793794662858,
+      "aborted": false
+    },
+    {
+      "case": 9,
+      "path": "/resource-9",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "pragma": "no-cache",
+        "cache-control": "no-cache",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=9",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":z226Rqfcd+QOZD3QVx1um9wOMzoQ4+cVy92cDjAutFY=:",
+        "dictionary-id": "\"case-9\""
+      },
+      "started": 1793794664071,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 10,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794664077,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 10,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794664082,
+      "finished": 1793794664684,
+      "aborted": false
+    },
+    {
+      "case": 10,
+      "path": "/resource-10",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "pragma": "no-cache",
+        "cache-control": "no-cache",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=10",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":DXL7KxBtrNLaSE3lqAfqyaSXUt33ZHvXkMkN+3q0mYc=:",
+        "dictionary-id": "\"case-10\""
+      },
+      "started": 1793794665890,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 11,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794665893,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 11,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794665897,
+      "finished": 1793794666499,
+      "aborted": false
+    },
+    {
+      "case": 11,
+      "path": "/resource-11",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=11",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":a7zbE06FS6OJUkAbZED377c8dj0ZArDQ+Q+tSAQSOXE=:",
+        "dictionary-id": "\"case-11\""
+      },
+      "started": 1793794667705,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 12,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794667716,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 12,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794667719,
+      "finished": 1793794668320,
+      "aborted": false
+    },
+    {
+      "case": 12,
+      "path": "/resource-12",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=12",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":QLUzcrs97swqhB52IvC+UgvrTVeDPQYDC6j8NvCX3YU=:",
+        "dictionary-id": "\"case-12\""
+      },
+      "started": 1793794669530,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 13,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794669540,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 13,
+      "path": "/resource-13",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=13",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794671349,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 14,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794671356,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 14,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794671360,
+      "finished": 1793794671963,
+      "aborted": false
+    },
+    {
+      "case": 14,
+      "path": "/resource-14",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=14",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":FsSgDexCD0lvrFn+ESFY1cF/N+BPENkuDUZ47QoS93A=:",
+        "dictionary-id": "\"case-14\""
+      },
+      "started": 1793794673166,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 15,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794673170,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 15,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794673175,
+      "finished": 1793794673775,
+      "aborted": false
+    },
+    {
+      "case": 15,
+      "path": "/resource-15",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=15",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":vGCO+zzC+pGt9LSKldJJsFqFyxlv/aDb5vR7k7DMT24=:",
+        "dictionary-id": "\"case-15\""
+      },
+      "started": 1793794674979,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 16,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794674987,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 16,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794674992,
+      "finished": 1793794675592,
+      "aborted": true
+    },
+    {
+      "case": 16,
+      "path": "/resource-16",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=16",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794676797,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 17,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794676804,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 17,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794676810,
+      "finished": 1793794677411,
+      "aborted": true
+    },
+    {
+      "case": 17,
+      "path": "/resource-17",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=17",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794678619,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 18,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794678626,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 18,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794678634,
+      "finished": 1793794679234,
+      "aborted": true
+    },
+    {
+      "case": 18,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794678685,
+      "finished": 1793794679285,
+      "aborted": false
+    },
+    {
+      "case": 18,
+      "path": "/resource-18",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=18",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":1naWQle/t9tUEkLVb89woZh1WNhG6+H8Y1e46ESaoC8=:",
+        "dictionary-id": "\"case-18\""
+      },
+      "started": 1793794680439,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 19,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794680443,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 20,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794682253,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 21,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794684066,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 21,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794684076,
+      "finished": 1793794684678,
+      "aborted": false
+    },
+    {
+      "case": 21,
+      "path": "/resource-21",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=21",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":D/dAwdtsX+w3rWp79XYIA5rUGkyZseta6fDgwYFPKcA=:",
+        "dictionary-id": "\"case-21\""
+      },
+      "started": 1793794685881,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 22,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794685886,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 22,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794685894,
+      "finished": 1793794686495,
+      "aborted": false
+    },
+    {
+      "case": 22,
+      "path": "/resource-22",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "available-dictionary": ":EAgCLQ0oLYFhpff9eI8xAgCG4rIGF5yq1JYGQBLNViM=:",
+        "dictionary-id": "\"case-22\""
+      },
+      "started": 1793794687705,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 23,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794687710,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 23,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794687717,
+      "finished": 1793794688319,
+      "aborted": false
+    },
+    {
+      "case": 23,
+      "path": "/resource-23",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794689520,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 24,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794689527,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 24,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794689533,
+      "finished": 1793794690135,
+      "aborted": false
+    },
+    {
+      "case": 24,
+      "path": "/resource-24",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "available-dictionary": ":qK2i7yT33X4LD9wv6dSE7pgMzIcogfJizi12fE+PYOc=:",
+        "dictionary-id": "\"case-24\""
+      },
+      "started": 1793794691335,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 25,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794691338,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 25,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794691341,
+      "finished": 1793794691943,
+      "aborted": false
+    },
+    {
+      "case": 25,
+      "path": "/resource-25",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794693143,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 26,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794693145,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 26,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794693150,
+      "finished": 1793794693753,
+      "aborted": false
+    },
+    {
+      "case": 26,
+      "path": "/resource-26",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=26",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":pvu4M9NUfGusvvK3xeZVXunFJ/jaEwek2Okm2Ld8hlI=:",
+        "dictionary-id": "\"case-26\""
+      },
+      "started": 1793794694953,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 27,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794694955,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 27,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "origin": "https://localhost:51684",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794694959,
+      "finished": 1793794695560,
+      "aborted": false
+    },
+    {
+      "case": 27,
+      "path": "/resource-27",
+      "method": "OPTIONS",
+      "headers": {
+        "host": "localhost:51685",
+        "connection": "keep-alive",
+        "accept": "*/*",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "priority",
+        "origin": "https://localhost:51684",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794696762,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 28,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794696764,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 28,
+      "path": "/dictionary",
+      "method": "HEAD",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=28",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794698570,
+      "finished": 1793794699172,
+      "aborted": false
+    },
+    {
+      "case": 28,
+      "path": "/resource-28",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=28",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794699173,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 28,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=28",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794699174,
+      "finished": 1793794699776,
+      "aborted": false
+    },
+    {
+      "case": 28,
+      "path": "/resource-28",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=28",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794699777,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 28,
+      "path": "/resource-28",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=28",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":K/iE10GbSFEKQ/qQ6KuxZ4XE0ZSq0VFfZG54X56pJA0=:",
+        "dictionary-id": "\"case-28\""
+      },
+      "started": 1793794699880,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 28,
+      "path": "/resource-28",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=28",
+        "accept-encoding": "gzip, deflate, br, zstd, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "available-dictionary": ":K/iE10GbSFEKQ/qQ6KuxZ4XE0ZSq0VFfZG54X56pJA0=:",
+        "dictionary-id": "\"case-28\""
+      },
+      "started": 1793794700283,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 29,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794700285,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 29,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794700289,
+      "finished": 1793794700890,
+      "aborted": false
+    },
+    {
+      "case": 29,
+      "path": "/resource-29",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=29",
+        "accept-encoding": "identity, dcb, dcz",
+        "cookie": "dictionary_page_cookie=present",
+        "range": "bytes=0-3",
+        "available-dictionary": ":BqNuPJ9Dejv8N/R0j4MtdqH/o6catIkptoAJcfbIyJw=:",
+        "dictionary-id": "\"case-29\""
+      },
+      "started": 1793794702091,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 30,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794702093,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 30,
+      "path": "/dictionary",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip, deflate, br, zstd"
+      },
+      "started": 1793794702096,
+      "finished": 1793794702697,
+      "aborted": false
+    },
+    {
+      "case": 30,
+      "path": "/resource-30",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "referer": "https://localhost:51684/page?case=30",
+        "accept-encoding": "identity",
+        "cookie": "dictionary_page_cookie=present",
+        "range": "bytes=0-3"
+      },
+      "started": 1793794703899,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 31,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794703901,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 31,
+      "path": "/delayed-image",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "image",
+        "referer": "https://localhost:51684/page?case=31",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794703903,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 32,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794706335,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 32,
+      "path": "/delayed-script",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "script",
+        "referer": "https://localhost:51684/page?case=32",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794706337,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 33,
+      "path": "/page",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-user": "?1",
+        "sec-fetch-dest": "document",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794708751,
+      "finished": null,
+      "aborted": false
+    },
+    {
+      "case": 33,
+      "path": "/delayed-script",
+      "method": "GET",
+      "headers": {
+        "host": "localhost:51684",
+        "connection": "keep-alive",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\"",
+        "sec-ch-ua-mobile": "?0",
+        "accept": "*/*",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "script",
+        "referer": "https://localhost:51684/page?case=33",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "cookie": "dictionary_page_cookie=present"
+      },
+      "started": 1793794708753,
+      "finished": null,
+      "aborted": false
+    }
+  ],
+  "result": [
+    {
+      "name": "manual-exact-hash",
+      "manual": {
+        "headers": [":vDH9JZrWq0268KoztLZO52JPDfOR/BYpnZbOXTs8cWc=:", null],
+        "request": [":vDH9JZrWq0268KoztLZO52JPDfOR/BYpnZbOXTs8cWc=:", null],
+        "outcome": {
+          "error": "TypeError",
+          "message": "Failed to fetch"
+        }
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794645777, "interactive"],
+        ["load", 1793794645777, "complete"],
+        ["link:load", 1793794646383, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "manual-mismatched-hash",
+      "manual": {
+        "headers": [":AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:", null],
+        "request": [":AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:", null],
+        "outcome": {
+          "error": "TypeError",
+          "message": "Failed to fetch"
+        }
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794647607, "interactive"],
+        ["load", 1793794647608, "complete"],
+        ["link:load", 1793794648212, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "manual-malformed-hash",
+      "manual": {
+        "headers": ["malformed", null],
+        "request": ["malformed", null],
+        "outcome": {
+          "error": "TypeError",
+          "message": "Failed to fetch"
+        }
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794649451, "interactive"],
+        ["load", 1793794649451, "complete"],
+        ["link:load", 1793794650059, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "manual-known-hash-outside-match",
+      "manual": {
+        "headers": [":xI/N7KlVTmDN7OmwXw/WLU+6o54EIWWySlGs1mDTmxQ=:", null],
+        "request": [":xI/N7KlVTmDN7OmwXw/WLU+6o54EIWWySlGs1mDTmxQ=:", null],
+        "outcome": {
+          "error": "TypeError",
+          "message": "Failed to fetch"
+        }
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794651280, "interactive"],
+        ["load", 1793794651281, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "manual-dictionary-id-alone",
+      "manual": {
+        "headers": [null, "\"forged\""],
+        "request": [null, "\"forged\""],
+        "outcome": {
+          "ok": true
+        }
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794653114, "interactive"],
+        ["load", 1793794653114, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "relative-root-target",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794654973, "interactive"],
+        ["load", 1793794654974, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "relative-nested-target",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794656795, "interactive"],
+        ["load", 1793794656795, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "header",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794658614, "interactive"],
+        ["load", 1793794658614, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "parser-link",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794660427, "interactive"],
+        ["load", 1793794660427, "complete"],
+        ["link:load", 1793794661031, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "cache-no-store",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794662253, "interactive"],
+        ["load", 1793794662253, "complete"],
+        ["link:load", 1793794662859, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "cache-reload",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794664079, "interactive"],
+        ["load", 1793794664080, "complete"],
+        ["link:load", 1793794664685, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "header-and-parser",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794665896, "interactive"],
+        ["load", 1793794665896, "complete"],
+        ["link:load", 1793794666500, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "dynamic-link",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794667719, "interactive"],
+        ["load", 1793794667719, "complete"],
+        ["link:load", 1793794668321, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "foreign-svg-link",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794669543, "interactive"],
+        ["load", 1793794669544, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "shadow-open",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794671359, "interactive"],
+        ["load", 1793794671359, "complete"],
+        ["shadow:load", 1793794671963, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "shadow-closed",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794673173, "interactive"],
+        ["load", 1793794673174, "complete"],
+        ["shadow:load", 1793794673776, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "removed-link",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794674990, "interactive"],
+        ["load", 1793794674990, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "rel-changed-link",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794676807, "interactive"],
+        ["load", 1793794676807, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "href-changed-link",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794678629, "interactive"],
+        ["load", 1793794678629, "complete"],
+        ["link:load", 1793794679286, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "connect-blocked",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794680446, "interactive"],
+        ["load", 1793794680446, "complete"],
+        ["link:error", 1793794680447, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "default-blocked",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794682256, "interactive"],
+        ["load", 1793794682256, "complete"],
+        ["link:error", 1793794682257, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "connect-allowed",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794684072, "interactive"],
+        ["load", 1793794684072, "complete"],
+        ["link:load", 1793794684679, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "header-cross-cors",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794685889, "interactive"],
+        ["load", 1793794685889, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "header-cross-no-cors",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794687713, "interactive"],
+        ["load", 1793794687713, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "link-cross-cors",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794689529, "interactive"],
+        ["load", 1793794689530, "complete"],
+        ["link:load", 1793794690136, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "link-cross-no-cors",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794691340, "interactive"],
+        ["load", 1793794691340, "complete"],
+        ["link:error", 1793794691943, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "link-bad-integrity",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794693149, "interactive"],
+        ["load", 1793794693149, "complete"],
+        ["link:load", 1793794693753, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "guest-priority-spoof",
+      "priority": {
+        "error": "TypeError",
+        "message": "Failed to fetch"
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794694958, "interactive"],
+        ["load", 1793794694958, "complete"],
+        ["link:load", 1793794695561, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "head-does-not-register",
+      "head": {
+        "headBytes": 0,
+        "getBytes": 48
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794696766, "interactive"],
+        ["load", 1793794696766, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "header-range-request",
+      "range": {
+        "status": 206,
+        "contentRange": "bytes 0-3/23",
+        "text": "plai"
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794700287, "interactive"],
+        ["load", 1793794700288, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "range-outside-match",
+      "range": {
+        "status": 206,
+        "contentRange": "bytes 0-3/23",
+        "text": "plai"
+      },
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794702095, "interactive"],
+        ["load", 1793794702095, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "blocked-delayed-image",
+      "secure": true,
+      "events": [
+        ["DOMContentLoaded", 1793794703904, "interactive"],
+        ["timer", 1793794703907, "interactive"],
+        ["link:error", 1793794703907, "interactive"],
+        ["future-timer", 1793794704007, "interactive"],
+        ["load", 1793794704505, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "blocked-delayed-parser-script",
+      "secure": true,
+      "events": [
+        ["timer", 1793794706337, "loading"],
+        ["link:error", 1793794706338, "loading"],
+        ["future-timer", 1793794706440, "loading"],
+        ["script", 1793794706940, "loading"],
+        ["DOMContentLoaded", 1793794706940, "interactive"],
+        ["load", 1793794706940, "complete"]
+      ],
+      "support": true
+    },
+    {
+      "name": "blocked-delayed-defer-script",
+      "secure": true,
+      "events": [
+        ["timer", 1793794708753, "interactive"],
+        ["link:error", 1793794708753, "interactive"],
+        ["future-timer", 1793794708856, "interactive"],
+        ["script", 1793794709356, "interactive"],
+        ["DOMContentLoaded", 1793794709356, "interactive"],
+        ["load", 1793794709356, "complete"]
+      ],
+      "support": true
+    }
+  ]
+}

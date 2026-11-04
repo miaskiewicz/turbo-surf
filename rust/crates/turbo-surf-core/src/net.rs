@@ -946,6 +946,13 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
     }
     #[cfg(not(feature = "impersonate"))]
     let _ = restart;
+    // Fetch already chose a Range request's Accept-Encoding (identity, plus
+    // dcb/dcz with a dictionary). wreq's decoder would overwrite it with bare
+    // identity, so it owns no content coding for this request.
+    #[cfg(feature = "impersonate")]
+    if wire.contains_key("range") {
+        req = req.gzip(false).brotli(false).deflate(false).zstd(false);
+    }
     let streaming_upload = upload.is_some();
     if let Some(upload) = upload {
         #[cfg(not(feature = "impersonate"))]

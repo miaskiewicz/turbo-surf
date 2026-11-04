@@ -3369,7 +3369,13 @@ struct ActiveDocument(v8::Weak<v8::Object>);
 struct DocumentFacts {
     last_modified: Option<f64>,
     keyed: bool,
+    /// Whether the binding takes `keyed` as the response's agent cluster decision: only a
+    /// secure context honours `Origin-Agent-Cluster`; elsewhere the binding's default stands.
+    secure: bool,
     domain_sandboxed: bool,
+    /// The creator document whose origin an initial about:blank / srcdoc child shares
+    /// (Blink's shared `SecurityOrigin`), so `document.domain` relaxes both (turbo-surf#116).
+    creator: Option<v8::Global<v8::Object>>,
 }
 impl DocumentFacts {
     /// A navigation response: its own headers, and this browsing context group's
@@ -3388,7 +3394,9 @@ impl DocumentFacts {
         Self {
             last_modified: crate::document_facts::last_modified(headers),
             keyed,
+            secure: trustworthy_url(url),
             domain_sandboxed: sandboxed_document_domain(context),
+            creator: None,
         }
     }
     /// srcdoc and about:blank documents have no response; they join their
@@ -3398,14 +3406,24 @@ impl DocumentFacts {
         context: v8::Local<v8::Context>,
         parent: v8::Local<v8::Context>,
     ) -> Self {
-        let keyed = window_is_opaque(scope, context)
+        let opaque = window_is_opaque(scope, context);
+        let keyed = opaque
             || parent
                 .get_slot::<AgentClusterKeyed>()
                 .is_none_or(|keyed| keyed.0);
+        // An opaque (sandboxed) child has its own origin; it shares nothing.
+        let creator = (!opaque)
+            .then(|| parent.get_slot::<ActiveDocument>())
+            .flatten()
+            .and_then(|document| document.0.to_global(scope));
         Self {
             last_modified: None,
             keyed,
+            // A child sharing its creator's origin reads the creator's clustering; an opaque
+            // one is no secure context and keeps the binding's default.
+            secure: false,
             domain_sandboxed: sandboxed_document_domain(context),
+            creator,
         }
     }
 }
@@ -3426,8 +3444,14 @@ fn install_document_facts(scope: &mut v8::PinScope, facts: DocumentFacts) {
         return;
     };
     crate::browser_env::set_document_last_modified(scope, document, facts.last_modified);
-    crate::browser_env::set_document_origin_keyed(scope, document, facts.keyed);
+    if facts.secure {
+        crate::browser_env::set_document_origin_keyed(scope, document, facts.keyed);
+    }
     crate::browser_env::set_document_domain_sandboxed(scope, document, facts.domain_sandboxed);
+    if let Some(creator) = facts.creator {
+        let creator = v8::Local::new(scope, creator);
+        crate::browser_env::share_document_domain(scope, document, creator);
+    }
     context.set_slot(Rc::new(AgentClusterKeyed(facts.keyed)));
     context.set_slot(Rc::new(ActiveDocument(v8::Weak::new(scope, document))));
 }

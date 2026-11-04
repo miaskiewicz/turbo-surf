@@ -430,7 +430,6 @@ Known gaps, each tracked in its own issue:
 [transport identity](https://github.com/miaskiewicz/turbo-surf/issues/113),
 [Google SERP](https://github.com/miaskiewicz/turbo-surf/issues/114),
 [GC / memory reclamation](https://github.com/miaskiewicz/turbo-surf/issues/115),
-[srcdoc `document.domain` sharing](https://github.com/miaskiewicz/turbo-surf/issues/116) (needs a turbo-dom-browser-env host hook),
 audio ([#27](https://github.com/miaskiewicz/turbo-surf/issues/27)); in turbo-dom:
 [XPath](https://github.com/miaskiewicz/turbo-dom/issues/185),
 [XML parsing](https://github.com/miaskiewicz/turbo-dom/issues/186),

@@ -9,9 +9,12 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
 
 - **Fixed (Observable, #116)**: `HTMLElement#click()` runs as its own binding frame, so a
   failure inside a `when("click")` listener reads `Failed to execute 'click' on
-  'HTMLElement'` as in Chrome; the `web_apis` known gap is gone. The srcdoc
-  `document.domain` sharing pin in `document_hooks` stays: it needs a host hook in
-  turbo-dom-browser-env.
+  'HTMLElement'` as in Chrome; the `web_apis` known gap is gone.
+- **Fixed (document.domain, #116)**: srcdoc and initial about:blank children share their
+  creator's origin through turbo-dom-browser-env's `share_document_domain` (turbo-dom#284),
+  so a `document.domain` assignment in one relaxes all of them like Chrome 156; the
+  `document_hooks` known gaps are gone. `set_document_origin_keyed` is only called for a
+  secure context's response document.
 - **Fixed (fetch, #109)**: `Request`/`Response#formData()` parses `multipart/form-data`
   (Blink's delimiter, header, `Content-Disposition` and UTF-8 rules; `File` entries keep the
   part's raw `Content-Type`, default `text/plain`) and picks the parser by MIME essence like

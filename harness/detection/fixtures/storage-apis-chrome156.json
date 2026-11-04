@@ -1,0 +1,152 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-04T12:09:36.840Z",
+  "fixtures": {
+    "storage-apis-probe.js": "28b8ba51ec0e3210eb92ec499a084eef3d3134ccd6212a9b910eea1394ae4665"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "storage-apis-probe.js": {
+      "lockShape": ["ok", ["[object LockManager]", "function", "function", true]],
+      "lockGrant": ["ok", ["[object Lock]", "a", "exclusive", true]],
+      "lockOrder": [
+        "ok",
+        [
+          ["first", "shared", "query", "second", "done", 4, 2],
+          {
+            "held": [["b", "exclusive", "string"]],
+            "pending": [["b", "exclusive"]]
+          }
+        ]
+      ],
+      "lockIfAvailable": ["ok", null],
+      "lockSteal": [
+        "ok",
+        [["AbortError", "Lock broken by another request with the 'steal' option."], "e"]
+      ],
+      "lockAbort": ["AbortError", "signal is aborted without reason"],
+      "lockBadName": [
+        "NotSupportedError",
+        "Failed to execute 'request' on 'LockManager': Names cannot start with '-'."
+      ],
+      "lockBadOptions": [
+        "NotSupportedError",
+        "Failed to execute 'request' on 'LockManager': The 'steal' option may only be used with 'exclusive' locks."
+      ],
+      "lockNoCallback": [
+        "TypeError",
+        "Failed to execute 'request' on 'LockManager': 2 arguments required, but only 1 present."
+      ],
+      "lockThrows": ["RangeError", "boom"],
+      "cookieShape": ["ok", ["[object CookieStore]", "function", true, true]],
+      "cookieSet": [
+        "ok",
+        [
+          "alpha=1; beta=2",
+          {
+            "domain": null,
+            "expires": null,
+            "name": "alpha",
+            "partitioned": false,
+            "path": "/",
+            "sameSite": "strict",
+            "secure": true,
+            "value": "1"
+          }
+        ]
+      ],
+      "cookieFromDocument": [
+        "ok",
+        [
+          {
+            "domain": null,
+            "expires": null,
+            "name": "gamma",
+            "partitioned": false,
+            "path": "/",
+            "sameSite": "lax",
+            "secure": false,
+            "value": "3"
+          },
+          {
+            "domain": null,
+            "expires": null,
+            "name": "gamma",
+            "partitioned": false,
+            "path": "/",
+            "sameSite": "lax",
+            "secure": false,
+            "value": "3"
+          },
+          ["alpha", "beta", "gamma"],
+          1,
+          null
+        ]
+      ],
+      "cookieDelete": ["ok", ["gamma=3", null]],
+      "cookieChange": [
+        "ok",
+        [
+          ["change", "[object CookieChangeEvent]", [["delta", "4"]], []],
+          ["change", "[object CookieChangeEvent]", [], [["delta", null]]]
+        ]
+      ],
+      "cookieNoArgs": [
+        "TypeError",
+        "Failed to execute 'set' on 'CookieStore': 1 argument required, but only 0 present."
+      ],
+      "cookieEmpty": [
+        "TypeError",
+        "Failed to execute 'set' on 'CookieStore': Cookie name and value both cannot be empty"
+      ],
+      "cookieBadName": [
+        "TypeError",
+        "Failed to execute 'set' on 'CookieStore': Cookie name cannot contain '='"
+      ],
+      "cookieBadValue": [
+        "TypeError",
+        "Failed to execute 'set' on 'CookieStore': Cookie was malformed and could not be stored, due to problem(s) while parsing."
+      ],
+      "cacheShape": ["ok", ["[object CacheStorage]", "function", true, "function"]],
+      "cacheRoundTrip": [
+        "ok",
+        [
+          true,
+          true,
+          "alpha",
+          "yes",
+          null,
+          "alpha",
+          [[true, "/a?x=1", "GET"], [true, "/b", "GET"]],
+          [200, 201]
+        ]
+      ],
+      "cacheStorage": ["ok", [["v1", "v2"], "beta", null, [true, false], [true, false], ["v1"]]],
+      "cacheDelete": ["ok", [true, false, ["/b"]]],
+      "cacheAddPersist": ["ok", [false, 1]],
+      "cachePost": [
+        "TypeError",
+        "Failed to execute 'put' on 'Cache': Request method 'POST' is unsupported"
+      ],
+      "cacheBadScheme": [
+        "TypeError",
+        "Failed to execute 'put' on 'Cache': Request scheme 'data' is unsupported"
+      ],
+      "cachePartial": [
+        "TypeError",
+        "Failed to execute 'put' on 'Cache': Partial response (status code 206) is unsupported"
+      ],
+      "cacheUsedBody": [
+        "TypeError",
+        "Failed to execute 'put' on 'Cache': Response body is already used"
+      ]
+    }
+  }
+}

@@ -136,7 +136,19 @@
 
   // ---- Session history --------------------------------------------------------------------
   // Entries of this document only: the engine loads every other document as a new page.
-  const entries = [{ __proto__: null, url: seeded, serialized: null, scroll: "auto" }];
+  // Navigation API identity: replacing an entry keeps its key and mints a new id.
+  const uid = () =>
+    "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx".replace(/x/g, () =>
+      ((Math.random() * 16) | 0).toString(16),
+    );
+  const stamp = (entry, key, navState) => {
+    entry.key = key || uid();
+    entry.id = uid();
+    entry.navState = navState;
+    return entry;
+  };
+  let navigationHooks = null;
+  const entries = [stamp({ __proto__: null, url: seeded, serialized: null, scroll: "auto" })];
   let index = 0,
     stateObject = null;
   const activeEntry = () => entries[index];
@@ -155,14 +167,26 @@
   };
   // HTML "navigate to a fragment": a new (or replacing) entry, popstate synchronously and
   // hashchange as a queued task, as Chrome 156 delivers them.
-  function navigateToFragment(href, replace) {
+  // `nav` carries a navigation.navigate() call's info, state and promises; every other
+  // fragment navigation (Location, anchors) fires the navigate event itself.
+  function navigateToFragment(href, replace, nav) {
+    const kind = replace ? "replace" : "push";
+    const pending = navigationHooks.begin(kind, href, nav || { __proto__: null });
+    if (!pending) return;
     const oldURL = url();
-    const entry = { __proto__: null, url: href, serialized: null, scroll: activeEntry().scroll };
+    const from = activeEntry();
+    const entry = stamp(
+      { __proto__: null, url: href, serialized: null, scroll: activeEntry().scroll },
+      replace ? from.key : null,
+      pending.navState,
+    );
     if (replace) entries[index] = entry;
     else appendEntry(entry);
     moveTo(href);
     stateObject = null;
+    navigationHooks.committed(kind, from, pending);
     trusted(new PopState("popstate", { state: null }));
+    navigationHooks.settle(pending, true);
     hashChange(oldURL, href);
   }
   function navigate(href, replace) {
@@ -481,8 +505,18 @@
         );
       target = parsed.href;
     }
-    const entry = { __proto__: null, url: target, serialized, scroll: activeEntry().scroll };
-    if (operation === "pushState") appendEntry(entry);
+    const kind = operation === "pushState" ? "push" : "replace";
+    const pending = navigationHooks.begin(kind, target, {
+      __proto__: null,
+      uncancelable: true,
+      sameDocument: true,
+    });
+    const from = activeEntry();
+    const entry = stamp(
+      { __proto__: null, url: target, serialized, scroll: from.scroll },
+      kind === "replace" ? from.key : null,
+    );
+    if (kind === "push") appendEntry(entry);
     else entries[index] = entry;
     if (target !== url()) {
       moveTo(target);
@@ -490,20 +524,34 @@
       ops.op_script_navigation_admitted(target);
     }
     stateObject = deserialize(serialized);
+    navigationHooks.committed(kind, from, pending);
+    navigationHooks.settle(pending, true);
   }
-  function traverse(delta) {
+  // A same-document traversal: navigate, currententrychange and navigatesuccess, then
+  // popstate and a queued hashchange, as Chrome 156 orders them.
+  function traverseTo(target, nav) {
     task(() => {
-      const target = index + delta;
-      if (target < 0 || target >= entries.length || delta === 0) return;
+      if (target < 0 || target >= entries.length || target === index) return;
+      const entry = entries[target];
+      const pending = navigationHooks.begin("traverse", entry.url, {
+        __proto__: null,
+        ...nav,
+        index: target,
+        entry,
+      });
+      if (!pending) return;
       const oldURL = url();
+      const from = activeEntry();
       index = target;
-      const entry = entries[index];
       if (entry.url !== oldURL) moveTo(entry.url);
       stateObject = deserialize(entry.serialized);
+      navigationHooks.committed("traverse", from, pending);
+      navigationHooks.settle(pending, false);
       trusted(new PopState("popstate", { state: stateObject }));
       hashChange(oldURL, entry.url);
     });
   }
+  const traverse = (delta) => traverseTo(index + delta);
   accessor(H, "length", function () {
     checkHistory(this);
     return entries.length;
@@ -556,6 +604,401 @@
         return history;
       },
       "get history",
+      0,
+    ),
+    set: undefined,
+    enumerable: true,
+    configurable: true,
+  });
+
+  // ---- Navigation API -----------------------------------------------------------------------
+  // window.navigation over this document's session history (#108, #143, measured in
+  // harness/detection/navigation-api-probe.js). Same-document navigations (fragments,
+  // pushState, intercept()ed navigations, traversals) commit here; any other navigation
+  // keeps the engine's contract and is admitted for the session driver.
+  const HostPromise = Promise,
+    HostEvent = Event,
+    HostErrorEvent = ErrorEvent,
+    HostAbort = AbortController;
+  const microtask = (callback) => HostPromise.resolve().then(callback);
+  const records = new WeakMap();
+  const record = (receiver, kind) => {
+    const value =
+      receiver !== null && typeof receiver === "object" ? records.get(receiver) : undefined;
+    if (!value || value.kind !== kind) throw new ErrorType("Illegal invocation");
+    return value;
+  };
+  const fire = (target, event) => {
+    ops.op_event_trust(event, -1);
+    ops.op_dispatch_host_event(event, target);
+    return event;
+  };
+  const getters = (constructor, kind, table) => {
+    for (const [name, read] of table)
+      accessor(constructor.prototype, name, function () {
+        return read(record(this, kind));
+      });
+  };
+  const cloneState = (value) => (value === undefined ? undefined : clone(value));
+  const serializeState = (value, method, owner) =>
+    value === undefined
+      ? undefined
+      : ops.op_surf_structured_clone(
+          value,
+          globalThis,
+          undefined,
+          `Failed to execute '${method}' on '${owner}': `,
+        );
+  const Navigation = __defineInterface("Navigation", 0, EventTarget);
+  const HistoryEntry = __defineInterface("NavigationHistoryEntry", 0, EventTarget);
+  const Destination = __defineInterface("NavigationDestination", 0, null);
+  const Transition = __defineInterface("NavigationTransition", 0, null);
+  const eventInterface = (name, kind, required) =>
+    __defineInterface(name, 2, HostEvent, function (type, init = undefined) {
+      if (!new.target)
+        throw new ErrorType(
+          `Failed to construct '${name}': Please use the 'new' operator, this DOM object constructor cannot be called as a function.`,
+        );
+      if (arguments.length < 2)
+        throw new ErrorType(
+          `Failed to construct '${name}': 2 arguments required, but only ${arguments.length} present.`,
+        );
+      const options = init || {};
+      for (const member of required)
+        if (options[member] === undefined)
+          throw new ErrorType(
+            `Failed to construct '${name}': Failed to read the '${member}' property from '${name}Init': Required member is undefined.`,
+          );
+      const event = Reflect.construct(HostEvent, [type, init], new.target);
+      records.set(event, { __proto__: null, kind, init: options, handlers: [], active: false });
+      return event;
+    });
+  const NavigateEvent = eventInterface("NavigateEvent", "navigate", ["destination"]);
+  const ChangeEvent = eventInterface("NavigationCurrentEntryChangeEvent", "change", ["from"]);
+  getters(NavigateEvent, "navigate", [
+    ["navigationType", (state) => state.init.navigationType || "push"],
+    ["destination", (state) => state.init.destination],
+    ["canIntercept", (state) => !!state.init.canIntercept],
+    ["userInitiated", (state) => !!state.init.userInitiated],
+    ["hashChange", (state) => !!state.init.hashChange],
+    ["signal", (state) => state.init.signal],
+    ["formData", (state) => state.init.formData || null],
+    ["downloadRequest", (state) => state.init.downloadRequest ?? null],
+    ["info", (state) => state.init.info],
+    ["hasUAVisualTransition", (state) => !!state.init.hasUAVisualTransition],
+    ["sourceElement", (state) => state.init.sourceElement || null],
+  ]);
+  method(NavigateEvent.prototype, "intercept", 0, function (options = {}) {
+    const state = record(this, "navigate");
+    if (!state.active)
+      throw new Exception(
+        "Failed to execute 'intercept' on 'NavigateEvent': intercept() may only be called while the navigate event is being dispatched.",
+        "InvalidStateError",
+      );
+    state.intercepted = true;
+    if (options && typeof options.handler === "function") state.handlers.push(options.handler);
+  });
+  method(NavigateEvent.prototype, "scroll", 0, function () {
+    record(this, "navigate");
+  });
+  getters(ChangeEvent, "change", [
+    ["navigationType", (state) => state.init.navigationType ?? null],
+    ["from", (state) => state.init.from],
+  ]);
+  const entryObject = (entry) => {
+    if (!entry.object) {
+      entry.object = Object.setPrototypeOf(new EventTarget(), HistoryEntry.prototype);
+      records.set(entry.object, { __proto__: null, kind: "entry", entry });
+    }
+    return entry.object;
+  };
+  getters(HistoryEntry, "entry", [
+    ["url", (state) => state.entry.url],
+    ["key", (state) => state.entry.key],
+    ["id", (state) => state.entry.id],
+    ["index", (state) => entries.indexOf(state.entry)],
+    ["sameDocument", () => true],
+  ]);
+  method(HistoryEntry.prototype, "getState", 0, function () {
+    return cloneState(record(this, "entry").entry.navState);
+  });
+  __defineEventHandler(HistoryEntry.prototype, "ondispose", (receiver) =>
+    record(receiver, "entry"),
+  );
+  getters(Destination, "destination", [
+    ["url", (state) => state.url],
+    ["key", (state) => state.key],
+    ["id", (state) => state.id],
+    ["index", (state) => state.index],
+    ["sameDocument", (state) => state.sameDocument],
+  ]);
+  method(Destination.prototype, "getState", 0, function () {
+    return cloneState(record(this, "destination").navState);
+  });
+  getters(Transition, "transition", [
+    ["navigationType", (state) => state.navigationType],
+    ["from", (state) => state.from],
+    ["finished", (state) => state.finished],
+  ]);
+  const navigation = Object.setPrototypeOf(new EventTarget(), Navigation.prototype);
+  records.set(navigation, { __proto__: null, kind: "navigation" });
+  let transition = null;
+  const deferred = () => {
+    let resolve, reject;
+    const promise = new HostPromise((ok, fail) => {
+      resolve = ok;
+      reject = fail;
+    });
+    promise.catch(() => {});
+    return { promise, resolve, reject };
+  };
+  const results = () => ({ committed: deferred(), finished: deferred() });
+  const exposed = (result) => ({
+    committed: result.committed.promise,
+    finished: result.finished.promise,
+  });
+  const failed = (result, error) => {
+    result.committed.reject(error);
+    result.finished.reject(error);
+    return exposed(result);
+  };
+  const navigateError = (error, message) =>
+    fire(navigation, new HostErrorEvent("navigateerror", { error, message }));
+  const sameDocumentURL = (href) => withoutFragment(href) === withoutFragment(url());
+  const hashChanged = (href) =>
+    sameDocumentURL(href) && fragmentOf(href) !== null && fragmentOf(href) !== fragmentOf(url());
+  navigationHooks = {
+    __proto__: null,
+    // Fire navigate; null when it was canceled (its promises reject with AbortError).
+    begin(kind, href, nav) {
+      const result = nav.result || results();
+      const entry = nav.entry;
+      const destination = Object.create(Destination.prototype);
+      records.set(destination, {
+        __proto__: null,
+        kind: "destination",
+        url: href,
+        key: entry ? entry.key : "",
+        id: entry ? entry.id : "",
+        index: entry ? nav.index : -1,
+        sameDocument:
+          nav.sameDocument ||
+          (kind === "traverse" || kind === "reload" ? !!entry : sameDocumentURL(href)),
+        navState: entry ? entry.navState : nav.navState,
+      });
+      const controller = new HostAbort();
+      const event = new NavigateEvent("navigate", {
+        navigationType: kind,
+        destination,
+        canIntercept: true,
+        cancelable: true,
+        hashChange: kind !== "reload" && hashChanged(href),
+        info: nav.info,
+        signal: controller.signal,
+      });
+      const state = records.get(event);
+      state.active = true;
+      fire(navigation, event);
+      state.active = false;
+      const pending = {
+        __proto__: null,
+        result,
+        handlers: state.handlers,
+        intercepted: !!state.intercepted,
+        navState: nav.navState,
+      };
+      if (event.defaultPrevented && !nav.uncancelable) {
+        const error = new Exception("Navigation was aborted", "AbortError");
+        controller.abort(error);
+        failed(result, error);
+        navigateError(error, "Uncaught ");
+        return null;
+      }
+      return pending;
+    },
+    committed(kind, from, pending) {
+      fire(
+        navigation,
+        new ChangeEvent("currententrychange", { navigationType: kind, from: entryObject(from) }),
+      );
+      pending.result.committed.resolve(entryObject(activeEntry()));
+      if (pending.handlers.length) {
+        const state = {
+          __proto__: null,
+          kind: "transition",
+          navigationType: kind,
+          from: entryObject(from),
+          finished: pending.result.finished.promise,
+        };
+        transition = Object.create(Transition.prototype);
+        records.set(transition, state);
+      }
+    },
+    settle(pending, later) {
+      const success = () => {
+        transition = null;
+        fire(navigation, new HostEvent("navigatesuccess"));
+        pending.result.finished.resolve(entryObject(activeEntry()));
+      };
+      if (!pending.handlers.length) {
+        if (later) microtask(success);
+        else success();
+        return;
+      }
+      HostPromise.all(pending.handlers.map((handler) => microtask(() => handler()))).then(
+        success,
+        (error) => {
+          transition = null;
+          navigateError(error, "Uncaught " + StringValue(error));
+          pending.result.finished.reject(error);
+        },
+      );
+    },
+  };
+  // A navigate() or reload() that a handler intercept()ed commits as a same-document
+  // navigation: the URL changes in place, as pushState/replaceState change it.
+  const commitIntercepted = (kind, href, pending) => {
+    const from = activeEntry();
+    if (kind !== "reload") {
+      const entry = stamp(
+        { __proto__: null, url: href, serialized: null, scroll: from.scroll },
+        kind === "replace" ? from.key : null,
+        pending.navState,
+      );
+      if (kind === "push") appendEntry(entry);
+      else entries[index] = entry;
+      stateObject = null;
+      if (href !== url()) {
+        moveTo(href);
+        ops.op_script_navigation_admitted(href);
+      }
+    } else if (pending.navState !== undefined) from.navState = pending.navState;
+    navigationHooks.committed(kind, from, pending);
+    navigationHooks.settle(pending, true);
+  };
+  const checkNavigation = (receiver) => record(receiver, "navigation");
+  const arity = (method, count) => {
+    if (count < 1)
+      throw new ErrorType(
+        `Failed to execute '${method}' on 'Navigation': 1 argument required, but only 0 present.`,
+      );
+  };
+  accessor(Navigation.prototype, "currentEntry", function () {
+    checkNavigation(this);
+    return entryObject(activeEntry());
+  });
+  accessor(Navigation.prototype, "transition", function () {
+    checkNavigation(this);
+    return transition;
+  });
+  accessor(Navigation.prototype, "canGoBack", function () {
+    checkNavigation(this);
+    return index > 0;
+  });
+  accessor(Navigation.prototype, "canGoForward", function () {
+    checkNavigation(this);
+    return index < entries.length - 1;
+  });
+  method(Navigation.prototype, "entries", 0, function () {
+    checkNavigation(this);
+    return entries.map(entryObject);
+  });
+  method(Navigation.prototype, "updateCurrentEntry", 1, function (options) {
+    checkNavigation(this);
+    arity("updateCurrentEntry", arguments.length);
+    const state = serializeState((options || {}).state, "updateCurrentEntry", "Navigation");
+    const entry = activeEntry();
+    entry.navState = state;
+    fire(
+      navigation,
+      new ChangeEvent("currententrychange", { navigationType: null, from: entryObject(entry) }),
+    );
+  });
+  const behaviors = ["auto", "push", "replace"];
+  method(Navigation.prototype, "navigate", 1, function (address, options = {}) {
+    checkNavigation(this);
+    arity("navigate", arguments.length);
+    address = string(address);
+    options = options || {};
+    const behavior = options.history === undefined ? "auto" : string(options.history);
+    if (!behaviors.includes(behavior))
+      throw new ErrorType(
+        `Failed to execute 'navigate' on 'Navigation': Failed to read the 'history' property from 'NavigationNavigateOptions': The provided value '${behavior}' is not a valid enum value of type NavigationHistoryBehavior.`,
+      );
+    const navState = serializeState(options.state, "navigate", "Navigation");
+    const result = results();
+    const parsed = parse(address, documentBase());
+    if (!parsed) return failed(result, new Exception(`Invalid URL '${address}'.`, "SyntaxError"));
+    const href = parsed.href;
+    const replace = behavior === "replace" || (behavior === "auto" && href === url());
+    const nav = { __proto__: null, info: options.info, navState, result };
+    if (fragmentOf(href) !== null && sameDocumentURL(href)) {
+      navigateToFragment(href, replace, nav);
+      return exposed(result);
+    }
+    const kind = replace ? "replace" : "push";
+    const pending = navigationHooks.begin(kind, href, nav);
+    if (!pending) return exposed(result);
+    if (pending.intercepted) commitIntercepted(kind, href, pending);
+    else navigate(href, replace);
+    return exposed(result);
+  });
+  method(Navigation.prototype, "reload", 0, function (options = {}) {
+    checkNavigation(this);
+    options = options || {};
+    const navState =
+      options.state === undefined
+        ? activeEntry().navState
+        : serializeState(options.state, "reload", "Navigation");
+    const result = results();
+    const pending = navigationHooks.begin("reload", url(), {
+      __proto__: null,
+      info: options.info,
+      navState,
+      result,
+    });
+    if (!pending) return exposed(result);
+    if (pending.intercepted) commitIntercepted("reload", url(), pending);
+    else ops.op_script_navigation_admitted(url());
+    return exposed(result);
+  });
+  const traverseResult = (target, options, message) => {
+    const result = results();
+    if (target < 0 || target >= entries.length)
+      return failed(result, new Exception(message, "InvalidStateError"));
+    if (target === index) {
+      result.committed.resolve(entryObject(activeEntry()));
+      result.finished.resolve(entryObject(activeEntry()));
+    } else traverseTo(target, { __proto__: null, info: (options || {}).info, result });
+    return exposed(result);
+  };
+  method(Navigation.prototype, "traverseTo", 1, function (key, options = {}) {
+    checkNavigation(this);
+    arity("traverseTo", arguments.length);
+    key = string(key);
+    return traverseResult(
+      entries.findIndex((entry) => entry.key === key),
+      options,
+      "Invalid key",
+    );
+  });
+  method(Navigation.prototype, "back", 0, function (options = {}) {
+    checkNavigation(this);
+    return traverseResult(index - 1, options, "Cannot go back");
+  });
+  method(Navigation.prototype, "forward", 0, function (options = {}) {
+    checkNavigation(this);
+    return traverseResult(index + 1, options, "Cannot go forward");
+  });
+  for (const name of ["onnavigate", "onnavigatesuccess", "onnavigateerror", "oncurrententrychange"])
+    __defineEventHandler(Navigation.prototype, name, checkNavigation);
+  define(globalThis, "navigation", {
+    __proto__: null,
+    get: make(
+      function () {
+        return navigation;
+      },
+      "get navigation",
       0,
     ),
     set: undefined,

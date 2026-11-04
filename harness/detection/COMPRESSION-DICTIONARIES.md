@@ -71,7 +71,7 @@ retirement and hostile promise-constructor hooks.
 For the managed V8 155 SDK, use the normal
 [engine helper](./engine-155/README.md) with the same Cargo test selection. Preserve
 actual engine/source provenance; changing the public profile is not a V8 upgrade.
-All32 exact Chrome cases pass in actual155 and stock-engine renderer tests.
+All exact Chrome cases pass in actual155 and stock-engine renderer tests.
 Integrated full native/default gates and live Google acceptance are recorded separately
 in [FINDINGS.md](./FINDINGS.md), not inferred from these focused controls.
 
@@ -107,14 +107,19 @@ than inferred from this run. Native Google SERP acceptance is still0/2.
 - Document discovery admits at most 16 header hints and 64 distinct dictionary
   URLs. Native composed traversal has explicit 100,000-node and 256-link limits.
   These are engine bounds, not a claim of identical Chrome resource budgets.
-- Chrome's current control does not advertise a dictionary on the immediate
+- The Chrome 156 control does not advertise a dictionary on the immediate
   request after ordinary GET body completion, then advertises it after 100 ms and
   500 ms. Native publication is synchronous at successful EOF. The stable HEAD
-  rejection and delayed GET positives are checked; publication scheduling remains
-  a measured difference. No artificial delay is used to conceal it.
+  rejection and delayed GET positives are checked; publication scheduling is a
+  KNOWN_GAPS pin in `tests/compression_dictionary.rs` (both sides asserted, #137).
+  No artificial delay is used to conceal it.
+- Range requests: Chrome 156 sends `Accept-Encoding: identity` and, when a
+  dictionary matches, `identity, dcb, dcz` with Available-Dictionary
+  (`header-range-request`, `range-outside-match`). Native requests match.
 - Incremental dcb/dcz bodies now have actual HTTPS header, partial-delivery,
   cancellation and cache-publication controls on both transports. Broader Fetch
-  queue ordering and encoded HTTP Range behavior remain separate parity work.
+  queue ordering and decoding of dictionary-encoded 206 bodies remain separate
+  parity work.
 - Coding stacks, stale dictionary eligibility, broader redirect/opaque-policy and
   dictionary-policy behavior need additional parity controls. Native
   dictionary state is session-owned; disk persistence is not implemented here.

@@ -72,5 +72,9 @@ async fn body_form_data_matches_chrome156() {
     let actual: Value = serde_json::from_str(value.as_str().unwrap()).unwrap();
     let mut found = Vec::new();
     divergences(String::new(), &actual, &expected, &mut found);
-    assert_eq!(found, Vec::<String>::new(), "divergences from the Chrome control");
+    assert_eq!(
+        found,
+        Vec::<String>::new(),
+        "divergences from the Chrome control"
+    );
 }

@@ -9,7 +9,16 @@ const CONTROL: &str =
     include_str!("../../../../harness/detection/fixtures/navigation-api-chrome156.json");
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`.
-const KNOWN_GAPS: &[&str] = &[];
+///
+/// The recorder's tab starts on about:blank, so Chrome's `history.length` counts
+/// one more (cross-document) entry than this document's own session history.
+/// Blink reports an invalid URL in its parsed-and-reserialized form
+/// (`http://[/`); the engine echoes the input string.
+const KNOWN_GAPS: &[&str] = &[
+    "/afterFragment/1/3 = 2",
+    "/badURL/1/0/2 = \"Invalid URL 'http://['.\"",
+    "/badURL/1/1/2 = \"Invalid URL 'http://['.\"",
+];
 
 fn control() -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();

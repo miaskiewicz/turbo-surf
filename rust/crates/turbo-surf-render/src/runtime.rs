@@ -12934,7 +12934,6 @@ __G.domSig = (() => {
       // These real Web APIs are FEATURE-DETECTED by page code (`if (window.X)`) which then calls
       // their methods — a bare {} is truthy but methodless, so e.g. `navigation.entries()` throws
       // (before, an undefined `navigation` was skipped). Give each its commonly-called methods.
-      navigation: { entries: () => [], currentEntry: null, canGoBack: false, canGoForward: false, navigate() {}, reload() {}, traverseTo() {}, back() {}, forward() {}, updateCurrentEntry() {}, addEventListener() {}, removeEventListener() {} },
       speechSynthesis: { getVoices: () => [], speak() {}, cancel() {}, pause() {}, resume() {}, pending: false, speaking: false, paused: false, addEventListener() {}, removeEventListener() {} },
       viewport: {}, launchQueue: { setConsumer() {} },
       external: {}, fence: null, crashReport: {}, documentPictureInPicture: {}, event: undefined,

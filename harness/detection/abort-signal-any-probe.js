@@ -151,5 +151,24 @@
       resolve(log);
     }, 50);
   });
+  // Per-listener checkpoints: two listeners on the timed signal and two on
+  // each of two dependents, each queueing a microtask.
+  out.timeoutListeners = await new Promise((resolve) => {
+    const log = [];
+    const timed = AbortSignal.timeout(0);
+    const first = AbortSignal.any([timed]);
+    const second = AbortSignal.any([first, timed]);
+    for (const [name, signal] of [
+      ["timed", timed],
+      ["first", first],
+      ["second", second],
+    ])
+      for (const index of [0, 1])
+        signal.addEventListener("abort", () => {
+          log.push([name, index]);
+          queueMicrotask(() => log.push([name, index, "microtask"]));
+        });
+    setTimeout(() => resolve(log), 50);
+  });
   return JSON.stringify(out);
 })();

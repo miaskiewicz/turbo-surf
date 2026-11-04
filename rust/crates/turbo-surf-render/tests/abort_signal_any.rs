@@ -10,15 +10,7 @@ const CONTROL: &str =
     include_str!("../../../../harness/detection/fixtures/abort-signal-any-chrome156.json");
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`.
-///
-/// A timed-out signal's listener microtask runs before its dependent signal's
-/// listener in Chrome: Blink dispatches each abort from native code, so the
-/// microtask checkpoint runs between listeners. The official abort algorithms
-/// run inside one JS timer callback here, so dependents fire first (#136).
-const KNOWN_GAPS: &[&str] = &[
-    "/timeoutEvents/1 = [\"combined\",true]",
-    "/timeoutEvents/2 = [\"microtask\"]",
-];
+const KNOWN_GAPS: &[&str] = &[];
 
 fn control() -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();

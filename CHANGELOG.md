@@ -4,6 +4,9 @@
 
 Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).
 
+- **Changed (deps)**: the `[patch.crates-io]` pin moves the turbo-dom crates to
+  turbo-dom#298 (the 0.7.1 branch, rev `13b8095f`: turbo-dom#281-#288).
+
 - **Fixed (Observable, #116)**: `HTMLElement#click()` runs as its own binding frame, so a
   failure inside a `when("click")` listener reads `Failed to execute 'click' on
   'HTMLElement'` as in Chrome; the `web_apis` known gap is gone. The srcdoc

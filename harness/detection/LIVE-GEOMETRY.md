@@ -146,7 +146,9 @@ node harness/detection/api-shape.mjs --run --binary /absolute/path/to/detection_
 
 Use a new output directory for each capture. The same command accepts
 `inline-border-layout-probe.js`, `composed-layout-lifecycle-probe.js`,
-`frame-layout-startup-probe.js` or `frame-viewport-lifecycle-probe.js` from this
+`frame-layout-startup-probe.js`, `frame-viewport-lifecycle-probe.js` or
+`frame-media-change-probe.js` (a frame's `resize` event and MediaQueryList `change`
+when its iframe resizes; Chrome 156 control `fixtures/frame-media-change-chrome156.json`) from this
 directory. It records the actual Chrome/native versions, executable/probe hashes
 and every observed difference. It does not overwrite the saved regression oracle;
 review a fresh Chrome result before replacing any fixture. The production native

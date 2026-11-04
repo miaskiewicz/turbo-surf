@@ -38,6 +38,19 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   `harness/detection/fixtures/indexeddb-chrome156.json`. Residuals are tracked in #148: the
   capture phase on IDB targets, per-listener microtasks, throwing `addEventListener` listeners
   (turbo-dom#301), and a cross-site partition control.
+- **Fixed (fetch, #137)**: reading a used, disturbed or locked body rejects with Chrome's
+  messages (`Failed to execute '<method>' on 'Response': body stream already read` /
+  `body stream is locked`, and the `Request` forms); `clone()` and `new Request(request)`
+  throw Chrome's used-body messages. A `Range` request sends `Accept-Encoding: identity`
+  (`identity, dcb, dcz` with a selected compression dictionary). New controls
+  `fetch-body-used-chrome156.json` and `compression-dictionary-chrome156.json` (replaces the
+  Chrome 155 one). Dictionary publication scheduling stays a pinned known gap: Chrome
+  publishes after `text()` resolves, Core at EOF.
+- **Fixed (abort, #136)**: a host-run `AbortSignal.timeout()` dispatches each signal (the
+  source, then each dependent) from the host with a microtask checkpoint after it, so a
+  timed listener's microtask runs before a dependent's listener as in Chrome. Still pinned:
+  the checkpoint between two listeners of one signal (needs a turbo-dom EventTarget hook) and
+  the pipeTo abort reaction order (a turbo-surf-deno-web `06_streams.js` promise hop).
 - **Tests**: `harness/detection/web-apis-chrome-control.mjs` takes `--probes` to record other
   single-page controls.
 

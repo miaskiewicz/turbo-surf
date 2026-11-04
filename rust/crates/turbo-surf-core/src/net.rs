@@ -1418,6 +1418,11 @@ async fn cached_request(
         .await?;
     }
     let mut headers = build_headers(&hop.url, &hop.method, opts);
+    // Fetch's HTTP-network-or-cache fetch: a Range request asks for identity
+    // (Chrome 156 control `header-range-request` / `range-outside-match`).
+    if headers.contains_key("range") {
+        headers.insert("accept-encoding".into(), "identity".into());
+    }
     let dictionary_store = opts
         .dictionary_store
         .or_else(|| opts.http_cache.map(HttpCache::dictionary_store))

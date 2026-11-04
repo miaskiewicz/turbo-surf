@@ -11,13 +11,19 @@ const CONTROL: &str =
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`.
 ///
-/// A timed-out signal's listener microtask runs before its dependent signal's
-/// listener in Chrome: Blink dispatches each abort from native code, so the
-/// microtask checkpoint runs between listeners. The official abort algorithms
-/// run inside one JS timer callback here, so dependents fire first (#136).
+/// A timed-out abort now dispatches each signal (the source, then each
+/// dependent) from the host with a microtask checkpoint after it (#136). Blink
+/// also checkpoints between two listeners of the same signal; those listeners
+/// run inside turbo-dom's private EventTarget dispatcher, which has no
+/// per-listener host checkpoint yet, so a signal's second listener still runs
+/// before its first listener's microtask.
 const KNOWN_GAPS: &[&str] = &[
-    "/timeoutEvents/1 = [\"combined\",true]",
-    "/timeoutEvents/2 = [\"microtask\"]",
+    "/timeoutListeners/1 = [\"timed\",1]",
+    "/timeoutListeners/2 = [\"timed\",0,\"microtask\"]",
+    "/timeoutListeners/5 = [\"first\",1]",
+    "/timeoutListeners/6 = [\"first\",0,\"microtask\"]",
+    "/timeoutListeners/9 = [\"second\",1]",
+    "/timeoutListeners/10 = [\"second\",0,\"microtask\"]",
 ];
 
 fn control() -> Value {

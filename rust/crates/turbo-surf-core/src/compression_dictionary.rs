@@ -151,6 +151,7 @@ fn destination(context: &RequestContext) -> &'static str {
         Destination::Script => "script",
         Destination::Style => "style",
         Destination::Image => "image",
+        Destination::Font => "font",
         Destination::Empty => "",
         Destination::Report => "report",
     }

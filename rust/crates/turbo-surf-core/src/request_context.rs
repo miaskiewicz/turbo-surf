@@ -18,6 +18,7 @@ pub enum Destination {
     Script,
     Style,
     Image,
+    Font,
     Empty,
     Report,
 }
@@ -31,6 +32,7 @@ impl Destination {
             Destination::Script => "script",
             Destination::Style => "style",
             Destination::Image => "image",
+            Destination::Font => "font",
             Destination::Empty => "empty",
             Destination::Report => "report",
         }
@@ -248,7 +250,8 @@ impl RequestContext {
             .priority_for(destination)
             .unwrap_or(match self.destination {
                 Destination::Document | Destination::Iframe => "u=0, i",
-                Destination::Style => "u=0",
+                // Chrome fetches web fonts at VeryHigh priority, like render-blocking CSS.
+                Destination::Style | Destination::Font => "u=0",
                 Destination::Script => "u=1",
                 Destination::Image => "u=2, i",
                 Destination::Empty | Destination::Report => "u=1, i",

@@ -3286,6 +3286,42 @@ mod edge_tests {
         (origin, heads)
     }
 
+    // Fetch negotiates a Range request's Accept-Encoding itself (identity, plus
+    // dcb/dcz with a selected dictionary; Chrome 156 `header-range-request`).
+    // The transport must send that value, not substitute its own.
+    #[tokio::test]
+    async fn the_transport_keeps_a_range_requests_negotiated_accept_encoding() {
+        const PARTIAL: &[u8] = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-1/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+        let (origin, mut heads) = serve(vec![PARTIAL, PARTIAL]).await;
+        let client = build_client();
+        for value in ["identity, dcb, dcz", "identity"] {
+            let headers = BTreeMap::from([
+                ("range".to_owned(), "bytes=0-1".to_owned()),
+                ("accept-encoding".to_owned(), value.to_owned()),
+            ]);
+            let url = format!("{origin}/ranged");
+            send(
+                &client,
+                Outgoing {
+                    method: "GET",
+                    url: &url,
+                    headers: &headers,
+                    body: &None,
+                    body_bytes: &None,
+                    upload: None,
+                    restart: false,
+                },
+            )
+            .await
+            .unwrap();
+            let head = heads.recv().await.unwrap();
+            assert!(
+                head.contains(&format!("\r\naccept-encoding: {value}\r\n")),
+                "{value}: {head}"
+            );
+        }
+    }
+
     #[cfg(feature = "impersonate")]
     #[test]
     fn the_transport_reuses_the_chrome_154_recipe() {

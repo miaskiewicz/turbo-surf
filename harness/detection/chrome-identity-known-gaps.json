@@ -56,7 +56,7 @@
       "type": "request-missing",
       "kind": "form-post"
     },
-    "reason": "Native form submission into another browsing context (target=<iframe name>) throws `Native form submission to another browsing context is not supported`.",
+    "reason": "Recorded before 0.7.1, when native form submission into another browsing context (target=<iframe name>) threw. 0.7.1 navigates named child frames (#111); the entry stays until the next parity remeasure records the battery again.",
     "owner": "render/forms"
   },
   {

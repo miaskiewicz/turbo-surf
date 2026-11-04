@@ -16,6 +16,9 @@ const { values } = parseArgs({
     out: { type: "string" },
     chrome: { type: "string" },
     probes: { type: "string" },
+    // Probes that assert failed loads (revoked blob: URLs, bad data: URLs)
+    // record each one as a request failure; those are part of the control.
+    "allow-request-failures": { type: "boolean" },
   },
 });
 if (!values.runner || !values.out)
@@ -24,9 +27,54 @@ const probeNames = values.probes
   ? values.probes.split(",")
   : ["observable-shape-probe.js", "observable-semantics-probe.js", "blob-text-stream-probe.js"];
 const directory = mkdtempSync(join(tmpdir(), "turbo-web-apis-oracle-"));
-const server = createServer((_request, response) => {
-  response.setHeader("Content-Type", "text/html");
-  response.end("<!doctype html><html><head></head><body></body></html>");
+// `/echo…` answers with the request it received (form-navigation probes read it
+// back from the navigated frame); `/csp-…` pages carry a `form-action 'none'` policy.
+const echoHeaders = [
+  "content-type",
+  "content-length",
+  "origin",
+  "referer",
+  "cache-control",
+  "upgrade-insecure-requests",
+  "sec-fetch-dest",
+  "sec-fetch-mode",
+  "sec-fetch-site",
+  "sec-fetch-user",
+];
+const server = createServer((request, response) => {
+  const chunks = [];
+  request.on("data", (chunk) => chunks.push(chunk));
+  request.on("end", () => {
+    response.setHeader("Content-Type", "text/html");
+    const origin = `http://${request.headers.host}`;
+    if (request.url.startsWith("/echo")) {
+      const boundary = /boundary=(\S+)/.exec(request.headers["content-type"] ?? "")?.[1];
+      const scrub = (text) => {
+        let value = text.replaceAll(origin, "<origin>");
+        if (boundary) value = value.replaceAll(boundary, "<boundary>");
+        return value;
+      };
+      const echo = {
+        method: request.method,
+        url: request.url,
+        headers: Object.fromEntries(
+          echoHeaders
+            .filter((name) => name in request.headers)
+            .map((name) => [name, scrub(request.headers[name])]),
+        ),
+        body: scrub(Buffer.concat(chunks).toString("latin1")),
+      };
+      const text = JSON.stringify(echo).replaceAll("&", "&amp;").replaceAll("<", "&lt;");
+      response.end(
+        `<!doctype html><html><head></head><body><pre id="echo">${text}</pre></body></html>`,
+      );
+      return;
+    }
+    const policy = request.url.startsWith("/csp-")
+      ? `<meta http-equiv="Content-Security-Policy" content="form-action 'none'">`
+      : "";
+    response.end(`<!doctype html><html><head>${policy}</head><body></body></html>`);
+  });
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
 let complete = false;
@@ -52,7 +100,7 @@ try {
   if (status !== 0) throw Error(`Chrome capture exited ${status}`);
   const trace = JSON.parse(readFileSync(join(output, "trace.json"), "utf8"));
   if (
-    trace.errors.length ||
+    trace.errors.some((error) => !(values["allow-request-failures"] && error.failure)) ||
     trace.probes.length !== probeNames.length ||
     trace.probes.some((probe) => probe.error || !probe.result)
   )

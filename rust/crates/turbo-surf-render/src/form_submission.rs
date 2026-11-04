@@ -55,13 +55,6 @@ fn submit<'s>(
     if operation != "submit" || !active {
         return;
     }
-    if context.get_slot::<FrameContextMarker>().is_some() {
-        fail(
-            scope,
-            "Native form navigation from child frames is not supported",
-        );
-        return;
-    }
     let Ok(form) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         return;
     };
@@ -84,7 +77,13 @@ fn submit<'s>(
     };
     let state = JsRuntime::op_state_from(scope);
     let source = state.borrow().borrow::<Base>().0.clone();
-    let source = window_proxy::location_url(context).unwrap_or(source);
+    let source = window_proxy::location_url(context)
+        .or_else(|| {
+            context
+                .get_slot::<FrameDocumentUrl>()
+                .map(|url| url.0.clone())
+        })
+        .unwrap_or(source);
     let base = approved_base(scope, context, form, &source);
     let action = payload.action.as_deref().filter(|value| !value.is_empty());
     let Some(action) = action.map_or_else(|| Some(source.clone()), |action| resolve(&base, action))
@@ -143,12 +142,33 @@ fn submit<'s>(
         result.set_bool(true);
         return;
     }
+    let Some(navigable) = navigable_target(scope, context, &target) else {
+        fail(
+            scope,
+            "Native form submission to another browsing context is not supported",
+        );
+        return;
+    };
+    // A sandboxed document navigates only itself and its descendants unless the
+    // sandbox grants top navigation (Chrome blocks with a console message).
+    if navigable != context && ancestor_of(scope, navigable, context) {
+        // Every sandbox sets the document.domain flag, whatever its tokens.
+        let sandboxed = crate::runtime::sandbox_blocks_top_navigation(context, navigable)
+            || (navigable.get_slot::<FrameParent>().is_some()
+                && context
+                    .get_slot::<FrameSandbox>()
+                    .is_some_and(|flags| flags.document_domain_blocked));
+        if sandboxed {
+            result.set_bool(true);
+            return;
+        }
+    }
     let plan = match form_navigation::prepare(
         &source,
         &action,
         &payload.method,
         &payload.enctype,
-        &target,
+        "",
         &payload.entries,
         &files,
         encoding,
@@ -159,6 +179,11 @@ fn submit<'s>(
             return;
         }
     };
+    if navigable.get_slot::<FrameHost>().is_some() {
+        navigate_child(scope, navigable, &plan, &source);
+        result.set_bool(true);
+        return;
+    }
     let Some(handle) = context.get_slot::<CspHandle>() else {
         return;
     };
@@ -217,6 +242,95 @@ fn queue_javascript_url<'s>(
     };
     let receiver = global.into();
     schedule.call(scope, receiver, &[task.into()]);
+}
+
+/// The navigable a form submission targets: this document (`""`, `_self`), its
+/// parent or top-level document, or a named child frame of this document. `None`
+/// for a new window (`_blank`, unknown names).
+fn navigable_target<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    target: &str,
+) -> Option<v8::Local<'s, v8::Context>> {
+    let parent = |scope: &mut v8::PinScope<'s, '_>, context: v8::Local<'s, v8::Context>| {
+        context
+            .get_slot::<FrameParent>()
+            .and_then(|parent| parent.0.to_local(scope))
+    };
+    if target.eq_ignore_ascii_case("_parent") {
+        return Some(parent(scope, context).unwrap_or(context));
+    }
+    if target.eq_ignore_ascii_case("_top") {
+        let mut top = context;
+        while let Some(next) = parent(scope, top) {
+            top = next;
+        }
+        return Some(top);
+    }
+    javascript_target(scope, context, target)
+}
+
+fn ancestor_of<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    ancestor: v8::Local<'s, v8::Context>,
+    mut context: v8::Local<'s, v8::Context>,
+) -> bool {
+    while let Some(parent) = context
+        .get_slot::<FrameParent>()
+        .and_then(|parent| parent.0.to_local(scope))
+    {
+        if parent == ancestor {
+            return true;
+        }
+        context = parent;
+    }
+    false
+}
+
+/// Hands a child navigable's form navigation to its parent's frame loader, which
+/// fetches it with navigation semantics (`op_fetch`, destination `iframe`).
+fn navigate_child<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    navigable: v8::Local<'s, v8::Context>,
+    plan: &form_navigation::Submission,
+    source: &str,
+) {
+    let Some(parent) = navigable
+        .get_slot::<FrameParent>()
+        .and_then(|parent| parent.0.to_local(scope))
+    else {
+        return;
+    };
+    let navigator = parent
+        .get_slot::<FrameNavigator>()
+        .and_then(|navigator| navigator.0.to_local(scope));
+    let host = navigable
+        .get_slot::<FrameHost>()
+        .and_then(|host| host.0.to_local(scope));
+    let (Some(navigator), Some(host)) = (navigator, host) else {
+        return;
+    };
+    // POST navigations revalidate (Chrome's `Cache-Control: max-age=0`).
+    let request = serde_json::json!({
+        "method": plan.method,
+        "headers": plan.headers,
+        "body_bytes": plan.body,
+        "cache": if plan.method == "POST" { "no-cache" } else { "default" },
+    });
+    let (Some(url), Some(source), Some(request)) = (
+        v8::String::new(scope, &plan.url),
+        v8::String::new(scope, source),
+        v8::String::new(scope, &request.to_string()),
+    ) else {
+        return;
+    };
+    let undefined = v8::undefined(scope);
+    let scope = &mut v8::ContextScope::new(scope, parent);
+    navigator.call(
+        scope,
+        undefined.into(),
+        &[host.into(), url.into(), source.into(), request.into()],
+    );
 }
 
 /// The context a `javascript:` navigation runs in, or `None` when it leaves this

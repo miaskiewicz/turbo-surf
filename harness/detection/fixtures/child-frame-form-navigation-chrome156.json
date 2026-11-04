@@ -1,0 +1,200 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-04T11:58:37.665Z",
+  "fixtures": {
+    "child-frame-form-navigation-probe.js": "8a1c5049e6b7ae991c7a055f45f5f4cccb2e5aee0a36575165047242fc1d09be"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "child-frame-form-navigation-probe.js": {
+      "get": {
+        "method": "GET",
+        "url": "/echo/get?a=1&b=x+y%26z",
+        "headers": {
+          "referer": "<origin>/child",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": ""
+      },
+      "post": {
+        "method": "POST",
+        "url": "/echo/post",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "13",
+          "origin": "<origin>",
+          "referer": "<origin>/echo/get?a=1&b=x+y%26z",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "a=1&b=x+y%26z"
+      },
+      "text": {
+        "method": "POST",
+        "url": "/echo/text",
+        "headers": {
+          "content-type": "text/plain",
+          "content-length": "14",
+          "origin": "<origin>",
+          "referer": "<origin>/echo/post",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "a=1\r\nb=x y&z\r\n"
+      },
+      "multipart": {
+        "method": "POST",
+        "url": "/echo/multipart",
+        "headers": {
+          "content-type": "multipart/form-data; boundary=<boundary>",
+          "content-length": "226",
+          "origin": "<origin>",
+          "referer": "<origin>/echo/text",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "--<boundary>\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--<boundary>\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\nx y&z\r\n--<boundary>--\r\n"
+      },
+      "self": {
+        "method": "POST",
+        "url": "/echo/self",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "13",
+          "origin": "<origin>",
+          "referer": "<origin>/echo/multipart",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "a=1&b=x+y%26z"
+      },
+      "defaultAction": {
+        "method": "POST",
+        "url": "/echo/start?x=1",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "13",
+          "origin": "<origin>",
+          "referer": "<origin>/echo/start?x=1",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "a=1&b=x+y%26z"
+      },
+      "requestSubmit": {
+        "method": "POST",
+        "url": "/echo/submitter",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "10",
+          "origin": "<origin>",
+          "referer": "<origin>/echo/self",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "c=3&go=yes"
+      },
+      "namedDescendant": [
+        {
+          "method": "POST",
+          "url": "/echo/named",
+          "headers": {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "3",
+            "origin": "<origin>",
+            "referer": "<origin>/host",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": "n=1"
+        },
+        "/host"
+      ],
+      "parentTarget": {
+        "method": "POST",
+        "url": "/echo/parent",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "3",
+          "origin": "<origin>",
+          "referer": "<origin>/echo/named",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "p=1"
+      },
+      "topToNamedChild": [
+        {
+          "method": "POST",
+          "url": "/echo/kid",
+          "headers": {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "3",
+            "origin": "<origin>",
+            "referer": "<origin>/",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": "k=1"
+        },
+        "/"
+      ],
+      "sandboxBlocked": [0, "/sandboxed"],
+      "sandboxAllowed": {
+        "method": "POST",
+        "url": "/echo/allowed",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "3",
+          "origin": "<origin>",
+          "referer": "<origin>/sandboxed-forms",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "s=2"
+      },
+      "sandboxParent": [0, "/outer", "/nested"],
+      "formAction": [0, "/csp-child", [["form-action", "<origin>/echo/csp"]]]
+    }
+  }
+}

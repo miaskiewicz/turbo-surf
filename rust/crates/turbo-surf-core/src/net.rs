@@ -912,6 +912,8 @@ fn err(e: impl std::fmt::Display, code: ErrorCode) -> HttpError {
     HttpError::new(e.to_string(), code)
 }
 
+// One transport seam for every hop; the arguments are the hop itself.
+#[allow(clippy::too_many_arguments)]
 async fn send(
     cl: &http::Client,
     method: &str,

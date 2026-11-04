@@ -351,29 +351,39 @@
         configurable: true,
       });
     }
-    const origins = ops.op_location_ancestor_origins();
-    const ancestors = __G.makeNamedObject(
-      StringList.prototype,
-      function (operation, key) {
-        const indexed = /^(0|[1-9][0-9]*)$/.test(key) && +key < origins.length;
-        if (operation === "indices") {
-          const indices = [];
-          for (let at = 0; at < origins.length; at++) indices[at] = at;
-          return indices;
-        }
-        if (operation === "keys") return [];
-        if (!indexed) return undefined;
-        if (operation === "get") return origins[+key];
-        if (operation === "has") return true;
-        if (operation === "descriptor")
-          return { value: origins[+key], writable: false, enumerable: true, configurable: true };
-        if (operation === "delete") return false;
-        if (operation === "set" || operation === "define") return true;
-        return undefined;
-      },
-      true,
-    );
-    apply(listSet, lists, [ancestors, origins]);
+    const stringList = (origins) => {
+      const list = __G.makeNamedObject(
+        StringList.prototype,
+        function (operation, key) {
+          const indexed = /^(0|[1-9][0-9]*)$/.test(key) && +key < origins.length;
+          if (operation === "indices") {
+            const indices = [];
+            for (let at = 0; at < origins.length; at++) indices[at] = at;
+            return indices;
+          }
+          if (operation === "keys") return [];
+          if (!indexed) return undefined;
+          if (operation === "get") return origins[+key];
+          if (operation === "has") return true;
+          if (operation === "descriptor")
+            return { value: origins[+key], writable: false, enumerable: true, configurable: true };
+          if (operation === "delete") return false;
+          if (operation === "set" || operation === "define") return true;
+          return undefined;
+        },
+        true,
+      );
+      apply(listSet, lists, [list, origins]);
+      return list;
+    };
+    const ancestors = stringList(ops.op_location_ancestor_origins());
+    // Static DOMStringList views for the other runtime interfaces (IDB objectStoreNames).
+    define(__G, "domStringList", {
+      __proto__: null,
+      value: stringList,
+      writable: true,
+      configurable: true,
+    });
     accessor(
       location,
       "ancestorOrigins",

@@ -6181,6 +6181,29 @@ fn op_document_cookie_site<'s>(
     serde_json::json!({"top_level_source":state.borrow::<Base>().0,"cookie_site_is_opaque":opaque})
 }
 
+/// The cookie URL and jar a document's cookie APIs act on: a frame's own URL and
+/// its partition jar, else the session's top-level document and jar.
+fn document_cookie_target(
+    scope: &mut v8::PinScope,
+    state: &OpState,
+    document: v8::Local<v8::Object>,
+) -> (String, Jar) {
+    let context = document.get_creation_context(scope);
+    let url = context
+        .as_ref()
+        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
+        .map(|url| url.0.clone())
+        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
+    let jar = context
+        .and_then(|context| context.get_slot::<CspHandle>())
+        .and_then(|handle| handle.partition.clone())
+        .map_or_else(
+            || state.borrow::<Jar>().clone(),
+            |partition| partition.jar.clone(),
+        );
+    (url, jar)
+}
+
 #[op2]
 #[string]
 fn op_frame_cookie_get(
@@ -6189,19 +6212,7 @@ fn op_frame_cookie_get(
     document: v8::Local<v8::Object>,
 ) -> String {
     apply_report_cookies(state);
-    let url = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
-        .map(|url| url.0.clone())
-        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
-    let jar = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<CspHandle>())
-        .and_then(|handle| handle.partition.clone())
-        .map_or_else(
-            || state.borrow::<Jar>().clone(),
-            |partition| partition.jar.clone(),
-        );
+    let (url, jar) = document_cookie_target(scope, state, document);
     let value = jar.borrow().document_cookie(&url, cookie_now());
     value
 }
@@ -6214,20 +6225,38 @@ fn op_frame_cookie_set(
     #[string] line: &str,
 ) {
     apply_report_cookies(state);
-    let url = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
-        .map(|url| url.0.clone())
-        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
-    let jar = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<CspHandle>())
-        .and_then(|handle| handle.partition.clone())
-        .map_or_else(
-            || state.borrow::<Jar>().clone(),
-            |partition| partition.jar.clone(),
-        );
+    let (url, jar) = document_cookie_target(scope, state, document);
     jar.borrow_mut().set_from_document(&url, line, cookie_now());
+}
+
+/// The script-visible cookies of a document as CookieStore list items, in
+/// `document.cookie` order (#108).
+#[op2]
+#[serde]
+fn op_cookie_store_list(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+) -> serde_json::Value {
+    apply_report_cookies(state);
+    let (url, jar) = document_cookie_target(scope, state, document);
+    let cookies = jar.borrow().cookies_for(&url, cookie_now());
+    cookies
+        .into_iter()
+        .filter(|cookie| !cookie.http_only)
+        .map(|cookie| {
+            serde_json::json!({
+                "domain": (!cookie.host_only).then_some(cookie.domain),
+                "expires": cookie.expires_at.is_finite().then_some(cookie.expires_at),
+                "name": cookie.name,
+                "partitioned": false,
+                "path": cookie.path,
+                "sameSite": cookie.same_site,
+                "secure": cookie.secure,
+                "value": cookie.value,
+            })
+        })
+        .collect()
 }
 
 type StorageEntries = Vec<(Vec<u16>, Vec<u16>)>;
@@ -7234,6 +7263,7 @@ deno_core::extension!(
         op_document_create_element,
         op_document_import_node,
         op_frame_cookie_set,
+        op_cookie_store_list,
         op_queue_classic_script,
         op_install_resource_consumer,
         op_prepare_resource_script,
@@ -7720,7 +7750,6 @@ const __navData = {
     credentials: { get: () => Promise.resolve(null), create: () => Promise.resolve(null), store: P, preventSilentAccess: P },
     wakeLock: { request: REJ },
     keyboard: { getLayoutMap: () => Promise.resolve(new Map()), lock: P, unlock() {} },
-    locks: { request: P, query: () => Promise.resolve({ held: [], pending: [] }) },
     mediaCapabilities: { decodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }), encodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }) },
     mediaSession: { metadata: null, playbackState: "none", setActionHandler() {}, setPositionState() {} },
     // React's scheduler probes navigator.scheduling.isInputPending — must be an object with the fn.
@@ -10030,6 +10059,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
     include_str!("xhr.js"),
     include_str!("file_reader.js"),
     include_str!("websocket.js"),
+    include_str!("storage_apis.js"),
     r##"
 // Object-URL registry + download capture. The common client-side export pattern is
 // `URL.createObjectURL(blob)` → set it on a `<a download href=…>` → `link.click()`. A real
@@ -12904,8 +12934,6 @@ __G.domSig = (() => {
       // These real Web APIs are FEATURE-DETECTED by page code (`if (window.X)`) which then calls
       // their methods — a bare {} is truthy but methodless, so e.g. `navigation.entries()` throws
       // (before, an undefined `navigation` was skipped). Give each its commonly-called methods.
-      caches: { open: () => Promise.resolve({ match: () => Promise.resolve(undefined), put: () => Promise.resolve(), keys: () => Promise.resolve([]) }), has: () => Promise.resolve(false), keys: () => Promise.resolve([]), match: () => Promise.resolve(undefined), delete: () => Promise.resolve(false) },
-      cookieStore: { get: () => Promise.resolve(null), getAll: () => Promise.resolve([]), set: () => Promise.resolve(), delete: () => Promise.resolve(), addEventListener() {}, removeEventListener() {} },
       navigation: { entries: () => [], currentEntry: null, canGoBack: false, canGoForward: false, navigate() {}, reload() {}, traverseTo() {}, back() {}, forward() {}, updateCurrentEntry() {}, addEventListener() {}, removeEventListener() {} },
       speechSynthesis: { getVoices: () => [], speak() {}, cancel() {}, pause() {}, resume() {}, pending: false, speaking: false, paused: false, addEventListener() {}, removeEventListener() {} },
       viewport: {}, launchQueue: { setConsumer() {} },

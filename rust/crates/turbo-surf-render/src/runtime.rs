@@ -8906,6 +8906,31 @@ globalThis.fetch = async (input, init = undefined) => {
 // these results. Other legacy media features retain the bounded evaluator below.
 {
   const __mediaWindow = globalThis, __mediaTypeError=TypeError, __mediaDOMException=DOMException;
+  const apply = Reflect.apply, __mediaLists = [], __MediaEvent = Event;
+  // The rendering update's resize steps, then media query evaluation (HTML "update the
+  // rendering"): a window whose viewport changed since the last update gets `resize`, then
+  // every watched list that flipped fires `change`. Only a frame's viewport ever changes.
+  let __mediaSize = null;
+  const __viewportSize = () => {
+    try { return [ops.op_live_frame_dimension(globalThis, false, true), ops.op_live_frame_dimension(globalThis, true, true)]; }
+    catch { return null; }
+  };
+  __renderingSteps.push(() => {
+    const size = __viewportSize();
+    if (!size) return;
+    const changed = __mediaSize !== null && (size[0] !== __mediaSize[0] || size[1] !== __mediaSize[1]);
+    __mediaSize = size;
+    if (!changed) return;
+    try { globalThis.dispatchEvent(new __MediaEvent("resize")); } catch (e) {}
+    for (const list of __mediaLists.slice()) {
+      const now = list.matches();
+      if (!list.flip(now)) continue;
+      let event;
+      try { event = new MediaQueryListEvent("change", { media: list.mql.media, matches: now }); }
+      catch { event = new __MediaEvent("change"); Object.defineProperties(event, { media: { value: list.mql.media }, matches: { value: now } }); }
+      for (const fn of list.listeners.slice()) { try { apply(fn, list.mql, [event]); } catch (e) { ops.op_report_exception(e); } }
+    }
+  });
   const __mqLen = (tok, basis) => {
     // A CSS length in a media feature → px. Supports px and em/rem (16px root).
     const m = String(tok).match(/([\d.]+)\s*(px|r?em)?/);
@@ -8954,17 +8979,34 @@ globalThis.fetch = async (input, init = undefined) => {
     if(!ops.op_windows_same_origin(owner))throw new __mediaDOMException("Cross-origin Window access","SecurityError");
     const media = String(q == null ? "" : q);
     if(ops.op_window_media_state(owner)===0)return null;
+    const listeners = [];
+    let handler = null, slot = null, watched = false, last = false;
+    const matches = () => ops.op_window_media_state(owner)===2 && __evalMedia(media, owner);
+    // A list with a listener joins its window's rendering update (turbo-dom#287 semantics):
+    // after the window's `resize`, each list whose `matches` flipped fires `change`.
+    const watch = () => {
+      if (watched) return;
+      watched = true;
+      last = matches();
+      __mediaLists.push({ __proto__: null, owner, mql, matches, flip(now) { if (now === last) return false; last = now; return true; }, listeners });
+    };
+    const add = (fn) => { if (typeof fn === "function" && !listeners.includes(fn)) { listeners.push(fn); watch(); } };
+    const remove = (fn) => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); };
     const mql = {
       media,
-      onchange: null,
-      _l: [],
-      addListener(fn) { if (typeof fn === "function") this._l.push(fn); },
-      removeListener(fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
-      addEventListener(_t, fn) { if (typeof fn === "function") this._l.push(fn); },
-      removeEventListener(_t, fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
+      get onchange() { return handler; },
+      set onchange(fn) {
+        handler = typeof fn === "function" ? fn : null;
+        // An event handler keeps the listener position of its first assignment.
+        if (handler && !slot) { slot = (event) => handler && apply(handler, mql, [event]); listeners.push(slot); watch(); }
+      },
+      addListener(fn) { add(fn); },
+      removeListener(fn) { remove(fn); },
+      addEventListener(type, fn) { if (String(type) === "change") add(fn); },
+      removeEventListener(type, fn) { if (String(type) === "change") remove(fn); },
       dispatchEvent() { return false; },
     };
-    Object.defineProperty(mql, "matches", { get: () => ops.op_window_media_state(owner)===2 && __evalMedia(media, owner), enumerable: true });
+    Object.defineProperty(mql, "matches", { get: matches, enumerable: true });
     return mql;
   } }).matchMedia;
 }
@@ -11308,6 +11350,12 @@ __G.domSig = (() => {
   const frameOwner = el => frameApply(frameDefaultView, frameApply(frameOwnerDocument, el, []), []);
   const frameConnected = el => frameApply(frameIsConnected, el, []);
   const visitFrameHosts = callback => frameApply(frameHostEach, frameHosts, [callback]);
+  // Each rendering update also updates this document's loaded frames (their resize and
+  // media query steps), without starting a frame that has no realm yet.
+  __renderingSteps.push(() => visitFrameHosts(el => {
+    const realm = frameRecords.get(el)?.realm;
+    if (realm && ops.op_window_active(realm)) ops.op_request_frame_rendering(realm);
+  }));
   const frameWindowView = __G.windowView;
   const frameDepth = ops.op_window_bootstrap_depth(globalThis) + 1;
   const iframeTag = __G.domAccessor("tagName", false, "Element");

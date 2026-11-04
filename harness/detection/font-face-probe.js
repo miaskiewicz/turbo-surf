@@ -163,6 +163,6 @@
     events: events.slice(),
   };
   fonts.delete(face);
-  out.deleted = { size: fonts.size, has: fonts.has(face), width: width("tScript") };
+  out.deleted = { size: fonts.size, has: fonts.has(face) };
   return JSON.stringify(out);
 })();

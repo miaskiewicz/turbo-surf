@@ -1,9 +1,9 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "recordedAt": "2026-11-04T13:08:03.612Z",
+  "recordedAt": "2026-11-04T13:16:46.497Z",
   "fixtures": {
-    "font-face-probe.js": "f1ff6a3c04203950092138ffeacd7f6cf9d08215abd0e8d9abc75e44c1ed7de6",
+    "font-face-probe.js": "6c4beb398aedd142ed37231e1dfd34bb79a5d5ecbf5b5a8a8cb70fd780dd4aa1",
     "font-face-ready-probe.js": "9748542e2fc436414124fedf6d3d24fbb4478156b95119a4bac8afb6695c99b7",
     "fixtures/embedded-font-range-probe.js": "7a8b2e47635af22bfb9bdbe69f854ad49e6c7934c3e4c4f53243d549a3e68093",
     "fixtures/font-face-cases.json": "148deaa34aae2d7a6595447dfa0266f878042689a99ef31aaeb8d0367249014c"
@@ -243,8 +243,7 @@
       },
       "deleted": {
         "size": 9,
-        "has": false,
-        "width": 240.828125
+        "has": false
       }
     },
     "csp": {
@@ -481,8 +480,7 @@
       },
       "deleted": {
         "size": 9,
-        "has": false,
-        "width": 240.828125
+        "has": false
       }
     },
     "range-block-only": {

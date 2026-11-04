@@ -6519,6 +6519,10 @@ mod session_tool_tests {
         assert_eq!(pixel(&shot, 5, 5), [255, 0, 0]);
         assert_eq!(pixel(&shot, 5, 25), [255, 0, 0]);
         assert_eq!(pixel(&shot, 40, 30), [0, 0, 255]);
+        // The quirks-mode first <form> keeps Chrome's 1em block-end margin, so the second
+        // form starts at y=56 and y=45 is still body background (Chrome 156: forms at y=0
+        // and y=56; turbo-surf#132, fixed by turbo-dom#282).
+        assert_eq!(pixel(&shot, 40, 45), [0, 0, 255]);
         assert!(s.requests.iter().any(|r| r.ends_with("/red.png")));
         // Without external CSS or images: white canvas, nothing fetched.
         s.requests.clear();

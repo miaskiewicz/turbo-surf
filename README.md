@@ -420,7 +420,7 @@ Google SERP acceptance for 0.6.0 is a separate run: see GOOGLE-SERP-0.6.0 (pendi
 Known gaps, each tracked in its own issue:
 [workers](https://github.com/miaskiewicz/turbo-surf/issues/104),
 [canvas captureStream / offscreen / PiP, WebGL](https://github.com/miaskiewicz/turbo-surf/issues/106),
-[IndexedDB](https://github.com/miaskiewicz/turbo-surf/issues/107),
+[IndexedDB event-path residuals](https://github.com/miaskiewicz/turbo-surf/issues/148),
 [placeholder APIs (caches, cookieStore, Navigation, locks, WebSocket)](https://github.com/miaskiewicz/turbo-surf/issues/108),
 [abort reaction / microtask order](https://github.com/miaskiewicz/turbo-surf/issues/136),
 [fetch residuals: compression-dictionary, Range, consumed-body text](https://github.com/miaskiewicz/turbo-surf/issues/137),
@@ -430,7 +430,6 @@ Known gaps, each tracked in its own issue:
 [transport identity](https://github.com/miaskiewicz/turbo-surf/issues/113),
 [Google SERP](https://github.com/miaskiewicz/turbo-surf/issues/114),
 [GC / memory reclamation](https://github.com/miaskiewicz/turbo-surf/issues/115),
-[srcdoc `document.domain` sharing](https://github.com/miaskiewicz/turbo-surf/issues/116) (needs a turbo-dom-browser-env host hook),
 audio ([#27](https://github.com/miaskiewicz/turbo-surf/issues/27)); in turbo-dom:
 [XPath](https://github.com/miaskiewicz/turbo-dom/issues/185),
 [XML parsing](https://github.com/miaskiewicz/turbo-dom/issues/186),

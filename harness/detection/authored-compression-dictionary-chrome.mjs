@@ -9,7 +9,7 @@ import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
 import { startDictionaryServers, dictionaryCases } from "./compression-dictionary-server.mjs";
 
 const output = resolve(
-    process.argv[2] || "harness/detection/fixtures/compression-dictionary-chrome155.json",
+    process.argv[2] || "harness/detection/fixtures/compression-dictionary-chrome156.json",
   ),
   profile = mkdtempSync(join(tmpdir(), "turbo-dictionary-oracle-"));
 const fixtures = await startDictionaryServers();
@@ -107,8 +107,17 @@ try {
       id;
     let manual = null,
       head = null,
-      priority = null;
-    if (dictionaryCases[id].head) {
+      priority = null,
+      range = null;
+    if (dictionaryCases[id].range) {
+      range = await evaluate(
+        "fetch(" +
+          JSON.stringify(resource) +
+          ",{headers:{Range:" +
+          JSON.stringify(dictionaryCases[id].range) +
+          "}}).then(async r=>({status:r.status,contentRange:r.headers.get('content-range'),text:await r.text()}))",
+      );
+    } else if (dictionaryCases[id].head) {
       const dictionary = fixtures.primary + "/dictionary?case=" + id;
       head = await evaluate(
         "(async()=>{const first=await fetch(" +
@@ -167,6 +176,7 @@ try {
       ...(manual ? { manual } : {}),
       ...(head ? { head } : {}),
       ...(priority ? { priority } : {}),
+      ...(range ? { range } : {}),
       ...(await evaluate(
         "({secure:isSecureContext,events:dictionaryEvents,support:document.createElement('link').relList.supports('compression-dictionary')})",
       )),

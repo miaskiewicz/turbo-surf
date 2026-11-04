@@ -4,11 +4,27 @@
 
 Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).
 
+- **Changed (deps)**: the `[patch.crates-io]` pin moves the turbo-dom crates to
+  turbo-dom#298 (the 0.7.1 branch, rev `13b8095f`: turbo-dom#281-#288).
+
 - **Fixed (Observable, #116)**: `HTMLElement#click()` runs as its own binding frame, so a
   failure inside a `when("click")` listener reads `Failed to execute 'click' on
-  'HTMLElement'` as in Chrome; the `web_apis` known gap is gone. The srcdoc
-  `document.domain` sharing pin in `document_hooks` stays: it needs a host hook in
-  turbo-dom-browser-env.
+  'HTMLElement'` as in Chrome; the `web_apis` known gap is gone.
+- **Fixed (document.domain, #116)**: srcdoc and initial about:blank children share their
+  creator's origin through turbo-dom-browser-env's `share_document_domain` (turbo-dom#284),
+  so a `document.domain` assignment in one relaxes all of them like Chrome 156; the
+  `document_hooks` known gaps are gone. `set_document_origin_keyed` is only called for a
+  secure context's response document.
+- **Fixed (viewport events)**: a frame whose iframe resizes gets a window `resize` event in
+  the next rendering update, then each `matchMedia` list with a listener whose `matches`
+  flipped fires `change` (listeners and `onchange` in registration order), like Chrome 156
+  (`frame-media-change-probe.js`). Each document's rendering update also updates its loaded
+  frames. The binding's JS cascade evaluates `@media` through turbo-surf's `matchMedia`, so
+  `getComputedStyle` follows the top and frame viewports.
+- **Fixed (screenshots, #132, #131)**: turbo-dom#282's quirks-mode `<form>` block-end margin
+  and turbo-dom#283's author borders on buttons reach the static screenshot. A border without a
+  colour (`currentcolor`) still paints nothing in the static raster (turbo-dom#303), pinned in
+  `screenshot_author_borders`.
 - **Fixed (fetch, #109)**: `Request`/`Response#formData()` parses `multipart/form-data`
   (Blink's delimiter, header, `Content-Disposition` and UTF-8 rules; `File` entries keep the
   part's raw `Content-Type`, default `text/plain`) and picks the parser by MIME essence like
@@ -38,6 +54,33 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   (turbo-dom metrics, pinned in `tests/font_face.rs`); a same-named installed font still
   wins over a web face, and static screenshots do not paint web fonts (both need turbo-dom
   API); `local()` sources and `unicode-range` subsetting are not applied.
+- **Added (IndexedDB, #107)**: a real in-memory IndexedDB per storage partition, keyed like
+  DOM storage and shared by every realm in the partition. It replaces the shape stub, whose
+  open requests stayed pending forever. It covers open/upgradeneeded/versionchange/blocked,
+  deleteDatabase and databases(), object stores (keyPath, autoIncrement, key generator),
+  indexes (unique, multiEntry, compound), cursors (all directions, continue(key), advance,
+  continuePrimaryKey, update/delete), IDBKeyRange, getAllRecords, and structured-clone values.
+  Requests run one per task, with a microtask checkpoint after every dispatch. Transactions
+  auto-commit, `commit()` ends one early, and abort rolls back and reports Chrome's error
+  names and messages. `StorageAccessHandle#indexedDB` now returns an unpartitioned factory
+  instead of throwing `NotSupportedError`. A throwing `on*` event handler is now reported to the
+  window `error` event, as in Chrome. New control
+  `harness/detection/fixtures/indexeddb-chrome156.json`. Residuals are tracked in #148: the
+  capture phase on IDB targets, per-listener microtasks, throwing `addEventListener` listeners
+  (turbo-dom#301), and a cross-site partition control.
+- **Fixed (fetch, #137)**: reading a used, disturbed or locked body rejects with Chrome's
+  messages (`Failed to execute '<method>' on 'Response': body stream already read` /
+  `body stream is locked`, and the `Request` forms); `clone()` and `new Request(request)`
+  throw Chrome's used-body messages. A `Range` request sends `Accept-Encoding: identity`
+  (`identity, dcb, dcz` with a selected compression dictionary). New controls
+  `fetch-body-used-chrome156.json` and `compression-dictionary-chrome156.json` (replaces the
+  Chrome 155 one). Dictionary publication scheduling stays a pinned known gap: Chrome
+  publishes after `text()` resolves, Core at EOF.
+- **Fixed (abort, #136)**: a host-run `AbortSignal.timeout()` dispatches each signal (the
+  source, then each dependent) from the host with a microtask checkpoint after it, so a
+  timed listener's microtask runs before a dependent's listener as in Chrome. Still pinned:
+  the checkpoint between two listeners of one signal (needs a turbo-dom EventTarget hook) and
+  the pipeTo abort reaction order (a turbo-surf-deno-web `06_streams.js` promise hop).
 - **Tests**: `harness/detection/web-apis-chrome-control.mjs` takes `--probes` to record other
   single-page controls.
 

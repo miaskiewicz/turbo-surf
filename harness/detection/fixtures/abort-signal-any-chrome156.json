@@ -1,9 +1,9 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "recordedAt": "2026-11-04T11:05:15.631Z",
+  "recordedAt": "2026-11-04T12:25:23.172Z",
   "fixtures": {
-    "abort-signal-any-probe.js": "444872ccbc098d31a9f7a622604fa35f6bfeb760f73f505fa36c90794339c4b4"
+    "abort-signal-any-probe.js": "2a92adc2509eefe7d265c22a12a516f6c12f0d0672d787f27ec92bbd1d2c2209"
   },
   "effectiveExtensionFlags": [
     "--disable-extensions",
@@ -99,7 +99,22 @@
         ["microtask"],
         ["combined", true],
         ["reason", "[object DOMException]", "TimeoutError", "signal timed out", 23]
-      ]
+      ],
+      "timeoutListeners": [
+        ["timed", 0],
+        ["timed", 0, "microtask"],
+        ["timed", 1],
+        ["timed", 1, "microtask"],
+        ["first", 0],
+        ["first", 0, "microtask"],
+        ["first", 1],
+        ["first", 1, "microtask"],
+        ["second", 0],
+        ["second", 0, "microtask"],
+        ["second", 1],
+        ["second", 1, "microtask"]
+      ],
+      "timeoutNestedAbort": ["inner", "after-inner", "inner-microtask"]
     }
   }
 }

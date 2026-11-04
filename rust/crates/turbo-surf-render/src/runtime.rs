@@ -8626,11 +8626,13 @@ const __resourceFailure=error=>__fetchFailures.get(error);
     value.stream=__web.readable(value.raw)?value.raw:new __FetchReadable({async start(controller){try{controller.enqueue(await rawBytes(value.raw));controller.close();}catch(error){controller.error(error);}}});
     return value.stream;
   };
-  const consume = async value => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.raw==null&&!value.stream)return new Uint8Array();value.used=true;return value.stream?rawBytes(value.stream):rawBytes(value.raw);};
-  const copyBody = value => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.stream || __web.readable(value.raw)){const streams=applyBody(__ReadableTee,body(value),[]);value.stream=streams[0];value.raw=streams[0];return streams[1];}return value.raw;};
+  // Chrome's Body consumption rejections: a locked stream first, then a used one.
+  const usedBody = (value,method,kind) => {if(value.stream?.locked)return new TypeError(`Failed to execute '${method}' on '${kind}': body stream is locked`);if(value.used || value.stream && __web.disturbed(value.stream))return new TypeError(`Failed to execute '${method}' on '${kind}': body stream already read`);return null;};
+  const consume = async (value,method,kind) => {const error=usedBody(value,method,kind);if(error)throw error;if(value.raw==null&&!value.stream)return new Uint8Array();value.used=true;return value.stream?rawBytes(value.stream):rawBytes(value.raw);};
+  const copyBody = (value,kind) => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError(`Failed to execute 'clone' on '${kind}': ${kind} body is already used`);if(value.stream || __web.readable(value.raw)){const streams=applyBody(__ReadableTee,body(value),[]);value.stream=streams[0];value.raw=streams[0];return streams[1];}return value.raw;};
   const transferBody = value => {
     if(value.raw==null)return null;
-    if(value.used||value.stream&&(__web.disturbed(value.stream)||applyBody(__ReadableLocked,value.stream,[])))throw new TypeError("Body has already been consumed");
+    if(value.used||value.stream&&(__web.disturbed(value.stream)||applyBody(__ReadableLocked,value.stream,[])))throw new TypeError("Failed to construct 'Request': Cannot construct a Request with a Request object that has already been used.");
     const transferred=applyBody(__ReadablePipeThrough,body(value),[new __BodyTransform()]);
     value.used=true;
     return transferred;
@@ -8638,22 +8640,22 @@ const __resourceFailure=error=>__fetchFailures.get(error);
   const addContentType = (headers, extracted) => {
     if(!headers.has("content-type")&&extracted.type)headers.set("content-type",extracted.type);
   };
-  const bodyMethods = map => ({
-    async arrayBuffer(){const bytes=await consume(state(map,this).body);return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);},
-    async bytes(){return consume(state(map,this).body);},
-    async text(){return __utf8Decode(await consume(state(map,this).body));},
-    async json(){return JSON.parse(__utf8Decode(await consume(state(map,this).body)));},
-    async blob(){const value=state(map,this);return new Blob([await consume(value.body)],{type:value.headers.get("content-type") || ""});},
-    textStream(){const value=state(map,this).body;if(value.used||value.stream&&__web.disturbed(value.stream)||value.stream?.locked)throw new TypeError("Body has already been consumed");const stream=body(value);value.used=true;const decoder=new TextDecoder(),reader=stream?.getReader();let released=false;const release=()=>{if(reader&&!released){released=true;reader.releaseLock();}};return new __FetchReadable({async pull(controller){try{if(reader){while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text){controller.enqueue(text);return;}}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();release();}catch(error){controller.error(error);release();}},async cancel(reason){try{if(reader)await reader.cancel(reason);}finally{release();}}},{highWaterMark:0});},
+  const bodyMethods = (map,kind) => ({
+    async arrayBuffer(){const bytes=await consume(state(map,this).body,"arrayBuffer",kind);return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);},
+    async bytes(){return consume(state(map,this).body,"bytes",kind);},
+    async text(){return __utf8Decode(await consume(state(map,this).body,"text",kind));},
+    async json(){return JSON.parse(__utf8Decode(await consume(state(map,this).body,"json",kind)));},
+    async blob(){const value=state(map,this);return new Blob([await consume(value.body,"blob",kind)],{type:value.headers.get("content-type") || ""});},
+    textStream(){const value=state(map,this).body,error=usedBody(value,"textStream",kind);if(error)throw error;const stream=body(value);value.used=true;const decoder=new TextDecoder(),reader=stream?.getReader();let released=false;const release=()=>{if(reader&&!released){released=true;reader.releaseLock();}};return new __FetchReadable({async pull(controller){try{if(reader){while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text){controller.enqueue(text);return;}}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();release();}catch(error){controller.error(error);release();}},async cancel(reason){try{if(reader)await reader.cancel(reason);}finally{release();}}},{highWaterMark:0});},
     async formData(){
       const value=state(map,this),body=value.body;
-      if(body.used||body.stream&&__web.disturbed(body.stream)||body.stream?.locked)throw new TypeError("Body has already been consumed");
+      const error=usedBody(body,"formData",kind);if(error)throw error;
       const type=value.headers.get("content-type")||"",essence=__formBody.essence(type),empty=body.raw==null&&!body.stream;
       const done=rows=>__aliasFormData(__makeFormDataRecord(rows));
-      if(essence==="application/x-www-form-urlencoded")return done(empty?[]:__formBody.urlencoded(await consume(body)));
+      if(essence==="application/x-www-form-urlencoded")return done(empty?[]:__formBody.urlencoded(await consume(body,"formData",kind)));
       const boundary=essence==="multipart/form-data"?__formBody.boundaryOf(type):null;
       if(empty||boundary==="")throw new TypeError("Invalid MIME type");
-      const bytes=await consume(body),rows=boundary===null?null:__formBody.multipart(bytes,boundary);
+      const bytes=await consume(body,"formData",kind),rows=boundary===null?null:__formBody.multipart(bytes,boundary);
       if(!rows)throw new TypeError("Failed to fetch");
       return done(rows);
     }
@@ -8663,14 +8665,14 @@ const __resourceFailure=error=>__fetchFailures.get(error);
     // Getter functions are extracted from descriptors, preserving nonconstructibility.
     Object.defineProperty(ctor.prototype,"body",{get:Object.getOwnPropertyDescriptor({get body(){return body(state(map,this).body);}},"body").get,enumerable:true,configurable:true});
     Object.defineProperty(ctor.prototype,"bodyUsed",{get:Object.getOwnPropertyDescriptor({get bodyUsed(){const value=state(map,this).body;return value.used||!!(value.stream&&__web.disturbed(value.stream));}},"bodyUsed").get,enumerable:true,configurable:true});
-    for(const [name,method] of Object.entries(bodyMethods(map)))Object.defineProperty(ctor.prototype,name,{value:method,writable:true,enumerable:true,configurable:true});
+    for(const [name,method] of Object.entries(bodyMethods(map,ctor.name)))Object.defineProperty(ctor.prototype,name,{value:method,writable:true,enumerable:true,configurable:true});
   };
   globalThis.Response = class Response {
     constructor(raw=null, init=undefined){init=init||{};const status=init.status==null?200:Number(init.status);if(!Number.isInteger(status)||status<200||status>599)throw new RangeError("Invalid response status");if(raw!=null&&[204,205,304].includes(status))throw new TypeError("Null body status cannot have a body");const headers=new Headers(init.headers),statusText=String(init.statusText||"");if(/[\r\n]/.test(statusText))throw new TypeError("Invalid status text");const extracted=extractBody(raw);addContentType(headers,extracted);responses.set(this,{body:bodyState(extracted.raw,extracted.sourceStream),status,statusText,headers,ok:status>=200&&status<300,type:"default",url:"",redirected:false});}
     static json(data,init=undefined){const text=JSON.stringify(data);if(text===undefined)throw new TypeError("JSON data is not serializable");const headers=new Headers(init?.headers);if(!headers.has("content-type"))headers.set("content-type","application/json");return new Response(text,{...init,headers});}
     static error(){const response=new Response();Object.assign(state(responses,response),{status:0,statusText:"",ok:false,type:"error"});return response;}
     static redirect(url,status=302){const absolute=new URL(String(url),location.href);if(![301,302,303,307,308].includes(Number(status)))throw new RangeError("Invalid redirect status");return new Response(null,{status:Number(status),headers:{location:absolute.href}});}
-    clone(){const value=state(responses,this),copied=copyBody(value.body);const clone=new Response([204,205,304].includes(value.status)?null:copied,{status:value.status||200,statusText:value.statusText,headers:value.headers});if([204,205,304].includes(value.status))state(responses,clone).body=bodyState(copied);Object.assign(state(responses,clone),{status:value.status,ok:value.ok,type:value.type,url:value.url,redirected:value.redirected});if(value.type!=="default")__setHeadersGuard(clone.headers,"immutable");return clone;}
+    clone(){const value=state(responses,this),copied=copyBody(value.body,"Response");const clone=new Response([204,205,304].includes(value.status)?null:copied,{status:value.status||200,statusText:value.statusText,headers:value.headers});if([204,205,304].includes(value.status))state(responses,clone).body=bodyState(copied);Object.assign(state(responses,clone),{status:value.status,ok:value.ok,type:value.type,url:value.url,redirected:value.redirected});if(value.type!=="default")__setHeadersGuard(clone.headers,"immutable");return clone;}
   };
   project(Response,responses,["status","statusText","headers","ok","type","url","redirected"]);
   globalThis.Request = class Request {
@@ -8687,7 +8689,7 @@ const __resourceFailure=error=>__fetchFailures.get(error);
       if(extracted.sourceStream&&(keepalive||mode==="no-cors"))throw new TypeError("Invalid stream request options");
       const raw=supplied?extracted.raw:previous?transferBody(previous.body):null;
       requests.set(this,{url:absolute.href,method,headers,body:bodyState(raw,extracted.sourceStream),mode,credentials,cache,redirect,referrer,referrerPolicy,integrity:__String(integrity!==undefined?integrity:previous?.integrity??""),keepalive,signal,destination:"",duplex:"half",targetAddressSpace:init.targetAddressSpace??previous?.targetAddressSpace??"unknown",isHistoryNavigation:false,isReloadNavigation:false});}
-    clone(){const value=state(requests,this),clone=new Request(value.url,{...value,body:copyBody(value.body)});state(requests,clone).body.sourceStream=value.body.sourceStream;return clone;}
+    clone(){const value=state(requests,this),clone=new Request(value.url,{...value,body:copyBody(value.body,"Request")});state(requests,clone).body.sourceStream=value.body.sourceStream;return clone;}
   };
   project(Request,requests,["url","method","headers","mode","credentials","cache","redirect","referrer","referrerPolicy","integrity","keepalive","signal","destination","duplex","targetAddressSpace","isHistoryNavigation","isReloadNavigation"]);
   const __NetworkResponse=Response,__NetworkHeaders=Headers;

@@ -132,6 +132,24 @@
     return submitted(element, { action: "/echo/allowed", method: "post" }, [["s", "2"]]);
   })();
   // The child document's own form-action policy governs its submissions.
+  // A sandboxed frame (even with allow-forms) cannot navigate its parent.
+  out.sandboxParent = await (async () => {
+    const outer = await frame(document, "/outer");
+    const nested = await frame(outer.contentDocument, "/nested", {
+      sandbox: "allow-same-origin allow-forms",
+    });
+    let navigations = 0;
+    outer.addEventListener("load", () => navigations++);
+    form(nested.contentDocument, { action: "/echo/escape", method: "post", target: "_parent" }, [
+      ["e", "1"],
+    ]).submit();
+    await sleep(300);
+    return [
+      navigations,
+      outer.contentWindow.location.pathname,
+      nested.contentWindow.location.pathname,
+    ];
+  })();
   out.formAction = await (async () => {
     const element = await frame(document, "/csp-child");
     const violations = [];

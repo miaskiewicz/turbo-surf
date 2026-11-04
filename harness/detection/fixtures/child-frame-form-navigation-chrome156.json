@@ -1,9 +1,9 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "recordedAt": "2026-11-04T11:43:33.225Z",
+  "recordedAt": "2026-11-04T11:58:37.665Z",
   "fixtures": {
-    "child-frame-form-navigation-probe.js": "9bfe5f6e20e21d6fb80e1c957dbfce6591d4b356eb1665a90bbe310ef2fdc630"
+    "child-frame-form-navigation-probe.js": "8a1c5049e6b7ae991c7a055f45f5f4cccb2e5aee0a36575165047242fc1d09be"
   },
   "effectiveExtensionFlags": [
     "--disable-extensions",
@@ -193,6 +193,7 @@
         },
         "body": "s=2"
       },
+      "sandboxParent": [0, "/outer", "/nested"],
       "formAction": [0, "/csp-child", [["form-action", "<origin>/echo/csp"]]]
     }
   }

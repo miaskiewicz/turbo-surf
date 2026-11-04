@@ -77,6 +77,7 @@ pub(crate) fn op_web_abort_dispatch(
     scope: &mut v8::PinScope,
     id: u32,
     reason: v8::Local<v8::Value>,
+    host: bool,
 ) {
     let Some(bridges) = scope.get_slot::<Rc<RefCell<Bridges>>>().cloned() else {
         return;
@@ -99,6 +100,11 @@ pub(crate) fn op_web_abort_dispatch(
     };
     let scope = &mut v8::ContextScope::new(scope, context);
     callback.call(scope, object.into(), &[reason]);
+    // A host-run abort ends each signal's dispatch with the microtask
+    // checkpoint Blink performs when its native caller's script stack empties.
+    if host {
+        scope.perform_microtask_checkpoint();
+    }
 }
 
 #[op2(fast)]

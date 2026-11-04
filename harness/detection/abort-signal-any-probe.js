@@ -170,5 +170,20 @@
         });
     setTimeout(() => resolve(log), 50);
   });
+  // A page abort() inside a host-run listener stays synchronous: no checkpoint.
+  out.timeoutNestedAbort = await new Promise((resolve) => {
+    const log = [];
+    const timed = AbortSignal.timeout(0);
+    timed.addEventListener("abort", () => {
+      const inner = new AbortController();
+      inner.signal.addEventListener("abort", () => {
+        log.push("inner");
+        queueMicrotask(() => log.push("inner-microtask"));
+      });
+      inner.abort();
+      log.push("after-inner");
+    });
+    setTimeout(() => resolve(log), 50);
+  });
   return JSON.stringify(out);
 })();

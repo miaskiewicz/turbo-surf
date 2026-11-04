@@ -10,7 +10,21 @@ const CONTROL: &str =
     include_str!("../../../../harness/detection/fixtures/abort-signal-any-chrome156.json");
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`.
-const KNOWN_GAPS: &[&str] = &[];
+///
+/// A timed-out abort now dispatches each signal (the source, then each
+/// dependent) from the host with a microtask checkpoint after it (#136). Blink
+/// also checkpoints between two listeners of the same signal; those listeners
+/// run inside turbo-dom's private EventTarget dispatcher, which has no
+/// per-listener host checkpoint yet, so a signal's second listener still runs
+/// before its first listener's microtask.
+const KNOWN_GAPS: &[&str] = &[
+    "/timeoutListeners/1 = [\"timed\",1]",
+    "/timeoutListeners/2 = [\"timed\",0,\"microtask\"]",
+    "/timeoutListeners/5 = [\"first\",1]",
+    "/timeoutListeners/6 = [\"first\",0,\"microtask\"]",
+    "/timeoutListeners/9 = [\"second\",1]",
+    "/timeoutListeners/10 = [\"second\",0,\"microtask\"]",
+];
 
 fn control() -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();

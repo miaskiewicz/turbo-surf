@@ -1,9 +1,9 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "recordedAt": "2026-11-04T12:23:09.144Z",
+  "recordedAt": "2026-11-04T12:25:23.172Z",
   "fixtures": {
-    "abort-signal-any-probe.js": "6b8bb4f5180662a1ef08f9037bfebe18f46f838b17500bd7aba8361439788076"
+    "abort-signal-any-probe.js": "2a92adc2509eefe7d265c22a12a516f6c12f0d0672d787f27ec92bbd1d2c2209"
   },
   "effectiveExtensionFlags": [
     "--disable-extensions",
@@ -113,7 +113,8 @@
         ["second", 0, "microtask"],
         ["second", 1],
         ["second", 1, "microtask"]
-      ]
+      ],
+      "timeoutNestedAbort": ["inner", "after-inner", "inner-microtask"]
     }
   }
 }

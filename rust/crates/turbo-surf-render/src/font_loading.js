@@ -493,6 +493,8 @@
     configurable: true,
     enumerable: true,
     get() {
+      // Brand check like the binding's own Document accessors (TypeError off a Document).
+      __intrinsicApply(__fontRoot, this, []);
       return this === __fontDocument ? fonts : undefined;
     },
   });

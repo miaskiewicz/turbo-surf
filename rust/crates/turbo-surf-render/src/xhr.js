@@ -467,6 +467,7 @@
       headers,
       credentials: record.credentials ? "include" : "same-origin",
       signal: record.controller.signal,
+      initiator: "xmlhttprequest",
     };
     if (body !== null && body !== undefined) init.body = body;
     __fetchFromSource(record.url, init, record.source())

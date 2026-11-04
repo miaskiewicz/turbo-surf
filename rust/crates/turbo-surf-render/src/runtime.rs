@@ -80,6 +80,8 @@ use turbo_surf_core::url::resolve;
 mod runtime_activation;
 use runtime_activation::ActivationKey;
 
+#[path = "blob_urls.rs"]
+mod blob_urls;
 #[path = "form_navigation.rs"]
 mod form_navigation;
 #[path = "privacy_sandbox.rs"]
@@ -2598,9 +2600,26 @@ async fn op_fetch(
             ..Default::default()
         };
     }
-    if target.starts_with("data:")
-        && init.get("destination").and_then(|value| value.as_str()) == Some("iframe")
-    {
+    let iframe = init.get("destination").and_then(|value| value.as_str()) == Some("iframe");
+    if target.starts_with("blob:") && !iframe {
+        let key = init
+            .get("blob_key")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let xhr = init.get("initiator").and_then(|value| value.as_str()) == Some("xmlhttprequest");
+        return blob_urls::fetch_blob(
+            &state.borrow(),
+            &target,
+            method.as_deref(),
+            &headers,
+            key,
+            xhr,
+        );
+    }
+    if target.starts_with("data:") && !iframe {
+        return blob_urls::fetch_data(&target);
+    }
+    if target.starts_with("data:") && iframe {
         let decoded = decode_data_document(&target);
         let ok = decoded.is_some();
         let (body, content_type) = decoded.unwrap_or_default();
@@ -7251,6 +7270,10 @@ deno_core::extension!(
         fetch_streams::op_fetch_release,
         fetch_streams::op_fetch_read,
         op_fetch,
+        blob_urls::op_blob_url_create,
+        blob_urls::op_blob_url_revoke,
+        blob_urls::op_blob_url_key,
+        blob_urls::op_blob_url_read,
         op_load_image,
         op_decode_data_image,
         op_dictionary_active,
@@ -8783,7 +8806,8 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body, body_bytes:bodyBytes, upload:!!uploadPump, cancel_id:cancelId, stream:!o.destination, cache:o.cache,
     referrer:o.referrer,referrerPolicy:o.referrerPolicy,
     mode: o.mode, credentials: o.credentials, redirect:o.redirect, integrity:o.integrity, destination: o.destination, source, referrer_source:referrerSource,
-    opaque_origin: ops.op_window_opaque(__document), ...cookieSite, csp:ops.op_csp_context(__document), nonce:o.nonce });
+    opaque_origin: ops.op_window_opaque(__document), ...cookieSite, initiator:o.initiator,
+    blob_key: __String(requestTarget).startsWith("blob:") ? ops.op_blob_url_key(__document) : undefined, csp:ops.op_csp_context(__document), nonce:o.nonce });
   // Count in-flight fetches so the hydration/interaction drain doesn't quiesce while a
   // request is outstanding — otherwise a save POST resolves AFTER the drain gives up
   // (the DOM looks "stable" while waiting) and its success re-render (modal close,
@@ -10021,8 +10045,6 @@ if (typeof globalThis.URL === "undefined") {
     Object.defineProperty(URL.prototype, key, descriptor);
   }
   Object.defineProperty(URL.prototype, Symbol.toStringTag, {value: "URL", configurable: true});
-  globalThis.URL.createObjectURL = () => "blob:turbo-surf";
-  globalThis.URL.revokeObjectURL = () => {};
 }
 __BodyParamsString=URLSearchParams.prototype.toString;
 "##,
@@ -10038,19 +10060,23 @@ __BodyParamsString=URLSearchParams.prototype.toString;
 // can resolve `page.waitForEvent('download')` + `download.path()`. Runs after browser_env
 // installed the anchor prototype (ENV_BOOTSTRAP runs last).
 (() => {
-  const blobs = new Map();
   const decodeBlobBytes = TextDecoder.prototype.decode.bind(new TextDecoder());
-  let bid = 0;
-  globalThis.URL.createObjectURL = (obj) => {
-    const url = "blob:turbo-surf/" + bid++;
-    try { blobs.set(url, obj); } catch (_e) {}
-    return url;
-  };
-  globalThis.URL.revokeObjectURL = () => {}; // keep the blob for a later .path() read
+  // The native store keys each URL by the creating document's storage key
+  // (blob_urls.rs); revocation and reads stay within that key.
+  const overload = "Failed to execute 'createObjectURL' on 'URL': Overload resolution failed.";
+  const blobType = Object.getOwnPropertyDescriptor(Blob.prototype, "type").get;
+  globalThis.URL.createObjectURL = __documentFunction(function createObjectURL(obj) {
+    let bytes;
+    try { bytes = __readBlobBytes(obj); } catch { throw new __exceptionTypeError(overload); }
+    return ops.op_blob_url_create(__document, bytes, __baseApply(blobType, obj, []));
+  }, "createObjectURL", 1);
+  globalThis.URL.revokeObjectURL = __documentFunction(function revokeObjectURL(url) {
+    if (!arguments.length) throw new __exceptionTypeError("Failed to execute 'revokeObjectURL' on 'URL': 1 argument required, but only 0 present.");
+    ops.op_blob_url_revoke(__document, __String(url));
+  }, "revokeObjectURL", 1);
   __G.readBlobUrl = (url) => {
-    const b = blobs.get(url);
-    if (b == null) return null;
-    return __readBlobBytes ? decodeBlobBytes(__readBlobBytes(b)) : "";
+    const bytes = ops.op_blob_url_read(__document, url);
+    return bytes == null ? null : decodeBlobBytes(bytes);
   };
   __G.downloads = __G.downloads || [];
   const record = (el) => {
@@ -13250,6 +13276,7 @@ fn make_runtime_with_storage_and_options(
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put(NetworkLog::default());
+    state.put(blob_urls::Store::default());
     state.put(form_submission::Queue::default());
     state.put(storage);
     state.put(ResponseHeaders::default());

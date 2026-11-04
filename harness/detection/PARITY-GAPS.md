@@ -501,7 +501,8 @@ and [unadapted Deno baseline](./fixtures/abort-bridge-deno-baseline.json) retain
 exact open difference: Chrome runs stream sink-abort/cancel reactions before the
 microtask queued by the signal listener; the native Deno backend runs that listener
 microtask first. The same difference existed before the private event-array fix
-and remains tracked in issue28. Event state, dependent reason identity and timeout
+and is tracked in turbo-surf#136 (with the timeout-dependent listener order pinned in
+`tests/abort_signal_any.rs`). Event state, dependent reason identity and timeout
 results are checked against Chrome separately; a passing state control does not
 close this queue-order gap.
 

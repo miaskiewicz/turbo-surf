@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.7.1] — unreleased
+
+Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).
+
+- **Fixed (Observable, #116)**: `HTMLElement#click()` runs as its own binding frame, so a
+  failure inside a `when("click")` listener reads `Failed to execute 'click' on
+  'HTMLElement'` as in Chrome; the `web_apis` known gap is gone. The srcdoc
+  `document.domain` sharing pin in `document_hooks` stays: it needs a host hook in
+  turbo-dom-browser-env.
+- **Fixed (fetch, #109)**: `Request`/`Response#formData()` parses `multipart/form-data`
+  (Blink's delimiter, header, `Content-Disposition` and UTF-8 rules; `File` entries keep the
+  part's raw `Content-Type`, default `text/plain`) and picks the parser by MIME essence like
+  Chrome: `Invalid MIME type` (body unread) for a multipart type without a valid boundary or
+  a null body, `Failed to fetch` for anything that does not parse. Parsing, `Blob#text` and
+  `Body#text`/`json` decode with bootstrap-captured primitives, so page-patched
+  `TextDecoder`/`FormData` never see the bytes. New control
+  `harness/detection/fixtures/fetch-form-data-chrome156.json`.
+- **Fixed (abort, #109)**: `AbortSignal.any()` reads a JS array by index like Blink (no
+  iterator call, own or inherited) and throws Chrome's sequence and brand messages;
+  `AbortSignal.timeout()` converts its argument as `[EnforceRange] unsigned long long` with
+  Chrome's messages and aborts with `TimeoutError: signal timed out`. New control
+  `harness/detection/fixtures/abort-signal-any-chrome156.json`. The per-listener microtask
+  checkpoint (timeout dependents, abort-bridge reactions) is pinned and tracked in #136; the
+  unpinned compression-dictionary/Range items and consumed-body messages move to #137.
+- **Tests**: `harness/detection/web-apis-chrome-control.mjs` takes `--probes` to record other
+  single-page controls.
+
 ## [0.7.0] — turbo-dom 0.7.0
 
 turbo-surf moves to turbo-dom 0.7.0 (`turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster`,

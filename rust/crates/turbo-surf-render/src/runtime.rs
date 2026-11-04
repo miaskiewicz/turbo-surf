@@ -3512,6 +3512,9 @@ struct WindowTimerNesting {
     level: std::cell::Cell<u32>,
     /// Whether a timer task (with its microtask checkpoint) is running in this realm.
     task: std::cell::Cell<bool>,
+    /// The task base this realm published for its running timer task; cleared when
+    /// the outermost task ends, so a later task never reads a stale one (#128).
+    published: std::cell::Cell<Option<f64>>,
 }
 
 fn window_timer_nesting(context: v8::Local<v8::Context>) -> Rc<WindowTimerNesting> {
@@ -3536,6 +3539,35 @@ fn op_timer_task_active(scope: &mut v8::PinScope, document: v8::Local<v8::Object
         .is_some_and(|context| window_timer_nesting(context).task.get())
 }
 
+/// Publish `document`'s realm's timer-task base (NaN for a rendering task) agent-wide.
+#[op2(fast)]
+fn op_timer_publish_task_base(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    base: f64,
+) {
+    let Some(context) = document.get_creation_context(scope) else {
+        return;
+    };
+    let nesting = window_timer_nesting(context);
+    nesting.published.set(Some(base));
+    let state = JsRuntime::op_state_from(scope);
+    let state = state.borrow();
+    *state.borrow::<TimerClock>().task_base.borrow_mut() = Some(PublishedTaskBase { nesting });
+}
+
+/// The agent's running timer-task base, or NaN outside a (non-rendering) timer task.
+/// The publisher's task must still be running (its base is cleared when it ends).
+#[op2(fast)]
+fn op_timer_agent_task_base(state: &mut OpState) -> f64 {
+    match &*state.borrow::<TimerClock>().task_base.borrow() {
+        Some(published) if published.nesting.task.get() => {
+            published.nesting.published.get().unwrap_or(f64::NAN)
+        }
+        _ => f64::NAN,
+    }
+}
+
 #[op2(fast)]
 fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>, level: u32) {
     if let Some(context) = document.get_creation_context(scope) {
@@ -3556,6 +3588,7 @@ impl WindowTimerTask {
         let nesting = window_timer_nesting(context);
         let previous = nesting.level.get();
         let previous_task = nesting.task.replace(true);
+
         Self {
             nesting,
             previous,
@@ -3567,6 +3600,9 @@ impl Drop for WindowTimerTask {
     fn drop(&mut self) {
         self.nesting.level.set(self.previous);
         self.nesting.task.set(self.previous_task);
+        if !self.previous_task {
+            self.nesting.published.set(None);
+        }
     }
 }
 
@@ -3585,7 +3621,18 @@ struct TimerClock {
     /// One task order across the agent's Window realms: timers and posted
     /// messages with the same deadline run in the order they were queued.
     sequence: std::cell::Cell<f64>,
+    /// The running timer task's base clock, agent-wide: a timer queued in any
+    /// same-agent realm during that task counts from it (turbo-surf#128). Valid only
+    /// while the publishing realm's task is still active.
+    task_base: std::cell::RefCell<Option<PublishedTaskBase>>,
 }
+/// The realm whose running timer task published the agent's task base. It is not
+/// limited to same-origin readers: a srcdoc frame's security token differs while it
+/// loads, and the frame-load-order Chrome 156 control needs the shared base there.
+struct PublishedTaskBase {
+    nesting: Rc<WindowTimerNesting>,
+}
+
 impl TimerClock {
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64() * 1000.0 + self.advance.get()
@@ -3604,6 +3651,7 @@ impl Default for TimerClock {
             advance: std::cell::Cell::new(0.0),
             resource_cursor: std::cell::Cell::new(0),
             sequence: std::cell::Cell::new(0.0),
+            task_base: std::cell::RefCell::new(None),
         }
     }
 }
@@ -5957,6 +6005,33 @@ fn op_parse_html_document<'s>(
     crate::browser_env::parse_html_document_units(scope, &units, sanitize)
 }
 
+/// `DOMParser` / XHR `responseXML` XML parsing (turbo-dom#186): an inert `XMLDocument`
+/// of `content_type`, Chrome's `<parsererror>` document for ill-formed input.
+#[op2(reentrant)]
+fn op_parse_xml_document<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    xml: v8::Local<v8::String>,
+    #[string] content_type: &str,
+) -> v8::Local<'s, v8::Object> {
+    let units = crate::browser_env::string_code_units(scope, xml);
+    crate::browser_env::parse_xml_document_units(scope, &units, content_type).document
+}
+
+/// XHR `responseXML` parsing: the `XMLDocument`, or `None` when the input is not
+/// well-formed (Chrome's `responseXML` is `null` then). Uses turbo-dom's
+/// `ParsedXmlDocument::well_formed`, so a literal `<parsererror>` in a well-formed
+/// response stays content.
+#[op2(reentrant)]
+fn op_parse_xml_response<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    xml: v8::Local<v8::String>,
+    #[string] content_type: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let units = crate::browser_env::string_code_units(scope, xml);
+    let parsed = crate::browser_env::parse_xml_document_units(scope, &units, content_type);
+    parsed.well_formed.then_some(parsed.document)
+}
+
 #[op2(reentrant)]
 fn op_document_create_element<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -6833,6 +6908,75 @@ fn op_capture_runtime_core(scope: &mut v8::PinScope, core: v8::Local<v8::Object>
         .core = Some(v8::Global::new(scope, core_value));
 }
 
+/// The private key holding a realm's promise-rejection dispatcher (turbo-surf#103),
+/// `{unhandled, handled}`, on that realm's own global: no host handle keeps a retired
+/// frame realm alive.
+fn rejection_realm_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    let name = v8::String::new(scope, "turbo-surf.rejectionRealm")?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+
+#[op2(fast)]
+fn op_register_rejection_realm(scope: &mut v8::PinScope, realm: v8::Local<v8::Object>) {
+    // Frame bootstraps call the main realm's op functions, so the calling context is
+    // not the registering realm: the dispatcher object's own creation context is.
+    let (Some(context), Some(key)) = (
+        realm.get_creation_context(scope),
+        rejection_realm_key(scope),
+    ) else {
+        return;
+    };
+    context.global(scope).set_private(scope, key, realm.into());
+}
+
+/// deno_core's reject callback is isolate-wide and frame contexts borrow the main
+/// realm's state, so its report reaches whichever realm installed the JS handler last.
+/// Chrome reports on the global of the realm that created the promise: route there.
+#[op2(fast, reentrant)]
+fn op_route_promise_rejection(
+    scope: &mut v8::PinScope,
+    promise: v8::Local<v8::Object>,
+    reason: v8::Local<v8::Value>,
+    handled: bool,
+) -> bool {
+    // No creation context or tracker key: not a page realm, so deno_core's default
+    // reporting applies on purpose.
+    let (Some(context), Some(key)) = (
+        promise.get_creation_context(scope),
+        rejection_realm_key(scope),
+    ) else {
+        return false;
+    };
+    // A page realm the report cannot reach (not yet tracked, or retired) is logged and
+    // handled: a routing miss must never abort the session.
+    let miss = || {
+        eprintln!("turbo-surf: unrouted promise rejection (handled = {handled})");
+        true
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let Some(realm) = context
+        .global(scope)
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    else {
+        return miss();
+    };
+    let name = if handled { "handled" } else { "unhandled" };
+    let Some(key) = v8::String::new(scope, name) else {
+        return miss();
+    };
+    let Some(method) = realm
+        .get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    else {
+        return miss();
+    };
+    method
+        .call(scope, realm.into(), &[promise.into(), reason])
+        .is_some()
+        || miss()
+}
+
 fn install_environment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Value>,
@@ -7015,12 +7159,16 @@ deno_core::extension!(
         op_timer_nesting,
         op_timer_set_nesting,
         op_timer_task_active,
+        op_timer_publish_task_base,
+        op_timer_agent_task_base,
         op_run_local_timers,
         op_run_frame_timers,
         op_frame_pending,
         op_queue_frame_script,
         op_frame_module,
         op_event_trust,
+        op_register_rejection_realm,
+        op_route_promise_rejection,
         op_set_host_input_driver,
         op_host_user_activation,
         op_host_close_request,
@@ -7076,6 +7224,8 @@ deno_core::extension!(
         op_document_has_active_window,
         op_document_cookie_allowed,
         op_parse_html_document,
+        op_parse_xml_document,
+        op_parse_xml_response,
         op_parser_scripts,
         op_trusted_type_string,
         op_timer_code_allowed,
@@ -7855,7 +8005,13 @@ const __timerNow = () => ops.op_timer_clock();
 let __taskBase = null, __taskBaseEpoch = -1;
 // Only while the host runs a timer task (and its microtask checkpoint) in this realm; a
 // rendering frame's own tasks keep the live clock.
-const __taskClock = () => __taskBase !== null && __taskBaseEpoch === __taskEpoch && !__realWindowTimers && ops.op_timer_task_active(__timerDocument) ? __taskBase : __timerNow();
+// A realm outside its own task reads the agent's running timer task (turbo-surf#128).
+const __taskClock = () => {
+  if (__realWindowTimers) return __timerNow();
+  if (__taskBase !== null && __taskBaseEpoch === __taskEpoch && ops.op_timer_task_active(__timerDocument)) return __taskBase;
+  const base = ops.op_timer_agent_task_base();
+  return base === base ? base : __timerNow();
+};
 const __realWindowTimers = ops.op_window_timers_realtime();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
@@ -8095,7 +8251,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const timer=__timers[index];
     // Every caller, including hydration and child-frame drains, obeys this policy.
     if(__realWindowTimers && timer.due>__timerNow())break;
-    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:__taskBaseFor(timer.due);__taskBaseEpoch=__taskEpoch;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;__taskBase=timer.rendering?null:__taskBaseFor(timer.due);__taskBaseEpoch=__taskEpoch;ops.op_timer_publish_task_base(__timerDocument,__taskBase===null?NaN:__taskBase);
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);
@@ -8281,8 +8437,8 @@ const __registerInertDocument = (doc,documentURL,contentType) => {
 ops.op_set_inert_document_initializer(__registerInertDocument);
 
 // DOMParser (Chrome 156): (TrustedHTML or DOMString) then the SupportedType
-// enum are converted before the Trusted Types check. Only "text/html" can be
-// parsed by the HTML Tree engine; the XML types fail explicitly.
+// enum are converted before the Trusted Types check. "text/html" parses as HTML, the
+// XML types as an XMLDocument (turbo-dom-browser-env's XML parser, turbo-dom#186).
 const __domParserInstances=new WeakSet();
 const __domParserTypes=["text/html","text/xml","application/xml","application/xhtml+xml","image/svg+xml"];
 const __domParserIsHTML=Function.prototype.call.bind(TrustedTypePolicyFactory.prototype.isHTML),__domParserFactory=globalThis.trustedTypes;
@@ -8307,7 +8463,7 @@ Object.defineProperty(__domParserPrototype,"parseFromString",{value:__documentFu
   type=__domParserString(type,prefix);
   if(!__domParserTypes.includes(type))throw new TypeError(prefix+`The provided value '${type}' is not a valid enum value of type SupportedType.`);
   input=ops.op_trusted_type_string(__document,input,"TrustedHTML","DOMParser parseFromString",prefix);
-  if(type!=="text/html")throw new DOMException("XML document parsing is unsupported by the HTML Tree engine", "NotSupportedError");
+  if(type!=="text/html")return __registerInertDocument(ops.op_parse_xml_document(input,type),__document.URL,type);
   return __registerInertDocument(ops.op_parse_html_document(input,false),__document.URL,"text/html");
 },"parseFromString",2),writable:true,enumerable:true,configurable:true});
 Object.defineProperty(__domParserPrototype,"constructor",{value:DOMParser,writable:true,enumerable:false,configurable:true});
@@ -8994,6 +9150,93 @@ for (const name of ["message", "filename", "lineno", "colno", "error"]) {
   Object.defineProperty(ErrorEvent.prototype, name, {...descriptor, enumerable:true});
 }
 Object.defineProperty(ErrorEvent.prototype, Symbol.toStringTag, {value:"ErrorEvent", configurable:true});
+// PromiseRejectionEvent and the Window promise-rejection tracker (turbo-surf#103).
+// deno_core's V8 reject callback hands over unhandled rejections after the microtask
+// checkpoint; like Chrome, each report is a task queued behind the timers already
+// due, and a handler attached after the report queues rejectionhandled.
+const __rejectionEventState = __interfaceMap("PromiseRejectionEvent");
+const __rejectionEventRecord = event => {
+  const state = __rejectionEventState.get(event);
+  if (!state) throw new TypeError("Illegal invocation");
+  return state;
+};
+globalThis.PromiseRejectionEvent = class PromiseRejectionEvent extends Event {
+  constructor(type, init) {
+    if (arguments.length < 2) throw new TypeError("Failed to construct 'PromiseRejectionEvent': 2 arguments required, but only " + arguments.length + " present.");
+    if (init === null || (typeof init !== "object" && typeof init !== "function")) throw new TypeError("Failed to construct 'PromiseRejectionEvent': The provided value is not of type 'PromiseRejectionEventInit'.");
+    const promise = init.promise;
+    if (promise === undefined) throw new TypeError("Failed to construct 'PromiseRejectionEvent': Failed to read the 'promise' property from 'PromiseRejectionEventInit': Required member is undefined.");
+    super(type, init);
+    __rejectionEventState.set(this, {promise, reason: init.reason});
+  }
+  get promise() {return __rejectionEventRecord(this).promise;}
+  get reason() {return __rejectionEventRecord(this).reason;}
+};
+for (const name of ["promise", "reason"]) {
+  const descriptor = Object.getOwnPropertyDescriptor(PromiseRejectionEvent.prototype, name);
+  Object.defineProperty(PromiseRejectionEvent.prototype, name, {...descriptor, enumerable:true});
+}
+Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {value:"PromiseRejectionEvent", configurable:true});
+{
+  const hostRejectionEvent = PromiseRejectionEvent;
+  const hostConsole = globalThis.console;
+  const consoleError = hostConsole && hostConsole.error;
+  // Reported, not-canceled rejections that may still be handled (Chrome's outstanding set).
+  const outstanding = new WeakSet();
+  // Drained by deno_core but not yet dispatched: a handler attached meanwhile cancels it.
+  const queued = new WeakSet();
+  const handledBeforeReport = new WeakSet();
+  const fire = (type, promise, reason, cancelable) => {
+    // A null-prototype init: page getters on Object.prototype never run here.
+    const event = new hostRejectionEvent(type, {__proto__: null, promise, reason, cancelable, bubbles: false, composed: false});
+    ops.op_event_trust(event, -1);
+    ops.op_dispatch_host_event(event, globalThis);
+    return event;
+  };
+  const task = fn => __queueTimerTask(fn, __timerDue(0, 0, false), ops.op_task_sequence());
+  const realm = {
+    __proto__: null,
+    unhandled(promise, reason) {
+      queued.add(promise);
+      task(() => {
+        queued.delete(promise);
+        if (handledBeforeReport.has(promise)) {
+          handledBeforeReport.delete(promise);
+          return;
+        }
+        const event = fire("unhandledrejection", promise, reason, true);
+        // HTML: the promise joins the outstanding set either way (a later handler
+        // still queues rejectionhandled, as in Chrome 156); preventDefault() only
+        // suppresses the console report.
+        outstanding.add(promise);
+        if (event.defaultPrevented) return;
+        if (typeof consoleError === "function") {
+          try { Reflect.apply(consoleError, hostConsole, ["Uncaught (in promise)", reason]); } catch (_error) {}
+        }
+      });
+    },
+    handled(promise, reason) {
+      if (queued.has(promise)) {
+        handledBeforeReport.add(promise);
+        return;
+      }
+      if (!outstanding.has(promise)) return;
+      outstanding.delete(promise);
+      task(() => fire("rejectionhandled", promise, reason, false));
+    },
+  };
+  // deno_core's tracker is isolate-wide and frame contexts share this private core;
+  // the host routes each report to the realm that created the promise.
+  // Only the main realm installs the shared handlers: a frame-realm closure held by
+  // the core would keep a retired frame alive.
+  ops.op_register_rejection_realm(realm);
+  if (!__G.isFrame) {
+    // Routed reports are handled here (the event, never a fatal event-loop error);
+    // one no realm takes keeps deno_core's default reporting.
+    __core.setUnhandledPromiseRejectionHandler((promise, reason) => ops.op_route_promise_rejection(promise, reason, false));
+    __core.setHandledPromiseRejectionHandler((promise, reason) => ops.op_route_promise_rejection(promise, reason, true));
+  }
+}
 "##,
     include_str!("message_ports.js"),
     r##"
@@ -12912,6 +13155,11 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
             crate::browser_env::install_with_html_source_positions(&mut scope, html);
         } else {
             crate::browser_env::install_html(&mut scope, html);
+        }
+        // Canvas `measureText` resolves `ctx.font` against the faces live layout uses
+        // (turbo-dom#237); a page opened before font discovery keeps the bundled faces.
+        if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {
+            crate::browser_env::set_canvas_fonts(context, fonts.clone());
         }
         install_css_authorization(&mut scope).map_err(|error| error.to_string())?;
         // Before the environment bootstrap, which already creates the parsed iframes.

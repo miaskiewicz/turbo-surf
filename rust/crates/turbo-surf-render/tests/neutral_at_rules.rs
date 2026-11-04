@@ -64,6 +64,9 @@ async fn live_layout_neutral_admission_matches_real_chrome_and_rejects_used_depe
         if matches!(
             name,
             "absent-named-container"
+                // Size container queries evaluate in live layout (#105).
+                | "eligible-container"
+                | "inline-container-shorthand"
                 | "paint-registration"
                 | "transitive-paint-registration"
                 | "view-transition-auto"
@@ -75,9 +78,7 @@ async fn live_layout_neutral_admission_matches_real_chrome_and_rejects_used_depe
                 .as_str()
                 .unwrap_or_else(|| panic!("unsupported dependency accepted: {name}: {row}"));
             assert!(
-                message.contains("container query inactive")
-                    || message.contains("geometry dependency")
-                    || message.contains("rule type 0"),
+                message.contains("geometry dependency") || message.contains("rule type 0"),
                 "{name}: {message}"
             );
         }
@@ -102,14 +103,7 @@ async fn geometry_admission_rechecks_inline_and_stylesheet_dependencies_after_ca
       sheet.deleteRule(sheet.cssRules.length-1);values.push(read());return values;
     })()"#).await.unwrap();
     let values: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    for i in [0, 1, 3, 5] {
-        assert_eq!(values[i], 10);
-    }
-    for i in [2, 4] {
-        assert!(values[i]
-            .as_str()
-            .unwrap()
-            .contains("container query inactive"));
-    }
+    // The query container appears and disappears with each edit (#105), as in Chrome.
+    assert_eq!(values, serde_json::json!([10, 10, 70, 10, 70, 10]));
     page.close();
 }

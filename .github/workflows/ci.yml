@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR cancels its superseded run; push, tag and release
+# (workflow_call) runs are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: lint + test (node ${{ matrix.node }})
@@ -22,6 +28,13 @@ jobs:
       matrix:
         node: [20, 22]
     steps:
+      # The workspace test build (render tests + the PyO3/napi crates) outgrows the
+      # runner's free disk; drop the preinstalled toolchains this job never uses.
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af
+          df -h
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4

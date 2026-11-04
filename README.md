@@ -80,7 +80,7 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-Status: **v0.6.0 — the turbo-dom consolidation release**
+Status: **v0.7.0 — on turbo-dom 0.7.0**
 ([npm](https://www.npmjs.com/package/turbo-surf)). The engine ships hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -365,7 +365,7 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
   real native functions); the `toString` anti-hook trap is itself shapeless.
 - **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for
-  selected solids/shapes), `measureText` uses the system-font measurer, context
+  selected solids/shapes), `measureText` uses the system faces live layout uses (`@font-face` web fonts are not loaded yet, #130), context
   class-tags as `CanvasRenderingContext2D` + `getContextAttributes`.
 - **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
   `readPixels` matched Chrome for the shared gradient scene when Metal was accessible.
@@ -418,9 +418,7 @@ Google SERP acceptance for 0.6.0 is a separate run: see GOOGLE-SERP-0.6.0 (pendi
 [turbo-surf#114](https://github.com/miaskiewicz/turbo-surf/issues/114)).
 
 Known gaps, each tracked in its own issue:
-[unhandledrejection](https://github.com/miaskiewicz/turbo-surf/issues/103),
 [workers](https://github.com/miaskiewicz/turbo-surf/issues/104),
-[container queries in live layout](https://github.com/miaskiewicz/turbo-surf/issues/105),
 [canvas captureStream / offscreen / PiP, WebGL](https://github.com/miaskiewicz/turbo-surf/issues/106),
 [IndexedDB](https://github.com/miaskiewicz/turbo-surf/issues/107),
 [placeholder APIs (caches, cookieStore, Navigation, locks, WebSocket)](https://github.com/miaskiewicz/turbo-surf/issues/108),

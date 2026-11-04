@@ -148,14 +148,13 @@ async fn image_input_width_and_height_match_chrome156() {
     // KNOWN_GAP: image buttons load no image resource, so there is no natural
     // size (Chrome: 6x4) and no image-derived intrinsic size for width:auto.
     for (pointer, native, chrome) in [
-        ("/cases/imageBlock/0", 1278, 40),
+        // The block image button fills the line (turbo-dom 0.7.0 gives
+        // input[type=image] no UA padding or border, as Chrome does); Chrome's 40 is
+        // the missing image's intrinsic width.
+        ("/cases/imageBlock/0", 1280, 40),
         ("/images/hidden/0", 0, 6),
         ("/images/hidden/1", 0, 4),
         ("/images/hiddenAttribute/1", 0, 4),
-        ("/images/rendered/0", 150, 6),
-        ("/images/rendered/1", 22, 4),
-        ("/images/renderedZoom/0", 150, 6),
-        ("/images/renderedZoom/1", 22, 4),
     ] {
         known_gap(
             &actual,
@@ -165,6 +164,25 @@ async fn image_input_width_and_height_match_chrome156() {
             chrome.into(),
         );
     }
+    // KNOWN_GAP: an unloaded image button takes turbo-dom 0.7.0's broken-image box
+    // (#243, since turbo-dom a539d7c; it was 0x0 before): its size follows the
+    // host's fallback font (57x15 macOS, 59 wide on Linux), so it is pinned as a
+    // non-empty box no larger than the unzoomed one. Chrome reports the image's 6x4
+    // natural size.
+    let size = |pointer: &str| actual.pointer(pointer).and_then(Value::as_f64).unwrap();
+    for (pointer, chrome) in [
+        ("/images/rendered/0", 6),
+        ("/images/rendered/1", 4),
+        ("/images/renderedZoom/0", 6),
+        ("/images/renderedZoom/1", 4),
+    ] {
+        let slot = expected.pointer_mut(pointer).unwrap();
+        assert_eq!(*slot, Value::from(chrome), "Chrome {pointer}");
+        assert!(size(pointer) > 8.0, "native {pointer}: {}", size(pointer));
+        *slot = actual.pointer(pointer).unwrap().clone();
+    }
+    assert!(size("/images/renderedZoom/0") < size("/images/rendered/0"));
+    assert_eq!(size("/images/renderedZoom/1"), size("/images/rendered/1"));
     // KNOWN_GAP: Chrome has no layout object until the next style update after
     // insertion and reports the attribute meanwhile; native layout is always
     // current, so it reports the content box immediately.

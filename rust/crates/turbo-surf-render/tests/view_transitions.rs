@@ -105,10 +105,8 @@ async fn view_transitions_match_chrome156_on_the_frame_loop() {
         ],
     )
     .await;
-    // KNOWN_GAP: the render tier never dispatches unhandledrejection (no host promise
-    // rejection tracker), for these promises or any other.
-    assert_eq!(actual["unhandled"], serde_json::json!([]));
-    let differences = mismatches(&actual, &control["result"], &[("unhandled", "")]);
+    // The host promise-rejection tracker reports these rejections like Chrome (#103).
+    let differences = mismatches(&actual, &control["result"], &[]);
     assert!(
         differences.is_empty(),
         "{} differences:\n{}",

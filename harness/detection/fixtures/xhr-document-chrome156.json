@@ -1,0 +1,146 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "serverSha256": "2d7972a8fe7e42878f4c1138fc238cb927ad90a1079c5cd01f2e81f2e9d13d12",
+  "probeSha256": "8c5a870cfc797ffa2227663c6b8c2ca4dc70829e9419d67083652ac21a006e20",
+  "collectorSha256": "6a199ad2ad77b4f58c523328169dadeff041c03ba00b1237f56c9145abe69e47",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--use-mock-keychain",
+    "--password-store=basic",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "xml": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\"?><a xmlns:p=\"urn:p\"><b p:c=\"1\">t</b></a>"
+      ],
+      false,
+      60
+    ],
+    "textXml": [
+      ["[object XMLDocument]", "text/xml", null, "a", "<a><![CDATA[x<y]]></a>"],
+      false,
+      22
+    ],
+    "svg": [
+      [
+        "[object XMLDocument]",
+        "image/svg+xml",
+        "http://www.w3.org/2000/svg",
+        "svg",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><g/></svg>"
+      ],
+      false,
+      50
+    ],
+    "xhtml": [
+      [
+        "[object XMLDocument]",
+        "application/xhtml+xml",
+        "http://www.w3.org/1999/xhtml",
+        "html",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>x</body></html>"
+      ],
+      false,
+      64
+    ],
+    "illFormed": [null, false, 10],
+    "html": [null, false, 35],
+    "plain": [null, false, 12],
+    "xmlDocument": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\"?><a xmlns:p=\"urn:p\"><b p:c=\"1\">t</b></a>"
+      ],
+      true,
+      null
+    ],
+    "htmlDocument": [
+      [
+        "[object HTMLDocument]",
+        "text/html",
+        "http://www.w3.org/1999/xhtml",
+        "html",
+        "<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body><p>x</p></body></html>"
+      ],
+      true,
+      null
+    ],
+    "plainDocument": [null, true, null],
+    "override": [["[object XMLDocument]", "text/xml", null, "a", "<a>plain</a>"], false, 12],
+    "latin1Declared": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a>café</a>"
+      ],
+      false,
+      54
+    ],
+    "utf16Bom": [["[object XMLDocument]", "application/xml", null, "a", "<a>é€</a>"], false, 9],
+    "headerLatin1": [
+      ["[object XMLDocument]", "application/xml", null, "a", "<a>café</a>"],
+      false,
+      11
+    ],
+    "bomBeatsHeader": [
+      ["[object XMLDocument]", "application/xml", null, "a", "<a>é</a>"],
+      false,
+      8
+    ],
+    "headerVsDecl": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a>caf�</a>"
+      ],
+      false,
+      54
+    ],
+    "utf16Declared": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?><a>café</a>"
+      ],
+      false,
+      50
+    ],
+    "literalParsererror": [
+      [
+        "[object XMLDocument]",
+        "application/xml",
+        null,
+        "a",
+        "<a><parsererror xmlns=\"http://www.w3.org/1999/xhtml\">x</parsererror></a>"
+      ],
+      false,
+      72
+    ],
+    "unsent": null,
+    "textType": [
+      "InvalidStateError",
+      "Failed to read the 'responseXML' property from 'XMLHttpRequest': The value is only accessible if the object's 'responseType' is '' or 'document' (was 'text')."
+    ]
+  }
+}

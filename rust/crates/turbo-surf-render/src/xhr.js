@@ -2,9 +2,11 @@
 // harness/detection/transports-probe.js) over the engine's fetch: the XHR state machine,
 // argument validation, header lists, response types and Chrome's trusted event order
 // (readystatechange 2 and 3, progress, readystatechange 4, load, loadend).
-// Not modelled: synchronous requests (async=false still completes asynchronously),
-// responseXML/"document" parsing (null), upload progress events, setAttributionReporting
-// and setPrivateToken.
+// responseXML and responseType "document" parse XML MIME types with turbo-dom-browser-env's
+// XML parser (turbo-dom#186; ill-formed XML is null, as in Chrome) and, for "document",
+// text/html with the HTML parser. Not modelled: synchronous requests (async=false still
+// completes asynchronously), upload progress events, setAttributionReporting and
+// setPrivateToken.
 (() => {
   "use strict";
   const apply = Reflect.apply,
@@ -28,6 +30,9 @@
   const exec = RegExp.prototype.exec,
     lower = String.prototype.toLowerCase,
     upper = String.prototype.toUpperCase,
+    split = String.prototype.split,
+    endsWith = String.prototype.endsWith,
+    fromCharCode = String.fromCharCode,
     trim = String.prototype.trim,
     replace = String.prototype.replace;
   const arrayPush = Array.prototype.push,
@@ -125,6 +130,7 @@
         response: null,
         bytes: null,
         cache: undefined,
+        document: undefined,
         controller: null,
         timer: null,
         source: () => ops.op_document_request_url(),
@@ -182,13 +188,75 @@
   const finalMime = (record) =>
     record.override ??
     (record.response ? headerValue(record.response.headers, "content-type") : null);
+  // The XHR "document response" (Chrome 156: harness/detection/xhr-document-probe.js).
+  const documentResponse = (record) => {
+    if (record.state !== 4) return null;
+    if (record.document !== undefined) return record.document;
+    const essence = apply(
+      trim,
+      apply(lower, apply(split, finalMime(record) ?? "text/xml", [";"])[0], []),
+      [],
+    );
+    let doc = null;
+    if (essence === "text/html") {
+      if (record.responseType === "document")
+        doc = __registerInertDocument(
+          ops.op_parse_html_document(text(record), false),
+          record.response.url,
+          "text/html",
+        );
+    } else if (isXmlEssence(essence)) {
+      // Bounded by the network body cap (8 MiB); checked again for other sources.
+      if (record.bytes && record.bytes.length <= MAX_DOCUMENT_BYTES) {
+        // null when not well-formed (turbo-dom's ParsedXmlDocument::well_formed).
+        const parsed = ops.op_parse_xml_response(text(record), essence);
+        if (parsed !== null) doc = __registerInertDocument(parsed, record.response.url, essence);
+      }
+    }
+    record.document = doc;
+    return doc;
+  };
+  const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+  const isXmlEssence = (essence) =>
+    essence === "text/xml" || essence === "application/xml" || apply(endsWith, essence, ["+xml"]);
+  // A byte order mark decides the encoding first.
+  const bomLabel = (bytes) =>
+    bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+      ? "utf-8"
+      : bytes[0] === 0xfe && bytes[1] === 0xff
+        ? "utf-16be"
+        : bytes[0] === 0xff && bytes[1] === 0xfe
+          ? "utf-16le"
+          : null;
+  // The `<?xml ... encoding="…"?>` declaration, read from the ASCII prefix.
+  const declaredLabel = (bytes) => {
+    let prefix = "";
+    for (let i = 0; i < bytes.length && i < 1024; i++) {
+      if (bytes[i] > 0x7f) break;
+      prefix += apply(fromCharCode, null, [bytes[i]]);
+      if (bytes[i] === 0x3e) break;
+    }
+    const match = apply(exec, /^<\?xml\s[^>]*?\bencoding\s*=\s*["']([A-Za-z][A-Za-z0-9._-]*)["']/, [
+      prefix,
+    ]);
+    if (!match) return null;
+    // An ASCII-readable declaration cannot be UTF-16: sniffing maps it to UTF-8.
+    const label = apply(lower, match[1], []);
+    return label === "utf-16" || label === "utf-16le" || label === "utf-16be" ? "utf-8" : match[1];
+  };
+  // XHR text decoding: BOM, then the final MIME type's charset, then (XML types, as
+  // the XML parser sniffs) the declaration, then UTF-8 (Chrome 156 control).
   const text = (record) => {
     if (!record.bytes) return "";
-    const label = charset(finalMime(record));
-    if (label)
-      try {
-        return apply(decode, new Decoder(label), [record.bytes]);
-      } catch {}
+    const mime = finalMime(record);
+    const essence = apply(trim, apply(lower, apply(split, mime ?? "text/xml", [";"])[0], []), []);
+    const labels = [bomLabel(record.bytes), charset(mime)];
+    if (isXmlEssence(essence)) apply(arrayPush, labels, [declaredLabel(record.bytes)]);
+    for (let i = 0; i < labels.length; i++)
+      if (labels[i])
+        try {
+          return apply(decode, new Decoder(labels[i]), [record.bytes]);
+        } catch {}
     return apply(decode, new Decoder(), [record.bytes]);
   };
   const reset = (record) => {
@@ -199,6 +267,7 @@
     record.timer = null;
     record.response = null;
     record.bytes = null;
+    record.document = undefined;
     record.cache = undefined;
   };
   // XHR "request error steps": DONE, then the error event and loadend.
@@ -263,7 +332,7 @@
       } catch {
         record.cache = null;
       }
-    } else record.cache = null;
+    } else record.cache = documentResponse(record);
     return record.cache;
   });
   getter("responseText", (record) => {
@@ -472,6 +541,6 @@
         `Failed to read the 'responseXML' property from 'XMLHttpRequest': The value is only accessible if the object's 'responseType' is '' or 'document' (was '${record.responseType}').`,
         "InvalidStateError",
       );
-    return null;
+    return documentResponse(record);
   });
 })();

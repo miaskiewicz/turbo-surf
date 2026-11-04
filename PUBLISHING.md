@@ -67,7 +67,8 @@ changelog entries and unrelated dependency versions must retain their own versio
    The Surf product tags do not publish those dependencies. Then drop the
    pre-publish `[patch.crates-io]` table in `rust/Cargo.toml` and re-lock with a
    targeted `cargo update -p` for the turbo-dom crates and the Deno family (exact
-   commands: [v0.6.0 pre-tag steps](#v060-pre-tag-steps-turbo-dom-consolidation)). Then
+   commands: [v0.6.0 pre-tag steps](#v060-pre-tag-steps-turbo-dom-consolidation); for
+   0.7.0 the same with the turbo-dom 0.7.0 crates, the Deno family already published). Then
    verify all five Surf library distributions
    in one normal invocation, with Cargo compilation verification enabled and no
    directory-source replacement:
@@ -303,8 +304,8 @@ The subsequent named dependency integration replaces twelve runtime packages at
 their existing versions and preserves all other lock records apart from the
 core/render dependency references. The previously tested Git candidates remain
 dated provenance, not current dependency metadata. Since the turbo-dom
-consolidation, layout comes from `turbo-dom-layout` 0.6.0 and the screenshot tier
-from `turbo-dom-raster` 0.6.0 (both published from turbo-dom); turbo-surf no
+consolidation, layout comes from `turbo-dom-layout` (0.7.0) and the screenshot tier
+from `turbo-dom-raster` (0.7.0; both published from turbo-dom); turbo-surf no
 longer depends on turbo-html2pdf.
 
 The V8 binding is turbo-dom's `turbo-dom-v8` 150.4.0, a generated fork of

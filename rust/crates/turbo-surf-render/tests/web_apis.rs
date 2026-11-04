@@ -15,8 +15,8 @@ const CONTROL: &str =
 /// - `click()`: an untrusted event reaching a `when()` listener is attributed to
 ///   `dispatchEvent`; the binding's `HTMLElement#click()` is not a frame
 ///   the Observable layer can see, so the inner context differs.
-/// - The render tier dispatches no `unhandledrejection` events, so the promises
-///   AsyncIteratorClose leaves rejected are never reported.
+/// - (closed by #103) the promises AsyncIteratorClose leaves rejected are now
+///   reported through `unhandledrejection`, as in Chrome.
 ///
 /// `xhr.when(...)` used to be a gap here (XMLHttpRequest was not an EventTarget),
 /// but the merged real `XMLHttpRequestEventTarget -> EventTarget` now inherits
@@ -24,9 +24,6 @@ const CONTROL: &str =
 /// `EventTarget.prototype.when` in a fresh stable profile), so it is resolved.
 const KNOWN_GAPS: &[&str] = &[
     "observable-semantics-probe.js/bindingContexts/log/2/1/1 = \"Failed to execute 'flatMap' on 'Observable': Failed to execute 'dispatchEvent' on 'EventTarget': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise.\"",
-    "observable-semantics-probe.js/iteratorClose/log/7/1 = \"[]\"",
-    "observable-semantics-probe.js/iteratorClose/log/9/1 = \"[]\"",
-    "observable-semantics-probe.js/iteratorClose/log/11/1 = \"[]\"",
 ];
 
 fn control() -> Value {

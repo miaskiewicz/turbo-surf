@@ -83,7 +83,7 @@ pub(crate) fn capture_composed_tree(
 // author rules must be able to override it regardless of selector specificity.
 pub(crate) const LIVE_UA: &str = concat!(
     "body{margin:8px;font-family:serif}",
-    "button{display:inline-block;font-family:Arial;font-size:13.3333px;font-style:normal;font-weight:400;font-stretch:normal;font-variant-caps:normal;line-height:normal;margin:0;padding:1px 6px;border-width:2px;vertical-align:baseline}",
+    "button{display:inline-block;font-family:Arial;font-size:13.3333px;font-style:normal;font-weight:400;font-stretch:normal;font-variant-caps:normal;line-height:normal;margin:0;border-width:2px;vertical-align:baseline}",
     "iframe{display:inline;border:2px inset}",
     "head,style,script,title,meta,link,base,noscript{display:none}",
 );
@@ -142,6 +142,7 @@ pub(crate) fn test_rules(
             text,
             scoped: sheet.rules.remove(0).scoped,
             resource: None,
+            containers: Vec::new(),
         });
     }
     Ok(rules)
@@ -225,6 +226,114 @@ pub(crate) fn layout_active_rules_resolved(
             );
         }
     }
+    // Container-query targets start unselected; each pass re-selects them against
+    // the previous pass's container boxes until the selection is stable.
+    let conditional = qualified.iter().any(|rule| !rule.containers.is_empty());
+    let mut selected: Vec<Option<turbo_dom_layout::live::PreMatched>> = qualified
+        .iter()
+        .map(|rule| {
+            rule.scoped
+                .as_ref()
+                .map(|scoped| select(scoped, rule, |_| false))
+        })
+        .collect();
+    let mut passes = 0;
+    loop {
+        let (snapshot, (styles, containers)) = snapshot_pass(
+            tree,
+            input,
+            &qualified,
+            &selected,
+            rules,
+            layout_scale,
+            inputs,
+            diagnostics,
+        )?;
+        if !conditional {
+            return Ok((snapshot, styles));
+        }
+        let boxes = containers.boxes(&snapshot);
+        let next = qualified
+            .iter()
+            .map(|rule| {
+                rule.scoped.as_ref().map(|scoped| {
+                    select(scoped, rule, |target| {
+                        containers.matches(&boxes, target, &rule.containers)
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        passes += 1;
+        // An unchanged selection means this pass's snapshot is final: no extra pass.
+        if next == selected {
+            return Ok((snapshot, styles));
+        }
+        // Containment keeps a container's size independent of its contents, so each
+        // pass settles one more level of nested containers: as many passes as the
+        // deepest container chain (top-down), bounded by the pass budget.
+        let limit = (containers.depth() + 1).min(MAX_CONTAINER_PASSES);
+        if passes >= limit {
+            if passes >= MAX_CONTAINER_PASSES {
+                diagnostics.push(
+                    turbo_dom_layout::LintCode::UnsupportedCss,
+                    format!(
+                        "container queries did not settle within {MAX_CONTAINER_PASSES} layout passes"
+                    ),
+                    turbo_dom_layout::Span::default(),
+                );
+            }
+            return Ok((snapshot, styles));
+        }
+        selected = next;
+    }
+}
+
+/// The layout-pass budget for container queries: nested container levels resolved
+/// before the last selection is kept (with a diagnostic).
+const MAX_CONTAINER_PASSES: usize = 32;
+
+/// `scoped` with only the targets an `@container`-conditioned rule currently selects.
+fn select(
+    scoped: &turbo_dom_layout::live::PreMatched,
+    rule: &crate::live_stylesheets::ActiveRule,
+    applies: impl Fn(turbo_dom_layout::layout_snapshot::SourceId) -> bool,
+) -> turbo_dom_layout::live::PreMatched {
+    if rule.containers.is_empty() {
+        return scoped.clone();
+    }
+    turbo_dom_layout::live::PreMatched {
+        depth: scoped.depth,
+        declarations: scoped.declarations.clone(),
+        targets: scoped
+            .targets
+            .iter()
+            .filter(|target| applies(target.source))
+            .cloned()
+            .collect(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn snapshot_pass(
+    tree: &Tree,
+    input: &LiveTreeInput,
+    qualified: &[&crate::live_stylesheets::ActiveRule],
+    selected: &[Option<turbo_dom_layout::live::PreMatched>],
+    rules: &[crate::live_stylesheets::ActiveRule],
+    layout_scale: f32,
+    inputs: &SnapshotInputs,
+    diagnostics: &mut Diagnostics,
+) -> Result<
+    (
+        LayoutSnapshot,
+        (
+            turbo_dom_layout::cssom_view::scroll::SourceStyles,
+            crate::live_container_queries::Containers,
+        ),
+    ),
+    String,
+> {
+    debug_assert_eq!(qualified.len(), selected.len());
     let graph = input
         .composition
         .as_ref()
@@ -240,7 +349,7 @@ pub(crate) fn layout_active_rules_resolved(
         },
         OriginRules {
             origin: CascadeOrigin::Author,
-            rules: qualified.iter().map(|rule| rule.scoped.as_ref()).collect(),
+            rules: selected.iter().map(Option::as_ref).collect(),
         },
     ];
     let children = |node: Handle| graph.children_of(node);
@@ -275,7 +384,8 @@ pub(crate) fn layout_active_rules_resolved(
         |styled| {
             let styles = crate::live_layout_zoom::apply(styled, document);
             crate::live_layout_resources::validate(styled, rules)?;
-            Ok(styles)
+            let containers = crate::live_container_queries::Containers::collect(styled, document);
+            Ok((styles, containers))
         },
         inputs,
         diagnostics,

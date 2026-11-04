@@ -1,0 +1,80 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "viewport": [1280, 800],
+  "probeSha256": "387f413444e5acc81ddd54cb67c8355b808d990f0b7f21113e935e5cdaef71b1",
+  "casesSha256": "53360bd8139e3938a3cd442aebebbabfcefe01100dd40b241df7e88ae7e4b905",
+  "collectorSha256": "257cf3dbc0780b3cf83837dcf493d68dfa0c011fb2aa317f3aeff68c317a7351",
+  "errors": [],
+  "result": [
+    {
+      "id": "unnamed-match",
+      "result": [["DIV.cq", "ok", 300, 0], ["I#t", "ok", 17, 0]]
+    },
+    {
+      "id": "unnamed-miss",
+      "result": [["DIV.cq", "ok", 150, 0], ["I#t", "ok", 5, 0]]
+    },
+    {
+      "id": "nearest-ancestor",
+      "result": [["DIV.outer", "ok", 500, 4], ["DIV.inner", "ok", 120, 4], ["I#t", "ok", 11, 4]]
+    },
+    {
+      "id": "named",
+      "result": [["DIV.outer", "ok", 500, 0], ["DIV.inner", "ok", 120, 0], ["I#t", "ok", 23, 0]]
+    },
+    {
+      "id": "no-container",
+      "result": [["DIV", "ok", 1280, 0], ["I#t", "ok", 3, 0]]
+    },
+    {
+      "id": "size-height",
+      "result": [["DIV.cq", "ok", 100, 80], ["I#t", "ok", 13, 0]]
+    },
+    {
+      "id": "padding-content-box",
+      "result": [["DIV.cq", "ok", 220, 0], ["I#t", "ok", 3, 0]]
+    },
+    {
+      "id": "self-not-container",
+      "result": [["DIV.cq", "ok", 300, 0], ["I#t", "ok", 29, 0]]
+    },
+    {
+      "id": "deep-nesting-12",
+      "result": [
+        ["DIV#r", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["DIV.c", "ok", 100, 5],
+        ["I#t", "ok", 13, 5]
+      ]
+    },
+    {
+      "id": "contents-container-boxless",
+      "result": [["DIV.o", "ok", 500, 0], ["DIV.n", "ok", 0, 0], ["I#t", "ok", 0, 0]]
+    },
+    {
+      "id": "aspect-ratio-zero-height",
+      "result": [["DIV.s", "ok", 100, 0], ["I#t", "ok", 9, 3]]
+    },
+    {
+      "id": "size-containment-shrink",
+      "result": [
+        ["DIV.f", "ok", 0, 30],
+        ["B", "ok", 40, 10],
+        ["B", "ok", 40, 10],
+        ["B", "ok", 40, 10],
+        ["DIV.g", "ok", 0, 0],
+        ["B", "ok", 40, 10],
+        ["B", "ok", 40, 10]
+      ]
+    }
+  ]
+}

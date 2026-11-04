@@ -96,3 +96,67 @@ fn synchronous_timer_driver_finishes_the_initial_job_before_timer_tasks() {
         "{html}"
     );
 }
+
+// turbo-surf#128: a frame realm's timer queued during a parent timer task counts from
+// that task's due time, as the parent's own timers do. The busy wait stands in for slow
+// frame creation; Chrome 156 runs the frame's zero-delay timer first (its timers read
+// the live clock in both realms, so the frame's timer is still due 20 ms earlier).
+#[tokio::test(flavor = "current_thread")]
+async fn frame_timer_queued_in_parent_timer_task_counts_from_the_task_due_time() {
+    let mut page = PageSession::open(
+        "<!doctype html><body></body>",
+        "https://timer.test/",
+        "",
+        "",
+        10000,
+    )
+    .await
+    .unwrap();
+    let value = page
+        .eval_expression(
+            r#"(async()=>{
+              const log=[];
+              await new Promise(r=>setTimeout(r,100));
+              const f=document.createElement('iframe');document.body.append(f);
+              const end=Date.now()+60;while(Date.now()<end){}
+              f.contentWindow.setTimeout(()=>log.push('frame-timer'),0);
+              await new Promise(r=>setTimeout(r,20));log.push('t20');
+              return JSON.stringify(log);
+            })()"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(value, r#"["frame-timer","t20"]"#);
+}
+
+// turbo-surf#128 review: a frame whose timer task published the agent's task base and
+// was then removed must not lend that base to later parent timers.
+#[tokio::test(flavor = "current_thread")]
+async fn a_retired_frames_task_base_is_not_reused() {
+    let mut page = PageSession::open(
+        "<!doctype html><body></body>",
+        "https://timer.test/",
+        "",
+        "",
+        10000,
+    )
+    .await
+    .unwrap();
+    let value = page
+        .eval_expression(
+            r#"(async()=>{
+              const log=[];
+              const f=document.createElement('iframe');document.body.append(f);
+              await new Promise(r=>f.contentWindow.setTimeout(r,0));
+              f.remove();
+              const end=Date.now()+60;while(Date.now()<end){}
+              setTimeout(()=>log.push('t10'),10);
+              setTimeout(()=>log.push('t0'),0);
+              await new Promise(r=>setTimeout(r,40));
+              return JSON.stringify(log);
+            })()"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(value, r#"["t0","t10"]"#);
+}

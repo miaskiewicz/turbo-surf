@@ -78,7 +78,8 @@ fn parser_receiver_conversion_and_unsupported_modes_fail_explicitly() {
             "TypeError",
             "TypeError",
             "TypeError",
-            "NotSupportedError",
+            // application/xml parses into an XMLDocument (turbo-dom#186), as in Chrome.
+            "",
             "",
             "NotSupportedError"
         ])

@@ -7,8 +7,8 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
-requires `turbo-dom` 0.6 (the consolidation release, published with
-turbo-dom-layout / -raster / -browser-env 0.6.0, all from crates.io). turbo-dom 0.6 brings the one Chrome-checked selector engine, the
+requires `turbo-dom` 0.7 (with turbo-dom-layout / -raster / -browser-env 0.7.0 from
+crates.io). Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
 original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
 mutation batches and bounded storage collection (the per-release history is in
 [CHANGELOG.md](../CHANGELOG.md)).
@@ -36,17 +36,17 @@ restore the caller before yielding.
 | `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 80-tool surface over a stateful session |
 
 Native layout/paint, canvas rasterization and system text measurement (optional
-Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.6.0 crate, which
+Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.7.0 crate, which
 mcp/napi/py depend on (forwarding its `gpu-metal` / `coretext` features, and its
 `avif` / `jxl` image decoders, which are on by default); the layout engine is
-`turbo-dom-layout` 0.6.0. turbo-surf no longer depends on
+`turbo-dom-layout` 0.7.0. turbo-surf no longer depends on
 turbo-html2pdf.
 
 `cargo test --workspace` runs the offline engine suite. Required gates also include
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
 the root npm test command checks versions, the addon/shim and detection harness too.
 
-The render tier consumes `turbo-dom-layout` 0.6.0 (the layout half of
+The render tier consumes `turbo-dom-layout` 0.7.0 (the layout half of
 turbo-html2pdf-core 0.3.9, relocated verbatim into turbo-dom) for native live-tree
 box geometry, transforms, element scroll metrics and point-hit regions: its live-DOM
 input (`turbo_dom_layout::live`) styles the page's own composed tree in place from the
@@ -62,8 +62,8 @@ contracts and remaining inline/caret/scroll/layout limits are recorded in
 ## Registry dependency identity
 
 The seven direct Rust dependency aliases retain the existing source/API names.
-All of them (the Deno 0.x.1 family, `turbo-dom-v8` and the turbo-dom 0.6.0 crates)
-resolve from crates.io; `rust/Cargo.toml` has no `[patch.crates-io]` table. The
+The Deno 0.x.1 family and `turbo-dom-v8` resolve from crates.io, as do
+the turbo-dom 0.7.0 crates. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):
 

@@ -29,6 +29,7 @@ mod fetch_cors;
 mod geometry_backend;
 mod integrity;
 mod layout_profile;
+mod live_container_queries;
 mod live_layout;
 mod live_layout_backend;
 #[cfg(test)]

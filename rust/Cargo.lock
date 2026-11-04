@@ -328,6 +328,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1605,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1789,6 +1798,12 @@ dependencies = [
  "libc",
  "winapi",
 ]
+
+[[package]]
+name = "fst"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a"
 
 [[package]]
 name = "funty"
@@ -2371,6 +2386,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyphenation"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcf4dd4c44ae85155502a52c48739c8a48185d1449fff1963cffee63c28a50f0"
+dependencies = [
+ "bincode",
+ "fst",
+ "hyphenation_commons",
+ "pocket-resources",
+ "serde",
+]
+
+[[package]]
+name = "hyphenation_commons"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5febe7a2ade5c7d98eb8b75f946c046b335324b06a14ea0998271504134c05bf"
+dependencies = [
+ "fst",
+ "serde",
+]
+
+[[package]]
 name = "icu_calendar"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2631,7 +2669,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3761,6 +3799,12 @@ dependencies = [
  "flate2",
  "miniz_oxide",
 ]
+
+[[package]]
+name = "pocket-resources"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c135f38778ad324d9e9ee68690bac2c1a51f340fdf96ca13e2ab3914eb2e51d8"
 
 [[package]]
 name = "pollster"
@@ -5775,9 +5819,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b303483c680df80d6e0edab986f798532f1ceb3af40d95c8156b9c9b580bc94f"
+checksum = "e059f328a9fa044ff44e77608ee9ab3e44e1e89ff893d7faf837c7154f975df6"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5791,29 +5835,33 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-browser-env"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8eb8d17b0d3d77da950e9e5d36c6cc6ee85851930e6d334f0fcb110e1fcc150"
+checksum = "b7c49030459c6bf57bef90c51f34583fbde3d4a7ec326a4c62783c7b67ca1ee7"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
  "psl",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "turbo-dom",
+ "turbo-dom-layout",
  "turbo-dom-v8",
  "url",
+ "xml",
 ]
 
 [[package]]
 name = "turbo-dom-layout"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41f2e415ea1c2856d24636a94bc38c2054a9112f420708b09f43465e1e05d83f"
+checksum = "5b2b730f3008c2a1e77b7130e9de291274dc1b1995a0399d588b8bf7736ab4c1"
 dependencies = [
  "core-foundation",
  "core-text",
  "encoding_rs",
+ "hyphenation",
  "jpeg-decoder",
  "png 0.18.1",
  "resvg",
@@ -5823,14 +5871,15 @@ dependencies = [
  "taffy",
  "thiserror 2.0.18",
  "turbo-dom",
+ "unicode-bidi",
  "unicode-linebreak",
 ]
 
 [[package]]
 name = "turbo-dom-raster"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17d67a9d208a9bd367a28d07143c974dea46d44c6e5e17499d9f2f3f128d1a5c"
+checksum = "50860bff0e2665ae7a97e951a6609c9d942489e91532c52c4c9b53cfb830099d"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5894,7 +5943,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -6059,7 +6108,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-mcp"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -6080,7 +6129,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-napi"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "napi",
  "napi-build",
@@ -6099,7 +6148,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-page"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6111,7 +6160,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-py"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "pyo3",
  "serde",
@@ -6126,7 +6175,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-render"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -6189,14 +6238,14 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-transform"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "swc_core",
 ]
 
 [[package]]
 name = "turbo-surf-view"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "criterion",
  "regex",
@@ -6802,7 +6851,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6996,6 +7045,12 @@ dependencies = [
  "serde",
  "zeroize",
 ]
+
+[[package]]
+name = "xml"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f45bb2c13fec6a6cb4c0f76a7e94839e110a14ec803ec2940777a94c347bc52"
 
 [[package]]
 name = "xml-rs"

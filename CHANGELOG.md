@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.7.0] — turbo-dom 0.7.0
+
+turbo-surf moves to turbo-dom 0.7.0 (`turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster`,
+`turbo-dom-browser-env` 0.7; `turbo-dom-v8` stays 150.4.0). Until those crates are on
+crates.io, `rust/Cargo.toml` pins them to a git rev of turbo-dom#232 through
+`[patch.crates-io]`; the pin is dropped before the tag (see PUBLISHING.md). npm, PyPI and
+the Rust crates move to 0.7.0 with turbo-dom, turbo-test and turbo-html2pdf.
+
+- **Fixed (`DOMParser`)**: `parseFromString` with `application/xml`, `text/xml`,
+  `image/svg+xml` or `application/xhtml+xml` returns an `XMLDocument` (turbo-dom-browser-env's
+  `parse_xml_document_units`, turbo-dom#186) instead of throwing `NotSupportedError`; the
+  sanitizer control's XML known gap is gone.
+- **Fixed (XHR)**: `responseXML` and `responseType = "document"` parse the response like
+  Chrome 156 (new control `harness/detection/xhr-document-*`): an XML MIME type (also through
+  `overrideMimeType`) gives an `XMLDocument` and ill-formed XML gives `null`; `text/html`
+  parses only for `"document"`; other types give `null`. They were always `null`.
+- **Fixed (canvas)**: a page's canvases measure text with the system faces live layout uses
+  (`set_canvas_fonts`, turbo-dom#237), not turbo-dom-layout's bundled faces.
+- **Fixed (native155 SDK, #126)**: the CHROME-PARITY-RUNBOOK engine-155 build (v8 152.2.0,
+  V8 15.5.35.23-rusty) compiles again: the WindowProperties setter/definer take the SDK's
+  `ReturnValue<Boolean>` under `native-sdk-frame-read`. The runbook says how to reuse a
+  prepared SDK copied from another checkout.
+- **Tests (#117)**: `unsupported_pseudo_class_layout` checks that rules with unsupported
+  pseudo-classes, in page and shadow CSS, leave layout and geometry running.
+- **Changed (render, turbo-dom 0.7.0)**: static screenshots and live geometry pick up
+  turbo-dom 0.7.0's Chrome 156 fixes (line height, kerning and shaping, `hyphens: auto`,
+  bidi and `dir`, list markers, inset `box-shadow`, inline box decoration, background
+  layers, unloaded `<img>`, vertical writing modes, Chrome's glyph coverage, fractional
+  background tiles, `<img>` transforms, grid sizing, native form-control appearance);
+  measured in turbo-dom's `tools/parity` surf corpora. `container-type` now applies size
+  containment, so a shrink-to-fit size container is as wide as Chrome's (0 without an
+  explicit size).
+- **Fixed (`unhandledrejection` / `rejectionhandled`, #103)**: The render tier now has a
+  host promise-rejection tracker. Each realm, iframes included, gets a
+  `PromiseRejectionEvent` on its own `window` with Chrome 156's timing (a task after
+  the rejecting task's microtasks) and shape (`promise`, `reason`, `cancelable`).
+  `preventDefault()` suppresses the `Uncaught (in promise)` console report. An
+  unhandled rejection no longer ends the event loop early. Chrome control:
+  `tests/fixtures/unhandled_rejection_chrome156.json`.
+- **Fixed (size container queries in live layout, #105)**: An unnamed or named
+  `@container` size query (`width`/`height`/`inline-size`/`block-size`/
+  `aspect-ratio`/`orientation`, ranges, `and`/`or`/`not`) is evaluated against the
+  nearest eligible ancestor container's content box, so geometry reads no longer
+  throw. Style and scroll-state queries and font-relative lengths are still refused
+  with a clear error. Chrome control:
+  `tests/fixtures/container_queries_chrome156.json`.
+- **Fixed (review round 1)**: XHR XML responses pick their encoding from the BOM,
+  then the charset parameter, then the `<?xml encoding?>` declaration (Chrome 156
+  control). A literal XHTML `<parsererror>` in a well-formed document no longer nulls
+  `responseXML` (decided by turbo-dom's `ParsedXmlDocument::well_formed`). Document parsing stops above the 8 MiB body cap. A prevented
+  `unhandledrejection` still gets `rejectionhandled` when it is handled later, as in
+  Chrome. The host event init can no longer run page `Object.prototype` getters. Promise
+  rejections that no realm takes keep deno_core's default reporting. Container queries
+  settle at any nesting depth (one pass per level, a 32-pass budget with a diagnostic).
+  A boxless nearest container makes its query false. `aspect-ratio` with zero height is
+  handled. A realm's timer-task base is cleared when its task ends.
+- **Fixed (frame timers, #128)**: a timer queued in a frame realm while a parent timer
+  task runs counts from that task's due time, as the parent's own timers do, so it no
+  longer runs after later parent timers (Chrome 156 order; the task base is agent-wide).
+- **Fixed (native155 SDK, #129)**: `new Window()` throws Chrome's
+  `Failed to construct 'Window': Illegal constructor` on the native-proxy build too
+  (`Window()` stays `Illegal constructor`).
+- **Changed (form controls)**: live layout's UA stylesheet no longer sets
+  `button { padding: 1px 6px }`; turbo-dom#239's flow-relative UA padding applies, so
+  vertical-writing buttons are no longer 10px too wide.
+- **Not adopted yet (turbo-dom#240)**: turbo-surf does not fetch `@font-face` faces (live
+  layout refuses a used web font with a clear error, and canvases get the system
+  registry), so `FontFace::from_web_font_bytes` has no call site yet; tracked in #130.
+
 ## [0.6.0] — 2026-10-26 — turbo-dom consolidation
 
 turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of

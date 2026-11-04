@@ -1,0 +1,50 @@
+[
+  {
+    "id": "unnamed-match",
+    "html": "<!doctype html><style>body{margin:0}.cq{container-type:inline-size;width:300px} @container (min-width:200px){.cq>i{display:block;width:17px}}</style><div class=\"cq\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "unnamed-miss",
+    "html": "<!doctype html><style>body{margin:0}.cq{container-type:inline-size;width:150px} @container (min-width:200px){.cq>i{display:block;width:17px}} i{display:block;width:5px}</style><div class=\"cq\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "nearest-ancestor",
+    "html": "<!doctype html><style>body{margin:0}.outer{container-type:inline-size;width:500px}.inner{container-type:inline-size;width:120px}#t{display:block;width:3px;height:4px} @container (max-width:200px){#t{width:11px}} @container (width > 400px){#t{height:9px}}</style><div class=\"outer\"><div class=\"inner\"><i id=\"t\"></i></div></div>"
+  },
+  {
+    "id": "named",
+    "html": "<!doctype html><style>body{margin:0}.outer{container:card / inline-size;width:500px}.inner{container-type:inline-size;width:120px}#t{display:block;width:3px} @container card (min-width:400px){#t{width:23px}}</style><div class=\"outer\"><div class=\"inner\"><i id=\"t\"></i></div></div>"
+  },
+  {
+    "id": "no-container",
+    "html": "<!doctype html><style>body{margin:0}#t{display:block;width:3px} @container (min-width:1px){#t{width:31px}}</style><div><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "size-height",
+    "html": "<!doctype html><style>body{margin:0}.cq{container-type:size;width:100px;height:80px}#t{display:block;width:3px} @container (min-height:50px) and (max-width:100px){#t{width:13px}}</style><div class=\"cq\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "padding-content-box",
+    "html": "<!doctype html><style>body{margin:0}.cq{container-type:inline-size;width:220px;padding:0 20px;box-sizing:border-box}#t{display:block;width:3px} @container (min-width:200px){#t{width:19px}}</style><div class=\"cq\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "self-not-container",
+    "html": "<!doctype html><style>body{margin:0}.cq{container-type:inline-size;width:300px} #t{display:block;width:3px} @container (min-width:200px){.cq{width:100px} #t{width:29px}}</style><div class=\"cq\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "deep-nesting-12",
+    "html": "<!doctype html><style>body{margin:0}.c{container-type:inline-size;width:50px}#r{width:100px} @container (min-width:100px){.c{width:100px} i{display:block;width:13px;height:5px}}</style><div class=\"c\" id=\"r\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><div class=\"c\"><i id=\"t\"></i></div></div></div></div></div></div></div></div></div></div></div></div>"
+  },
+  {
+    "id": "contents-container-boxless",
+    "html": "<!doctype html><style>body{margin:0}.o{container-type:inline-size;width:500px}.n{container-type:inline-size;display:contents} @container (min-width:400px){i{display:block;width:17px;height:3px}}</style><div class=\"o\"><div class=\"n\"><i id=\"t\"></i></div></div>"
+  },
+  {
+    "id": "aspect-ratio-zero-height",
+    "html": "<!doctype html><style>body{margin:0}.s{container-type:size;width:100px;height:0}i{display:block;height:3px;width:1px} @container (aspect-ratio > 1){.s+b{display:block;width:11px;height:3px}} @container (min-aspect-ratio:1/1){i{width:9px}} @container (max-aspect-ratio:1/1){i{width:7px}}</style><div class=\"s\"><i id=\"t\"></i></div>"
+  },
+  {
+    "id": "size-containment-shrink",
+    "html": "<!doctype html><style>body{margin:0}.f,.g{float:left;font-size:0}.f{container-type:inline-size}.g{container-type:size}b{display:inline-block;width:40px;height:10px}</style><div class=\"f\"><b></b><b></b><b></b></div><div class=\"g\"><b></b><b></b></div>"
+  }
+]

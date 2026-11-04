@@ -63,7 +63,7 @@ contracts and remaining inline/caret/scroll/layout limits are recorded in
 
 The seven direct Rust dependency aliases retain the existing source/API names.
 The Deno 0.x.1 family and `turbo-dom-v8` resolve from crates.io; the turbo-dom 0.7.0
-crates are pinned to turbo-dom#298 (the 0.7.1 branch, rev 13b8095f) by `rust/Cargo.toml`'s pre-publish
+crates are pinned to turbo-dom#298 (the 0.7.1 branch, rev ad9702a3) by `rust/Cargo.toml`'s pre-publish
 `[patch.crates-io]` table until they are published. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):

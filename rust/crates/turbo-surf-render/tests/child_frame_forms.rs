@@ -163,7 +163,8 @@ async fn child_frame_form_navigation_matches_chrome156() {
         &format!("http://127.0.0.1:{port}/"),
         "",
         "",
-        20000,
+        // ~16 frame navigations over localhost; headroom for a loaded host.
+        60000,
     )
     .await
     .unwrap();

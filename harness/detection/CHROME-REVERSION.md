@@ -76,6 +76,9 @@ in identity-diff.mjs. It picks one of:
 - `navigate`, `no-cors`, `cors-resource` (CORS script, style or font), `cors` (fetch
   or XHR), `preflight`
 - the same with `-hinted` appended when any high-entropy client hint is present
+- `navigate-hinted-restart`: the navigation Chrome re-sends after a Critical-CH
+  response (the battery's second `critical` request); net.rs uses it only for that
+  restart
 
 Chrome orders headers differently in each class, and differently again once hints
 are negotiated. Each class order is a merge of every measured request in that class,
@@ -398,8 +401,8 @@ satisfied by changing strings:
   labelling rules).
 - **`navigator.webdriver`.** It stays `false`. The measured `true` is the CDP
   collector's artifact.
-- **Missing behaviour.** Don't emit requests to look busy. Favicon, web-font and
-  Critical-CH gaps stay gaps until the behaviour really exists.
+- **Missing behaviour.** Don't emit requests to look busy. Favicon and web-font
+  gaps stay gaps until the behaviour really exists.
 
 ## 7. Tests, fixtures and gates
 

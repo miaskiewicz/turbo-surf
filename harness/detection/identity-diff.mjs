@@ -521,12 +521,12 @@ export function measuredRelease(fixture, previous) {
   const spellings = h1Spellings(requests);
   const classes = new Map();
   for (const [key, request] of index) {
-    // A Critical-CH restart reorders headers; turbo-surf does not restart.
-    if (key.startsWith("critical@") && !key.endsWith("#0")) continue;
     const names = request.headers
       .map(([name]) => lower(name))
       .filter((name) => !isPseudo(name) && !AUTHOR_HEADER.test(name));
-    const cls = requestClass(request.headers, request.method);
+    // A Critical-CH restart reorders headers: its own `-restart` class.
+    const restart = key.startsWith("critical@") && !key.endsWith("#0");
+    const cls = `${requestClass(request.headers, request.method)}${restart ? "-restart" : ""}`;
     if (!classes.has(cls)) classes.set(cls, []);
     classes.get(cls).push(names);
   }

@@ -96,12 +96,13 @@ async fn negotiated_hints_and_resource_metadata_reach_the_wire() {
     let requests = requests.lock().unwrap();
     let cold = &requests[0];
     assert_eq!(cold["sec-fetch-dest"], "document");
-    assert_eq!(cold["priority"], "u=0, i");
+    // Cleartext is HTTP/1.1, where Chrome sends no Priority (transport_identity_chrome156.json).
+    assert!(!cold.contains_key("priority"));
     assert_eq!(cold["sec-fetch-user"], "?1");
     assert!(!cold.contains_key("sec-ch-ua-arch"));
     let script = &requests[1];
     assert_eq!(script["sec-fetch-dest"], "script");
-    assert_eq!(script["priority"], "u=1");
+    assert!(!script.contains_key("priority"));
     assert_eq!(script["sec-fetch-mode"], "no-cors");
     assert_eq!(script["sec-fetch-site"], "same-origin");
     assert_eq!(script["accept"], "*/*");
@@ -184,7 +185,8 @@ async fn redirects_negotiate_hints_before_next_hop_and_omit_credentials_is_enfor
     assert_eq!(requests[1]["sec-ch-ua-arch"], "\"arm\"");
     assert_eq!(requests[2]["origin"], base);
     assert_eq!(requests[2]["sec-fetch-dest"], "empty");
-    assert_eq!(requests[2]["priority"], "u=1, i");
+    // Cleartext is HTTP/1.1, where Chrome sends no Priority (transport_identity_chrome156.json).
+    assert!(!requests[2].contains_key("priority"));
     assert_eq!(requests[2]["sec-fetch-mode"], "cors");
     assert!(!requests[2].contains_key("cookie"));
 }
@@ -212,12 +214,8 @@ async fn binary_resource_redirects_use_origin_aware_request_context() {
     assert_eq!(final_url, format!("{base}/after"));
     let requests = requests.lock().unwrap();
     assert_eq!(requests[0]["sec-fetch-dest"], "image");
-    assert_eq!(
-        requests[0]["priority"],
-        turbo_surf_core::browser::default_release()
-            .priority_for("image")
-            .unwrap_or("u=2, i")
-    );
+    // Cleartext is HTTP/1.1, where Chrome sends no Priority (transport_identity_chrome156.json).
+    assert!(!requests[0].contains_key("priority"));
     assert!(!requests[0].contains_key("sec-ch-ua-arch"));
     assert_eq!(requests[1]["sec-ch-ua-arch"], "\"arm\"");
     assert!(!requests[1].contains_key("sec-fetch-user"));

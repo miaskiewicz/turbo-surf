@@ -402,8 +402,8 @@ SERP in one baseline while another fails effective consent dismissal. The later
   is preserved on same-origin hops and permanently removed after an origin transition.
   Public fetch honors follow/manual/error redirects, including opaque redirect filtering
   and redirect-limit rejection. Connection failures reject with TypeError; HTTP error
-  status codes still resolve to Responses. Permissions-policy hint delegation, Critical-CH
-  retries and a complete browser preflight cache remain unsupported. Request cache/integrity/signal/referrer policies have bounded real network
+  status codes still resolve to Responses. Permissions-policy hint delegation
+  and a complete browser preflight cache remain unsupported. Request cache/integrity/signal/referrer policies have bounded real network
   effects; binary bodies, response streams/cancellation and HTTP2 uploads are
   integrated. Keepalive and full browser Fetch/cache behavior remain incomplete.
   Genuine multipart FormData BodyInit still throws explicitly. The default

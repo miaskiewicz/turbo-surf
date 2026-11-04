@@ -11509,7 +11509,9 @@ __G.domSig = (() => {
       else {
         const url = record.navigationURL || resolveFrameUrl(el);
         if (url && url !== "about:blank") {
-          const response = await ops.op_fetch(url, __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)}));
+          const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)});
+          const request = record.navigationRequest; record.navigationRequest = "";
+          const response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init);
           if (record.epoch !== epoch || !frameConnected(el)) return;
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;
@@ -11716,10 +11718,11 @@ __G.domSig = (() => {
     };
     Object.defineProperty(Element.prototype, name, {...descriptor, value: __documentFunction(delegate, name, original.length)});
   }
-  const navigateFrame = (el,url,source) => {
+  // `request` is a form navigation's native JSON (method, headers, body bytes).
+  const navigateFrame = (el,url,source,request) => {
     const record = recordFor(el);
     if (!record || !frameConnected(el) || !record.realm) return;
-    record.navigationURL = url; record.navigationSource = source;
+    record.navigationURL = url; record.navigationSource = source; record.navigationRequest = request || "";
     record.started = false; record.loaded = false; record.epoch++; record.navigation = true;
     record.metadata = frameMetadata(el);
     loadFrame(el);

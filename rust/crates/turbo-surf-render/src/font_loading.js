@@ -77,7 +77,7 @@
       let url;
       try {
         url = new URL(source.url, base).href;
-      } catch (_) {
+      } catch {
         continue;
       }
       if (!ops.op_csp_request(__fontDocument, url, "font-src", "")) continue;
@@ -94,7 +94,7 @@
           bytes = new Uint8Array(await __intrinsicApply(__fontArrayBuffer, response, []));
         }
         if (parsed(face, bytes)) return true;
-      } catch (_) {}
+      } catch {}
     }
     return false;
   }
@@ -114,7 +114,7 @@
           "font-src",
           "",
         );
-      } catch (_) {
+      } catch {
         return false;
       }
     });
@@ -280,7 +280,7 @@
         if (sheet.disabled) continue;
         collect(__resourceSheetRules(sheet), sheet.href || __fontDocument.baseURI, out);
       }
-    } catch (_) {}
+    } catch {}
     return out;
   };
 
@@ -338,7 +338,7 @@
       value.sets.delete(this.#state());
       if (value.id) ops.op_font_face_detach(__fontDocument, value.id);
     }
-    #started(face) {
+    #started() {
       const item = this.#state();
       if (item.loading++ === 0 && !item.resolve) {
         item.ready = new Promise((done) => (item.resolve = done));
@@ -384,7 +384,7 @@
           const root = __intrinsicApply(__fontRoot, __fontDocument, []);
           __fontRect ||= Element.prototype.getBoundingClientRect;
           if (root) __intrinsicApply(__fontRect, root, []);
-        } catch (_) {}
+        } catch {}
       }
       return this.#state().ready;
     }
@@ -476,21 +476,24 @@
   const fonts = new FontFaceSet(__fontToken);
   const used = fonts.used;
   delete FontFaceSet.prototype.used;
-  ops.op_font_face_layout_hook((names) => {
+  __G.fontLayoutUsed = (names) => {
     try {
       __intrinsicApply(used, fonts, [names]);
-    } catch (_) {}
-  });
+    } catch {}
+  };
   for (const [name, value] of [
     ["FontFace", FontFace],
     ["FontFaceSet", FontFaceSet],
     ["FontFaceSetLoadEvent", FontFaceSetLoadEvent],
   ])
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  Object.defineProperty(__fontDocument, "fonts", {
+  // On the prototype, as in Chrome: an own accessor on the document wrapper would make
+  // the binding keep that wrapper (and its realm) alive past a retired frame.
+  Object.defineProperty(Document.prototype, "fonts", {
     configurable: true,
+    enumerable: true,
     get() {
-      return fonts;
+      return this === __fontDocument ? fonts : undefined;
     },
   });
 })();

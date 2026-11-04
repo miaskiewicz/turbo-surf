@@ -208,24 +208,19 @@ pub(crate) fn op_font_face_rule(#[string] css: String) -> String {
     rule_descriptors(&css).map_or_else(|| "null".into(), |value| value.to_string())
 }
 
-/// `FontFaceSet` hook: live layout reports the `@font-face` families it used.
-struct LayoutHook(v8::Global<v8::Function>);
-
-#[op2(fast, reentrant)]
-pub(crate) fn op_font_face_layout_hook(scope: &mut v8::PinScope, hook: v8::Local<v8::Function>) {
-    let context = scope.get_current_context();
-    context.set_slot(Rc::new(LayoutHook(v8::Global::new(scope, hook))));
-}
-
-/// Hand the families the last layouts used to the realm's loader, which marks the
-/// matching unloaded faces loading (synchronously, as Chrome's style update does)
-/// and starts their fetches.
+/// Hand the families the last layouts used to the realm's loader (the engine
+/// namespace's `fontLayoutUsed`), which marks the matching unloaded faces loading
+/// (synchronously, as Chrome's style update does) and starts their fetches.
 pub(crate) fn report_used<'s>(scope: &mut v8::PinScope<'s, '_>, used: &[String]) -> bool {
-    let context = scope.get_current_context();
-    let Some(hook) = context.get_slot::<LayoutHook>() else {
+    let Some(namespace) = crate::browser_env::engine_namespace(scope) else {
         return false;
     };
-    let hook = v8::Local::new(scope, &hook.0);
+    let Some(hook) = v8::String::new(scope, "fontLayoutUsed")
+        .and_then(|key| namespace.get(scope, key.into()))
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    else {
+        return false;
+    };
     let names = used
         .iter()
         .filter_map(|name| v8::String::new(scope, name).map(Into::into))

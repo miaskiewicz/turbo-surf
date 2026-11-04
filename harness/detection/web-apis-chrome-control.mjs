@@ -1,4 +1,5 @@
-// Capture the Observable, EventTarget#when and Blob#textStream control in an independently installed Chrome.
+// Capture the Observable, EventTarget#when and Blob#textStream control (or the
+// --probes list, e.g. fetch-form-data-probe.js) in an independently installed Chrome.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,15 +15,14 @@ const { values } = parseArgs({
     runner: { type: "string" },
     out: { type: "string" },
     chrome: { type: "string" },
+    probes: { type: "string" },
   },
 });
 if (!values.runner || !values.out)
   throw Error("Pass --runner /absolute/chrome-cdp-trace.mjs --out /absolute/oracle.json");
-const probeNames = [
-  "observable-shape-probe.js",
-  "observable-semantics-probe.js",
-  "blob-text-stream-probe.js",
-];
+const probeNames = values.probes
+  ? values.probes.split(",")
+  : ["observable-shape-probe.js", "observable-semantics-probe.js", "blob-text-stream-probe.js"];
 const directory = mkdtempSync(join(tmpdir(), "turbo-web-apis-oracle-"));
 const server = createServer((_request, response) => {
   response.setHeader("Content-Type", "text/html");

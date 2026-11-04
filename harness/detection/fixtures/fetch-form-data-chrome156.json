@@ -1,0 +1,198 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-04T11:01:54.215Z",
+  "fixtures": {
+    "fetch-form-data-probe.js": "43348ce1f78fe5402ceab0dadb1df9e4fff20d26908f84399cd574b7997ac368"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "fetch-form-data-probe.js": {
+      "parts": {
+        "basic": [
+          "ok",
+          [[[97], [49]], [[102], [true, "x.txt", "text/plain", 2, [104, 105], "number", true]]],
+          true
+        ],
+        "fileNoType": [
+          "ok",
+          [[[102], [true, "a.bin", "text/plain", 2, [122, 122], "number", true]]],
+          true
+        ],
+        "fileRawType": [
+          "ok",
+          [[[102], [true, "p/q\\r.txt", "Image/PNG", 1, [118], "number", true]]],
+          true
+        ],
+        "fileTypeParams": [
+          "ok",
+          [[[102], [true, "z", "text/plain; charset=UTF-8", 1, [118], "number", true]]],
+          true
+        ],
+        "fileBlankType": ["ok", [[[97], [true, "f", "", 1, [118], "number", true]]], true],
+        "fileEmptyName": [
+          "ok",
+          [[[97, 34, 98], [true, "", "text/plain", 1, [118], "number", true]]],
+          true
+        ],
+        "fileFirstType": ["ok", [[[102], [true, "z", "a/b", 1, [118], "number", true]]], true],
+        "fileNameFirst": [
+          "ok",
+          [[[102], [true, "z", "text/plain", 1, [118], "number", true]]],
+          true
+        ],
+        "fileUtf8": [
+          "ok",
+          [[[102], [true, "ż.txt", "text/plain", 1, [118], "number", true]]],
+          true
+        ],
+        "filePercent": [
+          "ok",
+          [[[102], [true, "%C5%BC", "text/plain", 1, [118], "number", true]]],
+          true
+        ],
+        "fileBadName": ["TypeError", "Failed to fetch", true],
+        "fileRawBytes": [
+          "ok",
+          [[[102], [true, "b", "text/plain", 2, [65533, 0], "number", true]]],
+          true
+        ],
+        "preamble": ["ok", [[[97], [118]]], true],
+        "leadingCrlf": ["ok", [[[97], [118]]], true],
+        "lfOnly": ["TypeError", "Failed to fetch", true],
+        "lfBeforeClose": ["TypeError", "Failed to fetch", true],
+        "noName": ["TypeError", "Failed to fetch", true],
+        "noDisposition": ["TypeError", "Failed to fetch", true],
+        "noHeaders": ["TypeError", "Failed to fetch", true],
+        "blankHeaderLine": ["TypeError", "Failed to fetch", true],
+        "noClose": ["TypeError", "Failed to fetch", true],
+        "empty": ["TypeError", "Failed to fetch", true],
+        "onlyClose": ["ok", [], true],
+        "closeFirst": ["ok", [], true],
+        "utf8": ["ok", [[[380], [322]]], true],
+        "badUtf8Value": ["TypeError", "Failed to fetch", true],
+        "badUtf8Name": ["TypeError", "Failed to fetch", true],
+        "bomValue": ["ok", [[[97], [65279, 118]]], true],
+        "bomName": ["ok", [[[65279, 97], [118]]], true],
+        "nulValue": ["ok", [[[97], [118, 0, 119]]], true],
+        "crlfValue": ["ok", [[[97], [97, 13, 10, 98, 10, 99]]], true],
+        "emptyValue": ["ok", [[[97], []]], true],
+        "twoParts": ["ok", [[[97], [49]], [[97], [50]]], true],
+        "percentName": ["ok", [[[97, 37, 50, 50, 98], [118]]], true],
+        "escapes": ["ok", [[[97, 98, 92, 99], [118]]], true],
+        "unquoted": ["ok", [[[97], [118]]], true],
+        "singleQuotes": ["ok", [[[39, 97, 39], [118]]], true],
+        "commaValue": ["ok", [[[97], [118]]], true],
+        "nonAsciiToken": ["TypeError", "Failed to fetch", true],
+        "lowerHeader": ["ok", [[[97], [118]]], true],
+        "upperType": ["TypeError", "Failed to fetch", true],
+        "upperParam": ["ok", [[[97], [118]]], true],
+        "inline": ["TypeError", "Failed to fetch", true],
+        "tightParams": ["ok", [[[97], [118]]], true],
+        "looseParams": ["ok", [[[97], [118]]], true],
+        "tabs": ["ok", [[[97], [118]]], true],
+        "trailingSemicolon": ["TypeError", "Failed to fetch", true],
+        "duplicateParam": ["ok", [[[98], [118]]], true],
+        "duplicateHeader": ["ok", [[[97], [118]]], true],
+        "extendedParam": ["ok", [[[97], [118]]], true],
+        "typeWithoutFile": ["ok", [[[97], [118]]], true],
+        "extraHeader": ["ok", [[[97], [118]]], true],
+        "colonless": ["ok", [[[97], [118]]], true],
+        "emptyHeaderName": ["ok", [[[97], [118]]], true],
+        "spaceBeforeColon": ["ok", [[[97], [118]]], true],
+        "folded": ["ok", [[[97], [118]]], true],
+        "lfHeader": ["ok", [[[97], [118]]], true],
+        "innerDelimiter": ["TypeError", "Failed to fetch", true],
+        "paddedDelimiter": ["ok", [[[97], [118]]], true],
+        "paddedClose": ["ok", [[[97], [118]]], true],
+        "closePaddingCrlf": ["ok", [[[97], [118]]], true],
+        "closeJunk": ["TypeError", "Failed to fetch", true]
+      },
+      "types": {
+        "MULTIPART/FORM-DATA; BOUNDARY=x": ["ok", [[[97], [118]]], true],
+        "Multipart/Form-Data; boundary=x": ["ok", [[[97], [118]]], true],
+        "multipart/form-data; Boundary=\"x\"": ["ok", [[[97], [118]]], true],
+        "multipart/form-data;boundary=x;charset=utf-8": ["ok", [[[97], [118]]], true],
+        "multipart/form-data;  boundary = x": ["ok", [[[97], [118]]], true],
+        "multipart/form-data ; boundary=x": ["ok", [[[97], [118]]], true],
+        "multipart/form-data;boundary=\"x\";x=1": ["ok", [[[97], [118]]], true],
+        "multipart/form-data; boundary=X": ["TypeError", "Failed to fetch", true],
+        "multipart/form-data; boundary=\"x\"; boundary=y": ["TypeError", "Failed to fetch", true],
+        "multipart/form-data; boundary=\"x\\\"y\"": ["TypeError", "Failed to fetch", true],
+        "multipart/form-data; boundary=": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data; boundary=\"\"": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data; boundary=x y": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data; boundary=a\"b": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data; boundary=x;": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data;=;boundary=x": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data; foo; boundary=x": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data, text/plain; boundary=x": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-datax; boundary=x": ["TypeError", "Failed to fetch", true],
+        "multipart/form-data": ["TypeError", "Invalid MIME type", false]
+      },
+      "urlencoded": {
+        "application/x-www-form-urlencoded": [
+          "ok",
+          [[[97], [49]], [[98], [32, 32]], [[99], []]],
+          true
+        ],
+        "application/x-www-form-urlencoded;charset=x": [
+          "ok",
+          [[[97], [49]], [[98], [32, 32]], [[99], []]],
+          true
+        ],
+        "APPLICATION/X-WWW-FORM-URLENCODED": [
+          "ok",
+          [[[97], [49]], [[98], [32, 32]], [[99], []]],
+          true
+        ],
+        " application/x-www-form-urlencoded ": [
+          "ok",
+          [[[97], [49]], [[98], [32, 32]], [[99], []]],
+          true
+        ],
+        "text/plain": ["TypeError", "Failed to fetch", true],
+        "null": ["TypeError", "Failed to fetch", true],
+        "badUtf8": ["ok", [[[97], [65533]]], true],
+        "bom": ["ok", [[[65279, 97], [49]]], true]
+      },
+      "nullBodies": {
+        "null null": ["TypeError", "Invalid MIME type", false],
+        "null empty": ["TypeError", "Failed to fetch", true],
+        "text/plain null": ["TypeError", "Invalid MIME type", false],
+        "text/plain empty": ["TypeError", "Failed to fetch", true],
+        "multipart/form-data; boundary=x null": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data; boundary=x empty": ["TypeError", "Failed to fetch", true],
+        "multipart/form-data null": ["TypeError", "Invalid MIME type", false],
+        "multipart/form-data empty": ["TypeError", "Invalid MIME type", false],
+        "application/x-www-form-urlencoded null": ["ok", [], false],
+        "application/x-www-form-urlencoded empty": ["ok", [], true]
+      },
+      "request": {
+        "multipart": ["ok", [[[97], [118]]], true],
+        "textPlain": ["TypeError", "Failed to fetch", true],
+        "noBoundary": ["TypeError", "Invalid MIME type", false],
+        "nullBody": ["TypeError", "Invalid MIME type"]
+      },
+      "roundTrip": [
+        "multipart/form-data",
+        [[[97], [49]], [[102], [true, "n.txt", "x/y", 2, [122, 122], "number", true]]]
+      ],
+      "hooks": [
+        [
+          "ok",
+          [[[97], [49]], [[102], [true, "x.txt", "text/plain", 2, [104, 105], "number", true]]],
+          true
+        ],
+        ["ok", [[[97], [49]]], true],
+        0
+      ]
+    }
+  }
+}

@@ -2601,7 +2601,9 @@ async fn op_fetch(
         };
     }
     let iframe = init.get("destination").and_then(|value| value.as_str()) == Some("iframe");
-    if target.starts_with("blob:") && !iframe {
+    // fetch()/XHR destinations; scripts, styles and images keep their own data: paths.
+    let scheme_fetch = destination == Destination::Empty && !iframe;
+    if target.starts_with("blob:") && scheme_fetch {
         let key = init
             .get("blob_key")
             .and_then(|value| value.as_str())
@@ -2616,7 +2618,7 @@ async fn op_fetch(
             xhr,
         );
     }
-    if target.starts_with("data:") && !iframe {
+    if target.starts_with("data:") && scheme_fetch {
         return blob_urls::fetch_data(&target);
     }
     if target.starts_with("data:") && iframe {

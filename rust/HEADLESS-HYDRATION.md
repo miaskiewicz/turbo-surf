@@ -1082,8 +1082,9 @@ and/or shim `surface.test.mjs`) and committed on `fix-login-rsc-nav`.
   (`_actionSeq`, bumped per interaction) and only accepts one from the current action or later
   — matching Playwright's "responses after the call" semantics. Greened the vacation bulk
   upload (→ payroll-wizard 5/5).
-- **Download capture + ElementHandle + polling waitForFunction**: a real `URL.createObjectURL`
-  registry + capture-phase click listener record `<a download>` clicks over blob URLs into
+- **Download capture + ElementHandle + polling waitForFunction**: the native blob URL store
+  (`blob_urls.rs`, per storage key, Chrome's `blob:<origin>/<uuid>`; 0.7.1) + a
+  capture-phase click listener record `<a download>` clicks over blob URLs into
   `__downloads`; `page.waitForEvent('download')` → a Download with `path()/saveAs()/
   suggestedFilename()`. `Locator.elementHandle()` + a polling `page.waitForFunction(fn, handle)`
   that resolves the handle to the live element. Backs CSV-template download → fill → upload.
@@ -1544,9 +1545,11 @@ shadow geometry, scrolling, point hits and caret controls are integrated.
 ElementInternals/CustomStateSet, custom-element admission and form association,
 live control collections, RadioNodeList, native labels, validation and FormData
 lifecycle have independent behavior, receiver-realm and collection controls.
-Genuine top-document text GET/POST form submission uses actual network/cookie
-state and policy checks. Child-frame navigation, multipart parsing/encoding and
-broader form lifecycle remain explicit follow-up work.
+Genuine GET/POST form submission uses actual network/cookie state and policy
+checks, from the top document and (0.7.1, #111) from child frames, whose target
+navigable (`_self`, `_parent`, `_top`, named child frames) the parent's frame
+loader fetches with navigation semantics. Form-action on child-frame redirect
+hops (#139), frame-tree-wide target names and `_blank` (#140) remain follow-up work.
 
 Private native ownership backs Window/MessagePort and genuine stream transfers.
 Response/upload streams, cancellation, cache/referrer effects, partitioned and

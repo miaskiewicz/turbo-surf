@@ -24,8 +24,28 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   `harness/detection/fixtures/abort-signal-any-chrome156.json`. The per-listener microtask
   checkpoint (timeout dependents, abort-bridge reactions) is pinned and tracked in #136; the
   unpinned compression-dictionary/Range items and consumed-body messages move to #137.
+- **Fixed (blob:/data: URLs, #134)**: `URL.createObjectURL` mints Chrome's
+  `blob:<origin>/<uuid>` (was `blob:turbo-surf/N`, a fingerprint) into a native store keyed
+  by the creating document's origin, top-level site and credentialless partition (opaque
+  origins mint `blob:null/…` reachable from their own document only); `revokeObjectURL`
+  revokes, and a non-Blob argument throws Chrome's overload error. `fetch()` and
+  `XMLHttpRequest` load blob: URLs (GET only; one byte range answered 206 with
+  `Content-Range`, reported `Partial Content` to XHR and `OK` to fetch; `Content-Type` and
+  `Content-Length`; revoked, foreign-origin and unknown URLs fail like Chrome) and data: URLs
+  (any method, ranges ignored, Chrome's MIME serialization). Download capture reads the same
+  store. Synchronous XHR still does not load (#138). New control
+  `harness/detection/fixtures/blob-data-url-fetch-chrome156.json`.
+- **Fixed (forms, #111)**: native form submission inside a child frame navigates its target
+  (the frame itself, `_parent`, `_top`, or a named child frame; top-level forms can target
+  named frames too) with the form's method, body and headers through the frame loader, so
+  the server sees Chrome's `Origin`, `Content-Type`, `Cache-Control: max-age=0` (POST),
+  `Referer` and `Sec-Fetch-*` (`iframe`/`navigate`). `allow-forms`, the child's
+  `form-action` policy and the sandbox's ban on navigating ancestors apply. Form-action on
+  redirect hops (#139) and names outside the submitting document's frames / `_blank` (#140)
+  remain. New control `harness/detection/fixtures/child-frame-form-navigation-chrome156.json`.
 - **Tests**: `harness/detection/web-apis-chrome-control.mjs` takes `--probes` to record other
-  single-page controls.
+  single-page controls, `--allow-request-failures` for probes that assert failed loads, and
+  serves `/echo…` (the request it received) and `/csp-…` (`form-action 'none'`) pages.
 
 ## [0.7.0] — turbo-dom 0.7.0
 

@@ -2178,6 +2178,29 @@ pub async fn fetch_typed_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn protocol_memory_drops_priority_only_for_http1_origins() {
+        let url = "https://protocol-memory.test/a";
+        let headers = BTreeMap::from([("priority".to_owned(), "u=0, i".to_owned())]);
+        super::remember_protocol(url, http::Version::HTTP_11);
+        let wire = super::wire_headers(url, &headers);
+        assert!(!wire.contains_key("priority"));
+        assert_eq!(wire["connection"], "keep-alive");
+        super::remember_protocol(url, http::Version::HTTP_2);
+        assert_eq!(super::wire_headers(url, &headers)["priority"], "u=0, i");
+        super::remember_protocol("data:,x", http::Version::HTTP_11);
+        let explicit = BTreeMap::from([("connection".to_owned(), "close".to_owned())]);
+        assert_eq!(super::wire_headers(url, &explicit)["connection"], "close");
+        // One test owns the process-wide map, so clearing it races nothing.
+        for n in 0..=super::HTTP1_ORIGIN_LIMIT {
+            super::remember_protocol(
+                &format!("https://h{n}.bounded.test/"),
+                http::Version::HTTP_11,
+            );
+        }
+        assert!(super::http1_origins().lock().unwrap().len() <= super::HTTP1_ORIGIN_LIMIT);
+    }
+
     use super::*;
 
     #[test]

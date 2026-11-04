@@ -190,6 +190,9 @@ fn structured_fields_and_real_url_patterns_match_destinations_and_origin() {
         outgoing["accept-encoding"],
         "gzip, deflate, br, zstd, dcb, dcz"
     );
+    let mut ranged = BTreeMap::from([("range".to_owned(), "bytes=0-3".to_owned())]);
+    selected.negotiate(&mut ranged);
+    assert_eq!(ranged["accept-encoding"], "identity, dcb, dcz");
     assert!(dictionaries
         .select("other", "https://dict.test/app/main.js", &context())
         .is_none());

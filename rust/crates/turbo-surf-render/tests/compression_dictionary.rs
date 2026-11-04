@@ -68,7 +68,7 @@ fn lifecycle_events_match(actual: &Value, expected: &Value) -> bool {
 #[test]
 fn dictionary_lifecycle_order_keeps_barriers_counts_and_states() {
     let control: Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/compression-dictionary-chrome155.json"
+        "../../../../harness/detection/fixtures/compression-dictionary-chrome156.json"
     ))
     .unwrap();
     for (id, case) in control["cases"].as_array().unwrap().iter().enumerate() {
@@ -176,7 +176,7 @@ async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() 
     let (_fixture, urls) = fixture();
     let primary = urls["primary"].as_str().unwrap();
     let control: Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/compression-dictionary-chrome155.json"
+        "../../../../harness/detection/fixtures/compression-dictionary-chrome156.json"
     ))
     .unwrap();
     for (id, case) in control["cases"].as_array().unwrap().iter().enumerate() {
@@ -224,7 +224,16 @@ async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() 
                 primary
             }
         );
-        if case["head"] == true {
+        if let Some(range) = case["range"].as_str() {
+            let script = format!(
+                "fetch({},{{headers:{{Range:{}}}}}).then(async r=>({{status:r.status,contentRange:r.headers.get('content-range'),text:await r.text()}}))",
+                serde_json::to_string(&target).unwrap(),
+                serde_json::to_string(range).unwrap()
+            );
+            let actual: Value =
+                serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
+            assert_eq!(actual, control["result"][id]["range"], "range response");
+        } else if case["head"] == true {
             let dictionary = format!("{primary}/dictionary?case={id}");
             let script=format!("(async()=>{{const first=await fetch({},{{method:'HEAD'}});const headBytes=(await first.text()).length;await fetch({}).then(r=>r.text());const second=await fetch({});const getBytes=(await second.text()).length;await fetch({}).then(r=>r.text());await new Promise(resolve=>setTimeout(resolve,100));await fetch({}).then(r=>r.text());await new Promise(resolve=>setTimeout(resolve,400));await fetch({}).then(r=>r.text());return {{headBytes,getBytes}}}})()",serde_json::to_string(&dictionary).unwrap(),serde_json::to_string(&(target.clone()+"&phase=before")).unwrap(),serde_json::to_string(&dictionary).unwrap(),serde_json::to_string(&(target.clone()+"&phase=after")).unwrap(),serde_json::to_string(&(target.clone()+"&phase=after100")).unwrap(),serde_json::to_string(&(target.clone()+"&phase=after500")).unwrap());
             let actual: Value =
@@ -405,11 +414,31 @@ async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() 
         if case["head"] == true {
             assert_eq!(actual_available.len(), 4);
             assert_eq!(expected_available.len(), 4);
-            // Chrome publishes its dictionary asynchronously after response.text();
-            // Core publishes at EOF. Compare HEAD absence and stable delayed reads,
-            // retaining the immediate Chrome observation in the source-pinned fixture.
+            // KNOWN_GAPS (#137): Chrome publishes a fetched dictionary in a later
+            // task after response.text() resolves, so the immediate follow-up
+            // request does not advertise it (100 ms later it does). Core publishes
+            // synchronously at transport EOF and advertises it at once. Pinned on
+            // both sides so a change in either is noticed; no artificial delay.
+            assert_eq!(expected_available[1], false, "Chrome immediate read");
+            assert_eq!(actual_available[1], true, "surf immediate read (gap)");
             actual_available.remove(1);
             expected_available.remove(1);
+        }
+        if case["range"].is_string() {
+            // A Range request still negotiates the dictionary, with identity.
+            let encodings = |rows: &Value| {
+                rows.as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|row| row["case"] == id && row["path"] == resource_path)
+                    .map(|row| row["headers"]["accept-encoding"].clone())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                encodings(&wire),
+                encodings(&control["wire"]),
+                "range Accept-Encoding"
+            );
         }
         assert_eq!(
             actual_available, expected_available,

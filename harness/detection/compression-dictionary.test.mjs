@@ -11,7 +11,7 @@ const source = readFileSync(
 
 test("dictionary Chrome evidence is pinned and distinguishes CSP, CORS and background load", () => {
   const fixture = JSON.parse(
-    readFileSync(new URL("./fixtures/compression-dictionary-chrome155.json", import.meta.url)),
+    readFileSync(new URL("./fixtures/compression-dictionary-chrome156.json", import.meta.url)),
   );
   assert.equal(
     fixture.collectorSha256,

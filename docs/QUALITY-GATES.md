@@ -193,7 +193,7 @@ JS (55; `function:<line>` is an anonymous function):
 - `harness/detection/chrome-trace.mjs`: capture:89=37
 - `harness/detection/collector-interruption.test.mjs`: function:102=23
 - `harness/detection/compare.mjs`: function:125=21, function:206=30, function:248=17
-- `harness/detection/compression-dictionary-server.mjs`: function:74=29
+- `harness/detection/compression-dictionary-server.mjs`: function:91=29
 - `harness/detection/cpu-profile-summary.mjs`: summarizeCpuProfile:6=28
 - `harness/detection/csp-report-endpoint-chrome.mjs`: function:51=18
 - `harness/detection/css-security.mjs`: cssSecurityErrors:21=24

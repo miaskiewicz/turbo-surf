@@ -51,8 +51,19 @@
     // retains only a numeric native weak identity, never a child realm closure.
     const rawAdd = signal.addEventListener.value,
       rawRemove = signal.removeEventListener.value;
+    // True only while a host task (the official timeout timer) runs the abort
+    // algorithms; page code reached from a listener never inherits it.
+    backend.hostAbort = false;
     backend.listen = (raw, id) => {
-      const listener = () => ops.op_web_abort_dispatch(id, apply(signal.reason.get, raw, []));
+      const listener = () => {
+        const host = backend.hostAbort;
+        backend.hostAbort = false;
+        try {
+          ops.op_web_abort_dispatch(id, apply(signal.reason.get, raw, []), host);
+        } finally {
+          backend.hostAbort = host;
+        }
+      };
       apply(rawAdd, raw, ["abort", listener, { once: true }]);
       return listener;
     };
@@ -655,10 +666,18 @@
               ]);
               apply(backend.signal.addEventListener.value, timer, [
                 "abort",
-                () =>
-                  apply(backend.controller.abort.value, controller, [
-                    new Exception("signal timed out", "TimeoutError"),
-                  ]),
+                () => {
+                  // Blink signals the timeout from a task: each signal (the
+                  // source, then each dependent) dispatches from the host.
+                  backend.hostAbort = true;
+                  try {
+                    apply(backend.controller.abort.value, controller, [
+                      new Exception("signal timed out", "TimeoutError"),
+                    ]);
+                  } finally {
+                    backend.hostAbort = false;
+                  }
+                },
               ]);
               const front = signalFront(apply(backend.controller.signal.get, controller, []));
               retainTimeout(front);

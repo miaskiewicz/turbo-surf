@@ -235,8 +235,13 @@ async fn official_abort_bridge_keeps_chrome_state_and_unadapted_reaction_order()
     for (name, rows) in actual.as_object().unwrap() {
         let rows = rows.as_array().unwrap();
         let phases: Vec<_> = rows.iter().map(|row| row[0].clone()).collect();
-        // Preserve the official Deno queue order; its known Chrome difference
-        // remains explicitly tracked rather than silently normalizing the API.
+        // KNOWN_GAPS (#136): preserve the official Deno queue order. This is
+        // not a host-checkpoint difference: controller.abort() runs from page
+        // script, so Chrome performs no checkpoint either. Chrome's pipeTo
+        // shutdown reaches sink abort/source cancel before the listener's
+        // microtask; the official Deno shutdownWithAction waits one more
+        // promise hop (waitForWritesToFinish), which only a
+        // turbo-surf-deno-web 06_streams.js change can remove.
         assert_eq!(
             serde_json::json!(phases),
             baseline["phases"][name],

@@ -428,6 +428,7 @@ Known gaps, each tracked in its own issue:
 [form-action on child-frame form redirects](https://github.com/miaskiewicz/turbo-surf/issues/139),
 [form targets outside the submitting document's frames / `_blank`](https://github.com/miaskiewicz/turbo-surf/issues/140),
 [synchronous XMLHttpRequest](https://github.com/miaskiewicz/turbo-surf/issues/138),
+[blob: script/style/image/frame sources](https://github.com/miaskiewicz/turbo-surf/issues/146),
 [V8 15.0 vs 15.6](https://github.com/miaskiewicz/turbo-surf/issues/112),
 [transport identity](https://github.com/miaskiewicz/turbo-surf/issues/113),
 [Google SERP](https://github.com/miaskiewicz/turbo-surf/issues/114),

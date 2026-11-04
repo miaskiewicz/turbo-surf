@@ -33,7 +33,8 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   `Content-Range`, reported `Partial Content` to XHR and `OK` to fetch; `Content-Type` and
   `Content-Length`; revoked, foreign-origin and unknown URLs fail like Chrome) and data: URLs
   (any method, ranges ignored, Chrome's MIME serialization). Download capture reads the same
-  store. Synchronous XHR still does not load (#138). New control
+  store. Synchronous XHR still does not load (#138); blob: script, style, image and frame
+  sources are #146. New control
   `harness/detection/fixtures/blob-data-url-fetch-chrome156.json`.
 - **Fixed (forms, #111)**: native form submission inside a child frame navigates its target
   (the frame itself, `_parent`, `_top`, or a named child frame; top-level forms can target

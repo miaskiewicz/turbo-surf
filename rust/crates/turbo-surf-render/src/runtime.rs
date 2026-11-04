@@ -8542,6 +8542,7 @@ let __setHeadersGuard;
 }
 let __responseFromNetwork, __requestInit, __resourceResponse, __BodyParamsString;
 const __blobStates = __interfaceMap("Blob");
+let __utf8Decode;
 const __formDataStates = __interfaceMap("FormData");
 // multipart/form-data BodyInit: UTF-8, newline-normalized names and text values,
 // Blink's quoted-string escapes and its random WebKitFormBoundary.
@@ -8640,11 +8641,22 @@ const __resourceFailure=error=>__fetchFailures.get(error);
   const bodyMethods = map => ({
     async arrayBuffer(){const bytes=await consume(state(map,this).body);return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);},
     async bytes(){return consume(state(map,this).body);},
-    async text(){return new TextDecoder().decode(await consume(state(map,this).body));},
-    async json(){return JSON.parse(new TextDecoder().decode(await consume(state(map,this).body)));},
+    async text(){return __utf8Decode(await consume(state(map,this).body));},
+    async json(){return JSON.parse(__utf8Decode(await consume(state(map,this).body)));},
     async blob(){const value=state(map,this);return new Blob([await consume(value.body)],{type:value.headers.get("content-type") || ""});},
     textStream(){const value=state(map,this).body;if(value.used||value.stream&&__web.disturbed(value.stream)||value.stream?.locked)throw new TypeError("Body has already been consumed");const stream=body(value);value.used=true;const decoder=new TextDecoder(),reader=stream?.getReader();let released=false;const release=()=>{if(reader&&!released){released=true;reader.releaseLock();}};return new __FetchReadable({async pull(controller){try{if(reader){while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text){controller.enqueue(text);return;}}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();release();}catch(error){controller.error(error);release();}},async cancel(reason){try{if(reader)await reader.cancel(reason);}finally{release();}}},{highWaterMark:0});},
-    async formData(){const value=state(map,this),type=value.headers.get("content-type")||"",bytes=await consume(value.body);if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(type))throw new TypeError("Unsupported form encoding");const form=new FormData();for(const [key,item] of new URLSearchParams(new TextDecoder().decode(bytes)))form.append(key,item);return form;}
+    async formData(){
+      const value=state(map,this),body=value.body;
+      if(body.used||body.stream&&__web.disturbed(body.stream)||body.stream?.locked)throw new TypeError("Body has already been consumed");
+      const type=value.headers.get("content-type")||"",essence=__formBody.essence(type),empty=body.raw==null&&!body.stream;
+      const done=rows=>__aliasFormData(__makeFormDataRecord(rows));
+      if(essence==="application/x-www-form-urlencoded")return done(empty?[]:__formBody.urlencoded(await consume(body)));
+      const boundary=essence==="multipart/form-data"?__formBody.boundaryOf(type):null;
+      if(empty||boundary==="")throw new TypeError("Invalid MIME type");
+      const bytes=await consume(body),rows=boundary===null?null:__formBody.multipart(bytes,boundary);
+      if(!rows)throw new TypeError("Failed to fetch");
+      return done(rows);
+    }
   });
   const project = (ctor,map,fields) => {
     for(const field of fields)Object.defineProperty(ctor.prototype,field,{get:({["get "+field](){return state(map,this)[field];}})["get "+field],enumerable:true,configurable:true});
@@ -8976,6 +8988,209 @@ if (typeof globalThis.FormData === "undefined") {
 const __capturedFormDataPrototype=globalThis.FormData.prototype;
 const __makeFormDataRecord=rows=>{const entries=[];for(let i=0;i<rows.length;i++)entries[entries.length]=[__fileUSV(rows[i][0]),__formDataValue(rows[i][1],undefined,false)];return {entries};};
 const __aliasFormData=record=>{const wrapper=__recordCreate(__capturedFormDataPrototype);__formDataStates.set(wrapper,record);return wrapper;};
+// Body#formData() as Blink parses it (body.cc, multipart_parser.cc): the MIME
+// essence picks the parser; a multipart type with no valid boundary rejects
+// "Invalid MIME type" before the body is read; a body that does not parse
+// rejects "Failed to fetch". Bytes are decoded here, so page-patched
+// TextDecoder, URLSearchParams or FormData methods never see the parse.
+const __formBody = (() => {
+  const fromCode = String.fromCharCode, lower = String.prototype.toLowerCase, apply = Reflect.apply;
+  const own = Object.hasOwn;
+  // UTF-8 per the Encoding Standard: maximal subparts become U+FFFD, or fail when fatal.
+  const utf8 = (bytes, start, end, fatal) => {
+    let text = "", index = start;
+    while (index < end) {
+      const lead = bytes[index++];
+      if (lead < 0x80) { text += fromCode(lead); continue; }
+      let need = 0, point = 0, low = 0x80, high = 0xbf;
+      if (lead >= 0xc2 && lead <= 0xdf) { need = 1; point = lead & 0x1f; }
+      else if (lead >= 0xe0 && lead <= 0xef) { need = 2; point = lead & 0x0f; if (lead === 0xe0) low = 0xa0; if (lead === 0xed) high = 0x9f; }
+      else if (lead >= 0xf0 && lead <= 0xf4) { need = 3; point = lead & 0x07; if (lead === 0xf0) low = 0x90; if (lead === 0xf4) high = 0x8f; }
+      else { if (fatal) return null; text += "�"; continue; }
+      let bad = false;
+      for (let seen = 0; seen < need; seen++) {
+        const next = bytes[index];
+        if (index >= end || next < low || next > high) { bad = true; break; }
+        low = 0x80; high = 0xbf; point = point << 6 | next & 0x3f; index++;
+      }
+      if (bad) { if (fatal) return null; text += "�"; continue; }
+      if (point > 0xffff) { point -= 0x10000; text += fromCode(0xd800 + (point >> 10), 0xdc00 + (point & 0x3ff)); }
+      else text += fromCode(point);
+    }
+    return text;
+  };
+  const isWhite = code => code === 0x20 || code === 0x09;
+  const tokenChar = code => code > 0x20 && code < 0x7f && "()<>@,;:\\\"/[]?={}".indexOf(fromCode(code)) < 0;
+  // A header value's `token *( ";" name "=" ( token / quoted-string ) )`, whitespace
+  // allowed around each symbol; a comma ends the value. Null when malformed.
+  const parameters = (text, at) => {
+    const values = { __proto__: null }, length = text.length;
+    const skip = () => { while (at < length && isWhite(text.charCodeAt(at))) at++; };
+    const token = () => { const start = at; while (at < length && tokenChar(text.charCodeAt(at))) at++; return text.slice(start, at); };
+    for (;;) {
+      skip();
+      if (at >= length || text[at] === ",") return values;
+      if (text[at] !== ";") return null;
+      at++; skip();
+      const name = apply(lower, token(), []);
+      if (!name) return null;
+      skip();
+      if (text[at] !== "=") return null;
+      at++; skip();
+      let value = "";
+      if (text[at] === "\"") {
+        at++;
+        for (;;) {
+          if (at >= length) return null;
+          const character = text[at++];
+          if (character === "\"") break;
+          if (character === "\\") { if (at >= length) return null; value += text[at++]; } else value += character;
+        }
+      } else if (!(value = token())) return null;
+      values[name] = value;
+    }
+  };
+  // `type/subtype` (or a lone token for Content-Disposition) and its parameters.
+  const headerValue = (text, slash) => {
+    let at = 0;
+    while (at < text.length && isWhite(text.charCodeAt(at))) at++;
+    const start = at;
+    while (at < text.length && tokenChar(text.charCodeAt(at))) at++;
+    if (at === start) return null;
+    if (slash) {
+      if (text[at] !== "/") return null;
+      const sub = ++at;
+      while (at < text.length && tokenChar(text.charCodeAt(at))) at++;
+      if (at === sub) return null;
+    }
+    const params = parameters(text, at);
+    return params && { type: text.slice(start, at), params };
+  };
+  // The MIME type essence the parser choice reads: lowercased, up to ";", "," or whitespace.
+  const essence = type => {
+    let at = 0;
+    while (at < type.length && (isWhite(type.charCodeAt(at)) || type[at] === "\r" || type[at] === "\n")) at++;
+    let end = at;
+    while (end < type.length && ";, \t\r\n".indexOf(type[end]) < 0) end++;
+    return apply(lower, type.slice(at, end), []);
+  };
+  const boundaryOf = type => {
+    const parsed = headerValue(type, true);
+    return parsed && own(parsed.params, "boundary") ? parsed.params.boundary : "";
+  };
+  const find = (bytes, needle, from) => {
+    const last = bytes.length - needle.length;
+    outer: for (let index = from; index <= last; index++) {
+      for (let offset = 0; offset < needle.length; offset++) if (bytes[index + offset] !== needle[offset]) continue outer;
+      return index;
+    }
+    return -1;
+  };
+  const ascii = text => { const out = []; for (let index = 0; index < text.length; index++) out[index] = text.charCodeAt(index) & 0xff; return out; };
+  // Part headers: CRLF or LF lines, folded continuations, first occurrence wins.
+  const partHeaders = text => {
+    const lines = [], headers = { __proto__: null };
+    let start = 0;
+    for (let index = 0; index <= text.length; index++) {
+      if (index < text.length && text[index] !== "\n") continue;
+      let line = text.slice(start, index);
+      if (line.length && line[line.length - 1] === "\r") line = line.slice(0, -1);
+      start = index + 1;
+      if (lines.length && line.length && isWhite(line.charCodeAt(0))) lines[lines.length - 1] += " " + line;
+      else lines[lines.length] = line;
+    }
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index], colon = line.indexOf(":");
+      if (colon < 0) continue;
+      let name = line.slice(0, colon), value = line.slice(colon + 1);
+      let from = 0, to = name.length;
+      while (from < to && isWhite(name.charCodeAt(from))) from++;
+      while (to > from && isWhite(name.charCodeAt(to - 1))) to--;
+      name = apply(lower, name.slice(from, to), []);
+      from = 0; to = value.length;
+      while (from < to && isWhite(value.charCodeAt(from))) from++;
+      while (to > from && isWhite(value.charCodeAt(to - 1))) to--;
+      if (name && !own(headers, name)) headers[name] = value.slice(from, to);
+    }
+    return headers;
+  };
+  // One part into a [name, value] row, or null when it does not form an entry.
+  const part = (bytes, headerStart, headerEnd, bodyStart, bodyEnd, now) => {
+    const text = utf8(bytes, headerStart, headerEnd, true);
+    if (text === null) return null;
+    const headers = partHeaders(text);
+    if (!own(headers, "content-disposition")) return null;
+    const disposition = headerValue(headers["content-disposition"], false);
+    if (!disposition || disposition.type !== "form-data" || !own(disposition.params, "name")) return null;
+    const name = disposition.params.name;
+    if (!own(disposition.params, "filename")) {
+      const value = utf8(bytes, bodyStart, bodyEnd, true);
+      return value === null ? null : [name, value];
+    }
+    const type = own(headers, "content-type") ? headers["content-type"] : "text/plain";
+    const blob = { bytes: bytes.slice(bodyStart, bodyEnd), type };
+    return [name, __createPrivateFile(blob, disposition.params.filename, now)];
+  };
+  const multipart = (bytes, boundary) => {
+    const dash = ascii("--" + boundary), delimiter = ascii("\r\n--" + boundary), rows = [];
+    let at = find(bytes, dash, 0) === 0 ? dash.length : find(bytes, delimiter, 0);
+    if (at < 0) return null;
+    if (at !== dash.length) at += delimiter.length;
+    const now = __fileNow();
+    for (;;) {
+      if (bytes[at] === 0x2d && bytes[at + 1] === 0x2d) {
+        at += 2;
+        while (at < bytes.length && isWhite(bytes[at])) at++;
+        return at === bytes.length || bytes[at] === 0x0d && bytes[at + 1] === 0x0a ? rows : null;
+      }
+      while (at < bytes.length && isWhite(bytes[at])) at++;
+      if (bytes[at] !== 0x0d || bytes[at + 1] !== 0x0a) return null;
+      at += 2;
+      let headerEnd, bodyStart;
+      if (bytes[at] === 0x0d && bytes[at + 1] === 0x0a) { headerEnd = at; bodyStart = at + 2; }
+      else {
+        headerEnd = find(bytes, [0x0d, 0x0a, 0x0d, 0x0a], at);
+        if (headerEnd < 0) return null;
+        bodyStart = headerEnd + 4;
+      }
+      const bodyEnd = find(bytes, delimiter, bodyStart);
+      if (bodyEnd < 0) return null;
+      const row = part(bytes, at, headerEnd, bodyStart, bodyEnd, now);
+      if (!row) return null;
+      rows[rows.length] = row;
+      at = bodyEnd + delimiter.length;
+    }
+  };
+  // application/x-www-form-urlencoded parsing over bytes (URL Standard).
+  const hex = code => code >= 0x30 && code <= 0x39 ? code - 0x30 : (code | 0x20) >= 0x61 && (code | 0x20) <= 0x66 ? (code | 0x20) - 0x57 : -1;
+  const decodeComponent = (bytes, start, end) => {
+    const out = [];
+    for (let index = start; index < end; index++) {
+      const code = bytes[index];
+      if (code === 0x2b) out[out.length] = 0x20;
+      else if (code === 0x25 && index + 2 < end && hex(bytes[index + 1]) >= 0 && hex(bytes[index + 2]) >= 0) {
+        out[out.length] = hex(bytes[index + 1]) * 16 + hex(bytes[index + 2]);
+        index += 2;
+      } else out[out.length] = code;
+    }
+    return utf8(out, 0, out.length, false);
+  };
+  const urlencoded = bytes => {
+    const rows = [];
+    let start = 0;
+    for (let index = 0; index <= bytes.length; index++) {
+      if (index < bytes.length && bytes[index] !== 0x26) continue;
+      if (index > start) {
+        let equals = start;
+        while (equals < index && bytes[equals] !== 0x3d) equals++;
+        rows[rows.length] = [decodeComponent(bytes, start, equals), equals < index ? decodeComponent(bytes, equals + 1, index) : ""];
+      }
+      start = index + 1;
+    }
+    return rows;
+  };
+  return { essence, boundaryOf, multipart, urlencoded };
+})();
 // Blob / File / FileReader — analytics + upload code (PostHog, file inputs) reference
 // these during hydration; deno_core ships none ("File is not defined" aborts PostHog
 // init). Private byte buffers preserve binary Blob/File parts and authentic brands
@@ -8998,7 +9213,7 @@ if (typeof globalThis.Blob === "undefined") {
     async arrayBuffer(){return read(this).bytes.slice().buffer;}
     slice(start=0,end=undefined,type=""){const value=read(this),size=value.bytes.length;start=Number(start)||0;end=end===undefined?size:Number(end)||0;start=start<0?Math.max(size+start,0):Math.min(start,size);end=end<0?Math.max(size+end,0):Math.min(end,size);return new Blob([value.bytes.slice(start,Math.max(start,end))],{type});}
     stream(){const bytes=read(this).bytes.slice();return new ReadableStream({start(controller){controller.enqueue(bytes);controller.close();}});}
-    async text(){return new TextDecoder().decode(read(this).bytes);}
+    async text(){return __utf8Decode(read(this).bytes);}
     async bytes(){return read(this).bytes.slice();}
   };
   for(const name of ["size","type","arrayBuffer","slice","stream","text","bytes"])Object.defineProperty(Blob.prototype,name,{...Object.getOwnPropertyDescriptor(Blob.prototype,name),enumerable:true});
@@ -9589,6 +9804,9 @@ if (typeof globalThis.CSS === "undefined") {
  };
  for(const [ctor,name] of [[TextEncoder,"TextEncoder"],[TextDecoder,"TextDecoder"]])Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});
 }
+// Bootstrap-captured UTF-8 decode for Blob#text and the Body readers: a
+// page-patched TextDecoder never sees their bytes.
+{const decoder=new TextDecoder(),decode=TextDecoder.prototype.decode,apply=Reflect.apply;__utf8Decode=bytes=>apply(decode,decoder,[bytes]);}
 "##,
     include_str!("blob_text_stream.js"),
     include_str!("observable.js"),

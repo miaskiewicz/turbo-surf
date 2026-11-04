@@ -77,6 +77,10 @@ pub fn brand_header(major: u16, version: &str, full: bool) -> String {
         .join(", ")
 }
 
+/// The document `devicePixelRatio` the render tier defaults to (runtime.rs) and
+/// the value of the `Sec-CH-DPR` client hint.
+pub const DEVICE_PIXEL_RATIO: u8 = 2;
+
 /// One coherent real-Chrome client identity. Construct via [`select`] (by client
 /// key) or [`profile_at`] (by index); [`default_profile`] is the fixed identity
 /// used when no profile is chosen (preserves pre-pool behaviour).

@@ -244,9 +244,12 @@ async fn critical_ch_restarts_once_with_the_accepted_hints_in_chromes_order() {
             get(&chrome[1], hint).is_some()
         );
     }
+    // The oracle is headless-shell, whose product brand is `HeadlessChrome`.
     assert_eq!(
         get(&sent[1], "sec-ch-ua-full-version-list"),
         get(&chrome[1], "sec-ch-ua-full-version-list")
+            .map(|value| value.replace("HeadlessChrome", "Google Chrome"))
+            .as_deref()
     );
     // The restart's relative order of the names both sides send.
     let names = |lines: &Lines| -> Vec<String> {

@@ -148,6 +148,24 @@
           "Cookie",
           "priority"
         ],
+        "navigate-hinted-restart": [
+          "Upgrade-Insecure-Requests",
+          "User-Agent",
+          "Accept",
+          "sec-ch-ua",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-arch",
+          "sec-ch-ua-platform",
+          "sec-ch-ua-full-version-list",
+          "Sec-Fetch-Site",
+          "Sec-Fetch-Mode",
+          "Sec-Fetch-User",
+          "Sec-Fetch-Dest",
+          "Accept-Encoding",
+          "Accept-Language",
+          "Cookie",
+          "priority"
+        ],
         "no-cors": [
           "sec-ch-ua-platform",
           "User-Agent",

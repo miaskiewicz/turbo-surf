@@ -398,8 +398,8 @@ satisfied by changing strings:
   labelling rules).
 - **`navigator.webdriver`.** It stays `false`. The measured `true` is the CDP
   collector's artifact.
-- **Missing behaviour.** Don't emit requests to look busy. Favicon, web-font and
-  Critical-CH gaps stay gaps until the behaviour really exists.
+- **Missing behaviour.** Don't emit requests to look busy. Favicon and web-font
+  gaps stay gaps until the behaviour really exists.
 
 ## 7. Tests, fixtures and gates
 

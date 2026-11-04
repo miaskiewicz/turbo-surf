@@ -670,12 +670,18 @@ fn transport_recipe(base_major: u16) -> wreq_util::Profile {
 fn request_order(
     method: &str,
     headers: &BTreeMap<String, String>,
+    restart: bool,
 ) -> Option<http::header::OrigHeaderMap> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<HashMap<String, http::header::OrigHeaderMap>>> = OnceLock::new();
-    let class = crate::browser::request_class(method, |name| headers.get(name).cloned());
-    let order = crate::browser::default_release().request_order(&class)?;
+    let mut class = crate::browser::request_class(method, |name| headers.get(name).cloned());
+    let release = crate::browser::default_release();
+    // A Critical-CH restart has its own measured order; fall back to the class's.
+    if restart && release.request_order(&format!("{class}-restart")).is_some() {
+        class.push_str("-restart");
+    }
+    let order = release.request_order(&class)?;
     let mut cache = CACHE
         .get_or_init(Default::default)
         .lock()
@@ -914,13 +920,17 @@ async fn send(
     body: &Option<String>,
     body_bytes: &Option<Vec<u8>>,
     upload: Option<crate::upload_body::UploadBody>,
+    restart: bool,
 ) -> Result<http::Response, HttpError> {
     let m = http::Method::from_bytes(method.as_bytes()).map_err(|e| err(e, ErrorCode::Network))?;
-    let mut req = apply_headers(cl.request(m, url), headers);
+    let wire = wire_headers(url, headers);
+    let mut req = apply_headers(cl.request(m, url), &wire);
     #[cfg(feature = "impersonate")]
-    if let Some(order) = request_order(method, headers) {
+    if let Some(order) = request_order(method, &wire, restart) {
         req = req.orig_headers(order);
     }
+    #[cfg(not(feature = "impersonate"))]
+    let _ = restart;
     let streaming_upload = upload.is_some();
     if let Some(upload) = upload {
         #[cfg(not(feature = "impersonate"))]
@@ -945,6 +955,9 @@ async fn send(
         })
     });
     let mut result = req.send().await;
+    if let Ok(response) = &result {
+        remember_protocol(url, response.version());
+    }
     if method == "HEAD" {
         if let Ok(response) = &mut result {
             response.extensions_mut().insert(HeadResponse);
@@ -978,6 +991,51 @@ fn apply_headers(
         req = req.header(k.as_str(), v.as_str());
     }
     req
+}
+
+// Origins whose last response came over HTTP/1.x, like Chrome's
+// HttpServerProperties. Request headers are built before ALPN picks the
+// protocol, so only a known origin can drop its HTTP/2-only headers.
+fn http1_origins() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static ORIGINS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    ORIGINS.get_or_init(Default::default)
+}
+
+const HTTP1_ORIGIN_LIMIT: usize = 4096;
+
+fn remember_protocol(url: &str, version: http::Version) {
+    let Some(origin) = crate::request_context::origin(url) else {
+        return;
+    };
+    let mut origins = http1_origins().lock().unwrap_or_else(|e| e.into_inner());
+    if version == http::Version::HTTP_2 || version == http::Version::HTTP_3 {
+        origins.remove(&origin);
+        return;
+    }
+    if origins.len() >= HTTP1_ORIGIN_LIMIT {
+        origins.clear();
+    }
+    origins.insert(origin);
+}
+
+// Transport-owned headers Chrome adds per protocol. `Connection: keep-alive`
+// goes on every request: the HTTP/2 encoder strips connection-specific headers,
+// so only HTTP/1.1 carries it, as in Chrome. `Priority` is HTTP/2+ only.
+fn wire_headers(url: &str, headers: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut wire = headers.clone();
+    wire.entry("connection".into())
+        .or_insert_with(|| "keep-alive".into());
+    let known_http1 = crate::request_context::origin(url).is_some_and(|origin| {
+        http1_origins()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&origin)
+    });
+    if known_http1 {
+        wire.remove("priority");
+    }
+    wire
 }
 
 fn check_content_length(res: &http::Response, max_bytes: usize) -> Result<(), HttpError> {
@@ -1403,10 +1461,41 @@ fn finish_range_response(
     Ok(response)
 }
 
+// Chrome restarts a navigation once when the response's Critical-CH names a
+// hint that its Accept-CH just enabled and the request did not carry.
 async fn cached_request(
     opts: &mut FetchOptions<'_>,
     hop: &Hop,
     client: &http::Client,
+) -> Result<http::Response, HttpError> {
+    let navigation = opts
+        .context
+        .as_ref()
+        .is_none_or(|context| context.mode == crate::request_context::RequestMode::Navigate);
+    let replayable = navigation && opts.upload_body.is_none() && opts.client_hints.is_some();
+    let sent = replayable.then(|| build_headers(&hop.url, &hop.method, opts));
+    let response = cached_request_once(opts, hop, client, false).await?;
+    let Some(sent) = sent else {
+        return Ok(response);
+    };
+    let critical = list_header(&response, "critical-ch").unwrap_or_default();
+    let now = build_headers(&hop.url, &hop.method, opts);
+    let restart = critical.split(',').any(|hint| {
+        let hint = hint.trim().to_ascii_lowercase();
+        !hint.is_empty() && now.contains_key(&hint) && !sent.contains_key(&hint)
+    });
+    if !restart {
+        return Ok(response);
+    }
+    drop(response);
+    cached_request_once(opts, hop, client, true).await
+}
+
+async fn cached_request_once(
+    opts: &mut FetchOptions<'_>,
+    hop: &Hop,
+    client: &http::Client,
+    restart: bool,
 ) -> Result<http::Response, HttpError> {
     if let Some(before) = opts.before_request {
         before(
@@ -1530,6 +1619,7 @@ async fn cached_request(
             &hop.body,
             &hop.body_bytes,
             opts.upload_body.take(),
+            restart,
         )
         .await?;
         if opts.response_side_effects.is_some() {
@@ -1856,6 +1946,7 @@ async fn follow_auto(
         &opts.body,
         &opts.body_bytes,
         None,
+        false,
     )
     .await?;
     let final_url = final_url(&res);
@@ -2069,6 +2160,7 @@ pub async fn fetch_typed_bytes(
         &opts.body,
         &opts.body_bytes,
         None,
+        false,
     )
     .await?;
     let final_url = final_url(&res);
@@ -2116,7 +2208,7 @@ mod tests {
             ("sec-fetch-mode".to_string(), "no-cors".to_string()),
             ("sec-fetch-dest".to_string(), "image".to_string()),
         ]);
-        let order = request_order("GET", &headers);
+        let order = request_order("GET", &headers, false);
         match crate::browser::default_release().request_order("no-cors") {
             Some(expected) => {
                 let names: Vec<String> = order

@@ -1427,8 +1427,8 @@ limits in this historical account. CSS parsing
 is a style/group-rule scanner rather than a complete CSS parser. Ordinary text
 input dirty/default value semantics and select default selectedIndex remain
 incomplete. Frames still use detached DOM wrappers and mostly parent-created DOM
-API constructors; cross-origin access enforcement is incomplete. Critical-CH
-retries and Permissions-Policy delegation are not implemented. Native V8/backend
+API constructors; cross-origin access enforcement is incomplete. Navigations
+restart once for Critical-CH (turbo-surf#113); Permissions-Policy delegation is not implemented. Native V8/backend
 versions, viewport/language configuration and some API shapes can still differ.
 Standalone recon/solver/Google ENID helpers have separate state paths; the default
 Google web_search strategy still uses its sidecar path.

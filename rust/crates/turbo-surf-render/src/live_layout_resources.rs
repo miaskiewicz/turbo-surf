@@ -72,7 +72,7 @@ pub(crate) fn definition(source: &str) -> Result<Definition, String> {
     }
 }
 
-fn family_name(family: &FontFamily<'_>) -> Result<String, String> {
+pub(crate) fn family_name(family: &FontFamily<'_>) -> Result<String, String> {
     let text = family
         .to_css_string(PrinterOptions::default())
         .map_err(|_| "native layout font family cannot be serialized")?;
@@ -94,7 +94,22 @@ fn family_name(family: &FontFamily<'_>) -> Result<String, String> {
 struct Definitions {
     fonts: std::collections::HashSet<String>,
     animations: std::collections::HashSet<String>,
-    non_ascii_font: bool,
+}
+
+thread_local! {
+    /// `@font-face` families (lowercased) a layout found in use; the font loader
+    /// takes them after the layout to start those faces' loads, as Chrome does.
+    static USED_FONTS: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        std::cell::RefCell::default();
+}
+
+/// The `@font-face` families layouts used since the last call.
+pub(crate) fn take_used_fonts() -> Vec<String> {
+    USED_FONTS.with(|fonts| {
+        std::mem::take(&mut *fonts.borrow_mut())
+            .into_iter()
+            .collect()
+    })
 }
 impl Definitions {
     fn collect(rules: &[crate::live_stylesheets::ActiveRule]) -> Self {
@@ -102,8 +117,7 @@ impl Definitions {
         for definition in rules.iter().filter_map(|rule| rule.resource.as_ref()) {
             match definition {
                 Definition::Font(name) => {
-                    result.non_ascii_font |= !name.is_ascii();
-                    result.fonts.insert(name.to_ascii_lowercase());
+                    result.fonts.insert(name.to_lowercase());
                 }
                 Definition::Animation(name) => {
                     result.animations.insert(name.clone());
@@ -168,16 +182,9 @@ fn validate_style<'a>(
                 let FontFamily::FamilyName(_) = family else {
                     continue;
                 };
-                let used = family_name(&family)?;
-                if definitions.fonts.contains(&used.to_ascii_lowercase()) {
-                    return Err(format!(
-                        "native live layout font-face resource is unsupported: {used}"
-                    ));
-                }
-                if !used.is_ascii() || definitions.non_ascii_font {
-                    return Err(
-                        "native layout cannot prove non-ASCII font name matching unused".into(),
-                    );
+                let used = family_name(&family)?.to_lowercase();
+                if definitions.fonts.contains(&used) {
+                    USED_FONTS.with(|fonts| fonts.borrow_mut().insert(used));
                 }
             }
         }

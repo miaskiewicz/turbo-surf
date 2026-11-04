@@ -29,13 +29,22 @@ fn only_unused_definitions_leave_real_chrome_geometry_unchanged() {
 #[test]
 fn referenced_fonts_and_animations_never_silently_fall_back_or_freeze() {
     let cases = [
-        ("@font-face{font-family:Used;src:url('/face.woff2')}#target{font-family:env(unknown)}", "cannot prove"),
-        ("@keyframes Spin{to{width:100px}}#target{animation-name:env(unknown)}", "cannot prove"),
-        ("@font-face{font-family:'Used Face';src:url('/face.woff2')}#target{font-family:'uSeD FaCe'}", "font-face resource"),
-        (r#"@font-face{font-family:'Used\20 Face';src:url('/face.woff2')}#target{font:16px 'Used Face'}"#, "font-face resource"),
-        ("@font-face{font-family:'Used Face';src:url('/face.woff2')}#target{--f:'Used Face';font-family:var(--f)}", "font-face resource"),
-        ("@keyframes Spin{to{width:100px}}#target{animation:Spin 1s}", "animation resource"),
-        ("@keyframes 'Spin Name'{to{width:100px}}#target{animation-name:'Spin Name'}", "animation resource"),
+        (
+            "@font-face{font-family:Used;src:url('/face.woff2')}#target{font-family:env(unknown)}",
+            "cannot prove",
+        ),
+        (
+            "@keyframes Spin{to{width:100px}}#target{animation-name:env(unknown)}",
+            "cannot prove",
+        ),
+        (
+            "@keyframes Spin{to{width:100px}}#target{animation:Spin 1s}",
+            "animation resource",
+        ),
+        (
+            "@keyframes 'Spin Name'{to{width:100px}}#target{animation-name:'Spin Name'}",
+            "animation resource",
+        ),
     ];
     for (css, diagnostic) in cases {
         let html = format!("<!doctype html><style>#target{{width:43px;height:17px}}{css}</style><div id='target'></div>");
@@ -48,10 +57,32 @@ fn referenced_fonts_and_animations_never_silently_fall_back_or_freeze() {
 fn definition_lifecycle_uses_actual_sheet_state_instead_of_old_layout_cache() {
     let actual = run_with_dom(
         "<!doctype html><style id='resource'>@font-face{font-family:Used;src:url('/face.woff2')}</style><div id='target' style='font-family:Used;width:43px;height:17px'></div>",
-        "(()=>{const sheet=document.getElementById('resource').sheet,node=document.getElementById('target');const read=()=>{try{return node.getBoundingClientRect().width;}catch(error){return error.message.includes('font-face resource');}};const result=[read()];sheet.disabled=true;result.push(read());sheet.disabled=false;result.push(read());sheet.deleteRule(0);result.push(read());return JSON.stringify(result);})()",
+        "(()=>{const sheet=document.getElementById('resource').sheet,node=document.getElementById('target');const read=()=>[node.getBoundingClientRect().width,Array.from(document.fonts,face=>face.status).join()];const result=[read()];sheet.disabled=true;result.push(read());sheet.disabled=false;result.push(read());sheet.deleteRule(0);result.push(read());return JSON.stringify(result);})()",
     ).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
-        serde_json::json!([true, 43, true, 43])
+        serde_json::json!([[43, "error"], [43, ""], [43, "error"], [43, ""]])
     );
+}
+
+/// A used `@font-face` family lays out with its fallback while the face loads
+/// (turbo-surf#130), whatever case, escape or `var()` spelling names it. The
+/// document has no fetchable base, so a started relative source fails at once.
+#[test]
+fn used_web_fonts_lay_out_and_start_loading() {
+    for css in [
+        "@font-face{font-family:'Used Face';src:url('/face.woff2')}#target{font-family:'uSeD FaCe'}",
+        r#"@font-face{font-family:'Used\20 Face';src:url('/face.woff2')}#target{font:16px 'Used Face'}"#,
+        "@font-face{font-family:'Used Face';src:url('/face.woff2')}#target{--f:'Used Face';font-family:var(--f)}",
+        "@font-face{font-family:'Ünused';src:url('/face.woff2')}#target{font-family:'Other'}",
+    ] {
+        let html = format!("<!doctype html><style>#target{{width:43px;height:17px}}{css}</style><div id='target'></div>");
+        let actual = run_with_dom(&html, "(()=>{const before=Array.from(document.fonts,face=>face.status).join();const width=document.getElementById('target').getBoundingClientRect().width;return JSON.stringify([before,width,Array.from(document.fonts,face=>face.status).join()]);})()").unwrap();
+        let used = !css.contains("Ünused");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+            serde_json::json!(["unloaded", 43, if used { "error" } else { "unloaded" }]),
+            "{css}"
+        );
+    }
 }

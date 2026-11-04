@@ -704,6 +704,18 @@ with the earlier API runner command and
 the discrepancy, including the predecessor native canvas path's requested-weight
 limitation, without treating it as resolved font parity.
 
+The [`@font-face` control](./fixtures/font-face-chrome156.json) runs
+[font-face-probe.js](./font-face-probe.js) on a plain and a CSP `font-src 'self'` page,
+and the embedded-font Range probe over pages that load the same IBM Plex Mono bytes with
+`@font-face` (ttf/woff/woff2 under `fixtures/fonts/ibm-plex-mono/`), so it needs no
+installed font. The pages are in [font-face-cases.json](./fixtures/font-face-cases.json);
+record it with
+
+```bash
+node harness/detection/font-face-chrome-control.mjs --runner "$PWD/harness/detection/chrome-cdp-trace.mjs" \
+  --chrome <chrome-156> --out harness/detection/fixtures/font-face-chrome156.json
+```
+
 The [border cascade control](./fixtures/border-cascade-chrome155.json) retains
 the exact nine native regression cases and its shared
 [probe](./fixtures/border-cascade-probe.js). With the fixture server above running,

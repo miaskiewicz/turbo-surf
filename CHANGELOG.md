@@ -24,6 +24,20 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   `harness/detection/fixtures/abort-signal-any-chrome156.json`. The per-listener microtask
   checkpoint (timeout dependents, abort-bridge reactions) is pinned and tracked in #136; the
   unpinned compression-dictionary/Range items and consumed-body messages move to #137.
+- **Added (`@font-face`, #130)**: live layout and canvases load web fonts. A layout that
+  uses an `@font-face` family starts its faces' loads (Chrome's style-update timing); sources
+  are fetched over the page's network stack as destination `font` (CORS mode, CSP
+  `font-src`, `Sec-Fetch-Dest: font`), WOFF/WOFF2 are decoded (`wuff`), and the bytes are
+  parsed with turbo-dom's `FontFace::from_web_font_bytes` into a per-document registry that
+  live layout and `set_canvas_fonts` use. `document.fonts` is a real `FontFaceSet`
+  (CSS-connected faces, `add`/`delete`/`check`/`load`, `loading`/`loadingdone`/`loadingerror`
+  events, `ready`) and `FontFace` loads from a URL or bytes, matching the new control
+  `harness/detection/fixtures/font-face-chrome156.json`. Waiting on `document.fonts.ready`
+  first lays the page out, since surf has no rendering lifecycle. The used-font refusal is
+  gone. Known gaps: a web face's inline content height is 1px taller than Chrome 156's
+  (turbo-dom metrics, pinned in `tests/font_face.rs`); a same-named installed font still
+  wins over a web face, and static screenshots do not paint web fonts (both need turbo-dom
+  API); `local()` sources and `unicode-range` subsetting are not applied.
 - **Tests**: `harness/detection/web-apis-chrome-control.mjs` takes `--probes` to record other
   single-page controls.
 

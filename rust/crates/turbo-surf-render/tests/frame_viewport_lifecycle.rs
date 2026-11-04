@@ -79,13 +79,8 @@ async fn frame_script_startup_does_not_eagerly_require_parent_layout() {
     )
     .unwrap();
     assert_eq!(actual["started"], expected["result"]["started"]);
-    assert!(
-        actual["initial"]["error"]
-            .as_str()
-            .unwrap()
-            .contains("font-face resource is unsupported"),
-        "{actual}"
-    );
+    // A used @font-face family no longer refuses layout (turbo-surf#130).
+    assert_eq!(actual["initial"], expected["result"]["initial"]);
     assert_eq!(
         actual["widthAfterClear"],
         expected["result"]["widthAfterClear"]

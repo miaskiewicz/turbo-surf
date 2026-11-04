@@ -2526,6 +2526,7 @@ async fn op_fetch(
         Some("iframe") => Destination::Iframe,
         Some("style") => Destination::Style,
         Some("image") => Destination::Image,
+        Some("font") => Destination::Font,
         _ => Destination::Empty,
     };
     let csp = init.get("csp").and_then(|id| id.as_u64()).and_then(|id| {
@@ -2578,6 +2579,7 @@ async fn op_fetch(
         Destination::Script => "script-src-elem",
         Destination::Style => "style-src-elem",
         Destination::Image => "img-src",
+        Destination::Font => "font-src",
         Destination::Iframe => "frame-src",
         _ => "connect-src",
     };
@@ -7807,24 +7809,7 @@ const __navData = {
   };
   globalThis.devicePixelRatio = __pick("devicePixelRatio", 2);
 }
-// document.fonts (FontFaceSet) — an EventTarget with a `ready` promise; web-font
-// loaders (`document.fonts.ready`, `.addEventListener('loadingdone')`) touch it, and
-// a missing one throws mid-hydration. No real font pipeline here, so `ready` resolves
-// immediately and load/check report success/emptiness.
-if (globalThis.document && !globalThis.document.fonts) {
-  try {
-    const __fonts = {
-      ready: Promise.resolve(), status: "loaded", size: 0,
-      add() {}, delete() { return false; }, clear() {}, has() { return false; },
-      check() { return true; }, load() { return Promise.resolve([]); },
-      forEach() {}, values() { return [][Symbol.iterator](); }, keys() { return [][Symbol.iterator](); },
-      [Symbol.iterator]() { return [][Symbol.iterator](); },
-      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
-      onloading: null, onloadingdone: null, onloadingerror: null,
-    };
-    Object.defineProperty(globalThis.document, "fonts", { configurable: true, get() { return __fonts; } });
-  } catch (e) {}
-}
+// document.fonts / FontFace: font_loading.js (turbo-surf#130).
 // `window.chrome` presence (with loadTimes/csi/app, but no extension `runtime`) is
 // what a plain Chrome page exposes; its absence flags a non-Chrome/headless client.
 // Key insertion order matches real Chrome (`Object.keys(chrome)` = loadTimes, csi, app)
@@ -8726,7 +8711,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   const abortReason=()=>__baseApply(__AbortSignalReason,signal,[]);
   if(isAborted())throw abortReason();
   const requestTarget=o.url || __String(url);
-  const directive=o.destination==="script"?"script-src-elem":o.destination==="style"?"style-src-elem":o.destination==="image"?"img-src":o.destination==="iframe"?"frame-src":"connect-src";
+  const directive=o.destination==="script"?"script-src-elem":o.destination==="style"?"style-src-elem":o.destination==="image"?"img-src":o.destination==="font"?"font-src":o.destination==="iframe"?"frame-src":"connect-src";
   if(!ops.op_csp_request(__document,requestTarget,directive,o.nonce||""))throw new __exceptionTypeError("Failed to fetch");
   const cancelId=ops.op_fetch_prepare(__document);
   const transport={controller:null,done:false,uploadReader:null};
@@ -13032,6 +13017,7 @@ __G.domSig = (() => {
 
 })();
 "##,
+    include_str!("font_loading.js"),
     include_str!("observers.js"),
     include_str!("interface_shapes.js"),
     include_str!("user_activation.js"),

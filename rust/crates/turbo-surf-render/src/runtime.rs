@@ -6575,6 +6575,37 @@ fn storage_area(
     Ok(id)
 }
 
+/// IndexedDB backing stores (indexeddb.js), one per storage key: the same
+/// partitioning as DOM storage, so every same-partition realm shares the databases.
+#[derive(Default)]
+struct IdbRegistries(std::collections::HashMap<u32, v8::Global<v8::Object>>);
+#[op2(reentrant)]
+fn op_idb_registry<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &mut OpState,
+    window: v8::Local<'s, v8::Object>,
+    unpartitioned: bool,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let id = storage_area(scope, state, window, false, unpartitioned)?;
+    if !state.has::<IdbRegistries>() {
+        state.put(IdbRegistries::default());
+    }
+    let registries = state.borrow_mut::<IdbRegistries>();
+    if let Some(registry) = registries.0.get(&id) {
+        return Ok(v8::Local::new(scope, registry));
+    }
+    let null = v8::null(scope).into();
+    let registry = v8::Object::with_prototype_and_properties(scope, null, &[], &[]);
+    registries.0.insert(id, v8::Global::new(scope, registry));
+    Ok(registry)
+}
+/// IndexedDB fires each request's events as their own task: the microtasks a
+/// listener queues run before the transaction goes inactive again.
+#[op2(nofast, reentrant)]
+fn op_idb_checkpoint(scope: &mut v8::PinScope) {
+    scope.perform_microtask_checkpoint();
+}
+
 struct StorageFactory(v8::Weak<v8::Function>);
 #[op2(fast)]
 fn op_storage_factory(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
@@ -7185,6 +7216,8 @@ deno_core::extension!(
         op_form_data_finish,
         op_form_data_event,
         op_storage_area,
+        op_idb_registry,
+        op_idb_checkpoint,
         op_storage_factory,
         op_storage_object,
         op_storage_access_factory,
@@ -7961,20 +7994,6 @@ ops.op_storage_events_factory((key,oldValue,newValue,url,session)=>{
  ops.op_event_trust(event,-1);ops.op_dispatch_host_event(event,globalThis);
 },()=>new __StorageEventImplementation(''));
 
-// indexedDB — a real Chrome window global (IDBFactory). `typeof indexedDB === "undefined"`
-// is a classic headless tell. A shape stub (no real persistence) that answers presence +
-// class-tag + the IDBFactory method surface; requests stay pending (no backing store).
-if (typeof globalThis.indexedDB === "undefined") {
-  const __idbReq = () => ({ onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null, result: null, error: null, readyState: "pending", addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } });
-  const __idb = {
-    open() { return __idbReq(); },
-    deleteDatabase() { return __idbReq(); },
-    databases() { return Promise.resolve([]); },
-    cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; },
-  };
-  try { Object.defineProperty(__idb, Symbol.toStringTag, { value: "IDBFactory", configurable: true }); } catch (e) {}
-  globalThis.indexedDB = __idb;
-}
 const __log = (...a) => __print(a.map(String).join(" ") + "\n");
 globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
 const __timers = [];
@@ -8362,6 +8381,7 @@ for(const name of ['localStorage','sessionStorage','indexedDB','locks','caches']
  const getter=Object.getOwnPropertyDescriptor({get [name](){
   const state=__storageHandleRecord(this);
   if(!state.types.all&&!state.types[name])throw new __storageAccessException('Access was not requested','SecurityError');
+  if(name==='indexedDB')return state.indexedDB||(state.indexedDB=__G.idbFactory(true));
   if(name!=='localStorage'&&name!=='sessionStorage')throw new __storageAccessException('This storage capability is not implemented','NotSupportedError');
   if(!state[name])state[name]=__mkStorage(ops.op_storage_area(globalThis,name==='sessionStorage',true));
   return state[name];
@@ -10111,6 +10131,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
 
 "##,
     include_str!("window_location.js"),
+    include_str!("indexeddb.js"),
     r##"
 
 // Document metadata is live and owned by Document.prototype; native body/head

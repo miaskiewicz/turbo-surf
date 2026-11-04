@@ -24,6 +24,20 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   `harness/detection/fixtures/abort-signal-any-chrome156.json`. The per-listener microtask
   checkpoint (timeout dependents, abort-bridge reactions) is pinned and tracked in #136; the
   unpinned compression-dictionary/Range items and consumed-body messages move to #137.
+- **Added (IndexedDB, #107)**: a real in-memory IndexedDB per storage partition, keyed like
+  DOM storage and shared by every realm in the partition. It replaces the shape stub, whose
+  open requests stayed pending forever. It covers open/upgradeneeded/versionchange/blocked,
+  deleteDatabase and databases(), object stores (keyPath, autoIncrement, key generator),
+  indexes (unique, multiEntry, compound), cursors (all directions, continue(key), advance,
+  continuePrimaryKey, update/delete), IDBKeyRange, getAllRecords, and structured-clone values.
+  Requests run one per task, with a microtask checkpoint after every dispatch. Transactions
+  auto-commit, `commit()` ends one early, and abort rolls back and reports Chrome's error
+  names and messages. `StorageAccessHandle#indexedDB` now returns an unpartitioned factory
+  instead of throwing `NotSupportedError`. A throwing `on*` event handler is now reported to the
+  window `error` event, as in Chrome. New control
+  `harness/detection/fixtures/indexeddb-chrome156.json`. Residuals are tracked in #148: the
+  capture phase on IDB targets, per-listener microtasks, throwing `addEventListener` listeners
+  (turbo-dom#301), and a cross-site partition control.
 - **Fixed (fetch, #137)**: reading a used, disturbed or locked body rejects with Chrome's
   messages (`Failed to execute '<method>' on 'Response': body stream already read` /
   `body stream is locked`, and the `Request` forms); `clone()` and `new Request(request)`

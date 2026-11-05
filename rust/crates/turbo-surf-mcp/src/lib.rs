@@ -1111,11 +1111,12 @@ impl Session {
             .get("external_css")
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let css = if want_css {
-            self.fetch_linked_css(&html).await
+        let sheets = if want_css {
+            self.fetch_linked_sheets(&html).await
         } else {
-            String::new()
+            Vec::new()
         };
+        let css: String = sheets.iter().map(|(_, body)| format!("{body}\n")).collect();
         // `<img>` + `background-image` bytes, fetched over the session client
         // (impersonation + cookies apply), unless `{ images: false }`.
         let want_images = args.get("images").and_then(Value::as_bool).unwrap_or(true);
@@ -1130,16 +1131,27 @@ impl Session {
             .get("full_page")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        // The page's `@font-face` faces, fetched over the session client, unless
+        // `{ fonts: false }` (turbo-surf#142).
+        let want_fonts = args.get("fonts").and_then(Value::as_bool).unwrap_or(true);
+        let fonts = if want_fonts {
+            self.fetch_page_fonts(&html, &sheets).await
+        } else {
+            None
+        };
+        let mut options = raster::ScreenshotOptions::default();
+        options.full_page = full_page;
+        options.fonts = fonts.as_ref();
         match arg_str(args, "format").unwrap_or("png") {
             "svg" => {
-                let svg = raster::screenshot_svg_with_assets(&html, &css, vp, &images, full_page)?;
+                let svg = raster::screenshot_svg_with_options(&html, &css, vp, &images, &options)?;
                 Ok(json!({
                     "format": "svg", "mimeType": "image/svg+xml",
                     "width": vp.width, "height": svg_height(&svg).unwrap_or(vp.height), "svg": svg,
                 }))
             }
             "png" => {
-                let png = raster::screenshot_png_with_assets(&html, &css, vp, &images, full_page)?;
+                let png = raster::screenshot_png_with_options(&html, &css, vp, &images, &options)?;
                 let (w, h) = png_dims(&png).unwrap_or((vp.width, vp.height));
                 Ok(json!({
                     "format": "png", "mimeType": "image/png",
@@ -1154,20 +1166,80 @@ impl Session {
     // bodies in source order, resolving each href against the current page URL
     // via the session client (impersonation + cookies apply). Failures + non-URL
     // hrefs are skipped; the count is capped so a hostile page can't fan out.
-    async fn fetch_linked_css(&mut self, html: &str) -> String {
+    // Each fetched sheet is kept with its URL: its `@font-face` sources resolve against it.
+    async fn fetch_linked_sheets(&mut self, html: &str) -> Vec<(String, String)> {
         const MAX_SHEETS: usize = 40;
         let base = self.url.clone();
-        let mut css = String::new();
+        let mut sheets = Vec::new();
         for href in raster::stylesheet_hrefs(html).into_iter().take(MAX_SHEETS) {
             let Some(url) = turbo_surf_core::url::resolve(&base, &href) else {
                 continue;
             };
             if let Ok(body) = self.fetch_resource_body(&url, Destination::Style).await {
-                css.push_str(&body);
-                css.push('\n');
+                sheets.push((url, body));
             }
         }
-        css
+        sheets
+    }
+
+    // The page's `@font-face` faces for the static screenshot (turbo-surf#142): the rules
+    // of its `<style>` blocks (resolved against the page URL) and of its fetched sheets
+    // (against each sheet's URL), each face's first `url()` source that fetches and parses
+    // (WOFF / WOFF2 unwrapped), registered over the bundled faces the screenshot otherwise
+    // uses. `None` when the page declares no face. Capped so a hostile page can't fan out.
+    async fn fetch_page_fonts(
+        &mut self,
+        html: &str,
+        sheets: &[(String, String)],
+    ) -> Option<turbo_dom_layout::FontRegistry> {
+        const MAX_FACES: usize = 20;
+        let tree = Tree::parse(html);
+        let inline = tree
+            .query_selector_all("style")
+            .iter()
+            .map(|&style| tree.text_content(style))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let page = (self.url.clone(), inline);
+        let sources: Vec<_> = std::iter::once(&page)
+            .chain(sheets)
+            .flat_map(|(base, css)| {
+                turbo_surf_render::font_face_sources(css)
+                    .into_iter()
+                    .map(move |source| (base.clone(), source))
+            })
+            .take(MAX_FACES)
+            .collect();
+        if sources.is_empty() {
+            return None;
+        }
+        let mut registry = turbo_dom_layout::FontRegistry::new();
+        for (base, source) in sources {
+            if let Some(face) = self.fetch_font_face(&base, &source).await {
+                registry.add(face);
+            }
+        }
+        Some(registry)
+    }
+
+    // A face's first `url()` source that fetches and parses, as Chrome tries them in order.
+    async fn fetch_font_face(
+        &mut self,
+        base: &str,
+        source: &turbo_surf_render::WebFontSource,
+    ) -> Option<turbo_dom_layout::text::FontFace> {
+        for reference in &source.urls {
+            let Some(url) = turbo_surf_core::url::resolve(base, reference) else {
+                continue;
+            };
+            let Ok(bytes) = self.fetch_asset_bytes(&url, Destination::Font).await else {
+                continue;
+            };
+            if let Some(face) = turbo_surf_render::web_font_face(&bytes, source) {
+                return Some(face);
+            }
+        }
+        None
     }
 
     // Fetch the page's `<img>` + `background-image` bytes, keyed by their raw
@@ -1203,6 +1275,16 @@ impl Session {
     // Fetch a single resource as raw bytes (no charset decode — image data must
     // survive verbatim) over the session client/jar/profile.
     async fn fetch_image_bytes(&mut self, url: &str) -> Result<Vec<u8>, String> {
+        self.fetch_asset_bytes(url, Destination::Image).await
+    }
+
+    // An image or font subresource's raw bytes: a no-cors image request, or the CORS-mode
+    // request Chrome makes for a font.
+    async fn fetch_asset_bytes(
+        &mut self,
+        url: &str,
+        destination: Destination,
+    ) -> Result<Vec<u8>, String> {
         self.requests.push(url.to_string());
         let profile = self.profile_for(url);
         let storage_effects = self.browsing_storage.response_storage_effects();
@@ -1211,8 +1293,12 @@ impl Session {
             allow_non_html: true,
             context: Some(RequestContext::resource(
                 &self.url,
-                Destination::Image,
-                RequestMode::NoCors,
+                destination,
+                if destination == Destination::Font {
+                    RequestMode::Cors
+                } else {
+                    RequestMode::NoCors
+                },
             )),
             client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
@@ -3041,9 +3127,11 @@ pub fn tools() -> Value {
              position/z-index stacking. Fetches the page's external <link> \
              stylesheets and its <img>/background-image bytes (via the session \
              client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG/BMP/ICO/AVIF/JPEG XL \
-             images are painted, others fall back to a placeholder. Args: format (png|svg), \
+             images are painted, others fall back to a placeholder; @font-face faces (TTF/OTF/WOFF/WOFF2) \
+             lay out and paint the text. Args: format (png|svg), \
              snapshot? (dom_history index), width?/height? (override viewport; \
              at most 16384x16384 px in all), external_css? (default true), images? (default true), \
+             fonts? (default true), \
              full_page? (default false — true grows height to full content). \
              PNG returns base64; SVG returns the document string.",
         ),

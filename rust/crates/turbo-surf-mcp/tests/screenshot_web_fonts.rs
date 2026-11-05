@@ -76,6 +76,13 @@ impl Shot {
     fn top(&self, x: u32, from: u32, color: [u8; 3]) -> Option<u32> {
         (from..600).find(|&y| self.pixel(x, y) == color)
     }
+    /// Each span's painted width and the top of the bar below it.
+    fn boxes(&self) -> Value {
+        json!({
+            "m": [self.run(12, BLUE), self.top(400, 0, RED)],
+            "n": [self.run(55, BLUE), self.top(400, 36, RED)],
+        })
+    }
     /// How far the run of `color` reaches along row `y` from x = 0.
     fn run(&self, y: u32, color: [u8; 3]) -> u32 {
         (0..self.width)
@@ -107,21 +114,7 @@ async fn static_screenshots_lay_out_and_paint_the_pages_web_fonts_like_chrome156
     call_tool(&mut session, "goto", &json!({ "url": format!("{base}/") }))
         .await
         .unwrap();
-    let shot = call_tool(
-        &mut session,
-        "screenshot",
-        &json!({ "width": 800, "height": 600 }),
-    )
-    .await
-    .unwrap();
-    let png = base64::engine::general_purpose::STANDARD
-        .decode(shot["base64"].as_str().unwrap())
-        .unwrap();
-    let image = turbo_dom_layout::image::decode_png_rgba(&png).unwrap();
-    let shot = Shot {
-        width: image.width,
-        rgba: image.rgba,
-    };
+    let shot = screenshot(&mut session, json!({ "width": 800, "height": 600 })).await;
     let number = |value: &Value| value.as_f64().unwrap() as u32;
     // Both faces were fetched (the sheet's second source, the inline sheet's own).
     let requests = requests.lock().unwrap().clone();
@@ -132,13 +125,28 @@ async fn static_screenshots_lay_out_and_paint_the_pages_web_fonts_like_chrome156
     ] {
         assert!(requests.iter().any(|seen| seen == path), "{requests:?}");
     }
-    let actual = json!({
-        "m": [shot.run(12, BLUE), shot.top(400, 0, RED)],
-        "n": [shot.run(55, BLUE), shot.top(400, 36, RED)],
-    });
     let expected = json!({
         "m": [number(&chrome["m"][2]), number(&chrome["bar"])],
         "n": [number(&chrome["n"][2]), number(&chrome["bar2"])],
     });
-    assert_eq!(actual, expected);
+    assert_eq!(shot.boxes(), expected);
+    // Without the faces (`fonts: false`) the fallback face lays the text out otherwise.
+    let bare = screenshot(
+        &mut session,
+        json!({ "width": 800, "height": 600, "fonts": false }),
+    )
+    .await;
+    assert_ne!(bare.boxes(), expected);
+}
+
+async fn screenshot(session: &mut Session, args: Value) -> Shot {
+    let shot = call_tool(session, "screenshot", &args).await.unwrap();
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(shot["base64"].as_str().unwrap())
+        .unwrap();
+    let image = turbo_dom_layout::image::decode_png_rgba(&png).unwrap();
+    Shot {
+        width: image.width,
+        rgba: image.rgba,
+    }
 }

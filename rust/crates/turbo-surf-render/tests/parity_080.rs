@@ -21,7 +21,11 @@ const GAPS: &[(&str, &str, &str)] = &[
     ("used-size", "/percent/0", r#""261.307px""#),
     // The binding resolves an `em` translate against the element's declared font-size
     // only (16px when inherited), not the layoutUsedSize hook's font size.
-    ("used-size", "/transforms/1", r#""matrix(1, 0, 0, 1, 32, 0)""#),
+    (
+        "used-size",
+        "/transforms/1",
+        r#""matrix(1, 0, 0, 1, 32, 0)""#,
+    ),
     // The binding serializes an authored named color as written.
     ("css-wide-and-button", "/1", r#""red""#),
     ("css-wide-and-button", "/2", r#""red""#),

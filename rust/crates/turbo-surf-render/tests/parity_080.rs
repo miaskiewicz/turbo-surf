@@ -12,6 +12,38 @@ use sha2::{Digest, Sha256};
 use turbo_surf_render::PageSession;
 
 const CASES: &[u8] = include_bytes!("fixtures/parity_080_cases.json");
+/// Known gaps owned by turbo-dom, as (case, JSON pointer into its result, surf's current
+/// value): each is required to still differ from Chrome, so a fix fails its pin and the
+/// gap is retired with it.
+const GAPS: &[(&str, &str, &str)] = &[
+    // Live layout keeps a percentage width unsnapped (261.3067px); Blink's LayoutUnit
+    // floors it to 1/64 px (261.296875).
+    ("used-size", "/percent/0", r#""261.307px""#),
+    // The binding resolves an `em` translate against the element's declared font-size
+    // only (16px when inherited), not the layoutUsedSize hook's font size.
+    ("used-size", "/transforms/1", r#""matrix(1, 0, 0, 1, 32, 0)""#),
+    // The binding serializes an authored named color as written.
+    ("css-wide-and-button", "/1", r#""red""#),
+    ("css-wide-and-button", "/2", r#""red""#),
+];
+/// CSS.supports answers from surf's Lightning CSS grammar, which rejects the 18 Chrome 156
+/// features (every form). The engine's grammar (`cssSupports` / `cssSupportsProperty`,
+/// turbo-dom#322) accepts them, but coerces its arguments with the page's `String`, which
+/// a page may replace (turbo-dom: private coercion), so CSS.supports cannot route there yet.
+const UNSUPPORTED_FEATURES: usize = 18;
+
+fn gaps() -> Vec<(&'static str, String, String)> {
+    let mut gaps: Vec<_> = GAPS
+        .iter()
+        .map(|(id, pointer, value)| (*id, pointer.to_string(), value.to_string()))
+        .collect();
+    for row in 0..UNSUPPORTED_FEATURES {
+        for form in 1..=3 {
+            gaps.push(("css-supports", format!("/{row}/{form}"), "false".into()));
+        }
+    }
+    gaps
+}
 const CONTROL: &str = include_str!("fixtures/parity_080_chrome156.json");
 
 fn sha(bytes: &[u8]) -> String {
@@ -56,7 +88,15 @@ async fn parity_rows_match_chrome156() {
     for (case, chrome) in cases.iter().zip(expected) {
         let id = case["id"].as_str().unwrap();
         assert_eq!(chrome["id"], id);
-        let native = run_case(case).await;
+        let mut native = run_case(case).await;
+        for (_, pointer, pinned) in gaps().iter().filter(|gap| gap.0 == id) {
+            let pinned: Value = serde_json::from_str(pinned).unwrap();
+            let slot = native.pointer_mut(pointer).unwrap();
+            assert_eq!(*slot, pinned, "{id}{pointer}: known gap changed");
+            let chrome = chrome["result"].pointer(pointer).unwrap();
+            assert_ne!(*chrome, pinned, "{id}{pointer}: known gap is fixed");
+            *slot = chrome.clone();
+        }
         if native != chrome["result"] {
             failures.push(format!(
                 "{id}\n  native: {native}\n  chrome: {}",

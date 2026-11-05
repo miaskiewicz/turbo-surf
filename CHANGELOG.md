@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
+  native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
+  with Chrome 156's handshake header order, cookies, origin and `connect-src` (ws/wss match
+  like http/https); `EventSource` streams over the page's fetch path with reconnection,
+  `retry` and `Last-Event-ID`. Transport reads are unref'd, so an open socket or stream
+  never holds a render. Events, close codes, readyState transitions, frame types and the
+  handshake are checked against a localhost Chrome 156 control
+  (`network-transports-chrome156.json`). `WebTransport` validates like Chrome and fails its
+  handshake honestly; HTTP/3 is split to #175.
+
 ## [0.7.1] — 2026-11-05
 
 Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).

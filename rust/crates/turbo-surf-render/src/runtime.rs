@@ -67,6 +67,8 @@ use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
 #[path = "fetch_streams.rs"]
 pub(crate) mod fetch_streams;
+#[path = "network_transports.rs"]
+mod network_transports;
 use turbo_surf_core::net::{fetch_html, fetch_typed_bytes, FetchOptions, FetchedBytes};
 use turbo_surf_core::request_context::{
     ClientHints, Credentials, Destination, RequestContext, RequestMode,
@@ -7361,6 +7363,14 @@ deno_core::extension!(
         fetch_streams::op_fetch_release,
         fetch_streams::op_fetch_read,
         op_fetch,
+        network_transports::op_connect_allowed,
+        network_transports::op_ws_open,
+        network_transports::op_ws_send_text,
+        network_transports::op_ws_send_binary,
+        network_transports::op_ws_close,
+        network_transports::op_ws_drop,
+        network_transports::op_ws_next,
+        network_transports::op_net_transport_hold,
         blob_urls::op_blob_url_create,
         blob_urls::op_blob_url_revoke,
         blob_urls::op_blob_url_key,
@@ -8907,6 +8917,8 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   let r;
   try {
     const request=ops.op_fetch(__String(requestTarget), initJson);
+    // An event stream (#144) must not hold the page's event loop open.
+    if(o.unref)__core.unrefOpPromise(request);
     r = await (abortNotice?__FetchPromiseRace([request,__FetchThen(abortNotice,reason=>{throw reason;})]):request);
   } catch(error) {ops.op_fetch_cancel(cancelId);finish();throw error;} finally {
     __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
@@ -8931,7 +8943,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
     else if([204,205,304].includes(r.status)){ops.op_fetch_cancel(cancelId);finish();payload=new __FetchReadable({type:"bytes",start(controller){controller.close();}});}
     else {
       payload=new __FetchReadable({type:"bytes",start(controller){transport.controller=controller;},async pull(controller){
-        try{const part=await ops.op_fetch_read(r.stream_id);if(transport.done)return;if(part.aborted||isAborted())throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");if(part.error)throw new __exceptionTypeError(part.error);if(part.done){controller.close();finish();}else controller.enqueue(new Uint8Array(part.bytes));}catch(error){controller.error(error);ops.op_fetch_cancel(cancelId);finish();}
+        try{const read=ops.op_fetch_read(r.stream_id);if(o.unref)__core.unrefOpPromise(read);const part=await read;if(transport.done)return;if(part.aborted||isAborted())throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");if(part.error)throw new __exceptionTypeError(part.error);if(part.done){controller.close();finish();}else controller.enqueue(new Uint8Array(part.bytes));}catch(error){controller.error(error);ops.op_fetch_cancel(cancelId);finish();}
       },cancel(){ops.op_fetch_cancel(cancelId);finish();}},{highWaterMark:0});
       ops.op_fetch_watch_body(payload,cancelId);
     }
@@ -10185,6 +10197,9 @@ __BodyParamsString=URLSearchParams.prototype.toString;
     include_str!("xhr.js"),
     include_str!("file_reader.js"),
     include_str!("websocket.js"),
+    include_str!("websocket_stream.js"),
+    include_str!("event_source.js"),
+    include_str!("web_transport.js"),
     include_str!("storage_apis.js"),
     r##"
 // Object-URL registry + download capture. The common client-side export pattern is
@@ -14320,6 +14335,14 @@ async fn drain_event_loop_until_completion(
             if completion.is_some()
                 && storage_waiter.is_some()
                 && matches!(result, std::task::Poll::Ready(Ok(())))
+            {
+                return std::task::Poll::Pending;
+            }
+            // Open sockets and event streams read through unref'd ops (#144): they never
+            // hold a render, but an awaited operation keeps waiting for their events.
+            if completion.is_some()
+                && matches!(result, std::task::Poll::Ready(Ok(())))
+                && network_transports::live(&rt.op_state().borrow())
             {
                 return std::task::Poll::Pending;
             }

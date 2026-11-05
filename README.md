@@ -249,7 +249,7 @@ UA-CH, the navigation **header order** and the measured per-request-class orders
 `Accept`/`Priority` per destination — all of which Chrome changes across releases)
 lives in a data registry (`turbo-surf-core/src/browser_releases.json`, compiled into
 the `browser` module): one coherent, measured config per supported Chrome version,
-defaulting to Chrome 156.0.8078.47. Wire headers and the render-tier navigator read
+defaulting to Chrome 156.0.8078.80. Wire headers and the render-tier navigator read
 from it. A new release is measured and written by one command —
 [`harness/detection/reversion-chrome.mjs`](harness/detection/CHROME-REVERSION.md)
 runs the Chrome identity battery (TLS/H2/headers/client hints/JS identity) and

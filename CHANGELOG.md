@@ -19,15 +19,25 @@
   `input-state.js`, `interface-trace.js`, the cache, CSP-report, timer and identity collectors
   (`identity-server.mjs`, `identity-wire.mjs`), and the dom-adoption, dom-variadic-errors,
   form-methods, live-text-geometry, native-iframe-layout, storage, trusted-types and
-  leading-space-geometry probes. Their controls are re-recorded on the frozen Chrome for
-  Testing headless shell 156.0.8078.47. The cache, dom-adoption, dom-variadic-errors,
-  form-methods and resource-scan-order controls have no data change. The window-timer
-  control changes only in timing noise. The headless shell does change the data of several
-  controls: CSP reports (no Reporting-API delivery over HTTPS, no favicon requests, and
-  headless UA-CH and Accept-Language headers), storage (`requestStorageAccess` rejects with
-  NotAllowedError), and live-text, native-iframe and leading-space geometry (default font and
-  device pixel ratio). Trusted Types also maps the new Chrome 156 `onchecked` and
-  `onopenerchange` attributes. The Google and observability receipts
+  leading-space-geometry probes. Their controls are re-recorded:
+  - **Headless controls**, on the frozen Chrome for Testing headless shell 156.0.8078.47:
+    cache, dom-adoption, dom-variadic-errors, form-methods, resource-scan-order, window-timer
+    and trusted-types.
+  - **Headed controls**, on the new frozen branded oracle, Google Chrome 156.0.8078.80 (see
+    below), with the original window size and device pixel ratio: CSP reporting, storage,
+    live-text, native-iframe and leading-space geometry.
+
+  No control's data changes beyond version and timing noise, with one exception: Trusted
+  Types maps the new Chrome 156 `onchecked` and `onopenerchange` attributes.
+- **Changed (identity, #154)**: the new frozen branded oracle is Google Chrome
+  156.0.8078.80 (`~/.cache/turbo-consolidation/chrome156-80`, frozen to
+  `.native-builds/oracles/chrome156-8078.80`). `reversion-chrome.mjs` re-recorded
+  `chrome-identity-156.json` and `TRANSPORT-156.json` on it, and the default reported
+  release in `browser_releases.json` moves from 156.0.8078.47 to 156.0.8078.80. Only the full
+  version and the evidence change; header orders are unchanged. The identity battery reports
+  0 tells (38 known gaps, 11 environment, 1 collector). Oracles are documented in
+  `harness/detection/README.md` and `CHROME-REVERSION.md` §10.
+- The Google and observability receipts
   (`GOOGLE-LAST-RUN.json`, `GOOGLE-DIAGNOSTICS.json`, `OBSERVABILITY-LAST-RUN.json`) were not
   re-run; their `staleSourceHashes` field marks the recorded hashes that predate the refactor.
 

@@ -1,6 +1,6 @@
 {
-  "browser": "HeadlessChrome/156.0.8078.47",
-  "v8": "15.6.75.19",
+  "browser": "Chrome/156.0.8078.80",
+  "v8": "15.6.75.27",
   "widgetSha256": "ae17b6b0a4f31f8b57043f445b2f6875a1f61cac4ddf41901a63b453d01600ef",
   "probeSha256": "b4230f9fd7957b0cb4da7ca0cc750acda728f3cd486938c0676f5bb6fbda7c5e",
   "collectorSha256": "9ee3295507c842f430eaa1bf3460ed033d620a05f4c816ba23e5507713a4d490",
@@ -150,18 +150,26 @@
         "previous": null,
         "value": "widget",
         "has": true,
-        "request": "NotAllowedError",
+        "request": "resolved",
         "handle": {
-          "error": "NotAllowedError"
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": null,
+          "sameObject": true
         }
       },
       "nested": {
         "previous": "widget",
         "value": "widget",
         "has": true,
-        "request": "NotAllowedError",
+        "request": "resolved",
         "handle": {
-          "error": "NotAllowedError"
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": null,
+          "sameObject": true
         }
       },
       "policies": [
@@ -175,7 +183,7 @@
         },
         {
           "hasStorageAccess": true,
-          "requestStorageAccess": "NotAllowedError"
+          "requestStorageAccess": "resolved"
         },
         {
           "hasStorageAccess": false,
@@ -322,18 +330,26 @@
         "previous": null,
         "value": "widget",
         "has": true,
-        "request": "NotAllowedError",
+        "request": "resolved",
         "handle": {
-          "error": "NotAllowedError"
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
         }
       },
       "nested": {
         "previous": null,
         "value": "widget",
         "has": true,
-        "request": "NotAllowedError",
+        "request": "resolved",
         "handle": {
-          "error": "NotAllowedError"
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
         }
       },
       "policies": [
@@ -347,7 +363,7 @@
         },
         {
           "hasStorageAccess": true,
-          "requestStorageAccess": "NotAllowedError"
+          "requestStorageAccess": "resolved"
         },
         {
           "hasStorageAccess": false,
@@ -494,18 +510,26 @@
         "previous": "widget",
         "value": "widget",
         "has": true,
-        "request": "NotAllowedError",
+        "request": "resolved",
         "handle": {
-          "error": "NotAllowedError"
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
         }
       },
       "nested": {
         "previous": "widget",
         "value": "widget",
         "has": true,
-        "request": "NotAllowedError",
+        "request": "resolved",
         "handle": {
-          "error": "NotAllowedError"
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
         }
       },
       "policies": [
@@ -519,7 +543,7 @@
         },
         {
           "hasStorageAccess": true,
-          "requestStorageAccess": "NotAllowedError"
+          "requestStorageAccess": "resolved"
         },
         {
           "hasStorageAccess": false,

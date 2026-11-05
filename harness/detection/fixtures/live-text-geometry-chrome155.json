@@ -1,6 +1,6 @@
 {
-  "browser": "HeadlessChrome/156.0.8078.47",
-  "v8": "15.6.75.19",
+  "browser": "Chrome/156.0.8078.80",
+  "v8": "15.6.75.27",
   "probeSha256": "fcb22da4eee43039256eb046a8743db5b739f21de7a6a53e5250dfa6b665702a",
   "runnerSha256": "cc70521202b9d9f0806c75b8803a4a31c2443469ac51bb11a87b0bf326b1054e",
   "result": {
@@ -8,45 +8,45 @@
       {
         "start": 0,
         "end": 0,
-        "rects": [[0, 4, 0, 71]],
-        "bounds": [0, 4, 0, 71]
+        "rects": [[0, 4.5, 0, 71]],
+        "bounds": [0, 4.5, 0, 71]
       },
       {
         "start": 0,
         "end": 1,
-        "rects": [[0, 4, 28.40625, 71]],
-        "bounds": [0, 4, 28.40625, 71]
+        "rects": [[0, 4.5, 28.40625, 71]],
+        "bounds": [0, 4.5, 28.40625, 71]
       },
       {
         "start": 0,
         "end": 2,
-        "rects": [[0, 4, 60.40625, 71]],
-        "bounds": [0, 4, 60.40625, 71]
+        "rects": [[0, 4.5, 60.40625, 71]],
+        "bounds": [0, 4.5, 60.40625, 71]
       },
       {
         "start": 1,
         "end": 1,
-        "rects": [[28.40625, 4, 0, 71]],
-        "bounds": [28.40625, 4, 0, 71]
+        "rects": [[28.40625, 4.5, 0, 71]],
+        "bounds": [28.40625, 4.5, 0, 71]
       },
       {
         "start": 1,
         "end": 2,
-        "rects": [[28.40625, 4, 32, 71]],
-        "bounds": [28.40625, 4, 32, 71]
+        "rects": [[28.40625, 4.5, 32, 71]],
+        "bounds": [28.40625, 4.5, 32, 71]
       },
       {
         "start": 2,
         "end": 2,
-        "rects": [[60.40625, 4, 0, 71]],
-        "bounds": [60.40625, 4, 0, 71]
+        "rects": [[60.40625, 4.5, 0, 71]],
+        "bounds": [60.40625, 4.5, 0, 71]
       }
     ],
     "carets": [
       {
         "sameText": true,
         "offset": 0,
-        "rect": [0, 4, 0, 71],
+        "rect": [0, 4.5, 0, 71],
         "rangeText": true,
         "rangeOffset": 0,
         "collapsed": true
@@ -54,7 +54,7 @@
       {
         "sameText": true,
         "offset": 1,
-        "rect": [28.40625, 4, 0, 71],
+        "rect": [28.40625, 4.5, 0, 71],
         "rangeText": true,
         "rangeOffset": 1,
         "collapsed": true
@@ -62,7 +62,7 @@
       {
         "sameText": true,
         "offset": 1,
-        "rect": [28.40625, 4, 0, 71],
+        "rect": [28.40625, 4.5, 0, 71],
         "rangeText": true,
         "rangeOffset": 1,
         "collapsed": true
@@ -70,14 +70,14 @@
       {
         "sameText": true,
         "offset": 2,
-        "rect": [60.40625, 4, 0, 71],
+        "rect": [60.40625, 4.5, 0, 71],
         "rangeText": true,
         "rangeOffset": 2,
         "collapsed": true
       }
     ],
     "hit": true,
-    "privateRange": [0, 4, 60.40625, 71],
+    "privateRange": [0, 4.5, 60.40625, 71],
     "hooks": 0,
     "errors": {
       "rangeBrand": "TypeError",
@@ -195,7 +195,7 @@
       {
         "step": "font",
         "offset": 2,
-        "rect": [30.203125, 6, 0, 36]
+        "rect": [30.203125, 6, 0, 35.5]
       },
       {
         "step": "detached",
@@ -210,7 +210,7 @@
       {
         "step": "restored",
         "offset": 2,
-        "rect": [30.203125, 6, 0, 36]
+        "rect": [30.203125, 6, 0, 35.5]
       }
     ],
     "outOfView": true,

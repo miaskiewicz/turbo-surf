@@ -74,19 +74,36 @@ function protocolList(body) {
   return protocols;
 }
 
+const applicationSettings = (body, type) => [
+  "applicationSettings",
+  { codepoint: type, protocols: protocolList(body) },
+];
+// Extension type -> [detail key, decoded value] for the identity-relevant bodies.
+const EXTENSION_DETAILS = {
+  0: (body) => ["serverName", body.subarray(5).toString("latin1")],
+  11: (body) => ["pointFormats", u8List(body)],
+  27: (body) => ["certificateCompression", u16List(body, 1, body[0])],
+  45: (body) => ["pskModes", u8List(body)],
+  17513: applicationSettings,
+  17613: applicationSettings,
+  65037: (body) => ["echOuterType", body[0]],
+};
+
+function extensionDetails(record) {
+  const details = {};
+  for (const { type, body } of extensionBodies(record)) {
+    const decode = Object.hasOwn(EXTENSION_DETAILS, type) ? EXTENSION_DETAILS[type] : null;
+    if (!decode) continue;
+    const [key, value] = decode(body, type);
+    details[key] = value;
+  }
+  return details;
+}
+
 /** Every identity-relevant ClientHello field, plus JA3/JA4, from one raw record. */
 export function describeClientHello(record) {
   const hello = parseClientHello(record);
-  const details = {};
-  for (const { type, body } of extensionBodies(record)) {
-    if (type === 0) details.serverName = body.subarray(5).toString("latin1");
-    if (type === 11) details.pointFormats = u8List(body);
-    if (type === 27) details.certificateCompression = u16List(body, 1, body[0]);
-    if (type === 45) details.pskModes = u8List(body);
-    if (type === 17513 || type === 17613)
-      details.applicationSettings = { codepoint: type, protocols: protocolList(body) };
-    if (type === 65037) details.echOuterType = body[0];
-  }
+  const details = extensionDetails(record);
   const ext = (type) => hello.extensions.find((entry) => entry.type === type);
   const plain = (values = []) => values.filter((value) => !isGrease(value));
   const versions = plain(ext(43)?.values);
@@ -189,29 +206,39 @@ function priorityOf(payload, at) {
   };
 }
 
-function describeFrame(type, flags, streamId, payload) {
-  const frame = { type: H2_FRAME_TYPES[type] || `UNKNOWN_${type}`, flags, streamId };
-  frame.length = payload.length;
-  if (type === 4) {
+// H2 frame type -> decoder of its identity-relevant payload fields.
+const FRAME_DETAILS = {
+  4: (frame, flags, payload) => {
     if (flags & 1) frame.ack = true;
     frame.settings = [];
     for (let at = 0; at + 6 <= payload.length; at += 6)
       frame.settings.push({ id: payload.readUInt16BE(at), value: payload.readUInt32BE(at + 2) });
-  } else if (type === 8 && payload.length >= 4) {
-    frame.increment = payload.readUInt32BE(0) & 0x7fffffff;
-  } else if (type === 2 && payload.length >= 5) {
-    frame.priority = priorityOf(payload, 0);
-  } else if (type === 1) {
+  },
+  8: (frame, _flags, payload) => {
+    if (payload.length >= 4) frame.increment = payload.readUInt32BE(0) & 0x7fffffff;
+  },
+  2: (frame, _flags, payload) => {
+    if (payload.length >= 5) frame.priority = priorityOf(payload, 0);
+  },
+  1: (frame, flags, payload) => {
     frame.endStream = Boolean(flags & 1);
     frame.endHeaders = Boolean(flags & 4);
     const padding = flags & 8 ? 1 : 0;
     if (flags & 0x20 && payload.length >= padding + 5)
       frame.priority = priorityOf(payload, padding);
-  } else if (type === 3 && payload.length >= 4) {
-    frame.errorCode = payload.readUInt32BE(0);
-  } else if (type === 6) {
+  },
+  3: (frame, _flags, payload) => {
+    if (payload.length >= 4) frame.errorCode = payload.readUInt32BE(0);
+  },
+  6: (frame, flags) => {
     if (flags & 1) frame.ack = true;
-  }
+  },
+};
+
+function describeFrame(type, flags, streamId, payload) {
+  const frame = { type: H2_FRAME_TYPES[type] || `UNKNOWN_${type}`, flags, streamId };
+  frame.length = payload.length;
+  if (Object.hasOwn(FRAME_DETAILS, type)) FRAME_DETAILS[type](frame, flags, payload);
   return frame;
 }
 

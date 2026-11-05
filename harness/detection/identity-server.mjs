@@ -142,6 +142,35 @@ export async function startIdentityServers(route) {
     for (const waiter of waiters) waiter();
   };
 
+  const requestEntry = (request, protocol, label, connection, length) => {
+    const path = request.url;
+    const match = /^\/t\/([a-z0-9-]+)\/k\/([a-z0-9-]+)/.exec(path);
+    return {
+      tier: match?.[1] ?? null,
+      kind: match?.[2] ?? null,
+      method: request.method,
+      path,
+      origin: label(request),
+      protocol,
+      httpVersion: request.httpVersion,
+      headers: headerList(request.rawHeaders),
+      bodyBytes: length,
+      connection: connection?.id ?? null,
+      streamId: protocol === "h2" ? request.stream.id : null,
+    };
+  };
+
+  // HTTP/2 requests also carry the connection's pseudo-header order and the stream's
+  // HEADERS-frame priority from the tapped wire.
+  const annotateH2 = (entry, connection, request) => {
+    const pseudo = entry.headers.map(([name]) => name).filter((name) => name.startsWith(":"));
+    connection.pseudoOrder ||= pseudo;
+    entry.streamPriority =
+      connection.tap.frames.find(
+        (frame) => frame.type === "HEADERS" && frame.streamId === request.stream.id,
+      )?.priority ?? null;
+  };
+
   const handle = (protocol, label) => (request, response) => {
     let length = 0;
     request.on("data", (chunk) => {
@@ -149,29 +178,8 @@ export async function startIdentityServers(route) {
     });
     request.on("end", () => {
       const connection = owner.get(protocol === "h2" ? request.stream.session : request.socket);
-      const path = request.url;
-      const match = /^\/t\/([a-z0-9-]+)\/k\/([a-z0-9-]+)/.exec(path);
-      const entry = {
-        tier: match?.[1] ?? null,
-        kind: match?.[2] ?? null,
-        method: request.method,
-        path,
-        origin: label(request),
-        protocol,
-        httpVersion: request.httpVersion,
-        headers: headerList(request.rawHeaders),
-        bodyBytes: length,
-        connection: connection?.id ?? null,
-        streamId: protocol === "h2" ? request.stream.id : null,
-      };
-      if (connection && protocol === "h2") {
-        const pseudo = entry.headers.map(([name]) => name).filter((name) => name.startsWith(":"));
-        connection.pseudoOrder ||= pseudo;
-        entry.streamPriority =
-          connection.tap.frames.find(
-            (frame) => frame.type === "HEADERS" && frame.streamId === request.stream.id,
-          )?.priority ?? null;
-      }
+      const entry = requestEntry(request, protocol, label, connection, length);
+      if (connection && protocol === "h2") annotateH2(entry, connection, request);
       record(entry);
       const reply = route(entry, ports);
       response.writeHead(reply.status ?? 200, reply.headers ?? {});

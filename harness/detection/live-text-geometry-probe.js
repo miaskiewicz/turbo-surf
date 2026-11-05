@@ -34,21 +34,22 @@
   sample.setStart(text, 0);
   sample.setEnd(text, 2);
   const rect = sample.getBoundingClientRect();
-  const carets = [];
-  for (const fraction of [0.1, 0.4, 0.6, 0.9]) {
+  const caretRow = (fraction) => {
     const x = rect.x + rect.width * fraction,
       y = rect.y + rect.height / 2;
     const position = document.caretPositionFromPoint(x, y),
       range = document.caretRangeFromPoint(x, y);
-    carets.push({
+    return {
       sameText: position?.offsetNode === text,
       offset: position?.offset ?? null,
       rect: position ? rectangle(position.getClientRect()) : null,
       rangeText: range?.startContainer === text,
       rangeOffset: range?.startOffset ?? null,
       collapsed: range?.collapsed ?? null,
-    });
-  }
+    };
+  };
+  const carets = [];
+  for (const fraction of [0.1, 0.4, 0.6, 0.9]) carets.push(caretRow(fraction));
   const hit =
     document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === target;
   let hooks = 0;
@@ -128,32 +129,21 @@
     rect.y + rect.height / 2,
   );
   const lifecycle = [];
+  const lifecycleRow = (step) => ({
+    step,
+    offset: retained.offset,
+    rect: retained.getClientRect() ? rectangle(retained.getClientRect()) : null,
+  });
   target.style.fontSize = "32px";
   target.style.lineHeight = "48px";
-  lifecycle.push({
-    step: "font",
-    offset: retained.offset,
-    rect: retained.getClientRect() ? rectangle(retained.getClientRect()) : null,
-  });
+  lifecycle.push(lifecycleRow("font"));
   target.remove();
-  lifecycle.push({
-    step: "detached",
-    offset: retained.offset,
-    rect: retained.getClientRect() ? rectangle(retained.getClientRect()) : null,
-  });
+  lifecycle.push(lifecycleRow("detached"));
   document.body.appendChild(target);
   text.nodeValue = "a";
-  lifecycle.push({
-    step: "shortened",
-    offset: retained.offset,
-    rect: retained.getClientRect() ? rectangle(retained.getClientRect()) : null,
-  });
+  lifecycle.push(lifecycleRow("shortened"));
   text.nodeValue = "abcd";
-  lifecycle.push({
-    step: "restored",
-    offset: retained.offset,
-    rect: retained.getClientRect() ? rectangle(retained.getClientRect()) : null,
-  });
+  lifecycle.push(lifecycleRow("restored"));
   return {
     ranges,
     carets,

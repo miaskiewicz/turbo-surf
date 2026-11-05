@@ -14,7 +14,8 @@ test("storage control pins all authored scripts and the actual Chrome collector"
   assert.equal(digest("./storage-probe.js"), fixture.probeSha256);
   assert.equal(digest("./storage-widget-probe.js"), fixture.widgetSha256);
   assert.equal(digest("./authored-storage-chrome.mjs"), fixture.collectorSha256);
-  assert.equal(fixture.browser, "Chrome/155.0.8059.79");
-  assert.equal(fixture.v8, "15.5.35.23");
+  // Re-recorded headed on the frozen branded Chrome 156.0.8078.80 oracle after the #154 refactor.
+  assert.equal(fixture.browser, "Chrome/156.0.8078.80");
+  assert.equal(fixture.v8, "15.6.75.27");
   assert.deepEqual(fixture.errors, []);
 });

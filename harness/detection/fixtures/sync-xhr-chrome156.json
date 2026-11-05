@@ -1,0 +1,17 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "probeSha256": "eb3146bb94f71aad7a5088fa7ed5c3ba0aceed34727198a62abdbff8174a9a40",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": "{\"blob\":[[\"readystatechange:1\",\"opened\",\"readystatechange:4\",\"load:4:10:10:true\",\"loadend:4:10:10:true\",\"sent\"],null,4,200,\"OK\",true,\"content-length: 10\\r\\ncontent-type: text/plain\\r\\n\",\"hello sync\"],\"blobResponse\":[\"hello sync\",\"10\",\"\"],\"data\":[[\"readystatechange:1\",\"opened\",\"readystatechange:4\",\"load:4:3:3:true\",\"loadend:4:3:3:true\",\"sent\"],null,4,200,\"OK\",true,\"content-type: text/plain\\r\\n\",\"abc\"],\"http\":[[\"readystatechange:1\",\"opened\",\"readystatechange:4\",\"load:4:54:54:true\",\"loadend:4:54:54:true\",\"sent\"],null,4,200,\"OK\",true,\"text/html\",true],\"httpHeader\":[null,200],\"xml\":[\"root\",\"application/xml\"],\"override\":[\"text/plain\",null],\"missing\":[[\"readystatechange:1\",\"opened\"],[\"NetworkError\",\"Failed to execute 'send' on 'XMLHttpRequest': Failed to load '<url>'.\"],4,0,\"\",false,\"\",\"\"],\"post\":[[\"readystatechange:1\",\"opened\"],[\"NetworkError\",\"Failed to execute 'send' on 'XMLHttpRequest': Failed to load '<url>': 'GET' is the only method allowed for 'blob:' URLs.\"],4,0,\"\",false,\"\",\"\"],\"foreign\":[[\"readystatechange:1\",\"opened\"],[\"NetworkError\",\"Failed to execute 'send' on 'XMLHttpRequest': Failed to load '<url>'.\"],4,0,\"\",false,\"\",\"\"],\"sendTwice\":[4,[\"InvalidStateError\",\"Failed to execute 'send' on 'XMLHttpRequest': The object's state must be OPENED.\"]],\"reopen\":[1,0,\"\",4,200,\"second\"],\"responseTypeBeforeOpen\":[[\"InvalidAccessError\",\"Failed to execute 'open' on 'XMLHttpRequest': Synchronous requests from a document must not set a response type.\"],0],\"responseTypeAfterOpen\":[[\"InvalidAccessError\",\"Failed to set the 'responseType' property on 'XMLHttpRequest': The response type cannot be changed for synchronous requests made from a document.\"],[\"InvalidAccessError\",\"Failed to set the 'responseType' property on 'XMLHttpRequest': The response type cannot be changed for synchronous requests made from a document.\"],null,\"\"],\"responseTypeAsyncThenSync\":[[\"InvalidAccessError\",\"Failed to execute 'open' on 'XMLHttpRequest': Synchronous requests from a document must not set a response type.\"],0],\"timeoutBeforeOpen\":[[\"InvalidAccessError\",\"Failed to execute 'open' on 'XMLHttpRequest': Synchronous requests must not set a timeout.\"],0,5],\"timeoutAfterOpen\":[[\"InvalidAccessError\",\"Failed to set the 'timeout' property on 'XMLHttpRequest': Timeouts cannot be set for synchronous requests made from a document.\"],[\"InvalidAccessError\",\"Failed to set the 'timeout' property on 'XMLHttpRequest': Timeouts cannot be set for synchronous requests made from a document.\"],0],\"withCredentials\":[null,200,true],\"asyncDefault\":[4,4,4,4,1]}"
+}

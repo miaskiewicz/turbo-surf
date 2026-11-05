@@ -125,15 +125,16 @@ async fn compare(skip: impl Fn(&str, &mut Value)) -> Vec<String> {
     differences
 }
 
-/// Surf has no Web Workers (#104) and loads no media, so `new Worker` throws and an audio
-/// `src` never fetches; those two observations are tracked by #190 (split from
-/// #110). The worker-src/media-src policy resolution itself is unit-tested in csp.rs.
-fn without_workers_and_media(_: &str, result: &mut Value) {
-    result.as_object_mut().unwrap().remove("worker");
+/// `new Worker(url)` enforces worker-src on construction (#104/#190), but the worker's
+/// own script never runs yet (follow-up: separate V8 realm per worker). Media loads are
+/// still missing, so `<audio src>` never fetches and its media-src violation never fires;
+/// drop only those media-src rows. The worker-src/media-src policy resolution is
+/// unit-tested in csp.rs.
+fn without_media(_: &str, result: &mut Value) {
     result["violations"]
         .as_array_mut()
         .unwrap()
-        .retain(|row| !matches!(row[1].as_str(), Some("worker-src" | "media-src")));
+        .retain(|row| row[1].as_str() != Some("media-src"));
 }
 
 /// Chrome 156 checks a report-only event-handler attribute twice: when it is set and
@@ -153,7 +154,7 @@ fn single_report_only_attribute_check(result: &mut Value) {
 }
 
 fn known_gaps(id: &str, result: &mut Value) {
-    without_workers_and_media(id, result);
+    without_media(id, result);
     single_report_only_attribute_check(result);
 }
 

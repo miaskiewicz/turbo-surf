@@ -21,6 +21,47 @@
   retire with them; the embedded-font range cases pin the new inline y-position gap
   (still owned by turbo-dom). `turbo-dom-v8` stays on `79ae001d` (generated
   candidate for #90) until `150.4.1` reaches crates.io.
+- **Fixed (GC / native-memory reclamation, #115)**: a retiring iframe context now releases
+  its blob URL entries from the native `URL.createObjectURL` store, and the host-side
+  `collect_message_port_garbage_for_testing` boundary prunes dead weak context handles from
+  the context-ownership registry. Soak coverage: `tests/gc_soak.rs` opens forty data-URL
+  iframes that each allocate a blob URL, a message channel and a 64-row detached subtree,
+  then checks that the message-port endpoints, queued bytes and host-context counts return
+  to their baseline. The same file reproduces #183 on an idle localhost (sixty frame loads
+  in one session) — the tail stayed under three seconds on this machine, so #183's reported
+  7-14 s slowdown looks like concurrent build load rather than a teardown leak.
+- **Fixed (CSP worker-src, #104, #190)**: `new Worker(url)` under `worker-src 'none'`
+  now fires a `securitypolicyviolation` whose `blockedURI` is the worker script URL
+  and whose `effectiveDirective` is `worker-src`, matching Chrome 156; the CSP3
+  fallback chain (`worker-src` -> `child-src` -> `script-src` -> `default-src`) is
+  applied, so a page under `script-src 'nonce-n'` without `worker-src` reports the
+  same violation. The Worker shell still constructs (`new Worker('/x.js')` returns a
+  Worker object), as in Chrome. `media-src` enforcement still waits on media loads
+  (split as #204). Checked against `csp-directives-chrome156.json`
+  (`tests/csp_directives.rs`). The remaining dedicated-worker runtime (a separate V8
+  realm per worker with DedicatedWorkerGlobalScope, module workers, blob: workers,
+  and SharedWorker/ServiceWorker) is tracked as #203.
+- **Fixed (render, #138)**: synchronous `XMLHttpRequest` (`open(..., false)`) now
+  blocks in `send()` and loads the response, over http(s), `blob:` and `data:` URLs.
+  Native `op_fetch_sync` runs the page's own fetch pipeline (CSP, CORS, cookies,
+  the HTTP cache and the blob:/data: scheme fetches) to completion on a dedicated
+  multi-thread runtime while the isolate thread is blocked. `xhr.js` also mirrors
+  Chrome 156's window-only restrictions (no loadstart or progress events on a sync
+  send, `NetworkError` thrown from `send()` on a network failure,
+  `InvalidAccessError` on `responseType` or `timeout` on a document's sync request,
+  and `async = undefined` is treated as synchronous). Covered by
+  `tests/sync_xhr.rs` against the Chrome 156 control.
+- **Fixed (render, #146)**: `blob:` URLs are now valid script, module, stylesheet,
+  image and iframe sources. The native blob URL store answers subresource loads
+  keyed by the creating document's storage key, so a revoked, foreign or
+  cross-partition URL fails like a missing response as in Chrome 156. Scripts and
+  modules resolve theirs through `script_fetch` after CSP and apply the MIME's
+  charset for source text; images and other destinations read the bytes directly;
+  iframes commit a local document response. Covered by
+  `tests/blob_url_resources.rs`.
+- **Refactor (render, #154)**: `script_fetch::fetch` split into small admission,
+  network-hop and finalisation helpers, so its cyclomatic complexity drops from
+  24 to 7 (`cc-check --max 15`). No behaviour change.
 - **Fixed (network transports, #188)**: a render session's trust anchor now covers its
   `wss:` sockets as well as its https fetches. `ClientHints::with_trust_anchor(der)`
   configures both; before, `new WebSocket('wss://…')` to a server signed by an embedder or

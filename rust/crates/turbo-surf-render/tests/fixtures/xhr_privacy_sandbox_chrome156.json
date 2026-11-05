@@ -1,0 +1,53 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47 (chrome-headless-shell, --use-mock-keychain --password-store=basic, http://localhost)",
+  "probe": "f879c56240217c14e6c8d7ac15796d841ace1b4fbe6e668d45e2ccea915340de",
+  "result": {
+    "order": ["constructor", "responseXML", "setAttributionReporting", "setPrivateToken"],
+    "shape": [
+      [
+        "setAttributionReporting",
+        1,
+        true,
+        true,
+        "function setAttributionReporting() { [native code] }"
+      ],
+      ["setPrivateToken", 1, true, true, "function setPrivateToken() { [native code] }"]
+    ],
+    "attribution": [
+      "ok:undefined",
+      "",
+      "TypeError: Failed to execute 'setAttributionReporting' on 'XMLHttpRequest': 1 argument required, but only 0 present.",
+      "ok:undefined",
+      "TypeError: Illegal invocation"
+    ],
+    "closed": [
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': 1 argument required, but only 0 present.",
+      "TypeError: Illegal invocation",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': The provided value is not of type 'PrivateToken'.",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': The provided value is not of type 'PrivateToken'.",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': Failed to read the 'operation' property from 'PrivateToken': Required member is undefined.",
+      "issuers,operation",
+      "InvalidStateError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': The object's state must be OPENED.",
+      "issuers,operation,refreshPolicy,version"
+    ],
+    "opened": [
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': Failed to read the 'version' property from 'PrivateToken': Required member is undefined.",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': Failed to read the 'operation' property from 'PrivateToken': The provided value 'bogus' is not a valid enum value of type OperationType.",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': Failed to read the 'version' property from 'PrivateToken': The provided value '2' is not a valid enum value of type PrivateTokenVersion.",
+      "ok:undefined",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': Failed to read the 'refreshPolicy' property from 'PrivateToken': The provided value 'bad' is not a valid enum value of type RefreshPolicy.",
+      "ok:undefined",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': Failed to read the 'issuers' property from 'PrivateToken': The provided value cannot be converted to a sequence.",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': privateToken: operation type 'send-redemption-record' requires that the 'issuers' field be present and contain at least one secure, HTTP(S) URL, but it was missing or empty.",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': privateToken: operation type 'send-redemption-record' requires that the 'issuers' field be present and contain at least one secure, HTTP(S) URL, but it was missing or empty.",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': privateToken: operation type 'send-redemption-record' requires that the 'issuers' fields' members parse to HTTP(S) origins, but one did not: not a url",
+      "TypeError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': privateToken: operation type 'send-redemption-record' requires that the 'issuers' fields' members parse to secure origins, but one did not: http://a.test",
+      "ok:undefined",
+      "ok:undefined"
+    ],
+    "sent": [
+      "InvalidStateError: Failed to execute 'setPrivateToken' on 'XMLHttpRequest': The object's state must be OPENED.",
+      "ok:undefined"
+    ]
+  }
+}

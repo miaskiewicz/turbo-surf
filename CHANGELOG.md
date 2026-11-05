@@ -38,9 +38,9 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   frames. The binding's JS cascade evaluates `@media` through turbo-surf's `matchMedia`, so
   `getComputedStyle` follows the top and frame viewports.
 - **Fixed (screenshots, #132, #131)**: turbo-dom#282's quirks-mode `<form>` block-end margin
-  and turbo-dom#283's author borders on buttons reach the static screenshot. A border without a
-  colour (`currentcolor`) still paints nothing in the static raster (turbo-dom#303), pinned in
-  `screenshot_author_borders`.
+  and turbo-dom#283's author borders on buttons reach the static screenshot. With turbo-dom 0.7.1, a
+  border without a colour paints in `currentcolor` too (turbo-dom#303), checked against Chrome 156
+  in `screenshot_author_borders`.
 - **Fixed (fetch, #109)**: `Request`/`Response#formData()` parses `multipart/form-data`
   (Blink's delimiter, header, `Content-Disposition` and UTF-8 rules; `File` entries keep the
   part's raw `Content-Type`, default `text/plain`) and picks the parser by MIME essence like

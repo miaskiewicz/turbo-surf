@@ -40,14 +40,17 @@ fn author_button_borders_paint_like_chrome156() {
     assert_eq!(pixel(20, 20), [239, 239, 239]);
 }
 
-/// KNOWN_GAP (turbo-dom#303): a border without a colour (`currentcolor`) paints nothing in
-/// the static raster, on any element; Chrome 156 paints the fixture's borders black. Pinned
-/// to the button face so the fix shows up here.
+/// turbo-dom#303 (fixed in turbo-dom 0.7.1): a border without a colour paints in the
+/// element's `color` (`currentcolor`). The fixture's buttons have no `color`, so Chrome 156
+/// paints their borders black, sampled at the same points as the red case above.
 #[test]
-fn current_color_button_borders_known_gap() {
+fn current_color_button_borders_paint_black_like_chrome156() {
     let pixel = screenshot(FIXTURE);
-    for &(x, y) in CHROME_BORDER {
-        assert_ne!(pixel(x, y), [0, 0, 0], "({x},{y}): turbo-dom#303 is fixed");
-    }
-    assert_eq!(pixel(9, 24), [239, 239, 239], "turbo-dom#303 gap changed");
+    let wrong: Vec<_> = CHROME_BORDER
+        .iter()
+        .filter(|&&(x, y)| pixel(x, y) != [0, 0, 0])
+        .map(|&(x, y)| format!("({x},{y}) = {:?}", pixel(x, y)))
+        .collect();
+    assert!(wrong.is_empty(), "not Chrome's currentcolor border: {wrong:?}");
+    assert_eq!(pixel(20, 20), [239, 239, 239]);
 }

@@ -8,11 +8,14 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use turbo_surf_render::PageSession;
 
-const PROBE: &str = include_str!("../../../../harness/detection/child-frame-form-targets-probe.js");
+const REDIRECTS: &str =
+    include_str!("../../../../harness/detection/child-frame-form-redirects-probe.js");
+const TARGETS: &str =
+    include_str!("../../../../harness/detection/child-frame-form-targets-probe.js");
 const CONTROL: &str =
     include_str!("../../../../harness/detection/fixtures/child-frame-form-targets-chrome156.json");
 
-fn control() -> Value {
+fn control(name: &str, probe: &str) -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();
     assert!(control["browser"]
         .as_str()
@@ -20,11 +23,11 @@ fn control() -> Value {
         .ends_with("Chrome/156.0.8078.47"));
     assert_eq!(control["v8"], "15.6.75.19");
     assert_eq!(
-        control["fixtures"]["child-frame-form-targets-probe.js"],
-        format!("{:x}", Sha256::digest(PROBE)),
+        control["fixtures"][name],
+        format!("{:x}", Sha256::digest(probe)),
         "stale control"
     );
-    control["result"]["child-frame-form-targets-probe.js"].clone()
+    control["result"][name].clone()
 }
 
 /// JSON-pointer paths where `actual` departs from Chrome, with the engine's value.
@@ -227,22 +230,23 @@ async fn page(port: u16) -> PageSession {
         &format!("http://127.0.0.1:{port}/"),
         "",
         "",
-        // ~30 frame loads and navigations over localhost; headroom for a loaded host.
+        // ~20 frame loads and navigations over localhost; headroom for a loaded host.
         60000,
     )
     .await
     .unwrap()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn child_frame_form_targets_match_chrome156() {
-    let expected = control();
+/// Runs one probe in a fresh session (each keeps its frame count near the
+/// existing child-frame form control's) and compares it with its Chrome control.
+async fn matches_chrome156(name: &str, probe: &str) {
+    let expected = control(name, probe);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(serve(listener));
     let mut page = page(port).await;
     let raw = page
-        .eval_json_expression(PROBE.trim().trim_end_matches(';'))
+        .eval_json_expression(probe.trim().trim_end_matches(';'))
         .await
         .unwrap();
     page.close();
@@ -255,6 +259,19 @@ async fn child_frame_form_targets_match_chrome156() {
         Vec::<String>::new(),
         "divergences from the Chrome control"
     );
+}
+
+/// turbo-surf#139: a refused hop cancels the navigation (no load, the document
+/// stays) and the submitter reports the violation against the initial URL.
+#[tokio::test(flavor = "current_thread")]
+async fn child_frame_form_redirects_match_chrome156() {
+    matches_chrome156("child-frame-form-redirects-probe.js", REDIRECTS).await;
+}
+
+/// turbo-surf#140: target names over the whole frame tree.
+#[tokio::test(flavor = "current_thread")]
+async fn child_frame_form_targets_match_chrome156() {
+    matches_chrome156("child-frame-form-targets-probe.js", TARGETS).await;
 }
 
 /// `_blank` and names no navigable answers to open a new top-level window in Chrome;

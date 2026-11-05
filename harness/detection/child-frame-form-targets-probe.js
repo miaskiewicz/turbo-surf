@@ -1,8 +1,7 @@
 (async () => {
-  // Child-frame form navigations beyond the submitting document's own frames:
-  // the submitter's form-action across redirect hops (turbo-surf#139) and target
-  // names resolved over the whole frame tree (turbo-surf#140). Served by the
-  // control's `/echo`, `/redirect…`, `/self-csp…` and `/xo-submit` routes.
+  // Child-frame form targets beyond the submitting document's own frames: names
+  // resolve over the whole frame tree (turbo-surf#140). Served by the control's
+  // `/echo` and `/xo-submit` routes.
   const out = {};
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // A navigation that never commits reports itself instead of stalling the probe.
@@ -47,49 +46,6 @@
     return state;
   };
   const xo = `http://localhost:${location.port}`;
-  const redirect = (status, to) => `/redirect${status}?to=${encodeURIComponent(to)}`;
-
-  // turbo-surf#139: the submitter's form-action governs every redirect hop.
-  const redirected = async (src, action, method = "post", fields = undefined) => {
-    const element = await frame(document, src);
-    const violations = [];
-    element.contentDocument.addEventListener("securitypolicyviolation", (event) =>
-      violations.push([
-        event.violatedDirective,
-        event.blockedURI
-          .replace(location.origin, "<origin>")
-          .replace(xo, "<xo>")
-          .replace(encodeURIComponent(xo), "<xo>"),
-      ]),
-    );
-    const state = counted(element);
-    form(element.contentDocument, { action, method }, fields).submit();
-    await sleep(500);
-    return [state.loads, where(element), violations, echo(element)];
-  };
-  out.redirectCrossOriginBlocked = await redirected(
-    "/self-csp-a",
-    redirect(302, `${xo}/echo/blocked`),
-  );
-  out.redirectSameOriginAllowed = await redirected("/self-csp-b", redirect(302, "/echo/allowed"));
-  out.redirect307Allowed = await redirected("/self-csp-c", redirect(307, "/echo/kept"));
-  // A GET submission replaces the action's query, so the hop comes from a field.
-  out.redirectGetBlocked = await redirected("/self-csp-d", "/redirect302", "get", [
-    ["to", `${xo}/echo/blocked-get`],
-  ]);
-  // A document targeting its own named child: its policy, not the child's, applies.
-  out.redirectNamedChildBlocked = await (async () => {
-    const host = await frame(document, "/self-csp-host");
-    const kid = await frame(host.contentDocument, "/kid", { name: "policykid" });
-    const state = counted(kid);
-    form(host.contentDocument, {
-      action: redirect(302, `${xo}/echo/kid`),
-      method: "post",
-      target: "policykid",
-    }).submit();
-    await sleep(500);
-    return [state.loads, where(kid), echo(kid)];
-  })();
 
   // turbo-surf#140: names resolve over the whole frame tree.
   out.sibling = await (async () => {
@@ -185,9 +141,11 @@
     const other = await frame(document, "/plain-other", { name: "xpick" });
     const shared = await frame(document, `${xo}/plain-shared`, { name: "xpick" });
     const states = [counted(other), counted(shared)];
+    const navigated = loaded(shared);
     const targets = encodeURIComponent(JSON.stringify([["xpick", `${xo}/echo/xpick`]]));
     await frame(document, `${xo}/xo-submit?targets=${targets}`);
-    await sleep(500);
+    await settled(navigated);
+    await sleep(100);
     return [states[0].loads, where(other), states[1].loads];
   })();
   // javascript: actions run in the chosen navigable.

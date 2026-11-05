@@ -1,9 +1,10 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "recordedAt": "2026-11-05T15:10:59.447Z",
+  "recordedAt": "2026-11-05T16:24:41.260Z",
   "fixtures": {
-    "child-frame-form-targets-probe.js": "ed41b1a98dca9252b652b444f393521938b858d2eac1320de0eb71b3f5cf6b7e"
+    "child-frame-form-redirects-probe.js": "02b4fa76f8323d1c0be74e02b24620b0042c15d2623d7b3e16b05db4e1e9f57f",
+    "child-frame-form-targets-probe.js": "63342dd9c4f4dcb96e0a7d53475de14d198cd7b33f43ae4327e9a05b6621646b"
   },
   "effectiveExtensionFlags": [
     "--disable-extensions",
@@ -13,7 +14,7 @@
     "--disable-background-timer-throttling"
   ],
   "result": {
-    "child-frame-form-targets-probe.js": {
+    "child-frame-form-redirects-probe.js": {
       "redirectCrossOriginBlocked": [
         0,
         "/self-csp-a",
@@ -65,7 +66,9 @@
         [["form-action", "<origin>/redirect302?to=<xo>%2Fecho%2Fblocked-get"]],
         ["no echo", "/self-csp-d"]
       ],
-      "redirectNamedChildBlocked": [0, "/kid", ["no echo", "/kid"]],
+      "redirectNamedChildBlocked": [0, "/kid", ["no echo", "/kid"]]
+    },
+    "child-frame-form-targets-probe.js": {
       "sibling": [
         {
           "method": "POST",

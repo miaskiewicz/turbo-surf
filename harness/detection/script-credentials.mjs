@@ -40,30 +40,39 @@ export const run = (command, args, out) =>
       code === 0 ? done() : fail(Error(stderr || String(code)));
     });
   });
-export function credentialErrors(value, requests) {
+const moduleGraphBroken = (value) =>
+  value?.module?.value !== "credentialed dependency" ||
+  !value.module.current ||
+  value.module.url !== "/entry.mjs";
+function valueErrors(value) {
   const errors = [];
-  if (
-    value?.module?.value !== "credentialed dependency" ||
-    !value.module.current ||
-    value.module.url !== "/entry.mjs"
-  )
-    errors.push("credentialed module graph");
+  if (moduleGraphBroken(value)) errors.push("credentialed module graph");
   if (!value?.anonymous || !value?.classic) errors.push("script completion");
   for (const key of ["legacy", "nosniff", "json"])
     if (value?.[key] !== true) errors.push(`${key} MIME policy`);
   if (value?.cookie !== "") errors.push("HttpOnly visibility");
   if (value?.redirect?.value !== "redirect dependency" || value.redirect.url !== "/final/entry.mjs")
     errors.push("redirect source/import identity");
+  return errors;
+}
+// Each script element's single completion event: [ids, expected type, error label suffix].
+const EVENT_EXPECTATIONS = [
+  [["module", "anonymous", "classic", "redirect", "legacy"], "load", " event"],
+  [["denied"], "error", " redirect event"],
+  [["nosniff", "json"], "error", " MIME event"],
+];
+function eventErrors(value) {
   const events = new Map(
     (value?.events || []).map(([id, type, trusted]) => [id, { type, trusted }]),
   );
-  for (const id of ["module", "anonymous", "classic", "redirect", "legacy"])
-    if (events.get(id)?.type !== "load" || !events.get(id).trusted) errors.push(`${id} event`);
-  if (events.get("denied")?.type !== "error" || !events.get("denied").trusted)
-    errors.push("denied redirect event");
-  for (const id of ["nosniff", "json"])
-    if (events.get(id)?.type !== "error" || !events.get(id).trusted)
-      errors.push(`${id} MIME event`);
+  const errors = [];
+  for (const [ids, type, label] of EVENT_EXPECTATIONS)
+    for (const id of ids)
+      if (events.get(id)?.type !== type || !events.get(id).trusted) errors.push(id + label);
+  return errors;
+}
+function requestErrors(requests) {
+  const errors = [];
   for (const path of ["/entry.mjs", "/dep.mjs", "/classic.js"])
     if (!requests.some((row) => row.path === path && row.cookie && row.origin === "source"))
       errors.push(`${path} credentials/origin`);
@@ -76,6 +85,58 @@ export function credentialErrors(value, requests) {
   )
     errors.push("redirect-tainted origin");
   return errors;
+}
+export function credentialErrors(value, requests) {
+  return [...valueErrors(value), ...eventErrors(value), ...requestErrors(requests)];
+}
+// Content-Type and body per fixture path; a path missing from BODIES is a 404.
+export const contentTypeFor = (path) =>
+  path === "/"
+    ? "text/html"
+    : ["/nosniff.js", "/legacy.js"].includes(path)
+      ? "text/plain"
+      : path === "/json.mjs"
+        ? "application/json"
+        : "text/javascript";
+const BODIES = {
+  "/nosniff.js": "globalThis.nosniffExecuted=true;",
+  "/legacy.js": "globalThis.legacyMime=true;",
+  "/json.mjs": "globalThis.jsonExecuted=true;",
+  "/entry.mjs": sources["entry.mjs"],
+  "/dep.mjs": sources["dep.mjs"],
+  "/classic.js": "globalThis.credentialClassic=true;",
+  "/anonymous.mjs": "globalThis.anonymousModule=true;",
+  "/final/entry.mjs":
+    "import {value} from './dep.mjs';globalThis.redirectModule={value,url:new URL(import.meta.url).pathname};",
+  "/final/dep.mjs": "export const value='redirect dependency';",
+};
+export const bodyFor = (path) => (Object.hasOwn(BODIES, path) ? BODIES[path] : null);
+// The cross origin's two redirects: `/denied` (no CORS) and a credentialed `/redirect`.
+const crossRedirect = (path, sourceOrigin) =>
+  path === "/denied"
+    ? [302, { Location: `${sourceOrigin}/must-not-request.mjs` }]
+    : path === "/redirect"
+      ? [
+          302,
+          {
+            "Access-Control-Allow-Origin": sourceOrigin,
+            "Access-Control-Allow-Credentials": "true",
+            Location: `${sourceOrigin}/final/entry.mjs`,
+          },
+        ]
+      : null;
+function setCors(response, path, isSource, sourceOrigin) {
+  if (!isSource) {
+    response.setHeader(
+      "Access-Control-Allow-Origin",
+      ["/anonymous.mjs", "/json.mjs"].includes(path) ? "*" : sourceOrigin,
+    );
+    response.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+  if (path === "/final/entry.mjs") {
+    response.setHeader("Access-Control-Allow-Origin", "null");
+    response.setHeader("Access-Control-Allow-Credentials", "true");
+  }
 }
 export async function captureCredentials({ binary, out, chromeOnly = false }) {
   if (existsSync(join(out, "comparison.json"))) throw Error("Use a fresh output directory");
@@ -99,67 +160,21 @@ export async function captureCredentials({ binary, out, chromeOnly = false }) {
         origin: request.headers.origin === sourceOrigin ? "source" : request.headers.origin || "",
         cookie: (request.headers.cookie || "").includes("secret=session"),
       });
-      response.setHeader(
-        "Content-Type",
-        path === "/"
-          ? "text/html"
-          : ["/nosniff.js", "/legacy.js"].includes(path)
-            ? "text/plain"
-            : path === "/json.mjs"
-              ? "application/json"
-              : "text/javascript",
-      );
+      response.setHeader("Content-Type", contentTypeFor(path));
       if (path === "/nosniff.js") response.setHeader("X-Content-Type-Options", "nosniff");
       if (isSource && path === "/") {
         response.setHeader("Set-Cookie", "secret=session; HttpOnly; Path=/");
         response.end(sources["page.html"].replaceAll("{{CROSS}}", crossOrigin));
         return;
       }
-      if (!isSource && path === "/denied") {
-        response.writeHead(302, { Location: `${sourceOrigin}/must-not-request.mjs` });
+      const redirect = isSource ? null : crossRedirect(path, sourceOrigin);
+      if (redirect) {
+        response.writeHead(...redirect);
         response.end();
         return;
       }
-      if (!isSource && path === "/redirect") {
-        response.writeHead(302, {
-          "Access-Control-Allow-Origin": sourceOrigin,
-          "Access-Control-Allow-Credentials": "true",
-          Location: `${sourceOrigin}/final/entry.mjs`,
-        });
-        response.end();
-        return;
-      }
-      const body =
-        path === "/nosniff.js"
-          ? "globalThis.nosniffExecuted=true;"
-          : path === "/legacy.js"
-            ? "globalThis.legacyMime=true;"
-            : path === "/json.mjs"
-              ? "globalThis.jsonExecuted=true;"
-              : path === "/entry.mjs"
-                ? sources["entry.mjs"]
-                : path === "/dep.mjs"
-                  ? sources["dep.mjs"]
-                  : path === "/classic.js"
-                    ? "globalThis.credentialClassic=true;"
-                    : path === "/anonymous.mjs"
-                      ? "globalThis.anonymousModule=true;"
-                      : path === "/final/entry.mjs"
-                        ? "import {value} from './dep.mjs';globalThis.redirectModule={value,url:new URL(import.meta.url).pathname};"
-                        : path === "/final/dep.mjs"
-                          ? "export const value='redirect dependency';"
-                          : null;
-      if (!isSource) {
-        response.setHeader(
-          "Access-Control-Allow-Origin",
-          ["/anonymous.mjs", "/json.mjs"].includes(path) ? "*" : sourceOrigin,
-        );
-        response.setHeader("Access-Control-Allow-Credentials", "true");
-      }
-      if (path === "/final/entry.mjs") {
-        response.setHeader("Access-Control-Allow-Origin", "null");
-        response.setHeader("Access-Control-Allow-Credentials", "true");
-      }
+      const body = bodyFor(path);
+      setCors(response, path, isSource, sourceOrigin);
       response.statusCode = body === null ? 404 : 200;
       response.end(body || "missing");
     });

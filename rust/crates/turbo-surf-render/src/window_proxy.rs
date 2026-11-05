@@ -58,20 +58,25 @@ fn retain_owned<'s>(
     let key = v8::Private::for_api(scope, Some(name));
     (owner.set_private(scope, key, value) == Some(true)).then_some(())
 }
+fn function_property<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Function>> {
+    let key = v8::String::new(scope, name)?;
+    v8::Local::<v8::Function>::try_from(object.get(scope, key.into())?).ok()
+}
 fn capture_functions(scope: &mut v8::PinScope) -> Option<()> {
     let context = scope.get_current_context();
     if context.get_slot::<Functions>().is_some() {
         return Some(());
     }
     let global = context.global(scope);
-    let key = v8::String::new(scope, "WeakMap")?;
-    let constructor = v8::Local::<v8::Function>::try_from(global.get(scope, key.into())?).ok()?;
+    let constructor = function_property(scope, global, "WeakMap")?;
     let key = v8::String::new(scope, "prototype")?;
     let prototype = constructor.get(scope, key.into())?.to_object(scope)?;
-    let key = v8::String::new(scope, "get")?;
-    let get = v8::Local::<v8::Function>::try_from(prototype.get(scope, key.into())?).ok()?;
-    let key = v8::String::new(scope, "set")?;
-    let set = v8::Local::<v8::Function>::try_from(prototype.get(scope, key.into())?).ok()?;
+    let get = function_property(scope, prototype, "get")?;
+    let set = function_property(scope, prototype, "set")?;
     let map = constructor.new_instance(scope, &[])?;
     for (name, value) in [
         ("functions", map.into()),

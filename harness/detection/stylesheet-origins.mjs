@@ -17,21 +17,18 @@ import { run } from "./script-credentials.mjs";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const html = readFileSync(join(here, "fixtures/stylesheet-origins.html"), "utf8");
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+// A sheet exists and its rules read/insertRule outcomes match `rules`/`insert`.
+const sheetBroken = (sheet, rules, insert) =>
+  !sheet?.sheet || sheet.rules !== rules || sheet.insert !== insert;
+const importBroken = (value) => !value?.imported?.sheet || value.imported.rules !== "SecurityError";
 export function stylesheetErrors(value) {
   const errors = [];
   for (const id of ["same", "cors", "include"])
-    if (!value?.[id]?.sheet || value[id].rules !== 1 || value[id].insert !== "allowed")
-      errors.push(id);
+    if (sheetBroken(value?.[id], 1, "allowed")) errors.push(id);
   for (const id of ["opaque", "redirect", "denied", "mime", "same-mime"])
-    if (
-      !value?.[id]?.sheet ||
-      value[id].rules !== "SecurityError" ||
-      value[id].insert !== "SecurityError"
-    )
-      errors.push(id);
+    if (sheetBroken(value?.[id], "SecurityError", "SecurityError")) errors.push(id);
 
-  if (!value?.imported?.sheet || value.imported.rules !== "SecurityError")
-    errors.push("import origin");
+  if (importBroken(value)) errors.push("import origin");
   const expectedEvents = [
     ["cors", "load", true],
     ["denied", "error", true],

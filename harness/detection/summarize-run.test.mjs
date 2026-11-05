@@ -52,6 +52,59 @@ test("fresh process evidence rejects abort, output failure and malformed flags e
   });
 });
 
+test("process summary maps each field to a public value or null", () => {
+  const clean = { code: 0, timedOut: false, aborted: false, error: null, signal: null };
+  assert.deepEqual(processSummary(clean), {
+    evidence: "measured",
+    complete: true,
+    exitCode: 0,
+    timedOut: false,
+    aborted: false,
+    errorPresent: false,
+    terminationSignal: null,
+  });
+  const failed = processSummary({ ...clean, code: 1, error: "x", signal: "SIGTERM" });
+  assert.deepEqual(
+    [
+      failed.evidence,
+      failed.complete,
+      failed.exitCode,
+      failed.errorPresent,
+      failed.terminationSignal,
+    ],
+    ["measured", false, 1, true, "SIGTERM"],
+  );
+  assert.equal(processSummary({ ...clean, signal: "SIGWINCH" }).terminationSignal, "other");
+  const invalid = processSummary({ ...clean, code: "0", timedOut: 1, error: 5, signal: 9 });
+  assert.deepEqual(
+    [invalid.evidence, invalid.complete, invalid.exitCode, invalid.timedOut, invalid.errorPresent],
+    ["invalid", false, null, null, null],
+  );
+  assert.equal(invalid.terminationSignal, null);
+  assert.deepEqual(
+    [processSummary({}).evidence, processSummary({}).complete],
+    ["unmeasured", null],
+  );
+});
+
+test("manifest runs with an unknown pass, invalid repeat or duplicate capture are rejected", () => {
+  fixture((directory, write) => {
+    const manifest = JSON.parse(readFileSync(join(directory, "manifest.json")));
+    const original = { ...manifest.runs[0] };
+    for (const [runs, error] of [
+      [[{ ...original, pass: "other" }], /Unknown capture pass/],
+      [[{ ...original, repeat: -1 }], /Invalid repeat/],
+      [[{ ...original, repeat: 1.5 }], /Invalid repeat/],
+      [[original, original], /Duplicate capture 0\/native-baseline/],
+    ]) {
+      write("manifest.json", { ...manifest, runs });
+      assert.throws(() => summarizeRun(directory), error);
+    }
+    write("manifest.json", { ...manifest, runs: [{ ...original, runtime: "other" }] });
+    assert.deepEqual(summarizeRun(directory).runs, {});
+  });
+});
+
 test("malformed collector error evidence cannot become a successful public baseline", () => {
   fixture((directory, write) => {
     const path = "native-baseline/trace.json";

@@ -178,28 +178,27 @@ fn secure_cookie_url(url: &Url) -> bool {
         })
 }
 
-fn rejected(c: &Cookie, url: &Url, line: &str) -> bool {
+/// Domain/scheme admission: the cookie domain must match the host, `Secure` needs
+/// a secure URL, and a public-suffix domain is only allowed for that exact host.
+fn domain_rejected(c: &Cookie, url: &Url) -> bool {
     let host = url.host_str().unwrap_or("");
-    if !domain_match(host, &c.domain) || c.secure && !secure_cookie_url(url) {
-        return true;
-    }
-    if !c.host_only && psl::suffix_str(&c.domain) == Some(c.domain.as_str()) && host != c.domain {
-        return true;
-    }
-    if c.name.starts_with("__Secure-") && !c.secure {
-        return true;
-    }
-    if c.name.starts_with("__Host-")
-        && (!c.secure || !c.host_only || explicit_cookie_path(line).as_deref() != Some("/"))
-    {
-        return true;
-    }
-    if (c.name.starts_with("__Http-") || c.name.starts_with("__Host-Http-"))
-        && (!c.secure || !c.http_only)
-    {
-        return true;
-    }
-    c.same_site == "none" && !c.secure
+    !domain_match(host, &c.domain)
+        || c.secure && !secure_cookie_url(url)
+        || !c.host_only && psl::suffix_str(&c.domain) == Some(c.domain.as_str()) && host != c.domain
+}
+
+/// Cookie name-prefix requirements (`__Secure-`, `__Host-`, `__Http-`, `__Host-Http-`).
+fn prefix_rejected(c: &Cookie, line: &str) -> bool {
+    let secure_prefix = c.name.starts_with("__Secure-") && !c.secure;
+    let host_prefix = c.name.starts_with("__Host-")
+        && (!c.secure || !c.host_only || explicit_cookie_path(line).as_deref() != Some("/"));
+    let http_prefix = (c.name.starts_with("__Http-") || c.name.starts_with("__Host-Http-"))
+        && (!c.secure || !c.http_only);
+    secure_prefix || host_prefix || http_prefix
+}
+
+fn rejected(c: &Cookie, url: &Url, line: &str) -> bool {
+    domain_rejected(c, url) || prefix_rejected(c, line) || c.same_site == "none" && !c.secure
 }
 
 #[derive(Default)]

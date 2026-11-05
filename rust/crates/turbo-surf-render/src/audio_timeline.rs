@@ -38,31 +38,39 @@ fn exp(x: f64) -> f64 {
     unsafe { surf_audio_exp(x) }
 }
 
+fn invalid_event(event: &Event, previous: f64) -> bool {
+    !event.time.is_finite()
+        || event.time < 0.
+        || event.time < previous
+        || !event.value.is_finite()
+        || !event.constant.is_finite()
+        || !event.duration.is_finite()
+        || event.curve.len() > 65536
+        || event.curve.iter().any(|value| !value.is_finite())
+}
+fn event_kind_error(event: &Event) -> Option<&'static str> {
+    if !["set", "linear", "exponential", "target", "curve"].contains(&event.kind.as_str()) {
+        return Some("Unknown audio automation event");
+    }
+    if event.kind == "target" && event.constant < 0. {
+        return Some("Invalid target time constant");
+    }
+    if event.kind == "curve" && (event.curve.len() < 2 || event.duration <= 0.) {
+        return Some("Invalid audio value curve");
+    }
+    None
+}
 pub(crate) fn validate(automation: &Automation) -> Result<(), String> {
     if automation.events.len() > 256 {
         return Err("AudioParam event limit exceeded".into());
     }
     let mut previous = -1.0;
     for event in &automation.events {
-        if !event.time.is_finite()
-            || event.time < 0.
-            || event.time < previous
-            || !event.value.is_finite()
-            || !event.constant.is_finite()
-            || !event.duration.is_finite()
-            || event.curve.len() > 65536
-            || event.curve.iter().any(|value| !value.is_finite())
-        {
+        if invalid_event(event, previous) {
             return Err("Invalid audio automation event".into());
         }
-        if !["set", "linear", "exponential", "target", "curve"].contains(&event.kind.as_str()) {
-            return Err("Unknown audio automation event".into());
-        }
-        if event.kind == "target" && event.constant < 0. {
-            return Err("Invalid target time constant".into());
-        }
-        if event.kind == "curve" && (event.curve.len() < 2 || event.duration <= 0.) {
-            return Err("Invalid audio value curve".into());
+        if let Some(error) = event_kind_error(event) {
+            return Err(error.into());
         }
         previous = event.time;
     }
@@ -74,15 +82,9 @@ pub(crate) struct Values {
     pub sample_accurate: Vec<bool>,
 }
 
-pub(crate) fn render(
-    initial: f32,
-    automation: &Automation,
-    length: usize,
-    rate: f64,
-) -> Result<Values, String> {
-    validate(automation)?;
+/// A ramp with no previous event starts at the intrinsic value at time zero.
+fn with_initial_set(automation: &Automation, initial: f32) -> Vec<Event> {
     let mut events = automation.events.clone();
-    // A ramp with no previous event starts at the intrinsic value at time zero.
     if events
         .first()
         .is_some_and(|event| event.kind == "linear" || event.kind == "exponential")
@@ -99,137 +101,203 @@ pub(crate) fn render(
             },
         );
     }
-    let mut samples = vec![initial; length];
-    let mut sample_accurate = vec![false; length.div_ceil(128)];
-    let mut last = initial;
-    let mut target_index = None;
-    for quantum in (0..length).step_by(128) {
-        let end = (quantum + 128).min(length);
+    events
+}
+fn is_ramp(event: &&Event) -> bool {
+    event.kind == "linear" || event.kind == "exponential"
+}
+/// The span of output frames one event segment writes.
+struct Segment {
+    frame: usize,
+    count: usize,
+    time: f64,
+}
+/// The running AudioParam output while a timeline renders.
+struct Playback {
+    samples: Vec<f32>,
+    last: f32,
+    target_index: Option<usize>,
+    rate: f64,
+    k_rate: bool,
+}
+impl Playback {
+    /// Whether this quantum reports sample-accurate values for `event`.
+    fn segment_accurate(&self, events: &[Event], event: &Event, quantum: usize) -> bool {
+        let settled = events.len() == 1
+            && event.kind != "target"
+            && event.kind != "curve"
+            && event.time < quantum as f64 / self.rate;
+        !self.k_rate
+            && !settled
+            && events.last().is_some_and(|last| {
+                let last_time = last.time
+                    + if last.kind == "curve" {
+                        last.duration
+                    } else {
+                        0.
+                    };
+                last.kind == "target"
+                    || quantum as f64 <= (last_time * self.rate / 128.).ceil() * 128.
+            })
+    }
+    /// Render one quantum; the sample-accuracy of its last evaluated segment, if any.
+    fn render_quantum(&mut self, events: &[Event], quantum: usize, end: usize) -> Option<bool> {
+        let mut accurate = None;
         let mut frame = quantum;
         while frame < end {
-            let time = frame as f64 / rate;
+            let time = frame as f64 / self.rate;
             let Some(index) = events.iter().rposition(|event| event.time <= time) else {
-                frame += if automation.k_rate { 128 } else { 1 };
+                frame += if self.k_rate { 128 } else { 1 };
                 continue;
             };
-            let event = &events[index];
-            let next = events.get(index + 1);
-            let segment_end = next
-                .map_or(end, |next| end.min((next.time * rate).ceil() as usize))
+            let segment_end = events
+                .get(index + 1)
+                .map_or(end, |next| end.min((next.time * self.rate).ceil() as usize))
                 .max(frame + 1);
-            let count = if automation.k_rate {
-                1
-            } else {
-                segment_end - frame
-            };
-            sample_accurate[quantum / 128] = !automation.k_rate
-                && !(events.len() == 1
-                    && event.kind != "target"
-                    && event.kind != "curve"
-                    && event.time < quantum as f64 / rate)
-                && events.last().is_some_and(|last| {
-                    let last_time = last.time
-                        + if last.kind == "curve" {
-                            last.duration
-                        } else {
-                            0.
-                        };
-                    last.kind == "target"
-                        || quantum as f64 <= (last_time * rate / 128.).ceil() * 128.
-                });
-            if let Some(next) =
-                next.filter(|next| next.kind == "linear" || next.kind == "exponential")
-            {
-                let start_value = event.value;
-                let delta = next.time - event.time;
-                if next.kind == "linear" {
-                    let inverse = if delta <= f32::MIN_POSITIVE as f64 {
-                        0.
-                    } else {
-                        (1. / delta) as f32
-                    };
-                    let difference = next.value - start_value;
-                    for offset in 0..count {
-                        let progress =
-                            (((frame + offset) as f64 / rate - event.time) * inverse as f64) as f32;
-                        last = start_value + progress * difference;
-                        samples[frame + offset] = last;
-                    }
-                } else if start_value * next.value <= 0. || delta <= 0. {
-                    last = start_value;
-                    samples[frame..frame + count].fill(last);
-                } else {
-                    // Blink rounds the quantum's starting value to f32, then
-                    // advances a double accumulator using its native fdlibm pow.
-                    let multiplier = power((next.value / start_value) as f64, 1. / (delta * rate));
-                    last = (start_value as f64
-                        * power(
-                            next.value as f64 / start_value as f64,
-                            (time - event.time) / delta,
-                        )) as f32;
-                    let mut accumulator = last as f64;
-                    for offset in 0..count {
-                        last = accumulator as f32;
-                        samples[frame + offset] = last;
-                        accumulator *= multiplier;
-                    }
-                }
-                target_index = None;
-            } else if event.kind == "target" {
-                let target = event.value;
-                let constant = event.constant as f32;
-                if constant == 0. {
-                    last = target;
-                    samples[frame..frame + count].fill(last);
-                } else {
-                    let control_rate = if automation.k_rate { rate / 128. } else { rate };
-                    let discrete = (1. - exp(-1. / (control_rate * constant as f64))) as f32;
-                    if target_index != Some(index) {
-                        last = (target as f64
-                            + (last - target) as f64 * exp(-(time - event.time) / constant as f64))
-                            as f32;
-                    } else {
-                        last += (target - last) * discrete;
-                    }
-                    for offset in 0..count {
-                        samples[frame + offset] = last;
-                        last += (target - last) * discrete;
-                    }
-                    last = samples[frame + count - 1];
-                }
-                target_index = Some(index);
-            } else if event.kind == "curve" {
-                let points = (event.curve.len() - 1) as f64 / event.duration / rate;
-                let base = points * (frame as f64 - event.time * rate);
-                for offset in 0..count {
-                    let position = base + offset as f64 * points;
-                    let first = (position as usize).min(event.curve.len() - 1);
-                    let second = (first + 1).min(event.curve.len() - 1);
-                    let fraction = (position - first as f64).min(1.);
-                    last = (event.curve[first] as f64
-                        + (event.curve[second] - event.curve[first]) as f64 * fraction)
-                        as f32;
-                    samples[frame + offset] = last;
-                }
-                target_index = None;
-            } else {
-                last = event.value;
-                samples[frame..frame + count].fill(last);
-                target_index = None;
-            }
-            if automation.k_rate {
-                samples[quantum..end].fill(last);
+            let count = if self.k_rate { 1 } else { segment_end - frame };
+            accurate = Some(self.segment_accurate(events, &events[index], quantum));
+            self.apply(events, index, &Segment { frame, count, time });
+            if self.k_rate {
+                self.samples[quantum..end].fill(self.last);
                 frame = end;
             } else {
                 frame += count;
             }
+        }
+        accurate
+    }
+    fn apply(&mut self, events: &[Event], index: usize, segment: &Segment) {
+        let event = &events[index];
+        if let Some(next) = events.get(index + 1).filter(is_ramp) {
+            if next.kind == "linear" {
+                self.linear(event, next, segment);
+            } else {
+                self.exponential(event, next, segment);
+            }
+            self.target_index = None;
+        } else if event.kind == "target" {
+            self.target(index, event, segment);
+            self.target_index = Some(index);
+        } else {
+            if event.kind == "curve" {
+                self.curve(event, segment);
+            } else {
+                self.hold(event.value, segment);
+            }
+            self.target_index = None;
+        }
+    }
+    fn hold(&mut self, value: f32, segment: &Segment) {
+        self.last = value;
+        self.samples[segment.frame..segment.frame + segment.count].fill(value);
+    }
+    fn linear(&mut self, event: &Event, next: &Event, segment: &Segment) {
+        let start_value = event.value;
+        let delta = next.time - event.time;
+        let inverse = if delta <= f32::MIN_POSITIVE as f64 {
+            0.
+        } else {
+            (1. / delta) as f32
+        };
+        let difference = next.value - start_value;
+        for offset in 0..segment.count {
+            let progress = (((segment.frame + offset) as f64 / self.rate - event.time)
+                * inverse as f64) as f32;
+            self.last = start_value + progress * difference;
+            self.samples[segment.frame + offset] = self.last;
+        }
+    }
+    fn exponential(&mut self, event: &Event, next: &Event, segment: &Segment) {
+        let start_value = event.value;
+        let delta = next.time - event.time;
+        if start_value * next.value <= 0. || delta <= 0. {
+            self.hold(start_value, segment);
+            return;
+        }
+        // Blink rounds the quantum's starting value to f32, then
+        // advances a double accumulator using its native fdlibm pow.
+        let multiplier = power((next.value / start_value) as f64, 1. / (delta * self.rate));
+        self.last = (start_value as f64
+            * power(
+                next.value as f64 / start_value as f64,
+                (segment.time - event.time) / delta,
+            )) as f32;
+        let mut accumulator = self.last as f64;
+        for offset in 0..segment.count {
+            self.last = accumulator as f32;
+            self.samples[segment.frame + offset] = self.last;
+            accumulator *= multiplier;
+        }
+    }
+    fn target(&mut self, index: usize, event: &Event, segment: &Segment) {
+        let target = event.value;
+        let constant = event.constant as f32;
+        if constant == 0. {
+            self.hold(target, segment);
+            return;
+        }
+        let control_rate = if self.k_rate {
+            self.rate / 128.
+        } else {
+            self.rate
+        };
+        let discrete = (1. - exp(-1. / (control_rate * constant as f64))) as f32;
+        if self.target_index != Some(index) {
+            self.last = (target as f64
+                + (self.last - target) as f64 * exp(-(segment.time - event.time) / constant as f64))
+                as f32;
+        } else {
+            self.last += (target - self.last) * discrete;
+        }
+        for offset in 0..segment.count {
+            self.samples[segment.frame + offset] = self.last;
+            self.last += (target - self.last) * discrete;
+        }
+        self.last = self.samples[segment.frame + segment.count - 1];
+    }
+    fn curve(&mut self, event: &Event, segment: &Segment) {
+        let points = (event.curve.len() - 1) as f64 / event.duration / self.rate;
+        let base = points * (segment.frame as f64 - event.time * self.rate);
+        for offset in 0..segment.count {
+            let position = base + offset as f64 * points;
+            let first = (position as usize).min(event.curve.len() - 1);
+            let second = (first + 1).min(event.curve.len() - 1);
+            let fraction = (position - first as f64).min(1.);
+            self.last = (event.curve[first] as f64
+                + (event.curve[second] - event.curve[first]) as f64 * fraction)
+                as f32;
+            self.samples[segment.frame + offset] = self.last;
+        }
+    }
+}
+
+pub(crate) fn render(
+    initial: f32,
+    automation: &Automation,
+    length: usize,
+    rate: f64,
+) -> Result<Values, String> {
+    validate(automation)?;
+    let events = with_initial_set(automation, initial);
+    let mut playback = Playback {
+        samples: vec![initial; length],
+        last: initial,
+        target_index: None,
+        rate,
+        k_rate: automation.k_rate,
+    };
+    let mut sample_accurate = vec![false; length.div_ceil(128)];
+    for quantum in (0..length).step_by(128) {
+        let end = (quantum + 128).min(length);
+        if let Some(accurate) = playback.render_quantum(&events, quantum, end) {
+            sample_accurate[quantum / 128] = accurate;
         }
         if automation.dirty && quantum == 0 && !automation.k_rate {
             sample_accurate[0] = true;
         }
     }
     Ok(Values {
-        samples,
+        samples: playback.samples,
         sample_accurate,
     })
 }

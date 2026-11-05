@@ -332,53 +332,65 @@ impl NativeHybridKey {
         extractable: bool,
         usages: Vec<String>,
     ) -> Result<NativeHybridKey, JsErrorBox> {
-        if jwk["kty"] != "AKP" || jwk.get("alg").is_some_and(|value| value != NAME) {
-            return Err(data("JWK algorithm or type does not match X-Wing"));
-        }
-        if jwk.get("ext") == Some(&Value::Bool(false)) && extractable {
-            return Err(data("JWK is not extractable"));
-        }
-        if !usages.is_empty() && jwk.get("use").is_some_and(|value| value != "enc") {
-            return Err(data("Invalid JWK use"));
-        }
+        check_jwk_header(&jwk, extractable, &usages)?;
         let public = jwk["pub"]
             .as_str()
             .ok_or_else(|| data("JWK public key is required"))?;
         let public = URL_SAFE_NO_PAD
             .decode(public)
             .map_err(|_| data("Invalid JWK public key"))?;
-        let private = jwk.get("priv").and_then(Value::as_str);
-        let key = if let Some(private) = private {
-            let seed = Zeroizing::new(
-                URL_SAFE_NO_PAD
-                    .decode(private)
-                    .map_err(|_| data("Invalid JWK seed"))?,
-            );
-            NativeHybridKey::import_bytes_inner("raw-seed", &seed, extractable, &usages)?
-        } else {
-            NativeHybridKey::import_bytes_inner("raw-public", &public, extractable, &usages)?
+        let key = match jwk.get("priv").and_then(Value::as_str) {
+            Some(private) => {
+                let seed = Zeroizing::new(
+                    URL_SAFE_NO_PAD
+                        .decode(private)
+                        .map_err(|_| data("Invalid JWK seed"))?,
+                );
+                NativeHybridKey::import_bytes_inner("raw-seed", &seed, extractable, &usages)?
+            }
+            None => {
+                NativeHybridKey::import_bytes_inner("raw-public", &public, extractable, &usages)?
+            }
         };
         if public.as_slice() != key.material.public {
             return Err(data("JWK public key does not match private seed"));
         }
         if let Some(value) = jwk.get("key_ops") {
-            let declared = value
-                .as_array()
-                .ok_or_else(|| data("Invalid JWK key_ops"))?;
-            let mut seen = Vec::new();
-            for usage in declared {
-                let usage = usage.as_str().ok_or_else(|| data("Invalid JWK key_ops"))?;
-                if seen.contains(&usage) {
-                    return Err(data("Duplicate JWK key_ops"));
-                }
-                seen.push(usage);
-            }
-            if usages.iter().any(|usage| !seen.contains(&usage.as_str())) {
-                return Err(data("JWK key_ops do not permit requested usages"));
-            }
+            check_key_ops(value, &usages)?;
         }
         Ok(key)
     }
+}
+/// The JWK `kty`/`alg`, `ext` and `use` members admit an X-Wing import.
+fn check_jwk_header(jwk: &Value, extractable: bool, usages: &[String]) -> Result<(), JsErrorBox> {
+    if jwk["kty"] != "AKP" || jwk.get("alg").is_some_and(|value| value != NAME) {
+        return Err(data("JWK algorithm or type does not match X-Wing"));
+    }
+    if jwk.get("ext") == Some(&Value::Bool(false)) && extractable {
+        return Err(data("JWK is not extractable"));
+    }
+    if !usages.is_empty() && jwk.get("use").is_some_and(|value| value != "enc") {
+        return Err(data("Invalid JWK use"));
+    }
+    Ok(())
+}
+/// `key_ops` must be a duplicate-free string list covering every requested usage.
+fn check_key_ops(value: &Value, usages: &[String]) -> Result<(), JsErrorBox> {
+    let declared = value
+        .as_array()
+        .ok_or_else(|| data("Invalid JWK key_ops"))?;
+    let mut seen = Vec::new();
+    for usage in declared {
+        let usage = usage.as_str().ok_or_else(|| data("Invalid JWK key_ops"))?;
+        if seen.contains(&usage) {
+            return Err(data("Duplicate JWK key_ops"));
+        }
+        seen.push(usage);
+    }
+    if usages.iter().any(|usage| !seen.contains(&usage.as_str())) {
+        return Err(data("JWK key_ops do not permit requested usages"));
+    }
+    Ok(())
 }
 fn key_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,

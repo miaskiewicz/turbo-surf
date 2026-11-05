@@ -270,6 +270,266 @@ test("retry evidence rejects stale documents, fabricated terminals and early tim
   );
 });
 
+function navigationConfig(origin, fixture) {
+  return {
+    url: origin + (fixture.oldResult ? "/existing-search" : "/"),
+    interfaces: false,
+    chromePath: chrome,
+    chromeIncognito: true,
+    disableExtensions: true,
+    // A headed Chrome takes the OS keyboard focus, and keys typed on the host
+    // then corrupt the trusted query (turbo-surf#51).
+    headless: true,
+    readySelector: "[data-input-ready]",
+    dismissSelector: "#dismiss",
+    waitMs: 100,
+    observationMs: fixture.observationMs,
+    inputCadenceMs,
+    pageBudgetMs: 5000,
+    requireNativeFormNavigation: !fixture.scriptEnter,
+    disableFormFallback: true,
+    steps: searchSteps("fixture query"),
+  };
+}
+
+const navigationUnsettled = (observation) =>
+  observation.pendingNavigation ||
+  observation.navigationFailed ||
+  observation.navigationWaitTimedOut ||
+  observation.navigationHopLimit;
+
+function assertObservationWindow(trace, fixture, label) {
+  const observation = trace.observation;
+  assert.equal(observation.policy, "fixed-deadline-before-enter", label);
+  assert.equal(observation.triggerStepIndex, 5, label);
+  assert.equal(observation.requestedMs, fixture.observationMs, label);
+  if (fixture.kind !== "retry") assert.equal(observation.completed, true, label);
+  else assert.equal(typeof observation.completed, "boolean", label);
+  assert(observation.elapsedMs >= fixture.observationMs, label);
+  assert(observation.overrunMs >= 0, label);
+  assert(observation.startedMs <= trace.actions[5].startedMs, label);
+  assert.equal(observation.deadlineMs, observation.startedMs + fixture.observationMs, label);
+  assert.equal(
+    trace.dwell.some((span) => span.stage === "search"),
+    false,
+    label,
+  );
+  if (fixture.kind !== "retry") {
+    assert.notEqual(observation.navigationWaitTimedOut, true, label);
+    assert.notEqual(observation.navigationHopLimit, true, label);
+    assert(!observation.pendingNavigation, label);
+  } else if (navigationUnsettled(observation)) {
+    assert.equal(observation.completed, false, label);
+    assert.equal(observationSummary(trace).complete, false, label);
+  }
+  if (fixture.overrun) assert(observation.overrunMs >= 400, label);
+}
+
+// The window is fixed: a retry's terminal document committed near the deadline
+// may still be loading at the snapshot on a loaded host (turbo-surf#51).
+const mayStillLoad = (fixture, final) =>
+  fixture.kind === "background" ||
+  (fixture.kind === "retry" && new URL(final.url).pathname === "/terminal");
+
+function assertFinalDocument({ runtime, fixture, trace, output, seen, label }) {
+  const final = trace.pages.at(-1);
+  if (fixture.kind === "retry") assertRetryOutcome(runtime, fixture, trace, output, seen, label);
+  else assert.equal(final.status, fixture.status, label);
+  if (fixture.kind === "redirect") {
+    assertDocumentResponse(runtime, trace, output, final, label);
+    assert.equal(chromeSearchOutcome(trace).accepted, false, label);
+    assert(
+      seen.some((event) => event.path === "/terminal" && event.status === 429),
+      label,
+    );
+  }
+  assert.equal(final.results, fixture.results, label);
+  if (mayStillLoad(fixture, final))
+    assert(["interactive", "complete"].includes(final.readyState), label);
+  else assert.equal(final.readyState, "complete", label);
+  assert.equal(
+    new URL(final.url).pathname,
+    fixture.finalPath || (final.status === 429 ? "/terminal" : "/search"),
+    label,
+  );
+  return final;
+}
+
+function assertTrustedSubmission(trace, fixture, seen, label) {
+  const search = seen.find((event) => event.path === "/search");
+  const consent = seen.find((event) => event.path === "/consent");
+  const audit = seen.find((event) => event.audit)?.audit;
+  assert.equal(search.query, "fixture query", label);
+  assert.equal(consent.status, 204, label);
+  assert(consent.finishedMs < search.timeMs, label);
+  assert.equal(audit.value, "fixture query", label);
+  assert.equal(audit.submitTrusted, true, label);
+  assert.equal(audit.eventType, fixture.scriptEnter ? "keydown" : "submit", label);
+  assert.equal(audit.trustedInputs, 13, label);
+  assert.equal(audit.focused, true, label);
+  assert(
+    audit.keys.every((key) => key.trusted),
+    label,
+  );
+  const characters = audit.keys.filter((key) => key.key !== "Enter");
+  assert.equal(characters.length, 26, label);
+  const typing = trace.actions.find((action) => action.action === "type");
+  const hostSpan = typing.finishedMs - typing.startedMs;
+  assert(hostSpan >= 13 * inputCadenceMs, label);
+  for (const clock of ["timeStamp", "performanceNow", "dateNow"]) {
+    const guestSpan = characters.at(-1)[clock] - characters[0][clock];
+    // Scheduler/protocol overhead is allowed; a second virtual 110 ms per
+    // character would exceed the containing host action by over a second.
+    assert(guestSpan <= hostSpan + 250, `${label}/${clock}: guest ${guestSpan}, host ${hostSpan}`);
+  }
+  return search;
+}
+
+function assertOldResultReplaced({ runtime, trace, output, label }, final, search) {
+  assert.equal(trace.pages.find((page) => page.phase === "home").results, 1, label);
+  assertDocumentResponse(runtime, trace, output, final, label);
+  assert.equal(observationSummary(trace).complete, true, label);
+  // The request event can arrive after the pre-evaluation tracker
+  // sample while snapshot evaluation waits for the new document.
+  console.log(
+    "Old result replacement",
+    JSON.stringify({
+      runtime,
+      pendingSnapshotCount: trace.pages.filter(
+        (page) => page.mainNavigationBeforeSnapshot?.pendingNavigation === true,
+      ).length,
+      enterFinishedMs: trace.actions[5].finishedMs,
+      searchRequestedMs: search.timeMs,
+      searchResponseFinishedMs: search.finishedMs,
+      finalSnapshotStartedMs: trace.observation.snapshotStartedMs,
+      finalStatus: final.status,
+    }),
+  );
+}
+
+function assertBackgroundScoped(trace, seen, label) {
+  assert(
+    seen.some((event) => event.path === "/background-xhr"),
+    label,
+  );
+  assert(
+    seen.some((event) => event.path === "/background-frame"),
+    label,
+  );
+  assert.equal(trace.observation.pendingNavigation, false, label);
+  assert.equal(trace.observation.navigationFailed, false, label);
+}
+
+function assertRuntimeIdentity(runtime, trace, fixture, label) {
+  if (runtime === "chrome") {
+    assert.deepEqual(
+      trace.effectiveExtensionFlags,
+      [
+        "--disable-extensions",
+        "--disable-component-extensions-with-background-pages",
+        "--headless=new",
+      ],
+      label,
+    );
+    assert.equal(trace.browserContext.createdContextVerified, true, label);
+    assert.equal(trace.browserContext.nonDefaultContext, true, label);
+  } else {
+    assert.equal(trace.windowTimerMode, "real-time", label);
+    assert.equal(trace.navigationSource, fixture.scriptEnter ? "script" : "native-form", label);
+    assert.equal(trace.formFallback, null, label);
+  }
+}
+
+function assertNavigationCapture(run) {
+  const { runtime, fixture, trace, seen, label } = run;
+  assert.equal(trace.captureComplete, true, `${label}: ${JSON.stringify(trace.errors)}`);
+  assert.equal(trace.actions.length, 6, label);
+  assert(
+    trace.actions.every((action) => action.completed === true),
+    label,
+  );
+  assertObservationWindow(trace, fixture, label);
+  const final = assertFinalDocument(run);
+  const search = assertTrustedSubmission(trace, fixture, seen, label);
+  if (fixture.oldResult) assertOldResultReplaced(run, final, search);
+  if (fixture.kind === "background") assertBackgroundScoped(trace, seen, label);
+  assertRuntimeIdentity(runtime, trace, fixture, label);
+}
+
+// Enter-window fixtures: slow forms, delayed retries, redirects and background traffic.
+const NAVIGATION_FIXTURES = [
+  {
+    name: "slow-short",
+    kind: "slow",
+    observationMs: 100,
+    status: 200,
+    results: 1,
+    overrun: true,
+  },
+  { name: "slow-common", kind: "slow", observationMs: 1000, status: 200, results: 1 },
+  {
+    name: "retry-short",
+    kind: "retry",
+    delay: 600,
+    observationMs: 100,
+    results: 0,
+  },
+  {
+    name: "retry-common",
+    kind: "retry",
+    delay: 600,
+    observationMs: 1000,
+    results: 0,
+  },
+  {
+    name: "retry-fast-boundary",
+    kind: "retry",
+    delay: 20,
+    observationMs: 100,
+    results: 0,
+  },
+  {
+    name: "retry-fast-common",
+    kind: "retry",
+    delay: 20,
+    observationMs: 1000,
+    results: 0,
+  },
+  {
+    name: "immediate-redirect",
+    kind: "redirect",
+    observationMs: 1000,
+    status: 429,
+    results: 0,
+  },
+  {
+    name: "script-enter",
+    kind: "slow",
+    scriptEnter: true,
+    observationMs: 1000,
+    status: 200,
+    results: 1,
+  },
+  {
+    name: "provisional-old-serp",
+    kind: "slow-challenge",
+    oldResult: true,
+    observationMs: 100,
+    status: 429,
+    results: 0,
+    overrun: true,
+    finalPath: "/search",
+  },
+  {
+    name: "background-scoping",
+    kind: "background",
+    chromeOnly: true,
+    observationMs: 100,
+    status: 200,
+    results: 1,
+  },
+];
+
 test(
   "both collectors use a fixed Enter window for slow forms and delayed retries",
   {
@@ -384,254 +644,17 @@ test(
         server.listen(0, "127.0.0.1", done);
       });
       const origin = `http://127.0.0.1:${server.address().port}`;
-      for (const fixture of [
-        {
-          name: "slow-short",
-          kind: "slow",
-          observationMs: 100,
-          status: 200,
-          results: 1,
-          overrun: true,
-        },
-        { name: "slow-common", kind: "slow", observationMs: 1000, status: 200, results: 1 },
-        {
-          name: "retry-short",
-          kind: "retry",
-          delay: 600,
-          observationMs: 100,
-          results: 0,
-        },
-        {
-          name: "retry-common",
-          kind: "retry",
-          delay: 600,
-          observationMs: 1000,
-          results: 0,
-        },
-        {
-          name: "retry-fast-boundary",
-          kind: "retry",
-          delay: 20,
-          observationMs: 100,
-          results: 0,
-        },
-        {
-          name: "retry-fast-common",
-          kind: "retry",
-          delay: 20,
-          observationMs: 1000,
-          results: 0,
-        },
-        {
-          name: "immediate-redirect",
-          kind: "redirect",
-          observationMs: 1000,
-          status: 429,
-          results: 0,
-        },
-        {
-          name: "script-enter",
-          kind: "slow",
-          scriptEnter: true,
-          observationMs: 1000,
-          status: 200,
-          results: 1,
-        },
-        {
-          name: "provisional-old-serp",
-          kind: "slow-challenge",
-          oldResult: true,
-          observationMs: 100,
-          status: 429,
-          results: 0,
-          overrun: true,
-          finalPath: "/search",
-        },
-        {
-          name: "background-scoping",
-          kind: "background",
-          chromeOnly: true,
-          observationMs: 100,
-          status: 200,
-          results: 1,
-        },
-      ]) {
+      for (const fixture of NAVIGATION_FIXTURES) {
         for (const runtime of fixture.chromeOnly ? ["chrome"] : ["chrome", "native"]) {
           active = { ...fixture, runtime };
           const own = active;
           const output = join(directory, `${fixture.name}-${runtime}`);
-          const config = {
-            url: origin + (fixture.oldResult ? "/existing-search" : "/"),
-            interfaces: false,
-            chromePath: chrome,
-            chromeIncognito: true,
-            disableExtensions: true,
-            // A headed Chrome takes the OS keyboard focus, and keys typed on the host
-            // then corrupt the trusted query (turbo-surf#51).
-            headless: true,
-            readySelector: "[data-input-ready]",
-            dismissSelector: "#dismiss",
-            waitMs: 100,
-            observationMs: fixture.observationMs,
-            inputCadenceMs,
-            pageBudgetMs: 5000,
-            requireNativeFormNavigation: !fixture.scriptEnter,
-            disableFormFallback: true,
-            steps: searchSteps("fixture query"),
-          };
           // The collector creates its output folder; the configuration must exist first.
           mkdirSync(output);
-          const trace = await collect(t, runtime, config, output);
+          const trace = await collect(t, runtime, navigationConfig(origin, fixture), output);
           const label = `${fixture.name}/${runtime}`;
-          assert.equal(trace.captureComplete, true, `${label}: ${JSON.stringify(trace.errors)}`);
-          assert.equal(trace.actions.length, 6, label);
-          assert(
-            trace.actions.every((action) => action.completed === true),
-            label,
-          );
-          const observation = trace.observation;
-          assert.equal(observation.policy, "fixed-deadline-before-enter", label);
-          assert.equal(observation.triggerStepIndex, 5, label);
-          assert.equal(observation.requestedMs, fixture.observationMs, label);
-          if (fixture.kind !== "retry") assert.equal(observation.completed, true, label);
-          else assert.equal(typeof observation.completed, "boolean", label);
-          assert(observation.elapsedMs >= fixture.observationMs, label);
-          assert(observation.overrunMs >= 0, label);
-          assert(observation.startedMs <= trace.actions[5].startedMs, label);
-          assert.equal(
-            observation.deadlineMs,
-            observation.startedMs + fixture.observationMs,
-            label,
-          );
-          assert.equal(
-            trace.dwell.some((span) => span.stage === "search"),
-            false,
-            label,
-          );
-          if (fixture.kind !== "retry") {
-            assert.notEqual(observation.navigationWaitTimedOut, true, label);
-            assert.notEqual(observation.navigationHopLimit, true, label);
-            assert(!observation.pendingNavigation, label);
-          } else if (
-            observation.pendingNavigation ||
-            observation.navigationFailed ||
-            observation.navigationWaitTimedOut ||
-            observation.navigationHopLimit
-          ) {
-            assert.equal(observation.completed, false, label);
-            assert.equal(observationSummary(trace).complete, false, label);
-          }
-          if (fixture.overrun) assert(observation.overrunMs >= 400, label);
-          const final = trace.pages.at(-1);
           const seen = events.filter((event) => event.fixture === own);
-          if (fixture.kind === "retry")
-            assertRetryOutcome(runtime, fixture, trace, output, seen, label);
-          else assert.equal(final.status, fixture.status, label);
-          if (fixture.kind === "redirect") {
-            assertDocumentResponse(runtime, trace, output, final, label);
-            assert.equal(chromeSearchOutcome(trace).accepted, false, label);
-            assert(
-              seen.some((event) => event.path === "/terminal" && event.status === 429),
-              label,
-            );
-          }
-          assert.equal(final.results, fixture.results, label);
-          // The window is fixed: a retry's terminal document committed near the deadline
-          // may still be loading at the snapshot on a loaded host (turbo-surf#51).
-          if (
-            fixture.kind === "background" ||
-            (fixture.kind === "retry" && new URL(final.url).pathname === "/terminal")
-          )
-            assert(["interactive", "complete"].includes(final.readyState), label);
-          else assert.equal(final.readyState, "complete", label);
-          assert.equal(
-            new URL(final.url).pathname,
-            fixture.finalPath || (final.status === 429 ? "/terminal" : "/search"),
-            label,
-          );
-          const search = seen.find((event) => event.path === "/search");
-          const consent = seen.find((event) => event.path === "/consent");
-          const audit = seen.find((event) => event.audit)?.audit;
-          assert.equal(search.query, "fixture query", label);
-          assert.equal(consent.status, 204, label);
-          assert(consent.finishedMs < search.timeMs, label);
-          assert.equal(audit.value, "fixture query", label);
-          assert.equal(audit.submitTrusted, true, label);
-          assert.equal(audit.eventType, fixture.scriptEnter ? "keydown" : "submit", label);
-          assert.equal(audit.trustedInputs, 13, label);
-          assert.equal(audit.focused, true, label);
-          assert(
-            audit.keys.every((key) => key.trusted),
-            label,
-          );
-          const characters = audit.keys.filter((key) => key.key !== "Enter");
-          assert.equal(characters.length, 26, label);
-          const typing = trace.actions.find((action) => action.action === "type");
-          const hostSpan = typing.finishedMs - typing.startedMs;
-          assert(hostSpan >= 13 * inputCadenceMs, label);
-          for (const clock of ["timeStamp", "performanceNow", "dateNow"]) {
-            const guestSpan = characters.at(-1)[clock] - characters[0][clock];
-            // Scheduler/protocol overhead is allowed; a second virtual 110 ms per
-            // character would exceed the containing host action by over a second.
-            assert(
-              guestSpan <= hostSpan + 250,
-              `${label}/${clock}: guest ${guestSpan}, host ${hostSpan}`,
-            );
-          }
-          if (fixture.oldResult) {
-            assert.equal(trace.pages.find((page) => page.phase === "home").results, 1, label);
-            assertDocumentResponse(runtime, trace, output, final, label);
-            assert.equal(observationSummary(trace).complete, true, label);
-            // The request event can arrive after the pre-evaluation tracker
-            // sample while snapshot evaluation waits for the new document.
-            console.log(
-              "Old result replacement",
-              JSON.stringify({
-                runtime,
-                pendingSnapshotCount: trace.pages.filter(
-                  (page) => page.mainNavigationBeforeSnapshot?.pendingNavigation === true,
-                ).length,
-                enterFinishedMs: trace.actions[5].finishedMs,
-                searchRequestedMs: search.timeMs,
-                searchResponseFinishedMs: search.finishedMs,
-                finalSnapshotStartedMs: observation.snapshotStartedMs,
-                finalStatus: final.status,
-              }),
-            );
-          }
-          if (fixture.kind === "background") {
-            assert(
-              seen.some((event) => event.path === "/background-xhr"),
-              label,
-            );
-            assert(
-              seen.some((event) => event.path === "/background-frame"),
-              label,
-            );
-            assert.equal(observation.pendingNavigation, false, label);
-            assert.equal(observation.navigationFailed, false, label);
-          }
-          if (runtime === "chrome") {
-            assert.deepEqual(
-              trace.effectiveExtensionFlags,
-              [
-                "--disable-extensions",
-                "--disable-component-extensions-with-background-pages",
-                "--headless=new",
-              ],
-              label,
-            );
-            assert.equal(trace.browserContext.createdContextVerified, true, label);
-            assert.equal(trace.browserContext.nonDefaultContext, true, label);
-          } else {
-            assert.equal(trace.windowTimerMode, "real-time", label);
-            assert.equal(
-              trace.navigationSource,
-              fixture.scriptEnter ? "script" : "native-form",
-              label,
-            );
-            assert.equal(trace.formFallback, null, label);
-          }
+          assertNavigationCapture({ runtime, fixture, trace, output, seen, label });
         }
       }
       complete = true;

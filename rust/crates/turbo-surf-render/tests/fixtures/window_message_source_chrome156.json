@@ -1,0 +1,25 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-05T15:04:24.310Z",
+  "fixture": "window-message-source-probe.js",
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
+  ],
+  "result": {
+    "rows": [
+      "top<-a:eval:true",
+      "top<-a:timer:true",
+      "top<-a:script:true",
+      "top<-a:function:true",
+      "top<-g:nested:true",
+      "top<-top:via-child-proxy:true",
+      "top<-top:self:true",
+      "top<-a:seen down:true:true",
+      "top<-b:seen sibling:true,false:true",
+      "top<-b:seen from-top:false,true:true"
+    ],
+    "errors": ["true:Failed to construct 'Window': Illegal constructor", "true:Illegal constructor"]
+  }
+}

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Tested (Window messaging, #85/#90/#129)**: a Chrome 156 control
+  (`harness/detection/window-message-source-chrome-control.mjs`,
+  `tests/window_message_source.rs`) covers `event.source` on every posting path. A child
+  timer, a child script, self, parent-to-child and nested parent paths already match Chrome.
+  Four posts still report the top window as `event.source`: child code that the top realm calls
+  into synchronously (`frame.eval(...)`, a child-realm function, nested and sibling
+  `eval`). Chrome reports the sender there. These rows are pinned as a known gap: surf needs
+  an incumbent-context API in turbo-dom-v8 (#90; #85 is the same gap on the native engine).
+  `new Window()` throws Chrome's "Failed to construct 'Window': Illegal constructor" and
+  `Window()` throws "Illegal constructor" on both engines (#129).
+- **Refactored (#154)**: `window_proxy.rs` and `message_ports.rs` functions are at cc <= 15.
+
 ## [0.7.1] — 2026-11-05
 
 Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).

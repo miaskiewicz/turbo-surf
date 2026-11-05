@@ -87,7 +87,9 @@ fn loaded_images(document: u32) -> (u64, LoadedImageResolver) {
     })
 }
 /// Record the outcome of an `<img>` load (`src` is its raw attribute): a decoded image's
-/// natural size, or none for a broken one.
+/// natural size, or none for a broken one. `ratio` (else 0) is a viewBox-only SVG's
+/// natural aspect ratio from `image::probe_natural`: such an image has no natural size
+/// for layout and sizes from its container and the ratio, as in Chrome (turbo-surf#161).
 #[op2(fast)]
 pub(crate) fn op_live_image_loaded(
     scope: &mut v8::PinScope,
@@ -95,9 +97,16 @@ pub(crate) fn op_live_image_loaded(
     #[string] src: String,
     width: u32,
     height: u32,
+    ratio: f64,
 ) {
     let document = turbo_dom_browser_env::host_internals::document_id_of(scope, image) as u32;
-    let size = (width > 0 && height > 0).then(|| Intrinsic::new(width, height, true));
+    let size = (width > 0 && height > 0).then(|| {
+        if ratio > 0.0 && ratio.is_finite() {
+            Intrinsic::ratio_only(width, height, ratio as f32, true)
+        } else {
+            Intrinsic::new(width, height, true)
+        }
+    });
     LOADED_IMAGES.with(|images| {
         let mut images = images.borrow_mut();
         let entry = images.entry(document).or_default();

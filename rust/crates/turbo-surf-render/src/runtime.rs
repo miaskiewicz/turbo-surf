@@ -3110,6 +3110,8 @@ struct ImageOut {
     status: u16,
     width: u32,
     height: u32,
+    /// A viewBox-only SVG's natural aspect ratio (turbo-surf#161), else none.
+    ratio: Option<f32>,
     ok: bool,
 }
 
@@ -3235,11 +3237,12 @@ async fn op_load_image(
         return ImageOut::default();
     };
     match natural_image_size(&response.bytes, &response.content_type) {
-        Some((width, height)) => ImageOut {
+        Some((width, height, ratio)) => ImageOut {
             url: response.final_url,
             status: response.status,
             width,
             height,
+            ratio,
             ok: true,
         },
         None => ImageOut {
@@ -3258,11 +3261,12 @@ fn op_decode_data_image(#[string] url: String) -> ImageOut {
     let size = turbo_dom_layout::image::decode_data_url(&url)
         .and_then(|data| natural_image_size(&data.bytes, &data.mime));
     match size {
-        Some((width, height)) => ImageOut {
+        Some((width, height, ratio)) => ImageOut {
             url,
             status: 200,
             width,
             height,
+            ratio,
             ok: true,
         },
         None => ImageOut {
@@ -3278,7 +3282,7 @@ fn op_decode_data_image(#[string] url: String) -> ImageOut {
 /// WebP, BMP, ICO/CUR, AVIF; EXIF orientation applied) from its bytes whatever the
 /// declared type or HTTP status, while SVG is decoded only when served as
 /// `image/svg+xml` and an `image/svg+xml` response is never sniffed as a raster.
-fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32)> {
+fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32, Option<f32>)> {
     use turbo_dom_layout::{image, svg};
     let essence = content_type.split(';').next().unwrap_or("").trim();
     let natural = if essence.eq_ignore_ascii_case("image/svg+xml") {
@@ -3291,7 +3295,7 @@ fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32)> {
             .and_then(|_| image::probe(bytes))
             .map(|intrinsic| intrinsic.displayed(true))
     }?;
-    Some((natural.width, natural.height))
+    Some((natural.width, natural.height, natural.natural_ratio))
 }
 
 // Each frame owns its native tree and JS browser APIs in its own V8 context.
@@ -10615,7 +10619,7 @@ function __imageLoaded(el, choice, result, url) {
   // A density-selected image reports (and lays out at) the binding's density-corrected size.
   const size = loaded ? __imageHost.naturalSize(result.width, result.height, choice.density) : null;
   const width = size ? size.naturalWidth : 0, height = size ? size.naturalHeight : 0;
-  ops.op_live_image_loaded(el,choice.key,width,height);
+  ops.op_live_image_loaded(el,choice.key,width,height,loaded&&result.ratio>0?result.ratio:0);
   __imageHost.setState(el,loaded?{complete:true,naturalWidth:width,naturalHeight:height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
   return loaded;
 }

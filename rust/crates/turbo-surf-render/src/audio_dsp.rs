@@ -503,311 +503,387 @@ fn parameter_limits(node: &Node, index: usize, rate: f32) -> (f32, f32) {
         _ => full,
     }
 }
-pub(crate) fn render(graph: Graph) -> Result<Rendered, String> {
-    if !(1..=2).contains(&graph.channels) {
-        return Err("Offline DSP supports mono and stereo graphs".into());
-    }
-    if graph.length == 0
+fn exceeds_limits(graph: &Graph) -> bool {
+    graph.length == 0
         || graph.length.saturating_mul(graph.channels) > MAX_SAMPLES
         || graph.nodes.is_empty()
         || graph.nodes.len() > MAX_NODES
         || graph.length.saturating_mul(graph.nodes.len()) > MAX_WORK
-    {
+}
+fn has_invalid_values(node: &Node) -> bool {
+    node.parameters.iter().any(|value| !value.is_finite())
+        || node.data.iter().any(|channel| {
+            channel.len() > MAX_SAMPLES || channel.iter().any(|value| !value.is_finite())
+        })
+}
+fn validate(graph: &Graph) -> Result<(), String> {
+    if !(1..=2).contains(&graph.channels) {
+        return Err("Offline DSP supports mono and stereo graphs".into());
+    }
+    if exceeds_limits(graph) {
         return Err("Offline audio resource limit exceeded".into());
     }
     if !graph.sample_rate.is_finite() || !(3000.0..=768000.0).contains(&graph.sample_rate) {
         return Err("Invalid offline sample rate".into());
     }
-    if graph.nodes.iter().any(|node| {
-        node.parameters.iter().any(|value| !value.is_finite())
-            || node.data.iter().any(|channel| {
-                channel.len() > MAX_SAMPLES || channel.iter().any(|value| !value.is_finite())
-            })
-    }) {
+    if graph.nodes.iter().any(has_invalid_values) {
         return Err("Invalid audio sample or parameter".into());
     }
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let padded = graph.length.div_ceil(QUANTUM) * QUANTUM;
-    let mut order = Vec::new();
-    visit(0, &graph.nodes, &mut vec![0; graph.nodes.len()], &mut order)?;
-    let mut sources = HashMap::new();
-    let mut buffers = HashMap::new();
-    let mut parameters: HashMap<usize, Vec<Values>> = HashMap::new();
-    let mut compressors = HashMap::new();
-    let mut effects = HashMap::new();
-    let mut origins: HashMap<usize, usize> = HashMap::new();
-    let mut tables = HashMap::new();
-    for &index in &order {
-        let node = &graph.nodes[index];
-        let origin = if ["oscillator", "buffer"].contains(&node.kind.as_str()) {
-            if node.started
-                && (node.kind != "buffer" || node.data.first().is_some_and(|data| !data.is_empty()))
-            {
-                let start = crate::audio_buffer::frame(node.start, graph.sample_rate as f64, true)
-                    / 128
-                    * 128;
-                if node.stop.is_some_and(|stop| {
-                    crate::audio_buffer::frame(stop, graph.sample_rate as f64, true) <= start
-                }) {
-                    padded
-                } else {
-                    start.min(padded)
-                }
-            } else {
-                padded
-            }
-        } else {
-            node.inputs
-                .iter()
-                .map(|input| origins[input])
-                .min()
-                .unwrap_or(padded)
-        };
-        origins.insert(index, origin);
-        let initial = if node.kind == "buffer" && node.parameters.is_empty() {
-            vec![1., 0.]
-        } else {
-            node.parameters.clone()
-        };
-        let mut values = Vec::with_capacity(initial.len());
-        for (parameter, initial) in initial.iter().enumerate() {
-            let mut automation = node.automation.get(parameter).cloned().unwrap_or_default();
-            if !automation.inputs.is_empty() {
-                return Err(
-                    "AudioParam signal connections are not yet supported by the native graph"
-                        .into(),
-                );
-            }
-            if node.kind == "buffer" || node.kind == "compressor" {
-                automation.k_rate = true;
-            }
-            let mut rendered = audio_timeline::render_at(
-                *initial,
-                &automation,
-                padded,
-                graph.sample_rate as f64,
-                origin,
-            )?;
-            let (minimum, maximum) = parameter_limits(node, parameter, graph.sample_rate);
-            for value in &mut rendered.samples {
-                *value = value.clamp(minimum, maximum);
-            }
-            values.push(rendered);
+    Ok(())
+}
+fn sample_frame(time: f64, rate: f32) -> usize {
+    crate::audio_buffer::frame(time, rate as f64, true)
+}
+/// The render quantum a scheduled source starts sounding at; `padded` when it never does.
+fn source_origin(node: &Node, rate: f32, padded: usize) -> usize {
+    let audible = node.started
+        && (node.kind != "buffer" || node.data.first().is_some_and(|data| !data.is_empty()));
+    if !audible {
+        return padded;
+    }
+    let start = sample_frame(node.start, rate) / 128 * 128;
+    if node
+        .stop
+        .is_some_and(|stop| sample_frame(stop, rate) <= start)
+    {
+        padded
+    } else {
+        start.min(padded)
+    }
+}
+/// Automation time origin: a source's own start, otherwise its earliest input's.
+fn node_origin(node: &Node, origins: &HashMap<usize, usize>, rate: f32, padded: usize) -> usize {
+    if ["oscillator", "buffer"].contains(&node.kind.as_str()) {
+        return source_origin(node, rate, padded);
+    }
+    node.inputs
+        .iter()
+        .map(|input| origins[input])
+        .min()
+        .unwrap_or(padded)
+}
+fn node_parameters(
+    node: &Node,
+    rate: f32,
+    padded: usize,
+    origin: usize,
+) -> Result<Vec<Values>, String> {
+    let initial = if node.kind == "buffer" && node.parameters.is_empty() {
+        vec![1., 0.]
+    } else {
+        node.parameters.clone()
+    };
+    let mut values = Vec::with_capacity(initial.len());
+    for (parameter, initial) in initial.iter().enumerate() {
+        let mut automation = node.automation.get(parameter).cloned().unwrap_or_default();
+        if !automation.inputs.is_empty() {
+            return Err(
+                "AudioParam signal connections are not yet supported by the native graph".into(),
+            );
         }
-        parameters.insert(index, values);
+        if node.kind == "buffer" || node.kind == "compressor" {
+            automation.k_rate = true;
+        }
+        let mut rendered =
+            audio_timeline::render_at(*initial, &automation, padded, rate as f64, origin)?;
+        let (minimum, maximum) = parameter_limits(node, parameter, rate);
+        for value in &mut rendered.samples {
+            *value = value.clamp(minimum, maximum);
+        }
+        values.push(rendered);
+    }
+    Ok(values)
+}
+fn is_effect(kind: &str) -> bool {
+    kind.starts_with("biquad:") || ["waveshaper", "delay", "panner"].contains(&kind)
+}
+/// Sum every input's block into a fresh stereo block.
+fn mix_inputs(node: &Node, blocks: &HashMap<usize, Vec<Vec<f32>>>) -> Vec<Vec<f32>> {
+    let mut block = vec![vec![0.; QUANTUM]; 2];
+    for input in &node.inputs {
+        let source = &blocks[input];
+        for channel in 0..2 {
+            for sample in 0..QUANTUM {
+                block[channel][sample] += source[channel][sample];
+            }
+        }
+    }
+    block
+}
+/// Per-quantum state of one node while the graph renders.
+struct Signal {
+    block: Vec<Vec<f32>>,
+    active: bool,
+    channels: usize,
+}
+/// Per-node prepared sources, parameters and processors for one offline render.
+struct Engine {
+    rate: f32,
+    padded: usize,
+    sources: HashMap<usize, Vec<f32>>,
+    buffers: HashMap<usize, crate::audio_buffer::Buffer>,
+    parameters: HashMap<usize, Vec<Values>>,
+    compressors: HashMap<usize, Compressor>,
+    effects: HashMap<usize, crate::audio_effects::Effect>,
+    tables: HashMap<String, Vec<Vec<f32>>>,
+}
+impl Engine {
+    fn new(rate: f32, padded: usize) -> Self {
+        Self {
+            rate,
+            padded,
+            sources: HashMap::new(),
+            buffers: HashMap::new(),
+            parameters: HashMap::new(),
+            compressors: HashMap::new(),
+            effects: HashMap::new(),
+            tables: HashMap::new(),
+        }
+    }
+    fn prepare(&mut self, index: usize, node: &Node) -> Result<(), String> {
         match node.kind.as_str() {
             "destination" | "gain" => {}
-            "oscillator" => {
-                if !(1..=2).contains(&node.parameters.len())
-                    || !["sine", "square", "sawtooth", "triangle"].contains(&node.shape.as_str())
-                {
-                    return Err("Unsupported oscillator parameters".into());
-                }
-                let table = tables
-                    .entry(node.shape.clone())
-                    .or_insert_with(|| wave_tables(&node.shape, graph.sample_rate));
-                if node.started {
-                    let simple = node.parameters.len() == 1
-                        && node.start == 0.
-                        && node.parameters.get(1).copied().unwrap_or(0.) == 0.
-                        && node.automation.iter().all(|param| param.events.is_empty());
-                    let mut data = if simple {
-                        oscillator(table, graph.sample_rate, node.parameters[0], padded)
-                    } else {
-                        oscillator_events(
-                            table,
-                            graph.sample_rate,
-                            node,
-                            &parameters[&index],
-                            padded,
-                        )
-                    };
-                    if let Some(stop) = node.stop {
-                        let at = crate::audio_buffer::frame(stop, graph.sample_rate as f64, true)
-                            .min(data.len());
-                        data[at..].fill(0.);
-                    }
-                    sources.insert(index, data);
-                }
-            }
+            "oscillator" => self.prepare_oscillator(index, node)?,
             "buffer" => {
                 if node.data.len() > 2 {
                     return Err("Offline buffer sources support mono and stereo".into());
                 }
-                buffers.insert(
-                    index,
-                    crate::audio_buffer::render(
-                        node,
-                        graph.sample_rate,
-                        padded,
-                        &parameters[&index],
-                    ),
+                let buffer = crate::audio_buffer::render(
+                    node,
+                    self.rate,
+                    self.padded,
+                    &self.parameters[&index],
                 );
+                self.buffers.insert(index, buffer);
             }
             "compressor" => {
-                compressors.insert(index, Compressor::new(graph.sample_rate, &node.parameters)?);
+                self.compressors
+                    .insert(index, Compressor::new(self.rate, &node.parameters)?);
             }
-            kind if kind.starts_with("biquad:")
-                || ["waveshaper", "delay", "panner"].contains(&kind) =>
-            {
-                effects.insert(
-                    index,
-                    crate::audio_effects::Effect::new(
-                        kind,
-                        graph.sample_rate,
-                        &node.parameters,
-                        &node.curve,
-                    )?,
-                );
+            kind if is_effect(kind) => {
+                let effect = crate::audio_effects::Effect::new(
+                    kind,
+                    self.rate,
+                    &node.parameters,
+                    &node.curve,
+                )?;
+                self.effects.insert(index, effect);
             }
             _ => return Err("Unsupported offline audio node".into()),
         }
+        Ok(())
+    }
+    fn prepare_oscillator(&mut self, index: usize, node: &Node) -> Result<(), String> {
+        if !(1..=2).contains(&node.parameters.len())
+            || !["sine", "square", "sawtooth", "triangle"].contains(&node.shape.as_str())
+        {
+            return Err("Unsupported oscillator parameters".into());
+        }
+        let rate = self.rate;
+        let table = self
+            .tables
+            .entry(node.shape.clone())
+            .or_insert_with(|| wave_tables(&node.shape, rate));
+        if !node.started {
+            return Ok(());
+        }
+        let simple = node.parameters.len() == 1
+            && node.start == 0.
+            && node.parameters.get(1).copied().unwrap_or(0.) == 0.
+            && node.automation.iter().all(|param| param.events.is_empty());
+        let mut data = if simple {
+            oscillator(table, rate, node.parameters[0], self.padded)
+        } else {
+            oscillator_events(table, rate, node, &self.parameters[&index], self.padded)
+        };
+        if let Some(stop) = node.stop {
+            let at = sample_frame(stop, rate).min(data.len());
+            data[at..].fill(0.);
+        }
+        self.sources.insert(index, data);
+        Ok(())
+    }
+    fn process(
+        &mut self,
+        index: usize,
+        node: &Node,
+        offset: usize,
+        signal: &mut Signal,
+    ) -> Result<(), String> {
+        match node.kind.as_str() {
+            "oscillator" => self.play_oscillator(index, node, offset, signal),
+            "buffer" => self.play_buffer(index, node, offset, signal),
+            "gain" => {
+                let values = self.parameters[&index]
+                    .first()
+                    .ok_or("Invalid gain parameter")?;
+                for channel in &mut signal.block {
+                    for (sample, value) in channel.iter_mut().enumerate() {
+                        *value *= values.samples[offset + sample];
+                    }
+                }
+            }
+            "compressor" => {
+                let compressor = self.compressors.get_mut(&index).unwrap();
+                compressor.parameters(&self.parameters[&index], offset);
+                compressor.process(&mut signal.block);
+            }
+            _ => self.apply_effect(index, node, offset, signal)?,
+        }
+        Ok(())
+    }
+    fn play_oscillator(&self, index: usize, node: &Node, offset: usize, signal: &mut Signal) {
+        signal.active = node.started
+            && sample_frame(node.start, self.rate) < offset + 128
+            && node
+                .stop
+                .is_none_or(|stop| sample_frame(stop, self.rate) > offset);
+        if let Some(source) = self.sources.get(&index) {
+            for channel in &mut signal.block {
+                channel.copy_from_slice(&source[offset..offset + QUANTUM]);
+            }
+        }
+    }
+    fn play_buffer(&self, index: usize, node: &Node, offset: usize, signal: &mut Signal) {
+        signal.channels = node.data.len().clamp(1, 2);
+        let buffer = self.buffers.get(&index);
+        signal.active = buffer.is_some_and(|buffer| buffer.active[offset / 128]);
+        if let Some(source) = buffer {
+            for (channel, destination) in signal.block.iter_mut().enumerate() {
+                destination.copy_from_slice(
+                    &source.channels[channel.min(source.channels.len() - 1)]
+                        [offset..offset + QUANTUM],
+                );
+            }
+        }
+    }
+    fn apply_effect(
+        &mut self,
+        index: usize,
+        node: &Node,
+        offset: usize,
+        signal: &mut Signal,
+    ) -> Result<(), String> {
+        let Some(effect) = self.effects.get_mut(&index) else {
+            return Ok(());
+        };
+        let parameters = &self.parameters[&index];
+        effect.set_input_silent(!signal.active, offset as f64 / self.rate as f64)?;
+        let values = parameters
+            .iter()
+            .take(if node.kind == "delay" { 1 } else { 4 })
+            .map(|value| value.samples[offset..offset + 128].to_vec())
+            .collect::<Vec<_>>();
+        effect.set_sample_accurate(
+            node.kind == "delay" && !node.automation.first().is_some_and(|param| param.k_rate)
+                || parameters
+                    .iter()
+                    .any(|param| param.sample_accurate[offset / 128]),
+        );
+        effect.process(&mut signal.block, signal.channels, &values)?;
+        signal.active = !effect.output_silent();
+        signal.channels = effect.output_channels(signal.channels);
+        Ok(())
+    }
+    fn node_end(&self, index: usize, node: &Node) -> Option<usize> {
+        if !node.started {
+            return None;
+        }
+        let end = if node.kind == "buffer" {
+            self.buffers.get(&index).and_then(|buffer| buffer.ended)
+        } else {
+            node.stop.map(|stop| sample_frame(stop, self.rate))
+        };
+        end.filter(|&end| end <= self.padded)
+    }
+    fn finish(&self, channels: Vec<Vec<f32>>, order: &[usize], nodes: &[Node]) -> Rendered {
+        Rendered {
+            channels,
+            reductions: self
+                .compressors
+                .iter()
+                .map(|(&index, compressor)| (index.to_string(), compressor.reduction()))
+                .collect(),
+            final_values: self
+                .parameters
+                .iter()
+                .map(|(index, values)| {
+                    (
+                        index.to_string(),
+                        values
+                            .iter()
+                            .map(|value| *value.samples.last().unwrap())
+                            .collect(),
+                    )
+                })
+                .collect(),
+            ends: order
+                .iter()
+                .filter_map(|&index| {
+                    self.node_end(index, &nodes[index])
+                        .map(|end| (index.to_string(), end))
+                })
+                .collect(),
+            current_time: self.padded as f64 / self.rate as f64,
+        }
+    }
+}
+/// Append one quantum of the destination block, down-mixing stereo for a mono graph.
+fn write_output(output: &mut [Vec<f32>], destination: &[Vec<f32>], count: usize) {
+    let mono = output.len() == 1;
+    for (channel, output) in output.iter_mut().enumerate() {
+        output.extend((0..count).map(|sample| {
+            if mono {
+                (destination[0][sample] + destination[1][sample]) * 0.5
+            } else {
+                destination[channel][sample]
+            }
+        }));
+    }
+}
+pub(crate) fn render(graph: Graph) -> Result<Rendered, String> {
+    validate(&graph)?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let rate = graph.sample_rate;
+    let padded = graph.length.div_ceil(QUANTUM) * QUANTUM;
+    let mut order = Vec::new();
+    visit(0, &graph.nodes, &mut vec![0; graph.nodes.len()], &mut order)?;
+    let mut engine = Engine::new(rate, padded);
+    let mut origins: HashMap<usize, usize> = HashMap::new();
+    for &index in &order {
+        let node = &graph.nodes[index];
+        let origin = node_origin(node, &origins, rate, padded);
+        origins.insert(index, origin);
+        let values = node_parameters(node, rate, padded, origin)?;
+        engine.parameters.insert(index, values);
+        engine.prepare(index, node)?;
     }
     let mut output = vec![Vec::with_capacity(graph.length); graph.channels];
     for offset in (0..padded).step_by(QUANTUM) {
         if Instant::now() > deadline {
             return Err("Offline audio execution limit exceeded".into());
         }
+        let mut signals: HashMap<usize, Signal> = HashMap::new();
         let mut blocks: HashMap<usize, Vec<Vec<f32>>> = HashMap::new();
-        let mut activity: HashMap<usize, bool> = HashMap::new();
-        let mut channel_counts: HashMap<usize, usize> = HashMap::new();
         for &index in &order {
             let node = &graph.nodes[index];
-            let mut block = vec![vec![0.; QUANTUM]; 2];
-            let mut active = node.inputs.iter().any(|input| activity[input]);
-            let mut input_channels = node
-                .inputs
-                .iter()
-                .map(|input| channel_counts[input])
-                .max()
-                .unwrap_or(1);
-            for input in &node.inputs {
-                let source = &blocks[input];
-                for channel in 0..2 {
-                    for sample in 0..QUANTUM {
-                        block[channel][sample] += source[channel][sample];
-                    }
-                }
-            }
-            match node.kind.as_str() {
-                "oscillator" => {
-                    active = node.started
-                        && crate::audio_buffer::frame(node.start, graph.sample_rate as f64, true)
-                            < offset + 128
-                        && node.stop.is_none_or(|stop| {
-                            crate::audio_buffer::frame(stop, graph.sample_rate as f64, true)
-                                > offset
-                        });
-                    if let Some(source) = sources.get(&index) {
-                        for channel in &mut block {
-                            channel.copy_from_slice(&source[offset..offset + QUANTUM]);
-                        }
-                    }
-                }
-                "buffer" => {
-                    input_channels = node.data.len().clamp(1, 2);
-                    active = buffers
-                        .get(&index)
-                        .is_some_and(|buffer| buffer.active[offset / 128]);
-                    if let Some(source) = buffers.get(&index) {
-                        for (channel, destination) in block.iter_mut().enumerate() {
-                            destination.copy_from_slice(
-                                &source.channels[channel.min(source.channels.len() - 1)]
-                                    [offset..offset + QUANTUM],
-                            );
-                        }
-                    }
-                }
-                "gain" => {
-                    let values = parameters[&index].first().ok_or("Invalid gain parameter")?;
-                    for channel in &mut block {
-                        for (sample, value) in channel.iter_mut().enumerate() {
-                            *value *= values.samples[offset + sample];
-                        }
-                    }
-                }
-                "compressor" => {
-                    let compressor = compressors.get_mut(&index).unwrap();
-                    compressor.parameters(&parameters[&index], offset);
-                    compressor.process(&mut block);
-                }
-                _ => {
-                    if let Some(effect) = effects.get_mut(&index) {
-                        effect
-                            .set_input_silent(!active, offset as f64 / graph.sample_rate as f64)?;
-                        let values = parameters[&index]
-                            .iter()
-                            .take(if node.kind == "delay" { 1 } else { 4 })
-                            .map(|value| value.samples[offset..offset + 128].to_vec())
-                            .collect::<Vec<_>>();
-                        effect.set_sample_accurate(
-                            node.kind == "delay"
-                                && !node.automation.first().is_some_and(|param| param.k_rate)
-                                || parameters[&index]
-                                    .iter()
-                                    .any(|param| param.sample_accurate[offset / 128]),
-                        );
-                        effect.process(&mut block, input_channels, &values)?;
-                        active = !effect.output_silent();
-                        input_channels = effect.output_channels(input_channels);
-                    }
-                }
-            }
-            activity.insert(index, active);
-            channel_counts.insert(index, input_channels);
-            blocks.insert(index, block);
+            let mut signal = Signal {
+                block: mix_inputs(node, &blocks),
+                active: node.inputs.iter().any(|input| signals[input].active),
+                channels: node
+                    .inputs
+                    .iter()
+                    .map(|input| signals[input].channels)
+                    .max()
+                    .unwrap_or(1),
+            };
+            engine.process(index, node, offset, &mut signal)?;
+            blocks.insert(index, std::mem::take(&mut signal.block));
+            signals.insert(index, signal);
         }
-        let destination = &blocks[&0];
-        let count = QUANTUM.min(graph.length - offset);
-        for channel in 0..graph.channels {
-            for (sample, _) in destination[channel].iter().enumerate().take(count) {
-                let value = if graph.channels == 1 {
-                    (destination[0][sample] + destination[1][sample]) * 0.5
-                } else {
-                    destination[channel][sample]
-                };
-                output[channel].push(value);
-            }
-        }
+        write_output(&mut output, &blocks[&0], QUANTUM.min(graph.length - offset));
     }
-    Ok(Rendered {
-        channels: output,
-        reductions: compressors
-            .iter()
-            .map(|(&index, compressor)| (index.to_string(), compressor.reduction()))
-            .collect(),
-        final_values: parameters
-            .iter()
-            .map(|(index, values)| {
-                (
-                    index.to_string(),
-                    values
-                        .iter()
-                        .map(|value| *value.samples.last().unwrap())
-                        .collect(),
-                )
-            })
-            .collect(),
-        ends: order
-            .iter()
-            .filter_map(|&index| {
-                let node = &graph.nodes[index];
-                if !node.started {
-                    return None;
-                }
-                let end = if node.kind == "buffer" {
-                    buffers.get(&index).and_then(|buffer| buffer.ended)
-                } else {
-                    node.stop.map(|stop| {
-                        crate::audio_buffer::frame(stop, graph.sample_rate as f64, true)
-                    })
-                };
-                end.filter(|&end| end <= padded)
-                    .map(|end| (index.to_string(), end))
-            })
-            .collect(),
-        current_time: padded as f64 / graph.sample_rate as f64,
-    })
+    Ok(engine.finish(output, &order, &graph.nodes))
 }
 
 #[cfg(test)]

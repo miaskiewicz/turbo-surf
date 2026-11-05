@@ -17,39 +17,111 @@ pub(crate) struct Buffer {
     pub active: Vec<bool>,
     pub ended: Option<usize>,
 }
-pub(crate) fn render(node: &Node, rate: f32, length: usize, parameters: &[Values]) -> Buffer {
-    let count = node.data.len().clamp(1, 2);
-    let mut result = Buffer {
-        channels: vec![vec![0.; length]; count],
-        active: vec![false; length.div_ceil(128)],
-        ended: None,
-    };
-    if !node.started || node.data.is_empty() {
-        return result;
+/// The playhead state of one scheduled buffer source, in input frames.
+struct Playhead {
+    looped: bool,
+    input_length: usize,
+    input_rate: f64,
+    loop_start: f64,
+    loop_end: f64,
+    loop_width: f64,
+    position: f64,
+    played: f64,
+    duration: f64,
+}
+impl Playhead {
+    /// `None` for a source that never sounds (unstarted or an empty buffer).
+    fn new(node: &Node, rate: f32) -> Option<Self> {
+        if !node.started {
+            return None;
+        }
+        let input_length = node.data.first()?.len();
+        if input_length == 0 {
+            return None;
+        }
+        let input_rate = f64::from(if node.buffer_rate > 0. {
+            node.buffer_rate
+        } else {
+            rate
+        });
+        let input_duration = input_length as f64 / input_rate;
+        let (loop_start, loop_end) = loop_frames(node, input_length, input_rate, input_duration);
+        Some(Self {
+            looped: node.looped,
+            input_length,
+            input_rate,
+            loop_start,
+            loop_end,
+            loop_width: loop_end - loop_start,
+            position: start_position(node, input_rate, input_duration),
+            played: 0.0,
+            duration: node
+                .duration
+                .map_or(f64::INFINITY, |duration| duration * input_rate),
+        })
     }
-    let input_length = node.data[0].len();
-    if input_length == 0 {
-        return result;
+    /// Apply the loop entry rules and the sub-frame start skip once playback begins.
+    fn begin(&mut self, node: &Node, start: usize, rate: f32, speed: f64) {
+        if self.looped && speed >= 0. && self.position >= self.loop_end {
+            self.position = self.loop_start.min((self.input_length - 1) as f64);
+        }
+        if self.looped && speed < 0. && self.position < self.loop_start {
+            self.position = self.loop_start;
+        }
+        let skip = ((start as f64 - node.start * rate as f64) * speed).abs();
+        self.position += if speed >= 0. { skip } else { -skip };
+        self.played += skip;
     }
-    let input_rate = if node.buffer_rate > 0. {
-        node.buffer_rate
-    } else {
-        rate
-    };
-    let input_duration = input_length as f64 / input_rate as f64;
-    let start = frame(node.start, rate as f64, true);
-    let stop = node
-        .stop
-        .map_or(length, |time| frame(time, rate as f64, true));
-    let mut position = if node.parameters.first().copied().unwrap_or(1.) == 1.
-        && node.parameters.get(1).copied().unwrap_or(0.) == 0.
-    {
-        frame(node.offset.min(input_duration), input_rate as f64, false) as f64
-    } else {
-        node.offset.min(input_duration) * input_rate as f64
-    };
-    let mut loop_start = 0.0;
-    let mut loop_end = input_length as f64;
+    fn ended(&self, speed: f64) -> bool {
+        let outside = (speed >= 0. && self.position >= self.input_length as f64)
+            || (speed < 0. && self.position < 0.);
+        self.played >= self.duration || !self.looped && outside
+    }
+    /// The two interpolation taps and the fraction between them.
+    fn taps(&self) -> (usize, usize, f64) {
+        let last = self.input_length - 1;
+        let first = (self.position.max(0.) as usize).min(last);
+        let fraction = self.position - first as f64;
+        let second = first + 1;
+        let second =
+            if self.looped && (first as f64) < self.loop_end && second as f64 >= self.loop_end {
+                self.wrapped_tap().max(0.) as usize
+            } else if second >= self.input_length {
+                first
+            } else {
+                second
+            };
+        (first, second.min(last), fraction)
+    }
+    fn wrapped_tap(&self) -> f64 {
+        if self.loop_width >= 1. {
+            self.position + 1. - self.loop_width
+        } else if self.loop_width > 0. {
+            self.loop_start + (self.position + 1. - self.loop_start) % self.loop_width
+        } else {
+            self.loop_start
+        }
+    }
+    fn advance(&mut self, speed: f64) {
+        self.position += speed;
+        self.played += speed.abs();
+        if !self.looped || self.loop_width <= 0. {
+            return;
+        }
+        if speed >= 0. && self.position >= self.loop_end {
+            self.position = self.loop_start + (self.position - self.loop_end) % self.loop_width;
+        } else if speed < 0. && self.position < self.loop_start {
+            self.position = self.loop_end - (self.loop_start - self.position) % self.loop_width;
+        }
+    }
+}
+/// Loop points in input frames; the whole buffer unless a valid loop is set.
+fn loop_frames(
+    node: &Node,
+    input_length: usize,
+    input_rate: f64,
+    input_duration: f64,
+) -> (f64, f64) {
     let start_seconds = node.loop_start.clamp(0., input_duration);
     let end_seconds = if node.loop_end == 0. {
         input_duration
@@ -57,82 +129,69 @@ pub(crate) fn render(node: &Node, rate: f32, length: usize, parameters: &[Values
         node.loop_end.clamp(0., input_duration)
     };
     if node.looped && start_seconds < end_seconds {
-        loop_start = start_seconds * input_rate as f64;
-        loop_end = end_seconds * input_rate as f64;
+        (start_seconds * input_rate, end_seconds * input_rate)
+    } else {
+        (0.0, input_length as f64)
     }
-    let loop_width = loop_end - loop_start;
-    let mut played = 0.0;
-    let duration = node
-        .duration
-        .map_or(f64::INFINITY, |duration| duration * input_rate as f64);
+}
+/// The offset rounds to a whole frame only at unity playback rate and no detune.
+fn start_position(node: &Node, input_rate: f64, input_duration: f64) -> f64 {
+    let unity = node.parameters.first().copied().unwrap_or(1.) == 1.
+        && node.parameters.get(1).copied().unwrap_or(0.) == 0.;
+    if unity {
+        frame(node.offset.min(input_duration), input_rate, false) as f64
+    } else {
+        node.offset.min(input_duration) * input_rate
+    }
+}
+/// The k-rate computed playback speed in input frames per output frame.
+fn quantum_speed(parameters: &[Values], quantum: usize, input_rate: f64, rate: f32) -> f64 {
+    let speed = parameters
+        .first()
+        .map_or(1., |value| value.samples[quantum]) as f64;
+    let detune = parameters.get(1).map_or(0., |value| value.samples[quantum]);
+    (input_rate / rate as f64 * speed * audio_timeline::power(2., (detune / 1200.) as f64))
+        .clamp(-1024., 1024.)
+}
+fn interpolate(source: &[f32], first: usize, second: usize, fraction: f64) -> f32 {
+    let value = if first == second && first >= 1 {
+        source[first] as f64 + (source[first] as f64 - source[first - 1] as f64) * fraction
+    } else {
+        (1. - fraction) * source[first] as f64 + fraction * source[second] as f64
+    };
+    value as f32
+}
+pub(crate) fn render(node: &Node, rate: f32, length: usize, parameters: &[Values]) -> Buffer {
+    let count = node.data.len().clamp(1, 2);
+    let mut result = Buffer {
+        channels: vec![vec![0.; length]; count],
+        active: vec![false; length.div_ceil(128)],
+        ended: None,
+    };
+    let Some(mut playhead) = Playhead::new(node, rate) else {
+        return result;
+    };
+    let start = frame(node.start, rate as f64, true);
+    let stop = node
+        .stop
+        .map_or(length, |time| frame(time, rate as f64, true));
     let mut active = false;
     for output in start..stop.min(length) {
-        let quantum = output / 128 * 128;
-        let speed = parameters
-            .first()
-            .map_or(1., |value| value.samples[quantum]) as f64;
-        let detune = parameters.get(1).map_or(0., |value| value.samples[quantum]);
-        let speed = (input_rate as f64 / rate as f64
-            * speed
-            * audio_timeline::power(2., (detune / 1200.) as f64))
-        .clamp(-1024., 1024.);
+        let speed = quantum_speed(parameters, output / 128 * 128, playhead.input_rate, rate);
         if !active {
-            if node.looped && speed >= 0. && position >= loop_end {
-                position = loop_start.min((input_length - 1) as f64);
-            }
-            if node.looped && speed < 0. && position < loop_start {
-                position = loop_start;
-            }
-            let skip = ((start as f64 - node.start * rate as f64) * speed).abs();
-            position += if speed >= 0. { skip } else { -skip };
-            played += skip;
+            playhead.begin(node, start, rate, speed);
             active = true;
         }
-        if played >= duration {
+        if playhead.ended(speed) {
             result.ended = Some(output);
             break;
         }
-        if !node.looped
-            && ((speed >= 0. && position >= input_length as f64) || (speed < 0. && position < 0.))
-        {
-            result.ended = Some(output);
-            break;
-        }
-        let first = (position.max(0.) as usize).min(input_length - 1);
-        let fraction = position - first as f64;
-        let mut second = first + 1;
-        if node.looped && (first as f64) < loop_end && second as f64 >= loop_end {
-            let wrapped = if loop_width >= 1. {
-                position + 1. - loop_width
-            } else if loop_width > 0. {
-                loop_start + (position + 1. - loop_start) % loop_width
-            } else {
-                loop_start
-            };
-            second = wrapped.max(0.) as usize;
-        } else if second >= input_length {
-            second = first;
-        }
-        second = second.min(input_length - 1);
+        let (first, second, fraction) = playhead.taps();
         result.active[output / 128] = true;
         for (channel, output_channel) in result.channels.iter_mut().enumerate() {
-            let source = &node.data[channel];
-            let value = if first == second && first >= 1 {
-                source[first] as f64 + (source[first] as f64 - source[first - 1] as f64) * fraction
-            } else {
-                (1. - fraction) * source[first] as f64 + fraction * source[second] as f64
-            };
-            output_channel[output] = value as f32;
+            output_channel[output] = interpolate(&node.data[channel], first, second, fraction);
         }
-        position += speed;
-        played += speed.abs();
-        if node.looped && loop_width > 0. {
-            if speed >= 0. && position >= loop_end {
-                position = loop_start + (position - loop_end) % loop_width;
-            } else if speed < 0. && position < loop_start {
-                position = loop_end - (loop_start - position) % loop_width;
-            }
-        }
+        playhead.advance(speed);
     }
     if node.stop.is_some() && stop <= length {
         result.ended = Some(result.ended.map_or(stop, |end| end.min(stop)));

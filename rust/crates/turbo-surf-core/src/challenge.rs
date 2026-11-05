@@ -203,6 +203,87 @@ fn has_set_cookie(headers: &[(String, String)], needle: &str) -> bool {
         .any(|(k, v)| k.eq_ignore_ascii_case("set-cookie") && v.contains(needle))
 }
 
+type Headers = [(String, String)];
+
+fn cloudflare_wall(headers: &Headers, body: &str) -> bool {
+    header(headers, "cf-mitigated").is_some_and(|v| v.contains("challenge"))
+        || has_set_cookie(headers, "cf_clearance")
+        || body.contains("__cf_chl")
+        || body.contains("/cdn-cgi/challenge-platform/")
+}
+
+fn datadome_wall(headers: &Headers, body: &str) -> bool {
+    has_set_cookie(headers, "datadome")
+        || header(headers, "x-datadome").is_some()
+        || header(headers, "x-datadome-cid").is_some()
+        || body.contains("geo.captcha-delivery.com")
+}
+
+fn kasada_wall(headers: &Headers, body: &str) -> bool {
+    header(headers, "x-kpsdk-ct").is_some()
+        || header(headers, "x-kpsdk-st").is_some()
+        || body.contains("KPSDK")
+        || body.contains("/ips.js")
+}
+
+/// Akamai Bot Manager (its sensor cookies).
+fn akamai_wall(headers: &Headers, _body: &str) -> bool {
+    has_set_cookie(headers, "_abck")
+        || has_set_cookie(headers, "bm_sz")
+        || has_set_cookie(headers, "ak_bmsc")
+}
+
+/// AWS WAF Bot Control (CloudFront/ALB): the challenge/captcha action header, the
+/// aws-waf-token cookie, or the awswaf challenge/captcha assets.
+fn aws_waf_wall(headers: &Headers, body: &str) -> bool {
+    header(headers, "x-amzn-waf-action").is_some()
+        || has_set_cookie(headers, "aws-waf-token")
+        || body.contains("token.awswaf.com")
+        || body.contains("captcha.awswaf.com")
+        || body.contains("challenge.js")
+}
+
+/// Header-keyed vendor walls, checked in order (Cloudflare managed challenge /
+/// Turnstile first).
+type WallCheck = fn(&Headers, &str) -> bool;
+const VENDOR_WALLS: [(Vendor, WallCheck); 5] = [
+    (Vendor::Cloudflare, cloudflare_wall),
+    (Vendor::DataDome, datadome_wall),
+    (Vendor::Kasada, kasada_wall),
+    (Vendor::Akamai, akamai_wall),
+    (Vendor::AwsWaf, aws_waf_wall),
+];
+
+/// Google reCAPTCHA. Two shapes: the `/sorry` unusual-traffic interstitial, and a
+/// `g-recaptcha` widget embedded on a page. Carry the site key/action so the solver
+/// (or the MCP tool) can drive the token flow without re-parsing.
+fn recaptcha_wall(page_url: &str, body: &str) -> Option<Challenge> {
+    let sorry_wall = page_url.contains("/sorry/")
+        || body.contains("our systems have detected unusual traffic")
+        || body.contains("unusual traffic from your computer network");
+    let has_widget = [
+        "g-recaptcha",
+        "grecaptcha.render",
+        "grecaptcha.execute",
+        "/recaptcha/api.js",
+        "/recaptcha/enterprise.js",
+    ]
+    .iter()
+    .any(|marker| body.contains(marker));
+    if !(sorry_wall || has_widget) {
+        return None;
+    }
+    let sitekey = crate::recaptcha::extract_sitekey(body);
+    // A `/sorry` wall with no discoverable widget is still a reCAPTCHA wall; a bare
+    // widget mention with no site key is not actionable, so require one there.
+    (sorry_wall || sitekey.is_some()).then(|| Challenge {
+        vendor: Vendor::Recaptcha,
+        page_url: page_url.to_string(),
+        sitekey,
+        action: crate::recaptcha::extract_action(body),
+    })
+}
+
 /// Sniff a response for a known challenge wall. Header-first (most reliable),
 /// with a few body markers as backup. Returns `None` for a normal page — note a
 /// site can *use* a vendor without the current response *being* a challenge, so
@@ -214,74 +295,11 @@ pub fn detect(
     headers: &[(String, String)],
     body: &str,
 ) -> Option<Challenge> {
-    let here = |vendor| Some(Challenge::new(vendor, page_url));
-
-    // Cloudflare managed challenge / Turnstile.
-    if header(headers, "cf-mitigated").is_some_and(|v| v.contains("challenge"))
-        || has_set_cookie(headers, "cf_clearance")
-        || body.contains("__cf_chl")
-        || body.contains("/cdn-cgi/challenge-platform/")
-    {
-        return here(Vendor::Cloudflare);
-    }
-    // DataDome.
-    if has_set_cookie(headers, "datadome")
-        || header(headers, "x-datadome").is_some()
-        || header(headers, "x-datadome-cid").is_some()
-        || body.contains("geo.captcha-delivery.com")
-    {
-        return here(Vendor::DataDome);
-    }
-    // Kasada.
-    if header(headers, "x-kpsdk-ct").is_some()
-        || header(headers, "x-kpsdk-st").is_some()
-        || body.contains("KPSDK")
-        || body.contains("/ips.js")
-    {
-        return here(Vendor::Kasada);
-    }
-    // Akamai Bot Manager (its sensor cookies).
-    if has_set_cookie(headers, "_abck")
-        || has_set_cookie(headers, "bm_sz")
-        || has_set_cookie(headers, "ak_bmsc")
-    {
-        return here(Vendor::Akamai);
-    }
-    // AWS WAF Bot Control (CloudFront/ALB): the challenge/captcha action header, the
-    // aws-waf-token cookie, or the awswaf challenge/captcha assets.
-    if header(headers, "x-amzn-waf-action").is_some()
-        || has_set_cookie(headers, "aws-waf-token")
-        || body.contains("token.awswaf.com")
-        || body.contains("captcha.awswaf.com")
-        || body.contains("challenge.js")
-    {
-        return here(Vendor::AwsWaf);
-    }
-    // Google reCAPTCHA. Two shapes: the `/sorry` unusual-traffic interstitial, and a
-    // `g-recaptcha` widget embedded on a page. Carry the site key/action so the solver
-    // (or the MCP tool) can drive the token flow without re-parsing.
-    let sorry_wall = page_url.contains("/sorry/")
-        || body.contains("our systems have detected unusual traffic")
-        || body.contains("unusual traffic from your computer network");
-    let has_widget = body.contains("g-recaptcha")
-        || body.contains("grecaptcha.render")
-        || body.contains("grecaptcha.execute")
-        || body.contains("/recaptcha/api.js")
-        || body.contains("/recaptcha/enterprise.js");
-    if sorry_wall || has_widget {
-        let sitekey = crate::recaptcha::extract_sitekey(body);
-        // A `/sorry` wall with no discoverable widget is still a reCAPTCHA wall; a bare
-        // widget mention with no site key is not actionable, so require one there.
-        if sorry_wall || sitekey.is_some() {
-            return Some(Challenge {
-                vendor: Vendor::Recaptcha,
-                page_url: page_url.to_string(),
-                sitekey,
-                action: crate::recaptcha::extract_action(body),
-            });
-        }
-    }
-    None
+    VENDOR_WALLS
+        .iter()
+        .find(|(_, wall)| wall(headers, body))
+        .map(|(vendor, _)| Challenge::new(*vendor, page_url))
+        .or_else(|| recaptcha_wall(page_url, body))
 }
 
 // ---- orchestration ---------------------------------------------------------

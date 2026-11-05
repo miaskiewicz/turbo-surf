@@ -145,26 +145,43 @@ pub(super) fn op_dictionary_prepare<'s>(
     Some((target, init))
 }
 
+/// Quoted-string, escape and `<URI>` state while scanning a header for separators.
+#[derive(Default)]
+struct FieldState {
+    quoted: bool,
+    escaped: bool,
+    target: bool,
+}
+impl FieldState {
+    /// Advance over `ch`; true when it separates two fields.
+    fn separates(&mut self, ch: char, separator: char) -> bool {
+        if self.escaped {
+            self.escaped = false;
+            return false;
+        }
+        match ch {
+            '\\' if self.quoted => self.escaped = true,
+            '"' if !self.target => self.quoted = !self.quoted,
+            _ if self.quoted => {}
+            '<' => self.target = true,
+            '>' => self.target = false,
+            _ => return !self.target && ch == separator,
+        }
+        false
+    }
+}
+
 fn fields(value: &str, separator: char) -> Vec<&str> {
     let mut result = Vec::new();
-    let (mut start, mut quoted, mut escaped, mut target) = (0, false, false, false);
+    let mut start = 0;
+    let mut state = FieldState::default();
     for (offset, ch) in value.char_indices() {
-        if escaped {
-            escaped = false;
-        } else if quoted && ch == '\\' {
-            escaped = true;
-        } else if !target && ch == '"' {
-            quoted = !quoted;
-        } else if !quoted && ch == '<' {
-            target = true;
-        } else if !quoted && ch == '>' {
-            target = false;
-        } else if !quoted && !target && ch == separator {
+        if state.separates(ch, separator) {
             result.push(&value[start..offset]);
             start = offset + ch.len_utf8();
         }
     }
-    if !quoted && !target && !escaped {
+    if !state.quoted && !state.target && !state.escaped {
         result.push(&value[start..]);
     }
     result
@@ -201,6 +218,45 @@ fn parameter(value: &str) -> Option<String> {
     rest.trim().is_empty().then_some(output)
 }
 
+/// A Link suffix's parameters name `rel=compression-dictionary` and no `anchor`.
+fn is_dictionary_link(suffix: &str) -> bool {
+    let (mut relation, mut anchor) = (None, false);
+    for part in fields(suffix, ';') {
+        let Some((name, value)) = part.trim().split_once('=') else {
+            continue;
+        };
+        if name.trim().eq_ignore_ascii_case("rel") && relation.is_none() {
+            relation = parameter(value);
+        } else if name.trim().eq_ignore_ascii_case("anchor") {
+            anchor = true;
+        }
+    }
+    !anchor
+        && relation.is_some_and(|relation| {
+            relation
+                .split_ascii_whitespace()
+                .any(|token| token.eq_ignore_ascii_case("compression-dictionary"))
+        })
+}
+
+/// The credential-free, fragment-less https target of one dictionary Link field.
+fn link_target(base: &Url, field: &str) -> Option<String> {
+    let field = field.trim().strip_prefix('<')?;
+    let (target, suffix) = field.split_once('>')?;
+    if !suffix.trim().is_empty() && !suffix.trim_start().starts_with(';') {
+        return None;
+    }
+    if !is_dictionary_link(suffix) {
+        return None;
+    }
+    let mut target = base.join(target).ok()?;
+    if target.scheme() != "https" || !target.username().is_empty() || target.password().is_some() {
+        return None;
+    }
+    target.set_fragment(None);
+    Some(target.to_string())
+}
+
 /// Parse Link fields without treating quoted or URI commas as field separators.
 /// Admission, CORS, freshness and the response's Use-As-Dictionary remain separate.
 pub(crate) fn header_links(base: &str, headers: &[(String, String)]) -> Vec<String> {
@@ -215,47 +271,10 @@ pub(crate) fn header_links(base: &str, headers: &[(String, String)]) -> Vec<Stri
         .iter()
         .filter(|(name, _)| name.eq_ignore_ascii_case("link"))
     {
-        for field in fields(value, ',') {
-            let Some(field) = field.trim().strip_prefix('<') else {
-                continue;
-            };
-            let Some((target, suffix)) = field.split_once('>') else {
-                continue;
-            };
-            if !suffix.trim().is_empty() && !suffix.trim_start().starts_with(';') {
-                continue;
-            }
-            let (mut relation, mut anchor) = (None, false);
-            for part in fields(suffix, ';') {
-                let Some((name, value)) = part.trim().split_once('=') else {
-                    continue;
-                };
-                if name.trim().eq_ignore_ascii_case("rel") && relation.is_none() {
-                    relation = parameter(value);
-                } else if name.trim().eq_ignore_ascii_case("anchor") {
-                    anchor = true;
-                }
-            }
-            if anchor
-                || !relation.is_some_and(|relation| {
-                    relation
-                        .split_ascii_whitespace()
-                        .any(|token| token.eq_ignore_ascii_case("compression-dictionary"))
-                })
-            {
-                continue;
-            }
-            let Ok(mut target) = base.join(target) else {
-                continue;
-            };
-            if target.scheme() != "https"
-                || !target.username().is_empty()
-                || target.password().is_some()
-            {
-                continue;
-            }
-            target.set_fragment(None);
-            let target = target.to_string();
+        for target in fields(value, ',')
+            .into_iter()
+            .filter_map(|field| link_target(&base, field))
+        {
             if !links.contains(&target) {
                 links.push(target);
                 if links.len() == 16 {

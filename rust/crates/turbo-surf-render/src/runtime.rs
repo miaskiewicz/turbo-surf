@@ -5701,6 +5701,7 @@ fn retire_frame_tree_impl<'s>(
                 }
                 fetch_streams::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
+                blob_urls::retire_context(scope, context);
                 storage_events::retire(context);
                 turbo_dom_browser_env::host_internals::retire_context(context);
                 context.set_slot(Rc::new(FrameRetired));
@@ -16188,6 +16189,7 @@ impl PageSession {
             deno_core::scope!(scope, &mut self.rt);
             crate::message_ports::sweep(scope);
             crate::web_streams_backend::sweep(scope);
+            crate::context_ownership::sweep_collected(scope);
         }
         crate::browser_env::sweep_collected_documents();
     }

@@ -136,6 +136,30 @@ pub(super) fn op_blob_url_read(
     lookup(state, url, &key).map(|(bytes, _)| bytes.to_vec())
 }
 
+/// Drop the retiring context's blob URL entries from the native store. An
+/// opaque-origin document's URLs are only reachable from its own realm, so they
+/// can never be looked up again once that realm has retired.
+pub(crate) fn retire_context(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    let opaque_suffix = {
+        let Some(handle) = context.get_slot::<CspHandle>() else {
+            return;
+        };
+        let partition = handle
+            .partition
+            .as_ref()
+            .map_or(0, |partition| partition.id);
+        format!("\u{0}{partition}\u{0}{}", handle.id)
+    };
+    let state = JsRuntime::op_state_from(scope);
+    let mut state = state.borrow_mut();
+    let Some(store) = state.try_borrow_mut::<Store>() else {
+        return;
+    };
+    store
+        .0
+        .retain(|_, entry| !entry.key.ends_with(&opaque_suffix));
+}
+
 fn lookup(state: &OpState, url: &str, key: &str) -> Option<(Rc<[u8]>, String)> {
     let url = url.split('#').next().unwrap_or(url);
     state

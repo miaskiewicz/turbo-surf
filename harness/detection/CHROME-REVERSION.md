@@ -76,6 +76,9 @@ in identity-diff.mjs. It picks one of:
 - `navigate`, `no-cors`, `cors-resource` (CORS script, style or font), `cors` (fetch
   or XHR), `preflight`
 - the same with `-hinted` appended when any high-entropy client hint is present
+- `navigate-hinted-restart`: the navigation Chrome re-sends after a Critical-CH
+  response (the battery's second `critical` request); net.rs uses it only for that
+  restart
 
 Chrome orders headers differently in each class, and differently again once hints
 are negotiated. Each class order is a merge of every measured request in that class,
@@ -398,8 +401,8 @@ satisfied by changing strings:
   labelling rules).
 - **`navigator.webdriver`.** It stays `false`. The measured `true` is the CDP
   collector's artifact.
-- **Missing behaviour.** Don't emit requests to look busy. Favicon, web-font and
-  Critical-CH gaps stay gaps until the behaviour really exists.
+- **Missing behaviour.** Don't emit requests to look busy. Favicon and web-font
+  gaps stay gaps until the behaviour really exists.
 
 ## 7. Tests, fixtures and gates
 
@@ -419,9 +422,9 @@ Version-agnostic tests read the expected default from the registry or its fixtur
   in the seed pool.
 - `rust/crates/turbo-surf-render/tests/chrome_identity.rs`: runs the same probe in
   the render tier and compares it with the fixture field by field. The machine-bound
-  `architecture`/`platformVersion` come from the profile. Pinned assertions:
-  - `KNOWN_GAP user-agent-data-interface`
-  - the webdriver collector artifact
+  `architecture`/`platformVersion` come from the profile. The webdriver collector
+  artifact is pinned, and `navigator.userAgentData` is checked as a real
+  `NavigatorUAData` instance, `toJSON()` included.
 - `rust/crates/turbo-surf-render/tests/browser_release.rs`: compares the default
   identity with the fixture, and a pinned 155 identity with the independent
   `browser-release-chrome155.json` control. This is the explicit "older release
@@ -534,10 +537,17 @@ The 57 known-gap deltas fall under 13 rules:
 | css-feature-support | 18 | dpr-hint | 2 |
 | h2-stream-priority | 11 | author-header-position | 1 |
 | user-agent-data-interface | 9 | critical-ch-retry | 1 |
-| favicon | 5 | form-submission-to-frame | 1 |
+| favicon | 5 | form-submission-to-frame¹ | 1 |
 | js-engine-version | 3 | web-font-loading | 1 |
 | h1-connection-header | 2 | window-global-inventory | 1 |
 | h1-priority-header | 2 | | |
+
+Since closed in 0.7.1: `user-agent-data-interface` (turbo-surf#164, a real
+`NavigatorUAData`) and `web-font-loading` (turbo-surf#166, used faces load before
+the load event, frames included, with Chrome's same-origin `Origin`).
+
+¹ Retired in 0.7.1: native form submission into a named child frame works since
+#111 (landed in #141), and the battery no longer records the `form-post` delta.
 
 Timings: the battery takes about 12 s for Chrome and 8 s for turbo-surf. The first
 full run took 52 s with a warm build. A re-run that recompiled `identity_battery`

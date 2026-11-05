@@ -16,15 +16,9 @@ const HEADLESS: &str =
     include_str!("../../../../harness/detection/fixtures/document_hooks_headless_chrome156.json");
 
 /// Measured Chrome behavior the engine does not reproduce yet, as `path = engine value`.
-///
-/// srcdoc and initial about:blank documents share their creator's origin, so in
-/// Chrome the srcdoc child's `document.domain = 'b.localhost'` relaxes the top
-/// document and the initial child too. The binding records the relaxed
-/// domain per Document and offers no host hook to share it.
-const KNOWN_GAPS: &[&str] = &[
-    "domain-site-keyed/frames/initial/value/domain = \"a.b.localhost\"",
-    "domain-site-keyed/top/domain = \"a.b.localhost\"",
-];
+/// srcdoc and initial about:blank children share their creator's origin through
+/// `share_document_domain` (turbo-surf#116, turbo-dom#284), so none remain.
+const KNOWN_GAPS: &[&str] = &[];
 
 fn control() -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();

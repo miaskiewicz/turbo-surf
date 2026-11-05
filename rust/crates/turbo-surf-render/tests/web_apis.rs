@@ -12,9 +12,8 @@ const CONTROL: &str =
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`.
 ///
-/// - `click()`: an untrusted event reaching a `when()` listener is attributed to
-///   `dispatchEvent`; the binding's `HTMLElement#click()` is not a frame
-///   the Observable layer can see, so the inner context differs.
+/// - (closed by #116) `HTMLElement#click()` runs as its own binding frame, so a
+///   failure inside a `when("click")` listener reads `'click' on 'HTMLElement'`.
 /// - (closed by #103) the promises AsyncIteratorClose leaves rejected are now
 ///   reported through `unhandledrejection`, as in Chrome.
 ///
@@ -22,9 +21,7 @@ const CONTROL: &str =
 /// but the merged real `XMLHttpRequestEventTarget -> EventTarget` now inherits
 /// `when` and delivers events, matching Chrome 156 (which genuinely exposes
 /// `EventTarget.prototype.when` in a fresh stable profile), so it is resolved.
-const KNOWN_GAPS: &[&str] = &[
-    "observable-semantics-probe.js/bindingContexts/log/2/1/1 = \"Failed to execute 'flatMap' on 'Observable': Failed to execute 'dispatchEvent' on 'EventTarget': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise.\"",
-];
+const KNOWN_GAPS: &[&str] = &[];
 
 fn control() -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();

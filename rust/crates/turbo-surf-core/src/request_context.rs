@@ -2,8 +2,9 @@
 //!
 //! A hint store belongs to a browsing session. Clones share the store so page
 //! fetches and navigations can use the same opt-in without leaking it to another
-//! session. This does not implement Permissions-Policy delegation or Critical-CH
-//! retries; cross-origin subresources therefore receive no high-entropy hints.
+//! session. This does not implement Permissions-Policy delegation, so
+//! cross-origin subresources receive no high-entropy hints. Critical-CH
+//! restarts live in net.rs (`critical_restart`).
 
 use crate::fingerprint::Profile;
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +19,7 @@ pub enum Destination {
     Script,
     Style,
     Image,
+    Font,
     Empty,
     Report,
 }
@@ -31,6 +33,7 @@ impl Destination {
             Destination::Script => "script",
             Destination::Style => "style",
             Destination::Image => "image",
+            Destination::Font => "font",
             Destination::Empty => "empty",
             Destination::Report => "report",
         }
@@ -248,12 +251,18 @@ impl RequestContext {
             .priority_for(destination)
             .unwrap_or(match self.destination {
                 Destination::Document | Destination::Iframe => "u=0, i",
-                Destination::Style => "u=0",
+                // Chrome fetches web fonts at VeryHigh priority, like render-blocking CSS.
+                Destination::Style | Destination::Font => "u=0",
                 Destination::Script => "u=1",
                 Destination::Image => "u=2, i",
                 Destination::Empty | Destination::Report => "u=1, i",
             });
-        h.insert("priority".into(), priority.into());
+        // RFC 9218 Priority is an HTTP/2+ header in Chrome, and a cleartext
+        // origin is always HTTP/1.1 (no h2c). net::send drops it for HTTPS
+        // origins already known to speak HTTP/1.1.
+        if !target.starts_with("http:") {
+            h.insert("priority".into(), priority.into());
+        }
         if trustworthy(target) {
             let site = match self.source.as_deref() {
                 None => "none",
@@ -291,10 +300,10 @@ impl RequestContext {
             {
                 h.insert("referer".into(), referer);
             }
-            // CORS script requests carry Origin even on the same URL origin;
-            // ordinary fetch adds it cross-origin or for unsafe methods.
+            // CORS script and font requests carry Origin even on the same URL
+            // origin; ordinary fetch adds it cross-origin or for unsafe methods.
             if (self.mode == RequestMode::Cors
-                && (self.destination == Destination::Script
+                && (matches!(self.destination, Destination::Script | Destination::Font)
                     || self.opaque_origin
                     || self.origin_tainted
                     || !same_origin(source, target)))
@@ -512,6 +521,7 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
             crate::fingerprint::brand_header(profile.chrome_major, profile.full_version, true)
         }
         "device-memory" | "sec-ch-device-memory" => profile.device_memory.to_string(),
+        "sec-ch-dpr" => crate::fingerprint::DEVICE_PIXEL_RATIO.to_string(),
         // Match the render tier's estimated NetworkInformation defaults.
         "downlink" => "10".into(),
         "rtt" => "50".into(),
@@ -728,6 +738,23 @@ mod tests {
             Some("cross-site")
         );
         assert!(!context.sends_credentials("https://styles.test/assets/import.css"));
+    }
+
+    /// Chrome 156 (identity battery fixture): a same-origin @font-face GET carries
+    /// `Origin`, as CORS script requests do (turbo-surf#166).
+    #[test]
+    fn same_origin_font_requests_carry_origin() {
+        let font = RequestContext::resource(
+            "https://example.com/style.css",
+            Destination::Font,
+            RequestMode::Cors,
+        );
+        let h = font.headers("https://example.com/font.woff2", "GET");
+        assert_eq!(h["sec-fetch-dest"], "font");
+        assert_eq!(
+            h.get("origin").map(String::as_str),
+            Some("https://example.com")
+        );
     }
 
     #[test]

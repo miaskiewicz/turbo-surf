@@ -54,6 +54,39 @@ fn op_capture_frame_scheduler<'s>(
     }
     Ok(())
 }
+/// Schedule a rendering update in a child frame's realm (its captured frame scheduler), so
+/// a frame whose owner re-rendered runs its own resize and media query steps as Chrome
+/// updates every document of the event loop together. Retired or foreign values are ignored.
+#[op2(fast, reentrant)]
+fn op_request_frame_rendering<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) {
+    let Some(context) = window
+        .get_creation_context(scope)
+        .filter(|context| window.strict_equals(context.global(scope).into()))
+    else {
+        return;
+    };
+    if crate::runtime::native_frame_is_retired(context) {
+        return;
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let Some(scheduler) = frame_scheduler_key(scope)
+        .and_then(|key| context.global(scope).get_private(scope, key))
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    else {
+        return;
+    };
+    let Some(step) = v8::Function::new(
+        scope,
+        |_: &mut v8::PinScope, _: v8::FunctionCallbackArguments, _: v8::ReturnValue| {},
+    ) else {
+        return;
+    };
+    let receiver = v8::undefined(scope);
+    scheduler.call(scope, receiver.into(), &[step.into()]);
+}
 /// Trusted bootstrap hands the realm's view-transition rendering seam (frame steps after
 /// animation callbacks, rendering suppression, page visibility) to the binding.
 #[op2(fast, reentrant)]
@@ -78,6 +111,7 @@ deno_core::extension!(
         op_geometry_object,
         op_install_geometry_clone_adapter,
         op_capture_frame_scheduler,
+        op_request_frame_rendering,
         op_capture_view_transition_host,
         op_register_dom_exception,
         crate::live_layout_backend::op_live_media_match,
@@ -87,6 +121,10 @@ deno_core::extension!(
         crate::live_layout_backend::op_live_element_geometry,
         crate::live_layout_backend::op_live_image_box,
         crate::live_layout_backend::op_live_image_loaded,
+        crate::web_fonts::op_font_face_parse,
+        crate::web_fonts::op_font_face_attach,
+        crate::web_fonts::op_font_face_detach,
+        crate::web_fonts::op_font_face_rule,
         crate::live_layout_backend::op_live_element_scroll,
         crate::live_layout_backend::op_live_element_scroll_to,
         crate::live_layout_backend::op_live_viewport_offset,

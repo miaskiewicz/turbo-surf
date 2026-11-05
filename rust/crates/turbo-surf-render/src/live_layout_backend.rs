@@ -55,6 +55,7 @@ struct CacheKey {
     inline_policy: Vec<(u32, String)>,
     /// The document's loaded-image epoch: a finished load resizes its replaced box.
     images: u64,
+    fonts: u64,
 }
 /// Natural sizes of the images surf's loader has decoded, per document and raw `src`
 /// attribute (turbo-dom-layout names an `<img>` box's image by that string). Live layout
@@ -116,6 +117,10 @@ struct LayoutView {
     omitted: std::collections::HashSet<turbo_dom_layout::layout_snapshot::SourceId>,
     quirks: bool,
     body: Option<turbo_dom_layout::layout_snapshot::SourceId>,
+    /// `@font-face` families this layout used, and whether the realm's font loader
+    /// has been told (a cached view still reports once a loader exists).
+    fonts: Vec<String>,
+    fonts_reported: std::cell::Cell<bool>,
 }
 impl LayoutView {
     fn zoom(&self, id: turbo_dom_layout::layout_snapshot::SourceId) -> f32 {
@@ -475,6 +480,29 @@ fn resolve<'s>(
     input: &mut crate::live_layout_dom::NativeLayoutInput<'s>,
     viewport: &Viewport,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
+    let view = resolve_layout(scope, input, viewport)?;
+    // A layout that used `@font-face` families starts their loads (turbo-surf#130) in
+    // the laid-out document's own realm: a frame's layout can run while another
+    // realm's script is current (turbo-surf#166).
+    if !view.fonts.is_empty() && !view.fonts_reported.get() {
+        let reported = match input.owner_context {
+            Some(context) => {
+                let scope = &mut v8::ContextScope::new(scope, context);
+                crate::web_fonts::report_used(scope, &view.fonts)
+            }
+            None => crate::web_fonts::report_used(scope, &view.fonts),
+        };
+        if reported {
+            view.fonts_reported.set(true);
+        }
+    }
+    Ok(view)
+}
+fn resolve_layout<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    input: &mut crate::live_layout_dom::NativeLayoutInput<'s>,
+    viewport: &Viewport,
+) -> Result<std::rc::Rc<LayoutView>, String> {
     refresh(scope, input)?;
     let input = &*input;
     let (tree, sheets) = (&input.tree, input.sheets.as_slice());
@@ -482,7 +510,10 @@ fn resolve<'s>(
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::RulesKey);
     let profile = crate::layout_profile::LayoutProfile::current(scope);
     let rules = crate::live_stylesheets::active_rule_snapshots(sheets, viewport)?;
-    let fonts = initialize_system_fonts();
+    let (font_epoch, web_fonts) = crate::web_fonts::document_fonts(tree.document_id());
+    let fonts = web_fonts
+        .as_deref()
+        .unwrap_or_else(|| initialize_system_fonts());
     let (image_epoch, resolver) = loaded_images(tree.document_id());
     let images = ImageCtx {
         resolver: &resolver,
@@ -511,6 +542,7 @@ fn resolve<'s>(
             rows
         }),
         images: image_epoch,
+        fonts: font_epoch,
     };
     let cached = LAYOUT_CACHE.with(|cache| {
         cache
@@ -526,6 +558,8 @@ fn resolve<'s>(
     let snapshot = if let Some(snapshot) = cached {
         snapshot
     } else {
+        // Drop families an earlier, failed layout collected.
+        crate::live_layout_resources::take_used_fonts();
         let layout_timer =
             crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Layout);
         // Layout reads the live tree it captured: re-enter that document. `refresh`
@@ -577,6 +611,8 @@ fn resolve<'s>(
             omitted,
             quirks: tree.capture.quirks,
             body: tree.capture.body,
+            fonts: crate::live_layout_resources::take_used_fonts(),
+            fonts_reported: std::cell::Cell::new(false),
         });
         LAYOUT_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();

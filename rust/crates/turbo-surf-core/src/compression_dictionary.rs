@@ -103,10 +103,14 @@ impl PendingDictionary {
 impl SelectedDictionary {
     /// These codings are inserted only after selecting a genuine scoped dictionary.
     pub(crate) fn negotiate(&self, headers: &mut BTreeMap<String, String>) {
-        headers.insert(
-            "accept-encoding".into(),
-            "gzip, deflate, br, zstd, dcb, dcz".into(),
-        );
+        // A Range request keeps identity and still advertises the dictionary
+        // codings (Chrome 156 control `header-range-request`).
+        let base = if headers.contains_key("range") {
+            "identity"
+        } else {
+            "gzip, deflate, br, zstd"
+        };
+        headers.insert("accept-encoding".into(), format!("{base}, dcb, dcz"));
         headers.insert(
             "available-dictionary".into(),
             format!(
@@ -147,6 +151,7 @@ fn destination(context: &RequestContext) -> &'static str {
         Destination::Script => "script",
         Destination::Style => "style",
         Destination::Image => "image",
+        Destination::Font => "font",
         Destination::Empty => "",
         Destination::Report => "report",
     }

@@ -1331,6 +1331,27 @@
     const type = typeGetter ? apply(typeGetter, event, []) : event.type;
     return type === "abort" && isSignal(target) ? ABORT : EMPTY;
   };
+  // HTMLElement#click() is a Blink binding frame: an untrusted click it
+  // dispatches reaches when() listeners under 'click' on 'HTMLElement'.
+  const clickDescriptor =
+    typeof HTMLElement === "function" ? descriptor(HTMLElement.prototype, "click") : undefined;
+  if (clickDescriptor && typeof clickDescriptor.value === "function") {
+    const click = clickDescriptor.value;
+    const frame = new Frame("click", "HTMLElement");
+    clickDescriptor.value = make(
+      function () {
+        enter(frame);
+        try {
+          return apply(click, this, arguments);
+        } finally {
+          leave();
+        }
+      },
+      "click",
+      0,
+    );
+    define(HTMLElement.prototype, "click", clickDescriptor);
+  }
   operation(EventTarget.prototype, "EventTarget", "when", 1, function (type, options) {
     const target = this === undefined || this === null ? realm : this;
     try {

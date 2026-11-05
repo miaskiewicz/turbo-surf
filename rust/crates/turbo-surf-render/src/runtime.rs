@@ -80,6 +80,8 @@ use turbo_surf_core::url::resolve;
 mod runtime_activation;
 use runtime_activation::ActivationKey;
 
+#[path = "blob_urls.rs"]
+mod blob_urls;
 #[path = "form_navigation.rs"]
 mod form_navigation;
 #[path = "privacy_sandbox.rs"]
@@ -2526,6 +2528,7 @@ async fn op_fetch(
         Some("iframe") => Destination::Iframe,
         Some("style") => Destination::Style,
         Some("image") => Destination::Image,
+        Some("font") => Destination::Font,
         _ => Destination::Empty,
     };
     let csp = init.get("csp").and_then(|id| id.as_u64()).and_then(|id| {
@@ -2578,6 +2581,7 @@ async fn op_fetch(
         Destination::Script => "script-src-elem",
         Destination::Style => "style-src-elem",
         Destination::Image => "img-src",
+        Destination::Font => "font-src",
         Destination::Iframe => "frame-src",
         _ => "connect-src",
     };
@@ -2598,9 +2602,28 @@ async fn op_fetch(
             ..Default::default()
         };
     }
-    if target.starts_with("data:")
-        && init.get("destination").and_then(|value| value.as_str()) == Some("iframe")
-    {
+    let iframe = init.get("destination").and_then(|value| value.as_str()) == Some("iframe");
+    // fetch()/XHR destinations; scripts, styles and images keep their own data: paths.
+    let scheme_fetch = destination == Destination::Empty && !iframe;
+    if target.starts_with("blob:") && scheme_fetch {
+        let key = init
+            .get("blob_key")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let xhr = init.get("initiator").and_then(|value| value.as_str()) == Some("xmlhttprequest");
+        return blob_urls::fetch_blob(
+            &state.borrow(),
+            &target,
+            method.as_deref(),
+            &headers,
+            key,
+            xhr,
+        );
+    }
+    if target.starts_with("data:") && scheme_fetch {
+        return blob_urls::fetch_data(&target);
+    }
+    if target.starts_with("data:") && iframe {
         let decoded = decode_data_document(&target);
         let ok = decoded.is_some();
         let (body, content_type) = decoded.unwrap_or_default();
@@ -3369,7 +3392,13 @@ struct ActiveDocument(v8::Weak<v8::Object>);
 struct DocumentFacts {
     last_modified: Option<f64>,
     keyed: bool,
+    /// Whether the binding takes `keyed` as the response's agent cluster decision: only a
+    /// secure context honours `Origin-Agent-Cluster`; elsewhere the binding's default stands.
+    secure: bool,
     domain_sandboxed: bool,
+    /// The creator document whose origin an initial about:blank / srcdoc child shares
+    /// (Blink's shared `SecurityOrigin`), so `document.domain` relaxes both (turbo-surf#116).
+    creator: Option<v8::Global<v8::Object>>,
 }
 impl DocumentFacts {
     /// A navigation response: its own headers, and this browsing context group's
@@ -3388,7 +3417,9 @@ impl DocumentFacts {
         Self {
             last_modified: crate::document_facts::last_modified(headers),
             keyed,
+            secure: trustworthy_url(url),
             domain_sandboxed: sandboxed_document_domain(context),
+            creator: None,
         }
     }
     /// srcdoc and about:blank documents have no response; they join their
@@ -3398,14 +3429,24 @@ impl DocumentFacts {
         context: v8::Local<v8::Context>,
         parent: v8::Local<v8::Context>,
     ) -> Self {
-        let keyed = window_is_opaque(scope, context)
+        let opaque = window_is_opaque(scope, context);
+        let keyed = opaque
             || parent
                 .get_slot::<AgentClusterKeyed>()
                 .is_none_or(|keyed| keyed.0);
+        // An opaque (sandboxed) child has its own origin; it shares nothing.
+        let creator = (!opaque)
+            .then(|| parent.get_slot::<ActiveDocument>())
+            .flatten()
+            .and_then(|document| document.0.to_global(scope));
         Self {
             last_modified: None,
             keyed,
+            // A child sharing its creator's origin reads the creator's clustering; an opaque
+            // one is no secure context and keeps the binding's default.
+            secure: false,
             domain_sandboxed: sandboxed_document_domain(context),
+            creator,
         }
     }
 }
@@ -3426,8 +3467,14 @@ fn install_document_facts(scope: &mut v8::PinScope, facts: DocumentFacts) {
         return;
     };
     crate::browser_env::set_document_last_modified(scope, document, facts.last_modified);
-    crate::browser_env::set_document_origin_keyed(scope, document, facts.keyed);
+    if facts.secure {
+        crate::browser_env::set_document_origin_keyed(scope, document, facts.keyed);
+    }
     crate::browser_env::set_document_domain_sandboxed(scope, document, facts.domain_sandboxed);
+    if let Some(creator) = facts.creator {
+        let creator = v8::Local::new(scope, creator);
+        crate::browser_env::share_document_domain(scope, document, creator);
+    }
     context.set_slot(Rc::new(AgentClusterKeyed(facts.keyed)));
     context.set_slot(Rc::new(ActiveDocument(v8::Weak::new(scope, document))));
 }
@@ -6181,6 +6228,29 @@ fn op_document_cookie_site<'s>(
     serde_json::json!({"top_level_source":state.borrow::<Base>().0,"cookie_site_is_opaque":opaque})
 }
 
+/// The cookie URL and jar a document's cookie APIs act on: a frame's own URL and
+/// its partition jar, else the session's top-level document and jar.
+fn document_cookie_target(
+    scope: &mut v8::PinScope,
+    state: &OpState,
+    document: v8::Local<v8::Object>,
+) -> (String, Jar) {
+    let context = document.get_creation_context(scope);
+    let url = context
+        .as_ref()
+        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
+        .map(|url| url.0.clone())
+        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
+    let jar = context
+        .and_then(|context| context.get_slot::<CspHandle>())
+        .and_then(|handle| handle.partition.clone())
+        .map_or_else(
+            || state.borrow::<Jar>().clone(),
+            |partition| partition.jar.clone(),
+        );
+    (url, jar)
+}
+
 #[op2]
 #[string]
 fn op_frame_cookie_get(
@@ -6189,19 +6259,7 @@ fn op_frame_cookie_get(
     document: v8::Local<v8::Object>,
 ) -> String {
     apply_report_cookies(state);
-    let url = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
-        .map(|url| url.0.clone())
-        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
-    let jar = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<CspHandle>())
-        .and_then(|handle| handle.partition.clone())
-        .map_or_else(
-            || state.borrow::<Jar>().clone(),
-            |partition| partition.jar.clone(),
-        );
+    let (url, jar) = document_cookie_target(scope, state, document);
     let value = jar.borrow().document_cookie(&url, cookie_now());
     value
 }
@@ -6214,20 +6272,38 @@ fn op_frame_cookie_set(
     #[string] line: &str,
 ) {
     apply_report_cookies(state);
-    let url = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
-        .map(|url| url.0.clone())
-        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
-    let jar = document
-        .get_creation_context(scope)
-        .and_then(|context| context.get_slot::<CspHandle>())
-        .and_then(|handle| handle.partition.clone())
-        .map_or_else(
-            || state.borrow::<Jar>().clone(),
-            |partition| partition.jar.clone(),
-        );
+    let (url, jar) = document_cookie_target(scope, state, document);
     jar.borrow_mut().set_from_document(&url, line, cookie_now());
+}
+
+/// The script-visible cookies of a document as CookieStore list items, in
+/// `document.cookie` order (#108).
+#[op2]
+#[serde]
+fn op_cookie_store_list(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+) -> serde_json::Value {
+    apply_report_cookies(state);
+    let (url, jar) = document_cookie_target(scope, state, document);
+    let cookies = jar.borrow().cookies_for(&url, cookie_now());
+    cookies
+        .into_iter()
+        .filter(|cookie| !cookie.http_only)
+        .map(|cookie| {
+            serde_json::json!({
+                "domain": (!cookie.host_only).then_some(cookie.domain),
+                "expires": cookie.expires_at.is_finite().then_some(cookie.expires_at),
+                "name": cookie.name,
+                "partitioned": false,
+                "path": cookie.path,
+                "sameSite": cookie.same_site,
+                "secure": cookie.secure,
+                "value": cookie.value,
+            })
+        })
+        .collect()
 }
 
 type StorageEntries = Vec<(Vec<u16>, Vec<u16>)>;
@@ -6573,6 +6649,37 @@ fn storage_area(
     areas.by_origin.insert(key, id);
     areas.values.insert(id, Vec::new());
     Ok(id)
+}
+
+/// IndexedDB backing stores (indexeddb.js), one per storage key: the same
+/// partitioning as DOM storage, so every same-partition realm shares the databases.
+#[derive(Default)]
+struct IdbRegistries(std::collections::HashMap<u32, v8::Global<v8::Object>>);
+#[op2(reentrant)]
+fn op_idb_registry<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &mut OpState,
+    window: v8::Local<'s, v8::Object>,
+    unpartitioned: bool,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let id = storage_area(scope, state, window, false, unpartitioned)?;
+    if !state.has::<IdbRegistries>() {
+        state.put(IdbRegistries::default());
+    }
+    let registries = state.borrow_mut::<IdbRegistries>();
+    if let Some(registry) = registries.0.get(&id) {
+        return Ok(v8::Local::new(scope, registry));
+    }
+    let null = v8::null(scope).into();
+    let registry = v8::Object::with_prototype_and_properties(scope, null, &[], &[]);
+    registries.0.insert(id, v8::Global::new(scope, registry));
+    Ok(registry)
+}
+/// IndexedDB fires each request's events as their own task: the microtasks a
+/// listener queues run before the transaction goes inactive again.
+#[op2(nofast, reentrant)]
+fn op_idb_checkpoint(scope: &mut v8::PinScope) {
+    scope.perform_microtask_checkpoint();
 }
 
 struct StorageFactory(v8::Weak<v8::Function>);
@@ -7185,6 +7292,8 @@ deno_core::extension!(
         op_form_data_finish,
         op_form_data_event,
         op_storage_area,
+        op_idb_registry,
+        op_idb_checkpoint,
         op_storage_factory,
         op_storage_object,
         op_storage_access_factory,
@@ -7234,6 +7343,7 @@ deno_core::extension!(
         op_document_create_element,
         op_document_import_node,
         op_frame_cookie_set,
+        op_cookie_store_list,
         op_queue_classic_script,
         op_install_resource_consumer,
         op_prepare_resource_script,
@@ -7251,6 +7361,10 @@ deno_core::extension!(
         fetch_streams::op_fetch_release,
         fetch_streams::op_fetch_read,
         op_fetch,
+        blob_urls::op_blob_url_create,
+        blob_urls::op_blob_url_revoke,
+        blob_urls::op_blob_url_key,
+        blob_urls::op_blob_url_read,
         op_load_image,
         op_decode_data_image,
         op_dictionary_active,
@@ -7342,7 +7456,7 @@ const __G = __tsNs;
   Element: 1, ElementInternals: 1, EventCounts: 1, FragmentDirective: 1, HTMLCollection: 1,
   HTMLDocument: 1, HTMLFormControlsCollection: 1, HTMLOptionsCollection: 1, HTMLUnknownElement: 1,
   History: 1, IntersectionObserverEntry: 1, MathMLElement: 1, MediaList: 1, MessagePort: 1,
-  MutationRecord: 1, NamedNodeMap: 1, Navigator: 1, Node: 1, NodeList: 1, NodeRange: 1,
+  MutationRecord: 1, NamedNodeMap: 1, Navigator: 1, NavigatorUAData: 1, Node: 1, NodeList: 1, NodeRange: 1,
   Performance: 1, PerformanceEntry: 1, PerformanceMeasure: 1, PerformanceNavigationTiming: 1,
   PerformanceObserverEntryList: 1, PermissionStatus: 1, Permissions: 1, PermissionsPolicy: 1,
   ProcessingInstruction: 1, RadioNodeList: 1, ReadableByteStreamController: 1,
@@ -7623,25 +7737,54 @@ const __navData = {
   // `probe` example on a real Akamai sensor) read it, and its absence is a tell.
   connection: __pick("connection", { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false }),
   // UA-Client-Hints high-entropy surface, consistent with the UA above.
-  userAgentData: __pick("userAgentData", {
+  // A real NavigatorUAData instance (turbo-surf#164): zero own properties, brand-checked
+  // prototype getters and native getHighEntropyValues/toJSON, as in Chrome 156. A
+  // `userAgentData` fingerprint override supplies the backing values.
+  userAgentData: (() => {
+    const data = __pick("userAgentData", {
     // Rust owns the same major-seeded GREASE generation used by HTTP headers.
-    brands: __brands,
-    mobile: false,
-    platform: __uaPlatform,
-    getHighEntropyValues: async (hints) => {
-      const values = {
-      architecture: __pick("architecture", "arm"), bitness: "64", model: "", wow64: false,
-      platform: __uaPlatform, platformVersion: __pick("platformVersion", "15.0.0"), uaFullVersion: __fullVersion,
-      mobile: false,
       brands: __brands,
-      fullVersionList: __fullBrands,
-      formFactors: ["Desktop"],
-      };
-      const result = {brands:values.brands, mobile:values.mobile, platform:values.platform};
-      for (const key of hints) if (Object.prototype.hasOwnProperty.call(values, key)) result[key] = values[key];
-      return result;
-    },
-  }),
+      mobile: false,
+      platform: __uaPlatform,
+      getHighEntropyValues: async (hints) => {
+        const values = {
+        architecture: __pick("architecture", "arm"), bitness: "64", model: "", wow64: false,
+        platform: __uaPlatform, platformVersion: __pick("platformVersion", "15.0.0"), uaFullVersion: __fullVersion,
+        mobile: false,
+        brands: __brands,
+        fullVersionList: __fullBrands,
+        formFactors: ["Desktop"],
+        };
+        const result = {brands:values.brands, mobile:values.mobile, platform:values.platform};
+        for (const key of hints) if (Object.prototype.hasOwnProperty.call(values, key)) result[key] = values[key];
+        return result;
+      },
+    });
+    const slots = new WeakMap();
+    function NavigatorUAData() { throw new TypeError("Failed to construct 'NavigatorUAData': Illegal constructor"); }
+    const proto = NavigatorUAData.prototype;
+    const slot = (self) => { if (!slots.has(self)) throw new TypeError("Illegal invocation"); return slots.get(self); };
+    for (const name of ["brands", "mobile", "platform"]) {
+      const get = Object.getOwnPropertyDescriptor({get [name]() { return slot(this)[name]; }}, name).get;
+      Object.defineProperty(proto, name, { get, enumerable: true, configurable: true });
+    }
+    const ops2 = {
+      getHighEntropyValues(hints) {
+        try { return Reflect.apply(slot(this).getHighEntropyValues, data, [hints]); }
+        catch (e) { return Promise.reject(e); }
+      },
+      toJSON() { const d = slot(this); return { brands: d.brands, mobile: d.mobile, platform: d.platform }; },
+    };
+    for (const name of ["getHighEntropyValues", "toJSON"])
+      Object.defineProperty(proto, name, { value: ops2[name], writable: true, enumerable: true, configurable: true });
+    delete proto.constructor;
+    Object.defineProperty(proto, "constructor", { value: NavigatorUAData, writable: true, configurable: true });
+    Object.defineProperty(proto, Symbol.toStringTag, { value: "NavigatorUAData", configurable: true });
+    globalThis.NavigatorUAData = NavigatorUAData;
+    const instance = Object.create(proto);
+    slots.set(instance, data);
+    return instance;
+  })(),
   // In-memory clipboard: an app that writeText()s a value (e.g. a copy-link button)
   // and reads it back round-trips, with no OS clipboard.
   clipboard: (() => {
@@ -7720,7 +7863,6 @@ const __navData = {
     credentials: { get: () => Promise.resolve(null), create: () => Promise.resolve(null), store: P, preventSilentAccess: P },
     wakeLock: { request: REJ },
     keyboard: { getLayoutMap: () => Promise.resolve(new Map()), lock: P, unlock() {} },
-    locks: { request: P, query: () => Promise.resolve({ held: [], pending: [] }) },
     mediaCapabilities: { decodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }), encodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }) },
     mediaSession: { metadata: null, playbackState: "none", setActionHandler() {}, setPositionState() {} },
     // React's scheduler probes navigator.scheduling.isInputPending — must be an object with the fn.
@@ -7807,24 +7949,7 @@ const __navData = {
   };
   globalThis.devicePixelRatio = __pick("devicePixelRatio", 2);
 }
-// document.fonts (FontFaceSet) — an EventTarget with a `ready` promise; web-font
-// loaders (`document.fonts.ready`, `.addEventListener('loadingdone')`) touch it, and
-// a missing one throws mid-hydration. No real font pipeline here, so `ready` resolves
-// immediately and load/check report success/emptiness.
-if (globalThis.document && !globalThis.document.fonts) {
-  try {
-    const __fonts = {
-      ready: Promise.resolve(), status: "loaded", size: 0,
-      add() {}, delete() { return false; }, clear() {}, has() { return false; },
-      check() { return true; }, load() { return Promise.resolve([]); },
-      forEach() {}, values() { return [][Symbol.iterator](); }, keys() { return [][Symbol.iterator](); },
-      [Symbol.iterator]() { return [][Symbol.iterator](); },
-      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
-      onloading: null, onloadingdone: null, onloadingerror: null,
-    };
-    Object.defineProperty(globalThis.document, "fonts", { configurable: true, get() { return __fonts; } });
-  } catch (e) {}
-}
+// document.fonts / FontFace: font_loading.js (turbo-surf#130).
 // `window.chrome` presence (with loadTimes/csi/app, but no extension `runtime`) is
 // what a plain Chrome page exposes; its absence flags a non-Chrome/headless client.
 // Key insertion order matches real Chrome (`Object.keys(chrome)` = loadTimes, csi, app)
@@ -7961,20 +8086,6 @@ ops.op_storage_events_factory((key,oldValue,newValue,url,session)=>{
  ops.op_event_trust(event,-1);ops.op_dispatch_host_event(event,globalThis);
 },()=>new __StorageEventImplementation(''));
 
-// indexedDB — a real Chrome window global (IDBFactory). `typeof indexedDB === "undefined"`
-// is a classic headless tell. A shape stub (no real persistence) that answers presence +
-// class-tag + the IDBFactory method surface; requests stay pending (no backing store).
-if (typeof globalThis.indexedDB === "undefined") {
-  const __idbReq = () => ({ onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null, result: null, error: null, readyState: "pending", addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } });
-  const __idb = {
-    open() { return __idbReq(); },
-    deleteDatabase() { return __idbReq(); },
-    databases() { return Promise.resolve([]); },
-    cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; },
-  };
-  try { Object.defineProperty(__idb, Symbol.toStringTag, { value: "IDBFactory", configurable: true }); } catch (e) {}
-  globalThis.indexedDB = __idb;
-}
 const __log = (...a) => __print(a.map(String).join(" ") + "\n");
 globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
 const __timers = [];
@@ -8362,6 +8473,7 @@ for(const name of ['localStorage','sessionStorage','indexedDB','locks','caches']
  const getter=Object.getOwnPropertyDescriptor({get [name](){
   const state=__storageHandleRecord(this);
   if(!state.types.all&&!state.types[name])throw new __storageAccessException('Access was not requested','SecurityError');
+  if(name==='indexedDB')return state.indexedDB||(state.indexedDB=__G.idbFactory(true));
   if(name!=='localStorage'&&name!=='sessionStorage')throw new __storageAccessException('This storage capability is not implemented','NotSupportedError');
   if(!state[name])state[name]=__mkStorage(ops.op_storage_area(globalThis,name==='sessionStorage',true));
   return state[name];
@@ -8542,6 +8654,7 @@ let __setHeadersGuard;
 }
 let __responseFromNetwork, __requestInit, __resourceResponse, __BodyParamsString;
 const __blobStates = __interfaceMap("Blob");
+let __utf8Decode;
 const __formDataStates = __interfaceMap("FormData");
 // multipart/form-data BodyInit: UTF-8, newline-normalized names and text values,
 // Blink's quoted-string escapes and its random WebKitFormBoundary.
@@ -8625,11 +8738,13 @@ const __resourceFailure=error=>__fetchFailures.get(error);
     value.stream=__web.readable(value.raw)?value.raw:new __FetchReadable({async start(controller){try{controller.enqueue(await rawBytes(value.raw));controller.close();}catch(error){controller.error(error);}}});
     return value.stream;
   };
-  const consume = async value => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.raw==null&&!value.stream)return new Uint8Array();value.used=true;return value.stream?rawBytes(value.stream):rawBytes(value.raw);};
-  const copyBody = value => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.stream || __web.readable(value.raw)){const streams=applyBody(__ReadableTee,body(value),[]);value.stream=streams[0];value.raw=streams[0];return streams[1];}return value.raw;};
+  // Chrome's Body consumption rejections: a locked stream first, then a used one.
+  const usedBody = (value,method,kind) => {if(value.stream?.locked)return new TypeError(`Failed to execute '${method}' on '${kind}': body stream is locked`);if(value.used || value.stream && __web.disturbed(value.stream))return new TypeError(`Failed to execute '${method}' on '${kind}': body stream already read`);return null;};
+  const consume = async (value,method,kind) => {const error=usedBody(value,method,kind);if(error)throw error;if(value.raw==null&&!value.stream)return new Uint8Array();value.used=true;return value.stream?rawBytes(value.stream):rawBytes(value.raw);};
+  const copyBody = (value,kind) => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError(`Failed to execute 'clone' on '${kind}': ${kind} body is already used`);if(value.stream || __web.readable(value.raw)){const streams=applyBody(__ReadableTee,body(value),[]);value.stream=streams[0];value.raw=streams[0];return streams[1];}return value.raw;};
   const transferBody = value => {
     if(value.raw==null)return null;
-    if(value.used||value.stream&&(__web.disturbed(value.stream)||applyBody(__ReadableLocked,value.stream,[])))throw new TypeError("Body has already been consumed");
+    if(value.used||value.stream&&(__web.disturbed(value.stream)||applyBody(__ReadableLocked,value.stream,[])))throw new TypeError("Failed to construct 'Request': Cannot construct a Request with a Request object that has already been used.");
     const transferred=applyBody(__ReadablePipeThrough,body(value),[new __BodyTransform()]);
     value.used=true;
     return transferred;
@@ -8637,28 +8752,39 @@ const __resourceFailure=error=>__fetchFailures.get(error);
   const addContentType = (headers, extracted) => {
     if(!headers.has("content-type")&&extracted.type)headers.set("content-type",extracted.type);
   };
-  const bodyMethods = map => ({
-    async arrayBuffer(){const bytes=await consume(state(map,this).body);return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);},
-    async bytes(){return consume(state(map,this).body);},
-    async text(){return new TextDecoder().decode(await consume(state(map,this).body));},
-    async json(){return JSON.parse(new TextDecoder().decode(await consume(state(map,this).body)));},
-    async blob(){const value=state(map,this);return new Blob([await consume(value.body)],{type:value.headers.get("content-type") || ""});},
-    textStream(){const value=state(map,this).body;if(value.used||value.stream&&__web.disturbed(value.stream)||value.stream?.locked)throw new TypeError("Body has already been consumed");const stream=body(value);value.used=true;const decoder=new TextDecoder(),reader=stream?.getReader();let released=false;const release=()=>{if(reader&&!released){released=true;reader.releaseLock();}};return new __FetchReadable({async pull(controller){try{if(reader){while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text){controller.enqueue(text);return;}}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();release();}catch(error){controller.error(error);release();}},async cancel(reason){try{if(reader)await reader.cancel(reason);}finally{release();}}},{highWaterMark:0});},
-    async formData(){const value=state(map,this),type=value.headers.get("content-type")||"",bytes=await consume(value.body);if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(type))throw new TypeError("Unsupported form encoding");const form=new FormData();for(const [key,item] of new URLSearchParams(new TextDecoder().decode(bytes)))form.append(key,item);return form;}
+  const bodyMethods = (map,kind) => ({
+    async arrayBuffer(){const bytes=await consume(state(map,this).body,"arrayBuffer",kind);return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);},
+    async bytes(){return consume(state(map,this).body,"bytes",kind);},
+    async text(){return __utf8Decode(await consume(state(map,this).body,"text",kind));},
+    async json(){return JSON.parse(__utf8Decode(await consume(state(map,this).body,"json",kind)));},
+    async blob(){const value=state(map,this);return new Blob([await consume(value.body,"blob",kind)],{type:value.headers.get("content-type") || ""});},
+    textStream(){const value=state(map,this).body,error=usedBody(value,"textStream",kind);if(error)throw error;const stream=body(value);value.used=true;const decoder=new TextDecoder(),reader=stream?.getReader();let released=false;const release=()=>{if(reader&&!released){released=true;reader.releaseLock();}};return new __FetchReadable({async pull(controller){try{if(reader){while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text){controller.enqueue(text);return;}}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();release();}catch(error){controller.error(error);release();}},async cancel(reason){try{if(reader)await reader.cancel(reason);}finally{release();}}},{highWaterMark:0});},
+    async formData(){
+      const value=state(map,this),body=value.body;
+      const error=usedBody(body,"formData",kind);if(error)throw error;
+      const type=value.headers.get("content-type")||"",essence=__formBody.essence(type),empty=body.raw==null&&!body.stream;
+      const done=rows=>__aliasFormData(__makeFormDataRecord(rows));
+      if(essence==="application/x-www-form-urlencoded")return done(empty?[]:__formBody.urlencoded(await consume(body,"formData",kind)));
+      const boundary=essence==="multipart/form-data"?__formBody.boundaryOf(type):null;
+      if(empty||boundary==="")throw new TypeError("Invalid MIME type");
+      const bytes=await consume(body,"formData",kind),rows=boundary===null?null:__formBody.multipart(bytes,boundary);
+      if(!rows)throw new TypeError("Failed to fetch");
+      return done(rows);
+    }
   });
   const project = (ctor,map,fields) => {
     for(const field of fields)Object.defineProperty(ctor.prototype,field,{get:({["get "+field](){return state(map,this)[field];}})["get "+field],enumerable:true,configurable:true});
     // Getter functions are extracted from descriptors, preserving nonconstructibility.
     Object.defineProperty(ctor.prototype,"body",{get:Object.getOwnPropertyDescriptor({get body(){return body(state(map,this).body);}},"body").get,enumerable:true,configurable:true});
     Object.defineProperty(ctor.prototype,"bodyUsed",{get:Object.getOwnPropertyDescriptor({get bodyUsed(){const value=state(map,this).body;return value.used||!!(value.stream&&__web.disturbed(value.stream));}},"bodyUsed").get,enumerable:true,configurable:true});
-    for(const [name,method] of Object.entries(bodyMethods(map)))Object.defineProperty(ctor.prototype,name,{value:method,writable:true,enumerable:true,configurable:true});
+    for(const [name,method] of Object.entries(bodyMethods(map,ctor.name)))Object.defineProperty(ctor.prototype,name,{value:method,writable:true,enumerable:true,configurable:true});
   };
   globalThis.Response = class Response {
     constructor(raw=null, init=undefined){init=init||{};const status=init.status==null?200:Number(init.status);if(!Number.isInteger(status)||status<200||status>599)throw new RangeError("Invalid response status");if(raw!=null&&[204,205,304].includes(status))throw new TypeError("Null body status cannot have a body");const headers=new Headers(init.headers),statusText=String(init.statusText||"");if(/[\r\n]/.test(statusText))throw new TypeError("Invalid status text");const extracted=extractBody(raw);addContentType(headers,extracted);responses.set(this,{body:bodyState(extracted.raw,extracted.sourceStream),status,statusText,headers,ok:status>=200&&status<300,type:"default",url:"",redirected:false});}
     static json(data,init=undefined){const text=JSON.stringify(data);if(text===undefined)throw new TypeError("JSON data is not serializable");const headers=new Headers(init?.headers);if(!headers.has("content-type"))headers.set("content-type","application/json");return new Response(text,{...init,headers});}
     static error(){const response=new Response();Object.assign(state(responses,response),{status:0,statusText:"",ok:false,type:"error"});return response;}
     static redirect(url,status=302){const absolute=new URL(String(url),location.href);if(![301,302,303,307,308].includes(Number(status)))throw new RangeError("Invalid redirect status");return new Response(null,{status:Number(status),headers:{location:absolute.href}});}
-    clone(){const value=state(responses,this),copied=copyBody(value.body);const clone=new Response([204,205,304].includes(value.status)?null:copied,{status:value.status||200,statusText:value.statusText,headers:value.headers});if([204,205,304].includes(value.status))state(responses,clone).body=bodyState(copied);Object.assign(state(responses,clone),{status:value.status,ok:value.ok,type:value.type,url:value.url,redirected:value.redirected});if(value.type!=="default")__setHeadersGuard(clone.headers,"immutable");return clone;}
+    clone(){const value=state(responses,this),copied=copyBody(value.body,"Response");const clone=new Response([204,205,304].includes(value.status)?null:copied,{status:value.status||200,statusText:value.statusText,headers:value.headers});if([204,205,304].includes(value.status))state(responses,clone).body=bodyState(copied);Object.assign(state(responses,clone),{status:value.status,ok:value.ok,type:value.type,url:value.url,redirected:value.redirected});if(value.type!=="default")__setHeadersGuard(clone.headers,"immutable");return clone;}
   };
   project(Response,responses,["status","statusText","headers","ok","type","url","redirected"]);
   globalThis.Request = class Request {
@@ -8675,7 +8801,7 @@ const __resourceFailure=error=>__fetchFailures.get(error);
       if(extracted.sourceStream&&(keepalive||mode==="no-cors"))throw new TypeError("Invalid stream request options");
       const raw=supplied?extracted.raw:previous?transferBody(previous.body):null;
       requests.set(this,{url:absolute.href,method,headers,body:bodyState(raw,extracted.sourceStream),mode,credentials,cache,redirect,referrer,referrerPolicy,integrity:__String(integrity!==undefined?integrity:previous?.integrity??""),keepalive,signal,destination:"",duplex:"half",targetAddressSpace:init.targetAddressSpace??previous?.targetAddressSpace??"unknown",isHistoryNavigation:false,isReloadNavigation:false});}
-    clone(){const value=state(requests,this),clone=new Request(value.url,{...value,body:copyBody(value.body)});state(requests,clone).body.sourceStream=value.body.sourceStream;return clone;}
+    clone(){const value=state(requests,this),clone=new Request(value.url,{...value,body:copyBody(value.body,"Request")});state(requests,clone).body.sourceStream=value.body.sourceStream;return clone;}
   };
   project(Request,requests,["url","method","headers","mode","credentials","cache","redirect","referrer","referrerPolicy","integrity","keepalive","signal","destination","duplex","targetAddressSpace","isHistoryNavigation","isReloadNavigation"]);
   const __NetworkResponse=Response,__NetworkHeaders=Headers;
@@ -8714,7 +8840,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   const abortReason=()=>__baseApply(__AbortSignalReason,signal,[]);
   if(isAborted())throw abortReason();
   const requestTarget=o.url || __String(url);
-  const directive=o.destination==="script"?"script-src-elem":o.destination==="style"?"style-src-elem":o.destination==="image"?"img-src":o.destination==="iframe"?"frame-src":"connect-src";
+  const directive=o.destination==="script"?"script-src-elem":o.destination==="style"?"style-src-elem":o.destination==="image"?"img-src":o.destination==="font"?"font-src":o.destination==="iframe"?"frame-src":"connect-src";
   if(!ops.op_csp_request(__document,requestTarget,directive,o.nonce||""))throw new __exceptionTypeError("Failed to fetch");
   const cancelId=ops.op_fetch_prepare(__document);
   const transport={controller:null,done:false,uploadReader:null};
@@ -8771,7 +8897,8 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body, body_bytes:bodyBytes, upload:!!uploadPump, cancel_id:cancelId, stream:!o.destination, cache:o.cache,
     referrer:o.referrer,referrerPolicy:o.referrerPolicy,
     mode: o.mode, credentials: o.credentials, redirect:o.redirect, integrity:o.integrity, destination: o.destination, source, referrer_source:referrerSource,
-    opaque_origin: ops.op_window_opaque(__document), ...cookieSite, csp:ops.op_csp_context(__document), nonce:o.nonce });
+    opaque_origin: ops.op_window_opaque(__document), ...cookieSite, initiator:o.initiator,
+    blob_key: __String(requestTarget).startsWith("blob:") ? ops.op_blob_url_key(__document) : undefined, csp:ops.op_csp_context(__document), nonce:o.nonce });
   // Count in-flight fetches so the hydration/interaction drain doesn't quiesce while a
   // request is outstanding — otherwise a save POST resolves AFTER the drain gives up
   // (the DOM looks "stable" while waiting) and its success re-render (modal close,
@@ -8868,6 +8995,31 @@ globalThis.fetch = async (input, init = undefined) => {
 // these results. Other legacy media features retain the bounded evaluator below.
 {
   const __mediaWindow = globalThis, __mediaTypeError=TypeError, __mediaDOMException=DOMException;
+  const apply = Reflect.apply, __mediaLists = [], __MediaEvent = Event;
+  // The rendering update's resize steps, then media query evaluation (HTML "update the
+  // rendering"): a window whose viewport changed since the last update gets `resize`, then
+  // every watched list that flipped fires `change`. Only a frame's viewport ever changes.
+  let __mediaSize = null;
+  const __viewportSize = () => {
+    try { return [ops.op_live_frame_dimension(globalThis, false, true), ops.op_live_frame_dimension(globalThis, true, true)]; }
+    catch { return null; }
+  };
+  __renderingSteps.push(() => {
+    const size = __viewportSize();
+    if (!size) return;
+    const changed = __mediaSize !== null && (size[0] !== __mediaSize[0] || size[1] !== __mediaSize[1]);
+    __mediaSize = size;
+    if (!changed) return;
+    try { globalThis.dispatchEvent(new __MediaEvent("resize")); } catch (e) {}
+    for (const list of __mediaLists.slice()) {
+      const now = list.matches();
+      if (!list.flip(now)) continue;
+      let event;
+      try { event = new MediaQueryListEvent("change", { media: list.mql.media, matches: now }); }
+      catch { event = new __MediaEvent("change"); Object.defineProperties(event, { media: { value: list.mql.media }, matches: { value: now } }); }
+      for (const fn of list.listeners.slice()) { try { apply(fn, list.mql, [event]); } catch (e) { ops.op_report_exception(e); } }
+    }
+  });
   const __mqLen = (tok, basis) => {
     // A CSS length in a media feature → px. Supports px and em/rem (16px root).
     const m = String(tok).match(/([\d.]+)\s*(px|r?em)?/);
@@ -8916,17 +9068,34 @@ globalThis.fetch = async (input, init = undefined) => {
     if(!ops.op_windows_same_origin(owner))throw new __mediaDOMException("Cross-origin Window access","SecurityError");
     const media = String(q == null ? "" : q);
     if(ops.op_window_media_state(owner)===0)return null;
+    const listeners = [];
+    let handler = null, slot = null, watched = false, last = false;
+    const matches = () => ops.op_window_media_state(owner)===2 && __evalMedia(media, owner);
+    // A list with a listener joins its window's rendering update (turbo-dom#287 semantics):
+    // after the window's `resize`, each list whose `matches` flipped fires `change`.
+    const watch = () => {
+      if (watched) return;
+      watched = true;
+      last = matches();
+      __mediaLists.push({ __proto__: null, owner, mql, matches, flip(now) { if (now === last) return false; last = now; return true; }, listeners });
+    };
+    const add = (fn) => { if (typeof fn === "function" && !listeners.includes(fn)) { listeners.push(fn); watch(); } };
+    const remove = (fn) => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); };
     const mql = {
       media,
-      onchange: null,
-      _l: [],
-      addListener(fn) { if (typeof fn === "function") this._l.push(fn); },
-      removeListener(fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
-      addEventListener(_t, fn) { if (typeof fn === "function") this._l.push(fn); },
-      removeEventListener(_t, fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
+      get onchange() { return handler; },
+      set onchange(fn) {
+        handler = typeof fn === "function" ? fn : null;
+        // An event handler keeps the listener position of its first assignment.
+        if (handler && !slot) { slot = (event) => handler && apply(handler, mql, [event]); listeners.push(slot); watch(); }
+      },
+      addListener(fn) { add(fn); },
+      removeListener(fn) { remove(fn); },
+      addEventListener(type, fn) { if (String(type) === "change") add(fn); },
+      removeEventListener(type, fn) { if (String(type) === "change") remove(fn); },
       dispatchEvent() { return false; },
     };
-    Object.defineProperty(mql, "matches", { get: () => ops.op_window_media_state(owner)===2 && __evalMedia(media, owner), enumerable: true });
+    Object.defineProperty(mql, "matches", { get: matches, enumerable: true });
     return mql;
   } }).matchMedia;
 }
@@ -8976,6 +9145,209 @@ if (typeof globalThis.FormData === "undefined") {
 const __capturedFormDataPrototype=globalThis.FormData.prototype;
 const __makeFormDataRecord=rows=>{const entries=[];for(let i=0;i<rows.length;i++)entries[entries.length]=[__fileUSV(rows[i][0]),__formDataValue(rows[i][1],undefined,false)];return {entries};};
 const __aliasFormData=record=>{const wrapper=__recordCreate(__capturedFormDataPrototype);__formDataStates.set(wrapper,record);return wrapper;};
+// Body#formData() as Blink parses it (body.cc, multipart_parser.cc): the MIME
+// essence picks the parser; a multipart type with no valid boundary rejects
+// "Invalid MIME type" before the body is read; a body that does not parse
+// rejects "Failed to fetch". Bytes are decoded here, so page-patched
+// TextDecoder, URLSearchParams or FormData methods never see the parse.
+const __formBody = (() => {
+  const fromCode = String.fromCharCode, lower = String.prototype.toLowerCase, apply = Reflect.apply;
+  const own = Object.hasOwn;
+  // UTF-8 per the Encoding Standard: maximal subparts become U+FFFD, or fail when fatal.
+  const utf8 = (bytes, start, end, fatal) => {
+    let text = "", index = start;
+    while (index < end) {
+      const lead = bytes[index++];
+      if (lead < 0x80) { text += fromCode(lead); continue; }
+      let need = 0, point = 0, low = 0x80, high = 0xbf;
+      if (lead >= 0xc2 && lead <= 0xdf) { need = 1; point = lead & 0x1f; }
+      else if (lead >= 0xe0 && lead <= 0xef) { need = 2; point = lead & 0x0f; if (lead === 0xe0) low = 0xa0; if (lead === 0xed) high = 0x9f; }
+      else if (lead >= 0xf0 && lead <= 0xf4) { need = 3; point = lead & 0x07; if (lead === 0xf0) low = 0x90; if (lead === 0xf4) high = 0x8f; }
+      else { if (fatal) return null; text += "�"; continue; }
+      let bad = false;
+      for (let seen = 0; seen < need; seen++) {
+        const next = bytes[index];
+        if (index >= end || next < low || next > high) { bad = true; break; }
+        low = 0x80; high = 0xbf; point = point << 6 | next & 0x3f; index++;
+      }
+      if (bad) { if (fatal) return null; text += "�"; continue; }
+      if (point > 0xffff) { point -= 0x10000; text += fromCode(0xd800 + (point >> 10), 0xdc00 + (point & 0x3ff)); }
+      else text += fromCode(point);
+    }
+    return text;
+  };
+  const isWhite = code => code === 0x20 || code === 0x09;
+  const tokenChar = code => code > 0x20 && code < 0x7f && "()<>@,;:\\\"/[]?={}".indexOf(fromCode(code)) < 0;
+  // A header value's `token *( ";" name "=" ( token / quoted-string ) )`, whitespace
+  // allowed around each symbol; a comma ends the value. Null when malformed.
+  const parameters = (text, at) => {
+    const values = { __proto__: null }, length = text.length;
+    const skip = () => { while (at < length && isWhite(text.charCodeAt(at))) at++; };
+    const token = () => { const start = at; while (at < length && tokenChar(text.charCodeAt(at))) at++; return text.slice(start, at); };
+    for (;;) {
+      skip();
+      if (at >= length || text[at] === ",") return values;
+      if (text[at] !== ";") return null;
+      at++; skip();
+      const name = apply(lower, token(), []);
+      if (!name) return null;
+      skip();
+      if (text[at] !== "=") return null;
+      at++; skip();
+      let value = "";
+      if (text[at] === "\"") {
+        at++;
+        for (;;) {
+          if (at >= length) return null;
+          const character = text[at++];
+          if (character === "\"") break;
+          if (character === "\\") { if (at >= length) return null; value += text[at++]; } else value += character;
+        }
+      } else if (!(value = token())) return null;
+      values[name] = value;
+    }
+  };
+  // `type/subtype` (or a lone token for Content-Disposition) and its parameters.
+  const headerValue = (text, slash) => {
+    let at = 0;
+    while (at < text.length && isWhite(text.charCodeAt(at))) at++;
+    const start = at;
+    while (at < text.length && tokenChar(text.charCodeAt(at))) at++;
+    if (at === start) return null;
+    if (slash) {
+      if (text[at] !== "/") return null;
+      const sub = ++at;
+      while (at < text.length && tokenChar(text.charCodeAt(at))) at++;
+      if (at === sub) return null;
+    }
+    const params = parameters(text, at);
+    return params && { type: text.slice(start, at), params };
+  };
+  // The MIME type essence the parser choice reads: lowercased, up to ";", "," or whitespace.
+  const essence = type => {
+    let at = 0;
+    while (at < type.length && (isWhite(type.charCodeAt(at)) || type[at] === "\r" || type[at] === "\n")) at++;
+    let end = at;
+    while (end < type.length && ";, \t\r\n".indexOf(type[end]) < 0) end++;
+    return apply(lower, type.slice(at, end), []);
+  };
+  const boundaryOf = type => {
+    const parsed = headerValue(type, true);
+    return parsed && own(parsed.params, "boundary") ? parsed.params.boundary : "";
+  };
+  const find = (bytes, needle, from) => {
+    const last = bytes.length - needle.length;
+    outer: for (let index = from; index <= last; index++) {
+      for (let offset = 0; offset < needle.length; offset++) if (bytes[index + offset] !== needle[offset]) continue outer;
+      return index;
+    }
+    return -1;
+  };
+  const ascii = text => { const out = []; for (let index = 0; index < text.length; index++) out[index] = text.charCodeAt(index) & 0xff; return out; };
+  // Part headers: CRLF or LF lines, folded continuations, first occurrence wins.
+  const partHeaders = text => {
+    const lines = [], headers = { __proto__: null };
+    let start = 0;
+    for (let index = 0; index <= text.length; index++) {
+      if (index < text.length && text[index] !== "\n") continue;
+      let line = text.slice(start, index);
+      if (line.length && line[line.length - 1] === "\r") line = line.slice(0, -1);
+      start = index + 1;
+      if (lines.length && line.length && isWhite(line.charCodeAt(0))) lines[lines.length - 1] += " " + line;
+      else lines[lines.length] = line;
+    }
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index], colon = line.indexOf(":");
+      if (colon < 0) continue;
+      let name = line.slice(0, colon), value = line.slice(colon + 1);
+      let from = 0, to = name.length;
+      while (from < to && isWhite(name.charCodeAt(from))) from++;
+      while (to > from && isWhite(name.charCodeAt(to - 1))) to--;
+      name = apply(lower, name.slice(from, to), []);
+      from = 0; to = value.length;
+      while (from < to && isWhite(value.charCodeAt(from))) from++;
+      while (to > from && isWhite(value.charCodeAt(to - 1))) to--;
+      if (name && !own(headers, name)) headers[name] = value.slice(from, to);
+    }
+    return headers;
+  };
+  // One part into a [name, value] row, or null when it does not form an entry.
+  const part = (bytes, headerStart, headerEnd, bodyStart, bodyEnd, now) => {
+    const text = utf8(bytes, headerStart, headerEnd, true);
+    if (text === null) return null;
+    const headers = partHeaders(text);
+    if (!own(headers, "content-disposition")) return null;
+    const disposition = headerValue(headers["content-disposition"], false);
+    if (!disposition || disposition.type !== "form-data" || !own(disposition.params, "name")) return null;
+    const name = disposition.params.name;
+    if (!own(disposition.params, "filename")) {
+      const value = utf8(bytes, bodyStart, bodyEnd, true);
+      return value === null ? null : [name, value];
+    }
+    const type = own(headers, "content-type") ? headers["content-type"] : "text/plain";
+    const blob = { bytes: bytes.slice(bodyStart, bodyEnd), type };
+    return [name, __createPrivateFile(blob, disposition.params.filename, now)];
+  };
+  const multipart = (bytes, boundary) => {
+    const dash = ascii("--" + boundary), delimiter = ascii("\r\n--" + boundary), rows = [];
+    let at = find(bytes, dash, 0) === 0 ? dash.length : find(bytes, delimiter, 0);
+    if (at < 0) return null;
+    if (at !== dash.length) at += delimiter.length;
+    const now = __fileNow();
+    for (;;) {
+      if (bytes[at] === 0x2d && bytes[at + 1] === 0x2d) {
+        at += 2;
+        while (at < bytes.length && isWhite(bytes[at])) at++;
+        return at === bytes.length || bytes[at] === 0x0d && bytes[at + 1] === 0x0a ? rows : null;
+      }
+      while (at < bytes.length && isWhite(bytes[at])) at++;
+      if (bytes[at] !== 0x0d || bytes[at + 1] !== 0x0a) return null;
+      at += 2;
+      let headerEnd, bodyStart;
+      if (bytes[at] === 0x0d && bytes[at + 1] === 0x0a) { headerEnd = at; bodyStart = at + 2; }
+      else {
+        headerEnd = find(bytes, [0x0d, 0x0a, 0x0d, 0x0a], at);
+        if (headerEnd < 0) return null;
+        bodyStart = headerEnd + 4;
+      }
+      const bodyEnd = find(bytes, delimiter, bodyStart);
+      if (bodyEnd < 0) return null;
+      const row = part(bytes, at, headerEnd, bodyStart, bodyEnd, now);
+      if (!row) return null;
+      rows[rows.length] = row;
+      at = bodyEnd + delimiter.length;
+    }
+  };
+  // application/x-www-form-urlencoded parsing over bytes (URL Standard).
+  const hex = code => code >= 0x30 && code <= 0x39 ? code - 0x30 : (code | 0x20) >= 0x61 && (code | 0x20) <= 0x66 ? (code | 0x20) - 0x57 : -1;
+  const decodeComponent = (bytes, start, end) => {
+    const out = [];
+    for (let index = start; index < end; index++) {
+      const code = bytes[index];
+      if (code === 0x2b) out[out.length] = 0x20;
+      else if (code === 0x25 && index + 2 < end && hex(bytes[index + 1]) >= 0 && hex(bytes[index + 2]) >= 0) {
+        out[out.length] = hex(bytes[index + 1]) * 16 + hex(bytes[index + 2]);
+        index += 2;
+      } else out[out.length] = code;
+    }
+    return utf8(out, 0, out.length, false);
+  };
+  const urlencoded = bytes => {
+    const rows = [];
+    let start = 0;
+    for (let index = 0; index <= bytes.length; index++) {
+      if (index < bytes.length && bytes[index] !== 0x26) continue;
+      if (index > start) {
+        let equals = start;
+        while (equals < index && bytes[equals] !== 0x3d) equals++;
+        rows[rows.length] = [decodeComponent(bytes, start, equals), equals < index ? decodeComponent(bytes, equals + 1, index) : ""];
+      }
+      start = index + 1;
+    }
+    return rows;
+  };
+  return { essence, boundaryOf, multipart, urlencoded };
+})();
 // Blob / File / FileReader — analytics + upload code (PostHog, file inputs) reference
 // these during hydration; deno_core ships none ("File is not defined" aborts PostHog
 // init). Private byte buffers preserve binary Blob/File parts and authentic brands
@@ -8998,7 +9370,7 @@ if (typeof globalThis.Blob === "undefined") {
     async arrayBuffer(){return read(this).bytes.slice().buffer;}
     slice(start=0,end=undefined,type=""){const value=read(this),size=value.bytes.length;start=Number(start)||0;end=end===undefined?size:Number(end)||0;start=start<0?Math.max(size+start,0):Math.min(start,size);end=end<0?Math.max(size+end,0):Math.min(end,size);return new Blob([value.bytes.slice(start,Math.max(start,end))],{type});}
     stream(){const bytes=read(this).bytes.slice();return new ReadableStream({start(controller){controller.enqueue(bytes);controller.close();}});}
-    async text(){return new TextDecoder().decode(read(this).bytes);}
+    async text(){return __utf8Decode(read(this).bytes);}
     async bytes(){return read(this).bytes.slice();}
   };
   for(const name of ["size","type","arrayBuffer","slice","stream","text","bytes"])Object.defineProperty(Blob.prototype,name,{...Object.getOwnPropertyDescriptor(Blob.prototype,name),enumerable:true});
@@ -9589,6 +9961,9 @@ if (typeof globalThis.CSS === "undefined") {
  };
  for(const [ctor,name] of [[TextEncoder,"TextEncoder"],[TextDecoder,"TextDecoder"]])Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});
 }
+// Bootstrap-captured UTF-8 decode for Blob#text and the Body readers: a
+// page-patched TextDecoder never sees their bytes.
+{const decoder=new TextDecoder(),decode=TextDecoder.prototype.decode,apply=Reflect.apply;__utf8Decode=bytes=>apply(decode,decoder,[bytes]);}
 "##,
     include_str!("blob_text_stream.js"),
     include_str!("observable.js"),
@@ -9803,8 +10178,6 @@ if (typeof globalThis.URL === "undefined") {
     Object.defineProperty(URL.prototype, key, descriptor);
   }
   Object.defineProperty(URL.prototype, Symbol.toStringTag, {value: "URL", configurable: true});
-  globalThis.URL.createObjectURL = () => "blob:turbo-surf";
-  globalThis.URL.revokeObjectURL = () => {};
 }
 __BodyParamsString=URLSearchParams.prototype.toString;
 "##,
@@ -9812,6 +10185,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
     include_str!("xhr.js"),
     include_str!("file_reader.js"),
     include_str!("websocket.js"),
+    include_str!("storage_apis.js"),
     r##"
 // Object-URL registry + download capture. The common client-side export pattern is
 // `URL.createObjectURL(blob)` → set it on a `<a download href=…>` → `link.click()`. A real
@@ -9820,19 +10194,23 @@ __BodyParamsString=URLSearchParams.prototype.toString;
 // can resolve `page.waitForEvent('download')` + `download.path()`. Runs after browser_env
 // installed the anchor prototype (ENV_BOOTSTRAP runs last).
 (() => {
-  const blobs = new Map();
   const decodeBlobBytes = TextDecoder.prototype.decode.bind(new TextDecoder());
-  let bid = 0;
-  globalThis.URL.createObjectURL = (obj) => {
-    const url = "blob:turbo-surf/" + bid++;
-    try { blobs.set(url, obj); } catch (_e) {}
-    return url;
-  };
-  globalThis.URL.revokeObjectURL = () => {}; // keep the blob for a later .path() read
+  // The native store keys each URL by the creating document's storage key
+  // (blob_urls.rs); revocation and reads stay within that key.
+  const overload = "Failed to execute 'createObjectURL' on 'URL': Overload resolution failed.";
+  const blobType = Object.getOwnPropertyDescriptor(Blob.prototype, "type").get;
+  globalThis.URL.createObjectURL = __documentFunction(function createObjectURL(obj) {
+    let bytes;
+    try { bytes = __readBlobBytes(obj); } catch { throw new __exceptionTypeError(overload); }
+    return ops.op_blob_url_create(__document, bytes, __baseApply(blobType, obj, []));
+  }, "createObjectURL", 1);
+  globalThis.URL.revokeObjectURL = __documentFunction(function revokeObjectURL(url) {
+    if (!arguments.length) throw new __exceptionTypeError("Failed to execute 'revokeObjectURL' on 'URL': 1 argument required, but only 0 present.");
+    ops.op_blob_url_revoke(__document, __String(url));
+  }, "revokeObjectURL", 1);
   __G.readBlobUrl = (url) => {
-    const b = blobs.get(url);
-    if (b == null) return null;
-    return __readBlobBytes ? decodeBlobBytes(__readBlobBytes(b)) : "";
+    const bytes = ops.op_blob_url_read(__document, url);
+    return bytes == null ? null : decodeBlobBytes(bytes);
   };
   __G.downloads = __G.downloads || [];
   const record = (el) => {
@@ -9891,6 +10269,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
 
 "##,
     include_str!("window_location.js"),
+    include_str!("indexeddb.js"),
     r##"
 
 // Document metadata is live and owned by Document.prototype; native body/head
@@ -10337,8 +10716,23 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
   return __framePromiseAll(styles);
 };
 __G.pendingResourceCount=()=>__resourcePromises.size+__dictionaryPending+__dictionaryTaskCount;
-__G.documentLoadReady=()=>__setSize(__resourcePromises)===0 && ops.op_frame_pending()===0;
-__G.waitForDocumentResources=()=>{const pending=__list();__intrinsicApply(__intrinsicSetEach,__resourcePromises,[promise=>__listPush(pending,promise)]);return __framePromiseAll(pending);};
+// Once the other load resources are in, the style update starts the used @font-face
+// faces (font_loading.js), and their loads delay the load event as in Chrome
+// (turbo-surf#166). It runs once per document load; surf lays out on demand.
+let __fontStyleUpdated=false;
+const __fontLoadResources=()=>{
+  if(__fontStyleUpdated||typeof __G.fontStyleUpdate!=="function")return;
+  __fontStyleUpdated=true;
+  const loads=__G.fontStyleUpdate();
+  for(let index=0;index<loads.length;index++)__trackResource(loads[index]);
+};
+__G.documentLoadReady=()=>{
+  if(__setSize(__resourcePromises)!==0||ops.op_frame_pending()!==0)return false;
+  __fontLoadResources();
+  return __setSize(__resourcePromises)===0;
+};
+const __documentResourcesSettled=()=>{const pending=__list();__intrinsicApply(__intrinsicSetEach,__resourcePromises,[promise=>__listPush(pending,promise)]);return __framePromiseAll(pending);};
+__G.waitForDocumentResources=async()=>{await __documentResourcesSettled();__fontLoadResources();await __documentResourcesSettled();};
 function __fireScriptEvent(el, kind, err) {
   // Use the same private native event path as image and stylesheet loads.
   // Plain records are not Events and cannot reach addEventListener handlers.
@@ -11064,6 +11458,12 @@ __G.domSig = (() => {
   const frameOwner = el => frameApply(frameDefaultView, frameApply(frameOwnerDocument, el, []), []);
   const frameConnected = el => frameApply(frameIsConnected, el, []);
   const visitFrameHosts = callback => frameApply(frameHostEach, frameHosts, [callback]);
+  // Each rendering update also updates this document's loaded frames (their resize and
+  // media query steps), without starting a frame that has no realm yet.
+  __renderingSteps.push(() => visitFrameHosts(el => {
+    const realm = frameRecords.get(el)?.realm;
+    if (realm && ops.op_window_active(realm)) ops.op_request_frame_rendering(realm);
+  }));
   const frameWindowView = __G.windowView;
   const frameDepth = ops.op_window_bootstrap_depth(globalThis) + 1;
   const iframeTag = __G.domAccessor("tagName", false, "Element");
@@ -11265,7 +11665,9 @@ __G.domSig = (() => {
       else {
         const url = record.navigationURL || resolveFrameUrl(el);
         if (url && url !== "about:blank") {
-          const response = await ops.op_fetch(url, __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)}));
+          const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)});
+          const request = record.navigationRequest; record.navigationRequest = "";
+          const response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init);
           if (record.epoch !== epoch || !frameConnected(el)) return;
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;
@@ -11472,10 +11874,11 @@ __G.domSig = (() => {
     };
     Object.defineProperty(Element.prototype, name, {...descriptor, value: __documentFunction(delegate, name, original.length)});
   }
-  const navigateFrame = (el,url,source) => {
+  // `request` is a form navigation's native JSON (method, headers, body bytes).
+  const navigateFrame = (el,url,source,request) => {
     const record = recordFor(el);
     if (!record || !frameConnected(el) || !record.realm) return;
-    record.navigationURL = url; record.navigationSource = source;
+    record.navigationURL = url; record.navigationSource = source; record.navigationRequest = request || "";
     record.started = false; record.loaded = false; record.epoch++; record.navigation = true;
     record.metadata = frameMetadata(el);
     loadFrame(el);
@@ -12686,9 +13089,6 @@ __G.domSig = (() => {
       // These real Web APIs are FEATURE-DETECTED by page code (`if (window.X)`) which then calls
       // their methods — a bare {} is truthy but methodless, so e.g. `navigation.entries()` throws
       // (before, an undefined `navigation` was skipped). Give each its commonly-called methods.
-      caches: { open: () => Promise.resolve({ match: () => Promise.resolve(undefined), put: () => Promise.resolve(), keys: () => Promise.resolve([]) }), has: () => Promise.resolve(false), keys: () => Promise.resolve([]), match: () => Promise.resolve(undefined), delete: () => Promise.resolve(false) },
-      cookieStore: { get: () => Promise.resolve(null), getAll: () => Promise.resolve([]), set: () => Promise.resolve(), delete: () => Promise.resolve(), addEventListener() {}, removeEventListener() {} },
-      navigation: { entries: () => [], currentEntry: null, canGoBack: false, canGoForward: false, navigate() {}, reload() {}, traverseTo() {}, back() {}, forward() {}, updateCurrentEntry() {}, addEventListener() {}, removeEventListener() {} },
       speechSynthesis: { getVoices: () => [], speak() {}, cancel() {}, pause() {}, resume() {}, pending: false, speaking: false, paused: false, addEventListener() {}, removeEventListener() {} },
       viewport: {}, launchQueue: { setConsumer() {} },
       external: {}, fence: null, crashReport: {}, documentPictureInPicture: {}, event: undefined,
@@ -12755,7 +13155,7 @@ __G.domSig = (() => {
   // private state, subclass new.target and the original exception behavior.
   if (typeof factory === "function") {
     const replacements = new Map();
-    const constructors = ["Date", "DOMParser", "Navigator", "Performance", "Permissions", "PermissionsPolicy", "PermissionStatus", "Storage", "Headers",
+    const constructors = ["Date", "DOMParser", "Navigator", "NavigatorUAData", "Performance", "Permissions", "PermissionsPolicy", "PermissionStatus", "Storage", "Headers",
       "Request", "Response", "URL", "URLSearchParams", "DOMException", "MessageEvent", "ErrorEvent",
       "Event", "SecurityPolicyViolationEvent", "CustomEvent", "SubmitEvent", "FormDataEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
@@ -12814,6 +13214,7 @@ __G.domSig = (() => {
 
 })();
 "##,
+    include_str!("font_loading.js"),
     include_str!("observers.js"),
     include_str!("interface_shapes.js"),
     include_str!("user_activation.js"),
@@ -13032,6 +13433,7 @@ fn make_runtime_with_storage_and_options(
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put(NetworkLog::default());
+    state.put(blob_urls::Store::default());
     state.put(form_submission::Queue::default());
     state.put(storage);
     state.put(ResponseHeaders::default());

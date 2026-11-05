@@ -670,12 +670,18 @@ fn transport_recipe(base_major: u16) -> wreq_util::Profile {
 fn request_order(
     method: &str,
     headers: &BTreeMap<String, String>,
+    restart: bool,
 ) -> Option<http::header::OrigHeaderMap> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<HashMap<String, http::header::OrigHeaderMap>>> = OnceLock::new();
-    let class = crate::browser::request_class(method, |name| headers.get(name).cloned());
-    let order = crate::browser::default_release().request_order(&class)?;
+    let mut class = crate::browser::request_class(method, |name| headers.get(name).cloned());
+    let release = crate::browser::default_release();
+    // A Critical-CH restart has its own measured order; fall back to the class's.
+    if restart && release.request_order(&format!("{class}-restart")).is_some() {
+        class.push_str("-restart");
+    }
+    let order = release.request_order(&class)?;
     let mut cache = CACHE
         .get_or_init(Default::default)
         .lock()
@@ -906,20 +912,46 @@ fn err(e: impl std::fmt::Display, code: ErrorCode) -> HttpError {
     HttpError::new(e.to_string(), code)
 }
 
-async fn send(
-    cl: &http::Client,
-    method: &str,
-    url: &str,
-    headers: &BTreeMap<String, String>,
-    body: &Option<String>,
-    body_bytes: &Option<Vec<u8>>,
+/// One outgoing hop through the transport seam.
+struct Outgoing<'a> {
+    method: &'a str,
+    url: &'a str,
+    headers: &'a BTreeMap<String, String>,
+    body: &'a Option<String>,
+    body_bytes: &'a Option<Vec<u8>>,
     upload: Option<crate::upload_body::UploadBody>,
-) -> Result<http::Response, HttpError> {
+    /// A Critical-CH restart, which has its own measured header order.
+    restart: bool,
+}
+
+// One transport seam for every hop.
+async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, HttpError> {
+    let Outgoing {
+        method,
+        url,
+        headers,
+        body,
+        body_bytes,
+        upload,
+        restart,
+    } = hop;
     let m = http::Method::from_bytes(method.as_bytes()).map_err(|e| err(e, ErrorCode::Network))?;
-    let mut req = apply_headers(cl.request(m, url), headers);
+    // Without impersonation a streaming upload is forced onto HTTP/2 below.
+    let force_http2 = upload.is_some() && cfg!(not(feature = "impersonate"));
+    let wire = wire_headers(url, headers, force_http2);
+    let mut req = apply_headers(cl.request(m, url), &wire);
     #[cfg(feature = "impersonate")]
-    if let Some(order) = request_order(method, headers) {
+    if let Some(order) = request_order(method, &wire, restart) {
         req = req.orig_headers(order);
+    }
+    #[cfg(not(feature = "impersonate"))]
+    let _ = restart;
+    // Fetch already chose a Range request's Accept-Encoding (identity, plus
+    // dcb/dcz with a dictionary). wreq's decoder would overwrite it with bare
+    // identity, so it owns no content coding for this request.
+    #[cfg(feature = "impersonate")]
+    if wire.contains_key("range") {
+        req = req.gzip(false).brotli(false).deflate(false).zstd(false);
     }
     let streaming_upload = upload.is_some();
     if let Some(upload) = upload {
@@ -945,6 +977,9 @@ async fn send(
         })
     });
     let mut result = req.send().await;
+    if let Ok(response) = &result {
+        remember_protocol(url, response.version());
+    }
     if method == "HEAD" {
         if let Ok(response) = &mut result {
             response.extensions_mut().insert(HeadResponse);
@@ -978,6 +1013,83 @@ fn apply_headers(
         req = req.header(k.as_str(), v.as_str());
     }
     req
+}
+
+// The protocol each origin's last response came over, like Chrome's
+// HttpServerProperties. Request headers are built before ALPN picks the
+// protocol, so only a known origin can drop its other protocol's headers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum OriginProtocol {
+    Http1,
+    Http2,
+}
+
+fn origin_protocols() -> &'static std::sync::Mutex<std::collections::HashMap<String, OriginProtocol>>
+{
+    static ORIGINS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, OriginProtocol>>,
+    > = std::sync::OnceLock::new();
+    ORIGINS.get_or_init(Default::default)
+}
+
+const ORIGIN_PROTOCOL_LIMIT: usize = 4096;
+
+fn remember_protocol(url: &str, version: http::Version) {
+    let Some(origin) = crate::request_context::origin(url) else {
+        return;
+    };
+    let protocol = if version == http::Version::HTTP_2 || version == http::Version::HTTP_3 {
+        OriginProtocol::Http2
+    } else {
+        OriginProtocol::Http1
+    };
+    let mut origins = origin_protocols().lock().unwrap_or_else(|e| e.into_inner());
+    if origins.len() >= ORIGIN_PROTOCOL_LIMIT && !origins.contains_key(&origin) {
+        origins.clear();
+    }
+    origins.insert(origin, protocol);
+}
+
+fn known_protocol(url: &str) -> Option<OriginProtocol> {
+    let origin = crate::request_context::origin(url)?;
+    origin_protocols()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&origin)
+        .copied()
+}
+
+// Transport-owned headers Chrome adds per protocol. `Connection: keep-alive` is
+// HTTP/1.1 only; `Priority` is HTTP/2+ only. An origin known to speak HTTP/2 (or
+// a request forced onto HTTP/2) loses `Connection` here, so the HTTP/2 encoder
+// never has to strip it (and warn). An unknown origin keeps both: its first
+// request may still negotiate HTTP/1.1.
+fn wire_headers(
+    url: &str,
+    headers: &BTreeMap<String, String>,
+    force_http2: bool,
+) -> BTreeMap<String, String> {
+    let mut wire = headers.clone();
+    let known = if force_http2 {
+        Some(OriginProtocol::Http2)
+    } else {
+        known_protocol(url)
+    };
+    match known {
+        Some(OriginProtocol::Http2) => {
+            wire.remove("connection");
+        }
+        Some(OriginProtocol::Http1) => {
+            wire.remove("priority");
+            wire.entry("connection".into())
+                .or_insert_with(|| "keep-alive".into());
+        }
+        None => {
+            wire.entry("connection".into())
+                .or_insert_with(|| "keep-alive".into());
+        }
+    }
+    wire
 }
 
 fn check_content_length(res: &http::Response, max_bytes: usize) -> Result<(), HttpError> {
@@ -1403,10 +1515,41 @@ fn finish_range_response(
     Ok(response)
 }
 
+// Chrome restarts a navigation once when the response's Critical-CH names a
+// hint that its Accept-CH just enabled and the request did not carry.
 async fn cached_request(
     opts: &mut FetchOptions<'_>,
     hop: &Hop,
     client: &http::Client,
+) -> Result<http::Response, HttpError> {
+    let navigation = opts
+        .context
+        .as_ref()
+        .is_none_or(|context| context.mode == crate::request_context::RequestMode::Navigate);
+    let replayable = navigation && opts.upload_body.is_none() && opts.client_hints.is_some();
+    let sent = replayable.then(|| build_headers(&hop.url, &hop.method, opts));
+    let response = cached_request_once(opts, hop, client, false).await?;
+    let Some(sent) = sent else {
+        return Ok(response);
+    };
+    let critical = list_header(&response, "critical-ch").unwrap_or_default();
+    let now = build_headers(&hop.url, &hop.method, opts);
+    let restart = critical.split(',').any(|hint| {
+        let hint = hint.trim().to_ascii_lowercase();
+        !hint.is_empty() && now.contains_key(&hint) && !sent.contains_key(&hint)
+    });
+    if !restart {
+        return Ok(response);
+    }
+    drop(response);
+    cached_request_once(opts, hop, client, true).await
+}
+
+async fn cached_request_once(
+    opts: &mut FetchOptions<'_>,
+    hop: &Hop,
+    client: &http::Client,
+    restart: bool,
 ) -> Result<http::Response, HttpError> {
     if let Some(before) = opts.before_request {
         before(
@@ -1418,6 +1561,11 @@ async fn cached_request(
         .await?;
     }
     let mut headers = build_headers(&hop.url, &hop.method, opts);
+    // Fetch's HTTP-network-or-cache fetch: a Range request asks for identity
+    // (Chrome 156 control `header-range-request` / `range-outside-match`).
+    if headers.contains_key("range") {
+        headers.insert("accept-encoding".into(), "identity".into());
+    }
     let dictionary_store = opts
         .dictionary_store
         .or_else(|| opts.http_cache.map(HttpCache::dictionary_store))
@@ -1524,12 +1672,15 @@ async fn cached_request(
         }
         let mut response = send(
             client,
-            &hop.method,
-            &hop.url,
-            &headers,
-            &hop.body,
-            &hop.body_bytes,
-            opts.upload_body.take(),
+            Outgoing {
+                method: &hop.method,
+                url: &hop.url,
+                headers: &headers,
+                body: &hop.body,
+                body_bytes: &hop.body_bytes,
+                upload: opts.upload_body.take(),
+                restart,
+            },
         )
         .await?;
         if opts.response_side_effects.is_some() {
@@ -1850,12 +2001,15 @@ async fn follow_auto(
     let headers = build_headers(url, &method, opts);
     let res = send(
         &cl,
-        &method,
-        url,
-        &headers,
-        &opts.body,
-        &opts.body_bytes,
-        None,
+        Outgoing {
+            method: &method,
+            url,
+            headers: &headers,
+            body: &opts.body,
+            body_bytes: &opts.body_bytes,
+            upload: None,
+            restart: false,
+        },
     )
     .await?;
     let final_url = final_url(&res);
@@ -2063,12 +2217,15 @@ pub async fn fetch_typed_bytes(
     let headers = build_headers(url, &method, &opts);
     let res = send(
         &cl,
-        &method,
-        url,
-        &headers,
-        &opts.body,
-        &opts.body_bytes,
-        None,
+        Outgoing {
+            method: &method,
+            url,
+            headers: &headers,
+            body: &opts.body,
+            body_bytes: &opts.body_bytes,
+            upload: None,
+            restart: false,
+        },
     )
     .await?;
     let final_url = final_url(&res);
@@ -2086,6 +2243,129 @@ pub async fn fetch_typed_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn protocol_memory_drops_priority_only_for_http1_origins() {
+        let url = "https://protocol-memory.test/a";
+        let headers = BTreeMap::from([("priority".to_owned(), "u=0, i".to_owned())]);
+        // Unknown origin: both transport headers, since ALPN has not spoken yet.
+        let unknown = super::wire_headers("https://protocol-unknown.test/", &headers, false);
+        assert_eq!(unknown["priority"], "u=0, i");
+        assert_eq!(unknown["connection"], "keep-alive");
+        super::remember_protocol(url, http::Version::HTTP_11);
+        let wire = super::wire_headers(url, &headers, false);
+        assert!(!wire.contains_key("priority"));
+        assert_eq!(wire["connection"], "keep-alive");
+        let explicit = BTreeMap::from([("connection".to_owned(), "close".to_owned())]);
+        assert_eq!(
+            super::wire_headers(url, &explicit, false)["connection"],
+            "close"
+        );
+        super::remember_protocol(url, http::Version::HTTP_2);
+        assert_eq!(
+            super::wire_headers(url, &headers, false)["priority"],
+            "u=0, i"
+        );
+        super::remember_protocol("data:,x", http::Version::HTTP_11);
+        assert_eq!(
+            super::known_protocol(url),
+            Some(super::OriginProtocol::Http2)
+        );
+        // One test owns the process-wide map, so clearing it races nothing.
+        for n in 0..=super::ORIGIN_PROTOCOL_LIMIT {
+            super::remember_protocol(
+                &format!("https://h{n}.bounded.test/"),
+                http::Version::HTTP_11,
+            );
+        }
+        assert!(super::origin_protocols().lock().unwrap().len() <= super::ORIGIN_PROTOCOL_LIMIT);
+    }
+
+    #[test]
+    fn http2_hops_never_hand_connection_to_the_encoder() {
+        // The h2 encoder strips `Connection` with a `warn!` per request; surf
+        // strips it first for origins known to speak HTTP/2 and forced-h2 hops.
+        let url = "https://protocol-h2.test/a";
+        let headers = BTreeMap::from([
+            ("connection".to_owned(), "close".to_owned()),
+            ("priority".to_owned(), "u=0, i".to_owned()),
+        ]);
+        let empty = BTreeMap::new();
+        let forced = super::wire_headers("https://protocol-forced.test/", &empty, true);
+        assert!(!forced.contains_key("connection"));
+        super::remember_protocol(url, http::Version::HTTP_2);
+        let wire = super::wire_headers(url, &headers, false);
+        assert!(!wire.contains_key("connection"));
+        assert_eq!(wire["priority"], "u=0, i");
+        assert!(!super::wire_headers(url, &empty, false).contains_key("connection"));
+        super::remember_protocol("https://protocol-h3.test/", http::Version::HTTP_3);
+        assert!(
+            !super::wire_headers("https://protocol-h3.test/x", &empty, false)
+                .contains_key("connection")
+        );
+        // Back on HTTP/1.1 the Chrome keep-alive returns.
+        super::remember_protocol(url, http::Version::HTTP_11);
+        assert_eq!(
+            super::wire_headers(url, &empty, false)["connection"],
+            "keep-alive"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_takes_one_outgoing_hop() {
+        // The `Outgoing` struct carries every hop field through to the wire.
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let mut seen = Vec::new();
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                seen.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&seen).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    if text.len() >= end + 4 + 5 {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            socket
+                .write_all(
+                    b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&seen).to_ascii_lowercase()
+        });
+        let url = format!("http://127.0.0.1:{port}/outgoing");
+        let headers = BTreeMap::from([("x-hop".to_owned(), "1".to_owned())]);
+        let cl = client(http::redirect::Policy::none()).unwrap();
+        let res = send(
+            &cl,
+            Outgoing {
+                method: "PUT",
+                url: &url,
+                headers: &headers,
+                body: &None,
+                body_bytes: &Some(b"hello".to_vec()),
+                upload: None,
+                restart: false,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status().as_u16(), 201);
+        let raw = server.await.unwrap();
+        assert!(raw.starts_with("put /outgoing http/1.1"), "{raw}");
+        assert!(raw.contains("x-hop: 1"), "{raw}");
+        assert!(raw.contains("connection: keep-alive"), "{raw}");
+        assert!(raw.ends_with("hello"), "{raw}");
+    }
+
     use super::*;
 
     #[test]
@@ -2116,7 +2396,7 @@ mod tests {
             ("sec-fetch-mode".to_string(), "no-cors".to_string()),
             ("sec-fetch-dest".to_string(), "image".to_string()),
         ]);
-        let order = request_order("GET", &headers);
+        let order = request_order("GET", &headers, false);
         match crate::browser::default_release().request_order("no-cors") {
             Some(expected) => {
                 let names: Vec<String> = order
@@ -3011,6 +3291,42 @@ mod edge_tests {
             }
         });
         (origin, heads)
+    }
+
+    // Fetch negotiates a Range request's Accept-Encoding itself (identity, plus
+    // dcb/dcz with a selected dictionary; Chrome 156 `header-range-request`).
+    // The transport must send that value, not substitute its own.
+    #[tokio::test]
+    async fn the_transport_keeps_a_range_requests_negotiated_accept_encoding() {
+        const PARTIAL: &[u8] = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-1/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+        let (origin, mut heads) = serve(vec![PARTIAL, PARTIAL]).await;
+        let client = build_client();
+        for value in ["identity, dcb, dcz", "identity"] {
+            let headers = BTreeMap::from([
+                ("range".to_owned(), "bytes=0-1".to_owned()),
+                ("accept-encoding".to_owned(), value.to_owned()),
+            ]);
+            let url = format!("{origin}/ranged");
+            send(
+                &client,
+                Outgoing {
+                    method: "GET",
+                    url: &url,
+                    headers: &headers,
+                    body: &None,
+                    body_bytes: &None,
+                    upload: None,
+                    restart: false,
+                },
+            )
+            .await
+            .unwrap();
+            let head = heads.recv().await.unwrap();
+            assert!(
+                head.contains(&format!("\r\naccept-encoding: {value}\r\n")),
+                "{value}: {head}"
+            );
+        }
     }
 
     #[cfg(feature = "impersonate")]

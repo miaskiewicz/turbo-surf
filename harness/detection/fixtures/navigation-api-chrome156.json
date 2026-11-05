@@ -1,0 +1,494 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-04T13:51:46.077Z",
+  "fixtures": {
+    "navigation-api-probe.js": "21073e51cb67953593d548bc6ac75285e3a831d129a9a75dd6debc1f3f9faaef"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "navigation-api-probe.js": {
+      "shape": [
+        "ok",
+        [
+          "[object Navigation]",
+          true,
+          true,
+          "function",
+          "function",
+          "function",
+          "function",
+          1,
+          ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"],
+          false,
+          false,
+          null,
+          true,
+          null
+        ]
+      ],
+      "fragment": [
+        "ok",
+        [
+          ["/#a", null],
+          [
+            ["committed", ["[object NavigationHistoryEntry]", "/#a", 1, true, "string", "string"]],
+            ["finished", ["[object NavigationHistoryEntry]", "/#a", 1, true, "string", "string"]]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "push",
+              "/#a",
+              true,
+              -1,
+              true,
+              true,
+              true,
+              false,
+              "i",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "push",
+              ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"],
+              "/#a"
+            ],
+            ["popstate", null],
+            ["navigatesuccess", "[object Event]"],
+            ["hashchange", "/", "/#a"]
+          ],
+          {
+            "n": 1
+          }
+        ]
+      ],
+      "afterFragment": [
+        "ok",
+        [
+          [
+            ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"],
+            ["[object NavigationHistoryEntry]", "/#a", 1, true, "string", "string"]
+          ],
+          true,
+          false,
+          3
+        ]
+      ],
+      "intercepted": [
+        "ok",
+        [
+          [
+            "/page",
+            [
+              "[object NavigationTransition]",
+              "push",
+              ["[object NavigationHistoryEntry]", "/#a", 1, true, "string", "string"]
+            ]
+          ],
+          ["[object NavigationHistoryEntry]", "/page", 2, true, "string", "string"],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "push",
+              "/page",
+              false,
+              -1,
+              false,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "push",
+              ["[object NavigationHistoryEntry]", "/#a", 1, true, "string", "string"],
+              "/page"
+            ]
+          ],
+          [
+            [
+              "committed",
+              ["[object NavigationHistoryEntry]", "/page", 2, true, "string", "string"]
+            ],
+            ["finished", ["[object NavigationHistoryEntry]", "/page", 2, true, "string", "string"]]
+          ],
+          [["navigatesuccess", "[object Event]"]],
+          null
+        ]
+      ],
+      "interceptRejects": [
+        "ok",
+        [
+          [
+            [
+              "committed",
+              ["[object NavigationHistoryEntry]", "/fail", 3, true, "string", "string"]
+            ],
+            ["finished", "RangeError", "handler"]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "push",
+              "/fail",
+              false,
+              -1,
+              false,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "push",
+              ["[object NavigationHistoryEntry]", "/page", 2, true, "string", "string"],
+              "/fail"
+            ],
+            ["navigateerror", "RangeError", "Uncaught RangeError: handler"]
+          ],
+          "/fail"
+        ]
+      ],
+      "prevented": [
+        "ok",
+        [
+          [
+            ["committed", "AbortError", "Navigation was aborted"],
+            ["finished", "AbortError", "Navigation was aborted"]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "push",
+              "/fail#blocked",
+              true,
+              -1,
+              true,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            ["navigateerror", "AbortError", "Uncaught "]
+          ],
+          "/fail"
+        ]
+      ],
+      "replace": [
+        "ok",
+        [
+          [
+            [
+              "committed",
+              ["[object NavigationHistoryEntry]", "/fail#r", 3, true, "string", "string"]
+            ],
+            [
+              "finished",
+              ["[object NavigationHistoryEntry]", "/fail#r", 3, true, "string", "string"]
+            ]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "replace",
+              "/fail#r",
+              true,
+              -1,
+              true,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "replace",
+              ["[object NavigationHistoryEntry]", "/fail", -1, true, "string", "string"],
+              "/fail#r"
+            ],
+            ["popstate", null],
+            ["navigatesuccess", "[object Event]"],
+            ["hashchange", "/fail", "/fail#r"]
+          ],
+          4
+        ]
+      ],
+      "updateCurrentEntry": [
+        "ok",
+        [
+          {
+            "s": 2
+          },
+          [
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              null,
+              ["[object NavigationHistoryEntry]", "/fail#r", 3, true, "string", "string"],
+              "/fail#r"
+            ]
+          ]
+        ]
+      ],
+      "pushState": [
+        "ok",
+        [
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "push",
+              "/pushed",
+              true,
+              -1,
+              false,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "push",
+              ["[object NavigationHistoryEntry]", "/fail#r", 3, true, "string", "string"],
+              "/pushed"
+            ],
+            ["navigatesuccess", "[object Event]"]
+          ],
+          ["[object NavigationHistoryEntry]", "/pushed", 4, true, "string", "string"],
+          null,
+          5
+        ]
+      ],
+      "back": [
+        "ok",
+        [
+          [
+            [
+              "committed",
+              ["[object NavigationHistoryEntry]", "/fail#r", 3, true, "string", "string"]
+            ],
+            [
+              "finished",
+              ["[object NavigationHistoryEntry]", "/fail#r", 3, true, "string", "string"]
+            ]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "traverse",
+              "/fail#r",
+              true,
+              3,
+              false,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "traverse",
+              ["[object NavigationHistoryEntry]", "/pushed", 4, true, "string", "string"],
+              "/fail#r"
+            ],
+            ["navigatesuccess", "[object Event]"],
+            ["popstate", null]
+          ],
+          "/fail#r",
+          null
+        ]
+      ],
+      "traverseTo": [
+        "ok",
+        [
+          [
+            ["committed", ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"]],
+            ["finished", ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"]]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "traverse",
+              "/",
+              true,
+              0,
+              false,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "traverse",
+              ["[object NavigationHistoryEntry]", "/fail#r", 3, true, "string", "string"],
+              "/"
+            ],
+            ["navigatesuccess", "[object Event]"],
+            ["popstate", null]
+          ],
+          "/",
+          true
+        ]
+      ],
+      "forward": [
+        "ok",
+        [
+          [
+            ["committed", ["[object NavigationHistoryEntry]", "/#a", 1, true, "string", "string"]],
+            ["finished", ["[object NavigationHistoryEntry]", "/#a", 1, true, "string", "string"]]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "traverse",
+              "/#a",
+              true,
+              1,
+              true,
+              true,
+              true,
+              false,
+              "none",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "traverse",
+              ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"],
+              "/#a"
+            ],
+            ["navigatesuccess", "[object Event]"],
+            ["popstate", null],
+            ["hashchange", "/", "/#a"]
+          ],
+          "/#a"
+        ]
+      ],
+      "backAtStart": [
+        "ok",
+        [
+          ["committed", "InvalidStateError", "Cannot go back"],
+          ["finished", "InvalidStateError", "Cannot go back"]
+        ]
+      ],
+      "traverseUnknown": [
+        "ok",
+        [
+          ["committed", "InvalidStateError", "Invalid key"],
+          ["finished", "InvalidStateError", "Invalid key"]
+        ]
+      ],
+      "badURL": [
+        "ok",
+        [
+          ["committed", "SyntaxError", "Invalid URL 'http://[/'."],
+          ["finished", "SyntaxError", "Invalid URL 'http://[/'."]
+        ]
+      ],
+      "badHistory": [
+        "TypeError",
+        "Failed to execute 'navigate' on 'Navigation': Failed to read the 'history' property from 'NavigationNavigateOptions': The provided value 'bogus' is not a valid enum value of type NavigationHistoryBehavior."
+      ],
+      "noArgs": [
+        "TypeError",
+        "Failed to execute 'navigate' on 'Navigation': 1 argument required, but only 0 present."
+      ],
+      "reloadIntercepted": [
+        "ok",
+        [
+          [
+            ["committed", ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"]],
+            ["finished", ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"]]
+          ],
+          [
+            [
+              "navigate",
+              "[object NavigateEvent]",
+              "reload",
+              "/",
+              false,
+              -1,
+              false,
+              true,
+              true,
+              false,
+              "again",
+              true,
+              null,
+              null
+            ],
+            [
+              "currententrychange",
+              "[object NavigationCurrentEntryChangeEvent]",
+              "reload",
+              ["[object NavigationHistoryEntry]", "/", 0, true, "string", "string"],
+              "/"
+            ],
+            ["navigatesuccess", "[object Event]"]
+          ]
+        ]
+      ],
+      "interceptOutside": [
+        "ok",
+        [
+          "InvalidStateError",
+          "Failed to execute 'intercept' on 'NavigateEvent': intercept() may only be called while the navigate event is being dispatched."
+        ]
+      ],
+      "entryIdentity": ["ok", [true, true, 2]]
+    }
+  }
+}

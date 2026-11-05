@@ -33,7 +33,7 @@ async fn unsupported_form_navigations_throw_a_named_type_error() {
             "javascript":"submitted",
             "unresolvable":"TypeError: Native form action cannot be resolved",
             "blank target":"TypeError: Native form submission to another browsing context is not supported",
-            "child":"TypeError: Native form navigation from child frames is not supported",
+            "child":"submitted",
             "location":"https://forms.test/page"
         })
     );

@@ -39,7 +39,15 @@ const __defineEventHandler = (prototype, name, check) => {
               function (event) {
                 const callback = entry.value;
                 if (typeof callback !== "function") return;
-                if (apply(callback, this, [event]) === false) event.preventDefault();
+                let result;
+                // The binding drops listener exceptions; a handler's is reported like Chrome.
+                try {
+                  result = apply(callback, this, [event]);
+                } catch (error) {
+                  ops.op_report_exception(error);
+                  return;
+                }
+                if (result === false) event.preventDefault();
               },
               name,
               1,

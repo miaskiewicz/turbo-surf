@@ -71,10 +71,12 @@ pub async fn matches_control_with_gaps(
     gaps: &[(&str, Value)],
 ) {
     let control: Value = serde_json::from_str(control).unwrap();
-    assert!(control["browser"]
-        .as_str()
-        .unwrap()
-        .starts_with("Chrome/156."));
+    // turbo-dom records controls from Chrome 156 or its headless shell (turbo-dom#305).
+    let browser = control["browser"].as_str().unwrap();
+    assert!(
+        browser.starts_with("Chrome/156.") || browser.starts_with("HeadlessChrome/156."),
+        "{browser}"
+    );
     assert_eq!(control["errors"], serde_json::json!([]));
     assert_eq!(
         control["probeSha256"],

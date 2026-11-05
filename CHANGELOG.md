@@ -1,6 +1,127 @@
 # Changelog
 
-## [0.7.0] — turbo-dom 0.7.0
+## [0.7.1] — 2026-11-05
+
+Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).
+
+- **Changed (deps)**: built on turbo-dom 0.7.1 from crates.io (turbo-dom#281-#288, #279 subtree
+  style invalidation, #295 sticky inline, #299 child-iframe cascade, #302/#311 transition cost and
+  style sharing, #303 `currentcolor` borders, #305 Chrome computed defaults, #306 real
+  html/head/body in child documents, #308 rule buckets, #309 media mode, #312 dispatcher speed).
+
+- **Fixed (UA-CH, #164)**: `navigator.userAgentData` is a real `NavigatorUAData` instance
+  (zero own properties; brand-checked `brands`/`mobile`/`platform` getters; native
+  `getHighEntropyValues` and `toJSON`), so `JSON.stringify(navigator.userAgentData)` matches
+  Chrome 156. The `user-agent-data-interface` known-gap rule is gone.
+- **Fixed (web fonts, #166)**: used `@font-face` faces start loading once the document's
+  other load resources are in, and their loads delay the load event, as in Chrome 156. Before
+  this, a page that never read layout never fetched them. A frame's layout now reports its
+  used families to the frame's own realm (before, its faces never started), and font requests
+  carry `Origin` even same-origin. The identity battery records the font request, and the
+  `web-font-loading` known-gap rule is gone.
+- **Fixed (XHR, #165)**: `XMLHttpRequest#setAttributionReporting` and `#setPrivateToken`
+  exist with Chrome 156's validation (arity, receiver, `PrivateToken` conversion, OPENED
+  state, issuer checks). Neither starts a Privacy Sandbox operation. The remaining #165
+  members are turbo-dom's (turbo-dom#323).
+- **Fixed (Observable, #116)**: `HTMLElement#click()` runs as its own binding frame, so a
+  failure inside a `when("click")` listener reads `Failed to execute 'click' on
+  'HTMLElement'` as in Chrome; the `web_apis` known gap is gone.
+- **Fixed (document.domain, #116)**: srcdoc and initial about:blank children share their
+  creator's origin through turbo-dom-browser-env's `share_document_domain` (turbo-dom#284),
+  so a `document.domain` assignment in one relaxes all of them like Chrome 156; the
+  `document_hooks` known gaps are gone. `set_document_origin_keyed` is only called for a
+  secure context's response document.
+- **Fixed (viewport events)**: a frame whose iframe resizes gets a window `resize` event in
+  the next rendering update, then each `matchMedia` list with a listener whose `matches`
+  flipped fires `change` (listeners and `onchange` in registration order), like Chrome 156
+  (`frame-media-change-probe.js`). Each document's rendering update also updates its loaded
+  frames. The binding's JS cascade evaluates `@media` through turbo-surf's `matchMedia`, so
+  `getComputedStyle` follows the top and frame viewports.
+- **Fixed (screenshots, #132, #131)**: turbo-dom#282's quirks-mode `<form>` block-end margin
+  and turbo-dom#283's author borders on buttons reach the static screenshot. With turbo-dom 0.7.1, a
+  border without a colour paints in `currentcolor` too (turbo-dom#303), checked against Chrome 156
+  in `screenshot_author_borders`.
+- **Fixed (fetch, #109)**: `Request`/`Response#formData()` parses `multipart/form-data`
+  (Blink's delimiter, header, `Content-Disposition` and UTF-8 rules; `File` entries keep the
+  part's raw `Content-Type`, default `text/plain`) and picks the parser by MIME essence like
+  Chrome: `Invalid MIME type` (body unread) for a multipart type without a valid boundary or
+  a null body, `Failed to fetch` for anything that does not parse. Parsing, `Blob#text` and
+  `Body#text`/`json` decode with bootstrap-captured primitives, so page-patched
+  `TextDecoder`/`FormData` never see the bytes. New control
+  `harness/detection/fixtures/fetch-form-data-chrome156.json`.
+- **Fixed (abort, #109)**: `AbortSignal.any()` reads a JS array by index like Blink (no
+  iterator call, own or inherited) and throws Chrome's sequence and brand messages;
+  `AbortSignal.timeout()` converts its argument as `[EnforceRange] unsigned long long` with
+  Chrome's messages and aborts with `TimeoutError: signal timed out`. New control
+  `harness/detection/fixtures/abort-signal-any-chrome156.json`. The per-listener microtask
+  checkpoint (timeout dependents, abort-bridge reactions) is pinned and tracked in #136; the
+  unpinned compression-dictionary/Range items and consumed-body messages move to #137.
+- **Added (`@font-face`, #130)**: live layout and canvases load web fonts. A layout that
+  uses an `@font-face` family starts its faces' loads (Chrome's style-update timing); sources
+  are fetched over the page's network stack as destination `font` (CORS mode, CSP
+  `font-src`, `Sec-Fetch-Dest: font`), WOFF/WOFF2 are decoded (`wuff`), and the bytes are
+  parsed with turbo-dom's `FontFace::from_web_font_bytes` into a per-document registry that
+  live layout and `set_canvas_fonts` use. `document.fonts` is a real `FontFaceSet`
+  (CSS-connected faces, `add`/`delete`/`check`/`load`, `loading`/`loadingdone`/`loadingerror`
+  events, `ready`) and `FontFace` loads from a URL or bytes, matching the new control
+  `harness/detection/fixtures/font-face-chrome156.json`. Waiting on `document.fonts.ready`
+  first lays the page out, since surf has no rendering lifecycle. The used-font refusal is
+  gone. Known gaps: a web face's inline content height is 1px taller than Chrome 156's
+  (turbo-dom metrics, pinned in `tests/font_face.rs`); a same-named installed font still
+  wins over a web face, and static screenshots do not paint web fonts (both need turbo-dom
+  API); `local()` sources and `unicode-range` subsetting are not applied.
+- **Added (IndexedDB, #107)**: a real in-memory IndexedDB per storage partition, keyed like
+  DOM storage and shared by every realm in the partition. It replaces the shape stub, whose
+  open requests stayed pending forever. It covers open/upgradeneeded/versionchange/blocked,
+  deleteDatabase and databases(), object stores (keyPath, autoIncrement, key generator),
+  indexes (unique, multiEntry, compound), cursors (all directions, continue(key), advance,
+  continuePrimaryKey, update/delete), IDBKeyRange, getAllRecords, and structured-clone values.
+  Requests run one per task, with a microtask checkpoint after every dispatch. Transactions
+  auto-commit, `commit()` ends one early, and abort rolls back and reports Chrome's error
+  names and messages. `StorageAccessHandle#indexedDB` now returns an unpartitioned factory
+  instead of throwing `NotSupportedError`. A throwing `on*` event handler is now reported to the
+  window `error` event, as in Chrome. New control
+  `harness/detection/fixtures/indexeddb-chrome156.json`. Residuals are tracked in #148: the
+  capture phase on IDB targets, per-listener microtasks, throwing `addEventListener` listeners
+  (turbo-dom#301), and a cross-site partition control.
+- **Fixed (fetch, #137)**: reading a used, disturbed or locked body rejects with Chrome's
+  messages (`Failed to execute '<method>' on 'Response': body stream already read` /
+  `body stream is locked`, and the `Request` forms); `clone()` and `new Request(request)`
+  throw Chrome's used-body messages. A `Range` request sends `Accept-Encoding: identity`
+  (`identity, dcb, dcz` with a selected compression dictionary). New controls
+  `fetch-body-used-chrome156.json` and `compression-dictionary-chrome156.json` (replaces the
+  Chrome 155 one). Dictionary publication scheduling stays a pinned known gap: Chrome
+  publishes after `text()` resolves, Core at EOF.
+- **Fixed (abort, #136)**: a host-run `AbortSignal.timeout()` dispatches each signal (the
+  source, then each dependent) from the host with a microtask checkpoint after it, so a
+  timed listener's microtask runs before a dependent's listener as in Chrome. Still pinned:
+  the checkpoint between two listeners of one signal (needs a turbo-dom EventTarget hook) and
+  the pipeTo abort reaction order (a turbo-surf-deno-web `06_streams.js` promise hop).
+- **Fixed (blob:/data: URLs, #134)**: `URL.createObjectURL` mints Chrome's
+  `blob:<origin>/<uuid>` (was `blob:turbo-surf/N`, a fingerprint) into a native store keyed
+  by the creating document's origin, top-level site and credentialless partition (opaque
+  origins mint `blob:null/…` reachable from their own document only); `revokeObjectURL`
+  revokes, and a non-Blob argument throws Chrome's overload error. `fetch()` and
+  `XMLHttpRequest` load blob: URLs (GET only; one byte range answered 206 with
+  `Content-Range`, reported `Partial Content` to XHR and `OK` to fetch; `Content-Type` and
+  `Content-Length`; revoked, foreign-origin and unknown URLs fail like Chrome) and data: URLs
+  (any method, ranges ignored, Chrome's MIME serialization). Download capture reads the same
+  store. Synchronous XHR still does not load (#138); blob: script, style, image and frame
+  sources are #146. New control
+  `harness/detection/fixtures/blob-data-url-fetch-chrome156.json`.
+- **Fixed (forms, #111)**: native form submission inside a child frame navigates its target
+  (the frame itself, `_parent`, `_top`, or a named child frame; top-level forms can target
+  named frames too) with the form's method, body and headers through the frame loader, so
+  the server sees Chrome's `Origin`, `Content-Type`, `Cache-Control: max-age=0` (POST),
+  `Referer` and `Sec-Fetch-*` (`iframe`/`navigate`). `allow-forms`, the child's
+  `form-action` policy and the sandbox's ban on navigating ancestors apply. Form-action on
+  redirect hops (#139) and names outside the submitting document's frames / `_blank` (#140)
+  remain. New control `harness/detection/fixtures/child-frame-form-navigation-chrome156.json`.
+- **Tests**: `harness/detection/web-apis-chrome-control.mjs` takes `--probes` to record other
+  single-page controls, `--allow-request-failures` for probes that assert failed loads, and
+  serves `/echo…` (the request it received) and `/csp-…` (`form-action 'none'`) pages.
+
+## [0.7.0] — 2026-11-04 — turbo-dom 0.7.0
 
 turbo-surf moves to turbo-dom 0.7.0 (`turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster`,
 `turbo-dom-browser-env` 0.7; `turbo-dom-v8` stays 150.4.0). Until those crates are on

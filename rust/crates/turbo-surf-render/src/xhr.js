@@ -5,8 +5,9 @@
 // responseXML and responseType "document" parse XML MIME types with turbo-dom-browser-env's
 // XML parser (turbo-dom#186; ill-formed XML is null, as in Chrome) and, for "document",
 // text/html with the HTML parser. Not modelled: synchronous requests (async=false still
-// completes asynchronously), upload progress events, setAttributionReporting and
-// setPrivateToken.
+// completes asynchronously) and upload progress events. setAttributionReporting and
+// setPrivateToken validate as Chrome 156 does (turbo-surf#165) and request nothing:
+// attribution reporting and Private State Token operations are not modelled.
 (() => {
   "use strict";
   const apply = Reflect.apply,
@@ -36,6 +37,7 @@
     trim = String.prototype.trim,
     replace = String.prototype.replace;
   const arrayPush = Array.prototype.push,
+    arrayIncludes = Array.prototype.includes,
     arraySort = Array.prototype.sort;
   const states = new WeakMap(),
     stateGet = WeakMap.prototype.get,
@@ -467,6 +469,7 @@
       headers,
       credentials: record.credentials ? "include" : "same-origin",
       signal: record.controller.signal,
+      initiator: "xmlhttprequest",
     };
     if (body !== null && body !== undefined) init.body = body;
     __fetchFromSource(record.url, init, record.source())
@@ -542,5 +545,96 @@
         "InvalidStateError",
       );
     return documentResponse(record);
+  });
+  const required = (name, count) => {
+    if (count < 1)
+      throw new ErrorType(
+        `Failed to execute '${name}' on 'XMLHttpRequest': 1 argument required, but only 0 present.`,
+      );
+  };
+  // Chrome 156 reads no member of the options dictionary.
+  method("setAttributionReporting", 1, function (_options) {
+    state(this);
+    required("setAttributionReporting", arguments.length);
+  });
+  const tokenFailure = (message) =>
+    new ErrorType(`Failed to execute 'setPrivateToken' on 'XMLHttpRequest': ${message}`);
+  const tokenMember = (message) => tokenFailure(`Failed to read the ${message}`);
+  const tokenEnum = (dictionary, name, type, values, needed) => {
+    const value = dictionary[name];
+    if (value === undefined) {
+      if (needed)
+        throw tokenMember(`'${name}' property from 'PrivateToken': Required member is undefined.`);
+      return undefined;
+    }
+    const text = string(value);
+    if (!apply(arrayIncludes, values, [text]))
+      throw tokenMember(
+        `'${name}' property from 'PrivateToken': The provided value '${text}' is not a valid enum value of type ${type}.`,
+      );
+    return text;
+  };
+  const issuerList = (value) => {
+    if (value === undefined) return undefined;
+    const iterator =
+      value !== null && (typeof value === "object" || typeof value === "function")
+        ? value[Symbol.iterator]
+        : undefined;
+    if (typeof iterator !== "function")
+      throw tokenMember(
+        "'issuers' property from 'PrivateToken': The provided value cannot be converted to a sequence.",
+      );
+    const list = [];
+    for (const item of { [Symbol.iterator]: () => apply(iterator, value, []) })
+      apply(arrayPush, list, [string(item)]);
+    return list;
+  };
+  // Potentially trustworthy as Chrome judges an issuer: https, or http on loopback.
+  const secureIssuer = (url) =>
+    url.protocol === "https:" ||
+    url.hostname === "localhost" ||
+    apply(endsWith, url.hostname, [".localhost"]) ||
+    url.hostname === "[::1]" ||
+    apply(exec, /^127(?:\.\d{1,3}){3}$/, [url.hostname]) !== null;
+  method("setPrivateToken", 1, function (privateToken) {
+    const record = state(this);
+    required("setPrivateToken", arguments.length);
+    if (
+      privateToken === null ||
+      (typeof privateToken !== "object" && typeof privateToken !== "function")
+    )
+      throw tokenFailure("The provided value is not of type 'PrivateToken'.");
+    // Dictionary members convert in lexicographic order.
+    const issuers = issuerList(privateToken.issuers);
+    const operation = tokenEnum(
+      privateToken,
+      "operation",
+      "OperationType",
+      ["token-request", "send-redemption-record", "token-redemption"],
+      true,
+    );
+    tokenEnum(privateToken, "refreshPolicy", "RefreshPolicy", ["none", "refresh"], false);
+    tokenEnum(privateToken, "version", "PrivateTokenVersion", ["1"], true);
+    if (record.state !== 1 || record.send)
+      throw failed("setPrivateToken", "The object's state must be OPENED.", "InvalidStateError");
+    if (operation !== "send-redemption-record") return;
+    if (!issuers || !issuers.length)
+      throw tokenFailure(
+        "privateToken: operation type 'send-redemption-record' requires that the 'issuers' field be present and contain at least one secure, HTTP(S) URL, but it was missing or empty.",
+      );
+    for (const issuer of issuers) {
+      let url = null;
+      try {
+        url = new LocationURL(issuer);
+      } catch {}
+      if (!url || (url.protocol !== "https:" && url.protocol !== "http:"))
+        throw tokenFailure(
+          `privateToken: operation type 'send-redemption-record' requires that the 'issuers' fields' members parse to HTTP(S) origins, but one did not: ${issuer}`,
+        );
+      if (!secureIssuer(url))
+        throw tokenFailure(
+          `privateToken: operation type 'send-redemption-record' requires that the 'issuers' fields' members parse to secure origins, but one did not: ${issuer}`,
+        );
+    }
   });
 })();

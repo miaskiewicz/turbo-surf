@@ -3143,6 +3143,8 @@ async fn createobjecturl_anchor_download_is_captured() {
         a.setAttribute('download', 'template.csv');
         a.setAttribute('href', url);
         a.click();
+        // Chrome resolves the URL when the click starts the download.
+        URL.revokeObjectURL(url);
       </script></body>"#;
     let mut session = PageSession::open(
         html,

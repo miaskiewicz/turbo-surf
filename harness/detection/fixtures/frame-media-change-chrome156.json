@@ -1,0 +1,21 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "probeSha256": "c44c8b638e210e054dd1dd2f60c051e340c869e815496d1ca321dacc8cb7e585",
+  "result": {
+    "before": [100, true],
+    "wide": [200, false],
+    "after": [120, 60, true],
+    "log": [
+      ["resize", "resize", false, false, 200, 80, false],
+      ["change", "change", "(max-width: 150px)", false, false, 200],
+      ["onchange", false],
+      "wide",
+      ["resize", "resize", false, false, 120, 80, true],
+      ["change", "change", "(max-width: 150px)", true, true, 120],
+      ["onchange", true],
+      "narrow",
+      ["resize", "resize", false, false, 120, 60, true]
+    ]
+  }
+}

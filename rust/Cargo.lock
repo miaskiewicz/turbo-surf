@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2669,7 +2669,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4056,7 +4056,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4427,7 +4427,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5819,9 +5819,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e059f328a9fa044ff44e77608ee9ab3e44e1e89ff893d7faf837c7154f975df6"
+checksum = "180e223c75324e17c487806e63a03424f3022835b2351c6f5588be3b042e1c07"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5835,9 +5835,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-browser-env"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7c49030459c6bf57bef90c51f34583fbde3d4a7ec326a4c62783c7b67ca1ee7"
+checksum = "4780701a9d383b126d32ea0769ad48694d7d1a1e63761f567540974580dbaca0"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5854,9 +5854,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-layout"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b2b730f3008c2a1e77b7130e9de291274dc1b1995a0399d588b8bf7736ab4c1"
+checksum = "18e4d38617deb61fb0d9237c8d60f1802c033e8bed3d273cc0a94cf4b96b2b92"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5877,9 +5877,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-raster"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50860bff0e2665ae7a97e951a6609c9d942489e91532c52c4c9b53cfb830099d"
+checksum = "0b01e5fff573cfabcd99ec6e4cf45b776cfb0374bd45a5d7b59aebe6b7d27a74"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5943,7 +5943,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -6108,7 +6108,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-mcp"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -6129,7 +6129,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-napi"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "napi",
  "napi-build",
@@ -6148,7 +6148,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-page"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6160,7 +6160,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-py"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "pyo3",
  "serde",
@@ -6175,7 +6175,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-render"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -6208,6 +6208,7 @@ dependencies = [
  "turbo-surf-deno-web",
  "turbo-surf-deno-webidl",
  "url",
+ "wuff",
  "x25519-dalek",
  "zeroize",
 ]
@@ -6238,14 +6239,14 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-transform"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "swc_core",
 ]
 
 [[package]]
 name = "turbo-surf-view"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "criterion",
  "regex",
@@ -6851,7 +6852,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7024,6 +7025,17 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "wuff"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "200a7b806377b65f1ff9a985874332f15357c87e5dd7855f35f06dade95b8b3d"
+dependencies = [
+ "brotli-decompressor 5.0.3",
+ "bytes",
+ "flate2",
+]
 
 [[package]]
 name = "wyz"

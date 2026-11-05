@@ -51,8 +51,19 @@
     // retains only a numeric native weak identity, never a child realm closure.
     const rawAdd = signal.addEventListener.value,
       rawRemove = signal.removeEventListener.value;
+    // True only while a host task (the official timeout timer) runs the abort
+    // algorithms; page code reached from a listener never inherits it.
+    backend.hostAbort = false;
     backend.listen = (raw, id) => {
-      const listener = () => ops.op_web_abort_dispatch(id, apply(signal.reason.get, raw, []));
+      const listener = () => {
+        const host = backend.hostAbort;
+        backend.hostAbort = false;
+        try {
+          ops.op_web_abort_dispatch(id, apply(signal.reason.get, raw, []), host);
+        } finally {
+          backend.hostAbort = host;
+        }
+      };
       apply(rawAdd, raw, ["abort", listener, { once: true }]);
       return listener;
     };
@@ -132,6 +143,8 @@
     return front;
   };
   const unwrap = (front, name) => record(front, name).raw;
+  const isArray = Array.isArray,
+    trunc = Math.trunc;
   const wrap = (raw, name) => {
     if (raw === null || raw === undefined) return raw;
     const previous = getFront(raw);
@@ -568,31 +581,44 @@
         function (...args) {
           try {
             if (name === "any") {
-              if (!args.length) throw new TypeErrorType("AbortSignal.any requires an argument");
+              const fail = (message) =>
+                new TypeErrorType("Failed to execute 'any' on 'AbortSignal': " + message);
+              if (!args.length) throw fail("1 argument required, but only 0 present.");
               const input = args[0];
               if (input === null || (typeof input !== "object" && typeof input !== "function"))
-                throw new TypeErrorType("AbortSignal.any requires an iterable");
-              const iterator = input[iteratorSymbol];
-              if (typeof iterator !== "function")
-                throw new TypeErrorType("AbortSignal.any requires an iterable");
-              const source = apply(iterator, input, []);
-              if (source === null || (typeof source !== "object" && typeof source !== "function"))
-                throw new TypeErrorType("Iterator result is not an object");
-              const next = source.next;
-              if (typeof next !== "function")
-                throw new TypeErrorType("Iterator next is not callable");
+                throw fail("The provided value cannot be converted to a sequence.");
               const values = create(null);
               let count = 0;
-              while (true) {
-                const item = apply(next, source, []);
-                if (item === null || (typeof item !== "object" && typeof item !== "function"))
-                  throw new TypeErrorType("Iterator result is not an object");
-                if (item.done) break;
+              const convert = (value) => {
+                let raw;
+                try {
+                  raw = unwrap(value, "AbortSignal");
+                } catch {
+                  throw fail("Failed to convert value to 'AbortSignal'.");
+                }
                 // Sequence conversion does not IteratorClose on a brand error.
-                define(values, count++, {
-                  __proto__: null,
-                  value: unwrap(item.value, "AbortSignal"),
-                });
+                define(values, count++, { __proto__: null, value: raw });
+              };
+              if (isArray(input) && !core.isProxy(input)) {
+                // Blink reads a JS array by index: no iterator, own or inherited.
+                const length = input.length;
+                for (let index = 0; index < length; index++) convert(input[index]);
+              } else {
+                const iterator = input[iteratorSymbol];
+                if (iterator === undefined || iterator === null)
+                  throw fail("The object must have a callable @@iterator property.");
+                if (typeof iterator !== "function") throw fail("@@iterator must be a callable.");
+                const source = apply(iterator, input, []);
+                if (source === null || (typeof source !== "object" && typeof source !== "function"))
+                  throw fail("Iterator object must be an object.");
+                const next = source.next;
+                while (true) {
+                  const item = apply(next, source, []);
+                  if (item === null || (typeof item !== "object" && typeof item !== "function"))
+                    throw fail("Expected iterator.next() to return an Object.");
+                  if (item.done) break;
+                  convert(item.value);
+                }
               }
               // Raw records never pass through page Array.from, iterators,
               // numeric setters or inherited property-descriptor accessors.
@@ -616,13 +642,53 @@
               });
               args[0] = iterable;
             }
+            if (name === "timeout") {
+              const fail = (message) =>
+                new TypeErrorType("Failed to execute 'timeout' on 'AbortSignal': " + message);
+              if (!args.length) throw fail("1 argument required, but only 0 present.");
+              // [EnforceRange] unsigned long long, with Blink's messages.
+              let millis;
+              try {
+                millis = +args[0];
+              } catch (error) {
+                throw fail(error.message);
+              }
+              if (millis !== millis) throw fail("Value is not of type 'unsigned long long'.");
+              if (millis === Infinity || millis === -Infinity)
+                throw fail("Value is infinite and not of type 'unsigned long long'.");
+              millis = trunc(millis);
+              if (millis < 0 || millis > 9007199254740991)
+                throw fail("Value is outside the 'unsigned long long' value range.");
+              // The official unrefed timer drives a signal that carries Blink's reason.
+              const controller = new backend.abort.AbortController();
+              const timer = apply(backend.abort.AbortSignal.timeout, backend.abort.AbortSignal, [
+                millis,
+              ]);
+              apply(backend.signal.addEventListener.value, timer, [
+                "abort",
+                () => {
+                  // Blink signals the timeout from a task: each signal (the
+                  // source, then each dependent) dispatches from the host.
+                  backend.hostAbort = true;
+                  try {
+                    apply(backend.controller.abort.value, controller, [
+                      new Exception("signal timed out", "TimeoutError"),
+                    ]);
+                  } finally {
+                    backend.hostAbort = false;
+                  }
+                },
+              ]);
+              const front = signalFront(apply(backend.controller.signal.get, controller, []));
+              retainTimeout(front);
+              return front;
+            }
             if (name === "abort" && args[0] !== undefined) authored(args[0]);
             if (name === "abort" && args[0] === undefined)
               args[0] = new Exception("signal is aborted without reason", "AbortError");
             const front = signalFront(
               apply(backend.abort.AbortSignal[name], backend.abort.AbortSignal, args),
             );
-            if (name === "timeout") retainTimeout(front);
             return front;
           } catch (error) {
             throw localError(error);

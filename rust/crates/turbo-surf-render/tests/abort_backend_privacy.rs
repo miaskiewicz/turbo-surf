@@ -37,13 +37,8 @@ async fn abort_any_does_not_expose_raw_signals_through_page_intrinsics() {
     ] {
         assert_eq!(actual[field], control[field], "{field}");
     }
-    assert_eq!(
-        actual["arrayIterator"]["rawExposed"],
-        control["arrayIterator"]["rawExposed"]
-    );
-    // Chrome's array fast path skips an inherited iterator. This wrapper still
-    // calls the public input iterator once; that separate behavior stays visible.
-    assert_eq!(actual["arrayIterator"]["calls"], 1);
+    // Chrome's array fast path skips an inherited iterator, as the wrapper does.
+    assert_eq!(actual["arrayIterator"], control["arrayIterator"]);
     page.close();
 }
 

@@ -1,0 +1,120 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-04T12:25:23.172Z",
+  "fixtures": {
+    "abort-signal-any-probe.js": "2a92adc2509eefe7d265c22a12a516f6c12f0d0672d787f27ec92bbd1d2c2209"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "abort-signal-any-probe.js": {
+      "ownIterator": ["ok", 0],
+      "protoIterator": ["ok", 0],
+      "arrayIteratorNext": ["ok", 0],
+      "subclass": ["ok", 0],
+      "holes": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Failed to convert value to 'AbortSignal'."
+      ],
+      "inheritedIndex": ["ok", 1],
+      "ownGetter": ["ok", 1],
+      "proxy": ["ok", ["Symbol.iterator", "length", "0", "length"]],
+      "set": ["ok", false],
+      "empty": ["ok", false],
+      "abortedInput": ["ok", "why"],
+      "notSignal": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Failed to convert value to 'AbortSignal'."
+      ],
+      "notSignalIterable": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Failed to convert value to 'AbortSignal'."
+      ],
+      "string": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': The provided value cannot be converted to a sequence."
+      ],
+      "noArgument": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': 1 argument required, but only 0 present."
+      ],
+      "null": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': The provided value cannot be converted to a sequence."
+      ],
+      "plainObject": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': The object must have a callable @@iterator property."
+      ],
+      "nonCallableIterator": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': @@iterator must be a callable."
+      ],
+      "iteratorNotObject": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Iterator object must be an object."
+      ],
+      "resultNotObject": [
+        "TypeError",
+        "Failed to execute 'any' on 'AbortSignal': Expected iterator.next() to return an Object."
+      ],
+      "timeoutNegative": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is outside the 'unsigned long long' value range."
+      ],
+      "timeoutNaN": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is not of type 'unsigned long long'."
+      ],
+      "timeoutHuge": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is outside the 'unsigned long long' value range."
+      ],
+      "timeoutString": ["ok", false],
+      "timeoutFraction": ["ok", false],
+      "timeoutInfinity": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Value is infinite and not of type 'unsigned long long'."
+      ],
+      "timeoutBigInt": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Cannot convert a BigInt value to a number"
+      ],
+      "timeoutSymbol": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': Cannot convert a Symbol value to a number"
+      ],
+      "timeoutNoArgument": [
+        "TypeError",
+        "Failed to execute 'timeout' on 'AbortSignal': 1 argument required, but only 0 present."
+      ],
+      "timeoutEvents": [
+        ["timed", true, false, true, true],
+        ["microtask"],
+        ["combined", true],
+        ["reason", "[object DOMException]", "TimeoutError", "signal timed out", 23]
+      ],
+      "timeoutListeners": [
+        ["timed", 0],
+        ["timed", 0, "microtask"],
+        ["timed", 1],
+        ["timed", 1, "microtask"],
+        ["first", 0],
+        ["first", 0, "microtask"],
+        ["first", 1],
+        ["first", 1, "microtask"],
+        ["second", 0],
+        ["second", 0, "microtask"],
+        ["second", 1],
+        ["second", 1, "microtask"]
+      ],
+      "timeoutNestedAbort": ["inner", "after-inner", "inner-microtask"]
+    }
+  }
+}

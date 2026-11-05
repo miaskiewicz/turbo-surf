@@ -93,7 +93,9 @@ use privacy_sandbox::{op_private_token_issuer, op_private_token_query};
 mod form_submission;
 #[path = "script_navigation.rs"]
 mod script_navigation;
-use form_submission::{op_form_data_entries, op_form_data_event, op_form_data_finish};
+use form_submission::{
+    op_form_data_entries, op_form_data_event, op_form_data_finish, op_form_navigation_blocked,
+};
 #[path = "user_activation.rs"]
 mod user_activation;
 #[path = "window_interfaces.rs"]
@@ -7297,6 +7299,7 @@ deno_core::extension!(
         op_form_data_entries,
         op_form_data_finish,
         op_form_data_event,
+        op_form_navigation_blocked,
         op_storage_area,
         op_idb_registry,
         op_idb_checkpoint,
@@ -11687,6 +11690,7 @@ __G.domSig = (() => {
           const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)});
           const request = record.navigationRequest; record.navigationRequest = "";
           const response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init);
+          if (request && ops.op_form_navigation_blocked(request) && record.epoch === epoch) { record.loaded = true; return; }
           if (record.epoch !== epoch || !frameConnected(el)) return;
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;

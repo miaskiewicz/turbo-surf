@@ -58,23 +58,83 @@ fn submit<'s>(
     let Ok(form) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         return;
     };
-    let mut payload: Payload = match deno_core::serde_v8::from_v8(scope, args.get(3)) {
-        Ok(payload) => payload,
-        Err(_) => {
-            fail(
-                scope,
-                "Native form entries require supported text or private File values",
-            );
-            return;
-        }
+    let outcome = match collect(scope, context, form, args.get(3)) {
+        Ok(Some(submission)) => navigate(scope, context, form, submission),
+        Ok(None) => Ok(false),
+        Err(error) => Err(error),
     };
-    payload.entries = match entries(scope, context, args.get(3)) {
-        Ok(entries) => entries,
-        Err(error) => {
-            fail(scope, &error);
-            return;
+    match outcome {
+        Ok(handled) => {
+            if handled {
+                result.set_bool(true);
+            }
         }
+        Err(error) => fail(scope, &error),
+    }
+}
+
+/// A submission's form data set and request shape, before its target is chosen.
+struct Collected {
+    payload: Payload,
+    source: String,
+    action: String,
+    target: String,
+    encoding: &'static encoding_rs::Encoding,
+    files: Vec<Option<form_navigation::FilePart>>,
+}
+
+/// The submission's entries after the mutable `formdata` event. `Ok(None)` when the
+/// event or a capability aborted it (any exception is already pending).
+fn collect<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    form: v8::Local<'s, v8::Object>,
+    raw: v8::Local<'s, v8::Value>,
+) -> Result<Option<Collected>, String> {
+    let mut payload: Payload = deno_core::serde_v8::from_v8(scope, raw).map_err(|_| {
+        String::from("Native form entries require supported text or private File values")
+    })?;
+    payload.entries = entries(scope, context, raw)?;
+    let (source, action) = submission_urls(scope, context, form, &payload)?;
+    let target = if payload.target.is_empty() {
+        crate::browser_env::form_submission_base_target(scope, form).unwrap_or_default()
+    } else {
+        payload.target.clone()
     };
+    let state = JsRuntime::op_state_from(scope);
+    let encoding = document_encoding(
+        &state.borrow(),
+        payload.accept_charset.as_deref().unwrap_or(""),
+    );
+    let Some(snapshot) = dispatch_formdata(scope, context, form, raw, encoding) else {
+        return Ok(None);
+    };
+    payload.entries = entries(scope, context, snapshot)?;
+    // Charset replacement (`_charset_` entries) already preceded the mutable formdata
+    // event, so the binding's charset entry indices are not applied again.
+    let files = if payload.method == "post" && payload.enctype == "multipart/form-data" {
+        file_parts(scope, context, snapshot)?
+    } else {
+        Vec::new()
+    };
+    Ok(Some(Collected {
+        payload,
+        source,
+        action,
+        target,
+        encoding,
+        files,
+    }))
+}
+
+/// The submitting document's URL and the resolved action (the document URL when
+/// the action is empty).
+fn submission_urls(
+    scope: &mut v8::PinScope,
+    context: v8::Local<v8::Context>,
+    form: v8::Local<v8::Object>,
+    payload: &Payload,
+) -> Result<(String, String), String> {
     let state = JsRuntime::op_state_from(scope);
     let source = state.borrow().borrow::<Base>().0.clone();
     let source = window_proxy::location_url(context)
@@ -85,85 +145,70 @@ fn submit<'s>(
         })
         .unwrap_or(source);
     let base = approved_base(scope, context, form, &source);
-    let action = payload.action.as_deref().filter(|value| !value.is_empty());
-    let Some(action) = action.map_or_else(|| Some(source.clone()), |action| resolve(&base, action))
-    else {
-        fail(scope, "Native form action cannot be resolved");
-        return;
-    };
-    let target = if payload.target.is_empty() {
-        crate::browser_env::form_submission_base_target(scope, form).unwrap_or_default()
-    } else {
-        payload.target.clone()
-    };
-    let encoding = document_encoding(
-        &state.borrow(),
-        payload.accept_charset.as_deref().unwrap_or(""),
-    );
-    let Some(data) = submission_form_data(scope, context, args.get(3), encoding.name()) else {
-        return;
-    };
+    let action = match payload.action.as_deref().filter(|value| !value.is_empty()) {
+        Some(action) => resolve(&base, action),
+        None => Some(source.clone()),
+    }
+    .ok_or("Native form action cannot be resolved")?;
+    Ok((source, action))
+}
+
+/// Fires `formdata` over a fresh submission FormData and snapshots its entries.
+fn dispatch_formdata<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    form: v8::Local<'s, v8::Object>,
+    raw: v8::Local<'s, v8::Value>,
+    encoding: &'static encoding_rs::Encoding,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let data = submission_form_data(scope, context, raw, encoding.name())?;
     if !crate::browser_env::dispatch_formdata_event(scope, form, data) {
-        return;
+        return None;
     }
-    let Some(snapshot) = call_capability(scope, context, "snapshotFormValue", &[data]) else {
-        return;
-    };
-    payload.entries = match entries(scope, context, snapshot) {
-        Ok(entries) => entries,
-        Err(error) => {
-            fail(scope, &error);
-            return;
-        }
-    };
-    // Charset replacement (`_charset_` entries) already preceded the mutable formdata
-    // event, so the binding's charset entry indices are not applied again.
-    let files = if payload.method == "post" && payload.enctype == "multipart/form-data" {
-        match file_parts(scope, context, snapshot) {
-            Ok(files) => files,
-            Err(error) => {
-                fail(scope, &error);
-                return;
-            }
-        }
-    } else {
-        Vec::new()
-    };
+    call_capability(scope, context, "snapshotFormValue", &[data])
+}
+
+/// Plans the navigation in the chosen navigable. `Ok(true)` when the submission was
+/// handled (including policy and sandbox blocks, which Chrome drops silently).
+fn navigate<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    form: v8::Local<'s, v8::Object>,
+    submission: Collected,
+) -> Result<bool, String> {
+    let Collected {
+        payload,
+        source,
+        action,
+        target,
+        encoding,
+        files,
+    } = submission;
     if !csp_request_for_context(scope, context, form, &action, "form-action", "") {
-        result.set_bool(true);
-        return;
+        return Ok(true);
     }
-    if url::Url::parse(&action).is_ok_and(|url| url.scheme() == "javascript") {
-        // Chrome 156 runs the URL in the targeted browsing context: this document, a
-        // named child frame, or a new window (`_blank`, unknown names) outside it.
-        if let Some(target) = javascript_target(scope, context, &target) {
-            queue_javascript_url(scope, target, &action);
-        }
-        result.set_bool(true);
-        return;
-    }
-    let Some(navigable) = navigable_target(scope, context, &target) else {
-        fail(
-            scope,
-            "Native form submission to another browsing context is not supported",
-        );
-        return;
+    let javascript = url::Url::parse(&action).is_ok_and(|url| url.scheme() == "javascript");
+    let Some(navigable) = choose_navigable(scope, context, &target) else {
+        // Chrome opens a new window for `_blank` and unknown names. A no-browser
+        // engine has none: a javascript: URL there runs outside this frame tree,
+        // while a navigation cannot be honored.
+        return if javascript {
+            Ok(true)
+        } else {
+            Err("Native form submission to another browsing context is not supported".into())
+        };
     };
-    // A sandboxed document navigates only itself and its descendants unless the
-    // sandbox grants top navigation (Chrome blocks with a console message).
-    if navigable != context && ancestor_of(scope, navigable, context) {
-        // Every sandbox sets the document.domain flag, whatever its tokens.
-        let sandboxed = crate::runtime::sandbox_blocks_top_navigation(context, navigable)
-            || (navigable.get_slot::<FrameParent>().is_some()
-                && context
-                    .get_slot::<FrameSandbox>()
-                    .is_some_and(|flags| flags.document_domain_blocked));
-        if sandboxed {
-            result.set_bool(true);
-            return;
-        }
+    if sandbox_blocks(scope, context, navigable) {
+        return Ok(true);
     }
-    let plan = match form_navigation::prepare(
+    if javascript {
+        // A javascript: URL runs only in a navigable of the initiator's origin.
+        if same_origin(scope, context, navigable) {
+            queue_javascript_url(scope, navigable, &action);
+        }
+        return Ok(true);
+    }
+    let plan = form_navigation::prepare(
         &source,
         &action,
         &payload.method,
@@ -172,23 +217,17 @@ fn submit<'s>(
         &payload.entries,
         &files,
         encoding,
-    ) {
-        Ok(plan) => plan,
-        Err(error) => {
-            fail(scope, &error);
-            return;
-        }
-    };
+    )?;
     if navigable.get_slot::<FrameHost>().is_some() {
-        navigate_child(scope, navigable, &plan, &source);
-        result.set_bool(true);
-        return;
+        navigate_child(scope, context, form, navigable, &plan, &source);
+        return Ok(true);
     }
     let Some(handle) = context.get_slot::<CspHandle>() else {
-        return;
+        return Ok(false);
     };
     let policy = handle.policy.borrow();
     // A later submission replaces the earlier pending navigation before any wire IO.
+    let state = JsRuntime::op_state_from(scope);
     state.borrow_mut().borrow_mut::<Queue>().0 = Some(Pending {
         plan,
         source,
@@ -196,7 +235,37 @@ fn submit<'s>(
         policy: policy.active.clone(),
         referrer_policy: policy.referrer_policy,
     });
-    result.set_bool(true);
+    Ok(true)
+}
+
+/// A sandboxed document navigates only itself and its descendants unless the sandbox
+/// grants top navigation (Chrome blocks with a console message).
+fn sandbox_blocks<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    navigable: v8::Local<'s, v8::Context>,
+) -> bool {
+    if navigable == context || !ancestor_of(scope, navigable, context) {
+        return false;
+    }
+    // Every sandbox sets the document.domain flag, whatever its tokens.
+    crate::runtime::sandbox_blocks_top_navigation(context, navigable)
+        || (navigable.get_slot::<FrameParent>().is_some() && sandboxed(context))
+}
+
+fn sandboxed(context: v8::Local<v8::Context>) -> bool {
+    context
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|flags| flags.document_domain_blocked)
+}
+
+fn same_origin<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    left: v8::Local<'s, v8::Context>,
+    right: v8::Local<'s, v8::Context>,
+) -> bool {
+    let token = left.get_security_token(scope);
+    right.get_security_token(scope).strict_equals(token)
 }
 
 /// Navigating to a `javascript:` URL runs its percent-decoded script in a later task of
@@ -244,30 +313,115 @@ fn queue_javascript_url<'s>(
     schedule.call(scope, receiver, &[task.into()]);
 }
 
-/// The navigable a form submission targets: this document (`""`, `_self`), its
-/// parent or top-level document, or a named child frame of this document. `None`
-/// for a new window (`_blank`, unknown names).
-fn navigable_target<'s>(
+/// The navigable a form submission targets (HTML "rules for choosing a navigable",
+/// as Chrome 156 runs them): this document (`""`, `_self`), its parent or top-level
+/// document, or the first frame answering to the name. `None` for a new window
+/// (`_blank`, other `_` keywords, and names no navigable it may navigate answers to).
+fn choose_navigable<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
     target: &str,
 ) -> Option<v8::Local<'s, v8::Context>> {
-    let parent = |scope: &mut v8::PinScope<'s, '_>, context: v8::Local<'s, v8::Context>| {
-        context
-            .get_slot::<FrameParent>()
-            .and_then(|parent| parent.0.to_local(scope))
-    };
+    if target.is_empty() || target.eq_ignore_ascii_case("_self") {
+        return Some(context);
+    }
     if target.eq_ignore_ascii_case("_parent") {
         return Some(parent(scope, context).unwrap_or(context));
     }
     if target.eq_ignore_ascii_case("_top") {
-        let mut top = context;
-        while let Some(next) = parent(scope, top) {
-            top = next;
-        }
-        return Some(top);
+        return Some(top(scope, context));
     }
-    javascript_target(scope, context, target)
+    if target.starts_with('_') {
+        return None;
+    }
+    named_navigable(scope, context, target)
+}
+
+fn parent<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Option<v8::Local<'s, v8::Context>> {
+    context
+        .get_slot::<FrameParent>()
+        .and_then(|parent| parent.0.to_local(scope))
+}
+
+fn top<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+) -> v8::Local<'s, v8::Context> {
+    while let Some(next) = parent(scope, context) {
+        context = next;
+    }
+    context
+}
+
+/// `root` and its descendant frames in frame-tree order (children in creation
+/// order, which Chrome keeps whatever their DOM order).
+fn frame_tree<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    root: v8::Local<'s, v8::Context>,
+    out: &mut Vec<v8::Local<'s, v8::Context>>,
+) {
+    out.push(root);
+    for child in frame_children(scope, root) {
+        frame_tree(scope, child, out);
+    }
+}
+
+/// Chrome searches the submitter's own subtree first, then the rest of its frame
+/// tree, skipping frames the submitter may not navigate. A frame's name is its
+/// container's `name` attribute. Other top-level windows do not exist here.
+fn named_navigable<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Context>> {
+    let mut candidates = Vec::new();
+    frame_tree(scope, context, &mut candidates);
+    let own = candidates.len();
+    let root = top(scope, context);
+    frame_tree(scope, root, &mut candidates);
+    let (subtree, rest) = candidates.split_at(own);
+    let order: Vec<_> = subtree
+        .iter()
+        .chain(rest.iter().filter(|frame| !subtree.contains(frame)))
+        .copied()
+        .collect();
+    order.into_iter().find(|&candidate| {
+        frame_name(scope, candidate).as_deref() == Some(name)
+            && may_navigate(scope, context, candidate)
+    })
+}
+
+fn frame_name(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) -> Option<String> {
+    let host = context.get_slot::<FrameHost>()?;
+    let host = host.0.to_local(scope)?;
+    crate::browser_env::node_attribute(scope, host, "name")
+}
+
+/// Chrome's navigation right: a document navigates a frame it shares an origin with,
+/// or whose ancestor it shares one with (which covers its own descendants). A
+/// sandboxed document navigates only its descendants; its ancestors are left to
+/// `sandbox_blocks`.
+fn may_navigate<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+) -> bool {
+    if sandboxed(source) {
+        return target == source
+            || ancestor_of(scope, source, target)
+            || ancestor_of(scope, target, source);
+    }
+    let mut frame = Some(target);
+    while let Some(current) = frame {
+        if same_origin(scope, source, current) {
+            return true;
+        }
+        frame = parent(scope, current);
+    }
+    false
 }
 
 fn ancestor_of<'s>(
@@ -275,10 +429,7 @@ fn ancestor_of<'s>(
     ancestor: v8::Local<'s, v8::Context>,
     mut context: v8::Local<'s, v8::Context>,
 ) -> bool {
-    while let Some(parent) = context
-        .get_slot::<FrameParent>()
-        .and_then(|parent| parent.0.to_local(scope))
-    {
+    while let Some(parent) = parent(scope, context) {
         if parent == ancestor {
             return true;
         }
@@ -287,18 +438,29 @@ fn ancestor_of<'s>(
     false
 }
 
+/// A child-frame form navigation in flight: the submitter's `form-action` gate its
+/// fetch carries, and where a refused hop is reported.
+struct FrameFormNavigation {
+    submitter: v8::Weak<v8::Context>,
+    form: v8::Weak<v8::Object>,
+    gate: std::sync::Arc<crate::csp::FormActionGate>,
+    url: String,
+}
+#[derive(Default)]
+struct FrameFormNavigations(std::collections::HashMap<u32, FrameFormNavigation>);
+
 /// Hands a child navigable's form navigation to its parent's frame loader, which
-/// fetches it with navigation semantics (`op_fetch`, destination `iframe`).
+/// fetches it with navigation semantics (`op_fetch`, destination `iframe`) under
+/// the parent's policy narrowed by the submitter's `form-action` gate.
 fn navigate_child<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    submitter: v8::Local<'s, v8::Context>,
+    form: v8::Local<'s, v8::Object>,
     navigable: v8::Local<'s, v8::Context>,
     plan: &form_navigation::Submission,
     source: &str,
 ) {
-    let Some(parent) = navigable
-        .get_slot::<FrameParent>()
-        .and_then(|parent| parent.0.to_local(scope))
-    else {
+    let Some(parent) = parent(scope, navigable) else {
         return;
     };
     let navigator = parent
@@ -310,13 +472,19 @@ fn navigate_child<'s>(
     let (Some(navigator), Some(host)) = (navigator, host) else {
         return;
     };
+    let gated = gate_navigation(scope, submitter, form, parent, &plan.url);
     // POST navigations revalidate (Chrome's `Cache-Control: max-age=0`).
-    let request = serde_json::json!({
+    let mut request = serde_json::json!({
         "method": plan.method,
         "headers": plan.headers,
         "body_bytes": plan.body,
         "cache": if plan.method == "POST" { "no-cache" } else { "default" },
     });
+    if let Some(id) = gated {
+        // Later keys win over the loader's own `csp` (the parent's context).
+        request["csp"] = id.into();
+        request["form_navigation"] = id.into();
+    }
     let (Some(url), Some(source), Some(request)) = (
         v8::String::new(scope, &plan.url),
         v8::String::new(scope, source),
@@ -333,47 +501,107 @@ fn navigate_child<'s>(
     );
 }
 
-/// The context a `javascript:` navigation runs in, or `None` when it leaves this
-/// frame tree (a new window).
-fn javascript_target<'s>(
+/// Registers a policy context for one child-frame form navigation: the parent's
+/// (frame-src, partition, referrer and embedder policy) with the submitter's
+/// `form-action` checked on every hop. Its id replaces the loader's `csp`.
+fn gate_navigation<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    context: v8::Local<'s, v8::Context>,
-    target: &str,
-) -> Option<v8::Local<'s, v8::Context>> {
-    if target.is_empty() || target.eq_ignore_ascii_case("_self") {
-        return Some(context);
+    submitter: v8::Local<'s, v8::Context>,
+    form: v8::Local<'s, v8::Object>,
+    parent: v8::Local<'s, v8::Context>,
+    url: &str,
+) -> Option<u32> {
+    let own = submitter.get_slot::<CspHandle>()?;
+    let embedder = parent.get_slot::<CspHandle>()?;
+    let gate = std::sync::Arc::new(crate::csp::FormActionGate::new(
+        own.policy.borrow().active.clone(),
+    ));
+    let fresh = CspHandle::new(url, &[], "");
+    {
+        let source = embedder.policy.borrow();
+        let mut policy = fresh.policy.borrow_mut();
+        policy.active = source.active.with_form_action(gate.clone());
+        policy.referrer_policy = source.referrer_policy;
+        policy.embedder_policy = source.embedder_policy;
     }
-    if target.starts_with('_') {
-        return None;
+    let handle = CspHandle {
+        partition: embedder.partition.clone(),
+        response_metadata: embedder.response_metadata.clone(),
+        dictionaries: embedder.dictionaries.clone(),
+        ..fresh
+    };
+    let id = handle.id;
+    let navigation = FrameFormNavigation {
+        submitter: v8::Weak::new(scope, submitter),
+        form: v8::Weak::new(scope, form),
+        gate,
+        url: url.to_string(),
+    };
+    let state = JsRuntime::op_state_from(scope);
+    let mut state = state.borrow_mut();
+    state.borrow_mut::<CspContexts>().0.insert(id, handle);
+    if !state.has::<FrameFormNavigations>() {
+        state.put(FrameFormNavigations::default());
     }
-    // A frame's browsing-context name is its container's `name` attribute.
-    let global = context.global(scope);
-    let key = v8::String::new(scope, "document")?;
-    let document = global.get(scope, key.into())?.to_object(scope)?;
-    let key = v8::String::new(scope, "querySelectorAll")?;
-    let query = v8::Local::<v8::Function>::try_from(document.get(scope, key.into())?).ok()?;
-    let selector = v8::String::new(scope, "iframe,frame")?;
-    let containers = query
-        .call(scope, document.into(), &[selector.into()])?
-        .to_object(scope)?;
-    let key = v8::String::new(scope, "length")?;
-    let length = containers.get(scope, key.into())?.uint32_value(scope)?;
-    let get_attribute = v8::String::new(scope, "getAttribute")?;
-    let name = v8::String::new(scope, "name")?;
-    let content_window = v8::String::new(scope, "contentWindow")?;
-    (0..length).find_map(|index| {
-        let container = containers.get_index(scope, index)?.to_object(scope)?;
-        let read = container.get(scope, get_attribute.into())?;
-        let read = v8::Local::<v8::Function>::try_from(read).ok()?;
-        let value = read.call(scope, container.into(), &[name.into()])?;
-        if value.to_rust_string_lossy(scope) != target {
-            return None;
-        }
-        let window = container
-            .get(scope, content_window.into())?
-            .to_object(scope)?;
-        window.get_creation_context(scope)
-    })
+    state
+        .borrow_mut::<FrameFormNavigations>()
+        .0
+        .insert(id, navigation);
+    Some(id)
+}
+
+/// The frame loader's verdict on a fetched child-frame form navigation: `true` when
+/// the submitter's `form-action` refused a hop, so the navigation is cancelled (the
+/// frame keeps its document and fires no load) and the submitter reports the
+/// violation against the navigation's initial URL (Chrome 156). Releases the
+/// navigation's policy context either way.
+#[op2(nofast, reentrant)]
+pub(super) fn op_form_navigation_blocked(
+    scope: &mut v8::PinScope,
+    #[string] request: &str,
+) -> bool {
+    let id = serde_json::from_str::<serde_json::Value>(request)
+        .ok()
+        .and_then(|request| request.get("form_navigation")?.as_u64())
+        .and_then(|id| u32::try_from(id).ok());
+    let Some(id) = id else {
+        return false;
+    };
+    let navigation = {
+        let state = JsRuntime::op_state_from(scope);
+        let mut state = state.borrow_mut();
+        state.borrow_mut::<CspContexts>().0.remove(&id);
+        state
+            .try_borrow_mut::<FrameFormNavigations>()
+            .and_then(|navigations| navigations.0.remove(&id))
+    };
+    let Some(navigation) = navigation else {
+        return false;
+    };
+    let Some(refused) = navigation.gate.refused() else {
+        return false;
+    };
+    if let (Some(submitter), Some(form)) = (
+        navigation.submitter.to_local(scope),
+        navigation.form.to_local(scope),
+    ) {
+        let scope = &mut v8::ContextScope::new(scope, submitter);
+        let blocked = csp_blocked_url(scope, submitter, &navigation.url);
+        let records = navigation
+            .gate
+            .policy()
+            .request_violations("form-action", &refused, "");
+        queue_csp_violations(
+            scope,
+            submitter,
+            form,
+            "form-action",
+            &blocked,
+            "enforce",
+            records,
+        );
+    }
+    true
 }
 
 /// Under `require-trusted-types-for 'script'` a `javascript:` URL's script passes the

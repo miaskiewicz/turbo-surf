@@ -422,9 +422,9 @@ Version-agnostic tests read the expected default from the registry or its fixtur
   in the seed pool.
 - `rust/crates/turbo-surf-render/tests/chrome_identity.rs`: runs the same probe in
   the render tier and compares it with the fixture field by field. The machine-bound
-  `architecture`/`platformVersion` come from the profile. Pinned assertions:
-  - `KNOWN_GAP user-agent-data-interface`
-  - the webdriver collector artifact
+  `architecture`/`platformVersion` come from the profile. The webdriver collector
+  artifact is pinned, and `navigator.userAgentData` is checked as a real
+  `NavigatorUAData` instance, `toJSON()` included.
 - `rust/crates/turbo-surf-render/tests/browser_release.rs`: compares the default
   identity with the fixture, and a pinned 155 identity with the independent
   `browser-release-chrome155.json` control. This is the explicit "older release

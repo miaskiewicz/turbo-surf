@@ -7456,7 +7456,7 @@ const __G = __tsNs;
   Element: 1, ElementInternals: 1, EventCounts: 1, FragmentDirective: 1, HTMLCollection: 1,
   HTMLDocument: 1, HTMLFormControlsCollection: 1, HTMLOptionsCollection: 1, HTMLUnknownElement: 1,
   History: 1, IntersectionObserverEntry: 1, MathMLElement: 1, MediaList: 1, MessagePort: 1,
-  MutationRecord: 1, NamedNodeMap: 1, Navigator: 1, Node: 1, NodeList: 1, NodeRange: 1,
+  MutationRecord: 1, NamedNodeMap: 1, Navigator: 1, NavigatorUAData: 1, Node: 1, NodeList: 1, NodeRange: 1,
   Performance: 1, PerformanceEntry: 1, PerformanceMeasure: 1, PerformanceNavigationTiming: 1,
   PerformanceObserverEntryList: 1, PermissionStatus: 1, Permissions: 1, PermissionsPolicy: 1,
   ProcessingInstruction: 1, RadioNodeList: 1, ReadableByteStreamController: 1,
@@ -7737,25 +7737,54 @@ const __navData = {
   // `probe` example on a real Akamai sensor) read it, and its absence is a tell.
   connection: __pick("connection", { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false }),
   // UA-Client-Hints high-entropy surface, consistent with the UA above.
-  userAgentData: __pick("userAgentData", {
+  // A real NavigatorUAData instance (turbo-surf#164): zero own properties, brand-checked
+  // prototype getters and native getHighEntropyValues/toJSON, as in Chrome 156. A
+  // `userAgentData` fingerprint override supplies the backing values.
+  userAgentData: (() => {
+    const data = __pick("userAgentData", {
     // Rust owns the same major-seeded GREASE generation used by HTTP headers.
-    brands: __brands,
-    mobile: false,
-    platform: __uaPlatform,
-    getHighEntropyValues: async (hints) => {
-      const values = {
-      architecture: __pick("architecture", "arm"), bitness: "64", model: "", wow64: false,
-      platform: __uaPlatform, platformVersion: __pick("platformVersion", "15.0.0"), uaFullVersion: __fullVersion,
-      mobile: false,
       brands: __brands,
-      fullVersionList: __fullBrands,
-      formFactors: ["Desktop"],
-      };
-      const result = {brands:values.brands, mobile:values.mobile, platform:values.platform};
-      for (const key of hints) if (Object.prototype.hasOwnProperty.call(values, key)) result[key] = values[key];
-      return result;
-    },
-  }),
+      mobile: false,
+      platform: __uaPlatform,
+      getHighEntropyValues: async (hints) => {
+        const values = {
+        architecture: __pick("architecture", "arm"), bitness: "64", model: "", wow64: false,
+        platform: __uaPlatform, platformVersion: __pick("platformVersion", "15.0.0"), uaFullVersion: __fullVersion,
+        mobile: false,
+        brands: __brands,
+        fullVersionList: __fullBrands,
+        formFactors: ["Desktop"],
+        };
+        const result = {brands:values.brands, mobile:values.mobile, platform:values.platform};
+        for (const key of hints) if (Object.prototype.hasOwnProperty.call(values, key)) result[key] = values[key];
+        return result;
+      },
+    });
+    const slots = new WeakMap();
+    function NavigatorUAData() { throw new TypeError("Failed to construct 'NavigatorUAData': Illegal constructor"); }
+    const proto = NavigatorUAData.prototype;
+    const slot = (self) => { if (!slots.has(self)) throw new TypeError("Illegal invocation"); return slots.get(self); };
+    for (const name of ["brands", "mobile", "platform"]) {
+      const get = Object.getOwnPropertyDescriptor({get [name]() { return slot(this)[name]; }}, name).get;
+      Object.defineProperty(proto, name, { get, enumerable: true, configurable: true });
+    }
+    const ops2 = {
+      getHighEntropyValues(hints) {
+        try { return Reflect.apply(slot(this).getHighEntropyValues, data, [hints]); }
+        catch (e) { return Promise.reject(e); }
+      },
+      toJSON() { const d = slot(this); return { brands: d.brands, mobile: d.mobile, platform: d.platform }; },
+    };
+    for (const name of ["getHighEntropyValues", "toJSON"])
+      Object.defineProperty(proto, name, { value: ops2[name], writable: true, enumerable: true, configurable: true });
+    delete proto.constructor;
+    Object.defineProperty(proto, "constructor", { value: NavigatorUAData, writable: true, configurable: true });
+    Object.defineProperty(proto, Symbol.toStringTag, { value: "NavigatorUAData", configurable: true });
+    globalThis.NavigatorUAData = NavigatorUAData;
+    const instance = Object.create(proto);
+    slots.set(instance, data);
+    return instance;
+  })(),
   // In-memory clipboard: an app that writeText()s a value (e.g. a copy-link button)
   // and reads it back round-trips, with no OS clipboard.
   clipboard: (() => {
@@ -13111,7 +13140,7 @@ __G.domSig = (() => {
   // private state, subclass new.target and the original exception behavior.
   if (typeof factory === "function") {
     const replacements = new Map();
-    const constructors = ["Date", "DOMParser", "Navigator", "Performance", "Permissions", "PermissionsPolicy", "PermissionStatus", "Storage", "Headers",
+    const constructors = ["Date", "DOMParser", "Navigator", "NavigatorUAData", "Performance", "Permissions", "PermissionsPolicy", "PermissionStatus", "Storage", "Headers",
       "Request", "Response", "URL", "URLSearchParams", "DOMException", "MessageEvent", "ErrorEvent",
       "Event", "SecurityPolicyViolationEvent", "CustomEvent", "SubmitEvent", "FormDataEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",

@@ -131,6 +131,7 @@ async fn user_agent_data_is_a_navigator_ua_data_instance() {
   try { d("brands").get.call({}); } catch (e) { illegal = e.constructor.name + ": " + e.message; }
   let ctor = "";
   try { new NavigatorUAData(); } catch (e) { ctor = e.constructor.name + ": " + e.message; }
+  try { NavigatorUAData(); } catch (e) { ctor += " | " + e.message; }
   return {
     tag: Object.prototype.toString.call(u),
     proto: Object.getPrototypeOf(u) === P,
@@ -159,7 +160,7 @@ async fn user_agent_data_is_a_navigator_ua_data_instance() {
             "getters": ["function true get brands true", "function true get mobile true", "function true get platform true"],
             "methods": ["getHighEntropyValues/1 true true", "toJSON/0 true true"],
             "illegal": "TypeError: Illegal invocation",
-            "ctor": "TypeError: Failed to construct 'NavigatorUAData': Illegal constructor",
+            "ctor": "TypeError: Failed to construct 'NavigatorUAData': Illegal constructor | Illegal constructor",
             "json": "macOS",
         })
     );

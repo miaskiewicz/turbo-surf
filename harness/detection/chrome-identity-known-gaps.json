@@ -60,15 +60,6 @@
     "owner": "render/forms"
   },
   {
-    "id": "user-agent-data-interface",
-    "match": {
-      "area": "js",
-      "path": "/^userAgentData\\.json/"
-    },
-    "reason": "navigator.userAgentData is a plain object rather than a NavigatorUAData instance, so toJSON() and the prototype getters are missing. Values (brands, mobile, platform, every high-entropy hint) match.",
-    "owner": "render/navigator"
-  },
-  {
     "id": "js-engine-version",
     "match": {
       "area": "js",

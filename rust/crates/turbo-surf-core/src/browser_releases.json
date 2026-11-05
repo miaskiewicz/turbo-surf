@@ -217,7 +217,7 @@
         "fixture": "harness/detection/fixtures/chrome-identity-156.json",
         "browser": "Chrome/156.0.8078.80",
         "v8": "15.6.75.27",
-        "collectedAt": "2026-11-05T16:33:00.064Z",
+        "collectedAt": "2026-11-05T17:13:36.054Z",
         "bundleSha256": "d6a91183c237faeb55d8d51a79d85de979e9bb637b38cf2fb92db57286331c7a"
       }
     },

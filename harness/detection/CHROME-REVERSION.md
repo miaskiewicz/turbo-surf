@@ -125,6 +125,7 @@ client→server HTTP/2 frames before Node's own HTTP/2 server sees them.
 | C | `https://127.0.0.1:P3` | H2 — client-hint opt-in origin |
 | CX | `https://localhost:P3` | H2 — Critical-CH origin |
 | D | `http://127.0.0.1:P4` | plain HTTP/1.1 |
+| W | `wss://127.0.0.1:P5` | TLS, HTTP/1.1 only — the page's `wss:` socket (#187) |
 
 Ports, the per-run tier prefix (`/t/<tier>/`) and host names are labelled
 (`<A>`, `<A-host>`, `/t/~/`), so two runs compare structurally. The certificate is
@@ -163,7 +164,12 @@ Each connection records:
 - for H2, the frame preamble (SETTINGS order and values, WINDOW_UPDATE, PRIORITY
   frames), pseudo-header order and the Akamai string
 
-The diff uses the first fresh (non-PSK) connection per origin and ALPN.
+The diff uses the first fresh (non-PSK) connection per origin and ALPN: A over
+h2, B over HTTP/1.1, and W, the battery page's `new WebSocket()` (#187). W answers
+the upgrade with a 101 and a close frame and logs no request, so only its
+ClientHello is compared. Chrome offers only `http/1.1` there, with no ALPS.
+turbo-surf's render tier dials it without the loopback trust anchor, so its
+handshake fails after the ClientHello, which is all the row reads.
 
 ### JS identity (`js`, from chrome-identity-probe.js)
 
@@ -247,7 +253,8 @@ Step 1 does the following, in order. It is safe to re-run.
    sets `defaultMajor` to the newest measured major and writes `browser_releases.json`.
 8. Builds `identity_battery` (`cargo build -p turbo-surf-mcp --example
    identity_battery`), runs the battery against turbo-surf and diffs in parity mode.
-   The parity also gets the `wss:` TLS row (area `wss`, `wss-hello.mjs`): turbo-surf's
+   The battery's own W row (above) compares the page's `wss:` hello. The parity also
+   gets the standalone `wss:` TLS row (area `wss`, `wss-hello.mjs`): turbo-surf's
    wss ClientHello must differ from its https one exactly where Chrome's does (ALPN
    `http/1.1` only, no ALPS), and match Chrome's wss hello apart from deltas its https
    hello shares (class `oracle-https`). Step 3 records its control

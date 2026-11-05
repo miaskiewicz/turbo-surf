@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "collectedAt": "2026-11-05T16:33:00.064Z",
+  "collectedAt": "2026-11-05T17:13:36.054Z",
   "chromeVersion": "Chrome/156.0.8078.80",
   "v8": "15.6.75.27",
   "targetChromeMajor": 156,
@@ -14,9 +14,9 @@
     "registryCompatible": false
   },
   "sources": {
-    "chrome-identity-battery.mjs": "b57c026e3db4cfe5e629b814a4fa5698a2aa2eaa74320e052e23cb30c7b185d2",
+    "chrome-identity-battery.mjs": "ecdf3ab9d6688d448bcea88135b0711b34c81b468246e55af4a168be179c25da",
     "chrome-identity-probe.js": "fae8f16807d6ad34e79acf9843f0146854f02415be1865b81ca9683404f5f5eb",
-    "identity-server.mjs": "183c6be3a70e1282f81e849990aa33fdae17a7b1b631c64539869cf2289bc7f4",
+    "identity-server.mjs": "087bac7120a1195f9899270bf73182e54dd9a5b1085761d1d93e9b7294140d2a",
     "identity-wire.mjs": "7fca1a2e4cfa37af33097e6db5e8dfeba5f2425c6b8473a812e704918da80778"
   },
   "nativeBuild": {
@@ -32,12 +32,12 @@
   "rawRecords": {
     "chrome": {
       "fixture": "fixtures/transport-chrome156-client-hello.bin",
-      "sha256": "8ec1ca943642d0ea862bee845230880b7d2a35143f617d3c1bf190aeb5e15b04",
-      "bytes": 1899
+      "sha256": "d5286cd6f6b501aa7f4b7a419fd8fb71244fbb4f0dc7abcc8c6a9e856d8452bc",
+      "bytes": 1995
     },
     "native": {
       "fixture": "fixtures/transport-native156-client-hello.bin",
-      "sha256": "85ba2316710c07b06532e633845c0bfab5f0d5cd772fff3176d1ca8d05ac3e88",
+      "sha256": "7be95aec850cf269fb53259dc11978da166e5dfa30209c62bad52c385cc1c0b7",
       "bytes": 1899
     }
   },
@@ -357,8 +357,8 @@
   },
   "differences": [],
   "identityParity": {
-    "known-gap": 38,
-    "environment": 11,
+    "known-gap": 39,
+    "environment": 12,
     "collector": 1
   }
 }

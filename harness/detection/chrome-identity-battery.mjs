@@ -94,6 +94,7 @@ function batteryPage(tier, origins) {
   await step(() => fetch("${cross}/fetch-preflight", { method: "PUT", body: "{}", headers: { "content-type": "application/json", "x-battery": "1" } }).then((r) => r.text()));
   await step(() => new Promise((done) => { const x = new XMLHttpRequest(); x.open("GET", "${base}/xhr"); x.onloadend = done; x.send(); }));
   await step(() => document.getElementById("form").submit());
+  await step(() => new Promise((done) => { const socket = new WebSocket("${origins.W}${base}/ws"); socket.onclose = done; setTimeout(done, 3000); }));
   if (document.readyState !== "complete") await new Promise((done) => addEventListener("load", done));
   window[Symbol.for("batteryDone")] = true;
 })();
@@ -451,9 +452,10 @@ export async function collect({ chrome, native }) {
       .filter((entry) => run.tiers.includes(entry.tier) || entry.path === "/favicon.ico")
       .map((entry) => normalizeRequest(entry, origins));
     const used = new Set(requests.map((entry) => entry.connection));
+    // W connections carry no logged request: the page's wss: socket (#187).
     const connections = servers
       .connectionRecords()
-      .filter((record) => used.has(record.id))
+      .filter((record) => used.has(record.id) || record.origin === "W")
       .map(({ raw, ...record }) => ({
         ...record,
         hello: record.hello && { ...record.hello, rawBase64: raw },

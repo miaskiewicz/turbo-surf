@@ -5898,8 +5898,7 @@ dependencies = [
 [[package]]
 name = "turbo-dom-v8"
 version = "150.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e2d9f01e54a3ce5574b9a1e21cfe74edbca8c85226b0f14098e97302811cc68"
+source = "git+https://github.com/miaskiewicz/turbo-dom.git?rev=79ae001de8e5518a730912e89c7a921fabd5984f#79ae001de8e5518a730912e89c7a921fabd5984f"
 dependencies = [
  "bindgen 0.72.1",
  "bitflags 2.13.0",

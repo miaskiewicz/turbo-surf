@@ -2546,5 +2546,13 @@
         }
       }
     }
+  },
+  "staleSourceHashes": {
+    "note": "The recorded hashes of these collector sources predate their #154 complexity refactor (same behaviour, new bytes). This receipt was not re-run (no Google traffic from the refactor); it documents the sources as measured, not the current files.",
+    "current": {
+      "interface-trace.js": "5c23468a7c66ec57b1374144a75cf8e81ef334ae7337730955b61024e4cca0c2",
+      "input-state.js": "e3f8ef79827c28c11e38aadeb79c6017878c38b574370ded181a968903f9c15a",
+      "chrome-cdp-trace.mjs": "cc70521202b9d9f0806c75b8803a4a31c2443469ac51bb11a87b0bf326b1054e"
+    }
   }
 }

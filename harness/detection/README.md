@@ -124,6 +124,20 @@ alongside the exact executable hash. The stock workspace engine remains V8150;
 the [experimental155 SDK](./engine-155/README.md) uses its separate build helper
 and `.native-builds/sdk155-8059.79/target/release/examples/detection_trace`.
 
+**Oracles (0.8.0).** There are two frozen Chrome 156 builds, both run localhost-only with
+`--use-mock-keychain --password-store=basic`; pass one through `TURBO_SURF_CHROME_PATH`
+(or `--chrome`):
+- **Headless controls:** the Chrome for Testing headless shell `156.0.8078.47`
+  (`~/.cache/turbo-consolidation/chrome156/chrome-headless-shell-mac-arm64/chrome-headless-shell`).
+- **Headed controls and the identity battery:** branded Google Chrome `156.0.8078.80`
+  (`~/.cache/turbo-consolidation/chrome156-80/Google Chrome.app`, which
+  `reversion-chrome.mjs` freezes to `.native-builds/oracles/chrome156-8078.80`). The headed
+  controls are CSP reporting, storage access, live-text, iframe and leading-space geometry
+  (DPR 2). They use it because they need a normal browser's fonts, device pixel ratio,
+  Reporting-API delivery or storage-access grant.
+
+See [CHROME-REVERSION.md §10](./CHROME-REVERSION.md).
+
 Chrome must be installed. The default oracle uses raw CDP and Node 22 or newer (its native WebSocket API); Playwright/Patchright are optional legacy collectors. Missing binaries/dependencies and launch failures are
 reported; live work is skipped unless `--live` is explicit. A sandbox that blocks
 Chrome launch, DNS, localhost binding or Metal access must allow those operations

@@ -1,6 +1,7 @@
 //! Host-injected render hooks (installed by the crates that own fonts, raster and GPU:
 //! mcp/napi). Process-global, so this binary installs them once before any page runs:
-//! canvas `measureText` widths come from the text measurer, `toDataURL` PNG bytes and
+//! canvas `measureText` stays on the page's fonts, never the text measurer (turbo-surf#133;
+//! the measurer knows no @font-face face and returns widths only), `toDataURL` PNG bytes and
 //! `getImageData` pixels from the rasterizers, and the WebGL unmasked identity from the
 //! adapter metadata.
 use std::sync::Once;
@@ -51,7 +52,7 @@ async fn canvas_and_webgl_use_the_installed_host_hooks() {
   const gl=document.createElement('canvas').getContext('webgl');
   const info=gl&&gl.getExtension('WEBGL_debug_renderer_info');
   const identity=info?[gl.getParameter(info.UNMASKED_VENDOR_WEBGL),gl.getParameter(info.UNMASKED_RENDERER_WEBGL)]:null;
-  return {wide,plain,pixel:pixel.slice(0,2).concat(pixel[3]),url,identity};
+  return {hostWidths:wide===50||plain===40,pixel:pixel.slice(0,2).concat(pixel[3]),url,identity};
 })()"#,
         )
         .await
@@ -62,8 +63,7 @@ async fn canvas_and_webgl_use_the_installed_host_hooks() {
     assert_eq!(
         value,
         serde_json::json!({
-            "wide": 50,
-            "plain": 40,
+            "hostWidths": false,
             "pixel": [2, 1, 255],
             "url": format!("data:image/png;base64,{png}"),
             "identity": ["Host Vendor", "Host Renderer"],

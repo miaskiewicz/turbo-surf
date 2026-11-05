@@ -4316,9 +4316,8 @@ mod tests {
     }
 
     // Canvas 2D surface fidelity: the context class-tags as CanvasRenderingContext2D (was
-    // "[object DOMImplementation]"), exposes getContextAttributes, and measureText routes width
-    // through the real system-font measurer (matches a real browser; the vendored width was a
-    // synthetic approximation — a font-detection tell).
+    // "[object DOMImplementation]"), exposes getContextAttributes, and measureText measures the
+    // real system face (the binding's TextMetrics over the registered fonts, turbo-surf#133).
     #[tokio::test]
     async fn canvas2d_surface_matches_browser() {
         let _s = Session::new(); // installs set_measure_fn

@@ -559,3 +559,33 @@ the load event, frames included, with Chrome's same-origin `Origin`).
 Timings: the battery takes about 12 s for Chrome and 8 s for turbo-surf. The first
 full run took 52 s with a warm build. A re-run that recompiled `identity_battery`
 took 2.5 min. Two consecutive re-runs gave zero same-build drift.
+
+## 10. Re-version 156.0.8078.47 → 156.0.8078.80 (0.8.0, #154)
+
+The 0.8.0 oracle is branded Google Chrome `156.0.8078.80` (V8 15.6.75.27), copied so it
+cannot auto-update to `~/.cache/turbo-consolidation/chrome156-80/Google Chrome.app` and
+frozen by `reversion-chrome.mjs` to `.native-builds/oracles/chrome156-8078.80` (bundle
+`d6a91183…`). It was run with `--use-mock-keychain --password-store=basic`, localhost only.
+
+- **Identity.** `reversion-chrome.mjs --chrome <that app> --skip-engine` re-recorded
+  `fixtures/chrome-identity-156.json` and `TRANSPORT-156.json`, after the
+  `identity-server.mjs` / `identity-wire.mjs` refactor changed the collector hashes.
+  `browser_releases.json` now defaults to `156.0.8078.80`. The full version and the
+  evidence block are the only registry changes; header orders, Accept and Priority are
+  unchanged. Native parity: 38 known gaps, 11 environment, 1 collector
+  (`navigator.webdriver`), 0 tells.
+- **Headed controls.** The controls that need a normal headed browser were
+  re-recorded on the same frozen .80, with the original window size and device pixel
+  ratio: csp-report-endpoint (http and https), storage, live-text-geometry,
+  native-iframe-layout and leading-space-geometry (`--force-device-scale-factor=2`,
+  `headed-direct-cdp`). Their data matches the Chrome 155 / 156.0.8078.4 controls they
+  replace. The only differences are the `sec-ch-ua` GREASE brand, which is version noise,
+  and the order and age of Reporting-API deliveries.
+- **Headless controls** stay on the Chrome for Testing headless shell `156.0.8078.47`
+  (`~/.cache/turbo-consolidation/chrome156/chrome-headless-shell-mac-arm64`). The headless
+  shell differs from headed Chrome:
+  - no Reporting-API delivery over HTTPS
+  - `requestStorageAccess` rejects
+  - a different default serif font
+  - device pixel ratio 1
+  - headless UA-CH headers

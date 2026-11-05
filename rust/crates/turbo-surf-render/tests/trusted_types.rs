@@ -35,11 +35,14 @@ async fn compare_collector(cases: &str, probe: &str, control: &str, collector: &
         );
     }
     assert_eq!(oracle["errors"], serde_json::json!([]));
+    // trusted-types-chrome155.json was re-recorded on the frozen Chrome 156 headless shell (#154).
     assert!(matches!(
-        oracle["browser"].as_str(),
-        Some("Chrome/155.0.8059.79" | "Chrome/155.0.8059.80")
+        (oracle["browser"].as_str(), oracle["v8"].as_str()),
+        (
+            Some("Chrome/155.0.8059.79" | "Chrome/155.0.8059.80"),
+            Some("15.5.35.23")
+        ) | (Some("HeadlessChrome/156.0.8078.47"), Some("15.6.75.19"))
     ));
-    assert_eq!(oracle["v8"], "15.5.35.23");
     let cases: Value = serde_json::from_str(cases).unwrap();
     for case in cases.as_array().unwrap() {
         let expected = oracle["result"]

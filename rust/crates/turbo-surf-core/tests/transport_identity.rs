@@ -244,11 +244,17 @@ async fn critical_ch_restarts_once_with_the_accepted_hints_in_chromes_order() {
             get(&chrome[1], hint).is_some()
         );
     }
-    // The oracle is headless-shell, whose product brand is `HeadlessChrome`.
+    // The oracle is headless-shell 156.0.8078.47, whose product brand is `HeadlessChrome`;
+    // surf reports the registry's default full version instead (156.0.8078.80 since #154).
     assert_eq!(
         get(&sent[1], "sec-ch-ua-full-version-list"),
         get(&chrome[1], "sec-ch-ua-full-version-list")
-            .map(|value| value.replace("HeadlessChrome", "Google Chrome"))
+            .map(
+                |value| value.replace("HeadlessChrome", "Google Chrome").replace(
+                    "156.0.8078.47",
+                    turbo_surf_core::browser::default_release().full_version
+                )
+            )
             .as_deref()
     );
     // The restart's relative order of the names both sides send.

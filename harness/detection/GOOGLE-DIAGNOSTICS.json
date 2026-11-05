@@ -155,5 +155,11 @@
       },
       "networkSha256": "48afc21be221bc986197b2c8ca43c5462bb04f1418b8c6d16bbd4bfad079e4ba"
     }
-  ]
+  ],
+  "staleSourceHashes": {
+    "note": "The recorded hashes of these collector sources predate their #154 complexity refactor (same behaviour, new bytes). This receipt was not re-run (no Google traffic from the refactor); it documents the sources as measured, not the current files.",
+    "current": {
+      "interface-trace.js": "5c23468a7c66ec57b1374144a75cf8e81ef334ae7337730955b61024e4cca0c2"
+    }
+  }
 }

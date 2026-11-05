@@ -66,6 +66,15 @@ jobs:
       - name: Test
         run: npm test
 
+      # The rustls backend (`--no-default-features`, README) is a documented build; the
+      # default build never compiles its cfg paths (#189). transport_identity is left
+      # out: it asserts Chrome's HTTP/1 wire, which only the impersonate backend sends.
+      - name: rustls backend (turbo-surf-core --no-default-features)
+        working-directory: rust
+        run: |
+          cargo clippy -p turbo-surf-core --no-default-features --all-targets -- -D warnings
+          cargo test -p turbo-surf-core --no-default-features --lib --test websocket
+
   # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine) ----
   # Sharded: one instrumented link of every workspace test binary exhausts the ubuntu runner
   # (rust-lld bus error, run 40788261228), so each shard runs tarpaulin over its crates' tests

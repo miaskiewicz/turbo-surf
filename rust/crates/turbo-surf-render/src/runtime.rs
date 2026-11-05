@@ -12504,39 +12504,10 @@ __G.domSig = (() => {
               return { alpha: true, colorSpace: "srgb", colorType: "unorm8", desynchronized: false, toneMapping: { mode: "standard" }, willReadFrequently: false };
             } }).getContextAttributes, "getContextAttributes", 0);
           }
-          // measureText: the binding's width was a synthetic approximation (a font-metrics tell —
-          // font-detection fingerprints compare measureText width across families). Route the WIDTH
-          // through the host's real system-font measurer (op_measure_text), which measures the same
-          // CoreText face Chrome does → width matches Chrome exactly. The bounding-box fields are
-          // derived from the size with Arial-typical ratios (the measurer returns width+height only;
-          // real per-glyph boxes would need a richer measurer — width is the load-bearing metric).
-          const measureOp = ops && ops.op_measure_text;
-          if (typeof ctx.measureText === "function" && measureOp) {
-            const origMT = ctx.measureText;
-            ctx.measureText = nativize(({ measureText(text) {
-              try {
-                const font = String(this.font || "10px sans-serif");
-                const m = /(\d+(?:\.\d+)?)px\s+(.+)$/.exec(font);
-                const size = m ? parseFloat(m[1]) : 10;
-                const fam = m ? m[2].replace(/^['"]|['"]$/g, "").split(",")[0].trim() : "sans-serif";
-                const r = JSON.parse(measureOp(String(text == null ? "" : text), fam, size));
-                if (r && r.length === 2) {
-                  const w = r[0];
-                  const round2 = (n) => Math.round(n * 100) / 100;
-                  const asc = round2(size * 0.875), desc = round2(size * 0.212);
-                  return {
-                    width: w,
-                    actualBoundingBoxLeft: 0, actualBoundingBoxRight: w,
-                    actualBoundingBoxAscent: round2(size * 0.72), actualBoundingBoxDescent: round2(size * 0.16),
-                    fontBoundingBoxAscent: asc, fontBoundingBoxDescent: desc,
-                    emHeightAscent: asc, emHeightDescent: desc,
-                    hangingBaseline: round2(asc * 0.8), alphabeticBaseline: 0, ideographicBaseline: -desc,
-                  };
-                }
-              } catch (e) {}
-              return origMT.call(this, text);
-            } }).measureText, "measureText", 1);
-          }
+          // measureText stays the binding's (turbo-surf#133): a branded TextMetrics from the glyph
+          // outlines and font metrics of the faces `set_canvas_fonts` registers (the system faces
+          // live layout uses plus the document's @font-face faces). The host measurer knows
+          // system faces only and widths alone, so routing through it was a metrics tell.
         }
         if (k === "2d" && Object.prototype.hasOwnProperty.call(ctx, "getImageData")) {
           const origGID = ctx.getImageData;

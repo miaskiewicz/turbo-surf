@@ -1,9 +1,12 @@
 {
-  "collectedAt": "2026-10-14T01:15:06.848Z",
-  "browserVersion": "Chrome/155.0.8059.79",
-  "browserV8Version": "15.5.35.23",
-  "effectiveExtensionFlags": ["--disable-extensions"],
-  "collectorSha256": "60ab6f00c9039be2c9d14371befe9194cadc38177eeb03fdeb35757635d51813",
+  "collectedAt": "2026-11-05T16:19:43.873Z",
+  "browserVersion": "HeadlessChrome/156.0.8078.47",
+  "browserV8Version": "15.6.75.19",
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
+  ],
+  "collectorSha256": "dd95bd959f852dd626aa3a0a16c59363d70c20250a910e4e777781e0bc215b7d",
   "result": {
     "documentAppend": ["HierarchyRequestError", false, null, 0, true, true, 0, 0, null],
     "documentPrepend": ["HierarchyRequestError", false, null, 0, true, true, 0, 0, null],

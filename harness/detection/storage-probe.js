@@ -9,17 +9,24 @@
     }
   };
   const storage = localStorage;
-  storage.clear();
-  const quota = [];
-  for (const length of [2621439, 2621440, 5242879, 5242880]) {
-    storage.clear();
-    try {
-      storage.setItem("q", "x".repeat(length));
-      quota.push({ length, result: "stored" });
-    } catch (e) {
-      quota.push({ length, result: e.name });
+  const measureQuota = () => {
+    const rows = [];
+    for (const length of [2621439, 2621440, 5242879, 5242880]) {
+      storage.clear();
+      try {
+        storage.setItem("q", "x".repeat(length));
+        rows.push({ length, result: "stored" });
+      } catch (e) {
+        rows.push({ length, result: e.name });
+      }
     }
-  }
+    return rows;
+  };
+  const setAttributes = (frame, attributes) => {
+    for (const [name, value] of Object.entries(attributes)) frame.setAttribute(name, value);
+  };
+  storage.clear();
+  const quota = measureQuota();
   storage.clear();
   storage.setItem("q", "before");
   const quotaAtomic = {
@@ -144,7 +151,7 @@
     { allow: "storage-access 'none'" },
   ]) {
     const frame = document.createElement("iframe");
-    for (const [name, value] of Object.entries(attributes)) frame.setAttribute(name, value);
+    setAttributes(frame, attributes);
     frame.srcdoc = `<script>(async()=>{const result={};for(const name of ['hasStorageAccess','requestStorageAccess']){try {const value=await document[name]();result[name]=value===undefined?'resolved':value;}catch(e){result[name]=e.name;}}parent.postMessage(result,'*');})()</script>`;
     const result = await new Promise((resolve) => {
       const listener = (event) => {

@@ -1,8 +1,8 @@
 {
-  "browser": "Chrome/155.0.8059.80",
-  "v8": "15.5.35.23",
-  "probeSha256": "22d791af9cc6d30f1405d2384fbb712b2ac33bbc9e271e32f0ea1a6a04e188df",
-  "collectorSha256": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
+  "browser": "Chrome/156.0.8078.80",
+  "v8": "15.6.75.27",
+  "probeSha256": "fa20a11caeac384fadac668e8048d42d5ddf45d7ac51b82bfebbce6b176ab7d5",
+  "collectorSha256": "cc70521202b9d9f0806c75b8803a4a31c2443469ac51bb11a87b0bf326b1054e",
   "errors": [],
   "result": [
     {

@@ -7,19 +7,22 @@ const source = (name) => readFileSync(new URL(`./${name}`, import.meta.url));
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 test("native Trusted Types controls pin independent case, probe and collector sources", () => {
-  for (const [name, collector, count] of [
-    ["trusted-types", "trusted-types-chrome", 15],
-    ["trusted-types-sinks", "trusted-types-chrome", 4],
-    ["trusted-types-code", "trusted-types-code-chrome", 11],
-    ["trusted-types-lifecycle", "trusted-types-lifecycle-chrome", 1],
+  // trusted-types was re-recorded on the frozen Chrome 156 headless shell after the #154 refactor.
+  const chrome155 = ["Chrome/155.0.8059.80", "15.5.35.23"];
+  const chrome156 = ["HeadlessChrome/156.0.8078.47", "15.6.75.19"];
+  for (const [name, collector, count, [browser, v8]] of [
+    ["trusted-types", "trusted-types-chrome", 15, chrome156],
+    ["trusted-types-sinks", "trusted-types-chrome", 4, chrome155],
+    ["trusted-types-code", "trusted-types-code-chrome", 11, chrome155],
+    ["trusted-types-lifecycle", "trusted-types-lifecycle-chrome", 1, chrome155],
   ]) {
     const control = JSON.parse(source(`${name}-chrome155.json`));
     const cases = JSON.parse(source(`${name}-cases.json`));
     assert.equal(control.casesSha256, digest(source(`${name}-cases.json`)), name);
     assert.equal(control.probeSha256, digest(source(`${name}-probe.js`)), name);
     assert.equal(control.collectorSha256, digest(source(`${collector}.mjs`)), name);
-    assert.equal(control.browser, "Chrome/155.0.8059.80");
-    assert.equal(control.v8, "15.5.35.23");
+    assert.equal(control.browser, browser);
+    assert.equal(control.v8, v8);
     assert.deepEqual(control.errors, []);
     assert.equal(cases.length, count);
     assert.equal(control.result.length, count);

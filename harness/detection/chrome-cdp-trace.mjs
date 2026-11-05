@@ -138,79 +138,91 @@ async function debugPort() {
   await new Promise((done, fail) => server.close((error) => (error ? fail(error) : done())));
   return port;
 }
+const interfaceSnapshotExpression = `globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null`;
+async function mainDocumentIdentity() {
+  const { frameTree } = await call("Page.getFrameTree");
+  const frame = frameTree.frame;
+  if (mainFrame !== frame.id)
+    mainNavigation.setScope({ sessionId: mainSession, frameId: frame.id });
+  mainFrame = frame.id;
+  frameRows.set(frame.id, frame);
+  return `${mainSession}/${frame.id}/${frame.loaderId}`;
+}
+const documentStateExpression = () =>
+  `JSON.stringify({url:location.href,readyState:document.readyState,...(${documentSnapshotState.toString()})(document,${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}),browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const captureInputState=${inputStateSource}\nreturn captureInputState(document,${JSON.stringify(config.dismissSelector || "#W0wltc")});})(),environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`;
+// The CDP document response for the main frame's current loader, when CDP saw one.
+function mainDocumentResponse() {
+  const loaderId = frameRows.get(mainFrame)?.loaderId;
+  return loaderId
+    ? responses.findLast(
+        (response) =>
+          response.sessionId === mainSession &&
+          response.frameId === mainFrame &&
+          response.loaderId === loaderId &&
+          response.type === "document",
+      )
+    : null;
+}
+function applyDocumentStatus(row) {
+  const documentResponse = mainDocumentResponse();
+  row.status = documentResponse?.status ?? null;
+  row.statusSource = documentResponse ? "cdp-main-document-loader" : "unavailable";
+  row.statusDocumentUrl = documentResponse?.url ?? null;
+}
+async function childFrameInterfaces() {
+  const childFrames = [];
+  if (!instrumented) return childFrames;
+  for (const [frameId, { contextId, sessionId }] of contexts) {
+    if (frameId === mainFrame) continue;
+    try {
+      childFrames.push({
+        url: frameRows.get(frameId)?.url,
+        interfaces: await evaluate(interfaceSnapshotExpression, contextId, sessionId),
+      });
+    } catch (error) {
+      childFrames.push({ url: frameRows.get(frameId)?.url, error: String(error) });
+    }
+  }
+  return childFrames;
+}
+const workerTypes = ["worker", "shared_worker", "service_worker"];
+async function workerInterfaces() {
+  const workers = [];
+  if (!instrumented) return workers;
+  for (const [sessionId, target] of targetSessions) {
+    if (!workerTypes.includes(target.type)) continue;
+    try {
+      workers.push({
+        type: target.type,
+        url: target.url,
+        interfaces: await evaluate(interfaceSnapshotExpression, undefined, sessionId),
+      });
+    } catch (error) {
+      workers.push({ type: target.type, url: target.url, error: String(error) });
+    }
+  }
+  return workers;
+}
+async function documentSnapshot(phase) {
+  const state = await evaluate(documentStateExpression());
+  const row = JSON.parse(state),
+    html = row.html;
+  delete row.html;
+  applyDocumentStatus(row);
+  save(phase + ".html", html);
+  const cookies = (await call("Network.getCookies")).cookies.map(({ name, domain }) => ({
+    name,
+    domain,
+  }));
+  const childFrames = await childFrameInterfaces();
+  const workers = await workerInterfaces();
+  return { phase, ...row, bytes: Buffer.byteLength(html), cookies, childFrames, workers };
+}
 async function snapshot(phase) {
   const mainNavigationBeforeSnapshot = mainNavigation.snapshot();
-  const identity = async () => {
-    const { frameTree } = await call("Page.getFrameTree");
-    const frame = frameTree.frame;
-    if (mainFrame !== frame.id)
-      mainNavigation.setScope({ sessionId: mainSession, frameId: frame.id });
-    mainFrame = frame.id;
-    frameRows.set(frame.id, frame);
-    return `${mainSession}/${frame.id}/${frame.loaderId}`;
-  };
-  const { value, retries } = await captureStableDocument(identity, async () => {
-    const state = await evaluate(
-      `JSON.stringify({url:location.href,readyState:document.readyState,...(${documentSnapshotState.toString()})(document,${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}),browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const captureInputState=${inputStateSource}\nreturn captureInputState(document,${JSON.stringify(config.dismissSelector || "#W0wltc")});})(),environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`,
-    );
-    const row = JSON.parse(state),
-      html = row.html;
-    delete row.html;
-    const loaderId = frameRows.get(mainFrame)?.loaderId;
-    const documentResponse = loaderId
-      ? responses.findLast(
-          (response) =>
-            response.sessionId === mainSession &&
-            response.frameId === mainFrame &&
-            response.loaderId === loaderId &&
-            response.type === "document",
-        )
-      : null;
-    row.status = documentResponse?.status ?? null;
-    row.statusSource = documentResponse ? "cdp-main-document-loader" : "unavailable";
-    row.statusDocumentUrl = documentResponse?.url ?? null;
-    save(phase + ".html", html);
-    const cookies = (await call("Network.getCookies")).cookies.map(({ name, domain }) => ({
-      name,
-      domain,
-    }));
-    const childFrames = [];
-    if (instrumented)
-      for (const [frameId, { contextId, sessionId }] of contexts)
-        if (frameId !== mainFrame) {
-          try {
-            childFrames.push({
-              url: frameRows.get(frameId)?.url,
-              interfaces: await evaluate(
-                `globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null`,
-                contextId,
-                sessionId,
-              ),
-            });
-          } catch (error) {
-            childFrames.push({ url: frameRows.get(frameId)?.url, error: String(error) });
-          }
-        }
-    const workers = [];
-    if (instrumented)
-      for (const [sessionId, target] of targetSessions) {
-        if (!["worker", "shared_worker", "service_worker"].includes(target.type)) continue;
-        try {
-          workers.push({
-            type: target.type,
-            url: target.url,
-            interfaces: await evaluate(
-              `globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null`,
-              undefined,
-              sessionId,
-            ),
-          });
-        } catch (error) {
-          workers.push({ type: target.type, url: target.url, error: String(error) });
-        }
-      }
-    return { phase, ...row, bytes: Buffer.byteLength(html), cookies, childFrames, workers };
-  });
+  const { value, retries } = await captureStableDocument(mainDocumentIdentity, () =>
+    documentSnapshot(phase),
+  );
   value.navigationSnapshotRetries = retries;
   value.mainNavigationBeforeSnapshot = mainNavigationBeforeSnapshot;
   pages.push(value);
@@ -245,10 +257,7 @@ async function key(key, type, text) {
     ...(text ? { text, unmodifiedText: text } : {}),
   });
 }
-async function capture() {
-  effectiveExtensionFlags = chromeExtensionArgs(config);
-  if (!existsSync(executable) || typeof WebSocket === "undefined")
-    throw new Error("Installed Chrome and Node.js 22+ are required");
+async function launchChrome() {
   const port = await debugPort();
   chrome = spawn(
     executable,
@@ -279,16 +288,32 @@ async function capture() {
       throw new Error(`Chrome exited during startup (${chrome.exitCode})`);
     return chromeStderr.includes(`DevTools listening on ws://127.0.0.1:${port}/`);
   }, 30000);
-  stage = "connect";
-  const version = await (
-    await fetch(`http://127.0.0.1:${port}/json/version`, { signal: lifecycle.signal })
-  ).json();
+  return port;
+}
+const devtoolsJson = async (port, path) =>
+  (await fetch(`http://127.0.0.1:${port}${path}`, { signal: lifecycle.signal })).json();
+function dispatchProtocolEvent(data) {
+  if (responseNetworkEvents.some((event) => data.method === `Network.${event}`))
+    protocolNetwork.push({
+      event: data.method.slice(8),
+      timeMs: Date.now(),
+      sessionId: data.sessionId,
+      params: data.params,
+    });
+  for (const callback of handlers.get(data.method) || []) {
+    try {
+      callback(data.params, data.sessionId);
+    } catch (error) {
+      collectorError(String(error));
+    }
+  }
+}
+async function connectBrowser(port) {
+  const version = await devtoolsJson(port, "/json/version");
   browserVersion = version.Browser;
   browserV8Version = version["V8-Version"];
-  const tabs = await (
-    await fetch(`http://127.0.0.1:${port}/json/list`, { signal: lifecycle.signal })
-  ).json();
-  let tab = tabs.find((tab) => tab.type === "page");
+  const tabs = await devtoolsJson(port, "/json/list");
+  const tab = tabs.find((tab) => tab.type === "page");
   socket = new WebSocket(version.webSocketDebuggerUrl);
   await lifecycle.race(
     new Promise((done, fail) => {
@@ -297,146 +322,155 @@ async function capture() {
       socket.onclose = () => fail(new Error("Chrome websocket closed during startup"));
     }),
   );
-  connection = cdpConnection(socket, (data) => {
-    if (responseNetworkEvents.some((event) => data.method === `Network.${event}`))
-      protocolNetwork.push({
-        event: data.method.slice(8),
-        timeMs: Date.now(),
-        sessionId: data.sessionId,
-        params: data.params,
-      });
-    for (const callback of handlers.get(data.method) || []) {
-      try {
-        callback(data.params, data.sessionId);
-      } catch (error) {
-        collectorError(String(error));
-      }
-    }
-  });
+  connection = cdpConnection(socket, dispatchProtocolEvent);
+  return tab;
+}
+function forgetContexts(matches) {
+  for (const [frame, entry] of contexts) if (matches(entry)) contexts.delete(frame);
+}
+function registerRuntimeHandlers() {
   on("Runtime.executionContextCreated", ({ context }, sessionId) => {
     if (context.auxData?.isDefault && context.auxData.frameId)
       contexts.set(context.auxData.frameId, { contextId: context.id, sessionId });
   });
-  on("Runtime.executionContextDestroyed", ({ executionContextId }, sessionId) => {
-    for (const [frame, entry] of contexts)
-      if (entry.contextId === executionContextId && entry.sessionId === sessionId)
-        contexts.delete(frame);
-  });
-  on("Runtime.executionContextsCleared", (_, sessionId) => {
-    for (const [frame, entry] of contexts)
-      if (entry.sessionId === sessionId) contexts.delete(frame);
-  });
+  on("Runtime.executionContextDestroyed", ({ executionContextId }, sessionId) =>
+    forgetContexts(
+      (entry) => entry.contextId === executionContextId && entry.sessionId === sessionId,
+    ),
+  );
+  on("Runtime.executionContextsCleared", (_, sessionId) =>
+    forgetContexts((entry) => entry.sessionId === sessionId),
+  );
   on("Runtime.consoleAPICalled", (params, sessionId) => consoles.push({ sessionId, ...params }));
   on("Runtime.exceptionThrown", ({ exceptionDetails }) =>
     errors.push(exceptionDetails.exception?.description || exceptionDetails.text),
   );
+}
+function onFrameNavigated({ frame }, sessionId) {
+  if (!frame.parentId && sessionId === mainSession) {
+    if (mainFrame !== frame.id)
+      mainNavigation.setScope({ sessionId: mainSession, frameId: frame.id });
+    mainFrame = frame.id;
+  }
+  mainNavigation.commit(frame, sessionId);
+  frameRows.set(frame.id, frame);
+  frames.push({
+    url: frame.url,
+    name: frame.name || "",
+    main: frame.id === mainFrame,
+    sessionId,
+  });
+}
+function registerPageHandlers() {
   on("Page.domContentEventFired", (_, sessionId) => {
     if (sessionId === mainSession) domReady = true;
   });
-  on("Page.frameNavigated", ({ frame }, sessionId) => {
-    if (!frame.parentId && sessionId === mainSession) {
-      if (mainFrame !== frame.id)
-        mainNavigation.setScope({ sessionId: mainSession, frameId: frame.id });
-      mainFrame = frame.id;
-    }
-    mainNavigation.commit(frame, sessionId);
-    frameRows.set(frame.id, frame);
-    frames.push({
-      url: frame.url,
-      name: frame.name || "",
-      main: frame.id === mainFrame,
-      sessionId,
-    });
+  on("Page.frameNavigated", onFrameNavigated);
+}
+function recordRedirectResponse(event, sessionId) {
+  const previous = requestRows.get(networkKey(sessionId, event.requestId));
+  responses.push({
+    id: ++sequence,
+    protocolRequestId: event.requestId,
+    sessionId,
+    requestId: previous?.id,
+    timeMs: Date.now(),
+    url: event.redirectResponse.url,
+    status: event.redirectResponse.status,
+    headers: event.redirectResponse.headers,
+    type: previous?.type || event.type.toLowerCase(),
+    redirect: true,
+    transport: responseTransport(event.redirectResponse),
   });
-  on("Network.requestWillBeSent", (event, sessionId) => {
-    mainNavigation.request(event, sessionId);
-    const requestKey = networkKey(sessionId, event.requestId);
-    if (event.redirectResponse) {
-      const previous = requestRows.get(networkKey(sessionId, event.requestId));
-      responses.push({
-        id: ++sequence,
-        protocolRequestId: event.requestId,
-        sessionId,
-        requestId: previous?.id,
-        timeMs: Date.now(),
-        url: event.redirectResponse.url,
-        status: event.redirectResponse.status,
-        headers: event.redirectResponse.headers,
-        type: previous?.type || event.type.toLowerCase(),
-        redirect: true,
-        transport: responseTransport(event.redirectResponse),
-      });
-    }
-    const row = {
+}
+// CDP omits large request bodies from the event; fetch them separately.
+function fetchPostData(row, event, sessionId) {
+  tasks.push(
+    call("Network.getRequestPostData", { requestId: event.requestId }, sessionId)
+      .then(({ postData }) => {
+        row.body = postData;
+      })
+      .catch((error) => {
+        row.bodyError = String(error);
+      }),
+  );
+}
+function onRequestWillBeSent(event, sessionId) {
+  mainNavigation.request(event, sessionId);
+  const requestKey = networkKey(sessionId, event.requestId);
+  if (event.redirectResponse) recordRedirectResponse(event, sessionId);
+  const row = {
+    id: ++sequence,
+    protocolRequestId: event.requestId,
+    sessionId,
+    timeMs: Date.now(),
+    method: event.request.method,
+    url: event.request.url,
+    type: event.type.toLowerCase(),
+    body: event.request.postData || null,
+    headers: event.request.headers,
+    initiator: event.initiator,
+  };
+  requests.push(row);
+  requestRows.set(requestKey, row);
+  if (event.request.hasPostData && event.request.postData === undefined)
+    fetchPostData(row, event, sessionId);
+}
+function onResponseReceived(event, sessionId) {
+  const response = event.response,
+    row = {
       id: ++sequence,
       protocolRequestId: event.requestId,
       sessionId,
+      frameId: event.frameId,
+      loaderId: event.loaderId,
+      requestId: requestRows.get(networkKey(sessionId, event.requestId))?.id,
       timeMs: Date.now(),
-      method: event.request.method,
-      url: event.request.url,
+      url: response.url,
+      status: response.status,
+      headers: response.headers,
       type: event.type.toLowerCase(),
-      body: event.request.postData || null,
-      headers: event.request.headers,
-      initiator: event.initiator,
+      transport: responseTransport(response),
     };
-    requests.push(row);
-    requestRows.set(requestKey, row);
-    if (event.request.hasPostData && event.request.postData === undefined)
-      tasks.push(
-        call("Network.getRequestPostData", { requestId: event.requestId }, sessionId)
-          .then(({ postData }) => {
-            row.body = postData;
-          })
-          .catch((error) => {
-            row.bodyError = String(error);
-          }),
-      );
+  responses.push(row);
+}
+function onLoadingFailed(event, sessionId) {
+  mainNavigation.failed(event, sessionId);
+  errors.push({
+    url: requestRows.get(networkKey(sessionId, event.requestId))?.url,
+    failure: { errorText: event.errorText },
   });
-  on("Network.responseReceived", (event, sessionId) => {
-    const response = event.response,
-      row = {
-        id: ++sequence,
-        protocolRequestId: event.requestId,
-        sessionId,
-        frameId: event.frameId,
-        loaderId: event.loaderId,
-        requestId: requestRows.get(networkKey(sessionId, event.requestId))?.id,
-        timeMs: Date.now(),
-        url: response.url,
-        status: response.status,
-        headers: response.headers,
-        type: event.type.toLowerCase(),
-        transport: responseTransport(response),
-      };
-    responses.push(row);
-  });
-  on("Network.loadingFailed", (event, sessionId) => {
-    mainNavigation.failed(event, sessionId);
-    errors.push({
-      url: requestRows.get(networkKey(sessionId, event.requestId))?.url,
-      failure: { errorText: event.errorText },
-    });
-  });
-  on("Network.loadingFinished", (event, sessionId) => {
-    const row = responses.findLast(
-      (response) =>
-        response.protocolRequestId === event.requestId && response.sessionId === sessionId,
-    );
-    if (row && ["document", "script", "xhr", "fetch"].includes(row.type))
-      tasks.push(
-        call("Network.getResponseBody", { requestId: event.requestId }, sessionId)
-          .then(({ body, base64Encoded }) => {
-            const bytes = Buffer.from(body, base64Encoded ? "base64" : "utf8");
-            row.bodyFile = `${row.id}-${row.type}.txt`;
-            row.bytes = bytes.length;
-            row.bodyHash = createHash("sha256").update(bytes).digest("hex");
-            save(row.bodyFile, bytes);
-          })
-          .catch((error) => {
-            row.bodyError = String(error);
-          }),
-      );
-  });
+}
+const savedBodyTypes = ["document", "script", "xhr", "fetch"];
+function saveResponseBody(row, event, sessionId) {
+  tasks.push(
+    call("Network.getResponseBody", { requestId: event.requestId }, sessionId)
+      .then(({ body, base64Encoded }) => {
+        const bytes = Buffer.from(body, base64Encoded ? "base64" : "utf8");
+        row.bodyFile = `${row.id}-${row.type}.txt`;
+        row.bytes = bytes.length;
+        row.bodyHash = createHash("sha256").update(bytes).digest("hex");
+        save(row.bodyFile, bytes);
+      })
+      .catch((error) => {
+        row.bodyError = String(error);
+      }),
+  );
+}
+function onLoadingFinished(event, sessionId) {
+  const row = responses.findLast(
+    (response) =>
+      response.protocolRequestId === event.requestId && response.sessionId === sessionId,
+  );
+  if (row && savedBodyTypes.includes(row.type)) saveResponseBody(row, event, sessionId);
+}
+function registerNetworkHandlers() {
+  on("Network.requestWillBeSent", onRequestWillBeSent);
+  on("Network.responseReceived", onResponseReceived);
+  on("Network.loadingFailed", onLoadingFailed);
+  on("Network.loadingFinished", onLoadingFinished);
+}
+function registerWebSocketHandlers() {
   const websocketRows = new Map();
   on("Network.webSocketCreated", (event, sessionId) => {
     const row = { url: event.url, sessionId, sent: [], received: [] };
@@ -453,43 +487,51 @@ async function capture() {
       .get(networkKey(sessionId, event.requestId))
       ?.received.push(event.response.payloadData),
   );
-  const childSetup = new Map();
-  const autoAttach = { autoAttach: true, waitForDebuggerOnStart: true, flatten: true };
-  async function configureTarget(sessionId, targetInfo) {
-    targetSessions.set(sessionId, targetInfo);
-    targets.push({ sessionId, ...targetInfo });
-    try {
-      await call("Network.enable", {}, sessionId);
-      await call("Runtime.enable", {}, sessionId);
-      await call("Target.setAutoAttach", autoAttach, sessionId);
-      if (["iframe", "page"].includes(targetInfo.type)) {
-        await call("Page.enable", {}, sessionId);
-        if (instrumented)
-          await call(
-            "Page.addScriptToEvaluateOnNewDocument",
-            { source: readFileSync(config.interfaceScript, "utf8") },
-            sessionId,
-          );
-      } else if (instrumented) {
-        await evaluate(readFileSync(config.interfaceScript, "utf8"), undefined, sessionId);
-      }
-      if (config.debugger) {
-        await call("Debugger.enable", {}, sessionId);
-        await call("Debugger.setSkipAllPauses", { skip: true }, sessionId);
-      }
-    } catch (error) {
-      collectorError({
-        phase: "target setup",
-        targetType: targetInfo.type,
-        url: targetInfo.url,
-        error: String(error),
-      });
-    } finally {
-      await call("Runtime.runIfWaitingForDebugger", {}, sessionId).catch((error) =>
-        collectorError(String(error)),
+}
+const autoAttach = { autoAttach: true, waitForDebuggerOnStart: true, flatten: true };
+async function instrumentTarget(sessionId, targetInfo) {
+  if (["iframe", "page"].includes(targetInfo.type)) {
+    await call("Page.enable", {}, sessionId);
+    if (instrumented)
+      await call(
+        "Page.addScriptToEvaluateOnNewDocument",
+        { source: readFileSync(config.interfaceScript, "utf8") },
+        sessionId,
       );
-    }
+  } else if (instrumented) {
+    await evaluate(readFileSync(config.interfaceScript, "utf8"), undefined, sessionId);
   }
+}
+async function enableTargetDomains(sessionId, targetInfo) {
+  await call("Network.enable", {}, sessionId);
+  await call("Runtime.enable", {}, sessionId);
+  await call("Target.setAutoAttach", autoAttach, sessionId);
+  await instrumentTarget(sessionId, targetInfo);
+  if (config.debugger) {
+    await call("Debugger.enable", {}, sessionId);
+    await call("Debugger.setSkipAllPauses", { skip: true }, sessionId);
+  }
+}
+async function configureTarget(sessionId, targetInfo) {
+  targetSessions.set(sessionId, targetInfo);
+  targets.push({ sessionId, ...targetInfo });
+  try {
+    await enableTargetDomains(sessionId, targetInfo);
+  } catch (error) {
+    collectorError({
+      phase: "target setup",
+      targetType: targetInfo.type,
+      url: targetInfo.url,
+      error: String(error),
+    });
+  } finally {
+    await call("Runtime.runIfWaitingForDebugger", {}, sessionId).catch((error) =>
+      collectorError(String(error)),
+    );
+  }
+}
+function registerTargetHandlers() {
+  const childSetup = new Map();
   on("Target.attachedToTarget", ({ sessionId, targetInfo }) => {
     if (childSetup.has(sessionId)) return;
     const task = configureTarget(sessionId, targetInfo);
@@ -498,31 +540,26 @@ async function capture() {
   });
   on("Target.detachedFromTarget", ({ sessionId }) => {
     targetSessions.delete(sessionId);
-    for (const [frame, entry] of contexts)
-      if (entry.sessionId === sessionId) contexts.delete(frame);
+    forgetContexts((entry) => entry.sessionId === sessionId);
   });
-  let createdBrowserContext;
-  if (config.chromeIncognito) {
-    ({ browserContextId: createdBrowserContext } = await call(
-      "Target.createBrowserContext",
-      { disposeOnDetach: true },
-      null,
-    ));
-    const { targetId } = await call(
-      "Target.createTarget",
-      { url: "about:blank", browserContextId: createdBrowserContext },
-      null,
-    );
-    await call("Target.closeTarget", { targetId: tab.id }, null);
-    tab = { id: targetId };
-  }
-  ({ sessionId: mainSession } = await call(
-    "Target.attachToTarget",
-    { targetId: tab.id, flatten: true },
+  return childSetup;
+}
+// Replace the startup tab with one in a fresh CDP-created browser context.
+async function openIncognitoTarget(tab) {
+  const { browserContextId } = await call(
+    "Target.createBrowserContext",
+    { disposeOnDetach: true },
     null,
-  ));
-  // Explicit attachment emits the same event as automatic child attachment.
-  await childSetup.get(mainSession);
+  );
+  const { targetId } = await call(
+    "Target.createTarget",
+    { url: "about:blank", browserContextId },
+    null,
+  );
+  await call("Target.closeTarget", { targetId: tab.id }, null);
+  return { tab: { id: targetId }, createdBrowserContext: browserContextId };
+}
+async function verifyBrowserContext(tab, createdBrowserContext) {
   const contextList = await call("Target.getBrowserContexts", {}, null);
   const targetState = await call("Target.getTargetInfo", { targetId: tab.id }, null);
   const nonDefaultContext = (contextList.browserContextIds || []).includes(
@@ -540,18 +577,28 @@ async function capture() {
   };
   if (config.chromeIncognito && (!nonDefaultContext || !browserContext.createdContextVerified))
     throw new Error("Requested Incognito target was not verified in a non-default browser context");
-  await call("Page.enable");
-  const { frameTree: initialFrameTree } = await call("Page.getFrameTree");
-  mainFrame = initialFrameTree.frame.id;
-  frameRows.set(mainFrame, initialFrameTree.frame);
-  mainNavigation.setScope({ sessionId: mainSession, frameId: mainFrame });
-  await call("Runtime.enable");
-  if (config.localCertificate) {
-    const target = new URL(config.url);
-    if (target.protocol !== "https:" || !["127.0.0.1", "localhost"].includes(target.hostname))
-      throw new Error("The certificate fixture override is restricted to localhost HTTPS");
-    await call("Security.setIgnoreCertificateErrors", { ignore: true });
-  }
+}
+async function attachMainTarget(startupTab, childSetup) {
+  let tab = startupTab,
+    createdBrowserContext;
+  if (config.chromeIncognito) ({ tab, createdBrowserContext } = await openIncognitoTarget(tab));
+  ({ sessionId: mainSession } = await call(
+    "Target.attachToTarget",
+    { targetId: tab.id, flatten: true },
+    null,
+  ));
+  // Explicit attachment emits the same event as automatic child attachment.
+  await childSetup.get(mainSession);
+  await verifyBrowserContext(tab, createdBrowserContext);
+  return tab;
+}
+async function allowLocalCertificate() {
+  const target = new URL(config.url);
+  if (target.protocol !== "https:" || !["127.0.0.1", "localhost"].includes(target.hostname))
+    throw new Error("The certificate fixture override is restricted to localhost HTTPS");
+  await call("Security.setIgnoreCertificateErrors", { ignore: true });
+}
+async function emulateDevice(tab) {
   const viewport = config.viewport || { width: 1280, height: 800 },
     screen = config.screen || { width: 1920, height: 1080 };
   await call("Emulation.setDeviceMetricsOverride", {
@@ -568,28 +615,40 @@ async function capture() {
     windowId,
     bounds: config.outerWindow || { width: viewport.width, height: viewport.height + 88 },
   });
-
-  if (config.debugger) {
-    on("Debugger.scriptParsed", (event, sessionId) =>
-      tasks.push(
-        call("Debugger.getScriptSource", { scriptId: event.scriptId }, sessionId)
-          .then(({ scriptSource }) => {
-            const hash = createHash("sha256").update(scriptSource).digest("hex");
-            save(`script-${hash}.js`, scriptSource);
-            scripts.push({
-              url: event.url,
-              hash,
-              executionContextId: event.executionContextId,
-              sessionId,
-              startLine: event.startLine,
-            });
-          })
-          .catch((error) => collectorError(`script source: ${error}`)),
-      ),
-    );
-    await call("Debugger.enable");
-    await call("Debugger.setSkipAllPauses", { skip: true });
-  }
+}
+async function prepareMainPage(tab) {
+  await call("Page.enable");
+  const { frameTree: initialFrameTree } = await call("Page.getFrameTree");
+  mainFrame = initialFrameTree.frame.id;
+  frameRows.set(mainFrame, initialFrameTree.frame);
+  mainNavigation.setScope({ sessionId: mainSession, frameId: mainFrame });
+  await call("Runtime.enable");
+  if (config.localCertificate) await allowLocalCertificate();
+  await emulateDevice(tab);
+}
+function onScriptParsed(event, sessionId) {
+  tasks.push(
+    call("Debugger.getScriptSource", { scriptId: event.scriptId }, sessionId)
+      .then(({ scriptSource }) => {
+        const hash = createHash("sha256").update(scriptSource).digest("hex");
+        save(`script-${hash}.js`, scriptSource);
+        scripts.push({
+          url: event.url,
+          hash,
+          executionContextId: event.executionContextId,
+          sessionId,
+          startLine: event.startLine,
+        });
+      })
+      .catch((error) => collectorError(`script source: ${error}`)),
+  );
+}
+async function enableDebugger() {
+  on("Debugger.scriptParsed", onScriptParsed);
+  await call("Debugger.enable");
+  await call("Debugger.setSkipAllPauses", { skip: true });
+}
+async function attachWorkers() {
   await call(
     "Target.setAutoAttach",
     {
@@ -602,6 +661,8 @@ async function capture() {
     },
     null,
   );
+}
+async function navigateToFixture() {
   stage = "navigation";
   domReady = false;
   const navigation = await call("Page.navigate", { url: config.url });
@@ -613,141 +674,141 @@ async function capture() {
       () => evaluate(`!!document.querySelector(${JSON.stringify(config.readySelector)})`),
       config.readyTimeoutMs ?? 5000,
     );
-  stage = "snapshots and input";
-  await pageDwell("home");
-  await snapshot("home");
-  if (config.dismissSelector) {
-    const present = await evaluate(
-      `!!document.querySelector(${JSON.stringify(config.dismissSelector)})`,
-    );
-    dismissal = { selector: config.dismissSelector, present, clicked: false };
-    if (present) {
-      const coordinates = await point(config.dismissSelector);
-      await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...coordinates });
-      await call("Input.dispatchMouseEvent", {
-        type: "mousePressed",
-        button: "left",
-        buttons: 1,
-        clickCount: 1,
-        ...coordinates,
-      });
-      await call("Input.dispatchMouseEvent", {
-        type: "mouseReleased",
-        button: "left",
-        buttons: 0,
-        clickCount: 1,
-        ...coordinates,
-      });
-      dismissal.clicked = true;
-      await pageDwell("dismiss");
-      await snapshot("dismiss");
-    }
+}
+async function clickAt(coordinates) {
+  await call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+    ...coordinates,
+  });
+  await call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+    ...coordinates,
+  });
+}
+async function dismissConsent() {
+  if (!config.dismissSelector) return;
+  const present = await evaluate(
+    `!!document.querySelector(${JSON.stringify(config.dismissSelector)})`,
+  );
+  dismissal = { selector: config.dismissSelector, present, clicked: false };
+  if (!present) return;
+  const coordinates = await point(config.dismissSelector);
+  await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...coordinates });
+  await clickAt(coordinates);
+  dismissal.clicked = true;
+  await pageDwell("dismiss");
+  await snapshot("dismiss");
+}
+async function controlCall(handle, fn, value) {
+  const result = await call("Runtime.callFunctionOn", {
+    objectId: handle,
+    functionDeclaration: `function(value){return (${fn.toString()})(this,value);}`,
+    arguments: [{ value }],
+    returnByValue: true,
+  });
+  if (result.exceptionDetails)
+    throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
+  return result.result.value;
+}
+async function verifyTypedInput(input) {
+  const evidence = await controlCall(
+    input.typedInput.handle,
+    effectiveTypedControl,
+    input.typedInput.expected,
+  );
+  try {
+    return requireEffectiveInput(evidence);
+  } catch (error) {
+    collectorError({ phase: "effective-input", evidence });
+    throw error;
   }
-  let focusSelector = null,
-    typedInput = null;
-  const controlCall = async (handle, fn, value) => {
-    const result = await call("Runtime.callFunctionOn", {
-      objectId: handle,
-      functionDeclaration: `function(value){return (${fn.toString()})(this,value);}`,
-      arguments: [{ value }],
-      returnByValue: true,
-    });
-    if (result.exceptionDetails)
-      throw new Error(
-        result.exceptionDetails.exception?.description || result.exceptionDetails.text,
-      );
-    return result.result.value;
+}
+async function moveStep(step, input) {
+  const coordinates = await point(step.move.selector);
+  await call("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    ...coordinates,
+    ...(input.pressed ? { button: "left", buttons: 1, force: 0.5 } : {}),
+  });
+}
+// A held press (down … up) mirrors the host driver's drag steps; a physical mouse
+// reports Chrome's 0.5 pressure while pressed, which CDP needs as an explicit force.
+async function holdStep(step, input) {
+  const pressed = Boolean(step.down);
+  input.pressed = pressed;
+  await call("Input.dispatchMouseEvent", {
+    type: pressed ? "mousePressed" : "mouseReleased",
+    button: "left",
+    buttons: pressed ? 1 : 0,
+    force: pressed ? 0.5 : 0,
+    clickCount: 1,
+    ...(await point(step.down || step.up)),
+  });
+}
+async function clickStep(step) {
+  await clickAt(await point(step.click));
+}
+async function focusStep(step, input) {
+  input.focusSelector = step.focus;
+  await evaluate(
+    `(()=>{const control=document.querySelector(${JSON.stringify(step.focus)});if(!control)throw new Error('Focus selector is absent');control.focus();if(document.activeElement!==control)throw new Error('Focus selector did not become active');})()`,
+  );
+}
+async function typeStep(step, input) {
+  if (input.typedInput) await call("Runtime.releaseObject", { objectId: input.typedInput.handle });
+  const control = await call("Runtime.evaluate", {
+    expression: input.focusSelector
+      ? `document.querySelector(${JSON.stringify(input.focusSelector)})`
+      : "document.activeElement",
+    returnByValue: false,
+  });
+  if (!control.result.objectId) throw new Error("Typing control is unavailable");
+  input.typedInput = {
+    handle: control.result.objectId,
+    ...(await controlCall(control.result.objectId, prepareTypedControl, String(step.type))),
   };
-  const verifyTypedInput = async () => {
-    const evidence = await controlCall(
-      typedInput.handle,
-      effectiveTypedControl,
-      typedInput.expected,
-    );
-    try {
-      return requireEffectiveInput(evidence);
-    } catch (error) {
-      collectorError({ phase: "effective-input", evidence });
-      throw error;
-    }
-  };
-  const observationIndex = observationTriggerIndex(config.steps || []);
-  let pressed = false;
-  for (const [index, step] of (config.steps || []).entries()) {
+  for (const character of String(step.type)) {
+    await key(character, "keyDown", character);
+    await pause(config.inputCadenceMs ?? 110);
+    await key(character, "keyUp");
+  }
+  input.evidence = await verifyTypedInput(input);
+}
+async function pressStep(step, input) {
+  if (step.press === "Enter" && input.typedInput) await verifyTypedInput(input);
+  await key(step.press, "keyDown", step.press === "Enter" ? "\r" : undefined);
+  await key(step.press, "keyUp");
+}
+// Step parts run in this fixed order when a step names several of them.
+const stepParts = [
+  [(step) => step.move, moveStep],
+  [(step) => step.down || step.up, holdStep],
+  [(step) => step.click, clickStep],
+  [(step) => step.focus, focusStep],
+  [(step) => step.type !== undefined, typeStep],
+  [(step) => step.press, pressStep],
+  [(step) => step.wait, (step) => pause(step.wait)],
+];
+async function runStep(step, input) {
+  input.evidence = undefined;
+  for (const [applies, part] of stepParts) if (applies(step)) await part(step, input);
+  return input.evidence;
+}
+async function runSteps() {
+  const steps = config.steps || [];
+  const observationIndex = observationTriggerIndex(steps);
+  const input = { focusSelector: null, typedInput: null, pressed: false, evidence: undefined };
+  for (const [index, step] of steps.entries()) {
     if (index === observationIndex)
       observationWindow = startObservation(observationMs, index, observationClock);
     const startedMs = Date.now();
-    let inputEvidence;
-    if (step.move) {
-      const coordinates = await point(step.move.selector);
-      await call("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
-        ...coordinates,
-        ...(pressed ? { button: "left", buttons: 1, force: 0.5 } : {}),
-      });
-    }
-    // A held press (down … up) mirrors the host driver's drag steps; a physical mouse
-    // reports Chrome's 0.5 pressure while pressed, which CDP needs as an explicit force.
-    if (step.down || step.up) {
-      pressed = Boolean(step.down);
-      await call("Input.dispatchMouseEvent", {
-        type: pressed ? "mousePressed" : "mouseReleased",
-        button: "left",
-        buttons: pressed ? 1 : 0,
-        force: pressed ? 0.5 : 0,
-        clickCount: 1,
-        ...(await point(step.down || step.up)),
-      });
-    }
-    if (step.click) {
-      const coordinates = await point(step.click);
-      await call("Input.dispatchMouseEvent", {
-        type: "mousePressed",
-        button: "left",
-        buttons: 1,
-        clickCount: 1,
-        ...coordinates,
-      });
-      await call("Input.dispatchMouseEvent", {
-        type: "mouseReleased",
-        button: "left",
-        buttons: 0,
-        clickCount: 1,
-        ...coordinates,
-      });
-    }
-    if (step.focus) {
-      focusSelector = step.focus;
-      await evaluate(
-        `(()=>{const control=document.querySelector(${JSON.stringify(step.focus)});if(!control)throw new Error('Focus selector is absent');control.focus();if(document.activeElement!==control)throw new Error('Focus selector did not become active');})()`,
-      );
-    }
-    if (step.type !== undefined) {
-      if (typedInput) await call("Runtime.releaseObject", { objectId: typedInput.handle });
-      const control = await call("Runtime.evaluate", {
-        expression: focusSelector
-          ? `document.querySelector(${JSON.stringify(focusSelector)})`
-          : "document.activeElement",
-        returnByValue: false,
-      });
-      if (!control.result.objectId) throw new Error("Typing control is unavailable");
-      typedInput = {
-        handle: control.result.objectId,
-        ...(await controlCall(control.result.objectId, prepareTypedControl, String(step.type))),
-      };
-      for (const character of String(step.type)) {
-        await key(character, "keyDown", character);
-        await pause(config.inputCadenceMs ?? 110);
-        await key(character, "keyUp");
-      }
-      inputEvidence = await verifyTypedInput();
-    }
-    if (step.press) {
-      if (step.press === "Enter" && typedInput) await verifyTypedInput();
-      await key(step.press, "keyDown", step.press === "Enter" ? "\r" : undefined);
-      await key(step.press, "keyUp");
-    }
-    if (step.wait) await pause(step.wait);
+    const inputEvidence = await runStep(step, input);
     actions.push({
       index,
       action: Object.keys(step)[0],
@@ -758,26 +819,31 @@ async function capture() {
     });
     await snapshot(`step-${index}`);
   }
+}
+function closeObservation(snapshotStarted) {
+  const navigation = mainNavigation.snapshot();
+  finishObservation(
+    observationWindow,
+    observationClock,
+    !navigation.pendingNavigation &&
+      !navigation.navigationFailed &&
+      pages.at(-1).documentElementPresent === true,
+    {
+      ...navigation,
+      documentElementPresent: pages.at(-1).documentElementPresent,
+      snapshotElapsedMs: observationClock.monotonic() - snapshotStarted,
+    },
+  );
+}
+async function finalSnapshot() {
   if (observationWindow) await waitForObservation(observationWindow, observationClock, pause);
   else await pageDwell("search");
   const snapshotStarted = observationClock.monotonic();
   if (observationWindow) observationWindow.record.snapshotStartedMs = Date.now();
   await snapshot("search");
-  if (observationWindow) {
-    const navigation = mainNavigation.snapshot();
-    finishObservation(
-      observationWindow,
-      observationClock,
-      !navigation.pendingNavigation &&
-        !navigation.navigationFailed &&
-        pages.at(-1).documentElementPresent === true,
-      {
-        ...navigation,
-        documentElementPresent: pages.at(-1).documentElementPresent,
-        snapshotElapsedMs: observationClock.monotonic() - snapshotStarted,
-      },
-    );
-  }
+  if (observationWindow) closeObservation(snapshotStarted);
+}
+async function runProbes() {
   for (const path of config.probes || []) {
     try {
       const raw = await evaluate(readFileSync(path, "utf8"));
@@ -786,6 +852,31 @@ async function capture() {
       probes.push({ path, error: String(error) });
     }
   }
+}
+async function capture() {
+  effectiveExtensionFlags = chromeExtensionArgs(config);
+  if (!existsSync(executable) || typeof WebSocket === "undefined")
+    throw new Error("Installed Chrome and Node.js 22+ are required");
+  const port = await launchChrome();
+  stage = "connect";
+  const startupTab = await connectBrowser(port);
+  registerRuntimeHandlers();
+  registerPageHandlers();
+  registerNetworkHandlers();
+  registerWebSocketHandlers();
+  const childSetup = registerTargetHandlers();
+  const tab = await attachMainTarget(startupTab, childSetup);
+  await prepareMainPage(tab);
+  if (config.debugger) await enableDebugger();
+  await attachWorkers();
+  await navigateToFixture();
+  stage = "snapshots and input";
+  await pageDwell("home");
+  await snapshot("home");
+  await dismissConsent();
+  await runSteps();
+  await finalSnapshot();
+  await runProbes();
   lifecycle.throwIfAborted();
   captureComplete = true;
 }

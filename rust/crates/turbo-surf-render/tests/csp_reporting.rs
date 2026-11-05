@@ -31,13 +31,13 @@ impl Drop for Server {
     }
 }
 
-// The control measured Chrome 155's identity headers; the report wire must carry
+// The control measured Chrome 156's identity headers; the report wire must carry
 // the registry default release's instead, with every other header unchanged.
 fn current_release_identity((name, value): (String, String)) -> (String, String) {
     let profile = turbo_surf_core::fingerprint::default_profile();
     let value = match name.as_str() {
-        "user-agent" if value.contains("Chrome/155.0.0.0") => profile.user_agent.clone(),
-        "sec-ch-ua" if value == turbo_surf_core::fingerprint::brand_header(155, "155", false) => {
+        "user-agent" if value.contains("Chrome/156.0.0.0") => profile.user_agent.clone(),
+        "sec-ch-ua" if value == turbo_surf_core::fingerprint::brand_header(156, "156", false) => {
             profile.sec_ch_ua.clone()
         }
         _ => value,
@@ -409,8 +409,8 @@ async fn source_pinned_chrome_reports_use_actual_private_transport() {
             )
         })
         .unwrap();
-        assert_eq!(fixture["browser"], "Chrome/155.0.8059.79");
-        assert_eq!(fixture["v8"], "15.5.35.23");
+        assert_eq!(fixture["browser"], "Chrome/156.0.8078.80");
+        assert_eq!(fixture["v8"], "15.6.75.27");
         assert_eq!(fixture["errors"], json!([]));
         use sha2::{Digest, Sha256};
         for (key, text) in [

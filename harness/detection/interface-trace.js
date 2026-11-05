@@ -118,56 +118,66 @@
     return out;
   };
   const seen = new WeakMap();
+  const coverScoped = (scope, name, status, reason) => {
+    if (scope) cover(name, scope, status, reason);
+  };
+  const descriptorOwner = (object, prop, name, scope) => {
+    let owner = object;
+    let depth = 0;
+    while (owner && !Object.hasOwn(owner, prop)) {
+      if (depth++ === 32) {
+        coverScoped(scope, name, "skipped", "descriptor-depth-limit");
+        return null;
+      }
+      owner = Object.getPrototypeOf(owner);
+    }
+    return owner;
+  };
+  const firstVisit = (owner, prop) => {
+    const done = seen.get(owner) || new Set();
+    if (done.has(prop)) return false;
+    seen.set(owner, done);
+    done.add(prop);
+    return true;
+  };
+  const wrappedDescriptor = (d, name, prop) => {
+    const updated = { ...d };
+    if (d.get) updated.get = wrap(d.get, name, "get");
+    if (d.set && (prop === "cookie" || prop === "src")) updated.set = wrap(d.set, name, "set");
+    if (typeof d.value === "function") updated.value = wrap(d.value, name, "call");
+    return updated;
+  };
+  const defineWrapped = (owner, prop, updated, name, scope) => {
+    try {
+      Object.defineProperty(owner, prop, updated);
+      installed.push(name);
+      coverScoped(scope, name, "installed");
+    } catch (e) {
+      skipped.push(`${name}: ${e}`);
+      coverScoped(scope, name, "skipped", "define-property-threw");
+    }
+  };
+  const instrumentProperty = (object, label, prop, scope) => {
+    if (prop === "constructor") return;
+    const name = `${label}.${prop}`;
+    const owner = descriptorOwner(object, prop, name, scope);
+    if (!owner) return coverScoped(scope, name, "unavailable", "missing-descriptor");
+    if (!firstVisit(owner, prop)) return;
+    const d = Object.getOwnPropertyDescriptor(owner, prop);
+    if (!d) return coverScoped(scope, name, "unavailable", "missing-descriptor");
+    if (!d.configurable) {
+      skipped.push(name);
+      return coverScoped(scope, name, "skipped", "nonconfigurable");
+    }
+    const updated = wrappedDescriptor(d, name, prop);
+    if (updated.get === d.get && updated.set === d.set && updated.value === d.value)
+      return coverScoped(scope, name, "unobserved", "data-property-or-setter");
+    defineWrapped(owner, prop, updated, name, scope);
+  };
   const instrument = (object, label, names, scope) => {
     if (!object) return;
-    for (const prop of names || Object.getOwnPropertyNames(object)) {
-      if (prop === "constructor") continue;
-      let owner = object;
-      let depth = 0;
-      while (owner && !Object.hasOwn(owner, prop)) {
-        if (depth++ === 32) {
-          if (scope) cover(`${label}.${prop}`, scope, "skipped", "descriptor-depth-limit");
-          owner = null;
-          break;
-        }
-        owner = Object.getPrototypeOf(owner);
-      }
-      if (!owner) {
-        if (scope) cover(`${label}.${prop}`, scope, "unavailable", "missing-descriptor");
-        continue;
-      }
-      const done = seen.get(owner) || new Set();
-      if (done.has(prop)) continue;
-      seen.set(owner, done);
-      done.add(prop);
-      const d = Object.getOwnPropertyDescriptor(owner, prop);
-      if (!d) {
-        if (scope) cover(`${label}.${prop}`, scope, "unavailable", "missing-descriptor");
-        continue;
-      }
-      if (!d.configurable) {
-        skipped.push(`${label}.${prop}`);
-        if (scope) cover(`${label}.${prop}`, scope, "skipped", "nonconfigurable");
-        continue;
-      }
-      const updated = { ...d };
-      if (d.get) updated.get = wrap(d.get, `${label}.${prop}`, "get");
-      if (d.set && (prop === "cookie" || prop === "src"))
-        updated.set = wrap(d.set, `${label}.${prop}`, "set");
-      if (typeof d.value === "function") updated.value = wrap(d.value, `${label}.${prop}`, "call");
-      if (updated.get === d.get && updated.set === d.set && updated.value === d.value) {
-        if (scope) cover(`${label}.${prop}`, scope, "unobserved", "data-property-or-setter");
-        continue;
-      }
-      try {
-        Object.defineProperty(owner, prop, updated);
-        installed.push(`${label}.${prop}`);
-        if (scope) cover(`${label}.${prop}`, scope, "installed");
-      } catch (e) {
-        skipped.push(`${label}.${prop}: ${e}`);
-        if (scope) cover(`${label}.${prop}`, scope, "skipped", "define-property-threw");
-      }
-    }
+    for (const prop of names || Object.getOwnPropertyNames(object))
+      instrumentProperty(object, label, prop, scope);
   };
   const contexts = new WeakSet();
   const instrumentSurface = (object, label) => {
@@ -207,42 +217,51 @@
     ["experimental-webgl2", "WebGL2RenderingContext"],
     ["2d", "CanvasRenderingContext2D"],
   ]);
+  const isObject = (value) => value && typeof value === "object";
+  const contextResult = (name, args, result) => {
+    const label = contextLabels.get(args[0]);
+    if (!label) {
+      // Do not coerce the kind again: a page-supplied toString may have side effects.
+      cover(name, "return", "unobserved", "unrecognized-context-kind");
+    } else if (isObject(result)) instrumentSurface(result, label);
+    else cover(label, "return", "unavailable", "null-or-nonobject-context");
+  };
+  const extensionResult = (result) => {
+    if (isObject(result)) instrumentSurface(result, "WebGLExtension");
+    else cover("WebGLExtension", "return", "unavailable", "null-or-nonobject-extension");
+  };
+  const createdElementResult = (name, args, result) => {
+    const tag = args[name.endsWith("NS") ? 1 : 0];
+    if (typeof tag === "string" && tag.toLowerCase() === "canvas")
+      instrument(result, "HTMLCanvasElement", ["getContext"], "returned-canvas");
+  };
+  const isStyleSource = (name, kind) =>
+    (kind === "get" && /^(?:HTMLElement|Element|CSSStyleRule)\.style$/.test(name)) ||
+    name === "window.getComputedStyle";
+  const styleResult = (result) => {
+    // Native declarations may expose supported methods as own properties.
+    instrument(result, "CSSStyleDeclaration", [
+      "getPropertyValue",
+      "getPropertyPriority",
+      "setProperty",
+      "removeProperty",
+      "item",
+      "length",
+      "cssText",
+    ]);
+  };
   const instrumentResult = (name, kind, args, result) => {
     if (kind !== "call" && kind !== "get") return;
-    if (kind === "call" && /^(?:HTMLCanvasElement|OffscreenCanvas)\.getContext$/.test(name)) {
-      const label = contextLabels.get(args[0]);
-      if (!label) {
-        // Do not coerce the kind again: a page-supplied toString may have side effects.
-        cover(name, "return", "unobserved", "unrecognized-context-kind");
-      } else if (result && typeof result === "object") instrumentSurface(result, label);
-      else cover(label, "return", "unavailable", "null-or-nonobject-context");
-    } else if (
+    if (kind === "call" && /^(?:HTMLCanvasElement|OffscreenCanvas)\.getContext$/.test(name))
+      contextResult(name, args, result);
+    else if (
       kind === "call" &&
       /^(?:WebGLRenderingContext|WebGL2RenderingContext)\.getExtension$/.test(name)
-    ) {
-      if (result && typeof result === "object") instrumentSurface(result, "WebGLExtension");
-      else cover("WebGLExtension", "return", "unavailable", "null-or-nonobject-extension");
-    } else if (result && typeof result === "object" && /\.createElement(?:NS)?$/.test(name)) {
-      const tag = args[name.endsWith("NS") ? 1 : 0];
-      if (typeof tag === "string" && tag.toLowerCase() === "canvas")
-        instrument(result, "HTMLCanvasElement", ["getContext"], "returned-canvas");
-    } else if (
-      result &&
-      typeof result === "object" &&
-      ((kind === "get" && /^(?:HTMLElement|Element|CSSStyleRule)\.style$/.test(name)) ||
-        name === "window.getComputedStyle")
-    ) {
-      // Native declarations may expose supported methods as own properties.
-      instrument(result, "CSSStyleDeclaration", [
-        "getPropertyValue",
-        "getPropertyPriority",
-        "setProperty",
-        "removeProperty",
-        "item",
-        "length",
-        "cssText",
-      ]);
-    }
+    )
+      extensionResult(result);
+    else if (isObject(result) && /\.createElement(?:NS)?$/.test(name))
+      createdElementResult(name, args, result);
+    else if (isObject(result) && isStyleSource(name, kind)) styleResult(result);
   };
   Object.defineProperty(globalThis, key, {
     value: {

@@ -1,9 +1,12 @@
 {
-  "collectedAt": "2026-10-14T00:52:47.277Z",
-  "browserVersion": "Chrome/155.0.8059.79",
-  "browserV8Version": "15.5.35.23",
-  "effectiveExtensionFlags": ["--disable-extensions"],
-  "collectorSha256": "4d7d156dc24528c7c4d099ff0342552c82d6466251420f9773846fed2a65a5c4",
+  "collectedAt": "2026-11-05T16:19:43.873Z",
+  "browserVersion": "HeadlessChrome/156.0.8078.47",
+  "browserV8Version": "15.6.75.19",
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
+  ],
+  "collectorSha256": "73d1f0b950dc5afe03abdf222f66bea2aa68e564c2141d25361bcef37d9706c3",
   "result": {
     "appendChild": {
       "owner": true,

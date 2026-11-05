@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fixed (render, #201)**: CSP violation reports now serialize a `blob:` or
+  `data:` `blockedURI` as the scheme alone (`"blob"` / `"data"`) like Chrome 156's
+  blob-url-resources control, so the opaque origin and its random key never leak
+  into the report. `csp::opaque_scheme_blocked_uri` handles both, and
+  `network_blocked_uri` delegates to it so every call site (the `connect-src`
+  reporter in `network_transports` and the script-src reporter in `runtime`)
+  picks up the new serialization. The remaining #201 items (text/plain iframe
+  body rendering, blob stylesheet MIME strictness, revoked-stylesheet
+  `SecurityError` on `.sheet.cssRules`) touch the runtime JS surface and the
+  blob-url-resources probe / fixture, and are split into #206.
 - **Fixed (GC / native-memory reclamation, #115)**: a retiring iframe context now releases
   its blob URL entries from the native `URL.createObjectURL` store, and the host-side
   `collect_message_port_garbage_for_testing` boundary prunes dead weak context handles from

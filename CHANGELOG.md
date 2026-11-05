@@ -1,14 +1,13 @@
 # Changelog
 
-## [0.7.1] — unreleased
+## [0.7.1] — 2026-11-05
 
 Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).
 
-- **Changed (deps)**: the `[patch.crates-io]` pin moves the turbo-dom crates to
-  turbo-dom#298 (the 0.7.1 branch, rev `ad9702a3`: turbo-dom#281-#288, then
-  #279 subtree style invalidation, #295 sticky inline, #299 child-iframe cascade, #302
-  transition cost, #305 Chrome computed defaults, #306 real html/head/body in child
-  documents, #308 rule buckets).
+- **Changed (deps)**: built on turbo-dom 0.7.1 from crates.io (turbo-dom#281-#288, #279 subtree
+  style invalidation, #295 sticky inline, #299 child-iframe cascade, #302/#311 transition cost and
+  style sharing, #303 `currentcolor` borders, #305 Chrome computed defaults, #306 real
+  html/head/body in child documents, #308 rule buckets, #309 media mode, #312 dispatcher speed).
 
 - **Fixed (UA-CH, #164)**: `navigator.userAgentData` is a real `NavigatorUAData` instance
   (zero own properties; brand-checked `brands`/`mobile`/`platform` getters; native
@@ -122,7 +121,7 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   single-page controls, `--allow-request-failures` for probes that assert failed loads, and
   serves `/echo…` (the request it received) and `/csp-…` (`form-action 'none'`) pages.
 
-## [0.7.0] — turbo-dom 0.7.0
+## [0.7.0] — 2026-11-04 — turbo-dom 0.7.0
 
 turbo-surf moves to turbo-dom 0.7.0 (`turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster`,
 `turbo-dom-browser-env` 0.7; `turbo-dom-v8` stays 150.4.0). Until those crates are on

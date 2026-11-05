@@ -185,10 +185,7 @@ async fn echoes_pings_and_closes_over_ws() {
     server.await.unwrap();
 }
 
-#[tokio::test]
-async fn echoes_over_wss_with_a_trust_anchor() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+fn tls_acceptor() -> tokio_rustls::TlsAcceptor {
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -200,7 +197,14 @@ async fn echoes_over_wss_with_a_trust_anchor() {
         rustls::pki_types::PrivatePkcs8KeyDer::from(KEY.to_vec()).into(),
     )
     .unwrap();
-    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    tokio_rustls::TlsAcceptor::from(Arc::new(config))
+}
+
+#[tokio::test]
+async fn echoes_over_wss_with_a_trust_anchor() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = tls_acceptor();
     let server = tokio::spawn(async move {
         let (socket, _) = listener.accept().await.unwrap();
         let tls = acceptor.accept(socket).await.unwrap();
@@ -213,6 +217,62 @@ async fn echoes_over_wss_with_a_trust_anchor() {
     })
     .await;
     server.await.unwrap();
+}
+
+// wss: rides the https transport (#179); the head on the wire must still be Chrome's,
+// byte for byte, with nothing the HTTP client would add. A frame sent in the same write
+// as the 101 head reaches the session.
+#[tokio::test]
+async fn wss_sends_chromes_head_byte_for_byte() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = tls_acceptor();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut tls = acceptor.accept(socket).await.unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0u8];
+        while !head.ends_with(b"\r\n\r\n") {
+            tls.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+        let head = String::from_utf8(head).unwrap();
+        let key = head
+            .lines()
+            .find_map(|line| line.strip_prefix("Sec-WebSocket-Key: "))
+            .unwrap()
+            .to_owned();
+        let mut reply = format!(
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\nSec-WebSocket-Protocol: chat\r\n\r\n",
+            accept_key(&key)
+        )
+        .into_bytes();
+        reply.extend_from_slice(&[0x81, 5]);
+        reply.extend_from_slice(b"early");
+        tls.write_all(&reply).await.unwrap();
+        let mut rest = Vec::new();
+        let _ = tls.read_to_end(&mut rest).await;
+        (head, key)
+    });
+    let request = WsRequest {
+        url: format!("wss://127.0.0.1:{port}/chat?room=1"),
+        origin: format!("https://127.0.0.1:{port}"),
+        protocols: vec!["chat".into()],
+        user_agent: "UA".into(),
+        accept_language: "en-US,en;q=0.9".into(),
+        cookie: "c=1".into(),
+        trust_anchor: Some(CERT.to_vec()),
+    };
+    let (handle, mut events) = open(request.clone());
+    match events.recv().await.unwrap() {
+        WsEvent::Open(accepted) => assert_eq!(accepted.protocol, "chat"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(events.recv().await, Some(WsEvent::Text("early".into())));
+    drop(handle);
+    let (head, key) = server.await.unwrap();
+    let url = url::Url::parse(&request.url).unwrap();
+    assert_eq!(head, handshake_head(&request, &url, &key));
 }
 
 #[tokio::test]
@@ -265,4 +325,43 @@ async fn failures_and_abnormal_closure() {
         })
     );
     server.await.unwrap();
+}
+
+// A wss: handshake answered with anything but 101 fails the connection; a redirect is
+// not followed (Chrome fails it too).
+#[tokio::test]
+async fn wss_non_switching_responses_fail() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = tls_acceptor();
+    let replies = [
+        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_owned(),
+        format!("HTTP/1.1 302 Found\r\nLocation: wss://127.0.0.1:{port}/next\r\nContent-Length: 0\r\n\r\n"),
+    ];
+    let server = tokio::spawn(async move {
+        let mut accepted = 0;
+        for reply in replies {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut tls = acceptor.accept(socket).await.unwrap();
+            let mut head = Vec::new();
+            let mut byte = [0u8];
+            while !head.ends_with(b"\r\n\r\n") {
+                tls.read_exact(&mut byte).await.unwrap();
+                head.push(byte[0]);
+            }
+            tls.write_all(reply.as_bytes()).await.unwrap();
+            tls.shutdown().await.unwrap();
+            accepted += 1;
+        }
+        accepted
+    });
+    for _ in 0..2 {
+        let request = WsRequest {
+            url: format!("wss://127.0.0.1:{port}/"),
+            trust_anchor: Some(CERT.to_vec()),
+            ..WsRequest::default()
+        };
+        assert_eq!(open(request).1.recv().await, Some(WsEvent::Failed));
+    }
+    assert_eq!(server.await.unwrap(), 2);
 }

@@ -254,6 +254,12 @@ pub struct Session {
     /// Session default engine for `web_search` when a call omits `engine` — set via
     /// `web_search_set_engine`. `None` (the default) falls through to `"duckduckgo"`.
     default_search_engine: Option<String>,
+    /// Tree-order indices (over `document.querySelectorAll('input')`) whose IDL
+    /// `indeterminate` flag a script has set to `true`, captured from the last render.
+    /// A static screenshot forwards them as [`raster::IdlStates::indeterminate_inputs`]
+    /// (turbo-dom#371) so an indeterminate checkbox paints the Chrome glyph the
+    /// serialized HTML does not express. Empty when no render ran or no input was set.
+    pub indeterminate_input_indices: Vec<usize>,
 }
 
 /// Install process-global render hooks once: a raster-backed text measurer (system fonts on) that
@@ -344,6 +350,26 @@ impl Session {
         self.response_headers.clear();
         self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
         self.last_render_navigation_count = 0;
+        self.indeterminate_input_indices.clear();
+    }
+
+    // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
+    // inputs whose IDL `indeterminate` flag is `true`. Best-effort: a parse / JSON
+    // failure in the one-shot probe leaves the list empty (no IDL overlay). The probe
+    // itself cannot throw, so `eval_json_expression` only errors on execution-budget
+    // termination the host side couldn't recover from.
+    async fn snapshot_indeterminate_inputs(
+        page: &mut turbo_surf_render::PageSession,
+    ) -> Vec<usize> {
+        // `eval_json_expression` already JSON-stringifies the expression's result;
+        // the inner `.reduce` is the array itself, not a pre-serialized string.
+        const PROBE: &str = "Array.prototype.reduce.call(\
+             document.querySelectorAll('input'),\
+             (acc,el,i)=>{if(el.indeterminate)acc.push(i);return acc;},[])";
+        let Ok(json) = page.eval_json_expression(PROBE).await else {
+            return Vec::new();
+        };
+        serde_json::from_str::<Vec<usize>>(&json).unwrap_or_default()
     }
 
     fn load_response(
@@ -686,6 +712,11 @@ impl Session {
         let headers = page.response_headers_snapshot();
         let html = page.serialize();
         let cookies = page.cookies();
+        // Snapshot the live IDL `indeterminate` flag on `<input>` elements (tree-order
+        // over `document.querySelectorAll('input')`); the serialized HTML does not
+        // carry it, so a later screenshot forwards it via ScreenshotOptions.idl_states
+        // (turbo-dom#371).
+        self.indeterminate_input_indices = Self::snapshot_indeterminate_inputs(&mut page).await;
         page.close();
         self.jar = CookieJar::from_storage_state(&cookies);
         self.last_render_navigation_count = count;
@@ -1139,9 +1170,17 @@ impl Session {
         } else {
             None
         };
+        // IDL `indeterminate` flags captured from the last render (turbo-dom#371):
+        // the serialized HTML does not express them, so a static screenshot paints
+        // plain checkboxes without this overlay.
+        let idl_states =
+            (!self.indeterminate_input_indices.is_empty()).then(|| raster::IdlStates {
+                indeterminate_inputs: self.indeterminate_input_indices.iter().copied().collect(),
+            });
         let mut options = raster::ScreenshotOptions::default();
         options.full_page = full_page;
         options.fonts = fonts.as_ref();
+        options.idl_states = idl_states.as_ref();
         match arg_str(args, "format").unwrap_or("png") {
             "svg" => {
                 let svg = raster::screenshot_svg_with_options(&html, &css, vp, &images, &options)?;

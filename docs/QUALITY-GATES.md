@@ -146,7 +146,7 @@ re-captures its controls in the same change.
 
 ### Backlog (`function:line=cc`)
 
-Rust (54):
+Rust (46):
 - `rust/crates/turbo-surf-core/src/challenge.rs`: detect:211=31
 - `rust/crates/turbo-surf-core/src/compression_dictionary.rs`: store_generation:202=17
 - `rust/crates/turbo-surf-core/src/compression_dictionary/decode.rs`: decode_reader:105=17
@@ -168,11 +168,6 @@ Rust (54):
 - `rust/crates/turbo-surf-render/src/csp.rs`: matches_source:391=16, new:480=23
 - `rust/crates/turbo-surf-render/src/csp_reporting.rs`: send:274=45
 - `rust/crates/turbo-surf-render/src/frame_location.rs`: navigate:29=16
-- `rust/crates/turbo-surf-render/src/live_layout_backend.rs`: scroll_into_view:859=23, offset:1396=17, range_geometry:1479=21
-- `rust/crates/turbo-surf-render/src/live_layout_dom.rs`: capture_kind:77=44
-- `rust/crates/turbo-surf-render/src/live_layout_scoped.rs`: prepare_rule:46=20, compound:337=21
-- `rust/crates/turbo-surf-render/src/live_layout_zoom.rs`: scale_value:191=17
-- `rust/crates/turbo-surf-render/src/live_stylesheets.rs`: append_rules:83=16
 - `rust/crates/turbo-surf-render/src/message_ports.rs`: op_port_post_message:587=17
 - `rust/crates/turbo-surf-render/src/runtime.rs`: op_fetch:2646=43, queue_window_message:4715=20, (closure):4902=43, allocate_frame:5636=18, clear_storage_from_response:6444=22, op_storage_call:6792=22, install_dom:12835=17, (closure):13437=33, drain_event_loop_until_completion:13234=30, hydrate_installed_document:14395=21, drain_to_quiescence_with_scripts:14618=21
 - `rust/crates/turbo-surf-render/src/script_fetch.rs`: fetch:23=26

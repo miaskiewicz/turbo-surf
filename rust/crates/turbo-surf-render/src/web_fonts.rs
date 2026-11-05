@@ -231,6 +231,83 @@ pub(crate) fn report_used<'s>(scope: &mut v8::PinScope<'s, '_>, used: &[String])
     hook.call(scope, receiver.into(), &[names.into()]).is_some()
 }
 
+/// One `@font-face` rule of a stylesheet, for an embedder that loads a static page's
+/// faces itself (the no-JS screenshot, turbo-surf#142): its family, weight, italic flag
+/// and `url()` sources in preference order (a `local()` source is left out).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebFontSource {
+    pub family: String,
+    pub weight: u16,
+    pub italic: bool,
+    pub urls: Vec<String>,
+}
+
+/// The `@font-face` rules of `css` (top-level rules; a rule without a family or a `url()`
+/// source is skipped, as is an unparsable sheet).
+pub fn font_face_sources(css: &str) -> Vec<WebFontSource> {
+    let Ok(sheet) = StyleSheet::parse(css, ParserOptions::default()) else {
+        return Vec::new();
+    };
+    sheet
+        .rules
+        .0
+        .iter()
+        .filter_map(|rule| match rule {
+            CssRule::FontFace(rule) => font_face_source(&rule.properties),
+            _ => None,
+        })
+        .collect()
+}
+
+fn font_face_source(properties: &[FontFaceProperty<'_>]) -> Option<WebFontSource> {
+    let mut source = WebFontSource {
+        family: String::new(),
+        weight: 400,
+        italic: false,
+        urls: Vec::new(),
+    };
+    for property in properties {
+        match property {
+            FontFaceProperty::FontFamily(family) => {
+                source.family = crate::live_layout_resources::family_name(family).ok()?;
+            }
+            FontFaceProperty::Source(sources) => {
+                source.urls = sources
+                    .iter()
+                    .filter_map(|item| match item {
+                        Source::Url(url) => Some(url.url.url.to_string()),
+                        Source::Local(_) => None,
+                    })
+                    .collect();
+            }
+            FontFaceProperty::FontWeight(_) => source.weight = weight(&value_text(property)?),
+            FontFaceProperty::FontStyle(_) => {
+                source.italic = value_text(property)?.starts_with(['i', 'o']);
+            }
+            _ => {}
+        }
+    }
+    (!source.family.is_empty() && !source.urls.is_empty()).then_some(source)
+}
+
+/// The weight a face registers under: a range's start, `bold` 700, else 400.
+fn weight(text: &str) -> u16 {
+    match text.split_whitespace().next() {
+        Some("bold") => 700,
+        Some(value) => value
+            .parse::<f32>()
+            .map_or(400, |weight| weight.clamp(1.0, 1000.0) as u16),
+        None => 400,
+    }
+}
+
+/// Parse a fetched face's bytes (WOFF / WOFF2 unwrapped) as `source`'s face, with
+/// Chrome's web-font metrics (`FontFace::from_web_font_bytes`); `None` for bytes that are
+/// not a usable font.
+pub fn web_font_face(bytes: &[u8], source: &WebFontSource) -> Option<FontFace> {
+    parse(bytes, source.family.clone(), source.weight, source.italic)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,5 +355,36 @@ mod tests {
         assert!(bogus.get("weight").is_none());
         assert!(rule_descriptors("a{color:red}").is_none());
         assert!(rule_descriptors("@font-face{").is_some_and(|value| value.get("src").is_none()));
+    }
+
+    #[test]
+    fn font_face_sources_read_each_rules_family_weight_style_and_urls() {
+        let sources = font_face_sources(
+            "a{color:red}@font-face{font-family:\"Surf A\";src:local(Foo),url(/a.woff2) format('woff2'),url(b.ttf);font-weight:bold;font-style:italic}\
+             @font-face{font-family:B;src:url(c.woff);font-weight:300 700;font-style:oblique 10deg}\
+             @font-face{font-family:C;src:url(d.woff);font-weight:600}\
+             @font-face{font-family:NoSource;src:local(Bar)}@font-face{src:url(e.woff)}",
+        );
+        let row = |family: &str, weight, italic, urls: &[&str]| WebFontSource {
+            family: family.into(),
+            weight,
+            italic,
+            urls: urls.iter().map(|url| url.to_string()).collect(),
+        };
+        assert_eq!(
+            sources,
+            [
+                row("Surf A", 700, true, &["/a.woff2", "b.ttf"]),
+                row("B", 300, true, &["c.woff"]),
+                row("C", 600, false, &["d.woff"]),
+            ]
+        );
+        assert!(font_face_sources("@font-face{").is_empty());
+        assert_eq!(weight("normal"), 400);
+        assert_eq!(weight(""), 400);
+        let face = web_font_face(WOFF2, &sources[2]).unwrap();
+        assert!(face.is_web_font());
+        assert_eq!(face.family(), "C");
+        assert!(web_font_face(b"not a font", &sources[2]).is_none());
     }
 }

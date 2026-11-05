@@ -67,6 +67,8 @@ use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
 #[path = "fetch_streams.rs"]
 pub(crate) mod fetch_streams;
+#[path = "network_transports.rs"]
+mod network_transports;
 use turbo_surf_core::net::{fetch_html, fetch_typed_bytes, FetchOptions, FetchedBytes};
 use turbo_surf_core::request_context::{
     ClientHints, Credentials, Destination, RequestContext, RequestMode,
@@ -91,7 +93,9 @@ use privacy_sandbox::{op_private_token_issuer, op_private_token_query};
 mod form_submission;
 #[path = "script_navigation.rs"]
 mod script_navigation;
-use form_submission::{op_form_data_entries, op_form_data_event, op_form_data_finish};
+use form_submission::{
+    op_form_data_entries, op_form_data_event, op_form_data_finish, op_form_navigation_blocked,
+};
 #[path = "user_activation.rs"]
 mod user_activation;
 #[path = "window_interfaces.rs"]
@@ -3110,6 +3114,8 @@ struct ImageOut {
     status: u16,
     width: u32,
     height: u32,
+    /// A viewBox-only SVG's natural aspect ratio (turbo-surf#161), else none.
+    ratio: Option<f32>,
     ok: bool,
 }
 
@@ -3235,11 +3241,12 @@ async fn op_load_image(
         return ImageOut::default();
     };
     match natural_image_size(&response.bytes, &response.content_type) {
-        Some((width, height)) => ImageOut {
+        Some((width, height, ratio)) => ImageOut {
             url: response.final_url,
             status: response.status,
             width,
             height,
+            ratio,
             ok: true,
         },
         None => ImageOut {
@@ -3258,11 +3265,12 @@ fn op_decode_data_image(#[string] url: String) -> ImageOut {
     let size = turbo_dom_layout::image::decode_data_url(&url)
         .and_then(|data| natural_image_size(&data.bytes, &data.mime));
     match size {
-        Some((width, height)) => ImageOut {
+        Some((width, height, ratio)) => ImageOut {
             url,
             status: 200,
             width,
             height,
+            ratio,
             ok: true,
         },
         None => ImageOut {
@@ -3278,7 +3286,7 @@ fn op_decode_data_image(#[string] url: String) -> ImageOut {
 /// WebP, BMP, ICO/CUR, AVIF; EXIF orientation applied) from its bytes whatever the
 /// declared type or HTTP status, while SVG is decoded only when served as
 /// `image/svg+xml` and an `image/svg+xml` response is never sniffed as a raster.
-fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32)> {
+fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32, Option<f32>)> {
     use turbo_dom_layout::{image, svg};
     let essence = content_type.split(';').next().unwrap_or("").trim();
     let natural = if essence.eq_ignore_ascii_case("image/svg+xml") {
@@ -3291,7 +3299,7 @@ fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32)> {
             .and_then(|_| image::probe(bytes))
             .map(|intrinsic| intrinsic.displayed(true))
     }?;
-    Some((natural.width, natural.height))
+    Some((natural.width, natural.height, natural.natural_ratio))
 }
 
 // Each frame owns its native tree and JS browser APIs in its own V8 context.
@@ -7291,6 +7299,7 @@ deno_core::extension!(
         op_form_data_entries,
         op_form_data_finish,
         op_form_data_event,
+        op_form_navigation_blocked,
         op_storage_area,
         op_idb_registry,
         op_idb_checkpoint,
@@ -7361,6 +7370,14 @@ deno_core::extension!(
         fetch_streams::op_fetch_release,
         fetch_streams::op_fetch_read,
         op_fetch,
+        network_transports::op_connect_allowed,
+        network_transports::op_ws_open,
+        network_transports::op_ws_send_text,
+        network_transports::op_ws_send_binary,
+        network_transports::op_ws_close,
+        network_transports::op_ws_drop,
+        network_transports::op_ws_next,
+        network_transports::op_net_transport_hold,
         blob_urls::op_blob_url_create,
         blob_urls::op_blob_url_revoke,
         blob_urls::op_blob_url_key,
@@ -8907,6 +8924,8 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   let r;
   try {
     const request=ops.op_fetch(__String(requestTarget), initJson);
+    // An event stream (#144) must not hold the page's event loop open.
+    if(o.unref)__core.unrefOpPromise(request);
     r = await (abortNotice?__FetchPromiseRace([request,__FetchThen(abortNotice,reason=>{throw reason;})]):request);
   } catch(error) {ops.op_fetch_cancel(cancelId);finish();throw error;} finally {
     __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
@@ -8931,7 +8950,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
     else if([204,205,304].includes(r.status)){ops.op_fetch_cancel(cancelId);finish();payload=new __FetchReadable({type:"bytes",start(controller){controller.close();}});}
     else {
       payload=new __FetchReadable({type:"bytes",start(controller){transport.controller=controller;},async pull(controller){
-        try{const part=await ops.op_fetch_read(r.stream_id);if(transport.done)return;if(part.aborted||isAborted())throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");if(part.error)throw new __exceptionTypeError(part.error);if(part.done){controller.close();finish();}else controller.enqueue(new Uint8Array(part.bytes));}catch(error){controller.error(error);ops.op_fetch_cancel(cancelId);finish();}
+        try{const read=ops.op_fetch_read(r.stream_id);if(o.unref)__core.unrefOpPromise(read);const part=await read;if(transport.done)return;if(part.aborted||isAborted())throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");if(part.error)throw new __exceptionTypeError(part.error);if(part.done){controller.close();finish();}else controller.enqueue(new Uint8Array(part.bytes));}catch(error){controller.error(error);ops.op_fetch_cancel(cancelId);finish();}
       },cancel(){ops.op_fetch_cancel(cancelId);finish();}},{highWaterMark:0});
       ops.op_fetch_watch_body(payload,cancelId);
     }
@@ -10185,6 +10204,9 @@ __BodyParamsString=URLSearchParams.prototype.toString;
     include_str!("xhr.js"),
     include_str!("file_reader.js"),
     include_str!("websocket.js"),
+    include_str!("websocket_stream.js"),
+    include_str!("event_source.js"),
+    include_str!("web_transport.js"),
     include_str!("storage_apis.js"),
     r##"
 // Object-URL registry + download capture. The common client-side export pattern is
@@ -10615,7 +10637,7 @@ function __imageLoaded(el, choice, result, url) {
   // A density-selected image reports (and lays out at) the binding's density-corrected size.
   const size = loaded ? __imageHost.naturalSize(result.width, result.height, choice.density) : null;
   const width = size ? size.naturalWidth : 0, height = size ? size.naturalHeight : 0;
-  ops.op_live_image_loaded(el,choice.key,width,height);
+  ops.op_live_image_loaded(el,choice.key,width,height,loaded&&result.ratio>0?result.ratio:0);
   __imageHost.setState(el,loaded?{complete:true,naturalWidth:width,naturalHeight:height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
   return loaded;
 }
@@ -11668,6 +11690,7 @@ __G.domSig = (() => {
           const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)});
           const request = record.navigationRequest; record.navigationRequest = "";
           const response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init);
+          if (request && ops.op_form_navigation_blocked(request) && record.epoch === epoch) { record.loaded = true; return; }
           if (record.epoch !== epoch || !frameConnected(el)) return;
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;
@@ -14320,6 +14343,14 @@ async fn drain_event_loop_until_completion(
             if completion.is_some()
                 && storage_waiter.is_some()
                 && matches!(result, std::task::Poll::Ready(Ok(())))
+            {
+                return std::task::Poll::Pending;
+            }
+            // Open sockets and event streams read through unref'd ops (#144): they never
+            // hold a render, but an awaited operation keeps waiting for their events.
+            if completion.is_some()
+                && matches!(result, std::task::Poll::Ready(Ok(())))
+                && network_transports::live(&rt.op_state().borrow())
             {
                 return std::task::Poll::Pending;
             }

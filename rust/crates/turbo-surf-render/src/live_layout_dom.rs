@@ -88,106 +88,67 @@ fn capture_kind<'s>(
     let browsing_context = is_browsing_context();
     let composition_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Composition);
-    let (connected, root, mut graph, sheets) = with_tree(|tree| {
-        let actual = tree.node_type_id(handle);
-        let valid = match kind {
-            0 => matches!(actual, 1 | 3 | 9 | 11),
-            9 => actual == 9 || tree.is_shadow_root(handle),
-            _ => actual == kind,
-        };
-        if !valid {
-            return Err(String::from("Illegal invocation"));
-        }
-        let connected = is_connected(tree, handle);
-        let graph = Composition::scopes(tree)?;
-        let sheets = graph
-            .scopes
-            .iter()
-            .filter_map(|(&node, &root)| {
-                matches!(tree.local_name(node), Some("style" | "link")).then_some((node, root))
-            })
-            .collect::<HashSet<_>>();
-        Ok((connected, tree.root(), graph, sheets))
-    })
-    .ok_or("native layout document is unavailable")??;
+    let (connected, root, mut graph, sheets) = with_tree(|tree| scope_graph(tree, handle, kind))
+        .ok_or("native layout document is unavailable")??;
     if connected && browsing_context {
-        let mut pending = vec![(root, 0usize)];
-        while let Some((node, depth)) = pending.pop() {
-            if depth > 256 || graph.children.len() >= 50_000 {
-                return Err("native composed layout exceeds source budget".into());
-            }
-            if graph.children.contains_key(&node) {
-                return Err("native composed layout repeats a source".into());
-            }
-            // The native light-tree children are already authoritative unless a
-            // shadow host or an HTML slot needs private distribution records.
-            if scope.is_execution_terminating() {
-                return Err("native composition interrupted".into());
-            }
-            let native = with_tree(|tree| native_composed_children(tree, node))
-                .ok_or("native layout document is unavailable")?;
-            let handles = if let Some(children) = native {
-                children
-            } else {
-                let wrapper = wrap(scope, node);
-                let children = host_composed_children(scope, wrapper)
-                    .ok_or("native composition interrupted")?;
-                let mut handles = Vec::with_capacity(children.len());
-                for child in children {
-                    if document_id_of(scope, child) != u64::from(document_id) {
-                        return Err("native composition contains a foreign document source".into());
-                    }
-                    handles.push(
-                        handle_of(scope, child)
-                            .ok_or("native composition child source unavailable")?,
-                    );
-                }
-                handles
-            };
-            for &child in &handles {
-                if graph.parents.insert(child, node).is_some() {
-                    return Err("native composed layout repeats a child".into());
-                }
-            }
-            pending.extend(handles.iter().rev().map(|child| (*child, depth + 1)));
-            graph.children.insert(node, handles);
-        }
+        compose(scope, root, document_id, &mut graph)?;
     }
     drop(composition_profile);
     graph.inline_overrides = cascade_policy(scope).inline_overrides.into_iter().collect();
     // Ordinary documents use the same native matched cascade as shadow scopes.
     // Falling back here loses functional selector arguments and specificity.
     let composed = connected && browsing_context;
+    let tree = capture_tree(scope, document_id, composed, &mut graph)?;
+    let owner_context = current_document_context(scope);
+    let sheets = if composed {
+        capture_sheets(scope, root, document_id, &graph, &sheets)?
+    } else {
+        Vec::new()
+    };
+    Ok(NativeLayoutInput {
+        source: CaptureSource::Node(receiver),
+        owner_context,
+        document: receiver,
+        tree,
+        handle,
+        connected,
+        browsing_context,
+        sheets,
+        range: None,
+    })
+}
+/// The live tree input: a composed document gets the UA rules matched in each of
+/// its scopes and the composed tree; anything else an empty tree.
+fn capture_tree(
+    scope: &mut v8::PinScope<'_, '_>,
+    document_id: u32,
+    composed: bool,
+    graph: &mut Composition,
+) -> Result<LiveTreeInput, String> {
     if composed {
         graph.ua_rules =
-            with_tree(|tree| crate::live_layout_scoped::ua_rules(tree, document_id, &graph))
+            with_tree(|tree| crate::live_layout_scoped::ua_rules(tree, document_id, graph))
                 .ok_or("native UA owner tree unavailable")??;
     }
-    let tree_profile =
+    let _tree_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::TreeSnapshot);
-    let tree = with_tree(|tree| {
+    with_tree(|tree| {
         if composed {
             capture_composed_tree(tree, document_id, graph.clone())
         } else {
             Ok(LiveTreeInput::empty(document_id, tree.version))
         }
     })
-    .ok_or("native layout document is unavailable")??;
-    drop(tree_profile);
-    let owner_context = current_document_context(scope);
-    if !connected || !browsing_context {
-        return Ok(NativeLayoutInput {
-            source: CaptureSource::Node(receiver),
-            owner_context,
-            document: receiver,
-            tree,
-            handle,
-            connected,
-            browsing_context,
-            sheets: Vec::new(),
-            range: None,
-        });
-    }
+    .ok_or("native layout document is unavailable")?
+}
+/// Every tree scope's stylesheets, prepared against `graph`, in cascade order.
+fn capture_sheets(
+    scope: &mut v8::PinScope<'_, '_>,
+    root: Handle,
+    document_id: u32,
+    graph: &Composition,
+    sheets: &HashSet<(Handle, Handle)>,
+) -> Result<Vec<SheetSnapshot>, String> {
     let _stylesheets_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Stylesheets);
     let document = wrap(scope, root);
@@ -202,41 +163,151 @@ fn capture_kind<'s>(
     let mut roots = vec![root];
     roots.extend(graph.hosts.keys().copied());
     for scope_root in roots {
-        let ordered = with_tree(|tree| ordered_stylesheets(tree, scope_root, &sheets))
+        let owners = SheetOwners {
+            host,
+            document_id,
+            root: scope_root,
+            graph,
+        };
+        owners.owned_sheets(scope, sheets, &mut result)?;
+        owners.adopted_sheets(scope, &mut result)?;
+    }
+    Ok(result)
+}
+/// Whether the receiver is connected, the tree root, the tree scopes, and the
+/// `(style / link node, scope root)` pairs.
+type ScopeGraph = (bool, Handle, Composition, HashSet<(Handle, Handle)>);
+/// Validate the receiver's node type for this capture `kind`, then collect the
+/// tree scopes and the `style` / `link` nodes (with their scope roots).
+fn scope_graph(tree: &Tree, handle: Handle, kind: u8) -> Result<ScopeGraph, String> {
+    let actual = tree.node_type_id(handle);
+    let valid = match kind {
+        0 => matches!(actual, 1 | 3 | 9 | 11),
+        9 => actual == 9 || tree.is_shadow_root(handle),
+        _ => actual == kind,
+    };
+    if !valid {
+        return Err(String::from("Illegal invocation"));
+    }
+    let connected = is_connected(tree, handle);
+    let graph = Composition::scopes(tree)?;
+    let sheets = graph
+        .scopes
+        .iter()
+        .filter_map(|(&node, &root)| {
+            matches!(tree.local_name(node), Some("style" | "link")).then_some((node, root))
+        })
+        .collect::<HashSet<_>>();
+    Ok((connected, tree.root(), graph, sheets))
+}
+/// Record the composed (flat) tree from `root` in `graph`, within the source budget.
+fn compose(
+    scope: &mut v8::PinScope<'_, '_>,
+    root: Handle,
+    document_id: u32,
+    graph: &mut Composition,
+) -> Result<(), String> {
+    let mut pending = vec![(root, 0usize)];
+    while let Some((node, depth)) = pending.pop() {
+        if depth > 256 || graph.children.len() >= 50_000 {
+            return Err("native composed layout exceeds source budget".into());
+        }
+        if graph.children.contains_key(&node) {
+            return Err("native composed layout repeats a source".into());
+        }
+        if scope.is_execution_terminating() {
+            return Err("native composition interrupted".into());
+        }
+        let handles = composed_children(scope, node, document_id)?;
+        for &child in &handles {
+            if graph.parents.insert(child, node).is_some() {
+                return Err("native composed layout repeats a child".into());
+            }
+        }
+        pending.extend(handles.iter().rev().map(|child| (*child, depth + 1)));
+        graph.children.insert(node, handles);
+    }
+    Ok(())
+}
+fn composed_children(
+    scope: &mut v8::PinScope<'_, '_>,
+    node: Handle,
+    document_id: u32,
+) -> Result<Vec<Handle>, String> {
+    // The native light-tree children are already authoritative unless a
+    // shadow host or an HTML slot needs private distribution records.
+    let native = with_tree(|tree| native_composed_children(tree, node))
+        .ok_or("native layout document is unavailable")?;
+    if let Some(children) = native {
+        return Ok(children);
+    }
+    let wrapper = wrap(scope, node);
+    let children =
+        host_composed_children(scope, wrapper).ok_or("native composition interrupted")?;
+    let mut handles = Vec::with_capacity(children.len());
+    for child in children {
+        if document_id_of(scope, child) != u64::from(document_id) {
+            return Err("native composition contains a foreign document source".into());
+        }
+        handles.push(handle_of(scope, child).ok_or("native composition child source unavailable")?);
+    }
+    Ok(handles)
+}
+/// One tree scope's stylesheet sources, read through the private CSS host.
+struct SheetOwners<'a, 's> {
+    host: v8::Local<'s, v8::Object>,
+    document_id: u32,
+    root: Handle,
+    graph: &'a Composition,
+}
+impl<'s> SheetOwners<'_, 's> {
+    fn push(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        sheet: v8::Local<'s, v8::Value>,
+        result: &mut Vec<SheetSnapshot>,
+    ) -> Result<(), String> {
+        let mut sheet = export(scope, self.host, sheet)?;
+        prepare_sheet(scope, &mut sheet, self.document_id, self.root, self.graph)?;
+        result.push(sheet);
+        Ok(())
+    }
+    /// The scope's `style` / `link` sheets in tree order.
+    fn owned_sheets(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        sheets: &HashSet<(Handle, Handle)>,
+        result: &mut Vec<SheetSnapshot>,
+    ) -> Result<(), String> {
+        let ordered = with_tree(|tree| ordered_stylesheets(tree, self.root, sheets))
             .ok_or("native CSS owner tree unavailable")?;
         for handle in ordered {
             let node = wrap(scope, handle);
-            let value = call(scope, host, "sheet", &[node.into()])?;
+            let value = call(scope, self.host, "sheet", &[node.into()])?;
             if !value.is_null_or_undefined() {
-                let mut sheet = export(scope, host, value)?;
-                prepare_sheet(scope, &mut sheet, document_id, scope_root, &graph)?;
-                result.push(sheet);
+                self.push(scope, value, result)?;
             }
         }
-        let owner = wrap(scope, scope_root);
-        let adopted = call(scope, host, "readAdopted", &[owner.into()])?;
+        Ok(())
+    }
+    /// The scope's adopted sheets, after its owned ones.
+    fn adopted_sheets(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        result: &mut Vec<SheetSnapshot>,
+    ) -> Result<(), String> {
+        let owner = wrap(scope, self.root);
+        let adopted = call(scope, self.host, "readAdopted", &[owner.into()])?;
         let adopted = v8::Local::<v8::Array>::try_from(adopted)
             .map_err(|_| "native CSS adopted snapshot is not an array")?;
         for index in 0..adopted.length() {
             let sheet = adopted
                 .get_index(scope, index)
                 .ok_or("native CSS adopted read interrupted")?;
-            let mut sheet = export(scope, host, sheet)?;
-            prepare_sheet(scope, &mut sheet, document_id, scope_root, &graph)?;
-            result.push(sheet);
+            self.push(scope, sheet, result)?;
         }
+        Ok(())
     }
-    Ok(NativeLayoutInput {
-        source: CaptureSource::Node(receiver),
-        owner_context,
-        document: receiver,
-        tree,
-        handle,
-        connected,
-        browsing_context,
-        sheets: result,
-        range: None,
-    })
 }
 fn native_composed_children(tree: &Tree, node: Handle) -> Option<Vec<Handle>> {
     if tree.shadow_root(node).is_some()

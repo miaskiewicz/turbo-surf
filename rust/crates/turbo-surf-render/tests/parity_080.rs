@@ -15,8 +15,7 @@ const CASES: &[u8] = include_bytes!("fixtures/parity_080_cases.json");
 /// Known gaps owned by turbo-dom, as (case, JSON pointer into its result, surf's current
 /// value): each is required to still differ from Chrome, so a fix fails its pin and the
 /// gap is retired with it.
-const GAPS: &[(&str, &str, &str)] = &[
-];
+const GAPS: &[(&str, &str, &str)] = &[];
 /// CSS.supports answers from surf's Lightning CSS grammar, which rejects the 18 Chrome 156
 /// features (every form). The engine's grammar (`cssSupports` / `cssSupportsProperty`,
 /// turbo-dom#322) accepts them, but coerces its arguments with the page's `String`, which

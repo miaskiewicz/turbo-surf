@@ -1,0 +1,190 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-05T15:10:59.447Z",
+  "fixtures": {
+    "child-frame-form-targets-probe.js": "ed41b1a98dca9252b652b444f393521938b858d2eac1320de0eb71b3f5cf6b7e"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "child-frame-form-targets-probe.js": {
+      "redirectCrossOriginBlocked": [
+        0,
+        "/self-csp-a",
+        [["form-action", "<origin>/redirect302?to=<xo>%2Fecho%2Fblocked"]],
+        ["no echo", "/self-csp-a"]
+      ],
+      "redirectSameOriginAllowed": [
+        1,
+        "/echo/allowed",
+        [],
+        {
+          "method": "GET",
+          "url": "/echo/allowed",
+          "headers": {
+            "referer": "<origin>/self-csp-b",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": ""
+        }
+      ],
+      "redirect307Allowed": [
+        1,
+        "/echo/kept",
+        [],
+        {
+          "method": "POST",
+          "url": "/echo/kept",
+          "headers": {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "3",
+            "origin": "<origin>",
+            "referer": "<origin>/self-csp-c",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": "f=1"
+        }
+      ],
+      "redirectGetBlocked": [
+        0,
+        "/self-csp-d",
+        [["form-action", "<origin>/redirect302?to=<xo>%2Fecho%2Fblocked-get"]],
+        ["no echo", "/self-csp-d"]
+      ],
+      "redirectNamedChildBlocked": [0, "/kid", ["no echo", "/kid"]],
+      "sibling": [
+        {
+          "method": "POST",
+          "url": "/echo/sibling",
+          "headers": {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "3",
+            "origin": "<origin>",
+            "referer": "<origin>/sibling-source",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": "f=1"
+        },
+        "/sibling-source"
+      ],
+      "namedAncestor": {
+        "method": "POST",
+        "url": "/echo/ancestor",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "3",
+          "origin": "<origin>",
+          "referer": "<origin>/outer-inner",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "f=1"
+      },
+      "cousin": [
+        {
+          "method": "POST",
+          "url": "/echo/cousin",
+          "headers": {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "3",
+            "origin": "<origin>",
+            "referer": "<origin>/left-child",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": "f=1"
+        },
+        "/left-child",
+        "/right"
+      ],
+      "grandchild": [
+        {
+          "method": "POST",
+          "url": "/echo/grandkid",
+          "headers": {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "3",
+            "origin": "<origin>",
+            "referer": "<origin>/",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": "f=1"
+        },
+        "/middle",
+        "/"
+      ],
+      "selfByName": {
+        "method": "POST",
+        "url": "/echo/me",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": "3",
+          "origin": "<origin>",
+          "referer": "<origin>/me",
+          "cache-control": "max-age=0",
+          "upgrade-insecure-requests": "1",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "same-origin"
+        },
+        "body": "f=1"
+      },
+      "subtreeFirst": [
+        {
+          "method": "POST",
+          "url": "/echo/near",
+          "headers": {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "3",
+            "origin": "<origin>",
+            "referer": "<origin>/subtree-source",
+            "cache-control": "max-age=0",
+            "upgrade-insecure-requests": "1",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin"
+          },
+          "body": "f=1"
+        },
+        0,
+        "/far"
+      ],
+      "duplicates": [1, "/echo/dup", 0, "/dup-second"],
+      "crossOrigin": [0, "/plain-other", 1],
+      "javascriptTargets": [
+        ["/js-host", null, null],
+        [null, "/", null],
+        [null, null, "/js-sibling"],
+        [null, null, null]
+      ]
+    }
+  }
+}

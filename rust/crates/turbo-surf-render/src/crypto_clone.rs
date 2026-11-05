@@ -119,6 +119,18 @@ fn own_value<'s>(
     object.get(scope, name.into())
 }
 
+/// Call a context-owned adapter function with guest JS allowed; its object result.
+fn call_factory<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    factory: v8::Local<'s, v8::Function>,
+    args: &[v8::Local<'s, v8::Value>],
+) -> Option<v8::Local<'s, v8::Object>> {
+    let receiver = v8::undefined(scope);
+    let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
+    let scope = &mut scope.init();
+    factory.call(scope, receiver.into(), args)?.to_object(scope)
+}
+
 fn exception_snapshot<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
@@ -223,6 +235,120 @@ impl Delegate {
     }
 
     /// Throws a DataCloneError whose text is already final (prefixed or internal).
+    /// Rebuild a transferred stream from its endpoint port(s).
+    fn restore_stream<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        kind: u32,
+        first: usize,
+    ) -> Option<v8::Local<'s, v8::Object>> {
+        let ports = self.0.port_objects.borrow();
+        let a = v8::Local::new(scope, ports.get(first)?);
+        let b: v8::Local<v8::Value> = if kind == 3 {
+            v8::Local::new(scope, ports.get(first + 1)?).into()
+        } else {
+            v8::undefined(scope).into()
+        };
+        drop(ports);
+        let kind = v8::Integer::new_from_unsigned(scope, kind);
+        crate::stream_transfers::call(scope, 3, &[kind.into(), a.into(), b])?.to_object(scope)
+    }
+
+    /// A transferred port's snapshot; throws for a port missing from the transfer list.
+    fn port_snapshot<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        object: v8::Local<'s, v8::Object>,
+    ) -> Option<NativeSnapshot> {
+        let token = crate::message_ports::token(scope, object);
+        let index = token.and_then(|token| self.0.port_index.borrow().get(&token).copied());
+        let listed = token.is_some_and(|token| self.0.listed_ports.borrow().contains(&token));
+        match index {
+            Some(index) => Some(NativeSnapshot::Port(index)),
+            // A listed neutered port: the post-serialization check rejects it.
+            None if listed => Some(NativeSnapshot::Port(usize::MAX)),
+            None => {
+                let prefix = self.0.prefix.get();
+                let message = v8::String::new(
+                    scope,
+                    &format!(
+                        "{prefix}A MessagePort could not be cloned because it was not transferred."
+                    ),
+                )?;
+                self.throw_raw(scope, message);
+                None
+            }
+        }
+    }
+
+    fn planned_stream<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        object: v8::Local<'s, v8::Object>,
+    ) -> Option<(u32, usize)> {
+        self.0
+            .stream_plans
+            .borrow()
+            .iter()
+            .find(|plan| v8::Local::new(scope, &plan.object) == object)
+            .map(|plan| (plan.kind, plan.first))
+    }
+
+    fn stream_snapshot<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        object: v8::Local<'s, v8::Object>,
+        kind: u32,
+        first: usize,
+    ) -> Option<NativeSnapshot> {
+        // A getter may lock a planned stream before the serializer reaches it.
+        if crate::stream_transfers::kind(scope, object).ok()? < 0 {
+            let text = self.untransferable_stream(scope, object)?;
+            let message = v8::String::new(scope, &text)?;
+            self.throw_raw(scope, message);
+            return None;
+        }
+        Some(NativeSnapshot::Stream { kind, first })
+    }
+
+    /// Snapshot a native platform value; throws for an uncloneable one.
+    fn value_snapshot<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        object: v8::Local<'s, v8::Object>,
+    ) -> Option<NativeSnapshot> {
+        if deno_crypto::is_crypto_key(scope, object.into()) {
+            return Some(NativeSnapshot::Key(Box::new(
+                deno_crypto::NativeKeySnapshot::capture(scope, object.into())?,
+            )));
+        }
+        if crate::crypto_hybrid::is_hybrid_key(scope, object.into()) {
+            return Some(NativeSnapshot::HybridKey(
+                crate::crypto_hybrid::HybridKeySnapshot::capture(scope, object.into())?,
+            ));
+        }
+        if let Some(rectangle) = crate::geometry_backend::snapshot(scope, object) {
+            return Some(NativeSnapshot::Rectangle(rectangle));
+        }
+        if let Some(data) = crate::geometry_backend::point_matrix_snapshot(scope, object) {
+            return Some(NativeSnapshot::PointMatrix(data));
+        }
+        if let Some(snapshot) = exception_snapshot(scope, object) {
+            return Some(snapshot);
+        }
+        if let Some(text) = self.untransferable_stream(scope, object) {
+            let message = v8::String::new(scope, &text)?;
+            self.throw_raw(scope, message);
+            return None;
+        }
+        // V8's text for an uncloneable platform object, e.g. "HTMLBodyElement
+        // object could not be cloned." (the map's constructor, not a property).
+        let name = object.get_constructor_name().to_rust_string_lossy(scope);
+        let message = v8::String::new(scope, &format!("{name} object could not be cloned."))?;
+        self.throw_data_clone_error(scope, message);
+        None
+    }
+
     fn throw_raw<'s>(&self, scope: &mut v8::PinScope<'s, '_>, message: v8::Local<'s, v8::String>) {
         if let Some(adapter) = scope.get_current_context().get_slot::<KeyAdapter>() {
             let factory = crate::context_ownership::local(scope, &adapter.error);
@@ -299,66 +425,11 @@ impl v8::ValueSerializerImpl for Delegate {
         let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
         let scope = &mut scope.init();
         let snapshot = if crate::message_ports::token(scope, object).is_some() {
-            let token = crate::message_ports::token(scope, object);
-            let index = token.and_then(|token| self.0.port_index.borrow().get(&token).copied());
-            let listed = token.is_some_and(|token| self.0.listed_ports.borrow().contains(&token));
-            match index {
-                Some(index) => NativeSnapshot::Port(index),
-                // A listed neutered port: the post-serialization check rejects it.
-                None if listed => NativeSnapshot::Port(usize::MAX),
-                None => {
-                    let prefix = self.0.prefix.get();
-                    let message = v8::String::new(
-                        scope,
-                        &format!("{prefix}A MessagePort could not be cloned because it was not transferred."),
-                    )?;
-                    self.throw_raw(scope, message);
-                    return None;
-                }
-            }
-        } else if let Some((kind, first)) = self
-            .0
-            .stream_plans
-            .borrow()
-            .iter()
-            .find(|plan| v8::Local::new(scope, &plan.object) == object)
-            .map(|plan| (plan.kind, plan.first))
-        {
-            // A getter may lock a planned stream before the serializer reaches it.
-            if crate::stream_transfers::kind(scope, object).ok()? < 0 {
-                let text = self.untransferable_stream(scope, object)?;
-                let message = v8::String::new(scope, &text)?;
-                self.throw_raw(scope, message);
-                return None;
-            }
-            NativeSnapshot::Stream { kind, first }
-        } else if deno_crypto::is_crypto_key(scope, object.into()) {
-            NativeSnapshot::Key(Box::new(deno_crypto::NativeKeySnapshot::capture(
-                scope,
-                object.into(),
-            )?))
-        } else if crate::crypto_hybrid::is_hybrid_key(scope, object.into()) {
-            NativeSnapshot::HybridKey(crate::crypto_hybrid::HybridKeySnapshot::capture(
-                scope,
-                object.into(),
-            )?)
-        } else if let Some(rectangle) = crate::geometry_backend::snapshot(scope, object) {
-            NativeSnapshot::Rectangle(rectangle)
-        } else if let Some(data) = crate::geometry_backend::point_matrix_snapshot(scope, object) {
-            NativeSnapshot::PointMatrix(data)
-        } else if let Some(snapshot) = exception_snapshot(scope, object) {
-            snapshot
-        } else if let Some(text) = self.untransferable_stream(scope, object) {
-            let message = v8::String::new(scope, &text)?;
-            self.throw_raw(scope, message);
-            return None;
+            self.port_snapshot(scope, object)?
+        } else if let Some((kind, first)) = self.planned_stream(scope, object) {
+            self.stream_snapshot(scope, object, kind, first)?
         } else {
-            // V8's text for an uncloneable platform object, e.g. "HTMLBodyElement
-            // object could not be cloned." (the map's constructor, not a property).
-            let name = object.get_constructor_name().to_rust_string_lossy(scope);
-            let message = v8::String::new(scope, &format!("{name} object could not be cloned."))?;
-            self.throw_data_clone_error(scope, message);
-            return None;
+            self.value_snapshot(scope, object)?
         };
         let mut objects = self.0.objects.borrow_mut();
         let index = u32::try_from(objects.len()).ok()?;
@@ -421,20 +492,9 @@ impl v8::ValueDeserializerImpl for Delegate {
                 .map(|object| v8::Local::new(scope, object));
         }
         if let NativeSnapshot::Stream { kind, first } = snapshot {
-            let kind = *kind;
-            let first = *first;
+            let (kind, first) = (*kind, *first);
             drop(objects);
-            let ports = self.0.port_objects.borrow();
-            let a = v8::Local::new(scope, ports.get(first)?);
-            let b: v8::Local<v8::Value> = if kind == 3 {
-                v8::Local::new(scope, ports.get(first + 1)?).into()
-            } else {
-                v8::undefined(scope).into()
-            };
-            drop(ports);
-            let kind = v8::Integer::new_from_unsigned(scope, kind);
-            return crate::stream_transfers::call(scope, 3, &[kind.into(), a.into(), b])?
-                .to_object(scope);
+            return self.restore_stream(scope, kind, first);
         }
         if let NativeSnapshot::Rectangle(data) = snapshot {
             let data = *data;
@@ -456,12 +516,7 @@ impl v8::ValueDeserializerImpl for Delegate {
             let message = v8::String::new(scope, message)?;
             let name = v8::String::new(scope, name)?;
             drop(objects);
-            let receiver = v8::undefined(scope);
-            let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
-            let scope = &mut scope.init();
-            return factory
-                .call(scope, receiver.into(), &[message.into(), name.into()])?
-                .to_object(scope);
+            return call_factory(scope, factory, &[message.into(), name.into()]);
         }
         // The snapshot has no guest wrapper/prototype/metadata references.
         // Each delivery reconstructs native state; V8 preserves graph aliases.
@@ -472,12 +527,7 @@ impl v8::ValueDeserializerImpl for Delegate {
         };
         drop(objects);
         let adapter = crate::context_ownership::local(scope, &adapter.key);
-        let receiver = v8::undefined(scope);
-        let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
-        let scope = &mut scope.init();
-        adapter
-            .call(scope, receiver.into(), &[key.into()])?
-            .to_object(scope)
+        call_factory(scope, adapter, &[key.into()])
     }
 
     fn get_shared_array_buffer_from_id<'s, 'i>(
@@ -570,11 +620,7 @@ fn validate_transfers<'s>(
     };
     let array = v8::Local::<v8::Array>::try_from(transfer)
         .map_err(|_| JsErrorBox::type_error("Transfer sequence required"))?;
-    let mut buffers = Vec::new();
-    let mut port_objects =
-        Vec::<(v8::Local<'s, v8::Object>, crate::message_ports::PortToken)>::new();
-    let mut stream_objects = Vec::<(v8::Local<'s, v8::Object>, i32)>::new();
-    let mut seen_ports = std::collections::HashSet::new();
+    let mut scan = TransferScan::default();
     for index in 0..array.length() {
         if scope.is_execution_terminating() {
             return Err(JsErrorBox::generic("Clone interrupted"));
@@ -582,64 +628,136 @@ fn validate_transfers<'s>(
         let value = array
             .get_index(scope, index)
             .ok_or_else(|| JsErrorBox::generic("Transfer sequence interrupted"))?;
+        scan.add(scope, value, index, prefix)?;
+    }
+    // A neutered port or locked stream gets no transfer handle; the value may
+    // still reference it, and the post-serialization checks reject it.
+    let mut ports: Vec<_> = scan
+        .ports
+        .iter()
+        .filter_map(|(object, _)| crate::message_ports::validate_transfer(scope, *object))
+        .collect();
+    let mut streams = plan_streams(scope, &scan.streams)?;
+    let public_ports = ports.len();
+    for entry in &mut streams {
+        entry.first = ports.len();
+        stream_endpoints(scope, entry, &mut ports)?;
+    }
+    Ok(ValidatedTransfers {
+        listed: ListedTransfers {
+            buffers: scan.buffers.clone(),
+            ports: scan.ports,
+            streams: scan.streams.into_iter().map(|(object, _)| object).collect(),
+        },
+        buffers: scan.buffers,
+        ports,
+        streams,
+        public_ports,
+    })
+}
+
+/// The transfer list's ports, streams and buffers, in list order, as scanned.
+#[derive(Default)]
+struct TransferScan<'s> {
+    buffers: Vec<v8::Local<'s, v8::ArrayBuffer>>,
+    ports: Vec<(v8::Local<'s, v8::Object>, crate::message_ports::PortToken)>,
+    streams: Vec<(v8::Local<'s, v8::Object>, i32)>,
+    seen_ports: std::collections::HashSet<crate::message_ports::PortToken>,
+}
+
+impl<'s> TransferScan<'s> {
+    fn add(
+        &mut self,
+        scope: &mut v8::PinScope<'s, '_>,
+        value: v8::Local<'s, v8::Value>,
+        index: u32,
+        prefix: &str,
+    ) -> Result<(), JsErrorBox> {
         let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
             return Err(JsErrorBox::type_error(format!(
                 "{prefix}Failed to convert value to 'object'."
             )));
         };
         if let Some(token) = crate::message_ports::token(scope, object) {
-            if !seen_ports.insert(token) {
-                return Err(data_clone_error(
-                    scope,
-                    &format!(
-                        "{prefix}Message port at index {index} is a duplicate of an earlier port."
-                    ),
-                ));
-            }
-            port_objects.push((object, token));
-            continue;
+            return self.add_port(scope, object, token, index, prefix);
         }
         let kind = crate::stream_transfers::kind(scope, object)?;
         if kind != 0 {
-            if stream_objects
-                .iter()
-                .any(|(existing, _)| *existing == object)
-            {
-                let name = stream_interface(kind).unwrap_or("Stream");
-                return Err(data_clone_error(
-                    scope,
-                    &format!(
-                        "{prefix}{name} at index {index} is a duplicate of an earlier {name}."
-                    ),
-                ));
-            }
-            stream_objects.push((object, kind));
-            continue;
+            return self.add_stream(scope, object, kind, index, prefix);
         }
+        self.add_buffer(scope, value, index, prefix)
+    }
+
+    fn add_port(
+        &mut self,
+        scope: &mut v8::PinScope<'s, '_>,
+        object: v8::Local<'s, v8::Object>,
+        token: crate::message_ports::PortToken,
+        index: u32,
+        prefix: &str,
+    ) -> Result<(), JsErrorBox> {
+        if !self.seen_ports.insert(token) {
+            return Err(data_clone_error(
+                scope,
+                &format!(
+                    "{prefix}Message port at index {index} is a duplicate of an earlier port."
+                ),
+            ));
+        }
+        self.ports.push((object, token));
+        Ok(())
+    }
+
+    fn add_stream(
+        &mut self,
+        scope: &mut v8::PinScope<'s, '_>,
+        object: v8::Local<'s, v8::Object>,
+        kind: i32,
+        index: u32,
+        prefix: &str,
+    ) -> Result<(), JsErrorBox> {
+        if self.streams.iter().any(|(existing, _)| *existing == object) {
+            let name = stream_interface(kind).unwrap_or("Stream");
+            return Err(data_clone_error(
+                scope,
+                &format!("{prefix}{name} at index {index} is a duplicate of an earlier {name}."),
+            ));
+        }
+        self.streams.push((object, kind));
+        Ok(())
+    }
+
+    fn add_buffer(
+        &mut self,
+        scope: &mut v8::PinScope<'s, '_>,
+        value: v8::Local<'s, v8::Value>,
+        index: u32,
+        prefix: &str,
+    ) -> Result<(), JsErrorBox> {
         let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) else {
             return Err(data_clone_error(
                 scope,
                 &format!("{prefix}Value at index {index} does not have a transferable type."),
             ));
         };
-        if buffers.contains(&buffer) {
+        if self.buffers.contains(&buffer) {
             return Err(data_clone_error(
                 scope,
                 &format!("{prefix}ArrayBuffer at index {index} is a duplicate of an earlier ArrayBuffer."),
             ));
         }
-        buffers.push(buffer);
+        self.buffers.push(buffer);
+        Ok(())
     }
-    // A neutered port or locked stream gets no transfer handle; the value may
-    // still reference it, and the post-serialization checks reject it.
-    let mut ports = Vec::new();
-    for (object, _) in &port_objects {
-        if let Some(port) = crate::message_ports::validate_transfer(scope, *object) {
-            ports.push(port);
-        }
-    }
+}
+
+/// Prepare a transfer plan for each unlocked listed stream.
+fn plan_streams<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    stream_objects: &[(v8::Local<'s, v8::Object>, i32)],
+) -> Result<Vec<StreamPlan>, JsErrorBox> {
     let mut streams = Vec::<StreamPlan>::new();
-    for &(object, kind) in &stream_objects {
+    for &(object, kind) in stream_objects {
         if kind < 0 {
             continue;
         }
@@ -653,37 +771,29 @@ fn validate_transfers<'s>(
             first: 0,
         });
     }
-    let public_ports = ports.len();
-    for entry in &mut streams {
-        entry.first = ports.len();
-        let plan = v8::Local::new(scope, &entry.plan);
-        let receiver = own_value(scope, plan, "receiver")
-            .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
-            .ok_or_else(|| JsErrorBox::generic("Missing stream receiver"))?;
-        for index in 0..receiver.length() {
-            let object = receiver
-                .get_index(scope, index)
-                .and_then(|value| value.to_object(scope))
-                .ok_or_else(|| JsErrorBox::generic("Missing stream endpoint"))?;
-            let port = crate::message_ports::validate_transfer(scope, object)
-                .ok_or_else(|| data_clone_error(scope, "MessagePort is detached"))?;
-            ports.push(port);
-        }
+    Ok(streams)
+}
+
+/// Append the transfer handles of a planned stream's receiver endpoints.
+fn stream_endpoints(
+    scope: &mut v8::PinScope<'_, '_>,
+    entry: &StreamPlan,
+    ports: &mut Vec<crate::message_ports::PortTransfer>,
+) -> Result<(), JsErrorBox> {
+    let plan = v8::Local::new(scope, &entry.plan);
+    let receiver = own_value(scope, plan, "receiver")
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        .ok_or_else(|| JsErrorBox::generic("Missing stream receiver"))?;
+    for index in 0..receiver.length() {
+        let object = receiver
+            .get_index(scope, index)
+            .and_then(|value| value.to_object(scope))
+            .ok_or_else(|| JsErrorBox::generic("Missing stream endpoint"))?;
+        let port = crate::message_ports::validate_transfer(scope, object)
+            .ok_or_else(|| data_clone_error(scope, "MessagePort is detached"))?;
+        ports.push(port);
     }
-    Ok(ValidatedTransfers {
-        listed: ListedTransfers {
-            buffers: buffers.clone(),
-            ports: port_objects,
-            streams: stream_objects
-                .into_iter()
-                .map(|(object, _)| object)
-                .collect(),
-        },
-        buffers,
-        ports,
-        streams,
-        public_ports,
-    })
+    Ok(())
 }
 
 /// The transfer list as scanned, for Chrome's checks after value serialization.

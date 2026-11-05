@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed (network transports, #179)**: `wss:` connects over surf's Chrome https transport
+  (wreq/BoringSSL) instead of tokio-rustls, so its ClientHello is the https one with only
+  Chrome's WebSocket changes: ALPN `http/1.1` only and no ALPS. The handshake head is
+  still Chrome's, byte for byte. Checked against a frozen Chrome 156 control
+  (`fixtures/wss-hello-chrome156.json`, `tests/wss_client_hello.rs`). The identity battery
+  gained a `wss:` TLS row (`wss-hello.mjs`, run by `reversion-chrome.mjs`). `tokio-rustls`
+  is now a dev-dependency only.
 - **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
   native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
   with Chrome 156's handshake header order, cookies, origin and `connect-src` (ws/wss match

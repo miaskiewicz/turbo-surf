@@ -34,6 +34,7 @@ Files:
 | `harness/detection/chrome-identity.test.mjs` | Offline unit tests for all of the above |
 | `harness/detection/fixtures/chrome-identity-<major>.json` | One measured Chrome identity per release |
 | `harness/detection/TRANSPORT-<major>.json` (+ `fixtures/transport-*<major>-client-hello.bin`) | Chrome vs turbo-surf TLS/H2 record |
+| `harness/detection/wss-hello.mjs` (+ `fixtures/wss-hello-chrome<major>.json`) | The battery's `wss:` TLS row: Chrome's https and WebSocket ClientHellos, diffed against `turbo-surf-core`'s `wss_hello` example (#179) |
 | `rust/crates/turbo-surf-core/src/browser_releases.json` | The registry (compiled by `turbo-surf-core/build.rs`) |
 | `rust/crates/turbo-surf-mcp/examples/identity_battery.rs` | turbo-surf's side of the battery (no-JS and render tiers) |
 
@@ -246,6 +247,12 @@ Step 1 does the following, in order. It is safe to re-run.
    sets `defaultMajor` to the newest measured major and writes `browser_releases.json`.
 8. Builds `identity_battery` (`cargo build -p turbo-surf-mcp --example
    identity_battery`), runs the battery against turbo-surf and diffs in parity mode.
+   The parity also gets the `wss:` TLS row (area `wss`, `wss-hello.mjs`): turbo-surf's
+   wss ClientHello must differ from its https one exactly where Chrome's does (ALPN
+   `http/1.1` only, no ALPS), and match Chrome's wss hello apart from deltas its https
+   hello shares (class `oracle-https`). Step 3 records its control
+   (`fixtures/wss-hello-chrome<major>.json`) from the same frozen executable;
+   `--native-wss <wss_hello>` reuses a built example, `--skip-wss` skips the row.
 9. Writes `TRANSPORT-<major>.json` and the two raw ClientHello `.bin` files, then
    formats the JSON with biome.
 10. Prints the delta report and saves it to

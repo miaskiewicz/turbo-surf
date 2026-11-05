@@ -596,7 +596,13 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str, socs: Optio
 // Per-call profile overrides are not applied on this backend.
 fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     #[cfg(feature = "impersonate")]
-    let builder = {
+    let builder = apply_emulation(builder, chrome_emulation());
+    builder
+}
+
+#[cfg(feature = "impersonate")]
+fn chrome_emulation() -> wreq::Emulation {
+    {
         use wreq::IntoEmulation;
         let profile = crate::fingerprint::default_profile();
         // Resolve the upstream wreq-util Chrome profile to a concrete `Emulation` so its
@@ -642,14 +648,52 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
         // The upstream Chrome 154 profile owns signature-algorithm GREASE and
         // real trust-anchor IDs. Do not replace its Chromium root list with the
         // empty extension used by the former compatibility patch.
-        builder
-            .emulation(emulation)
-            // Override AFTER emulation (wreq applies the profile immediately, so
-            // later fine-tuning wins) to use the configured full patch version
-            // from the browser registry.
-            .user_agent(profile.user_agent.as_str())
-    };
+        emulation
+    }
+}
+
+#[cfg(feature = "impersonate")]
+fn apply_emulation(
+    builder: http::ClientBuilder,
+    emulation: wreq::Emulation,
+) -> http::ClientBuilder {
     builder
+        .emulation(emulation)
+        // Override AFTER emulation (wreq applies the profile immediately, so
+        // later fine-tuning wins) to use the configured full patch version
+        // from the browser registry.
+        .user_agent(crate::fingerprint::default_profile().user_agent.as_str())
+}
+
+/// The transport for a `wss:` upgrade (#179): the https emulation with the TLS
+/// change Chrome's WebSocket stack makes for an HTTP/1.1 upgrade. ALPN offers only
+/// `http/1.1`, and Chrome configures ALPS only for offered protocols, so no ALPS
+/// either. No redirects (Chrome fails a redirected handshake) and no idle pooling
+/// (an upgraded or refused connection is never lent to another request).
+pub(crate) fn websocket_client_builder(
+    anchor: Option<&[u8]>,
+) -> Result<http::ClientBuilder, HttpError> {
+    #[cfg(feature = "impersonate")]
+    let builder = {
+        let mut emulation = chrome_emulation();
+        if let Some(tls) = emulation.tls_options.as_mut() {
+            tls.alpn_protocols = Some(std::borrow::Cow::Borrowed(&[
+                http::tls::AlpnProtocol::HTTP1,
+            ]));
+            tls.alps_protocols = None;
+        }
+        apply_emulation(http::Client::builder(), emulation)
+    };
+    // The rustls backend negotiates ALPN per client, not per request version.
+    #[cfg(not(feature = "impersonate"))]
+    let builder = http::Client::builder().http1_only();
+    let builder = builder
+        .redirect(http::redirect::Policy::none())
+        .pool_max_idle_per_host(0);
+    match anchor {
+        Some(der) => with_trust(builder, der),
+        None => Ok(builder),
+    }
 }
 
 // The upstream wreq-util recipe a registry release names. Only recipes whose
@@ -773,7 +817,12 @@ pub fn build_report_client() -> ReportClient {
 /// Native transport builder with an embedder-supplied DER trust anchor.
 /// Certificate verification remains enabled; the factory is never guest-visible.
 pub fn client_builder_with_trust(der: &[u8]) -> Result<http::ClientBuilder, HttpError> {
-    let builder = client_builder().redirect(http::redirect::Policy::none());
+    with_trust(
+        client_builder().redirect(http::redirect::Policy::none()),
+        der,
+    )
+}
+fn with_trust(builder: http::ClientBuilder, der: &[u8]) -> Result<http::ClientBuilder, HttpError> {
     #[cfg(feature = "impersonate")]
     let builder = builder.tls_cert_store(
         http::tls::trust::CertStore::builder()

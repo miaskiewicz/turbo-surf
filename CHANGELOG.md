@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fixed (postMessage source, #90, #85)**: a posted message's `event.source` is the
+  incumbent window (the calling frame's realm), not the entered one, as in Chrome 156:
+  `a.eval("parent.postMessage(..)")`, a child-realm function called from the parent, nested
+  `g.eval` and sibling posts now report the child. `window.postMessage` and the cross-origin
+  view's `postMessage` are native entries that read V8's incumbent context
+  (`get_incumbent_context`, turbo-dom#367) before surf's own validation runs; the native
+  WindowProxy's `postMessage` reads it too. The native-SDK overlay (v8 152.2.0,
+  `engine-154/patches/sdk.patch`) gains the same `get_incumbent_context` link.
+- **Changed (deps)**: turbo-dom crates repinned to `release/0.8.0` `c650aae5`;
+  `turbo-dom-v8` comes from turbo-dom's generated candidate `79ae001d` (adds
+  `get_incumbent_context`) until its next crates.io release.
 - **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
   native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
   with Chrome 156's handshake header order, cookies, origin and `connect-src` (ws/wss match

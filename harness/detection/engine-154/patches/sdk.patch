@@ -2360,3 +2360,47 @@
        Platform::notify_isolate_shutdown(&get_current_platform(), self);
        // V8's final teardown runs here. `ANNEX_SLOT` still references the
        // (drained) annex, so any re-entrant access from weak callbacks or
+--- a/src/scope/raw.rs
++++ b/src/scope/raw.rs
+@@ -225,6 +225,22 @@
+     isolate: *mut RealIsolate,
+   ) -> *const Context;
+   pub(super) fn v8__Isolate__GetEnteredOrMicrotaskContext(
++    isolate: *mut RealIsolate,
++  ) -> *const Context;
++  // `v8::Isolate::GetIncumbentContext()` has no binding.cc wrapper in rusty_v8
++  // 152.2.0, so link V8's exported member function by its mangled symbol, as
++  // turbo-dom-v8 does (turbo-dom#367). `Local<Context>` is a one-pointer
++  // trivially-copyable wrapper, ABI-compatible with `*const Context`. HTML's
++  // incumbent realm: postMessage `event.source` (turbo-surf#90).
++  #[cfg_attr(
++    not(target_env = "msvc"),
++    link_name = "_ZN2v87Isolate19GetIncumbentContextEv"
++  )]
++  #[cfg_attr(
++    target_env = "msvc",
++    link_name = "?GetIncumbentContext@Isolate@v8@@QEAA?AV?$Local@VContext@v8@@@2@XZ"
++  )]
++  pub(super) fn v8__Isolate__GetIncumbentContext(
+     isolate: *mut RealIsolate,
+   ) -> *const Context;
+   pub(super) fn v8__Isolate__ThrowException(
+--- a/src/scope.rs
++++ b/src/scope.rs
+@@ -560,6 +560,16 @@
+     let context_ptr = unsafe {
+       raw::v8__Isolate__GetEnteredOrMicrotaskContext(self.0.isolate.as_ptr())
+     };
++    unsafe { Local::from_raw_unchecked(context_ptr) }
++  }
++
++  /// Returns the incumbent realm as defined by the HTML spec: the context of
++  /// the topmost JavaScript frame, else the backup incumbent / entered context.
++  /// Mirrors `v8::Isolate::GetIncumbentContext()` (postMessage `event.source`,
++  /// turbo-surf#90; same API as turbo-dom-v8's turbo-dom#367).
++  pub fn get_incumbent_context(&self) -> Local<'_, Context> {
++    let context_ptr =
++      unsafe { raw::v8__Isolate__GetIncumbentContext(self.0.isolate.as_ptr()) };
+     unsafe { Local::from_raw_unchecked(context_ptr) }
+   }
+ 

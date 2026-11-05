@@ -338,7 +338,9 @@ fn cross_message<'s>(
     let Ok(target) = v8::Local::<v8::Object>::try_from(args.data()) else {
         return;
     };
-    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    // The source is the incumbent realm (the calling frame's), not the entered
+    // one: `a.eval("top.postMessage(..)")` posts from `a` (turbo-surf#90).
+    let source = v8::Global::new(scope, scope.get_incumbent_context());
     let source = v8::Local::new(scope, source);
     let scope = &mut v8::ContextScope::new(scope, source);
     // Reuse the source realm's private Web IDL/serialization capability; target

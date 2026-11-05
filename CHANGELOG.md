@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Fixed (canvas, #133)**: with a host text measurer installed (mcp, napi), canvas
+  `measureText` no longer returns a plain object whose bounding-box, font-box and baseline
+  fields were size ratios and whose width ignored `@font-face` faces. It returns the
+  binding's branded `TextMetrics` over the faces `set_canvas_fonts` registers (glyph ink
+  bounds, font metrics, baselines, `textAlign`/`textBaseline` offsets). Checked against a
+  localhost Chrome 156 control over the IBM Plex Mono fixture
+  (`canvas-measure-text-chrome156.json`).
+- **Tests (web APIs, #165)**: `tests/interface_members.rs` checks the own prototype members
+  of the 21 interfaces that were missing members in the expanded inventory against a
+  Chrome 156 control (`interface-members-chrome156.json`). All match except
+  `CSSStyleRule.cssRules` / `insertRule` / `deleteRule`, which land with the next turbo-dom
+  repin (turbo-dom#358) and are pinned as pending until then.
 - **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
   native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
   with Chrome 156's handshake header order, cookies, origin and `connect-src` (ws/wss match

@@ -1,5 +1,6 @@
 //! Script fetches validate every CORS response before following its redirect.
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::net::{fetch_html, FetchOptions, FetchResult};
 use turbo_surf_core::request_context::{same_origin, ClientHints, RequestContext, RequestMode};
@@ -11,9 +12,12 @@ pub struct ScriptPolicies<'a> {
     pub http_cache: Option<&'a turbo_surf_core::http_cache::HttpCache>,
     pub cache_partition: &'a str,
     pub embedder: crate::resource_policy::EmbedderPolicy,
+    /// The requesting document's blob URL store, under its storage key (#146).
+    pub blob: Option<BlobLookup<'a>>,
 }
 
 type ScriptPolicy<'a> = &'a dyn Fn(&str, bool) -> bool;
+type BlobLookup<'a> = &'a dyn Fn(&str) -> Option<(Rc<[u8]>, String)>;
 
 pub struct ScriptResponse {
     pub response: FetchResult,
@@ -32,94 +36,22 @@ pub async fn fetch(
     let mut target = url.to_string();
     let mut redirected = false;
     for hop in 0..=20 {
-        if !crate::resource_policy::active_mixed_content_allowed(
-            context.source.as_deref().unwrap_or(""),
-            &target,
-        ) {
-            return Err("Script request blocked as active mixed content".into());
+        let parsed = admit(&context, &policies, &target, redirected)?;
+        if let Some(local) = local_scheme(&parsed, redirected, &policies, integrity) {
+            return local;
         }
-        if policies
-            .request
-            .is_some_and(|allowed| !allowed(&target, redirected))
-        {
-            return Err("Script blocked by Content Security Policy".into());
-        }
-        let parsed = url::Url::parse(&target).map_err(|error| error.to_string())?;
-        // Fetch "scheme fetch": a data: URL is a basic (same-origin) response in
-        // every request mode; a redirect to one is a network error.
-        if parsed.scheme() == "data" && !redirected {
-            return data_response(parsed, integrity);
-        }
-        if !matches!(parsed.scheme(), "http" | "https")
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-        {
-            return Err("Script URL is not an allowed HTTP URL".into());
-        }
-        let source = context.source.as_deref().unwrap_or("");
-        let cross_origin =
-            context.opaque_origin || context.origin_tainted || !same_origin(source, &target);
-        if context.mode == RequestMode::SameOrigin && cross_origin {
-            return Err("Script redirect violates same-origin mode".into());
-        }
-        let response_policy = |context: &RequestContext,
-                               target: &str,
-                               headers: &[(String, String)]| {
-            crate::resource_policy::embedder_allowed(policies.embedder, context, target, headers)
-                && (context.mode != RequestMode::Cors
-                    || !(context.opaque_origin
-                        || context.origin_tainted
-                        || !same_origin(context.source.as_deref().unwrap_or(""), target))
-                    || crate::fetch_cors::allowed(context, headers))
-        };
-        let mut response = fetch_html(
-            &target,
-            FetchOptions {
-                http_cache: policies.http_cache,
-                response_policy: Some(&response_policy),
-                response_side_effects: policies.response_side_effects,
-                cache_partition: policies.cache_partition.into(),
-                headers: headers.clone(),
-                context: Some(context.clone()),
-                client_hints: Some(hints),
-                jar: Some(jar),
-                allow_non_html: true,
-                max_redirects: Some(0),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-        // fetch_html applied `response_policy` (CORP/COEP and CORS) to this hop's
+        let cross_origin = network_admit(&parsed, &context, &target)?;
+        let response = fetch_hop(&target, &context, &headers, hints, jar, &policies).await?;
+        // fetch_html applied the response policy (CORP/COEP and CORS) to this hop's
         // response, cache hits included, before returning it.
-        let location = matches!(response.status, 301 | 302 | 303 | 307 | 308)
-            .then(|| crate::fetch_cors::header(&response.headers, "location"))
-            .flatten();
-        let Some(location) = location else {
-            if !crate::integrity::matches(
-                &response.body_bytes,
-                integrity,
-                context.mode == RequestMode::Cors || !cross_origin,
-            ) {
-                return Err("Script response failed integrity validation".into());
-            }
-            if context.destination == turbo_surf_core::request_context::Destination::Script
-                && nosniff(&response.headers)
-                && !javascript_mime(&response.content_type)
-            {
-                return Err("Script MIME type is blocked by nosniff".into());
-            }
-            response.redirected = redirected;
-            return Ok(ScriptResponse {
-                response,
-                muted_errors: context.mode == RequestMode::NoCors && cross_origin,
-            });
+        let Some(location) = redirect_location(&response) else {
+            return finish(response, &context, cross_origin, redirected, integrity);
         };
         if hop == 20 {
             return Err("Script redirect limit exceeded".into());
         }
         let next = parsed
-            .join(location)
+            .join(&location)
             .map_err(|error| error.to_string())?
             .to_string();
         if !same_origin(&target, &next) {
@@ -133,6 +65,143 @@ pub async fn fetch(
     unreachable!("bounded redirect loop always returns")
 }
 
+/// Request-side checks before any I/O: mixed content, CSP and a parseable URL.
+fn admit(
+    context: &RequestContext,
+    policies: &ScriptPolicies<'_>,
+    target: &str,
+    redirected: bool,
+) -> Result<url::Url, String> {
+    if !crate::resource_policy::active_mixed_content_allowed(
+        context.source.as_deref().unwrap_or(""),
+        target,
+    ) {
+        return Err("Script request blocked as active mixed content".into());
+    }
+    if policies
+        .request
+        .is_some_and(|allowed| !allowed(target, redirected))
+    {
+        return Err("Script blocked by Content Security Policy".into());
+    }
+    url::Url::parse(target).map_err(|error| error.to_string())
+}
+
+/// Fetch "scheme fetch": a data: or blob: URL is a basic (same-origin) response in
+/// every request mode; a redirect to one is a network error.
+fn local_scheme(
+    parsed: &url::Url,
+    redirected: bool,
+    policies: &ScriptPolicies<'_>,
+    integrity: &str,
+) -> Option<Result<ScriptResponse, String>> {
+    if redirected {
+        return None;
+    }
+    match parsed.scheme() {
+        "data" => Some(data_response(parsed.clone(), integrity)),
+        "blob" => policies
+            .blob
+            .map(|lookup| blob_response(parsed.clone(), lookup, integrity)),
+        _ => None,
+    }
+}
+
+/// An http(s) hop without credentials in the URL, within a same-origin mode;
+/// whether it is cross-origin.
+fn network_admit(
+    parsed: &url::Url,
+    context: &RequestContext,
+    target: &str,
+) -> Result<bool, String> {
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("Script URL is not an allowed HTTP URL".into());
+    }
+    let source = context.source.as_deref().unwrap_or("");
+    let cross_origin =
+        context.opaque_origin || context.origin_tainted || !same_origin(source, target);
+    if context.mode == RequestMode::SameOrigin && cross_origin {
+        return Err("Script redirect violates same-origin mode".into());
+    }
+    Ok(cross_origin)
+}
+
+/// One network hop, redirects not followed, under the embedder and CORS policy.
+async fn fetch_hop(
+    target: &str,
+    context: &RequestContext,
+    headers: &BTreeMap<String, String>,
+    hints: &ClientHints,
+    jar: &mut CookieJar,
+    policies: &ScriptPolicies<'_>,
+) -> Result<FetchResult, String> {
+    let embedder = policies.embedder;
+    let response_policy = |context: &RequestContext, target: &str, headers: &[(String, String)]| {
+        crate::resource_policy::embedder_allowed(embedder, context, target, headers)
+            && (context.mode != RequestMode::Cors
+                || !(context.opaque_origin
+                    || context.origin_tainted
+                    || !same_origin(context.source.as_deref().unwrap_or(""), target))
+                || crate::fetch_cors::allowed(context, headers))
+    };
+    fetch_html(
+        target,
+        FetchOptions {
+            http_cache: policies.http_cache,
+            response_policy: Some(&response_policy),
+            response_side_effects: policies.response_side_effects,
+            cache_partition: policies.cache_partition.into(),
+            headers: headers.clone(),
+            context: Some(context.clone()),
+            client_hints: Some(hints),
+            jar: Some(jar),
+            allow_non_html: true,
+            max_redirects: Some(0),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
+fn redirect_location(response: &FetchResult) -> Option<String> {
+    matches!(response.status, 301 | 302 | 303 | 307 | 308)
+        .then(|| crate::fetch_cors::header(&response.headers, "location"))
+        .flatten()
+        .map(|location| location.to_string())
+}
+
+/// The final response: integrity, then nosniff for script destinations.
+fn finish(
+    mut response: FetchResult,
+    context: &RequestContext,
+    cross_origin: bool,
+    redirected: bool,
+    integrity: &str,
+) -> Result<ScriptResponse, String> {
+    if !crate::integrity::matches(
+        &response.body_bytes,
+        integrity,
+        context.mode == RequestMode::Cors || !cross_origin,
+    ) {
+        return Err("Script response failed integrity validation".into());
+    }
+    if context.destination == turbo_surf_core::request_context::Destination::Script
+        && nosniff(&response.headers)
+        && !javascript_mime(&response.content_type)
+    {
+        return Err("Script MIME type is blocked by nosniff".into());
+    }
+    response.redirected = redirected;
+    Ok(ScriptResponse {
+        response,
+        muted_errors: context.mode == RequestMode::NoCors && cross_origin,
+    })
+}
+
 /// A data: script through the Fetch data: URL processor: its MIME type is the
 /// response Content-Type, its charset parameter (else UTF-8, BOM first) decodes the
 /// source, integrity applies and errors are not muted.
@@ -140,31 +209,62 @@ fn data_response(mut url: url::Url, integrity: &str) -> Result<ScriptResponse, S
     url.set_fragment(None);
     let data = turbo_dom_layout::image::decode_data_url(url.as_str())
         .ok_or("Script data: URL is not valid")?;
-    if !crate::integrity::matches(&data.bytes, integrity, true) {
+    basic_response(url, data.bytes, data.mime, integrity)
+}
+
+/// A blob: script from the creating storage key's store: the blob's type is the
+/// Content-Type (Chrome 156 runs any type as a classic script), unmuted.
+fn blob_response(
+    mut url: url::Url,
+    lookup: BlobLookup<'_>,
+    integrity: &str,
+) -> Result<ScriptResponse, String> {
+    url.set_fragment(None);
+    let (bytes, mime) = lookup(url.as_str()).ok_or("Script blob: URL is not in the store")?;
+    let mut script = basic_response(url, bytes.to_vec(), mime, integrity)?;
+    let length = script.response.body_bytes.len().to_string();
+    script
+        .response
+        .headers
+        .push(("content-length".into(), length));
+    Ok(script)
+}
+
+fn basic_response(
+    url: url::Url,
+    bytes: Vec<u8>,
+    mime: String,
+    integrity: &str,
+) -> Result<ScriptResponse, String> {
+    if !crate::integrity::matches(&bytes, integrity, true) {
         return Err("Script response failed integrity validation".into());
     }
-    let encoding = data
-        .mime
-        .split(';')
-        .skip(1)
-        .filter_map(|parameter| parameter.split_once('='))
-        .find(|(name, _)| name.trim().eq_ignore_ascii_case("charset"))
-        .and_then(|(_, label)| encoding_rs::Encoding::for_label(label.trim().as_bytes()))
-        .unwrap_or(encoding_rs::UTF_8);
-    let html = encoding.decode(&data.bytes).0.into_owned();
     Ok(ScriptResponse {
         response: FetchResult {
-            html,
-            body_bytes: data.bytes,
-            headers: vec![("content-type".into(), data.mime.clone())],
+            html: decode_text(&bytes, &mime),
+            body_bytes: bytes,
+            headers: vec![("content-type".into(), mime.clone())],
             final_url: url.into(),
             status: 200,
             status_text: "OK".into(),
             redirected: false,
-            content_type: data.mime,
+            content_type: mime,
         },
         muted_errors: false,
     })
+}
+
+/// Source text by the MIME type's charset parameter, else UTF-8 (a BOM first).
+pub(crate) fn decode_text(bytes: &[u8], mime: &str) -> String {
+    mime.split(';')
+        .skip(1)
+        .filter_map(|parameter| parameter.split_once('='))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("charset"))
+        .and_then(|(_, label)| encoding_rs::Encoding::for_label(label.trim().as_bytes()))
+        .unwrap_or(encoding_rs::UTF_8)
+        .decode(bytes)
+        .0
+        .into_owned()
 }
 
 pub fn javascript_mime(content_type: &str) -> bool {

@@ -9,10 +9,31 @@
   applied, so a page under `script-src 'nonce-n'` without `worker-src` reports the
   same violation. The Worker shell still constructs (`new Worker('/x.js')` returns a
   Worker object), as in Chrome. `media-src` enforcement still waits on media loads
-  (split as a follow-up to #190). Checked against `csp-directives-chrome156.json`
+  (split as #204). Checked against `csp-directives-chrome156.json`
   (`tests/csp_directives.rs`). The remaining dedicated-worker runtime (a separate V8
   realm per worker with DedicatedWorkerGlobalScope, module workers, blob: workers,
-  and SharedWorker/ServiceWorker) is tracked as a follow-up to #104.
+  and SharedWorker/ServiceWorker) is tracked as #203.
+- **Fixed (render, #138)**: synchronous `XMLHttpRequest` (`open(..., false)`) now
+  blocks in `send()` and loads the response, over http(s), `blob:` and `data:` URLs.
+  Native `op_fetch_sync` runs the page's own fetch pipeline (CSP, CORS, cookies,
+  the HTTP cache and the blob:/data: scheme fetches) to completion on a dedicated
+  multi-thread runtime while the isolate thread is blocked. `xhr.js` also mirrors
+  Chrome 156's window-only restrictions (no loadstart or progress events on a sync
+  send, `NetworkError` thrown from `send()` on a network failure,
+  `InvalidAccessError` on `responseType` or `timeout` on a document's sync request,
+  and `async = undefined` is treated as synchronous). Covered by
+  `tests/sync_xhr.rs` against the Chrome 156 control.
+- **Fixed (render, #146)**: `blob:` URLs are now valid script, module, stylesheet,
+  image and iframe sources. The native blob URL store answers subresource loads
+  keyed by the creating document's storage key, so a revoked, foreign or
+  cross-partition URL fails like a missing response as in Chrome 156. Scripts and
+  modules resolve theirs through `script_fetch` after CSP and apply the MIME's
+  charset for source text; images and other destinations read the bytes directly;
+  iframes commit a local document response. Covered by
+  `tests/blob_url_resources.rs`.
+- **Refactor (render, #154)**: `script_fetch::fetch` split into small admission,
+  network-hop and finalisation helpers, so its cyclomatic complexity drops from
+  24 to 7 (`cc-check --max 15`). No behaviour change.
 - **Fixed (network transports, #188)**: a render session's trust anchor now covers its
   `wss:` sockets as well as its https fetches. `ClientHints::with_trust_anchor(der)`
   configures both; before, `new WebSocket('wss://…')` to a server signed by an embedder or

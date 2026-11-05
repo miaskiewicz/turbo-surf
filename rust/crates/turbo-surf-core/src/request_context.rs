@@ -300,10 +300,10 @@ impl RequestContext {
             {
                 h.insert("referer".into(), referer);
             }
-            // CORS script requests carry Origin even on the same URL origin;
-            // ordinary fetch adds it cross-origin or for unsafe methods.
+            // CORS script and font requests carry Origin even on the same URL
+            // origin; ordinary fetch adds it cross-origin or for unsafe methods.
             if (self.mode == RequestMode::Cors
-                && (self.destination == Destination::Script
+                && (matches!(self.destination, Destination::Script | Destination::Font)
                     || self.opaque_origin
                     || self.origin_tainted
                     || !same_origin(source, target)))

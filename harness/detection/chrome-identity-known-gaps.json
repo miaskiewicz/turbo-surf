@@ -30,16 +30,6 @@
     "owner": "transport"
   },
   {
-    "id": "web-font-loading",
-    "match": {
-      "area": "request",
-      "type": "request-missing",
-      "kind": "font"
-    },
-    "reason": "Native live layout does not load @font-face resources (it reports them unsupported), so no font request is made.",
-    "owner": "render/layout"
-  },
-  {
     "id": "favicon",
     "match": {
       "area": "request",

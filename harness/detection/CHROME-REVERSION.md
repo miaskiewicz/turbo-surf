@@ -542,6 +542,10 @@ The 57 known-gap deltas fall under 13 rules:
 | h1-connection-header | 2 | window-global-inventory | 1 |
 | h1-priority-header | 2 | | |
 
+Since closed in 0.7.1: `user-agent-data-interface` (turbo-surf#164, a real
+`NavigatorUAData`) and `web-font-loading` (turbo-surf#166, used faces load before
+the load event, frames included, with Chrome's same-origin `Origin`).
+
 Timings: the battery takes about 12 s for Chrome and 8 s for turbo-surf. The first
 full run took 52 s with a warm build. A re-run that recompiled `identity_battery`
 took 2.5 min. Two consecutive re-runs gave zero same-build drift.

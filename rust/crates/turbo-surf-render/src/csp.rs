@@ -561,6 +561,14 @@ pub fn network_blocked_uri(target: &str) -> Option<String> {
     Some(url.into())
 }
 
+/// Chrome 156 (blob-url-resources control) serializes a `blob:` or `data:`
+/// violation target as the scheme alone (`blob` / `data`), never the full URL, so
+/// the opaque origin and its random key never leak into the report. Case-insensitive
+/// on the scheme, matching the URL parser; `None` for any other target. #201.
+pub fn opaque_scheme_blocked_uri(_target: &str) -> Option<&'static str> {
+    None
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum SchemeMatch {
     No,
@@ -982,6 +990,21 @@ mod tests {
         );
         assert_eq!(network_blocked_uri("data:text/plain,x"), None);
         assert_eq!(network_blocked_uri("not a url"), None);
+    }
+
+    #[test]
+    fn blocked_uris_serialize_blob_and_data_as_scheme_only() {
+        // Chrome 156 (blob-url-resources control) reports a blob: or data: violation
+        // target by its scheme alone, never the full URL, so the opaque origin never
+        // leaks into the report. #201.
+        assert_eq!(
+            opaque_scheme_blocked_uri("blob:http://a.test/dead-beef"),
+            Some("blob")
+        );
+        assert_eq!(opaque_scheme_blocked_uri("data:text/plain,x"), Some("data"));
+        assert_eq!(opaque_scheme_blocked_uri("DATA:text/plain,x"), Some("data"));
+        assert_eq!(opaque_scheme_blocked_uri("http://a.test/"), None);
+        assert_eq!(opaque_scheme_blocked_uri("not a url"), None);
     }
 
     #[test]

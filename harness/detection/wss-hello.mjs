@@ -175,7 +175,6 @@ export function helloFacts(view) {
     ciphers: view.hello.ciphers,
     cipherGrease: view.hello.cipherGrease,
     extensionGreaseCount: view.hello.extensionGreaseCount,
-    extensionTypes: view.hello.extensions.map((entry) => entry.type),
     "ja4.version": view.ja4.slice(0, 4),
     "ja4.alpn": view.ja4.split("_")[0].slice(-2),
     "ja4.ciphers": view.ja4.split("_")[1],
@@ -200,18 +199,12 @@ const factDeltas = (expected, actual) =>
     .filter((key) => !same(expected[key], actual[key]))
     .map((key) => ({ path: key, expected: expected[key] ?? null, actual: actual[key] ?? null }));
 
-// Chrome's own https→wss change applied to turbo-surf's https facts. extensionTypes is
-// a sorted list, so it is rebuilt from the per-type extension facts.
+// Chrome's own https→wss change applied to turbo-surf's https facts.
 function expectedWss(chrome, nativeHttps) {
   const changed = new Set(factDeltas(chrome.https, chrome.wss).map((delta) => delta.path));
   const expected = {};
   for (const key of new Set([...Object.keys(nativeHttps), ...changed]))
-    if (key !== "extensionTypes")
-      expected[key] = (changed.has(key) ? chrome.wss : nativeHttps)[key];
-  expected.extensionTypes = Object.keys(expected)
-    .filter((key) => key.startsWith("extension.") && expected[key] !== undefined)
-    .map((key) => Number(key.slice("extension.".length)))
-    .sort((a, b) => a - b);
+    expected[key] = (changed.has(key) ? chrome.wss : nativeHttps)[key];
   return expected;
 }
 
@@ -225,7 +218,7 @@ function expectedWss(chrome, nativeHttps) {
 export function diffWss(control, native, { knownGaps = [] } = {}) {
   const chrome = { https: helloFacts(control.views.https), wss: helloFacts(control.views.wss) };
   const ours = { https: helloFacts(native.views.https), wss: helloFacts(native.views.wss) };
-  const context = { area: "transport", origin: "W", alpn: control.views.wss.alpn.join(",") };
+  const context = { area: "wss", origin: "W", alpn: control.views.wss.alpn.join(",") };
   const deltas = factDeltas(expectedWss(chrome, ours.https), ours.wss).map((delta) => ({
     ...context,
     type: "ws-delta",

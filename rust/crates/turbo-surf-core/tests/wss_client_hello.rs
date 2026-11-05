@@ -92,6 +92,18 @@ impl Hello {
     }
 }
 
+impl Hello {
+    /// supported_versions (a uint8-length list) without GREASE.
+    fn versions(&self) -> Vec<u16> {
+        let body = self.body(43).expect("supported_versions present");
+        body[1..]
+            .chunks(2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+            .filter(|v| !grease(*v))
+            .collect()
+    }
+}
+
 struct Reader<'a>(&'a [u8]);
 
 impl<'a> Reader<'a> {
@@ -124,7 +136,10 @@ where
         let mut header = [0; 5];
         socket.read_exact(&mut header).await.unwrap();
         let mut record = header.to_vec();
-        record.resize(5 + usize::from(u16::from_be_bytes([header[3], header[4]])), 0);
+        record.resize(
+            5 + usize::from(u16::from_be_bytes([header[3], header[4]])),
+            0,
+        );
         socket.read_exact(&mut record[5..]).await.unwrap();
         record
     };
@@ -174,7 +189,7 @@ fn control_words(value: &serde_json::Value) -> Vec<u16> {
         .collect()
 }
 
-fn control_extension<'a>(control: &'a serde_json::Value, kind: u16) -> &'a serde_json::Value {
+fn control_extension(control: &serde_json::Value, kind: u16) -> &serde_json::Value {
     control["views"]["wss"]["hello"]["extensions"]
         .as_array()
         .unwrap()
@@ -232,8 +247,11 @@ async fn wss_client_hello_is_the_https_hello_with_chromes_websocket_alpn() {
     assert_eq!(wss.words(13), https.words(13));
     assert_eq!(wss.words(10), https.words(10));
     assert_eq!(https.alpn(), ["h2", "http/1.1"]);
+    assert_eq!(wss.versions(), https.versions(), "supported versions");
+    // Every other extension is byte-identical; ALPN differs on purpose, and key shares,
+    // ECH GREASE and the GREASE-bearing lists above are random per connection.
     for kind in wss.types() {
-        if ![16, 51, 65037].contains(&kind) {
+        if ![10, 13, 16, 43, 51, 65037].contains(&kind) {
             assert_eq!(wss.body(kind), https.body(kind), "extension {kind} body");
         }
     }

@@ -274,61 +274,77 @@ pub(crate) fn scale_value(value: &str, zoom: f32, keywords: bool) -> String {
     let mut out = String::with_capacity(value.len());
     let mut index = 0;
     while index < bytes.len() {
-        let byte = bytes[index];
-        let end = if byte == b'"' || byte == b'\'' {
-            skip_string(bytes, index)
-        } else if byte == b'#' {
-            skip_ident(bytes, index + 1)
-        } else if number_start(bytes, index) {
-            let number = number_end(bytes, index);
-            let unit = if bytes.get(number) == Some(&b'%') {
-                number + 1
-            } else {
-                skip_ident(bytes, number)
-            };
-            let suffix = &value[number..unit];
-            let zoomed = ZOOMED_UNITS
-                .iter()
-                .any(|known| suffix.eq_ignore_ascii_case(known));
-            match value[index..number].parse::<f32>() {
-                Ok(amount) if zoomed => {
-                    let length = (amount * zoom).clamp(-LAYOUT_MAX, LAYOUT_MAX);
-                    out.push_str(&format!("{length}{suffix}"));
-                    index = unit;
-                    continue;
-                }
-                _ => unit,
-            }
-        } else if ident_char(byte) && byte != b'-' || byte == b'-' && !number_start(bytes, index) {
-            let end = skip_ident(bytes, index + 1);
-            let word = &value[index..end];
-            if word.eq_ignore_ascii_case("url")
-                && bytes.get(end) == Some(&b'(')
-                && !value[end..].starts_with("(\"")
-                && !value[end..].starts_with("('")
-            {
-                value[end..]
-                    .find(')')
-                    .map_or(bytes.len(), |close| end + close + 1)
-            } else {
-                let width = ["thin", "medium", "thick"]
-                    .iter()
-                    .position(|keyword| word.eq_ignore_ascii_case(keyword))
-                    .filter(|_| keywords);
-                if let Some(width) = width {
-                    out.push_str(&format!("{}px", [1.0f32, 3.0, 5.0][width] * zoom));
-                    index = end;
-                    continue;
-                }
-                end
-            }
-        } else {
-            index + value[index..].chars().next().map_or(1, char::len_utf8)
-        };
-        out.push_str(&value[index..end]);
+        let (end, replacement) = scale_token(value, index, zoom, keywords);
+        out.push_str(replacement.as_deref().unwrap_or(&value[index..end]));
         index = end;
     }
     out
+}
+
+/// The token at `index`: its end, and its zoomed text when it scales.
+fn scale_token(value: &str, index: usize, zoom: f32, keywords: bool) -> (usize, Option<String>) {
+    let bytes = value.as_bytes();
+    let byte = bytes[index];
+    if byte == b'"' || byte == b'\'' {
+        (skip_string(bytes, index), None)
+    } else if byte == b'#' {
+        (skip_ident(bytes, index + 1), None)
+    } else if number_start(bytes, index) {
+        scale_dimension(value, index, zoom)
+    } else if ident_char(byte) {
+        // A `-` that starts no number opens an identifier.
+        scale_word(value, index, zoom, keywords)
+    } else {
+        let width = value[index..].chars().next().map_or(1, char::len_utf8);
+        (index + width, None)
+    }
+}
+
+fn scale_dimension(value: &str, index: usize, zoom: f32) -> (usize, Option<String>) {
+    let bytes = value.as_bytes();
+    let number = number_end(bytes, index);
+    let unit = if bytes.get(number) == Some(&b'%') {
+        number + 1
+    } else {
+        skip_ident(bytes, number)
+    };
+    let suffix = &value[number..unit];
+    let zoomed = ZOOMED_UNITS
+        .iter()
+        .any(|known| suffix.eq_ignore_ascii_case(known));
+    let replacement = value[index..number]
+        .parse::<f32>()
+        .ok()
+        .filter(|_| zoomed)
+        .map(|amount| {
+            let length = (amount * zoom).clamp(-LAYOUT_MAX, LAYOUT_MAX);
+            format!("{length}{suffix}")
+        });
+    (unit, replacement)
+}
+
+/// An identifier: an unquoted `url(...)` is skipped whole; a border width keyword
+/// (`thin` / `medium` / `thick`) becomes its zoomed px length when `keywords` holds.
+fn scale_word(value: &str, index: usize, zoom: f32, keywords: bool) -> (usize, Option<String>) {
+    let bytes = value.as_bytes();
+    let end = skip_ident(bytes, index + 1);
+    let word = &value[index..end];
+    if word.eq_ignore_ascii_case("url")
+        && bytes.get(end) == Some(&b'(')
+        && !value[end..].starts_with("(\"")
+        && !value[end..].starts_with("('")
+    {
+        let close = value[end..]
+            .find(')')
+            .map_or(bytes.len(), |close| end + close + 1);
+        return (close, None);
+    }
+    let width = ["thin", "medium", "thick"]
+        .iter()
+        .position(|keyword| word.eq_ignore_ascii_case(keyword))
+        .filter(|_| keywords)
+        .map(|width| format!("{}px", [1.0f32, 3.0, 5.0][width] * zoom));
+    (end, width)
 }
 
 #[cfg(test)]

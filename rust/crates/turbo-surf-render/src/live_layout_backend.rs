@@ -978,62 +978,15 @@ fn scroll_into_view<'s>(
         scrolling::alignment(alignments[0], mode)?,
         scrolling::alignment(alignments[1], mode)?,
     ];
-    let mut changed = Vec::new();
-    let mut viewport_changed = false;
-    if let Some(current) = scroll_view(scope, receiver)? {
-        let view = &current.view;
-        let boxed = element_geometry(view, current.id)?;
-        if !boxed.rects.is_empty() {
-            let state = scroll_state(current.context);
-            for scroller_id in into_view_scrollers(view, current.id, nearest)? {
-                let mut values = state.values.borrow_mut();
-                let translation = scrolling::scroll_translation(
-                    &view.snapshot,
-                    &view.styles,
-                    current.id,
-                    &values,
-                )?;
-                let bounds = boxed.bounds;
-                let world = [
-                    f64::from(bounds.x - translation[0]),
-                    f64::from(bounds.y - translation[1]),
-                    f64::from(bounds.width),
-                    f64::from(bounds.height),
-                ];
-                let (key, metrics, port, local) = if scroller_id == scrolling::VIEWPORT {
-                    let (key, metrics) = viewport_scroller(view, &current.viewport)?;
-                    let size = [
-                        f64::from(current.viewport.width),
-                        f64::from(current.viewport.height),
-                    ];
-                    (key, metrics, [0.0, 0.0, size[0], size[1]], world)
-                } else {
-                    let (key, metrics) = scroller(view, &current.viewport, scroller_id)?;
-                    let (port, local) = scroller_space(view, scroller_id, world, &values)?;
-                    (key, metrics, port, local)
-                };
-                let offset = values.get(&key).copied().unwrap_or([0.0; 2]);
-                let mut target = [None; 2];
-                for axis in 0..2 {
-                    let start = local[axis] - port[axis] + offset[axis];
-                    target[axis] = Some(scrolling::expose(
-                        start,
-                        local[axis + 2],
-                        offset[axis],
-                        port[axis + 2],
-                        behaviors[axis],
-                    ));
-                }
-                let (_, moved) =
-                    apply_scroll(&mut values, key, &metrics, &current.viewport, target, false);
-                if moved && key == scrolling::VIEWPORT {
-                    viewport_changed = true;
-                } else if moved {
-                    changed.push(key);
-                }
-            }
-        }
-    }
+    let moved = match scroll_view(scope, receiver)? {
+        Some(current) => expose_in_scrollers(&current, nearest, behaviors)?,
+        None => Vec::new(),
+    };
+    let viewport_changed = moved.contains(&scrolling::VIEWPORT);
+    let changed: Vec<_> = moved
+        .into_iter()
+        .filter(|key| *key != scrolling::VIEWPORT)
+        .collect();
     let elements = crate::live_layout_dom::wrap_elements(scope, receiver, &changed, 1)?;
     let viewport = v8::Boolean::new(scope, viewport_changed);
     Ok(null_record(
@@ -1041,6 +994,73 @@ fn scroll_into_view<'s>(
         [("elements", elements.into()), ("viewport", viewport.into())],
     )?
     .into())
+}
+/// Expose the element in each scrolling box of its into-view chain, innermost
+/// first; the boxes (the viewport included) whose offset moved, in that order.
+fn expose_in_scrollers(
+    current: &ScrollView<'_>,
+    nearest: bool,
+    behaviors: [[turbo_dom_layout::cssom_view::scroll::Align; 3]; 2],
+) -> Result<Vec<turbo_dom_layout::layout_snapshot::SourceId>, String> {
+    let view = &current.view;
+    let boxed = element_geometry(view, current.id)?;
+    if boxed.rects.is_empty() {
+        return Ok(Vec::new());
+    }
+    let state = scroll_state(current.context);
+    let mut moved = Vec::new();
+    for scroller_id in into_view_scrollers(view, current.id, nearest)? {
+        let mut values = state.values.borrow_mut();
+        if let Some(key) = expose_in(current, scroller_id, boxed.bounds, &mut values, behaviors)? {
+            moved.push(key);
+        }
+    }
+    Ok(moved)
+}
+/// One into-view step: scroll `scroller_id` so the element's `bounds` show, and
+/// report its key when its offset moved.
+fn expose_in(
+    current: &ScrollView<'_>,
+    scroller_id: turbo_dom_layout::layout_snapshot::SourceId,
+    bounds: turbo_dom_layout::layout_snapshot::Rect,
+    values: &mut std::collections::BTreeMap<turbo_dom_layout::layout_snapshot::SourceId, [f64; 2]>,
+    behaviors: [[turbo_dom_layout::cssom_view::scroll::Align; 3]; 2],
+) -> Result<Option<turbo_dom_layout::layout_snapshot::SourceId>, String> {
+    use turbo_dom_layout::cssom_view::scroll as scrolling;
+    let view = &current.view;
+    let translation =
+        scrolling::scroll_translation(&view.snapshot, &view.styles, current.id, values)?;
+    let world = [
+        f64::from(bounds.x - translation[0]),
+        f64::from(bounds.y - translation[1]),
+        f64::from(bounds.width),
+        f64::from(bounds.height),
+    ];
+    let (key, metrics, port, local) = if scroller_id == scrolling::VIEWPORT {
+        let (key, metrics) = viewport_scroller(view, &current.viewport)?;
+        let size = [
+            f64::from(current.viewport.width),
+            f64::from(current.viewport.height),
+        ];
+        (key, metrics, [0.0, 0.0, size[0], size[1]], world)
+    } else {
+        let (key, metrics) = scroller(view, &current.viewport, scroller_id)?;
+        let (port, local) = scroller_space(view, scroller_id, world, values)?;
+        (key, metrics, port, local)
+    };
+    let offset = values.get(&key).copied().unwrap_or([0.0; 2]);
+    let target: [Option<f64>; 2] = std::array::from_fn(|axis| {
+        let start = local[axis] - port[axis] + offset[axis];
+        Some(scrolling::expose(
+            start,
+            local[axis + 2],
+            offset[axis],
+            port[axis + 2],
+            behaviors[axis],
+        ))
+    });
+    let (_, moved) = apply_scroll(values, key, &metrics, &current.viewport, target, false);
+    Ok(moved.then_some(key))
 }
 fn scroll_root(view: &LayoutView) -> Option<turbo_dom_layout::layout_snapshot::SourceId> {
     view.styles
@@ -1612,41 +1632,9 @@ fn range_geometry<'s>(
         let state = scroll_state(context);
         let offsets = state.values.borrow();
         for selection in selections {
-            let selected_source = match *selection {
-                turbo_dom_layout::cssom_view::range::Selection::Element(source)
-                | turbo_dom_layout::cssom_view::range::Selection::Text { source, .. } => source,
-            };
-            if view.omitted.contains(&selected_source) {
+            let Some((source, mut boxes)) = selection_boxes(&view, selection)? else {
                 continue;
-            }
-            let (source, mut boxes) = match *selection {
-                turbo_dom_layout::cssom_view::range::Selection::Element(id) => {
-                    (id, element_geometry(&view, id)?.rects)
-                }
-                turbo_dom_layout::cssom_view::range::Selection::Text { source, start, end } => {
-                    let source_info = view
-                        .snapshot
-                        .source(source)
-                        .ok_or("native Range source missing")?;
-                    if source_info.excluded_from_layout {
-                        continue;
-                    }
-                    if view.snapshot.unsupported_svg_source_geometry(source) {
-                        return Err("native SVG text geometry is unsupported".into());
-                    }
-                    let boxes = view
-                        .snapshot
-                        .text_range_boxes(source, start, end)
-                        .map_err(|error| error.to_string())?
-                        .into_iter()
-                        .map(|cell| cell.transformed_bounds)
-                        .collect();
-                    (source, boxes)
-                }
             };
-            if boxes.is_empty() {
-                continue;
-            }
             let translation = turbo_dom_layout::cssom_view::scroll::scroll_translation(
                 &view.snapshot,
                 &view.styles,
@@ -1667,6 +1655,54 @@ fn range_geometry<'s>(
         bounds: values(bounds),
         rects: rects.into_iter().map(values).collect(),
     })
+}
+/// One selected piece of a Range: its source and untranslated border / text boxes,
+/// or `None` when it lays out no box.
+fn selection_boxes(
+    view: &LayoutView,
+    selection: &turbo_dom_layout::cssom_view::range::Selection,
+) -> Result<
+    Option<(
+        turbo_dom_layout::layout_snapshot::SourceId,
+        Vec<turbo_dom_layout::layout_snapshot::Rect>,
+    )>,
+    String,
+> {
+    use turbo_dom_layout::cssom_view::range::Selection;
+    let (source, boxes) = match *selection {
+        Selection::Element(id) if !view.omitted.contains(&id) => {
+            (id, element_geometry(view, id)?.rects)
+        }
+        Selection::Text { source, start, end } if !view.omitted.contains(&source) => {
+            (source, text_selection_boxes(view, source, start, end)?)
+        }
+        _ => return Ok(None),
+    };
+    Ok((!boxes.is_empty()).then_some((source, boxes)))
+}
+fn text_selection_boxes(
+    view: &LayoutView,
+    source: turbo_dom_layout::layout_snapshot::SourceId,
+    start: usize,
+    end: usize,
+) -> Result<Vec<turbo_dom_layout::layout_snapshot::Rect>, String> {
+    let source_info = view
+        .snapshot
+        .source(source)
+        .ok_or("native Range source missing")?;
+    if source_info.excluded_from_layout {
+        return Ok(Vec::new());
+    }
+    if view.snapshot.unsupported_svg_source_geometry(source) {
+        return Err("native SVG text geometry is unsupported".into());
+    }
+    Ok(view
+        .snapshot
+        .text_range_boxes(source, start, end)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|cell| cell.transformed_bounds)
+        .collect())
 }
 
 #[op2(reentrant)]

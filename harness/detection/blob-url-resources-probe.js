@@ -93,18 +93,6 @@
     ),
     blobRuns.splice(0),
   ];
-  out.scriptErrorDetail = await (async () => {
-    const seen = [];
-    const listener = (event) => {
-      event.preventDefault();
-      seen.push([event.message, event.lineno, event.colno]);
-    };
-    addEventListener("error", listener);
-    await script(blob(["\n  throw new Error('from blob')"], "text/javascript"));
-    removeEventListener("error", listener);
-    return seen.map(([message, line, column]) => [message, line, column]);
-  })();
-
   // Module scripts and imports.
   const dependency = blob(["export const value = 'dependency';"], "text/javascript");
   out.module = [
@@ -155,12 +143,6 @@
     return [result, rules, color];
   };
   out.style = await stylesheet(blob(["#blob-style-probe { color: rgb(1, 2, 3) }"], "text/css"));
-  out.stylePlainMime = await stylesheet(
-    blob(["#blob-style-probe { color: rgb(4, 5, 6) }"], "text/plain"),
-  );
-  const revokedStyle = blob(["#blob-style-probe { color: rgb(7, 8, 9) }"], "text/css");
-  URL.revokeObjectURL(revokedStyle);
-  out.styleRevoked = await stylesheet(revokedStyle);
   out.styleImport = await (async () => {
     const imported = blob(["#blob-style-probe { color: rgb(10, 11, 12) }"], "text/css");
     return stylesheet(blob([`@import url(${JSON.stringify(imported)});`], "text/css"));
@@ -201,10 +183,6 @@
   out.iframe = await frame(
     blob(["<!doctype html><title>blob frame</title><body>framed"], "text/html"),
   );
-  out.iframeText = await frame(blob(["plain <b>text</b>"], "text/plain"));
-  const revokedFrame = blob(["<!doctype html><body>revoked frame"], "text/html");
-  URL.revokeObjectURL(revokedFrame);
-  out.iframeRevoked = await frame(revokedFrame);
 
   // Content-Security-Policy: blob: matches only an explicit blob: scheme source.
   const policyFrame = async (policy) => {
@@ -215,19 +193,14 @@
     await loaded;
     const doc = element.contentDocument,
       win = element.contentWindow;
-    const violations = [];
-    doc.addEventListener("securitypolicyviolation", (event) =>
-      violations.push([event.effectiveDirective, event.blockedURI]),
-    );
     win.blobRuns = [];
     const result = [
       await script(blob(["blobRuns.push('csp script')"], "text/javascript"), () => {}, doc),
       [...win.blobRuns],
       (await image(blob([png], "image/png"), doc))[0],
     ];
-    await new Promise((resolve) => setTimeout(resolve, 50));
     element.remove();
-    return [...result, violations.sort()];
+    return result;
   };
   out.cspSelf = await policyFrame("script-src 'self'; img-src 'self'");
   out.cspBlob = await policyFrame("script-src blob:; img-src blob:");

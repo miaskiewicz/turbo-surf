@@ -102,6 +102,52 @@ fn brotli_window_bits(bytes: &[u8]) -> Option<u8> {
         value => Some(8 + value),
     }
 }
+type Codec<R, E> =
+    fn(&mut Input<R>, &SelectedDictionary, usize, &AtomicBool, &mut E) -> Result<(), DecodeError>;
+
+fn decode_dcb<R: Read, E: FnMut(&[u8]) -> Result<(), DecodeError>>(
+    input: &mut Input<R>,
+    dictionary: &SelectedDictionary,
+    maximum: usize,
+    cancelled: &AtomicBool,
+    emit: &mut E,
+) -> Result<(), DecodeError> {
+    let mut prefix = vec![0];
+    input.read_exact(&mut prefix).map_err(read_error)?;
+    if prefix[0] == 0x11 {
+        let mut second = [0];
+        input.read_exact(&mut second).map_err(read_error)?;
+        prefix.push(second[0]);
+    }
+    if brotli_window_bits(&prefix).is_none_or(|bits| bits > 24) {
+        return Err(DecodeError::Invalid(
+            "Shared Brotli window exceeds 16 MiB or is malformed".into(),
+        ));
+    }
+    let prefixed = io::Cursor::new(prefix).chain(input);
+    let mut decoder = brotli_decompressor::Decompressor::new(prefixed, 8192);
+    if !decoder.attach_dictionary(dictionary.body.as_ref().clone().into()) {
+        return Err(DecodeError::Invalid(
+            "Shared Brotli dictionary attachment failed".into(),
+        ));
+    }
+    emit_decoded(&mut decoder, maximum, cancelled, emit)
+}
+
+fn decode_dcz<R: Read, E: FnMut(&[u8]) -> Result<(), DecodeError>>(
+    input: &mut Input<R>,
+    dictionary: &SelectedDictionary,
+    maximum: usize,
+    cancelled: &AtomicBool,
+    emit: &mut E,
+) -> Result<(), DecodeError> {
+    let mut decoder =
+        zstd::stream::read::Decoder::with_dictionary(io::BufReader::new(input), &dictionary.body)
+            .map_err(read_error)?;
+    decoder.window_log_max(24).map_err(read_error)?;
+    emit_decoded(&mut decoder, maximum, cancelled, emit)
+}
+
 fn decode_reader(
     encoding: &str,
     reader: impl Read,
@@ -110,9 +156,9 @@ fn decode_reader(
     cancelled: Arc<AtomicBool>,
     mut emit: impl FnMut(&[u8]) -> Result<(), DecodeError>,
 ) -> Result<(), DecodeError> {
-    let magic: &[u8] = match encoding {
-        "dcb" => &[0xff, 0x44, 0x43, 0x42],
-        "dcz" => &[0x5e, 0x2a, 0x4d, 0x18, 0x20, 0, 0, 0],
+    let (magic, codec): (&[u8], Codec<_, _>) = match encoding {
+        "dcb" => (&[0xff, 0x44, 0x43, 0x42], decode_dcb),
+        "dcz" => (&[0x5e, 0x2a, 0x4d, 0x18, 0x20, 0, 0, 0], decode_dcz),
         _ => {
             return Err(DecodeError::Invalid(
                 "Unsupported dictionary content encoding".into(),
@@ -131,40 +177,7 @@ fn decode_reader(
         ));
     }
     let maximum = maximum.min(MAX_DECODED_BYTES);
-    match encoding {
-        "dcb" => {
-            let mut prefix = vec![0];
-            input.read_exact(&mut prefix).map_err(read_error)?;
-            if prefix[0] == 0x11 {
-                let mut second = [0];
-                input.read_exact(&mut second).map_err(read_error)?;
-                prefix.push(second[0]);
-            }
-            if brotli_window_bits(&prefix).is_none_or(|bits| bits > 24) {
-                return Err(DecodeError::Invalid(
-                    "Shared Brotli window exceeds 16 MiB or is malformed".into(),
-                ));
-            }
-            let prefixed = io::Cursor::new(prefix).chain(&mut input);
-            let mut decoder = brotli_decompressor::Decompressor::new(prefixed, 8192);
-            if !decoder.attach_dictionary(dictionary.body.as_ref().clone().into()) {
-                return Err(DecodeError::Invalid(
-                    "Shared Brotli dictionary attachment failed".into(),
-                ));
-            }
-            emit_decoded(&mut decoder, maximum, &cancelled, &mut emit)?;
-        }
-        "dcz" => {
-            let mut decoder = zstd::stream::read::Decoder::with_dictionary(
-                io::BufReader::new(&mut input),
-                &dictionary.body,
-            )
-            .map_err(read_error)?;
-            decoder.window_log_max(24).map_err(read_error)?;
-            emit_decoded(&mut decoder, maximum, &cancelled, &mut emit)?;
-        }
-        _ => unreachable!(),
-    }
+    codec(&mut input, &dictionary, maximum, &cancelled, &mut emit)?;
     // Codec EOF alone cannot publish a cache entry: observe actual transport EOF
     // (including a late I/O error or encoded-size failure) before terminal success.
     let mut discard = [0; 16 * 1024];

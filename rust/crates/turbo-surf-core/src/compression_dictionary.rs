@@ -38,6 +38,112 @@ struct Entry {
     dictionary: SelectedDictionary,
 }
 
+impl State {
+    /// Replace any entry for the same partition+URL, then evict oldest-first until
+    /// the new entry fits the count and byte budgets.
+    fn insert(&mut self, entry: Entry) {
+        self.entries
+            .retain(|old| !(old.partition == entry.partition && old.url == entry.url));
+        let incoming = entry.dictionary.body.len();
+        while self.entries.len() >= MAX_DICTIONARIES
+            || self
+                .entries
+                .iter()
+                .map(|old| old.dictionary.body.len())
+                .sum::<usize>()
+                + incoming
+                > MAX_STORE_BYTES
+        {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+    }
+}
+
+/// The response-level admission gate: a complete, bounded, cacheable 200.
+fn storable_response(
+    status: u16,
+    url: &str,
+    context: &RequestContext,
+    headers: &[(String, String)],
+    body: &[u8],
+) -> bool {
+    status == 200
+        && body.len() <= MAX_DICTIONARY_BYTES
+        && admitted(url, context, headers)
+        && !values(headers, "cache-control")
+            .split(',')
+            .any(|part| part.trim().eq_ignore_ascii_case("no-store"))
+}
+
+/// The parsed `Use-As-Dictionary` members a stored entry keeps.
+struct DictionaryFields {
+    pattern: UrlPattern,
+    match_length: usize,
+    id: String,
+    destinations: Vec<String>,
+}
+
+fn parse_use_as_dictionary(url: &str, headers: &[(String, String)]) -> Option<DictionaryFields> {
+    // admitted() already required `url` to parse as an https URL.
+    let base = Url::parse(url).expect("admitted() parsed the dictionary URL");
+    let input = values(headers, "use-as-dictionary");
+    if input.len() > 16 * 1024 {
+        return None;
+    }
+    let fields = Parser::new(&input).parse::<Dictionary>().ok()?;
+    let pattern_string = string_member(&fields, "match")?;
+    let pattern = match_pattern(pattern_string, base)?;
+    if !type_is_raw(&fields) {
+        return None;
+    }
+    Some(DictionaryFields {
+        pattern,
+        match_length: pattern_string.len(),
+        id: dictionary_id(&fields)?.to_owned(),
+        destinations: match_destinations(&fields)?,
+    })
+}
+
+/// The `match` URL pattern; regexp groups are not allowed.
+fn match_pattern(pattern_string: &str, base: Url) -> Option<UrlPattern> {
+    let init = UrlPatternInit::parse_constructor_string::<regex::Regex>(pattern_string, Some(base))
+        .ok()?;
+    let pattern = UrlPattern::parse(init, Default::default()).ok()?;
+    (!pattern.has_regexp_groups()).then_some(pattern)
+}
+
+/// An absent `type` defaults to raw; a present one must be the token `raw`.
+fn type_is_raw(fields: &Dictionary) -> bool {
+    fields.get("type").is_none_or(|kind| {
+        matches!(kind, ListEntry::Item(item) if matches!(&item.bare_item, BareItem::Token(token) if token.as_str() == "raw"))
+    })
+}
+
+/// An absent `id` is empty; a present one must be a string of at most 1024 bytes.
+fn dictionary_id(fields: &Dictionary) -> Option<&str> {
+    match fields.get("id") {
+        None => Some(""),
+        Some(_) => string_member(fields, "id").filter(|value| value.len() <= 1024),
+    }
+}
+
+/// `match-dest` must be an inner list of strings when present.
+fn match_destinations(fields: &Dictionary) -> Option<Vec<String>> {
+    match fields.get("match-dest") {
+        None => Some(Vec::new()),
+        Some(ListEntry::InnerList(list)) => list
+            .items
+            .iter()
+            .map(|item| match &item.bare_item {
+                BareItem::String(value) => Some(value.as_str().to_owned()),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
 #[derive(Clone)]
 pub struct SelectedDictionary {
     pub(crate) body: Arc<Vec<u8>>,
@@ -215,64 +321,11 @@ impl DictionaryStore {
         body: &[u8],
         stored: SystemTime,
     ) -> bool {
-        if status != 200
-            || body.len() > MAX_DICTIONARY_BYTES
-            || !admitted(url, context, headers)
-            || values(headers, "cache-control")
-                .split(',')
-                .any(|part| part.trim().eq_ignore_ascii_case("no-store"))
-        {
+        if !storable_response(status, url, context, headers, body) {
             return false;
         }
-        // admitted() already required `url` to parse as an https URL.
-        let base = Url::parse(url).expect("admitted() parsed the dictionary URL");
-        let input = values(headers, "use-as-dictionary");
-        if input.len() > 16 * 1024 {
+        let Some(fields) = parse_use_as_dictionary(url, headers) else {
             return false;
-        }
-        let Ok(fields) = Parser::new(&input).parse::<Dictionary>() else {
-            return false;
-        };
-        let Some(pattern_string) = string_member(&fields, "match") else {
-            return false;
-        };
-        let Ok(init) =
-            UrlPatternInit::parse_constructor_string::<regex::Regex>(pattern_string, Some(base))
-        else {
-            return false;
-        };
-        let Ok(pattern) = UrlPattern::parse(init, Default::default()) else {
-            return false;
-        };
-        if pattern.has_regexp_groups() {
-            return false;
-        }
-        if let Some(kind) = fields.get("type") {
-            if !matches!(kind, ListEntry::Item(item) if matches!(&item.bare_item, BareItem::Token(token) if token.as_str() == "raw"))
-            {
-                return false;
-            }
-        }
-        let id = match fields.get("id") {
-            None => "",
-            Some(_) => match string_member(&fields, "id") {
-                Some(value) if value.len() <= 1024 => value,
-                _ => return false,
-            },
-        };
-        let destinations = match fields.get("match-dest") {
-            None => Vec::new(),
-            Some(ListEntry::InnerList(list)) => {
-                let mut result = Vec::new();
-                for item in &list.items {
-                    let BareItem::String(value) = &item.bare_item else {
-                        return false;
-                    };
-                    result.push(value.as_str().to_owned());
-                }
-                result
-            }
-            _ => return false,
         };
         if !crate::http_cache::fresh_headers(headers, stored) {
             return false;
@@ -281,33 +334,19 @@ impl DictionaryStore {
         if generation != state.generation {
             return false;
         }
-        state
-            .entries
-            .retain(|entry| !(entry.partition == partition && entry.url == url));
-        while state.entries.len() >= MAX_DICTIONARIES
-            || state
-                .entries
-                .iter()
-                .map(|entry| entry.dictionary.body.len())
-                .sum::<usize>()
-                + body.len()
-                > MAX_STORE_BYTES
-        {
-            state.entries.remove(0);
-        }
-        state.entries.push(Entry {
+        state.insert(Entry {
             partition: partition.to_owned(),
             url: url.to_owned(),
             origin: origin(url).unwrap(),
-            pattern,
-            match_length: pattern_string.len(),
-            destinations,
+            pattern: fields.pattern,
+            match_length: fields.match_length,
+            destinations: fields.destinations,
             headers: headers.to_vec(),
             stored,
             dictionary: SelectedDictionary {
                 body: Arc::new(body.to_vec()),
                 hash: Sha256::digest(body).into(),
-                id: id.to_owned(),
+                id: fields.id,
             },
         });
         true

@@ -227,15 +227,34 @@ impl RequestContext {
 
     pub fn headers(&self, target: &str, method: &str) -> BTreeMap<String, String> {
         let mut h = BTreeMap::new();
-        // Values the default release measured per destination win; the tables
-        // below are the long-standing defaults for releases measured before the
-        // identity battery recorded subresources.
+        h.insert("accept".into(), self.accept().into());
+        // RFC 9218 Priority is an HTTP/2+ header in Chrome, and a cleartext
+        // origin is always HTTP/1.1 (no h2c). net::send drops it for HTTPS
+        // origins already known to speak HTTP/1.1.
+        if !target.starts_with("http:") {
+            h.insert("priority".into(), self.priority().into());
+        }
+        if trustworthy(target) {
+            self.insert_fetch_metadata(&mut h, target);
+        }
+        if self.mode == RequestMode::Navigate {
+            h.insert("upgrade-insecure-requests".into(), "1".into());
+        }
+        if let Some(source) = self.source.as_deref() {
+            self.insert_referer_and_origin(&mut h, source, target, method);
+        }
+        h
+    }
+
+    // Values the default release measured per destination win; the tables
+    // below are the long-standing defaults for releases measured before the
+    // identity battery recorded subresources.
+    fn accept(&self) -> &'static str {
         let release = crate::browser::default_release();
-        let destination = self.destination.as_str();
-        let accept = match self.destination {
+        match self.destination {
             Destination::Document | Destination::Iframe => release.navigation_accept,
             _ => release
-                .accept_for(destination)
+                .accept_for(self.destination.as_str())
                 .unwrap_or(match self.destination {
                     Destination::Style => "text/css,*/*;q=0.1",
                     Destination::Image => {
@@ -243,12 +262,14 @@ impl RequestContext {
                     }
                     _ => "*/*",
                 }),
-        };
-        h.insert("accept".into(), accept.into());
-        // Incremental delivery helps document/fetch/image streams; blocking
-        // scripts and styles prefer a complete response at their urgency.
-        let priority = release
-            .priority_for(destination)
+        }
+    }
+
+    // Incremental delivery helps document/fetch/image streams; blocking
+    // scripts and styles prefer a complete response at their urgency.
+    fn priority(&self) -> &'static str {
+        crate::browser::default_release()
+            .priority_for(self.destination.as_str())
             .unwrap_or(match self.destination {
                 Destination::Document | Destination::Iframe => "u=0, i",
                 // Chrome fetches web fonts at VeryHigh priority, like render-blocking CSS.
@@ -256,67 +277,70 @@ impl RequestContext {
                 Destination::Script => "u=1",
                 Destination::Image => "u=2, i",
                 Destination::Empty | Destination::Report => "u=1, i",
-            });
-        // RFC 9218 Priority is an HTTP/2+ header in Chrome, and a cleartext
-        // origin is always HTTP/1.1 (no h2c). net::send drops it for HTTPS
-        // origins already known to speak HTTP/1.1.
-        if !target.starts_with("http:") {
-            h.insert("priority".into(), priority.into());
-        }
-        if trustworthy(target) {
-            let site = match self.source.as_deref() {
-                None => "none",
-                Some(_) if self.opaque_origin => "cross-site",
-                Some(source) if same_origin(source, target) => "same-origin",
-                Some(source) if same_site(source, target) => "same-site",
-                _ => "cross-site",
-            };
-            h.insert(
-                "sec-fetch-site".into(),
-                self.redirect_site.as_deref().unwrap_or(site).into(),
-            );
-            h.insert(
-                "sec-fetch-mode".into(),
-                match self.mode {
-                    RequestMode::Navigate => "navigate",
-                    RequestMode::Cors => "cors",
-                    RequestMode::NoCors => "no-cors",
-                    RequestMode::SameOrigin => "same-origin",
-                }
-                .into(),
-            );
-            h.insert("sec-fetch-dest".into(), destination.into());
-            if self.mode == RequestMode::Navigate && self.user_activation {
-                h.insert("sec-fetch-user".into(), "?1".into());
+            })
+    }
+
+    fn fetch_site(&self, target: &str) -> &str {
+        let site = match self.source.as_deref() {
+            None => "none",
+            Some(_) if self.opaque_origin => "cross-site",
+            Some(source) if same_origin(source, target) => "same-origin",
+            Some(source) if same_site(source, target) => "same-site",
+            _ => "cross-site",
+        };
+        self.redirect_site.as_deref().unwrap_or(site)
+    }
+
+    fn insert_fetch_metadata(&self, h: &mut BTreeMap<String, String>, target: &str) {
+        h.insert("sec-fetch-site".into(), self.fetch_site(target).into());
+        h.insert(
+            "sec-fetch-mode".into(),
+            match self.mode {
+                RequestMode::Navigate => "navigate",
+                RequestMode::Cors => "cors",
+                RequestMode::NoCors => "no-cors",
+                RequestMode::SameOrigin => "same-origin",
             }
+            .into(),
+        );
+        h.insert("sec-fetch-dest".into(), self.destination.as_str().into());
+        if self.mode == RequestMode::Navigate && self.user_activation {
+            h.insert("sec-fetch-user".into(), "?1".into());
         }
-        if self.mode == RequestMode::Navigate {
-            h.insert("upgrade-insecure-requests".into(), "1".into());
+    }
+
+    // CORS script and font requests carry Origin even on the same URL
+    // origin; ordinary fetch adds it cross-origin or for unsafe methods.
+    fn sends_origin(&self, source: &str, target: &str, method: &str) -> bool {
+        (self.mode == RequestMode::Cors
+            && (matches!(self.destination, Destination::Script | Destination::Font)
+                || self.opaque_origin
+                || self.origin_tainted
+                || !same_origin(source, target)))
+            || !matches!(method, "GET" | "HEAD")
+    }
+
+    fn insert_referer_and_origin(
+        &self,
+        h: &mut BTreeMap<String, String>,
+        source: &str,
+        target: &str,
+        method: &str,
+    ) {
+        if let Some(referer) = self
+            .referrer_policy
+            .referrer(self.referrer.as_deref().unwrap_or(source), target)
+        {
+            h.insert("referer".into(), referer);
         }
-        if let Some(source) = self.source.as_deref() {
-            if let Some(referer) = self
-                .referrer_policy
-                .referrer(self.referrer.as_deref().unwrap_or(source), target)
-            {
-                h.insert("referer".into(), referer);
-            }
-            // CORS script and font requests carry Origin even on the same URL
-            // origin; ordinary fetch adds it cross-origin or for unsafe methods.
-            if (self.mode == RequestMode::Cors
-                && (matches!(self.destination, Destination::Script | Destination::Font)
-                    || self.opaque_origin
-                    || self.origin_tainted
-                    || !same_origin(source, target)))
-                || !matches!(method, "GET" | "HEAD")
-            {
-                if self.opaque_origin || self.origin_tainted {
-                    h.insert("origin".into(), "null".into());
-                } else if let Some(origin) = origin(source) {
-                    h.insert("origin".into(), origin);
-                }
-            }
+        if !self.sends_origin(source, target, method) {
+            return;
         }
-        h
+        if self.opaque_origin || self.origin_tainted {
+            h.insert("origin".into(), "null".into());
+        } else if let Some(origin) = origin(source) {
+            h.insert("origin".into(), origin);
+        }
     }
 }
 

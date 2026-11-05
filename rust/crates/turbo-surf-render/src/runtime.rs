@@ -16192,6 +16192,12 @@ impl PageSession {
         crate::browser_env::sweep_collected_documents();
     }
 
+    /// Host-only blob URL store size for the GC soak controls.
+    #[doc(hidden)]
+    pub fn blob_url_store_size_for_testing(&self) -> usize {
+        blob_urls::store_size(&self.rt.op_state().borrow())
+    }
+
     #[doc(hidden)]
     pub fn native_storage_diagnostics_for_testing(&mut self) -> serde_json::Value {
         let _activation = self.rt.activation_key().enter();

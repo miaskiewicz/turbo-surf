@@ -16,6 +16,11 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct Store(std::collections::HashMap<String, Entry>);
 
+/// Host-only live blob URL count for soak controls; no guest-visible accessor.
+pub(crate) fn store_size(state: &OpState) -> usize {
+    state.try_borrow::<Store>().map_or(0, |store| store.0.len())
+}
+
 /// The storage key a document's blob URLs live under, with the origin they print.
 fn storage_key(
     scope: &mut v8::PinScope,

@@ -8,6 +8,14 @@
   still Chrome's, byte for byte. Checked against a frozen Chrome 156 control
   (`fixtures/wss-hello-chrome156.json`, `tests/wss_client_hello.rs`). The identity battery
   gained a `wss:` TLS row (`wss-hello.mjs`, run by `reversion-chrome.mjs`).
+- **Tested (identity battery, #187)**: the battery page opens a `wss:` WebSocket to a new
+  HTTP/1.1-only listener W. W captures the ClientHello, answers the upgrade with a 101 and
+  a close frame, and logs no request. Parity and version diffs compare W next to the A/B
+  transport rows. `chrome-identity-156.json` and `TRANSPORT-156.json` are re-recorded on
+  the frozen Chrome 156.0.8078.80. Chrome's W hello offers only `http/1.1` and no ALPS,
+  and it matches the standalone `wss-hello.mjs` view; turbo-surf's matches it. Parity: 0
+  tells. Apart from the W connection, the re-record changes only noise: H2 stream
+  dependencies, `downlink`/`rtt`, and the racy D favicon.
 - **Fixed (rustls backend, #189)**: on `--no-default-features`, `wss:` sent its upgrade
   through reqwest, which lowercased Chrome's head and added `Accept: */*`, so the handshake
   head was not Chrome's and the wss tests failed. The rustls backend now dials `wss:` with

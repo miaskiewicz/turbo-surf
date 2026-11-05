@@ -204,6 +204,17 @@ export function representativeConnection(connections, origin, alpn, ids) {
   );
 }
 
+// The transport rows: the battery page's H2 origin, the HTTP/1.1-only origin and the
+// page's wss: socket (#187), which Chrome dials offering only http/1.1.
+export const TRANSPORT_ROWS = [
+  ["A", "h2"],
+  ["B", "http/1.1"],
+  ["W", "http/1.1"],
+];
+// Only the page opens the wss: socket, and its handshake is not a logged request, so
+// turbo-surf's W connection is not tied to a request id.
+const nativeRowIds = (origin, ids) => (origin === "W" ? undefined : ids);
+
 export const transportView = (connection) =>
   connection && {
     hello: connection.hello.normalized,
@@ -330,13 +341,10 @@ export function diffParity(chrome, native, { knownGaps = [] } = {}) {
       if (!expected.has(key))
         deltas.push({ area: "request", type: "request-extra", tier, kind: request.kind, key });
   }
-  for (const [origin, alpn] of [
-    ["A", "h2"],
-    ["B", "http/1.1"],
-  ]) {
+  for (const [origin, alpn] of TRANSPORT_ROWS) {
     const left = transportView(representativeConnection(chrome.connections, origin, alpn));
     const right = transportView(
-      representativeConnection(native.connections, origin, alpn, nativeIds),
+      representativeConnection(native.connections, origin, alpn, nativeRowIds(origin, nativeIds)),
     );
     if (!left || !right) {
       deltas.push({ area: "transport", type: "connection-missing", origin, alpn, path: origin });
@@ -425,10 +433,7 @@ function releaseRequestDeltas(previous, next, normalize) {
 
 function releaseTransportDeltas(previous, next) {
   const deltas = [];
-  for (const [origin, alpn] of [
-    ["A", "h2"],
-    ["B", "http/1.1"],
-  ]) {
+  for (const [origin, alpn] of TRANSPORT_ROWS) {
     const left = transportView(representativeConnection(previous.connections, origin, alpn));
     const right = transportView(representativeConnection(next.connections, origin, alpn));
     if (left && right)

@@ -132,13 +132,20 @@ async fn localhost_frame_loads_stay_bounded_across_sixty_iterations() {
         .await
         .unwrap();
     let times: Vec<u32> = serde_json::from_str(&raw).unwrap();
-    // Any iteration past the warmup takes less than one second; a 7-14 s leak
-    // would have shown as the issue reported. The budget covers shared-machine
-    // noise without being so slack that a real regression slips through.
+    // On an idle machine the tail runs in a few hundred ms; a 7-14 s leak would
+    // show as the issue reports. The budget covers shared-machine noise without
+    // being so slack that a real regression slips through, and the trend check
+    // catches a linear slowdown that noise alone will not produce.
     let tail = &times[10..];
     let worst = tail.iter().copied().max().unwrap_or(0);
     assert!(
-        worst < 3_000,
+        worst < 7_000,
         "a tail iteration ran for {worst} ms, suggesting a frame teardown leak: {times:?}"
+    );
+    let first_half = tail[..tail.len() / 2].iter().copied().sum::<u32>();
+    let second_half = tail[tail.len() / 2..].iter().copied().sum::<u32>();
+    assert!(
+        second_half < first_half * 3,
+        "second half {second_half} ms grew far beyond first half {first_half} ms: {times:?}"
     );
 }

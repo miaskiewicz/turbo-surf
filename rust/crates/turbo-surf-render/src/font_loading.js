@@ -513,13 +513,19 @@
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   // On the prototype, as in Chrome: an own accessor on the document wrapper would make
   // the binding keep that wrapper (and its realm) alive past a retired frame.
+  // A native accessor like the binding's own Document getters ("get fonts", length 0,
+  // native source); a JS closure would leak its name and source (a detection tell).
   Object.defineProperty(Document.prototype, "fonts", {
     configurable: true,
     enumerable: true,
-    get() {
-      // Brand check like the binding's own Document accessors (TypeError off a Document).
-      __intrinsicApply(__fontRoot, this, []);
-      return this === __fontDocument ? fonts : undefined;
-    },
+    get: __documentFunction(
+      function () {
+        // Brand check like the binding's own Document accessors (TypeError off a Document).
+        __intrinsicApply(__fontRoot, this, []);
+        return this === __fontDocument ? fonts : undefined;
+      },
+      "get fonts",
+      0,
+    ),
   });
 })();

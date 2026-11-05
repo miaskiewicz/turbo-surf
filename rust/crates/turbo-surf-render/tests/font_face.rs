@@ -9,6 +9,7 @@ use turbo_surf_render::PageSession;
 
 const PROBE: &str = include_str!("../../../../harness/detection/font-face-probe.js");
 const READY: &str = include_str!("../../../../harness/detection/font-face-ready-probe.js");
+const ACCESSOR: &str = include_str!("../../../../harness/detection/font-face-accessor-probe.js");
 const RANGE: &str =
     include_str!("../../../../harness/detection/fixtures/embedded-font-range-probe.js");
 const CASES: &str = include_str!("../../../../harness/detection/fixtures/font-face-cases.json");
@@ -25,6 +26,7 @@ fn control() -> Value {
     for (name, text) in [
         ("font-face-probe.js", PROBE),
         ("font-face-ready-probe.js", READY),
+        ("font-face-accessor-probe.js", ACCESSOR),
         ("fixtures/embedded-font-range-probe.js", RANGE),
         ("fixtures/font-face-cases.json", CASES),
     ] {
@@ -164,6 +166,7 @@ async fn run_case(name: &str) -> Value {
             match probe.as_str().unwrap() {
                 "font-face-probe.js" => PROBE,
                 "font-face-ready-probe.js" => READY,
+                "font-face-accessor-probe.js" => ACCESSOR,
                 _ => RANGE,
             },
         )
@@ -266,4 +269,12 @@ async fn used_css_faces_load_before_the_load_event_without_a_layout_read() {
         page.close();
         assert_eq!(actual, format!("\"{expected}\""), "{html}");
     }
+}
+
+/// `document.fonts` is a Web-IDL accessor in Chrome: `get fonts`, length 0, native
+/// source, not constructible, and an `Illegal invocation` brand check. A JS closure
+/// here (name "get", readable source) is a bot-detection tell.
+#[tokio::test(flavor = "current_thread")]
+async fn document_fonts_accessor_matches_chrome156() {
+    assert_case("accessor", &[]).await;
 }

@@ -1,12 +1,13 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "recordedAt": "2026-11-04T13:16:46.497Z",
+  "recordedAt": "2026-11-05T11:07:14.140Z",
   "fixtures": {
     "font-face-probe.js": "6c4beb398aedd142ed37231e1dfd34bb79a5d5ecbf5b5a8a8cb70fd780dd4aa1",
     "font-face-ready-probe.js": "9748542e2fc436414124fedf6d3d24fbb4478156b95119a4bac8afb6695c99b7",
     "fixtures/embedded-font-range-probe.js": "7a8b2e47635af22bfb9bdbe69f854ad49e6c7934c3e4c4f53243d549a3e68093",
-    "fixtures/font-face-cases.json": "148deaa34aae2d7a6595447dfa0266f878042689a99ef31aaeb8d0367249014c"
+    "font-face-accessor-probe.js": "30d6a2b5e28b94d4b12d007482ddaf88a7cb29d0c0a7aa8b68d530c858a231fa",
+    "fixtures/font-face-cases.json": "15b6b434ddf795e7d5830402bc577199b66bca14c9a24ec3b8b34fed4c6ce08f"
   },
   "result": {
     "plain": {
@@ -19,75 +20,27 @@
         "size": 8,
         "status": "loaded",
         "faces": [
-          [
-            "Surf CrossCors",
-            "unloaded"
-          ],
-          [
-            "Surf CrossOpaque",
-            "unloaded"
-          ],
-          [
-            "Surf Fallback",
-            "unloaded"
-          ],
-          [
-            "Surf Missing",
-            "unloaded"
-          ],
-          [
-            "Surf TTF",
-            "unloaded"
-          ],
-          [
-            "Surf Unused",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF2",
-            "unloaded"
-          ]
+          ["Surf CrossCors", "unloaded"],
+          ["Surf CrossOpaque", "unloaded"],
+          ["Surf Fallback", "unloaded"],
+          ["Surf Missing", "unloaded"],
+          ["Surf TTF", "unloaded"],
+          ["Surf Unused", "unloaded"],
+          ["Surf WOFF", "unloaded"],
+          ["Surf WOFF2", "unloaded"]
         ]
       },
       "laidOut": {
         "status": "loading",
         "faces": [
-          [
-            "Surf CrossCors",
-            "loading"
-          ],
-          [
-            "Surf CrossOpaque",
-            "loading"
-          ],
-          [
-            "Surf Fallback",
-            "loading"
-          ],
-          [
-            "Surf Missing",
-            "loading"
-          ],
-          [
-            "Surf TTF",
-            "loading"
-          ],
-          [
-            "Surf Unused",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF",
-            "loading"
-          ],
-          [
-            "Surf WOFF2",
-            "loading"
-          ]
+          ["Surf CrossCors", "loading"],
+          ["Surf CrossOpaque", "loading"],
+          ["Surf Fallback", "loading"],
+          ["Surf Missing", "loading"],
+          ["Surf TTF", "loading"],
+          ["Surf Unused", "unloaded"],
+          ["Surf WOFF", "loading"],
+          ["Surf WOFF2", "loading"]
         ],
         "readyReplaced": true,
         "events": []
@@ -95,61 +48,22 @@
       "ready": {
         "status": "loaded",
         "faces": [
-          [
-            "Surf CrossCors",
-            "loaded"
-          ],
-          [
-            "Surf CrossOpaque",
-            "error"
-          ],
-          [
-            "Surf Fallback",
-            "loaded"
-          ],
-          [
-            "Surf Missing",
-            "error"
-          ],
-          [
-            "Surf TTF",
-            "loaded"
-          ],
-          [
-            "Surf Unused",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF",
-            "loaded"
-          ],
-          [
-            "Surf WOFF2",
-            "loaded"
-          ]
+          ["Surf CrossCors", "loaded"],
+          ["Surf CrossOpaque", "error"],
+          ["Surf Fallback", "loaded"],
+          ["Surf Missing", "error"],
+          ["Surf TTF", "loaded"],
+          ["Surf Unused", "unloaded"],
+          ["Surf WOFF", "loaded"],
+          ["Surf WOFF2", "loaded"]
         ],
         "events": [
-          [
-            "loading",
-            []
-          ],
+          ["loading", []],
           [
             "loadingdone",
-            [
-              "Surf CrossCors",
-              "Surf Fallback",
-              "Surf TTF",
-              "Surf WOFF",
-              "Surf WOFF2"
-            ]
+            ["Surf CrossCors", "Surf Fallback", "Surf TTF", "Surf WOFF", "Surf WOFF2"]
           ],
-          [
-            "loadingerror",
-            [
-              "Surf CrossOpaque",
-              "Surf Missing"
-            ]
-          ]
+          ["loadingerror", ["Surf CrossOpaque", "Surf Missing"]]
         ],
         "widths": {
           "TTF": 240,
@@ -194,52 +108,21 @@
           "faceStatus": "loaded",
           "setStatus": "loaded"
         },
-        "order": [
-          "microtask",
-          "task",
-          "load",
-          "awaited",
-          "ready"
-        ],
-        "events": [
-          [
-            "loading",
-            []
-          ],
-          [
-            "loadingdone",
-            [
-              "\"Surf Script\""
-            ]
-          ]
-        ],
+        "order": ["microtask", "task", "load", "awaited", "ready"],
+        "events": [["loading", []], ["loadingdone", ["\"Surf Script\""]]],
         "width": 240
       },
       "bytes": {
         "status": "loaded",
         "loadedStatus": "loaded",
         "width": 240,
-        "invalid": [
-          "error",
-          "error",
-          "SyntaxError"
-        ],
-        "badDescriptor": [
-          "error",
-          "SyntaxError"
-        ]
+        "invalid": ["error", "error", "SyntaxError"],
+        "badDescriptor": ["error", "SyntaxError"]
       },
       "setLoad": {
-        "families": [
-          "Surf Unused"
-        ],
+        "families": ["Surf Unused"],
         "status": "loaded",
-        "events": [
-          [
-            "loading",
-            []
-          ]
-        ]
+        "events": [["loading", []]]
       },
       "deleted": {
         "size": 9,
@@ -256,75 +139,27 @@
         "size": 8,
         "status": "loaded",
         "faces": [
-          [
-            "Surf CrossCors",
-            "unloaded"
-          ],
-          [
-            "Surf CrossOpaque",
-            "unloaded"
-          ],
-          [
-            "Surf Fallback",
-            "unloaded"
-          ],
-          [
-            "Surf Missing",
-            "unloaded"
-          ],
-          [
-            "Surf TTF",
-            "unloaded"
-          ],
-          [
-            "Surf Unused",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF2",
-            "unloaded"
-          ]
+          ["Surf CrossCors", "unloaded"],
+          ["Surf CrossOpaque", "unloaded"],
+          ["Surf Fallback", "unloaded"],
+          ["Surf Missing", "unloaded"],
+          ["Surf TTF", "unloaded"],
+          ["Surf Unused", "unloaded"],
+          ["Surf WOFF", "unloaded"],
+          ["Surf WOFF2", "unloaded"]
         ]
       },
       "laidOut": {
         "status": "loading",
         "faces": [
-          [
-            "Surf CrossCors",
-            "error"
-          ],
-          [
-            "Surf CrossOpaque",
-            "error"
-          ],
-          [
-            "Surf Fallback",
-            "loading"
-          ],
-          [
-            "Surf Missing",
-            "loading"
-          ],
-          [
-            "Surf TTF",
-            "loading"
-          ],
-          [
-            "Surf Unused",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF",
-            "loading"
-          ],
-          [
-            "Surf WOFF2",
-            "loading"
-          ]
+          ["Surf CrossCors", "error"],
+          ["Surf CrossOpaque", "error"],
+          ["Surf Fallback", "loading"],
+          ["Surf Missing", "loading"],
+          ["Surf TTF", "loading"],
+          ["Surf Unused", "unloaded"],
+          ["Surf WOFF", "loading"],
+          ["Surf WOFF2", "loading"]
         ],
         "readyReplaced": true,
         "events": []
@@ -332,61 +167,19 @@
       "ready": {
         "status": "loaded",
         "faces": [
-          [
-            "Surf CrossCors",
-            "error"
-          ],
-          [
-            "Surf CrossOpaque",
-            "error"
-          ],
-          [
-            "Surf Fallback",
-            "loaded"
-          ],
-          [
-            "Surf Missing",
-            "error"
-          ],
-          [
-            "Surf TTF",
-            "loaded"
-          ],
-          [
-            "Surf Unused",
-            "unloaded"
-          ],
-          [
-            "Surf WOFF",
-            "loaded"
-          ],
-          [
-            "Surf WOFF2",
-            "loaded"
-          ]
+          ["Surf CrossCors", "error"],
+          ["Surf CrossOpaque", "error"],
+          ["Surf Fallback", "loaded"],
+          ["Surf Missing", "error"],
+          ["Surf TTF", "loaded"],
+          ["Surf Unused", "unloaded"],
+          ["Surf WOFF", "loaded"],
+          ["Surf WOFF2", "loaded"]
         ],
         "events": [
-          [
-            "loading",
-            []
-          ],
-          [
-            "loadingdone",
-            [
-              "Surf Fallback",
-              "Surf TTF",
-              "Surf WOFF",
-              "Surf WOFF2"
-            ]
-          ],
-          [
-            "loadingerror",
-            [
-              "Surf CrossCors",
-              "Surf CrossOpaque",
-              "Surf Missing"
-            ]
-          ]
+          ["loading", []],
+          ["loadingdone", ["Surf Fallback", "Surf TTF", "Surf WOFF", "Surf WOFF2"]],
+          ["loadingerror", ["Surf CrossCors", "Surf CrossOpaque", "Surf Missing"]]
         ],
         "widths": {
           "TTF": 240,
@@ -431,52 +224,21 @@
           "faceStatus": "loaded",
           "setStatus": "loaded"
         },
-        "order": [
-          "microtask",
-          "task",
-          "load",
-          "awaited",
-          "ready"
-        ],
-        "events": [
-          [
-            "loading",
-            []
-          ],
-          [
-            "loadingdone",
-            [
-              "\"Surf Script\""
-            ]
-          ]
-        ],
+        "order": ["microtask", "task", "load", "awaited", "ready"],
+        "events": [["loading", []], ["loadingdone", ["\"Surf Script\""]]],
         "width": 240
       },
       "bytes": {
         "status": "loaded",
         "loadedStatus": "loaded",
         "width": 240,
-        "invalid": [
-          "error",
-          "error",
-          "SyntaxError"
-        ],
-        "badDescriptor": [
-          "error",
-          "SyntaxError"
-        ]
+        "invalid": ["error", "error", "SyntaxError"],
+        "badDescriptor": ["error", "SyntaxError"]
       },
       "setLoad": {
-        "families": [
-          "Surf Unused"
-        ],
+        "families": ["Surf Unused"],
         "status": "loaded",
-        "events": [
-          [
-            "loading",
-            []
-          ]
-        ]
+        "events": [["loading", []]]
       },
       "deleted": {
         "size": 9,
@@ -486,53 +248,11 @@
     "range-block-only": {
       "rows": {
         "link": {
-          "bounds": [
-            8,
-            12,
-            1264,
-            24
-          ],
-          "rects": [
-            [
-              8,
-              12,
-              0,
-              0
-            ],
-            [
-              8,
-              12,
-              1264,
-              24
-            ],
-            [
-              8,
-              48,
-              0,
-              0
-            ]
-          ],
+          "bounds": [8, 12, 1264, 24],
+          "rects": [[8, 12, 0, 0], [8, 12, 1264, 24], [8, 48, 0, 0]],
           "contentsRange": {
-            "bounds": [
-              8,
-              11,
-              1264,
-              25
-            ],
-            "rects": [
-              [
-                8,
-                12,
-                1264,
-                24
-              ],
-              [
-                8,
-                11,
-                120,
-                25
-              ]
-            ]
+            "bounds": [8, 11, 1264, 25],
+            "rects": [[8, 12, 1264, 24], [8, 11, 120, 25]]
           },
           "style": {
             "fontFamily": "\"Embedded Plex\"",
@@ -543,35 +263,11 @@
           }
         },
         "heading": {
-          "bounds": [
-            8,
-            12,
-            1264,
-            24
-          ],
-          "rects": [
-            [
-              8,
-              12,
-              1264,
-              24
-            ]
-          ],
+          "bounds": [8, 12, 1264, 24],
+          "rects": [[8, 12, 1264, 24]],
           "contentsRange": {
-            "bounds": [
-              8,
-              11,
-              120,
-              25
-            ],
-            "rects": [
-              [
-                8,
-                11,
-                120,
-                25
-              ]
-            ]
+            "bounds": [8, 11, 120, 25],
+            "rects": [[8, 11, 120, 25]]
           },
           "style": {
             "fontFamily": "\"Embedded Plex\"",
@@ -586,65 +282,11 @@
     "range-mixed": {
       "rows": {
         "link": {
-          "bounds": [
-            8,
-            7,
-            1264,
-            97
-          ],
-          "rects": [
-            [
-              8,
-              7,
-              72,
-              25
-            ],
-            [
-              8,
-              44,
-              1264,
-              24
-            ],
-            [
-              8,
-              79,
-              60,
-              25
-            ]
-          ],
+          "bounds": [8, 7, 1264, 97],
+          "rects": [[8, 7, 72, 25], [8, 44, 1264, 24], [8, 79, 60, 25]],
           "contentsRange": {
-            "bounds": [
-              8,
-              7,
-              1264,
-              97
-            ],
-            "rects": [
-              [
-                8,
-                7,
-                72,
-                25
-              ],
-              [
-                8,
-                44,
-                1264,
-                24
-              ],
-              [
-                8,
-                43,
-                120,
-                25
-              ],
-              [
-                8,
-                79,
-                60,
-                25
-              ]
-            ]
+            "bounds": [8, 7, 1264, 97],
+            "rects": [[8, 7, 72, 25], [8, 44, 1264, 24], [8, 43, 120, 25], [8, 79, 60, 25]]
           },
           "style": {
             "fontFamily": "\"Embedded Plex\"",
@@ -655,35 +297,11 @@
           }
         },
         "heading": {
-          "bounds": [
-            8,
-            44,
-            1264,
-            24
-          ],
-          "rects": [
-            [
-              8,
-              44,
-              1264,
-              24
-            ]
-          ],
+          "bounds": [8, 44, 1264, 24],
+          "rects": [[8, 44, 1264, 24]],
           "contentsRange": {
-            "bounds": [
-              8,
-              43,
-              120,
-              25
-            ],
-            "rects": [
-              [
-                8,
-                43,
-                120,
-                25
-              ]
-            ]
+            "bounds": [8, 43, 120, 25],
+            "rects": [[8, 43, 120, 25]]
           },
           "style": {
             "fontFamily": "\"Embedded Plex\"",
@@ -693,6 +311,24 @@
             "lineHeight": "24px"
           }
         }
+      }
+    },
+    "accessor": {
+      "own": false,
+      "keys": ["configurable", "enumerable", "get", "set"],
+      "set": true,
+      "enumerable": true,
+      "configurable": true,
+      "name": "get fonts",
+      "length": 0,
+      "source": "function get fonts() { [native code] }",
+      "prototype": false,
+      "construct": "TypeError",
+      "same": true,
+      "brand": {
+        "object": ["TypeError", "Illegal invocation"],
+        "undefined": ["TypeError", "Illegal invocation"],
+        "element": ["TypeError", "Illegal invocation"]
       }
     }
   }

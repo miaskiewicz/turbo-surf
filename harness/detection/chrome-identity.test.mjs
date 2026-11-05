@@ -18,6 +18,7 @@ import { importLegacy } from "./chrome-identity-import.mjs";
 import {
   NOJS_KINDS,
   RENDER_KINDS,
+  actionFor,
   brandHeader,
   brandVersions,
   diffParity,
@@ -377,4 +378,32 @@ test("the optional engine step is skippable, tolerates absence and records its J
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("release delta actions dispatch by area, recording environment and collector paths", () => {
+  const cases = [
+    [{ area: "transport", kind: "favicon" }, "human"],
+    [{ area: "request", kind: "favicon", type: "header-order" }, "info"],
+    [{ area: "request", type: "header-value", header: "rtt" }, "info"],
+    [{ area: "request", type: "header-order" }, "registry"],
+    [{ area: "request", type: "pseudo-order" }, "registry"],
+    [{ area: "request", type: "header-value", header: "accept" }, "registry"],
+    [{ area: "request", type: "header-value", header: "priority" }, "registry"],
+    [{ area: "request", type: "header-value", header: "user-agent" }, "human"],
+    [{ area: "request", type: "stream-priority" }, "info"],
+    [{ area: "request", type: "request-new" }, "human"],
+    [{ area: "js", path: "screen.width" }, "info"],
+    [{ area: "js", path: "navigator.webdriver" }, "info"],
+    [{ area: "js", path: "navigator.deviceMemory" }, "registry"],
+    [{ area: "js", path: "engine.version" }, "engine"],
+    [{ area: "js", path: "features.prototypes.Window" }, "engine"],
+    [{ area: "js", path: "features.prototypes.Navigator" }, "engine"],
+    [{ area: "js", path: "intl.locale" }, "engine"],
+    [{ area: "js", path: "navigator.platform" }, "human"],
+    [{ area: "js", path: "userAgentData.mobile" }, "human"],
+    [{ area: "js", path: "document.title" }, "info"],
+    [{ area: "other" }, "info"],
+  ];
+  for (const [delta, action] of cases)
+    assert.equal(actionFor(delta), action, JSON.stringify(delta));
 });

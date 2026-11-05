@@ -48,25 +48,23 @@ export function lifecycleErrors(result) {
   if (result.dynamic?.imageWidth !== 3 || result.dynamic?.styleRule !== "dynamic-sentinel")
     errors.push("dynamic resources");
   if (result.control !== "parsed-token") errors.push("parsed hidden control");
-  if (
-    result.hostEvents?.length !== 5 ||
-    result.hostEvents.some(
-      (event) => !event.trusted || event.phase !== 2 || !event.timestampValid,
-    ) ||
-    result.completedEventStates?.length !== 5 ||
-    result.completedEventStates.some(
-      (event, index) =>
-        !event.trusted ||
-        (index < 3
-          ? event.currentTarget !== null || event.phase !== 0
-          : event.currentTarget !== "window" || event.phase !== 2 || event.pathLength !== 1),
-    ) ||
-    result.redispatchStates?.length !== 2 ||
-    result.redispatchStates.some((event) => event.error !== "InvalidStateError" || !event.trusted)
-  )
-    errors.push("host event dispatch state");
+  if (hostDispatchBroken(result)) errors.push("host event dispatch state");
   return errors;
 }
+
+// The first three completed events are read after dispatch, the window ones during it.
+const completedStateBroken = (event, index) =>
+  !event.trusted ||
+  (index < 3
+    ? event.currentTarget !== null || event.phase !== 0
+    : event.currentTarget !== "window" || event.phase !== 2 || event.pathLength !== 1);
+const hostDispatchBroken = (result) =>
+  result.hostEvents?.length !== 5 ||
+  result.hostEvents.some((event) => !event.trusted || event.phase !== 2 || !event.timestampValid) ||
+  result.completedEventStates?.length !== 5 ||
+  result.completedEventStates.some(completedStateBroken) ||
+  result.redispatchStates?.length !== 2 ||
+  result.redispatchStates.some((event) => event.error !== "InvalidStateError" || !event.trusted);
 
 async function run(command, args, dest, timezone) {
   return new Promise((done, fail) => {

@@ -20,18 +20,23 @@ export function redirectErrors(value, requests) {
   const errors = [];
   if (value?.same !== true || value?.cross !== false || value?.back !== false)
     errors.push("authorization origin transition");
-  if (
-    value?.manual?.type !== "opaqueredirect" ||
-    value.manual.status !== 0 ||
-    value.manual.ok !== false ||
-    value.manual.url !== "/manual" ||
-    value.manual.headers.length ||
-    value.manual.text !== ""
-  )
-    errors.push("manual filtered response");
+  if (manualResponseBroken(value?.manual)) errors.push("manual filtered response");
   if (value?.errorRejected !== true) errors.push("error mode rejection");
   if (value?.unsafeAllowed !== true || value?.unsafeDenied !== true)
     errors.push("redirected preflight authorization");
+  errors.push(...requestErrors(requests));
+  return errors;
+}
+// redirect: "manual" yields a fully filtered opaque-redirect response.
+const manualResponseBroken = (manual) =>
+  manual?.type !== "opaqueredirect" ||
+  manual.status !== 0 ||
+  manual.ok !== false ||
+  manual.url !== "/manual" ||
+  manual.headers.length ||
+  manual.text !== "";
+function requestErrors(requests) {
+  const errors = [];
   if (requests.some((row) => row.path === "/unsafe-blocked" && row.method !== "OPTIONS"))
     errors.push("denied unsafe request was sent");
   for (const path of ["/unsafe-step", "/unsafe-final", "/unsafe-blocked"])

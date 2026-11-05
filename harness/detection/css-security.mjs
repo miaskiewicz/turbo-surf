@@ -35,15 +35,15 @@ export function cssSecurityErrors(value) {
     errors.push("blocked parser declaration");
   for (const key of ["cssom", "deniedAttribute", "deniedAttrNode", "cssText"])
     if (value?.[key]?.applies !== true) errors.push(key);
-  if (
-    value?.deniedAttribute?.attribute !== "opacity:0.75" ||
-    value?.deniedAttribute?.declaration !== "0.5" ||
-    value?.deniedAttrNode?.attribute !== "opacity:0.8" ||
-    value?.deniedAttrNode?.declaration !== "0.5"
-  )
-    errors.push("authored and effective attribute separation");
+  if (attributeSeparationBroken(value)) errors.push("authored and effective attribute separation");
   return errors;
 }
+// The denied attribute keeps its authored text while the effective declaration stays 0.5.
+const attributeSeparationBroken = (value) =>
+  value?.deniedAttribute?.attribute !== "opacity:0.75" ||
+  value?.deniedAttribute?.declaration !== "0.5" ||
+  value?.deniedAttrNode?.attribute !== "opacity:0.8" ||
+  value?.deniedAttrNode?.declaration !== "0.5";
 export async function captureCssSecurity({ binary, out, chromeOnly = false, nativeOnly = false }) {
   if (existsSync(join(out, "comparison.json"))) throw Error("Use a fresh output directory");
   mkdirSync(out, { recursive: true, mode: 0o700 });

@@ -61,90 +61,122 @@
     delay: { buffer: true, delay: 0.003 },
     pan: { buffer: true, pan: 0.4, channels: 2 },
   };
+  const fillInput = (data) => {
+    for (let i = 0; i < data.length; i++)
+      data[i] = Math.sin(i * 0.13) * 0.4 + ((i % 67) - 33) / 200;
+  };
+  const bufferSource = (context, c) => {
+    const input = context.createBuffer(1, 1024, c.inputRate || 44100);
+    fillInput(input.getChannelData(0));
+    const source = context.createBufferSource();
+    source.buffer = input;
+    if (c.rate !== undefined) source.playbackRate.value = c.rate;
+    if (c.detune !== undefined) source.detune.value = c.detune;
+    if (c.loop) {
+      source.loop = true;
+      source.loopStart = c.loopStart;
+      source.loopEnd = c.loopEnd;
+    }
+    return source;
+  };
+  const oscillatorSource = (context, c) => {
+    const source = context.createOscillator();
+    source.type = c.wave;
+    source.frequency.value = c.frequency;
+    if (c.detune !== undefined) source.detune.value = c.detune;
+    return source;
+  };
+  const automationArg = (value) => (Array.isArray(value) ? new Float32Array(value) : value);
+  const automate = (automation, gain, source) => {
+    for (const [param, events] of Object.entries(automation))
+      for (const [method, ...args] of events)
+        (param === "gain" ? gain.gain : source[param])[method](...args.map(automationArg));
+  };
+  // Effects are chained in this fixed order after the gain node.
+  const effects = [
+    [
+      "biquad",
+      (context, spec) => {
+        const node = context.createBiquadFilter();
+        node.type = spec.type;
+        node.frequency.value = spec.frequency;
+        node.Q.value = spec.Q;
+        return node;
+      },
+    ],
+    [
+      "curve",
+      (context, curve) => {
+        const node = context.createWaveShaper();
+        node.curve = new Float32Array(curve);
+        return node;
+      },
+    ],
+    [
+      "delay",
+      (context, delay) => {
+        const node = context.createDelay();
+        node.delayTime.value = delay;
+        return node;
+      },
+    ],
+    [
+      "pan",
+      (context, pan) => {
+        const node = context.createStereoPanner();
+        node.pan.value = pan;
+        return node;
+      },
+    ],
+  ];
+  const startSource = (source, c) => {
+    if (c.buffer && c.offset !== undefined) source.start(c.start || 0, c.offset, c.duration);
+    else source.start(c.start || 0);
+    if (c.stop) source.stop(c.stop);
+  };
+  const summarize = (pcm, context) => {
+    let hash = 0x811c9dc5,
+      energy = 0;
+    for (const channel of pcm)
+      for (const x of channel) {
+        const n = Math.round(x * 1e7);
+        hash = Math.imul(hash ^ (n & 255), 0x01000193) >>> 0;
+        hash = Math.imul(hash ^ ((n >>> 8) & 255), 0x01000193) >>> 0;
+        energy += Math.abs(x);
+      }
+    return {
+      pcm,
+      hash: hash.toString(16).padStart(8, "0"),
+      energy,
+      firstNonzero: pcm[0].findIndex((value) => value !== 0),
+      time: context.currentTime,
+    };
+  };
+  const renderCase = async (c) => {
+    const context = new OfflineAudioContext(c.channels || 1, 2048, 44100);
+    const source = c.buffer ? bufferSource(context, c) : oscillatorSource(context, c);
+    let tail = source,
+      gain = context.createGain();
+    tail.connect(gain);
+    tail = gain;
+    if (c.automation) automate(c.automation, gain, source);
+    for (const [key, build] of effects)
+      if (c[key]) {
+        const node = build(context, c[key]);
+        tail.connect(node);
+        tail = node;
+      }
+    tail.connect(context.destination);
+    startSource(source, c);
+    const rendered = await context.startRendering(),
+      pcm = Array.from({ length: rendered.numberOfChannels }, (_, i) =>
+        Array.from(rendered.getChannelData(i)),
+      );
+    return summarize(pcm, context);
+  };
   for (const [name, c] of Object.entries(cases))
     try {
-      const context = new OfflineAudioContext(c.channels || 1, 2048, 44100);
-      let source;
-      if (c.buffer) {
-        const input = context.createBuffer(1, 1024, c.inputRate || 44100),
-          data = input.getChannelData(0);
-        for (let i = 0; i < data.length; i++)
-          data[i] = Math.sin(i * 0.13) * 0.4 + ((i % 67) - 33) / 200;
-        source = context.createBufferSource();
-        source.buffer = input;
-        if (c.rate !== undefined) source.playbackRate.value = c.rate;
-        if (c.detune !== undefined) source.detune.value = c.detune;
-        if (c.loop) {
-          source.loop = true;
-          source.loopStart = c.loopStart;
-          source.loopEnd = c.loopEnd;
-        }
-      } else {
-        source = context.createOscillator();
-        source.type = c.wave;
-        source.frequency.value = c.frequency;
-        if (c.detune !== undefined) source.detune.value = c.detune;
-      }
-      let tail = source,
-        gain = context.createGain();
-      tail.connect(gain);
-      tail = gain;
-      if (c.automation)
-        for (const [param, events] of Object.entries(c.automation))
-          for (const [method, ...args] of events)
-            (param === "gain" ? gain.gain : source[param])[method](
-              ...args.map((value) => (Array.isArray(value) ? new Float32Array(value) : value)),
-            );
-      if (c.biquad) {
-        const node = context.createBiquadFilter();
-        node.type = c.biquad.type;
-        node.frequency.value = c.biquad.frequency;
-        node.Q.value = c.biquad.Q;
-        tail.connect(node);
-        tail = node;
-      }
-      if (c.curve) {
-        const node = context.createWaveShaper();
-        node.curve = new Float32Array(c.curve);
-        tail.connect(node);
-        tail = node;
-      }
-      if (c.delay) {
-        const node = context.createDelay();
-        node.delayTime.value = c.delay;
-        tail.connect(node);
-        tail = node;
-      }
-      if (c.pan) {
-        const node = context.createStereoPanner();
-        node.pan.value = c.pan;
-        tail.connect(node);
-        tail = node;
-      }
-      tail.connect(context.destination);
-      if (c.buffer && c.offset !== undefined) source.start(c.start || 0, c.offset, c.duration);
-      else source.start(c.start || 0);
-      if (c.stop) source.stop(c.stop);
-      const rendered = await context.startRendering(),
-        pcm = Array.from({ length: rendered.numberOfChannels }, (_, i) =>
-          Array.from(rendered.getChannelData(i)),
-        );
-      let hash = 0x811c9dc5,
-        energy = 0;
-      for (const channel of pcm)
-        for (const x of channel) {
-          const n = Math.round(x * 1e7);
-          hash = Math.imul(hash ^ (n & 255), 0x01000193) >>> 0;
-          hash = Math.imul(hash ^ ((n >>> 8) & 255), 0x01000193) >>> 0;
-          energy += Math.abs(x);
-        }
-      result.graphs[name] = {
-        pcm,
-        hash: hash.toString(16).padStart(8, "0"),
-        energy,
-        firstNonzero: pcm[0].findIndex((value) => value !== 0),
-        time: context.currentTime,
-      };
+      result.graphs[name] = await renderCase(c);
     } catch (error) {
       result.graphs[name] = { error: { name: error.name, message: error.message } };
     }

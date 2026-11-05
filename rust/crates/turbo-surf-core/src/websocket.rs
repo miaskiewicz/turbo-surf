@@ -7,6 +7,7 @@
 //! and honored when the server accepts it. Each connection runs on its own tokio task;
 //! the owner exchanges [`WsCommand`]s and [`WsEvent`]s over channels, and dropping the
 //! [`WsHandle`] tears the connection down.
+#[cfg(feature = "impersonate")]
 use crate::http_backend as http;
 pub use crate::websocket_frame::ProtocolError;
 use crate::websocket_frame::{
@@ -219,8 +220,7 @@ async fn handshake(
 
 type Handshake = (Box<dyn Io>, String, Vec<u8>);
 
-/// `ws:`: the head goes out byte for byte on a plain TCP stream.
-async fn plain_handshake(url: &url::Url, head: &str) -> Result<Handshake, ProtocolError> {
+async fn tcp_connect(url: &url::Url) -> Result<tokio::net::TcpStream, ProtocolError> {
     let host = url.host_str().ok_or(ProtocolError("missing host"))?;
     let port = url
         .port_or_known_default()
@@ -229,7 +229,11 @@ async fn plain_handshake(url: &url::Url, head: &str) -> Result<Handshake, Protoc
         .await
         .map_err(|_| ProtocolError("connect failed"))?;
     let _ = tcp.set_nodelay(true);
-    let mut stream: Box<dyn Io> = Box::new(tcp);
+    Ok(tcp)
+}
+
+/// Writes the head byte for byte and reads the response head off the same stream.
+async fn raw_handshake(mut stream: Box<dyn Io>, head: &str) -> Result<Handshake, ProtocolError> {
     stream
         .write_all(head.as_bytes())
         .await
@@ -238,10 +242,58 @@ async fn plain_handshake(url: &url::Url, head: &str) -> Result<Handshake, Protoc
     Ok((stream, response, leftover))
 }
 
+/// `ws:`: the head goes out byte for byte on a plain TCP stream.
+async fn plain_handshake(url: &url::Url, head: &str) -> Result<Handshake, ProtocolError> {
+    raw_handshake(Box::new(tcp_connect(url).await?), head).await
+}
+
+/// `wss:` on the rustls backend (`--no-default-features`), which has no Chrome
+/// transport to ride (#189): rustls's own ClientHello offering ALPN `http/1.1`, and
+/// the head written byte for byte as on `ws:` (an HTTP client would recase it and
+/// add its own defaults).
+#[cfg(not(feature = "impersonate"))]
+async fn tls_handshake(
+    url: &url::Url,
+    head: &str,
+    anchor: Option<&[u8]>,
+) -> Result<Handshake, ProtocolError> {
+    let host = url.host_str().ok_or(ProtocolError("missing host"))?;
+    let name = rustls::pki_types::ServerName::try_from(host.trim_matches(['[', ']']).to_owned())
+        .map_err(|_| ProtocolError("invalid server name"))?;
+    let tcp = tcp_connect(url).await?;
+    let tls = tokio_rustls::TlsConnector::from(rustls_config(anchor)?)
+        .connect(name, tcp)
+        .await
+        .map_err(|_| ProtocolError("TLS handshake failed"))?;
+    raw_handshake(Box::new(tls), head).await
+}
+
+#[cfg(not(feature = "impersonate"))]
+fn rustls_config(anchor: Option<&[u8]>) -> Result<Arc<rustls::ClientConfig>, ProtocolError> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(der) = anchor {
+        roots
+            .add(rustls::pki_types::CertificateDer::from(der.to_vec()))
+            .map_err(|_| ProtocolError("invalid trust anchor"))?;
+    }
+    let mut config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|_| ProtocolError("TLS configuration"))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    // A WebSocket handshake is HTTP/1.1; Chrome offers only that protocol here.
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(Arc::new(config))
+}
+
 /// `wss:` rides surf's https transport (#179), so the ClientHello is the Chrome one
 /// every https request sends. The HTTP/1.1 request version is what Chrome's WebSocket
 /// stack asks of TLS: ALPN `http/1.1` only. The head keeps Chrome's order and casing;
 /// the response's upgraded stream carries any bytes read past the 101 head.
+#[cfg(feature = "impersonate")]
 async fn tls_handshake(
     url: &url::Url,
     head: &str,
@@ -273,6 +325,7 @@ async fn tls_handshake(
     Ok((Box::new(upgraded), response_head, Vec::new()))
 }
 
+#[cfg(feature = "impersonate")]
 fn wss_client(anchor: Option<&[u8]>) -> Result<http::Client, ProtocolError> {
     crate::net::websocket_client_builder(anchor)
         .map_err(|_| ProtocolError("invalid trust anchor"))?
@@ -280,6 +333,7 @@ fn wss_client(anchor: Option<&[u8]>) -> Result<http::Client, ProtocolError> {
         .map_err(|_| ProtocolError("TLS configuration"))
 }
 
+#[cfg(feature = "impersonate")]
 async fn send_upgrade(
     client: &http::Client,
     url: &str,
@@ -311,10 +365,6 @@ fn preserve_head(request: http::RequestBuilder, names: Vec<String>) -> http::Req
         order.insert(name);
     }
     request.default_headers(false).orig_headers(order)
-}
-#[cfg(not(feature = "impersonate"))]
-fn preserve_head(request: http::RequestBuilder, _names: Vec<String>) -> http::RequestBuilder {
-    request
 }
 
 async fn read_head(stream: &mut Box<dyn Io>) -> Result<(String, Vec<u8>), ProtocolError> {

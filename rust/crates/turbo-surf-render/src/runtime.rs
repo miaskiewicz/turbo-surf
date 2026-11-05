@@ -12059,6 +12059,48 @@ __G.domSig = (() => {
 "##,
     include_str!("web_geometry.js"),
     r##"
+// Web Workers (#104): the dedicated worker's script never executes yet (a separate
+// V8 realm per worker is follow-up work), but a real Chrome `new Worker(url)` under
+// `worker-src 'none'` still CONSTRUCTS the Worker object and dispatches a
+// `securitypolicyviolation` whose `blockedURI` is the worker script URL. The CSP3
+// fallback chain (worker-src -> child-src -> script-src -> default-src) also
+// applies. Wrap the binding's Worker so the check (and its violation) fires on
+// construction while preserving the stub's shape. Must run BEFORE the native-shape
+// sweep below, which otherwise replaces Worker with a factory function that drops
+// its prototype and breaks `new Worker(url)`.
+(() => {
+  "use strict";
+  const BaseWorker = globalThis.Worker;
+  if (typeof BaseWorker !== "function") return;
+  const BaseProto = BaseWorker.prototype;
+  const resolveURL = globalThis.URL;
+  const baseHref = () => { try { return ops.op_document_request_url(); } catch (_e) { return ""; } };
+  const check = (url) => {
+    let resolved = String(url);
+    try { resolved = new resolveURL(resolved, baseHref()).href; } catch (_e) {}
+    try { ops.op_csp_request(__document, resolved, "worker-src", ""); } catch (_e) {}
+  };
+  const WorkerWrapper = function Worker(url) {
+    if (new.target === undefined)
+      throw new TypeError(
+        "Failed to construct 'Worker': Please use the 'new' operator, this DOM object constructor cannot be called as a function.",
+      );
+    if (arguments.length === 0)
+      throw new TypeError(
+        "Failed to construct 'Worker': 1 argument required, but only 0 present.",
+      );
+    check(url);
+    return Reflect.construct(BaseWorker, arguments, new.target);
+  };
+  try { Object.defineProperty(WorkerWrapper, "name", { value: "Worker", configurable: true }); } catch (_e) {}
+  if (BaseProto) {
+    try { Object.defineProperty(WorkerWrapper, "prototype", { value: BaseProto, writable: false, configurable: false }); } catch (_e) {}
+    try { Object.defineProperty(BaseProto, "constructor", { value: WorkerWrapper, writable: true, configurable: true }); } catch (_e) {}
+  }
+  try { Object.setPrototypeOf(WorkerWrapper, Object.getPrototypeOf(BaseWorker)); } catch (_e) {}
+  try { Object.defineProperty(globalThis, "Worker", { value: WorkerWrapper, writable: true, configurable: true }); } catch (_e) {}
+})();
+
 // Web-IDL functions are embedded through V8 FunctionTemplates. Keep the
 // intrinsic Function.prototype.toString intact; guest delegates remain live.
 (() => {
@@ -13288,7 +13330,8 @@ __G.domSig = (() => {
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
       "TextEncoder", "TextDecoder", "Screen", "Window", "Crypto", "SubtleCrypto",
       "IntersectionObserver", "ResizeObserver", "MutationObserver", "PerformanceObserver",
-      "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigationTiming", "EventCounts", "DOMPointReadOnly", "DOMPoint", "DOMMatrixReadOnly", "DOMMatrix", "DOMQuad"];
+      "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigationTiming", "EventCounts", "DOMPointReadOnly", "DOMPoint", "DOMMatrixReadOnly", "DOMMatrix", "DOMQuad",
+      "Worker"];
     const bindProperties = (object, skip = []) => {
       if (!object) return;
       for (const key of Reflect.ownKeys(object)) {

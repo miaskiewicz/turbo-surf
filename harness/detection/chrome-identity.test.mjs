@@ -7,6 +7,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { connect } from "node:tls";
 import {
   ACCEPT_CH,
   batteryRoute,
@@ -32,6 +33,7 @@ import {
   versionOf,
   withCookieSlot,
 } from "./identity-diff.mjs";
+import { startIdentityServers } from "./identity-server.mjs";
 import { H2FrameTap, describeClientHello, fingerprints, summarizeH2 } from "./identity-wire.mjs";
 import {
   applyRelease,
@@ -241,20 +243,21 @@ test("battery routes answer CORS, client-hint and Critical-CH requests", () => {
   assert.deepEqual(request.headers, [["referer", "<A>/t/~/k/a"]]);
 });
 
+// A turbo-surf capture that replays Chrome's requests exactly in both tiers.
+const asNative = (chrome) => ({
+  ...clone(chrome),
+  requests: [
+    ...chrome.requests
+      .filter((r) => NOJS_KINDS.includes(r.kind))
+      .map((r) => ({ ...clone(r), tier: "nojs" })),
+    ...chrome.requests
+      .filter((r) => RENDER_KINDS.includes(r.kind))
+      .map((r) => ({ ...clone(r), tier: "render" })),
+  ],
+});
+
 test("parity diff classifies tells, environment noise, collector artifacts and known gaps", () => {
   const knownGaps = read("chrome-identity-known-gaps.json");
-  // A turbo-surf capture that replays Chrome's requests exactly in both tiers.
-  const asNative = (chrome) => ({
-    ...clone(chrome),
-    requests: [
-      ...chrome.requests
-        .filter((r) => NOJS_KINDS.includes(r.kind))
-        .map((r) => ({ ...clone(r), tier: "nojs" })),
-      ...chrome.requests
-        .filter((r) => RENDER_KINDS.includes(r.kind))
-        .map((r) => ({ ...clone(r), tier: "render" })),
-    ],
-  });
   assert.deepEqual(diffParity(fixture, asNative(fixture), { knownGaps }).deltas, []);
   const native = asNative(fixture);
   const nav = native.requests.find((request) => request.tier === "nojs");
@@ -272,6 +275,74 @@ test("parity diff classifies tells, environment noise, collector artifacts and k
   const again = diffParity(fixture, native, { knownGaps }).deltas;
   assert.equal(again.find((d) => d.path === "features.globals").class, "tell", "unlisted global");
   assert.equal(matches({ match: { header: "/^sec-/" } }, { header: "sec-ch-dpr" }), true);
+});
+
+test("the battery page opens one wss: WebSocket to the W listener (#187)", () => {
+  const origins = { A: "https://127.0.0.1:1", AX: "https://localhost:1", W: "wss://127.0.0.1:2" };
+  const page = batteryRoute({ kind: "nav", tier: "t", headers: [] }, origins).body;
+  assert.match(page, /new WebSocket\("wss:\/\/127\.0\.0\.1:2\/t\/t\/k\/ws"\)/);
+});
+
+test("the W listener captures the wss ClientHello and answers the upgrade off the request log (#187)", async () => {
+  const servers = await startIdentityServers(() => ({ status: 404 }));
+  try {
+    assert.equal(servers.origins.W, `wss://127.0.0.1:${servers.ports.W}`);
+    // RFC 6455 §1.3's sample key and accept value.
+    const head = `GET /t/x/k/ws HTTP/1.1\r\nHost: 127.0.0.1:${servers.ports.W}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`;
+    const reply = await new Promise((done, fail) => {
+      let text = "";
+      const socket = connect(
+        {
+          host: "127.0.0.1",
+          port: servers.ports.W,
+          ALPNProtocols: ["http/1.1"],
+          rejectUnauthorized: false,
+        },
+        () => socket.write(head),
+      );
+      socket.on("data", (chunk) => {
+        text += chunk.toString("latin1");
+      });
+      socket.on("close", () => done(text));
+      socket.on("error", fail);
+    });
+    assert.match(reply, /^HTTP\/1\.1 101 /);
+    assert.match(reply, /\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK\+xOo=\r\n/);
+    assert.ok(reply.endsWith("\r\n\r\n\x88\x00"), "the server closes the session at once");
+    assert.deepEqual(servers.requests, [], "the handshake is not a battery request");
+    const [record] = servers.connectionRecords();
+    assert.equal(record.origin, "W");
+    assert.deepEqual(record.hello.alpn, ["http/1.1"]);
+  } finally {
+    await servers.close();
+  }
+});
+
+test("parity and version diffs compare the battery's wss: ClientHello row (origin W, #187)", () => {
+  const knownGaps = read("chrome-identity-known-gaps.json");
+  const wss = fixture.connections.filter((connection) => connection.origin === "W");
+  assert.equal(wss.length, 1, "the default fixture records one wss connection");
+  assert.deepEqual(wss[0].hello.alpn, ["http/1.1"], "Chrome offers only http/1.1 for wss");
+  assert.equal(wss[0].hello.applicationSettings ?? null, null, "and no ALPS");
+  const alps = asNative(fixture);
+  alps.connections.find((connection) => connection.origin === "W").hello.alpn = ["h2", "http/1.1"];
+  const tell = diffParity(fixture, alps, { knownGaps }).deltas;
+  assert.deepEqual(
+    tell.map(({ area, origin, path, class: kind }) => ({ area, origin, path, kind })),
+    [{ area: "transport", origin: "W", path: "alpn", kind: "tell" }],
+  );
+  const none = asNative(fixture);
+  none.connections = none.connections.filter((connection) => connection.origin !== "W");
+  const missing = diffParity(fixture, none, { knownGaps }).deltas;
+  assert.deepEqual(
+    missing.map(({ type, origin, class: kind }) => ({ type, origin, kind })),
+    [{ type: "connection-missing", origin: "W", kind: "tell" }],
+  );
+  const release = diffVersions(fixture, alps).deltas.filter((delta) => delta.origin === "W");
+  assert.deepEqual(
+    release.map(({ path, action }) => ({ path, action })),
+    [{ path: "alpn", action: "human" }],
+  );
 });
 
 test("every known gap is justified and still matched by the committed parity run", () => {

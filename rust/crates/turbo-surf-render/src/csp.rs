@@ -462,6 +462,7 @@ impl Policy {
             "img-src",
             "frame-src",
             "child-src",
+            "worker-src",
             "form-action",
             "report-uri",
             "report-to",

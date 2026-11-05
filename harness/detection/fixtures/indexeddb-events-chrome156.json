@@ -1,0 +1,176 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-11-05T16:58:19.226Z",
+  "fixtures": {
+    "indexeddb-events-probe.js": "4d8262e3494f218866b17887e055af4f6a7bd83ee4998bb18450fb4381cd8653"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "indexeddb-events-probe.js": {
+      "throws": {
+        "listener": {
+          "log": [
+            "l1",
+            "l2",
+            [
+              "later-error",
+              ["AbortError", "The transaction was aborted, so the request cannot be fulfilled."]
+            ]
+          ],
+          "settled": ["abort", ["AbortError", "Uncaught exception in event handler."]],
+          "reports": [["Uncaught Error: listener", true, true]],
+          "stored": [null, null]
+        },
+        "handleEvent": {
+          "log": [
+            "handleEvent",
+            [
+              "later-error",
+              ["AbortError", "The transaction was aborted, so the request cannot be fulfilled."]
+            ]
+          ],
+          "settled": ["abort", ["AbortError", "Uncaught exception in event handler."]],
+          "reports": [["Uncaught Error: handleEvent", true, true]],
+          "stored": [null, null]
+        },
+        "handler": {
+          "log": [
+            "onsuccess",
+            [
+              "later-error",
+              ["AbortError", "The transaction was aborted, so the request cannot be fulfilled."]
+            ]
+          ],
+          "settled": ["abort", ["AbortError", "Uncaught exception in event handler."]],
+          "reports": [["Uncaught Error: handler", true, true]],
+          "stored": [null, null]
+        },
+        "primitive": {
+          "log": [
+            "primitive",
+            [
+              "later-error",
+              ["AbortError", "The transaction was aborted, so the request cannot be fulfilled."]
+            ]
+          ],
+          "settled": ["abort", ["AbortError", "Uncaught exception in event handler."]],
+          "reports": [["Uncaught 42", true, true]],
+          "stored": [null, null]
+        },
+        "nested": {
+          "log": ["after-nested", "later-success"],
+          "settled": "complete",
+          "reports": [["Uncaught Error: nested", true, true]],
+          "stored": ["v", "later"]
+        },
+        "transactionListener": {
+          "log": [
+            "tx-error",
+            [
+              "later-error",
+              ["AbortError", "The transaction was aborted, so the request cannot be fulfilled."]
+            ],
+            "tx-error"
+          ],
+          "settled": ["abort", ["AbortError", "Uncaught exception in event handler."]],
+          "reports": [
+            ["Uncaught Error: transaction", true, true],
+            ["Uncaught Error: transaction", true, true]
+          ],
+          "stored": [null, null]
+        },
+        "databaseListener": {
+          "log": [
+            "db-error",
+            [
+              "later-error",
+              ["AbortError", "The transaction was aborted, so the request cannot be fulfilled."]
+            ],
+            "db-error"
+          ],
+          "settled": ["abort", ["AbortError", "Uncaught exception in event handler."]],
+          "reports": [
+            ["Uncaught Error: database", true, true],
+            ["Uncaught Error: database", true, true]
+          ],
+          "stored": [null, null]
+        },
+        "preventedThenThrown": {
+          "log": [
+            "prevented",
+            [
+              "later-error",
+              ["AbortError", "The transaction was aborted, so the request cannot be fulfilled."]
+            ]
+          ],
+          "settled": ["abort", ["AbortError", "Uncaught exception in event handler."]],
+          "reports": [["Uncaught Error: prevented", true, true]],
+          "stored": [null, null]
+        },
+        "complete": {
+          "log": ["later-success", "complete"],
+          "settled": "complete",
+          "reports": [["Uncaught Error: complete", true, true]],
+          "stored": ["v", "later"]
+        },
+        "upgradeneeded": {
+          "log": [
+            ["abort", ["AbortError", "Uncaught exception in event handler."]],
+            [
+              "error",
+              [
+                "AbortError",
+                "Version change transaction was aborted in upgradeneeded event handler."
+              ]
+            ],
+            false
+          ],
+          "reports": [["Uncaught Error: upgrade", true, true]]
+        }
+      },
+      "path": {
+        "full": {
+          "log": [
+            ["db", "capture", 1, "db", "req", 0, ["db"]],
+            ["tx", "capture", 1, "tx", "req", 0, ["tx"]],
+            ["req", "bubble", 2, "req", "req", 0, ["req"]],
+            ["req", "capture", 2, "req", "req", 0, ["req"]],
+            ["tx", "bubble", 3, "tx", "req", 0, ["tx"]],
+            ["db", "bubble", 3, "db", "req", 0, ["db"]]
+          ],
+          "settled": "complete",
+          "events": 1
+        },
+        "stopped": {
+          "log": [
+            ["db", "capture", 1, "db", "req", 0, ["db"]],
+            ["tx", "capture", 1, "tx", "req", 0, ["tx"]]
+          ],
+          "settled": ["abort", ["ConstraintError", "Key already exists in the object store."]],
+          "events": 1
+        }
+      },
+      "microtasks": [
+        "s1",
+        ["s1-micro", "ok"],
+        "s2",
+        ["s2-micro", "ok"],
+        "e1",
+        ["e1-micro", "ok"],
+        "e2",
+        ["e2-micro", "ok"],
+        "tx",
+        ["tx-micro", "ok"],
+        "complete"
+      ],
+      "deactivation": [["micro", "ok"], ["timer", "TransactionInactiveError"], "complete"]
+    }
+  }
+}

@@ -365,52 +365,35 @@
   };
 
   // ---- events --------------------------------------------------------------------------------
-  let dispatching = 0,
-    threw = false;
-  realm.addEventListener(
-    "error",
-    () => {
-      if (dispatching) threw = true;
-    },
-    true,
-  );
   const makeEvent = (Ctor, type, init) => {
     const event = new Ctor(type, init);
     ops.op_event_trust(event, -1);
     return event;
   };
   // Fires at `target` and then, if it bubbles, at each parent (request -> transaction ->
-  // database) with a microtask checkpoint after every target. Returns [defaultPrevented, threw].
+  // database) with a microtask checkpoint after every target. Returns [defaultPrevented,
+  // whether a listener threw]: the binding reports each listener's exception and flags it
+  // (turbo-dom#301), not counting listeners of events those listeners dispatch.
   const fire = (target, type, options, parents) => {
     const Ctor = options.Ctor || HostEvent,
       init = { bubbles: !!options.bubbles, cancelable: !!options.cancelable, ...options.init };
     const event = makeEvent(Ctor, type, init);
-    let cancelled = false,
-      exception = false;
-    dispatching++;
-    threw = false;
-    try {
-      ops.op_dispatch_host_event(event, target);
-      checkpoint();
-      cancelled = apply(prevented, event, []);
-      let stopped = apply(cancelBubble, event, []);
-      if (init.bubbles && parents)
-        for (let at = 0; at < parents.length && !stopped; at++) {
-          const hop = makeEvent(Ctor, type, init);
-          if (cancelled) apply(preventDefault, hop, []);
-          for (const name of ["target", "srcElement"])
-            define(hop, name, { __proto__: null, get: () => target, configurable: true });
-          define(hop, "eventPhase", { __proto__: null, get: () => 3, configurable: true });
-          ops.op_dispatch_host_event(hop, parents[at]);
-          checkpoint();
-          cancelled = cancelled || apply(prevented, hop, []);
-          stopped = apply(cancelBubble, hop, []);
-        }
-    } finally {
-      exception = threw;
-      threw = false;
-      dispatching--;
-    }
+    let exception = ops.op_idb_dispatch(event, target);
+    checkpoint();
+    let cancelled = apply(prevented, event, []),
+      stopped = apply(cancelBubble, event, []);
+    if (init.bubbles && parents)
+      for (let at = 0; at < parents.length && !stopped; at++) {
+        const hop = makeEvent(Ctor, type, init);
+        if (cancelled) apply(preventDefault, hop, []);
+        for (const name of ["target", "srcElement"])
+          define(hop, name, { __proto__: null, get: () => target, configurable: true });
+        define(hop, "eventPhase", { __proto__: null, get: () => 3, configurable: true });
+        exception = ops.op_idb_dispatch(hop, parents[at]) || exception;
+        checkpoint();
+        cancelled = cancelled || apply(prevented, hop, []);
+        stopped = apply(cancelBubble, hop, []);
+      }
     return [cancelled, exception];
   };
 

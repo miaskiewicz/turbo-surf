@@ -1015,11 +1015,24 @@ fn op_csp_script<'s>(
     if document_policy.current().has_policy() {
         crate::browser_env::hide_node_nonce(scope, element);
     }
+    let insertion = if crate::browser_env::script_state(scope, element)
+        .is_some_and(|state| state.parser_inserted)
+    {
+        crate::csp::ScriptInsertion::Parser
+    } else {
+        crate::csp::ScriptInsertion::Script
+    };
+    let script = crate::csp::Script {
+        url,
+        text: &text,
+        nonce: &nonce,
+        insertion,
+    };
     if url.is_empty() {
         let policy = document_policy.current().clone();
         let report_only = document_policy.report_only.clone();
         drop(document_policy);
-        let allowed = policy.allows_inline("script-src-elem", &text, &nonce);
+        let allowed = policy.allows_script(&script);
         queue_csp_report(
             scope,
             context,
@@ -1028,7 +1041,7 @@ fn op_csp_script<'s>(
                 kind: "script-src-elem",
                 blocked: "inline",
                 disposition: "enforce",
-                records: policy.inline_violations("script-src-elem", &text, &nonce),
+                records: policy.script_violations(&script),
                 parser: None,
                 sample: Some(&sample),
             },
@@ -1041,7 +1054,7 @@ fn op_csp_script<'s>(
                 kind: "script-src-elem",
                 blocked: "inline",
                 disposition: "report",
-                records: report_only.inline_violations("script-src-elem", &text, &nonce),
+                records: report_only.script_violations(&script),
                 parser: None,
                 sample: Some(&sample),
             },
@@ -1049,8 +1062,9 @@ fn op_csp_script<'s>(
         allowed
     } else {
         let policy = document_policy.current().clone();
+        document_policy.note_element_script(url, insertion);
         drop(document_policy);
-        let allowed = policy.allows_request("script-src-elem", url, &nonce, false);
+        let allowed = policy.allows_script(&script);
         if !allowed {
             let blocked = csp_blocked_url(scope, context, url);
             queue_csp_violations(
@@ -1060,7 +1074,7 @@ fn op_csp_script<'s>(
                 "script-src-elem",
                 &blocked,
                 "enforce",
-                policy.request_violations("script-src-elem", url, &nonce),
+                policy.script_violations(&script),
             );
         }
         allowed
@@ -1071,6 +1085,9 @@ fn csp_blocked_url(
     context: v8::Local<v8::Context>,
     target: &str,
 ) -> String {
+    if let Some(blocked) = crate::csp::network_blocked_uri(target) {
+        return blocked;
+    }
     if let Ok(mut url) = url::Url::parse(target) {
         url.set_fragment(None);
         if window_origin(scope, context) == url.origin().ascii_serialization() {
@@ -1129,7 +1146,11 @@ fn csp_request_for_context<'s>(
         "enforce",
         policy.request_violations(kind, target, nonce),
     );
-    let report_only = handle.policy.borrow().report_only.clone();
+    let (report_only, insertion) = {
+        let mut document_policy = handle.policy.borrow_mut();
+        let insertion = document_policy.take_element_script(kind, target);
+        (document_policy.report_only.clone(), insertion)
+    };
     queue_csp_violations(
         scope,
         context,
@@ -1137,11 +1158,11 @@ fn csp_request_for_context<'s>(
         kind,
         &blocked,
         "report",
-        report_only.request_violations(kind, target, nonce),
+        report_only.request_violations_for(kind, target, nonce, insertion),
     );
-    if allowed {
-        // Chrome dispatches pre/post-request report-only events, but uploads the
-        // identical violation once. Duplicate URI tokens still upload separately.
+    if allowed && kind == "connect-src" {
+        // Chrome dispatches pre/post-request report-only events for a fetch, but uploads
+        // the identical violation once. Duplicate URI tokens still upload separately.
         let records = report_only
             .request_violations(kind, target, nonce)
             .into_iter()
@@ -7303,6 +7324,7 @@ deno_core::extension!(
         op_storage_area,
         op_idb_registry,
         op_idb_checkpoint,
+        crate::indexed_db::op_idb_dispatch,
         op_storage_factory,
         op_storage_object,
         op_storage_access_factory,
@@ -12504,39 +12526,10 @@ __G.domSig = (() => {
               return { alpha: true, colorSpace: "srgb", colorType: "unorm8", desynchronized: false, toneMapping: { mode: "standard" }, willReadFrequently: false };
             } }).getContextAttributes, "getContextAttributes", 0);
           }
-          // measureText: the binding's width was a synthetic approximation (a font-metrics tell —
-          // font-detection fingerprints compare measureText width across families). Route the WIDTH
-          // through the host's real system-font measurer (op_measure_text), which measures the same
-          // CoreText face Chrome does → width matches Chrome exactly. The bounding-box fields are
-          // derived from the size with Arial-typical ratios (the measurer returns width+height only;
-          // real per-glyph boxes would need a richer measurer — width is the load-bearing metric).
-          const measureOp = ops && ops.op_measure_text;
-          if (typeof ctx.measureText === "function" && measureOp) {
-            const origMT = ctx.measureText;
-            ctx.measureText = nativize(({ measureText(text) {
-              try {
-                const font = String(this.font || "10px sans-serif");
-                const m = /(\d+(?:\.\d+)?)px\s+(.+)$/.exec(font);
-                const size = m ? parseFloat(m[1]) : 10;
-                const fam = m ? m[2].replace(/^['"]|['"]$/g, "").split(",")[0].trim() : "sans-serif";
-                const r = JSON.parse(measureOp(String(text == null ? "" : text), fam, size));
-                if (r && r.length === 2) {
-                  const w = r[0];
-                  const round2 = (n) => Math.round(n * 100) / 100;
-                  const asc = round2(size * 0.875), desc = round2(size * 0.212);
-                  return {
-                    width: w,
-                    actualBoundingBoxLeft: 0, actualBoundingBoxRight: w,
-                    actualBoundingBoxAscent: round2(size * 0.72), actualBoundingBoxDescent: round2(size * 0.16),
-                    fontBoundingBoxAscent: asc, fontBoundingBoxDescent: desc,
-                    emHeightAscent: asc, emHeightDescent: desc,
-                    hangingBaseline: round2(asc * 0.8), alphabeticBaseline: 0, ideographicBaseline: -desc,
-                  };
-                }
-              } catch (e) {}
-              return origMT.call(this, text);
-            } }).measureText, "measureText", 1);
-          }
+          // measureText stays the binding's (turbo-surf#133): a branded TextMetrics from the glyph
+          // outlines and font metrics of the faces `set_canvas_fonts` registers (the system faces
+          // live layout uses plus the document's @font-face faces). The host measurer knows
+          // system faces only and widths alone, so routing through it was a metrics tell.
         }
         if (k === "2d" && Object.prototype.hasOwnProperty.call(ctx, "getImageData")) {
           const origGID = ctx.getImageData;

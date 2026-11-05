@@ -51,6 +51,9 @@ fn current_color_button_borders_paint_black_like_chrome156() {
         .filter(|&&(x, y)| pixel(x, y) != [0, 0, 0])
         .map(|&(x, y)| format!("({x},{y}) = {:?}", pixel(x, y)))
         .collect();
-    assert!(wrong.is_empty(), "not Chrome's currentcolor border: {wrong:?}");
+    assert!(
+        wrong.is_empty(),
+        "not Chrome's currentcolor border: {wrong:?}"
+    );
     assert_eq!(pixel(20, 20), [239, 239, 239]);
 }

@@ -10,6 +10,20 @@ Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7
   transition cost, #305 Chrome computed defaults, #306 real html/head/body in child
   documents, #308 rule buckets).
 
+- **Fixed (UA-CH, #164)**: `navigator.userAgentData` is a real `NavigatorUAData` instance
+  (zero own properties; brand-checked `brands`/`mobile`/`platform` getters; native
+  `getHighEntropyValues` and `toJSON`), so `JSON.stringify(navigator.userAgentData)` matches
+  Chrome 156. The `user-agent-data-interface` known-gap rule is gone.
+- **Fixed (web fonts, #166)**: used `@font-face` faces start loading once the document's
+  other load resources are in, and their loads delay the load event, as in Chrome 156. Before
+  this, a page that never read layout never fetched them. A frame's layout now reports its
+  used families to the frame's own realm (before, its faces never started), and font requests
+  carry `Origin` even same-origin. The identity battery records the font request, and the
+  `web-font-loading` known-gap rule is gone.
+- **Fixed (XHR, #165)**: `XMLHttpRequest#setAttributionReporting` and `#setPrivateToken`
+  exist with Chrome 156's validation (arity, receiver, `PrivateToken` conversion, OPENED
+  state, issuer checks). Neither starts a Privacy Sandbox operation. The remaining #165
+  members are turbo-dom's (turbo-dom#323).
 - **Fixed (Observable, #116)**: `HTMLElement#click()` runs as its own binding frame, so a
   failure inside a `when("click")` listener reads `Failed to execute 'click' on
   'HTMLElement'` as in Chrome; the `web_apis` known gap is gone.

@@ -1,0 +1,17 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "probeSha256": "b919fec385ddef02781a7da773ba061964d5c65c6b0a886195e7156f1ee8a16e",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": "{\"script\":[\"load\",[[\"classic\",true]]],\"scriptPlainMime\":[\"load\",[\"plain\"]],\"scriptUntyped\":[\"load\",[\"untyped\"]],\"scriptImageMime\":[\"load\",[\"image\"]],\"scriptCrossorigin\":[\"load\",[\"cors\"]],\"scriptRevoked\":[\"error\",[]],\"scriptRevokedAfterSrc\":[\"error\",[]],\"scriptRevokedAfterInsert\":[\"load\",[\"after insert\"]],\"scriptFragment\":[\"load\",[\"fragment\"]],\"scriptForeign\":[\"error\",[]],\"scriptErrorDetail\":[[\"Uncaught Error: from blob\",2,9]],\"module\":[\"load\",[[\"module\",\"dependency\",true]]],\"moduleDynamic\":\"dependency\",\"modulePlainMime\":[\"error\",[]],\"style\":[\"load\",1,\"rgb(1, 2, 3)\"],\"stylePlainMime\":[\"load\",0,\"rgb(0, 0, 0)\"],\"styleRevoked\":[\"error\",\"SecurityError\",\"rgb(0, 0, 0)\"],\"styleImport\":[\"load\",1,\"rgb(10, 11, 12)\"],\"image\":[\"load\",3,2],\"imageUntyped\":[\"load\",3,2],\"imageGarbage\":[\"error\",0,0],\"imageRevoked\":[\"error\",0,0],\"iframe\":[\"load\",[true,true,\"text/html\",\"framed\",\"blob frame\"]],\"iframeText\":[\"load\",[true,true,\"text/plain\",\"plain <b>text</b>\",\"\"]],\"iframeRevoked\":[\"load\",[\"SecurityError\"]],\"cspSelf\":[\"error\",[],\"error\",[[\"img-src\",\"blob\"],[\"script-src-elem\",\"blob\"]]],\"cspBlob\":[\"load\",[\"csp script\"],\"load\",[]],\"cspStar\":[\"error\",[],\"error\",[[\"img-src\",\"blob\"],[\"script-src-elem\",\"blob\"]]]}"
+}

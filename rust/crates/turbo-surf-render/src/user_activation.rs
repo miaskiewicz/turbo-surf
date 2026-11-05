@@ -183,6 +183,7 @@ fn activation_host(
     };
     match query {
         Query::Transient => host_user_activation(context),
+        Query::Sticky => has_been_active(context),
         Query::HistoryAction => history_action(context),
         Query::ConsumeTransient => {
             consume(scope, context, false);

@@ -29,43 +29,47 @@ const cases = [
 const requests = [],
   errors = [];
 const profile = mkdtempSync(join(tmpdir(), "turbo-activation-oracle-"));
+const secondaryOrigin = () => `http://127.0.0.1:${secondary.address().port}`;
+const activationParams = (requestUrl) => ({
+  activation: {
+    isActive: requestUrl.searchParams.get("active") === "true",
+    hasBeenActive: requestUrl.searchParams.get("sticky") === "true",
+  },
+});
+const recordRequest = (request, requestUrl, phase, name) =>
+  requests.push({
+    name,
+    phase,
+    origin: request.socket.localPort === server.address().port ? "primary" : "secondary",
+    method: request.method,
+    secFetchUser: request.headers["sec-fetch-user"] || null,
+    ...(phase === "next" ? activationParams(requestUrl) : {}),
+  });
+const REDIRECT_PHASES = new Set(["submit", "next", "retry"]);
+const redirectLocation = (phase, name) =>
+  `${name === "trusted-cross-origin-redirect" && phase === "submit" ? secondaryOrigin() : ""}/${phase !== "retry" ? "destination" : "final"}/${name}`;
+const retries = (name) =>
+  name === "automatic-retry" || name.includes("-location") || name.includes("cross-origin");
+const PAGES = {
+  start: (name) =>
+    `<!doctype html><form id=f action="${name === "trusted-cross-origin-form" ? secondaryOrigin() : ""}/submit/${name}"><input id=q name=q><button id=b>Go</button></form>`,
+  destination: (name) =>
+    `<!doctype html><form id=f action="/newdoc/${name}"><button>Go</button></form>${retries(name) ? `<script>location.replace('/retry/${name}')</script>` : ""}`,
+};
+const pageBody = (phase, name) =>
+  Object.hasOwn(PAGES, phase) ? PAGES[phase](name) : "<!doctype html><body>done</body>";
 const handler = (request, response) => {
   const requestUrl = new URL(request.url, "http://localhost");
   const [phase, name] = requestUrl.pathname.split("/").slice(1);
   response.setHeader("Cache-Control", "no-store");
-  if (cases.includes(name))
-    requests.push({
-      name,
-      phase,
-      origin: request.socket.localPort === server.address().port ? "primary" : "secondary",
-      method: request.method,
-      secFetchUser: request.headers["sec-fetch-user"] || null,
-      ...(phase === "next"
-        ? {
-            activation: {
-              isActive: requestUrl.searchParams.get("active") === "true",
-              hasBeenActive: requestUrl.searchParams.get("sticky") === "true",
-            },
-          }
-        : {}),
-    });
-  if (phase === "submit" || phase === "next" || phase === "retry") {
-    response.writeHead(302, {
-      Location: `${name === "trusted-cross-origin-redirect" && phase === "submit" ? `http://127.0.0.1:${secondary.address().port}` : ""}/${phase !== "retry" ? "destination" : "final"}/${name}`,
-    });
+  if (cases.includes(name)) recordRequest(request, requestUrl, phase, name);
+  if (REDIRECT_PHASES.has(phase)) {
+    response.writeHead(302, { Location: redirectLocation(phase, name) });
     response.end();
     return;
   }
   response.setHeader("Content-Type", "text/html");
-  if (phase === "start") {
-    response.end(
-      `<!doctype html><form id=f action="${name === "trusted-cross-origin-form" ? `http://127.0.0.1:${secondary.address().port}` : ""}/submit/${name}"><input id=q name=q><button id=b>Go</button></form>`,
-    );
-  } else if (phase === "destination") {
-    response.end(
-      `<!doctype html><form id=f action="/newdoc/${name}"><button>Go</button></form>${name === "automatic-retry" || name.includes("-location") || name.includes("cross-origin") ? `<script>location.replace('/retry/${name}')</script>` : ""}`,
-    );
-  } else response.end("<!doctype html><body>done</body>");
+  response.end(pageBody(phase, name));
 };
 const server = createServer(handler);
 const secondary = createServer(handler);

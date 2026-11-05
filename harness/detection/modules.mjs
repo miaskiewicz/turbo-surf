@@ -45,124 +45,138 @@ Object.assign(
     ]),
   ),
 );
+// Each check is [label, broken(value)]; checks run in order so the error list keeps its order.
+const failedChecks = (checks, value) =>
+  checks.filter(([, broken]) => broken(value)).map(([label]) => label);
+const FRAME_CHECKS = [
+  [
+    "native child realm",
+    (frame) =>
+      frame.title !== "module child" ||
+      frame.result?.owned !== "child" ||
+      frame.inline?.owned !== "child" ||
+      !frame.ownArray,
+  ],
+  ["independent module graph cache", (frame) => frame.depRuns !== 1 || frame.entryRuns !== 1],
+  [
+    "module source and currentScript",
+    (frame) =>
+      !frame.result?.current ||
+      !frame.inline?.current ||
+      frame.result.url !== "/modules/frame-entry.mjs" ||
+      frame.inline.url !== "/modules/frame-child.html",
+  ],
+  [
+    "frame module lifecycle",
+    (frame) => JSON.stringify(frame.events) !== JSON.stringify(["module", "dcl", "load"]),
+  ],
+];
 export function frameModuleErrors(value) {
   const errors = [];
   if (value?.parent !== "parent" || !value?.unpolluted || value?.frames?.length !== 2)
     errors.push("parent realm isolation");
-  for (const frame of value?.frames || []) {
-    if (
-      frame.title !== "module child" ||
-      frame.result?.owned !== "child" ||
-      frame.inline?.owned !== "child" ||
-      !frame.ownArray
-    )
-      errors.push("native child realm");
-    if (frame.depRuns !== 1 || frame.entryRuns !== 1) errors.push("independent module graph cache");
-    if (
-      !frame.result?.current ||
-      !frame.inline?.current ||
-      frame.result.url !== "/modules/frame-entry.mjs" ||
-      frame.inline.url !== "/modules/frame-child.html"
-    )
-      errors.push("module source and currentScript");
-    if (JSON.stringify(frame.events) !== JSON.stringify(["module", "dcl", "load"]))
-      errors.push("frame module lifecycle");
-  }
+  for (const frame of value?.frames || []) errors.push(...failedChecks(FRAME_CHECKS, frame));
   return errors;
 }
-export function moduleErrors(value) {
-  const errors = [];
-  if (!value?.dcl?.deferred || value.dcl.async || !value.dcl.currentScript)
-    errors.push("DOMContentLoaded module ordering");
-  for (const [id, type] of [
+// A script element completed exactly once with a trusted `type` event seen as currentScript.
+const completionBroken = (events, type) =>
+  events?.length !== 1 ||
+  events[0].type !== type ||
+  !events[0].trusted ||
+  !events[0].target ||
+  !events[0].currentScript;
+const lifecycleOrderBroken = (log) =>
+  log.indexOf("classic:loading") > log.indexOf("deferred:eval") ||
+  log.indexOf("deferred:eval") > log.indexOf("dcl") ||
+  log.indexOf("async:eval") < log.indexOf("dcl") ||
+  log.indexOf("async:eval") > log.indexOf("window:load");
+const MODULE_CHECKS = [
+  [
+    "DOMContentLoaded module ordering",
+    (value) => !value?.dcl?.deferred || value.dcl.async || !value.dcl.currentScript,
+  ],
+  ...[
     ["deferred", "load"],
     ["async", "load"],
     ["missing", "error"],
     ["mime", "error"],
-  ]) {
-    const events = value?.scriptEvents?.[id];
-    if (
-      events?.length !== 1 ||
-      events[0].type !== type ||
-      !events[0].trusted ||
-      !events[0].target ||
-      !events[0].currentScript
-    )
-      errors.push(id + " module completion");
-  }
-  if (value?.scriptEvents?.inline || value?.scriptEvents?.inline2)
-    errors.push("inline module load event");
-  if (
-    value?.inlineSources?.length !== 2 ||
-    value.inlineSources.some(
-      (source) => !source.url || !source.stack || source.local !== "independent",
-    )
-  )
-    errors.push("inline module source identity");
-  if (
-    value?.inline !== true ||
-    value?.deferred?.currentScript !== true ||
-    value.deferred.source.currentScript !== true ||
-    value?.async?.currentScript !== true
-  )
-    errors.push("module currentScript");
-  if (
-    value?.deferred?.source?.url != "/dep.mjs" ||
-    value.deferred.entry != "/entry.mjs" ||
-    !value.deferred.source.stack ||
-    value.deferred.value !== "linked"
-  )
-    errors.push("module graph/source");
-  const log = value?.events || [];
-  if (
-    log.indexOf("classic:loading") > log.indexOf("deferred:eval") ||
-    log.indexOf("deferred:eval") > log.indexOf("dcl") ||
-    log.indexOf("async:eval") < log.indexOf("dcl") ||
-    log.indexOf("async:eval") > log.indexOf("window:load")
-  )
-    errors.push("module lifecycle ordering");
-  return errors;
+  ].map(([id, type]) => [
+    id + " module completion",
+    (value) => completionBroken(value?.scriptEvents?.[id], type),
+  ]),
+  [
+    "inline module load event",
+    (value) => value?.scriptEvents?.inline || value?.scriptEvents?.inline2,
+  ],
+  [
+    "inline module source identity",
+    (value) =>
+      value?.inlineSources?.length !== 2 ||
+      value.inlineSources.some(
+        (source) => !source.url || !source.stack || source.local !== "independent",
+      ),
+  ],
+  [
+    "module currentScript",
+    (value) =>
+      value?.inline !== true ||
+      value?.deferred?.currentScript !== true ||
+      value.deferred.source.currentScript !== true ||
+      value?.async?.currentScript !== true,
+  ],
+  [
+    "module graph/source",
+    (value) =>
+      value?.deferred?.source?.url != "/dep.mjs" ||
+      value.deferred.entry != "/entry.mjs" ||
+      !value.deferred.source.stack ||
+      value.deferred.value !== "linked",
+  ],
+  ["module lifecycle ordering", (value) => lifecycleOrderBroken(value?.events || [])],
+];
+export function moduleErrors(value) {
+  return failedChecks(MODULE_CHECKS, value);
 }
-export function evaluationErrors(value) {
-  const errors = [];
-  if (!value?.dcl?.started || value.dcl.done || !value?.load?.started || value.load.done)
-    errors.push("top-level await blocks document lifecycle");
-  if (
-    !value?.tla?.currentScript ||
-    value.tla.readyState !== "complete" ||
-    value.tla.url !== "/tla.mjs"
-  )
-    errors.push("top-level await source/currentScript");
-  if (value?.repeat !== 1) errors.push("module graph cache");
-  for (const id of ["tla", "runtime", "parse", "repeat1", "repeat2"]) {
-    const events = value?.scriptEvents?.[id];
-    if (
-      events?.length !== 1 ||
-      events[0].type !== "load" ||
-      !events[0].trusted ||
-      !events[0].target ||
-      !events[0].currentScript
-    )
-      errors.push(id + " module evaluation completion");
-  }
-  for (const [name, filename] of [
+const windowErrorBroken = (event, filename) =>
+  !event ||
+  event.filename !== filename ||
+  !event.trusted ||
+  !event.target ||
+  !event.currentScript ||
+  !event.line ||
+  event.brand !== "[object ErrorEvent]";
+const EVALUATION_CHECKS = [
+  [
+    "top-level await blocks document lifecycle",
+    (value) => !value?.dcl?.started || value.dcl.done || !value?.load?.started || value.load.done,
+  ],
+  [
+    "top-level await source/currentScript",
+    (value) =>
+      !value?.tla?.currentScript ||
+      value.tla.readyState !== "complete" ||
+      value.tla.url !== "/tla.mjs",
+  ],
+  ["module graph cache", (value) => value?.repeat !== 1],
+  ...["tla", "runtime", "parse", "repeat1", "repeat2"].map((id) => [
+    id + " module evaluation completion",
+    (value) => completionBroken(value?.scriptEvents?.[id], "load"),
+  ]),
+  ...[
     ["RangeError", "/runtime-error.mjs"],
     ["SyntaxError", "/parse-error.mjs"],
-  ]) {
-    const event = value?.errors?.find((x) => x.name === name);
-    if (
-      !event ||
-      event.filename !== filename ||
-      !event.trusted ||
-      !event.target ||
-      !event.currentScript ||
-      !event.line ||
-      event.brand !== "[object ErrorEvent]"
-    )
-      errors.push(name + " module Window error");
-  }
-  if (value?.errors?.length !== 2) errors.push("module error delivery count");
-  return errors;
+  ].map(([name, filename]) => [
+    name + " module Window error",
+    (value) =>
+      windowErrorBroken(
+        value?.errors?.find((x) => x.name === name),
+        filename,
+      ),
+  ]),
+  ["module error delivery count", (value) => value?.errors?.length !== 2],
+];
+export function evaluationErrors(value) {
+  return failedChecks(EVALUATION_CHECKS, value);
 }
 const run = (command, args, out) =>
   new Promise((done, fail) => {
@@ -184,6 +198,12 @@ const run = (command, args, out) =>
       code === 0 ? done() : fail(Error(stderr || String(code)));
     });
   });
+const fixtureHtml = (evaluation, frames) =>
+  frames
+    ? readFileSync(join(here, "fixtures/frame-modules.html"))
+    : evaluation
+      ? readFileSync(join(here, "fixtures/modules-evaluation.html"))
+      : fixture;
 export async function captureModules({
   binary,
   out,
@@ -191,11 +211,7 @@ export async function captureModules({
   evaluation = false,
   frames = false,
 }) {
-  const html = frames
-    ? readFileSync(join(here, "fixtures/frame-modules.html"))
-    : evaluation
-      ? readFileSync(join(here, "fixtures/modules-evaluation.html"))
-      : fixture;
+  const html = fixtureHtml(evaluation, frames);
   if (existsSync(join(out, "comparison.json"))) throw Error("Use a fresh output directory");
   mkdirSync(out, { recursive: true, mode: 0o700 });
   let build = null,

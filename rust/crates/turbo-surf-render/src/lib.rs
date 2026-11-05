@@ -71,6 +71,7 @@ pub use runtime::{
     HydrationPhase, HydrationProgress, NavigationActivationSnapshot, PageSession,
     PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
+pub use web_fonts::{font_face_sources, web_font_face, WebFontSource};
 
 /// Actual native engine version, independently of navigator's browser identity.
 pub fn v8_version() -> &'static str {

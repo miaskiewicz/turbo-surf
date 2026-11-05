@@ -122,30 +122,36 @@ export const captureSummary = (trace) => ({
     [...(trace.pages || [])].reverse().find((page) => page.inputState)?.inputState || null,
   dismissal: trace.dismissal || null,
 });
+// A snapshot without the field predates it; one that carries it must report the root present.
+const documentRootPresent = (value) =>
+  !Object.hasOwn(value || {}, "documentElementPresent") || value.documentElementPresent === true;
+const observationTimingValid = (window) =>
+  window.policy === "fixed-deadline-before-enter" &&
+  Number.isInteger(window.requestedMs) &&
+  window.requestedMs >= 0 &&
+  window.requestedMs <= 60000 &&
+  Number.isFinite(window.overrunMs) &&
+  window.overrunMs >= 0 &&
+  Number.isFinite(window.elapsedMs) &&
+  window.elapsedMs >= window.requestedMs;
+const observationNavigationSettled = (window) =>
+  ["navigationFailed", "navigationWaitTimedOut", "navigationHopLimit"].every(
+    (key) => !Object.hasOwn(window, key) || window[key] === false,
+  ) &&
+  (window.pendingNavigation == null || window.pendingNavigation === false);
+const observationComplete = (trace, window) =>
+  collectorComplete(trace) &&
+  window.completed === true &&
+  documentRootPresent(window) &&
+  documentRootPresent(trace.pages?.at(-1)) &&
+  observationTimingValid(window) &&
+  observationNavigationSettled(window);
 export const observationSummary = (trace) => {
   const window = trace.observation;
   if (!window || typeof window !== "object") return { evidence: "unmeasured", complete: null };
   return {
     evidence: "measured",
-    complete:
-      collectorComplete(trace) &&
-      window.completed === true &&
-      (!Object.hasOwn(window, "documentElementPresent") ||
-        window.documentElementPresent === true) &&
-      (!Object.hasOwn(trace.pages?.at(-1) || {}, "documentElementPresent") ||
-        trace.pages.at(-1).documentElementPresent === true) &&
-      window.policy === "fixed-deadline-before-enter" &&
-      Number.isInteger(window.requestedMs) &&
-      window.requestedMs >= 0 &&
-      window.requestedMs <= 60000 &&
-      Number.isFinite(window.overrunMs) &&
-      window.overrunMs >= 0 &&
-      Number.isFinite(window.elapsedMs) &&
-      window.elapsedMs >= window.requestedMs &&
-      ["navigationFailed", "navigationWaitTimedOut", "navigationHopLimit"].every(
-        (key) => !Object.hasOwn(window, key) || window[key] === false,
-      ) &&
-      (window.pendingNavigation == null || window.pendingNavigation === false),
+    complete: observationComplete(trace, window),
     policy: window.policy,
     triggerStepIndex: window.triggerStepIndex,
     requestedMs: window.requestedMs,
@@ -203,27 +209,33 @@ const parsedUrl = (value) => {
     return null;
   }
 };
+const ORGANIC_RESULT_SELECTOR = "#rso a h3, #search a h3";
+const fixedObservationComplete = (trace) =>
+  trace.observation == null && trace.config?.observationMs == null
+    ? true
+    : observationSummary(trace).complete === true;
+const searchChecks = (trace, page, url, start) => ({
+  collectorComplete: collectorComplete(trace),
+  fixedObservationComplete: fixedObservationComplete(trace),
+  terminalSnapshot: page?.phase === "search",
+  documentRootPresent: documentRootPresent(page),
+  configuredOrigin: !!url && !!start && url.origin === start.origin,
+  searchDocument: url?.pathname === "/search",
+  documentStatus200: page?.status === 200,
+  documentReady: page?.readyState === "complete",
+  organicResultSelector:
+    (trace.config?.successSelector || ORGANIC_RESULT_SELECTOR) === ORGANIC_RESULT_SELECTOR,
+  positiveResultMarkers: Number.isInteger(page?.results) && page.results > 0,
+});
+const searchClassification = (accepted, challenge, measured) => {
+  if (accepted) return "serp";
+  if (challenge) return "challenge";
+  return measured ? "not-accepted" : "unmeasured";
+};
 export const chromeSearchOutcome = (trace) => {
   const page = trace.pages?.at(-1);
   const url = parsedUrl(page?.url);
-  const start = parsedUrl(trace.config?.url);
-  const checks = {
-    collectorComplete: collectorComplete(trace),
-    fixedObservationComplete:
-      trace.observation == null && trace.config?.observationMs == null
-        ? true
-        : observationSummary(trace).complete === true,
-    terminalSnapshot: page?.phase === "search",
-    documentRootPresent:
-      !Object.hasOwn(page || {}, "documentElementPresent") || page.documentElementPresent === true,
-    configuredOrigin: !!url && !!start && url.origin === start.origin,
-    searchDocument: url?.pathname === "/search",
-    documentStatus200: page?.status === 200,
-    documentReady: page?.readyState === "complete",
-    organicResultSelector:
-      (trace.config?.successSelector || "#rso a h3, #search a h3") === "#rso a h3, #search a h3",
-    positiveResultMarkers: Number.isInteger(page?.results) && page.results > 0,
-  };
+  const checks = searchChecks(trace, page, url, parsedUrl(trace.config?.url));
   const accepted = Object.values(checks).every(Boolean);
   const challenge = page?.status === 429 || ["/sorry", "/sorry/index"].includes(url?.pathname);
   const measured =
@@ -232,32 +244,37 @@ export const chromeSearchOutcome = (trace) => {
     typeof page?.readyState === "string";
   return {
     accepted,
-    classification: accepted
-      ? "serp"
-      : challenge
-        ? "challenge"
-        : measured
-          ? "not-accepted"
-          : "unmeasured",
+    classification: searchClassification(accepted, challenge, measured),
     evidence: measured ? "measured" : "unmeasured",
     scope:
       "Final captured same-origin /search document, HTTP 200, complete DOM and organic h3 markers; content relevance is not assessed.",
     checks,
   };
 };
+const requestsByEndpoint = (rows) => {
+  const result = new Map();
+  for (const row of rows) {
+    const key = endpoint(row);
+    const entry = result.get(key) || [];
+    entry.push(requestSummary(row));
+    result.set(key, entry);
+  }
+  return result;
+};
+const nestedPages = (trace, field) => (trace.pages || []).flatMap((page) => page[field] || []);
+const configuredPlansMatch = (chrome, native) =>
+  Array.isArray(chrome.config?.steps) && Array.isArray(native.config?.steps)
+    ? JSON.stringify(chrome.config.steps) === JSON.stringify(native.config.steps)
+    : null;
+const configuredPoliciesMatch = (chrome, native) =>
+  chrome.observation && native.observation
+    ? chrome.observation.policy === native.observation.policy &&
+      chrome.observation.triggerStepIndex === native.observation.triggerStepIndex &&
+      chrome.observation.requestedMs === native.observation.requestedMs
+    : null;
 export const compare = (chrome, native, cRequests = [], nRequests = []) => {
-  const counts = (rows) => {
-    const result = new Map();
-    for (const row of rows) {
-      const key = endpoint(row);
-      const entry = result.get(key) || [];
-      entry.push(requestSummary(row));
-      result.set(key, entry);
-    }
-    return result;
-  };
-  const c = counts(cRequests),
-    n = counts(nRequests);
+  const c = requestsByEndpoint(cRequests),
+    n = requestsByEndpoint(nRequests);
   return {
     network: [...new Set([...c.keys(), ...n.keys()])].sort().map((key) => ({
       endpoint: key,
@@ -268,33 +285,22 @@ export const compare = (chrome, native, cRequests = [], nRequests = []) => {
     })),
     interfaces: interfaceDiff(chrome.pages, native.pages),
     childInterfaces: interfaceDiff(
-      (chrome.pages || []).flatMap((page) => page.childFrames || []),
-      (native.pages || []).flatMap((page) => page.childFrames || []),
+      nestedPages(chrome, "childFrames"),
+      nestedPages(native, "childFrames"),
     ),
-    workerInterfaces: interfaceDiff(
-      (chrome.pages || []).flatMap((page) => page.workers || []),
-      (native.pages || []).flatMap((page) => page.workers || []),
-    ),
+    workerInterfaces: interfaceDiff(nestedPages(chrome, "workers"), nestedPages(native, "workers")),
     runtimeInterfaces: interfaceDiff(chrome.pages, native.pages, "runtime"),
     features: native.features,
     capture: { chrome: captureSummary(chrome), native: captureSummary(native) },
     interaction: {
-      configuredPlansMatch:
-        Array.isArray(chrome.config?.steps) && Array.isArray(native.config?.steps)
-          ? JSON.stringify(chrome.config.steps) === JSON.stringify(native.config.steps)
-          : null,
+      configuredPlansMatch: configuredPlansMatch(chrome, native),
       chrome: interactionSummary(chrome),
       native: interactionSummary(native),
     },
     observation: {
       chrome: observationSummary(chrome),
       native: observationSummary(native),
-      configuredPoliciesMatch:
-        chrome.observation && native.observation
-          ? chrome.observation.policy === native.observation.policy &&
-            chrome.observation.triggerStepIndex === native.observation.triggerStepIndex &&
-            chrome.observation.requestedMs === native.observation.requestedMs
-          : null,
+      configuredPoliciesMatch: configuredPoliciesMatch(chrome, native),
     },
     chromeSearchOutcome: chromeSearchOutcome(chrome),
     probes: { chrome: chrome.probes, native: native.probes },

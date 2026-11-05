@@ -1,0 +1,82 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "viewport": [800, 600],
+  "casesSha256": "36c411afcb98eb9f9945de94cab04d0f0f41ebe31fdd589594c3b0fdf955a3e5",
+  "collectorSha256": "b32f759f544bd0b5076977b09cd63b8fe230b83e494e84b4e3d0dc74313e04f1",
+  "errors": [],
+  "result": [
+    {
+      "id": "line-box-dpr1",
+      "result": [18, 18, "18px", 1]
+    },
+    {
+      "id": "line-box-dpr2",
+      "result": [18.5, 18.5, "18.5px", 2]
+    },
+    {
+      "id": "used-size",
+      "result": {
+        "block": ["784px", "0px"],
+        "fixed": ["200px", "40px"],
+        "padded": ["200px", "40px"],
+        "borderBox": ["200px", "40px"],
+        "percent": ["261.297px", "10px"],
+        "clamped": ["100px", "30px"],
+        "flexFixed": ["40px", "10px"],
+        "flexGrow": ["260px", "10px"],
+        "canvas": ["300px", "150px"],
+        "transforms": [
+          "matrix(1, 0, 0, 1, 20, 40)",
+          "matrix(1, 0, 0, 1, 24, 0)",
+          "matrix(1, 0, 0, 1, 100, 5)"
+        ]
+      }
+    },
+    {
+      "id": "svg-viewbox-only",
+      "result": {
+        "i": [true, 400, 133, 399.984375, 133.328125],
+        "h": [true, 150, 50, 150, 50]
+      }
+    },
+    {
+      "id": "css-wide-and-button",
+      "result": [
+        "rgba(0, 0, 0, 0)",
+        "rgb(255, 0, 0)",
+        "rgb(255, 0, 0)",
+        "rgb(239, 239, 239)",
+        "rgb(239, 239, 239)"
+      ]
+    },
+    {
+      "id": "border-spacing-hit",
+      "result": ["t", "t", "t", "c1"]
+    },
+    {
+      "id": "css-supports",
+      "result": [
+        ["anchor-name: --a", true, true, true],
+        ["position-try-fallbacks: flip-block", true, true, true],
+        ["interpolate-size: allow-keywords", true, true, true],
+        ["field-sizing: content", true, true, true],
+        ["text-box: trim-both cap alphabetic", true, true, true],
+        ["reading-flow: flex-visual", true, true, true],
+        ["corner-shape: squircle", true, true, true],
+        ["dynamic-range-limit: standard", true, true, true],
+        ["order: sibling-index()", true, true, true],
+        ["color: if(style(--x: 1): red; else: blue)", true, true, true],
+        ["clip-path: shape(from 0 0, line to 10px 10px)", true, true, true],
+        ["scroll-marker-group: after", true, true, true],
+        ["text-wrap: pretty", true, true, true],
+        ["color: contrast-color(red)", true, true, true],
+        ["anchor-scope: all", true, true, true],
+        ["overlay: auto", true, true, true],
+        ["timeline-scope: --t", true, true, true],
+        ["content-visibility: auto", true, true, true],
+        ["colour: red", false, false, false],
+        ["color: bogus", false, false, false]
+      ]
+    }
+  ]
+}

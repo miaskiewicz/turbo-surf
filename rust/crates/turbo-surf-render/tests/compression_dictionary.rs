@@ -171,6 +171,113 @@ fn dictionary_lifecycle_order_keeps_barriers_counts_and_states() {
     }
 }
 
+async fn open_case_page(source: &str, hints: &ClientHints) -> PageSession {
+    let response = net::fetch_html(
+        source,
+        FetchOptions {
+            client_hints: Some(hints),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut jar = CookieJar::new();
+    let response_cookies = response
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+        .map(|(_, value)| value.clone())
+        .collect::<Vec<_>>();
+    jar.set_from_response(source, &response_cookies, 0.0);
+    let cookie_state = jar.storage_state();
+    PageSession::open_with_response_headers(
+        &response.html,
+        source,
+        &cookie_state,
+        "",
+        20000,
+        "",
+        hints.clone(),
+        &response.headers,
+    )
+    .await
+    .unwrap()
+}
+
+/// The case's resource path and its same- or cross-origin URL.
+fn case_target(case: &Value, id: usize, urls: &Value, primary: &str) -> (String, String) {
+    let resource_path = case["resource"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("/resource-{id}"));
+    let target = format!(
+        "{}{resource_path}?case={id}",
+        if case["cross"] == true {
+            urls["peer"].as_str().unwrap()
+        } else {
+            primary
+        }
+    );
+    (resource_path, target)
+}
+
+/// Issue the case's guest request and check its per-kind result against Chrome.
+async fn run_case_request(
+    page: &mut PageSession,
+    case: &Value,
+    id: usize,
+    target: &str,
+    primary: &str,
+    control: &Value,
+) {
+    if let Some(range) = case["range"].as_str() {
+        let script = format!(
+            "fetch({},{{headers:{{Range:{}}}}}).then(async r=>({{status:r.status,contentRange:r.headers.get('content-range'),text:await r.text()}}))",
+            serde_json::to_string(target).unwrap(),
+            serde_json::to_string(range).unwrap()
+        );
+        let actual: Value =
+            serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
+        assert_eq!(actual, control["result"][id]["range"], "range response");
+    } else if case["head"] == true {
+        let dictionary = format!("{primary}/dictionary?case={id}");
+        let script=format!("(async()=>{{const first=await fetch({},{{method:'HEAD'}});const headBytes=(await first.text()).length;await fetch({}).then(r=>r.text());const second=await fetch({});const getBytes=(await second.text()).length;await fetch({}).then(r=>r.text());await new Promise(resolve=>setTimeout(resolve,100));await fetch({}).then(r=>r.text());await new Promise(resolve=>setTimeout(resolve,400));await fetch({}).then(r=>r.text());return {{headBytes,getBytes}}}})()",serde_json::to_string(&dictionary).unwrap(),serde_json::to_string(&(target.to_owned()+"&phase=before")).unwrap(),serde_json::to_string(&dictionary).unwrap(),serde_json::to_string(&(target.to_owned()+"&phase=after")).unwrap(),serde_json::to_string(&(target.to_owned()+"&phase=after100")).unwrap(),serde_json::to_string(&(target.to_owned()+"&phase=after500")).unwrap());
+        let actual: Value =
+            serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
+        assert_eq!(actual, control["result"][id]["head"]);
+    } else if case["prioritySpoof"] == true {
+        let script=format!("fetch({},{{headers:{{Priority:'u=4, i'}},dictionary_prefetch:true}}).then(r=>({{ok:r.ok}})).catch(error=>({{error:error.name,message:error.message}}))",serde_json::to_string(target).unwrap());
+        let actual: Value =
+            serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
+        assert_eq!(actual, control["result"][id]["priority"]);
+    } else if let Some(kind) = case["manual"].as_str() {
+        let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(format!(
+            "authored reusable compression dictionary case {id}"
+        )));
+        let supplied = if kind == "id" {
+            json!({"Dictionary-ID":"\"forged\""})
+        } else {
+            json!({"Available-Dictionary":match kind {"matching"=>format!(":{hash}:"),"mismatch"=>":AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:".into(),_=>"malformed".into()}})
+        };
+        let script=format!("(async()=>{{const supplied={supplied},headers=new Headers(supplied),request=new Request({},{{headers}});const retained={{headers:[headers.get('available-dictionary'),headers.get('dictionary-id')],request:[request.headers.get('available-dictionary'),request.headers.get('dictionary-id')]}};try{{const response=await fetch(request);await response.text();return {{...retained,outcome:{{ok:response.ok}}}};}}catch(error){{return {{...retained,outcome:{{error:error.name,message:error.message}}}}}}}})()",serde_json::to_string(target).unwrap());
+        let actual: Value =
+            serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
+        assert_eq!(
+            actual, control["result"][id]["manual"],
+            "manual header admission: {}",
+            case["name"]
+        );
+    } else {
+        page.eval_json_expression(&format!(
+            "fetch({},{{cache:{}}}).then(r=>r.text()).catch(error=>error.name)",
+            serde_json::to_string(target).unwrap(),
+            serde_json::to_string(case["cache"].as_str().unwrap_or("default")).unwrap()
+        ))
+        .await
+        .unwrap();
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() {
     let (_fixture, urls) = fixture();
@@ -180,96 +287,10 @@ async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() 
     ))
     .unwrap();
     for (id, case) in control["cases"].as_array().unwrap().iter().enumerate() {
-        let source = format!("{primary}/page?case={id}");
         let hints = hints();
-        let response = net::fetch_html(
-            &source,
-            FetchOptions {
-                client_hints: Some(&hints),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        let mut jar = CookieJar::new();
-        let response_cookies = response
-            .headers
-            .iter()
-            .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
-            .map(|(_, value)| value.clone())
-            .collect::<Vec<_>>();
-        jar.set_from_response(&source, &response_cookies, 0.0);
-        let cookie_state = jar.storage_state();
-        let mut page = PageSession::open_with_response_headers(
-            &response.html,
-            &source,
-            &cookie_state,
-            "",
-            20000,
-            "",
-            hints.clone(),
-            &response.headers,
-        )
-        .await
-        .unwrap();
-        let resource_path = case["resource"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("/resource-{id}"));
-        let target = format!(
-            "{}{resource_path}?case={id}",
-            if case["cross"] == true {
-                urls["peer"].as_str().unwrap()
-            } else {
-                primary
-            }
-        );
-        if let Some(range) = case["range"].as_str() {
-            let script = format!(
-                "fetch({},{{headers:{{Range:{}}}}}).then(async r=>({{status:r.status,contentRange:r.headers.get('content-range'),text:await r.text()}}))",
-                serde_json::to_string(&target).unwrap(),
-                serde_json::to_string(range).unwrap()
-            );
-            let actual: Value =
-                serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
-            assert_eq!(actual, control["result"][id]["range"], "range response");
-        } else if case["head"] == true {
-            let dictionary = format!("{primary}/dictionary?case={id}");
-            let script=format!("(async()=>{{const first=await fetch({},{{method:'HEAD'}});const headBytes=(await first.text()).length;await fetch({}).then(r=>r.text());const second=await fetch({});const getBytes=(await second.text()).length;await fetch({}).then(r=>r.text());await new Promise(resolve=>setTimeout(resolve,100));await fetch({}).then(r=>r.text());await new Promise(resolve=>setTimeout(resolve,400));await fetch({}).then(r=>r.text());return {{headBytes,getBytes}}}})()",serde_json::to_string(&dictionary).unwrap(),serde_json::to_string(&(target.clone()+"&phase=before")).unwrap(),serde_json::to_string(&dictionary).unwrap(),serde_json::to_string(&(target.clone()+"&phase=after")).unwrap(),serde_json::to_string(&(target.clone()+"&phase=after100")).unwrap(),serde_json::to_string(&(target.clone()+"&phase=after500")).unwrap());
-            let actual: Value =
-                serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
-            assert_eq!(actual, control["result"][id]["head"]);
-        } else if case["prioritySpoof"] == true {
-            let script=format!("fetch({},{{headers:{{Priority:'u=4, i'}},dictionary_prefetch:true}}).then(r=>({{ok:r.ok}})).catch(error=>({{error:error.name,message:error.message}}))",serde_json::to_string(&target).unwrap());
-            let actual: Value =
-                serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
-            assert_eq!(actual, control["result"][id]["priority"]);
-        } else if let Some(kind) = case["manual"].as_str() {
-            let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(format!(
-                "authored reusable compression dictionary case {id}"
-            )));
-            let supplied = if kind == "id" {
-                json!({"Dictionary-ID":"\"forged\""})
-            } else {
-                json!({"Available-Dictionary":match kind {"matching"=>format!(":{hash}:"),"mismatch"=>":AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:".into(),_=>"malformed".into()}})
-            };
-            let script=format!("(async()=>{{const supplied={supplied},headers=new Headers(supplied),request=new Request({},{{headers}});const retained={{headers:[headers.get('available-dictionary'),headers.get('dictionary-id')],request:[request.headers.get('available-dictionary'),request.headers.get('dictionary-id')]}};try{{const response=await fetch(request);await response.text();return {{...retained,outcome:{{ok:response.ok}}}};}}catch(error){{return {{...retained,outcome:{{error:error.name,message:error.message}}}}}}}})()",serde_json::to_string(&target).unwrap());
-            let actual: Value =
-                serde_json::from_str(&page.eval_json_expression(&script).await.unwrap()).unwrap();
-            assert_eq!(
-                actual, control["result"][id]["manual"],
-                "manual header admission: {}",
-                case["name"]
-            );
-        } else {
-            page.eval_json_expression(&format!(
-                "fetch({},{{cache:{}}}).then(r=>r.text()).catch(error=>error.name)",
-                serde_json::to_string(&target).unwrap(),
-                serde_json::to_string(case["cache"].as_str().unwrap_or("default")).unwrap()
-            ))
-            .await
-            .unwrap();
-        }
+        let mut page = open_case_page(&format!("{primary}/page?case={id}"), &hints).await;
+        let (resource_path, target) = case_target(case, id, &urls, primary);
+        run_case_request(&mut page, case, id, &target, primary, &control).await;
         let events: Value =
             serde_json::from_str(&page.eval_json_expression("dictionaryEvents").await.unwrap())
                 .unwrap();

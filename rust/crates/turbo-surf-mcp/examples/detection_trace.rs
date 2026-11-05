@@ -8,10 +8,12 @@ use std::{
 use turbo_surf_core::{
     cookies::CookieJar,
     fingerprint,
-    net::{fetch_html, FetchOptions},
+    net::{fetch_html, FetchOptions, FetchResult},
     request_context::{ClientHints, RequestContext},
 };
-use turbo_surf_render::{PageSession, PageSessionOptions, WindowTimerMode};
+use turbo_surf_render::{
+    NavigationActivationSnapshot, PageSession, PageSessionOptions, WindowTimerMode,
+};
 
 // Host sleeps give delayed HTTP futures a turn without advancing future window timers.
 async fn wait_until(page: &mut PageSession, deadline: Instant) -> Result<(), String> {
@@ -425,20 +427,37 @@ fn build_info() -> Value {
             "reportedChromeMajor":profile.chrome_major,"reportedFullVersion":profile.full_version}})
 }
 
-async fn capture(
-    config: &Value,
-    out: &Path,
-    trace: &mut Value,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Installs every compiled raster/measure/WebGL hook, exactly as the MCP server does.
-    turbo_surf_mcp::initialize_render_hooks();
-    let profile = fingerprint::default_profile();
-    let hints = ClientHints::default();
-    let storage = turbo_surf_render::BrowserStorage::default();
-    let budget = page_budget(config)?;
-    trace["windowTimerMode"] = json!("real-time");
-    let wait_ms = harness_milliseconds(config, "waitMs", 2500)?;
-    let cadence_ms = harness_milliseconds(config, "inputCadenceMs", 110)?;
+type BoxError = Box<dyn std::error::Error>;
+
+const NATIVE_FORM_REQUIRED: &str =
+    "No native form navigation committed; fallback prohibited by configuration";
+
+const PENDING_NAVIGATION: &str = r#"(() => {
+                const state=__tsNs;
+                return new URL(state?.rscNav || state?.nav || location.href,location.href).href;
+            })()"#;
+
+const FORM_FALLBACK: &str = r#"(() => {
+      const f=document.querySelector('form'); if(!f)return null;
+      const u=new URL(f.getAttribute('action')||location.pathname,location.href);
+      if((f.getAttribute('method')||'get').toLowerCase()!=='get')return null;
+      for(const el of f.querySelectorAll('input[name],textarea[name],select[name]')){
+        const type=(el.getAttribute('type')||'').toLowerCase();
+        if(el.disabled||['submit','button','reset','file'].includes(type)||
+          (['checkbox','radio'].includes(type)&&!el.checked))continue;
+        u.searchParams.append(el.getAttribute('name'),el.value??'');
+      } return u.href;
+    })()"#;
+
+fn require_native_form(config: &Value) -> bool {
+    config["requireNativeFormNavigation"]
+        .as_bool()
+        .unwrap_or(false)
+}
+
+/// Validate the harness viewport/window/screen geometry against the native HTTP
+/// profile, then publish it as the render fingerprint.
+fn configure_fingerprint(config: &Value, profile: &fingerprint::Profile) -> Result<(), BoxError> {
     let width = config["viewport"]["width"].as_u64().unwrap_or(1280);
     let height = config["viewport"]["height"].as_u64().unwrap_or(800);
     let screen_width = config["screen"]["width"].as_u64().unwrap_or(1920);
@@ -472,369 +491,52 @@ async fn capture(
         })
         .to_string(),
     );
-    let url = config["url"].as_str().ok_or("url required")?;
-    let selector = config["successSelector"]
-        .as_str()
-        .unwrap_or("#rso a h3, #search a h3");
-    let init = if config["interfaces"].as_bool().unwrap_or(false) {
-        fs::read_to_string(
-            config["interfaceScript"]
-                .as_str()
-                .ok_or("interfaceScript required")?,
-        )?
-    } else {
-        String::new()
-    };
-    if config["probeOnly"].as_bool().unwrap_or(false) {
-        let mut page = PageSession::open_with_document_response_and_options(
-            config["fixtureHtml"]
-                .as_str()
-                .unwrap_or("<!doctype html><html><head></head><body></body></html>"),
-            url,
-            "",
-            &profile.user_agent,
-            budget,
-            &init,
-            hints.clone(),
-            &[],
-            storage.clone(),
-            turbo_surf_render::DocumentResponseMetadata::default(),
-            None,
-            realtime_options(),
-        )
-        .await?;
-        trace["pages"]
-            .as_array_mut()
-            .unwrap()
-            .push(snapshot(&mut page, out, "probe", config).await?);
-        checkpoint(out, trace)?;
-        trace["probes"] = json!(collect_probes(&mut page, config).await?);
-        page.close();
-        return Ok(());
+    Ok(())
+}
+
+fn init_script(config: &Value) -> Result<String, BoxError> {
+    if !config["interfaces"].as_bool().unwrap_or(false) {
+        return Ok(String::new());
     }
-    let mut probes = Vec::new();
-    let mut jar = CookieJar::new();
-    let response = fetch_html(
-        url,
-        FetchOptions {
-            allow_non_html: true,
-            max_redirects: Some(10),
-            jar: Some(&mut jar),
-            client_hints: Some(&hints),
-            context: Some(RequestContext::navigation(None, true)),
-            ..Default::default()
-        },
-    )
-    .await?;
-    save(&out.join("home-response.html"), &response.html)?;
-    let mut page = PageSession::open_with_document_response_and_options(
-        &response.html,
-        &response.final_url,
-        &jar.storage_state(),
-        &profile.user_agent,
-        budget,
-        &init,
-        hints.clone(),
-        &response.headers,
-        storage.clone(),
-        turbo_surf_render::DocumentResponseMetadata {
-            status: response.status,
-            referrer: String::new(),
-        },
-        None,
-        realtime_options(),
-    )
-    .await?;
-    let readiness_started = host_milliseconds();
-    trace["readiness"] = json!({"stage":"home","complete":false,
-        "selectorRequested":config["readySelector"].as_str().is_some_and(|value| !value.is_empty()),
-        "startedMs":readiness_started});
-    checkpoint(out, trace)?;
-    if let Err(error) = wait_for_readiness(&mut page, config).await {
-        trace["readiness"]["error"] = json!(error);
-        trace["readiness"]["finishedMs"] = json!(host_milliseconds());
-        checkpoint(out, trace)?;
-        trace["pages"]
-            .as_array_mut()
-            .unwrap()
-            .push(snapshot(&mut page, out, "readiness-error", config).await?);
-        checkpoint(out, trace)?;
-        return Err("Home readiness failed; input was not attempted".into());
-    }
-    trace["readiness"]["complete"] = json!(true);
-    trace["readiness"]["finishedMs"] = json!(host_milliseconds());
-    trace["inputTiming"] = json!({"source":"host-wall-clock","minimumCharacterMs":cadence_ms,
-        "dwellMs":wait_ms,"perStepSnapshots":true,"windowTimerMode":"real-time"});
-    capture_dwell(&mut page, trace, out, "home", wait_ms).await?;
-    trace["pages"]
-        .as_array_mut()
-        .unwrap()
-        .push(snapshot(&mut page, out, "home", config).await?);
-    checkpoint(out, trace)?;
-    if let Some(dismiss) = config["dismissSelector"].as_str().filter(|s| !s.is_empty()) {
-        let script = format!(
-            "!!document.querySelector({})",
-            serde_json::to_string(dismiss)?
-        );
-        let present = serde_json::from_str::<bool>(&page.eval_json_expression(&script).await?)?;
-        trace["dismissal"] = json!({"selector":dismiss,"present":present,"clicked":false});
-        checkpoint(out, trace)?;
-        if present {
-            match input_with_real_waits(
-                &mut page,
-                &json!([{ "move":{"selector":dismiss} },{ "click":dismiss },{ "wait":wait_ms }]),
-                cadence_ms,
-            )
-            .await
-            {
-                Ok(()) => trace["dismissal"]["clicked"] = json!(true),
-                Err(error) => {
-                    trace["dismissal"]["error"] = json!(error);
-                    checkpoint(out, trace)?;
-                    return Err("Consent dismissal input failed; search was not attempted".into());
-                }
-            }
-            trace["pages"]
-                .as_array_mut()
-                .unwrap()
-                .push(snapshot(&mut page, out, "dismiss", config).await?);
-            checkpoint(out, trace)?;
-        }
-    }
-    let native_before_input = page.navigation_snapshot().0;
-    let steps = config["steps"].as_array().ok_or("steps array required")?;
-    let mut observation = None;
-    capture_input_steps(&mut page, config, out, trace, cadence_ms, &mut observation).await?;
-    if let Some(window) = observation {
-        let observed: Result<(), Box<dyn std::error::Error>> = async {
-            let native_form = page.navigation_snapshot().0 > native_before_input;
-            trace["inputSource"] = json!("native-host");
-            trace["navigationSource"] = json!(if native_form { "native-form" } else { "none" });
-            trace["formFallback"] = Value::Null;
-            let mut hops = 0;
-            loop {
-                if window.remaining().is_zero() {
-                    break;
-                }
-                let installed = page.navigation_snapshot().1;
-                let raw = page
-                    .eval_engine_json_expression(
-                        r#"(() => {
-                const state=__tsNs;
-                return new URL(state?.rscNav || state?.nav || location.href,location.href).href;
-            })()"#,
-                    )
-                    .await?;
-                let target: String = serde_json::from_str(&raw)?;
-                if target == installed {
-                    wait_until(
-                        &mut page,
-                        Instant::now() + window.remaining().min(Duration::from_millis(25)),
-                    )
-                    .await?;
-                    continue;
-                }
-                trace["observation"]["pendingNavigation"] = json!(target);
-                if hops == 5 {
-                    trace["observation"]["navigationHopLimit"] = json!(true);
-                    break;
-                }
-                let remaining = window.remaining();
-                if remaining.is_zero() {
-                    break;
-                }
-                let mut navigation_jar = CookieJar::from_storage_state(&page.cookies());
-                let navigation_metadata =
-                    std::sync::Mutex::new(turbo_surf_render::DocumentResponseMetadata::default());
-                let response_policy =
-                    |context: &RequestContext, target: &str, _headers: &[(String, String)]| {
-                        *navigation_metadata.lock().unwrap() =
-                            turbo_surf_render::DocumentResponseMetadata::from_request(
-                                200, context, target,
-                            );
-                        true
-                    };
-                let active = page
-                    .script_nav_activation_snapshot()
-                    .as_ref()
-                    .is_some_and(|(url, active)| *active && url == &target);
-                let fetch = tokio::time::timeout(
-                    remaining,
-                    fetch_html(
-                        &target,
-                        FetchOptions {
-                            response_policy: Some(&response_policy),
-                            context: Some(RequestContext::navigation(Some(installed), active)),
-                            client_hints: Some(&hints),
-                            allow_non_html: true,
-                            max_redirects: Some(10),
-                            jar: Some(&mut navigation_jar),
-                            ..Default::default()
-                        },
-                    ),
-                )
-                .await;
-                let response = match fetch {
-                    Ok(response) => response?,
-                    Err(_) => {
-                        trace["observation"]["navigationWaitTimedOut"] = json!(true);
-                        break;
-                    }
-                };
-                save(
-                    &out.join(format!("navigation-{hops}-response.html")),
-                    &response.html,
-                )?;
-                let remaining = window.remaining();
-                if remaining.is_zero() {
-                    trace["observation"]["navigationWaitTimedOut"] = json!(true);
-                    break;
-                }
-                let metadata = turbo_surf_render::DocumentResponseMetadata {
-                    status: response.status,
-                    referrer: navigation_metadata.lock().unwrap().referrer.clone(),
-                };
-                let activation = page.navigation_activation_snapshot();
-                let next = tokio::time::timeout(
-                    remaining,
-                    PageSession::open_with_document_response_and_options(
-                        &response.html,
-                        &response.final_url,
-                        &navigation_jar.storage_state(),
-                        &profile.user_agent,
-                        budget,
-                        &init,
-                        hints.clone(),
-                        &response.headers,
-                        storage.clone(),
-                        metadata,
-                        Some(activation),
-                        PageSessionOptions {
-                            initial_hydration_budget_ms: Some(
-                                remaining.as_millis().max(1).try_into().unwrap_or(budget),
-                            ),
-                            ..realtime_options()
-                        },
-                    ),
-                )
-                .await;
-                let next = match next {
-                    Ok(next) => next?,
-                    Err(_) => {
-                        trace["observation"]["navigationWaitTimedOut"] = json!(true);
-                        break;
-                    }
-                };
-                let previous = std::mem::replace(&mut page, next);
-                previous.close();
-                if !native_form {
-                    trace["navigationSource"] = json!("script");
-                }
-                hops += 1;
-                trace["observation"]["followedNavigationHops"] = json!(hops);
-                trace["observation"]["pendingNavigation"] = Value::Null;
-            }
-            trace["observation"]["snapshotStartedMs"] = json!(host_milliseconds());
-            let snapshot_started = Instant::now();
-            let row = snapshot(&mut page, out, "native-final", config).await?;
-            trace["observation"]["snapshotElapsedMs"] =
-                json!(snapshot_started.elapsed().as_secs_f64() * 1000.0);
-            if row["nav"]
-                .as_str()
-                .is_some_and(|target| target != page.navigation_snapshot().1)
-            {
-                trace["observation"]["pendingNavigation"] = row["nav"].clone();
-            }
-            trace["pages"].as_array_mut().unwrap().push(row);
-            if config["requireNativeFormNavigation"]
-                .as_bool()
-                .unwrap_or(false)
-                && !native_form
-            {
-                return Err(
-                    "No native form navigation committed; fallback prohibited by configuration"
-                        .into(),
-                );
-            }
-            Ok(())
-        }
-        .await;
-        let window_complete = observed.is_ok()
-            && window.remaining().is_zero()
-            && trace["observation"]["navigationWaitTimedOut"] != true
-            && trace["observation"]["navigationHopLimit"] != true
-            && trace["observation"]["pendingNavigation"].is_null();
-        window.finish(trace, window_complete);
-        checkpoint(out, trace)?;
-        observed?;
-        trace["probes"] = json!(collect_probes(&mut page, config).await?);
-        page.close();
-        return Ok(());
-    }
-    capture_dwell(&mut page, trace, out, "search", wait_ms).await?;
-    if !steps.is_empty() {
-        trace["pages"]
-            .as_array_mut()
-            .unwrap()
-            .push(snapshot(&mut page, out, "interaction", config).await?);
-        checkpoint(out, trace)?;
-    }
-    let (native_after_input, installed_url, _) = page.navigation_snapshot();
-    let native_form =
-        native_after_input > native_before_input || (steps.is_empty() && native_after_input > 0);
-    if native_form {
-        trace["inputSource"] = json!("native-host");
-        trace["navigationSource"] = json!("native-form");
-        trace["formFallback"] = Value::Null;
-        let row = snapshot(&mut page, out, "native-final", config).await?;
-        let pending_script_navigation = row["nav"]
+    Ok(fs::read_to_string(
+        config["interfaceScript"]
             .as_str()
-            .is_some_and(|target| target != installed_url);
-        trace["pages"].as_array_mut().unwrap().push(row);
-        checkpoint(out, trace)?;
-        if !pending_script_navigation {
-            probes.extend(collect_probes(&mut page, config).await?);
-            trace["probes"] = json!(probes);
-            checkpoint(out, trace)?;
-            page.close();
-            return Ok(());
-        }
-    } else if config["requireNativeFormNavigation"]
-        .as_bool()
-        .unwrap_or(false)
-    {
-        return Err(
-            "No native form navigation committed; fallback prohibited by configuration".into(),
-        );
-    }
-    // Follow the actual JS navigation; if the DOM's Enter default is absent, record the
-    // serialized GET form fallback separately rather than claiming the JS navigated.
-    let allow_fallback = !config["disableFormFallback"].as_bool().unwrap_or(false);
-    let fallback: Value = if native_form || !allow_fallback {
-        Value::Null
-    } else {
-        let raw = page
-            .eval_json_expression(
-                r#"(() => {
-      const f=document.querySelector('form'); if(!f)return null;
-      const u=new URL(f.getAttribute('action')||location.pathname,location.href);
-      if((f.getAttribute('method')||'get').toLowerCase()!=='get')return null;
-      for(const el of f.querySelectorAll('input[name],textarea[name],select[name]')){
-        const type=(el.getAttribute('type')||'').toLowerCase();
-        if(el.disabled||['submit','button','reset','file'].includes(type)||
-          (['checkbox','radio'].includes(type)&&!el.checked))continue;
-        u.searchParams.append(el.getAttribute('name'),el.value??'');
-      } return u.href;
-    })()"#,
-            )
-            .await?;
-        serde_json::from_str(&raw)?
-    };
+            .ok_or("interfaceScript required")?,
+    )?)
+}
+
+async fn push_snapshot(
+    page: &mut PageSession,
+    out: &Path,
+    phase: &str,
+    config: &Value,
+    trace: &mut Value,
+) -> Result<(), BoxError> {
+    let row = snapshot(page, out, phase, config).await?;
+    trace["pages"].as_array_mut().unwrap().push(row);
+    Ok(())
+}
+
+/// Record that a followed navigation outlived the observation window.
+fn timed_out(trace: &mut Value) -> Option<PageSession> {
+    trace["observation"]["navigationWaitTimedOut"] = json!(true);
+    None
+}
+
+/// The navigation target after input: the last snapshot's pending `nav`, or, when
+/// typed steps produced no navigation, the serialized GET form fallback.
+fn choose_target(
+    trace: &Value,
+    installed_url: &str,
+    native_form: bool,
+    steps_empty: bool,
+    fallback: &Value,
+) -> (String, &'static str) {
     let mut target = trace["pages"]
         .as_array()
         .and_then(|pages| pages.last())
         .and_then(|p| p["nav"].as_str())
-        .unwrap_or(&installed_url)
+        .unwrap_or(installed_url)
         .to_string();
     let mut nav_source = if native_form {
         "native-form"
@@ -843,28 +545,105 @@ async fn capture(
     } else {
         "none"
     };
-    if !native_form && !steps.is_empty() && target == installed_url {
+    if !native_form && !steps_empty && target == installed_url {
         if let Some(u) = fallback.as_str().filter(|u| *u != installed_url) {
             target = u.into();
             nav_source = "form-fallback";
         }
     }
-    trace["inputSource"] = json!("native-host");
-    trace["navigationSource"] = json!(nav_source);
-    trace["formFallback"] = fallback;
-    checkpoint(out, trace)?;
-    if target == installed_url {
-        probes.extend(collect_probes(&mut page, config).await?);
+    (target, nav_source)
+}
+
+fn navigation_active(
+    nav_source: &str,
+    hop: usize,
+    script_activation: &Option<(String, bool)>,
+    target: &str,
+) -> bool {
+    (nav_source == "form-fallback" && hop == 0)
+        || script_activation
+            .as_ref()
+            .is_some_and(|(url, active)| *active && url == target)
+}
+
+/// The per-capture configuration and the fresh session identity every page shares.
+struct Capture<'a> {
+    config: &'a Value,
+    out: &'a Path,
+    profile: fingerprint::Profile,
+    hints: ClientHints,
+    storage: turbo_surf_render::BrowserStorage,
+    budget: u64,
+    init: String,
+    wait_ms: u64,
+    cadence_ms: u64,
+}
+
+async fn capture(
+    config: &Value,
+    out: &Path,
+    trace: &mut Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Installs every compiled raster/measure/WebGL hook, exactly as the MCP server does.
+    turbo_surf_mcp::initialize_render_hooks();
+    let profile = fingerprint::default_profile();
+    let budget = page_budget(config)?;
+    trace["windowTimerMode"] = json!("real-time");
+    let wait_ms = harness_milliseconds(config, "waitMs", 2500)?;
+    let cadence_ms = harness_milliseconds(config, "inputCadenceMs", 110)?;
+    configure_fingerprint(config, &profile)?;
+    let url = config["url"].as_str().ok_or("url required")?;
+    let capture = Capture {
+        config,
+        out,
+        profile,
+        hints: ClientHints::default(),
+        storage: turbo_surf_render::BrowserStorage::default(),
+        budget,
+        init: init_script(config)?,
+        wait_ms,
+        cadence_ms,
+    };
+    if config["probeOnly"].as_bool().unwrap_or(false) {
+        return capture.probe_only(url, trace).await;
     }
-    jar = CookieJar::from_storage_state(&page.cookies());
-    let mut script_activation = page.script_nav_activation_snapshot();
-    let mut activation = page.navigation_activation_snapshot();
-    page.close();
-    let mut referer = installed_url.clone();
-    for hop in 0..5 {
-        if target == referer {
-            break;
-        }
+    capture.site(url, trace).await
+}
+
+impl Capture<'_> {
+    async fn open_document(
+        &self,
+        response: &FetchResult,
+        cookies: &str,
+        metadata: turbo_surf_render::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+    ) -> Result<PageSession, String> {
+        PageSession::open_with_document_response_and_options(
+            &response.html,
+            &response.final_url,
+            cookies,
+            &self.profile.user_agent,
+            self.budget,
+            &self.init,
+            self.hints.clone(),
+            &response.headers,
+            self.storage.clone(),
+            metadata,
+            activation,
+            options,
+        )
+        .await
+    }
+
+    /// Fetch a top-level navigation, returning the response and the referrer its
+    /// final request carried.
+    async fn fetch_navigation(
+        &self,
+        target: &str,
+        context: RequestContext,
+        jar: &mut CookieJar,
+    ) -> Result<(FetchResult, String), BoxError> {
         let navigation_metadata =
             std::sync::Mutex::new(turbo_surf_render::DocumentResponseMetadata::default());
         let response_policy =
@@ -873,77 +652,527 @@ async fn capture(
                     turbo_surf_render::DocumentResponseMetadata::from_request(200, context, target);
                 true
             };
-        let search = fetch_html(
-            &target,
+        let response = fetch_html(
+            target,
             FetchOptions {
                 response_policy: Some(&response_policy),
-                context: Some(RequestContext::navigation(
-                    Some(referer.clone()),
-                    (nav_source == "form-fallback" && hop == 0)
-                        || script_activation
-                            .as_ref()
-                            .is_some_and(|(url, active)| *active && url == &target),
-                )),
-                client_hints: Some(&hints),
+                context: Some(context),
+                client_hints: Some(&self.hints),
                 allow_non_html: true,
                 max_redirects: Some(10),
-                jar: Some(&mut jar),
+                jar: Some(jar),
                 ..Default::default()
             },
         )
         .await?;
-        save(
-            &out.join(format!("navigation-{hop}-response.html")),
-            &search.html,
-        )?;
-        let document_response = turbo_surf_render::DocumentResponseMetadata {
-            status: search.status,
-            referrer: navigation_metadata.lock().unwrap().referrer.clone(),
-        };
-        let next = PageSession::open_with_document_response_and_options(
-            &search.html,
-            &search.final_url,
-            &jar.storage_state(),
-            &profile.user_agent,
-            budget,
-            &init,
-            hints.clone(),
-            &search.headers,
-            storage.clone(),
-            document_response,
-            Some(activation),
+        let referrer = navigation_metadata.lock().unwrap().referrer.clone();
+        Ok((response, referrer))
+    }
+
+    async fn probe_only(&self, url: &str, trace: &mut Value) -> Result<(), BoxError> {
+        let mut page = PageSession::open_with_document_response_and_options(
+            self.config["fixtureHtml"]
+                .as_str()
+                .unwrap_or("<!doctype html><html><head></head><body></body></html>"),
+            url,
+            "",
+            &self.profile.user_agent,
+            self.budget,
+            &self.init,
+            self.hints.clone(),
+            &[],
+            self.storage.clone(),
+            turbo_surf_render::DocumentResponseMetadata::default(),
+            None,
             realtime_options(),
         )
-        .await;
-        let mut next = match next {
-            Ok(p) => p,
-            Err(e) => {
-                trace["pages"].as_array_mut().unwrap().push(json!({"phase":format!("navigation-{hop}-error"),"url":search.final_url,
-                    "status":search.status,"error":e,"bytes":search.html.len(),
-                    "results":turbo_dom_parser::rtdom::Tree::parse(&search.html).query_selector_all(selector).len(),
-                    "cookies":[]}));
-                checkpoint(out, trace)?;
+        .await?;
+        push_snapshot(&mut page, self.out, "probe", self.config, trace).await?;
+        checkpoint(self.out, trace)?;
+        trace["probes"] = json!(collect_probes(&mut page, self.config).await?);
+        page.close();
+        Ok(())
+    }
+
+    async fn site(&self, url: &str, trace: &mut Value) -> Result<(), BoxError> {
+        let mut jar = CookieJar::new();
+        let response = fetch_html(
+            url,
+            FetchOptions {
+                allow_non_html: true,
+                max_redirects: Some(10),
+                jar: Some(&mut jar),
+                client_hints: Some(&self.hints),
+                context: Some(RequestContext::navigation(None, true)),
+                ..Default::default()
+            },
+        )
+        .await?;
+        save(&self.out.join("home-response.html"), &response.html)?;
+        let metadata = turbo_surf_render::DocumentResponseMetadata {
+            status: response.status,
+            referrer: String::new(),
+        };
+        let mut page = self
+            .open_document(
+                &response,
+                &jar.storage_state(),
+                metadata,
+                None,
+                realtime_options(),
+            )
+            .await?;
+        self.home_readiness(&mut page, trace).await?;
+        self.home_dwell(&mut page, trace).await?;
+        self.dismiss(&mut page, trace).await?;
+        let native_before_input = page.navigation_snapshot().0;
+        let steps = self.config["steps"]
+            .as_array()
+            .ok_or("steps array required")?;
+        let mut observation = None;
+        capture_input_steps(
+            &mut page,
+            self.config,
+            self.out,
+            trace,
+            self.cadence_ms,
+            &mut observation,
+        )
+        .await?;
+        match observation {
+            Some(window) => {
+                self.finish_observation(page, window, native_before_input, trace)
+                    .await
+            }
+            None => {
+                self.after_input(page, steps.is_empty(), native_before_input, trace)
+                    .await
+            }
+        }
+    }
+
+    async fn home_readiness(
+        &self,
+        page: &mut PageSession,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        trace["readiness"] = json!({"stage":"home","complete":false,
+            "selectorRequested":self.config["readySelector"].as_str().is_some_and(|value| !value.is_empty()),
+            "startedMs":host_milliseconds()});
+        checkpoint(self.out, trace)?;
+        if let Err(error) = wait_for_readiness(page, self.config).await {
+            trace["readiness"]["error"] = json!(error);
+            trace["readiness"]["finishedMs"] = json!(host_milliseconds());
+            checkpoint(self.out, trace)?;
+            push_snapshot(page, self.out, "readiness-error", self.config, trace).await?;
+            checkpoint(self.out, trace)?;
+            return Err("Home readiness failed; input was not attempted".into());
+        }
+        trace["readiness"]["complete"] = json!(true);
+        trace["readiness"]["finishedMs"] = json!(host_milliseconds());
+        Ok(())
+    }
+
+    async fn home_dwell(&self, page: &mut PageSession, trace: &mut Value) -> Result<(), BoxError> {
+        trace["inputTiming"] = json!({"source":"host-wall-clock","minimumCharacterMs":self.cadence_ms,
+            "dwellMs":self.wait_ms,"perStepSnapshots":true,"windowTimerMode":"real-time"});
+        capture_dwell(page, trace, self.out, "home", self.wait_ms).await?;
+        push_snapshot(page, self.out, "home", self.config, trace).await?;
+        checkpoint(self.out, trace)?;
+        Ok(())
+    }
+
+    async fn dismiss(&self, page: &mut PageSession, trace: &mut Value) -> Result<(), BoxError> {
+        let Some(dismiss) = self.config["dismissSelector"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+        else {
+            return Ok(());
+        };
+        let script = format!(
+            "!!document.querySelector({})",
+            serde_json::to_string(dismiss)?
+        );
+        let present = serde_json::from_str::<bool>(&page.eval_json_expression(&script).await?)?;
+        trace["dismissal"] = json!({"selector":dismiss,"present":present,"clicked":false});
+        checkpoint(self.out, trace)?;
+        if !present {
+            return Ok(());
+        }
+        if let Err(error) = input_with_real_waits(
+            page,
+            &json!([{ "move":{"selector":dismiss} },{ "click":dismiss },{ "wait":self.wait_ms }]),
+            self.cadence_ms,
+        )
+        .await
+        {
+            trace["dismissal"]["error"] = json!(error);
+            checkpoint(self.out, trace)?;
+            return Err("Consent dismissal input failed; search was not attempted".into());
+        }
+        trace["dismissal"]["clicked"] = json!(true);
+        push_snapshot(page, self.out, "dismiss", self.config, trace).await?;
+        checkpoint(self.out, trace)?;
+        Ok(())
+    }
+
+    async fn finish_observation(
+        &self,
+        mut page: PageSession,
+        window: ObservationWindow,
+        native_before_input: u64,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        let observed = self
+            .observe(&mut page, &window, native_before_input, trace)
+            .await;
+        let window_complete = observed.is_ok()
+            && window.remaining().is_zero()
+            && trace["observation"]["navigationWaitTimedOut"] != true
+            && trace["observation"]["navigationHopLimit"] != true
+            && trace["observation"]["pendingNavigation"].is_null();
+        window.finish(trace, window_complete);
+        checkpoint(self.out, trace)?;
+        observed?;
+        trace["probes"] = json!(collect_probes(&mut page, self.config).await?);
+        page.close();
+        Ok(())
+    }
+
+    async fn observe(
+        &self,
+        page: &mut PageSession,
+        window: &ObservationWindow,
+        native_before_input: u64,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        let native_form = page.navigation_snapshot().0 > native_before_input;
+        trace["inputSource"] = json!("native-host");
+        trace["navigationSource"] = json!(if native_form { "native-form" } else { "none" });
+        trace["formFallback"] = Value::Null;
+        self.follow_observed_hops(page, window, native_form, trace)
+            .await?;
+        self.observed_final_snapshot(page, trace).await?;
+        if require_native_form(self.config) && !native_form {
+            return Err(NATIVE_FORM_REQUIRED.into());
+        }
+        Ok(())
+    }
+
+    async fn follow_observed_hops(
+        &self,
+        page: &mut PageSession,
+        window: &ObservationWindow,
+        native_form: bool,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        let mut hops = 0;
+        while !window.remaining().is_zero() {
+            let installed = page.navigation_snapshot().1;
+            let raw = page.eval_engine_json_expression(PENDING_NAVIGATION).await?;
+            let target: String = serde_json::from_str(&raw)?;
+            if target == installed {
+                wait_until(
+                    page,
+                    Instant::now() + window.remaining().min(Duration::from_millis(25)),
+                )
+                .await?;
+                continue;
+            }
+            trace["observation"]["pendingNavigation"] = json!(target);
+            if hops == 5 {
+                trace["observation"]["navigationHopLimit"] = json!(true);
                 break;
             }
-        };
-        real_wait(&mut next, wait_ms).await?;
-        let row = snapshot(&mut next, out, &format!("navigation-{hop}"), config).await?;
-        target = row["nav"].as_str().unwrap_or(&search.final_url).to_string();
-        referer = next.navigation_snapshot().1;
-        jar = CookieJar::from_storage_state(&next.cookies());
-        trace["pages"].as_array_mut().unwrap().push(row);
-        checkpoint(out, trace)?;
-        // Collectors run after the verdict snapshot, on the final page only. Their
-        // observations are never mixed into the recorded page interface snapshot.
-        if target == referer {
-            probes.extend(collect_probes(&mut next, config).await?);
+            let Some(next) = self
+                .open_observed_hop(page, &target, installed, hops, window, trace)
+                .await?
+            else {
+                break;
+            };
+            std::mem::replace(page, next).close();
+            if !native_form {
+                trace["navigationSource"] = json!("script");
+            }
+            hops += 1;
+            trace["observation"]["followedNavigationHops"] = json!(hops);
+            trace["observation"]["pendingNavigation"] = Value::Null;
         }
-        script_activation = next.script_nav_activation_snapshot();
-        activation = next.navigation_activation_snapshot();
-        next.close();
+        Ok(())
     }
-    trace["probes"] = json!(probes);
-    Ok(())
+
+    /// Fetch and open one observed navigation inside the remaining window; `None`
+    /// when the window closed first.
+    async fn open_observed_hop(
+        &self,
+        page: &mut PageSession,
+        target: &str,
+        installed: String,
+        hop: usize,
+        window: &ObservationWindow,
+        trace: &mut Value,
+    ) -> Result<Option<PageSession>, BoxError> {
+        let remaining = window.remaining();
+        if remaining.is_zero() {
+            return Ok(None);
+        }
+        let mut navigation_jar = CookieJar::from_storage_state(&page.cookies());
+        let active = page
+            .script_nav_activation_snapshot()
+            .as_ref()
+            .is_some_and(|(url, active)| *active && url == target);
+        let context = RequestContext::navigation(Some(installed), active);
+        let Ok(fetched) = tokio::time::timeout(
+            remaining,
+            self.fetch_navigation(target, context, &mut navigation_jar),
+        )
+        .await
+        else {
+            return Ok(timed_out(trace));
+        };
+        let (response, referrer) = fetched?;
+        save(
+            &self.out.join(format!("navigation-{hop}-response.html")),
+            &response.html,
+        )?;
+        let remaining = window.remaining();
+        if remaining.is_zero() {
+            return Ok(timed_out(trace));
+        }
+        let metadata = turbo_surf_render::DocumentResponseMetadata {
+            status: response.status,
+            referrer,
+        };
+        let activation = page.navigation_activation_snapshot();
+        let options = PageSessionOptions {
+            initial_hydration_budget_ms: Some(
+                remaining
+                    .as_millis()
+                    .max(1)
+                    .try_into()
+                    .unwrap_or(self.budget),
+            ),
+            ..realtime_options()
+        };
+        let opened = tokio::time::timeout(
+            remaining,
+            self.open_document(
+                &response,
+                &navigation_jar.storage_state(),
+                metadata,
+                Some(activation),
+                options,
+            ),
+        )
+        .await;
+        match opened {
+            Ok(next) => Ok(Some(next?)),
+            Err(_) => Ok(timed_out(trace)),
+        }
+    }
+
+    async fn observed_final_snapshot(
+        &self,
+        page: &mut PageSession,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        trace["observation"]["snapshotStartedMs"] = json!(host_milliseconds());
+        let snapshot_started = Instant::now();
+        let row = snapshot(page, self.out, "native-final", self.config).await?;
+        trace["observation"]["snapshotElapsedMs"] =
+            json!(snapshot_started.elapsed().as_secs_f64() * 1000.0);
+        if row["nav"]
+            .as_str()
+            .is_some_and(|target| target != page.navigation_snapshot().1)
+        {
+            trace["observation"]["pendingNavigation"] = row["nav"].clone();
+        }
+        trace["pages"].as_array_mut().unwrap().push(row);
+        Ok(())
+    }
+
+    async fn after_input(
+        &self,
+        mut page: PageSession,
+        steps_empty: bool,
+        native_before_input: u64,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        self.search_dwell(&mut page, steps_empty, trace).await?;
+        let (native_after_input, installed_url, _) = page.navigation_snapshot();
+        let native_form =
+            native_after_input > native_before_input || (steps_empty && native_after_input > 0);
+        if native_form && !self.native_final(&mut page, &installed_url, trace).await? {
+            return self.finish_native(page, trace).await;
+        }
+        if !native_form && require_native_form(self.config) {
+            return Err(NATIVE_FORM_REQUIRED.into());
+        }
+        // Follow the actual JS navigation; if the DOM's Enter default is absent, record the
+        // serialized GET form fallback separately rather than claiming the JS navigated.
+        let fallback = self.form_fallback(&mut page, native_form).await?;
+        let (target, nav_source) =
+            choose_target(trace, &installed_url, native_form, steps_empty, &fallback);
+        trace["inputSource"] = json!("native-host");
+        trace["navigationSource"] = json!(nav_source);
+        trace["formFallback"] = fallback;
+        checkpoint(self.out, trace)?;
+        let mut probes = Vec::new();
+        if target == installed_url {
+            probes.extend(collect_probes(&mut page, self.config).await?);
+        }
+        self.follow_navigations(page, target, nav_source, installed_url, &mut probes, trace)
+            .await?;
+        trace["probes"] = json!(probes);
+        Ok(())
+    }
+
+    async fn search_dwell(
+        &self,
+        page: &mut PageSession,
+        steps_empty: bool,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        capture_dwell(page, trace, self.out, "search", self.wait_ms).await?;
+        if !steps_empty {
+            push_snapshot(page, self.out, "interaction", self.config, trace).await?;
+            checkpoint(self.out, trace)?;
+        }
+        Ok(())
+    }
+
+    async fn finish_native(
+        &self,
+        mut page: PageSession,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        trace["probes"] = json!(collect_probes(&mut page, self.config).await?);
+        checkpoint(self.out, trace)?;
+        page.close();
+        Ok(())
+    }
+
+    /// Snapshot a committed native form navigation; true when a script navigation
+    /// is still pending on it.
+    async fn native_final(
+        &self,
+        page: &mut PageSession,
+        installed_url: &str,
+        trace: &mut Value,
+    ) -> Result<bool, BoxError> {
+        trace["inputSource"] = json!("native-host");
+        trace["navigationSource"] = json!("native-form");
+        trace["formFallback"] = Value::Null;
+        let row = snapshot(page, self.out, "native-final", self.config).await?;
+        let pending_script_navigation = row["nav"]
+            .as_str()
+            .is_some_and(|target| target != installed_url);
+        trace["pages"].as_array_mut().unwrap().push(row);
+        checkpoint(self.out, trace)?;
+        Ok(pending_script_navigation)
+    }
+
+    async fn form_fallback(
+        &self,
+        page: &mut PageSession,
+        native_form: bool,
+    ) -> Result<Value, BoxError> {
+        let allow_fallback = !self.config["disableFormFallback"]
+            .as_bool()
+            .unwrap_or(false);
+        if native_form || !allow_fallback {
+            return Ok(Value::Null);
+        }
+        let raw = page.eval_json_expression(FORM_FALLBACK).await?;
+        Ok(serde_json::from_str(&raw)?)
+    }
+
+    async fn follow_navigations(
+        &self,
+        mut page: PageSession,
+        mut target: String,
+        nav_source: &str,
+        installed_url: String,
+        probes: &mut Vec<Value>,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        let mut jar = CookieJar::from_storage_state(&page.cookies());
+        let mut script_activation = page.script_nav_activation_snapshot();
+        let mut activation = page.navigation_activation_snapshot();
+        page.close();
+        let mut referer = installed_url;
+        for hop in 0..5 {
+            if target == referer {
+                break;
+            }
+            let active = navigation_active(nav_source, hop, &script_activation, &target);
+            let context = RequestContext::navigation(Some(referer.clone()), active);
+            let (search, referrer) = self.fetch_navigation(&target, context, &mut jar).await?;
+            save(
+                &self.out.join(format!("navigation-{hop}-response.html")),
+                &search.html,
+            )?;
+            let document_response = turbo_surf_render::DocumentResponseMetadata {
+                status: search.status,
+                referrer,
+            };
+            let next = self
+                .open_document(
+                    &search,
+                    &jar.storage_state(),
+                    document_response,
+                    Some(activation),
+                    realtime_options(),
+                )
+                .await;
+            let mut next = match next {
+                Ok(p) => p,
+                Err(e) => {
+                    self.record_open_error(hop, &search, e, trace)?;
+                    break;
+                }
+            };
+            real_wait(&mut next, self.wait_ms).await?;
+            let row = snapshot(
+                &mut next,
+                self.out,
+                &format!("navigation-{hop}"),
+                self.config,
+            )
+            .await?;
+            target = row["nav"].as_str().unwrap_or(&search.final_url).to_string();
+            referer = next.navigation_snapshot().1;
+            jar = CookieJar::from_storage_state(&next.cookies());
+            trace["pages"].as_array_mut().unwrap().push(row);
+            checkpoint(self.out, trace)?;
+            // Collectors run after the verdict snapshot, on the final page only. Their
+            // observations are never mixed into the recorded page interface snapshot.
+            if target == referer {
+                probes.extend(collect_probes(&mut next, self.config).await?);
+            }
+            script_activation = next.script_nav_activation_snapshot();
+            activation = next.navigation_activation_snapshot();
+            next.close();
+        }
+        Ok(())
+    }
+
+    fn record_open_error(
+        &self,
+        hop: usize,
+        search: &FetchResult,
+        error: String,
+        trace: &mut Value,
+    ) -> Result<(), BoxError> {
+        let selector = self.config["successSelector"]
+            .as_str()
+            .unwrap_or("#rso a h3, #search a h3");
+        trace["pages"].as_array_mut().unwrap().push(json!({"phase":format!("navigation-{hop}-error"),"url":search.final_url,
+            "status":search.status,"error":error,"bytes":search.html.len(),
+            "results":turbo_dom_parser::rtdom::Tree::parse(&search.html).query_selector_all(selector).len(),
+            "cookies":[]}));
+        checkpoint(self.out, trace)
+    }
 }
 
 #[cfg(test)]

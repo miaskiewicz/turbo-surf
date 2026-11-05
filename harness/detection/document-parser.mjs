@@ -37,38 +37,41 @@ const run = (command, args, out) =>
       code === 0 ? done() : fail(Error(stderr || String(code)));
     });
   });
+const DOCUMENT_FLAGS = [
+  "view",
+  "location",
+  "inert",
+  "rootOwned",
+  "bodyOwned",
+  "headOwned",
+  "documentCtor",
+  "documentProto",
+];
+// DOMParser documents are about:blank; the DOMImplementation one inherits the page URL.
+const documentUrlBroken = (key, url) =>
+  key === "dom" ? !url?.startsWith("http://127.0.0.1:") : url !== "about:blank";
+// Each document is a fresh, inert, fully loaded Document owning its own tree.
+const documentBroken = (key, doc) =>
+  !doc?.view ||
+  DOCUMENT_FLAGS.some((flag) => !doc[flag]) ||
+  documentUrlBroken(key, doc.url) ||
+  doc.cookie !== "" ||
+  doc.ready !== "complete";
+const sanitizerBroken = (safe) =>
+  safe?.head !== "<title>parsed</title>" ||
+  safe?.body !== "<p><a>link</a></p><svg><a>vector</a></svg><math><mi>x</mi></math>";
+const importBroken = (imported) =>
+  imported?.owned !== true ||
+  imported.original !== true ||
+  imported.copied !== true ||
+  imported.text !== "link";
 export function parserErrors(value) {
   const errors = [];
   for (const key of ["distinct", "parent", "created"]) if (!value?.[key]) errors.push(key);
-  for (const key of ["dom", "unsafe", "safe"]) {
-    const doc = value?.[key];
-    if (
-      !doc?.view ||
-      !doc.location ||
-      !doc.inert ||
-      !doc.rootOwned ||
-      !doc.bodyOwned ||
-      !doc.headOwned ||
-      !doc.documentCtor ||
-      !doc.documentProto ||
-      (key === "dom" ? !doc.url?.startsWith("http://127.0.0.1:") : doc.url !== "about:blank") ||
-      doc.cookie !== "" ||
-      doc.ready !== "complete"
-    )
-      errors.push(key + " independent document");
-  }
-  if (
-    value?.safe?.head !== "<title>parsed</title>" ||
-    value?.safe?.body !== "<p><a>link</a></p><svg><a>vector</a></svg><math><mi>x</mi></math>"
-  )
-    errors.push("native default sanitizer");
-  if (
-    value?.import?.owned !== true ||
-    value.import.original !== true ||
-    value.import.copied !== true ||
-    value.import.text !== "link"
-  )
-    errors.push("native import");
+  for (const key of ["dom", "unsafe", "safe"])
+    if (documentBroken(key, value?.[key])) errors.push(key + " independent document");
+  if (sanitizerBroken(value?.safe)) errors.push("native default sanitizer");
+  if (importBroken(value?.import)) errors.push("native import");
   if (value?.invalid?.some((error) => error !== "TypeError")) errors.push("MIME validation");
   return errors;
 }

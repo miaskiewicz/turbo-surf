@@ -427,8 +427,17 @@ pub(crate) fn ua_rules(
     document: u32,
     graph: &Composition,
 ) -> Result<Vec<crate::live_stylesheets::ActiveRule>, String> {
+    // Chrome's fullscreen.css joins while the binding reports a fullscreen element
+    // (turbo-dom#82): getComputedStyle's used width / height of the fullscreen element read
+    // this layout (turbo-dom#316). A stack change bumps the tree version, so no cached
+    // layout outlives it.
+    let fullscreen = if tree.fullscreen_stack().is_empty() {
+        ""
+    } else {
+        turbo_dom_layout::style::fullscreen_user_agent_css()
+    };
     let css = format!(
-        "{} {} slot{{display:contents}}",
+        "{} {} slot{{display:contents}} {fullscreen}",
         turbo_dom_layout::style::user_agent_css(),
         crate::live_layout::LIVE_UA
     );

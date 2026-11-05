@@ -13,6 +13,17 @@
   frame, an A -> B -> A frame and `StorageAccessHandle.indexedDB`) matches as is. The event
   path's capture phase, per-listener microtask checkpoints and end-of-task transaction
   deactivation stay pinned as known gaps; they and the registry's realm lifetime moved to #193.
+- **Fixed (CSP, #110, #177, #154)**: `'strict-dynamic'` trusts only script-inserted
+  `<script>` elements (parser-inserted ones need a nonce; host sources, `'self'` and
+  `'unsafe-inline'` are dropped), for enforced and report-only policies. Source matching
+  follows Chrome 156 for `ws:`/`wss:` (`'self'` and `*` admit them, http(s) sources do not,
+  scheme upgrades need a non-exact port), so the network-transports ws->http workaround is
+  gone. Violation `blockedURI` names http(s)/ws(s) URLs in full (fragment and credentials
+  removed), cross-origin `fetch()` included; only `fetch` keeps Chrome's duplicate
+  report-only event. CSP3 fallback chains cover `worker-src`/`media-src`; their enforcement
+  waits on Workers and media loads (#190). `form-action` and `'strict-dynamic'` are no longer
+  reported as unsupported. Checked against a localhost Chrome 156 control
+  (`csp-directives-chrome156.json`); the CSP functions over cc 15 are decomposed.
 - **Fixed (canvas, #133)**: with a host text measurer installed (mcp, napi), canvas
   `measureText` no longer returns a plain object whose bounding-box, font-box and baseline
   fields were size ratios and whose width ignored `@font-face` faces. It returns the
@@ -34,8 +45,8 @@
   is now a dev-dependency only.
 - **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
   native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
-  with Chrome 156's handshake header order, cookies, origin and `connect-src` (ws/wss match
-  like http/https); `EventSource` streams over the page's fetch path with reconnection,
+  with Chrome 156's handshake header order, cookies, origin and `connect-src` (CSP3 ws/wss
+  source matching, #177); `EventSource` streams over the page's fetch path with reconnection,
   `retry` and `Last-Event-ID`. Transport reads are unref'd, so an open socket or stream
   never holds a render. Events, close codes, readyState transitions, frame types and the
   handshake are checked against a localhost Chrome 156 control

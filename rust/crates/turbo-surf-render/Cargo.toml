@@ -85,3 +85,5 @@ turbo-dom-browser-env = { version = "0.7.1", features = ["host-internals", "test
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }
 
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# The localhost WebSocket server in tests/network_transports_server.rs (permessage-deflate).
+flate2 = "1"

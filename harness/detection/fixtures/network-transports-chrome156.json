@@ -1,0 +1,615 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+  "collectorSha256": "86ea0514ca44e19b38b46c7111877e2579fcc9d2352680a82a3b53f82b5a997b",
+  "serverSha256": "dafc0ba619f5425cadef5ca736a319b00dddcc9fe47417b49ae2309bbcf8e446",
+  "fixtures": {
+    "network-transports-probe.js": "6951ea9c8907b7f3ba8ff6fc53cc1341b53c88fb8c99bbb57085299f86d8c56b",
+    "network-transports-csp-probe.js": "997225798045f9e2558bcea5d63684f9546788630f809d079708711a5077598a"
+  },
+  "flags": [
+    "--remote-debugging-pipe",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--use-mock-keychain",
+    "--password-store=basic",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "network-transports-probe.js": {
+      "webSocket": {
+        "connecting": ["ws://127.0.0.1:<port>/ws/echo", 0, "", "", "blob"],
+        "opened": [1, "chat", "", 0],
+        "buffered": 5,
+        "closing": [2, "ok", 4],
+        "echo": [
+          ["open", 1, true, "[object Event]", "chat", ""],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["text", "hello"]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["arraybuffer", [1, 2, 3]]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["arraybuffer", [4, 5, 6, 7]]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["arraybuffer", [98, 108, 111, 98, 33]]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["arraybuffer", [9, 8, 7]]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["text", "abcd"]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["text", 70000, "xxxx"]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["text", "été"]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["text", "pong:p1"]
+          ],
+          ["close", 3, true, "[object CloseEvent]", true, 4000, "done"]
+        ],
+        "serverClose": [
+          ["open", 1, true, "[object Event]", "", ""],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["blob", 3, "", [9, 8, 7]]
+          ],
+          ["close", 3, true, "[object CloseEvent]", true, 4321, "server bye"]
+        ],
+        "noCode": [
+          ["open", 1, true, "[object Event]", "", ""],
+          ["close", 3, true, "[object CloseEvent]", true, 1005, ""]
+        ],
+        "drop": [
+          ["open", 1, true, "[object Event]", "", ""],
+          ["close", 3, true, "[object CloseEvent]", false, 1006, ""]
+        ],
+        "badUtf8": [
+          ["open", 1, true, "[object Event]", "", ""],
+          ["error", 3, true, "[object Event]"],
+          ["close", 3, true, "[object CloseEvent]", false, 1006, ""]
+        ],
+        "reject": [
+          ["error", 3, true, "[object Event]"],
+          ["close", 3, true, "[object CloseEvent]", false, 1006, ""]
+        ],
+        "badAccept": [
+          ["error", 3, true, "[object Event]"],
+          ["close", 3, true, "[object CloseEvent]", false, 1006, ""]
+        ],
+        "badProtocol": [
+          ["error", 3, true, "[object Event]"],
+          ["close", 3, true, "[object CloseEvent]", false, 1006, ""]
+        ],
+        "unrequestedProtocol": [
+          ["error", 3, true, "[object Event]"],
+          ["close", 3, true, "[object CloseEvent]", false, 1006, ""]
+        ],
+        "deflate": [
+          [
+            "open",
+            1,
+            true,
+            "[object Event]",
+            "",
+            "permessage-deflate; server_no_context_takeover; client_no_context_takeover"
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["text", "squeeze squeeze squeeze"]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["text", "again again again"]
+          ],
+          [
+            "message",
+            1,
+            true,
+            "[object MessageEvent]",
+            "ws://127.0.0.1:<port>",
+            "",
+            ["arraybuffer", [9, 8, 7]]
+          ],
+          ["close", 3, true, "[object CloseEvent]", true, 1000, ""]
+        ],
+        "refused": [["error", 3], ["close", false, 1006, ""]],
+        "handshakes": [
+          {
+            "path": "/ws/echo",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"],
+              ["Sec-WebSocket-Protocol", "chat, superchat"]
+            ]
+          },
+          {
+            "path": "/ws/echo",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          },
+          {
+            "path": "/ws/echo",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          },
+          {
+            "path": "/ws/echo",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          },
+          {
+            "path": "/ws/echo",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          },
+          {
+            "path": "/ws/reject",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          },
+          {
+            "path": "/ws/bad-accept",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          },
+          {
+            "path": "/ws/echo?proto=bogus",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"],
+              ["Sec-WebSocket-Protocol", "chat"]
+            ]
+          },
+          {
+            "path": "/ws/echo?proto=bogus",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          },
+          {
+            "path": "/ws/echo?deflate",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "Upgrade"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["User-Agent", "<user-agent>"],
+              ["Upgrade", "websocket"],
+              ["Origin", "http://127.0.0.1:<port>"],
+              ["Sec-WebSocket-Version", "13"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"],
+              ["Sec-WebSocket-Key", "<16-byte base64>"],
+              ["Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits"]
+            ]
+          }
+        ]
+      },
+      "webSocketStream": {
+        "globals": ["function", "function"],
+        "proto": ["close", "closed", "constructor", "opened", "url"],
+        "errorProto": ["closeCode", "constructor", "reason"],
+        "construct": [["throw", "TypeError"], ["throw", "SyntaxError"], ["throw", "SyntaxError"]],
+        "error": ["WebSocketError", "why", 4002, "r", true],
+        "errorChecks": [["throw", "InvalidAccessError"], ["ok", {}]],
+        "url": "ws://127.0.0.1:<port>/ws/echo",
+        "opened": [
+          ["extensions", "protocol", "readable", "writable"],
+          "chat",
+          "",
+          "[object ReadableStream]",
+          "[object WritableStream]"
+        ],
+        "reads": [["text", "hi"], ["arraybuffer", [7, 8]]],
+        "closed": [["closeCode", "reason"], 4001, "x"],
+        "afterClose": ["read", true],
+        "rejected": [["WebSocketError", null, ""], ["WebSocketError", 1006, ""]],
+        "serverClose": [4400, "stream bye"]
+      },
+      "eventSource": {
+        "global": "function",
+        "constants": [0, 1, 2],
+        "proto": [
+          "CLOSED",
+          "CONNECTING",
+          "OPEN",
+          "close",
+          "constructor",
+          "onerror",
+          "onmessage",
+          "onopen",
+          "readyState",
+          "url",
+          "withCredentials"
+        ],
+        "construct": [["throw", "TypeError"], ["throw", "SyntaxError"]],
+        "stream": [
+          ["http://127.0.0.1:<port>/sse/stream", 0, false],
+          ["open", 1, "[object Event]"],
+          ["message", 1, "[object MessageEvent]", "one", "7", "http://127.0.0.1:<port>"],
+          ["custom", 1, "[object MessageEvent]", "two\nthree", "7", "http://127.0.0.1:<port>"],
+          ["message", 1, "[object MessageEvent]", "four", "7", "http://127.0.0.1:<port>"],
+          ["message", 1, "[object MessageEvent]", "five", "", "http://127.0.0.1:<port>"],
+          ["message", 1, "[object MessageEvent]", "six", "9", "http://127.0.0.1:<port>"],
+          ["error", 0, "[object Event]"],
+          ["open", 1, "[object Event]"],
+          ["message", 1, "[object MessageEvent]", "again", "9", "http://127.0.0.1:<port>"],
+          ["error", 0, "[object Event]"],
+          ["error", 2, "[object Event]"],
+          ["closed", 2]
+        ],
+        "wrongType": [
+          ["http://127.0.0.1:<port>/sse/wrong-type", 0, false],
+          ["error", 2, "[object Event]"],
+          ["closed", 2]
+        ],
+        "missing": [
+          ["http://127.0.0.1:<port>/sse/missing", 0, true],
+          ["error", 2, "[object Event]"],
+          ["closed", 2]
+        ],
+        "closeEarly": [
+          ["http://127.0.0.1:<port>/sse/forever", 0, false],
+          ["open", 1, "[object Event]"],
+          ["message", 1, "[object MessageEvent]", "first", "", "http://127.0.0.1:<port>"],
+          ["closed", 2]
+        ],
+        "requests": [
+          {
+            "path": "/sse/stream",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "keep-alive"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["sec-ch-ua-platform", "\"macOS\""],
+              ["User-Agent", "<user-agent>"],
+              ["Accept", "text/event-stream"],
+              [
+                "sec-ch-ua",
+                "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+              ],
+              ["sec-ch-ua-mobile", "?0"],
+              ["Sec-Fetch-Site", "same-origin"],
+              ["Sec-Fetch-Mode", "cors"],
+              ["Sec-Fetch-Dest", "empty"],
+              ["Referer", "http://127.0.0.1:<port>/"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"]
+            ]
+          },
+          {
+            "path": "/sse/stream",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "keep-alive"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["sec-ch-ua-platform", "\"macOS\""],
+              ["User-Agent", "<user-agent>"],
+              ["Accept", "text/event-stream"],
+              [
+                "sec-ch-ua",
+                "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+              ],
+              ["sec-ch-ua-mobile", "?0"],
+              ["Last-Event-ID", "9"],
+              ["Sec-Fetch-Site", "same-origin"],
+              ["Sec-Fetch-Mode", "cors"],
+              ["Sec-Fetch-Dest", "empty"],
+              ["Referer", "http://127.0.0.1:<port>/"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"]
+            ]
+          },
+          {
+            "path": "/sse/stream",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "keep-alive"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["sec-ch-ua-platform", "\"macOS\""],
+              ["User-Agent", "<user-agent>"],
+              ["Accept", "text/event-stream"],
+              [
+                "sec-ch-ua",
+                "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+              ],
+              ["sec-ch-ua-mobile", "?0"],
+              ["Last-Event-ID", "10"],
+              ["Sec-Fetch-Site", "same-origin"],
+              ["Sec-Fetch-Mode", "cors"],
+              ["Sec-Fetch-Dest", "empty"],
+              ["Referer", "http://127.0.0.1:<port>/"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"]
+            ]
+          },
+          {
+            "path": "/sse/wrong-type",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "keep-alive"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["sec-ch-ua-platform", "\"macOS\""],
+              ["User-Agent", "<user-agent>"],
+              ["Accept", "text/event-stream"],
+              [
+                "sec-ch-ua",
+                "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+              ],
+              ["sec-ch-ua-mobile", "?0"],
+              ["Sec-Fetch-Site", "same-origin"],
+              ["Sec-Fetch-Mode", "cors"],
+              ["Sec-Fetch-Dest", "empty"],
+              ["Referer", "http://127.0.0.1:<port>/"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"]
+            ]
+          },
+          {
+            "path": "/sse/missing",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "keep-alive"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["sec-ch-ua-platform", "\"macOS\""],
+              ["User-Agent", "<user-agent>"],
+              ["Accept", "text/event-stream"],
+              [
+                "sec-ch-ua",
+                "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+              ],
+              ["sec-ch-ua-mobile", "?0"],
+              ["Sec-Fetch-Site", "same-origin"],
+              ["Sec-Fetch-Mode", "cors"],
+              ["Sec-Fetch-Dest", "empty"],
+              ["Referer", "http://127.0.0.1:<port>/"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"]
+            ]
+          },
+          {
+            "path": "/sse/forever",
+            "headers": [
+              ["Host", "127.0.0.1:<port>"],
+              ["Connection", "keep-alive"],
+              ["Pragma", "no-cache"],
+              ["Cache-Control", "no-cache"],
+              ["sec-ch-ua-platform", "\"macOS\""],
+              ["User-Agent", "<user-agent>"],
+              ["Accept", "text/event-stream"],
+              [
+                "sec-ch-ua",
+                "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"HeadlessChrome\";v=\"156\""
+              ],
+              ["sec-ch-ua-mobile", "?0"],
+              ["Sec-Fetch-Site", "same-origin"],
+              ["Sec-Fetch-Mode", "cors"],
+              ["Sec-Fetch-Dest", "empty"],
+              ["Referer", "http://127.0.0.1:<port>/"],
+              ["Accept-Encoding", "gzip, deflate, br, zstd"],
+              ["Cookie", "wsc=1"]
+            ]
+          }
+        ]
+      },
+      "webTransport": {
+        "global": "function",
+        "proto": [
+          "close",
+          "closed",
+          "constructor",
+          "createBidirectionalStream",
+          "createUnidirectionalStream",
+          "datagrams",
+          "incomingBidirectionalStreams",
+          "incomingUnidirectionalStreams",
+          "protocol",
+          "ready"
+        ],
+        "construct": [["throw", "SyntaxError"], ["throw", "SyntaxError"]],
+        "failure": [
+          ["WebTransportError", "Opening handshake failed.", "session", null, true],
+          ["WebTransportError", "Opening handshake failed.", "session", null, true]
+        ]
+      }
+    },
+    "network-transports-csp-probe.js": {
+      "sameOrigin": [["created", 0], ["open", 1], ["close", true, 1005]],
+      "otherHost": [["created", 3], ["error", 3]],
+      "sourceSame": [["created", 0], ["message", "first"]],
+      "sourceOther": [["created", 0], ["error", 2]],
+      "violations": [
+        ["ws://localhost:<port>/ws/echo", "connect-src", "connect-src", "enforce"],
+        ["http://localhost:<port>/sse/forever", "connect-src", "connect-src", "enforce"]
+      ]
+    }
+  }
+}

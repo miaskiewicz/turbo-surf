@@ -120,6 +120,7 @@ deno_core::extension!(
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
         crate::live_layout_backend::op_live_image_box,
+        crate::live_layout_backend::op_live_element_used_size,
         crate::live_layout_backend::op_live_image_loaded,
         crate::web_fonts::op_font_face_parse,
         crate::web_fonts::op_font_face_attach,

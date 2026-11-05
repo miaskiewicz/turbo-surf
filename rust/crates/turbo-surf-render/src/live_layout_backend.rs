@@ -271,10 +271,19 @@ pub(crate) fn op_live_image_box<'s>(
 ) -> Result<Option<ImageBox>, JsErrorBox> {
     image_box(scope, receiver).map_err(JsErrorBox::generic)
 }
-fn image_box<'s>(
+/// A rendered element's first border-box fragment with its used box metrics, the layout
+/// it came from and its source id; `None` while the element has no box (disconnected, no
+/// browsing context, `display:none` on it or an ancestor, `display:contents`).
+type RenderedBox = (
+    std::rc::Rc<LayoutView>,
+    turbo_dom_layout::layout_snapshot::SourceId,
+    turbo_dom_layout::layout_snapshot::Rect,
+    turbo_dom_layout::layout_snapshot::UsedBoxMetrics,
+);
+fn rendered_box<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
-) -> Result<Option<ImageBox>, String> {
+) -> Result<Option<RenderedBox>, String> {
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
     if !input.connected || !input.browsing_context {
         return Ok(None);
@@ -295,12 +304,19 @@ fn image_box<'s>(
     if source.excluded_from_layout || view.omitted.contains(&id) || contents {
         return Ok(None);
     }
-    let Some((rect, used)) = source.fragment_indices.iter().find_map(|&index| {
+    let found = source.fragment_indices.iter().find_map(|&index| {
         let fragment = &view.snapshot.fragments()[index];
         (fragment.kind == turbo_dom_layout::layout_snapshot::GeometryKind::BorderBox)
             .then_some(fragment.used_box.map(|used| (fragment.rect, used)))
             .flatten()
-    }) else {
+    });
+    Ok(found.map(|(rect, used)| (view.clone(), id, rect, used)))
+}
+fn image_box<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<ImageBox>, String> {
+    let Some((view, id, rect, used)) = rendered_box(scope, receiver)? else {
         return Ok(None);
     };
     let zoom = view.zoom(id);
@@ -317,6 +333,46 @@ fn image_box<'s>(
         x: rect.x as i32,
         y: rect.y as i32,
     }))
+}
+/// The binding's `layoutUsedSize(element)` (turbo-dom#316, #353): [border-box width,
+/// border-box height, content-box width, content-box height, font size] in the element's
+/// unzoomed CSS px, the used values getComputedStyle reports for width / height and
+/// resolves `%` / `em` translates against; `None` for an element without a box of its own
+/// (a non-atomic inline fragment included).
+#[op2(reentrant)]
+#[serde]
+pub(crate) fn op_live_element_used_size<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<[f64; 5]>, JsErrorBox> {
+    let rendered = rendered_box(scope, receiver).map_err(JsErrorBox::generic)?;
+    Ok(rendered.and_then(|(view, id, rect, used)| used_size(&view, id, rect, used)))
+}
+fn used_size(
+    view: &LayoutView,
+    id: turbo_dom_layout::layout_snapshot::SourceId,
+    rect: turbo_dom_layout::layout_snapshot::Rect,
+    used: turbo_dom_layout::layout_snapshot::UsedBoxMetrics,
+) -> Option<[f64; 5]> {
+    if used.inline_fragment {
+        return None;
+    }
+    let zoom = f64::from(view.zoom(id));
+    let font_size = view
+        .styles
+        .get(&id)
+        .and_then(|entry| entry.style.get("font-size"))
+        .and_then(|value| value.strip_suffix("px"))
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(16.0 * zoom);
+    let unzoom = |size: f32| f64::from(size) / zoom;
+    Some([
+        unzoom(rect.width),
+        unzoom(rect.height),
+        unzoom(used.content_width),
+        unzoom(used.content_height),
+        font_size / zoom,
+    ])
 }
 #[derive(Serialize)]
 pub(crate) struct Geometry {

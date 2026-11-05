@@ -13,6 +13,18 @@
   waits on Workers and media loads (#190). `form-action` and `'strict-dynamic'` are no longer
   reported as unsupported. Checked against a localhost Chrome 156 control
   (`csp-directives-chrome156.json`); the CSP functions over cc 15 are decomposed.
+- **Fixed (canvas, #133)**: with a host text measurer installed (mcp, napi), canvas
+  `measureText` no longer returns a plain object whose bounding-box, font-box and baseline
+  fields were size ratios and whose width ignored `@font-face` faces. It returns the
+  binding's branded `TextMetrics` over the faces `set_canvas_fonts` registers (glyph ink
+  bounds, font metrics, baselines, `textAlign`/`textBaseline` offsets). Checked against a
+  localhost Chrome 156 control over the IBM Plex Mono fixture
+  (`canvas-measure-text-chrome156.json`).
+- **Fixed (web APIs, #165)**: the 194 members the expanded inventory missed are present with
+  Chrome 156's descriptor kinds. XMLHttpRequest's two are surf's (#168); the rest came with
+  the turbo-dom repins (turbo-dom#323, #340, #358). `tests/interface_members.rs` checks every
+  own prototype member of those 21 interfaces against a Chrome 156 control
+  (`interface-members-chrome156.json`).
 - **Fixed (network transports, #179)**: `wss:` connects over surf's Chrome https transport
   (wreq/BoringSSL) instead of tokio-rustls, so its ClientHello is the https one with only
   Chrome's WebSocket changes: ALPN `http/1.1` only and no ALPS. The handshake head is

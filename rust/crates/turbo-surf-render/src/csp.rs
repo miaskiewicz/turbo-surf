@@ -551,6 +551,9 @@ impl Policy {
 /// full, cross-origin ones included, without fragment or credentials. `None` for other
 /// schemes, whose report form the caller keeps.
 pub fn network_blocked_uri(target: &str) -> Option<String> {
+    if let Some(scheme) = opaque_scheme_blocked_uri(target) {
+        return Some(scheme.to_owned());
+    }
     let mut url = url::Url::parse(target).ok()?;
     if !matches!(url.scheme(), "http" | "https" | "ws" | "wss") {
         return None;
@@ -565,8 +568,15 @@ pub fn network_blocked_uri(target: &str) -> Option<String> {
 /// violation target as the scheme alone (`blob` / `data`), never the full URL, so
 /// the opaque origin and its random key never leak into the report. Case-insensitive
 /// on the scheme, matching the URL parser; `None` for any other target. #201.
-pub fn opaque_scheme_blocked_uri(_target: &str) -> Option<&'static str> {
-    None
+pub fn opaque_scheme_blocked_uri(target: &str) -> Option<&'static str> {
+    let scheme = target.split(':').next()?;
+    if scheme.eq_ignore_ascii_case("blob") {
+        Some("blob")
+    } else if scheme.eq_ignore_ascii_case("data") {
+        Some("data")
+    } else {
+        None
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -988,8 +998,16 @@ mod tests {
             network_blocked_uri("wss://x.test/s#f").as_deref(),
             Some("wss://x.test/s")
         );
-        assert_eq!(network_blocked_uri("data:text/plain,x"), None);
         assert_eq!(network_blocked_uri("not a url"), None);
+        // #201: blob: / data: now surface as scheme-only strings rather than None.
+        assert_eq!(
+            network_blocked_uri("data:text/plain,x").as_deref(),
+            Some("data")
+        );
+        assert_eq!(
+            network_blocked_uri("blob:http://a.test/dead-beef").as_deref(),
+            Some("blob")
+        );
     }
 
     #[test]

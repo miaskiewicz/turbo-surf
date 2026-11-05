@@ -481,12 +481,20 @@ fn resolve<'s>(
     viewport: &Viewport,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
     let view = resolve_layout(scope, input, viewport)?;
-    // A layout that used `@font-face` families starts their loads (turbo-surf#130).
-    if !view.fonts.is_empty()
-        && !view.fonts_reported.get()
-        && crate::web_fonts::report_used(scope, &view.fonts)
-    {
-        view.fonts_reported.set(true);
+    // A layout that used `@font-face` families starts their loads (turbo-surf#130) in
+    // the laid-out document's own realm: a frame's layout can run while another
+    // realm's script is current (turbo-surf#166).
+    if !view.fonts.is_empty() && !view.fonts_reported.get() {
+        let reported = match input.owner_context {
+            Some(context) => {
+                let scope = &mut v8::ContextScope::new(scope, context);
+                crate::web_fonts::report_used(scope, &view.fonts)
+            }
+            None => crate::web_fonts::report_used(scope, &view.fonts),
+        };
+        if reported {
+            view.fonts_reported.set(true);
+        }
     }
     Ok(view)
 }

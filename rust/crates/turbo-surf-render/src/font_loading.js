@@ -376,9 +376,9 @@
           startLoad(face);
       }
     }
-    get ready() {
-      // Chrome has laid the page out by the time a script waits on ready; surf lays
-      // out on demand, so a wait first runs the style/layout that starts used faces.
+    // Chrome's style update starts the used CSS faces; surf lays out on demand, so
+    // run that style/layout here when an unloaded CSS face could be in use.
+    styleUpdate() {
       if (this.#faces().some((face) => state(face).css && state(face).status === "unloaded")) {
         try {
           const root = __intrinsicApply(__fontRoot, __fontDocument, []);
@@ -386,6 +386,18 @@
           if (root) __intrinsicApply(__fontRect, root, []);
         } catch {}
       }
+      return this.#faces()
+        .filter((face) => state(face).css && state(face).status === "loading")
+        .map((face) =>
+          state(face).loaded.then(
+            () => {},
+            () => {},
+          ),
+        );
+    }
+    get ready() {
+      // Chrome has laid the page out by the time a script waits on ready.
+      __intrinsicApply(styleUpdate, this, []);
       return this.#state().ready;
     }
     get status() {
@@ -473,9 +485,21 @@
       },
     });
   }
+  const styleUpdate = FontFaceSet.prototype.styleUpdate;
   const fonts = new FontFaceSet(__fontToken);
   const used = fonts.used;
   delete FontFaceSet.prototype.used;
+  delete FontFaceSet.prototype.styleUpdate;
+  // The document-load wait (runtime.rs) runs the style update once its other
+  // resources are in: used CSS faces start, and their loads delay the load event
+  // as in Chrome (turbo-surf#166). Returns the started loads (never rejecting).
+  __G.fontStyleUpdate = () => {
+    try {
+      return __intrinsicApply(styleUpdate, fonts, []);
+    } catch {
+      return [];
+    }
+  };
   __G.fontLayoutUsed = (names) => {
     try {
       __intrinsicApply(used, fonts, [names]);

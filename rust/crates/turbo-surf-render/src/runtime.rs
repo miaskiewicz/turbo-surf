@@ -10716,8 +10716,23 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
   return __framePromiseAll(styles);
 };
 __G.pendingResourceCount=()=>__resourcePromises.size+__dictionaryPending+__dictionaryTaskCount;
-__G.documentLoadReady=()=>__setSize(__resourcePromises)===0 && ops.op_frame_pending()===0;
-__G.waitForDocumentResources=()=>{const pending=__list();__intrinsicApply(__intrinsicSetEach,__resourcePromises,[promise=>__listPush(pending,promise)]);return __framePromiseAll(pending);};
+// Once the other load resources are in, the style update starts the used @font-face
+// faces (font_loading.js), and their loads delay the load event as in Chrome
+// (turbo-surf#166). It runs once per document load; surf lays out on demand.
+let __fontStyleUpdated=false;
+const __fontLoadResources=()=>{
+  if(__fontStyleUpdated||typeof __G.fontStyleUpdate!=="function")return;
+  __fontStyleUpdated=true;
+  const loads=__G.fontStyleUpdate();
+  for(let index=0;index<loads.length;index++)__trackResource(loads[index]);
+};
+__G.documentLoadReady=()=>{
+  if(__setSize(__resourcePromises)!==0||ops.op_frame_pending()!==0)return false;
+  __fontLoadResources();
+  return __setSize(__resourcePromises)===0;
+};
+const __documentResourcesSettled=()=>{const pending=__list();__intrinsicApply(__intrinsicSetEach,__resourcePromises,[promise=>__listPush(pending,promise)]);return __framePromiseAll(pending);};
+__G.waitForDocumentResources=async()=>{await __documentResourcesSettled();__fontLoadResources();await __documentResourcesSettled();};
 function __fireScriptEvent(el, kind, err) {
   // Use the same private native event path as image and stylesheet loads.
   // Plain records are not Events and cannot reach addEventListener handlers.

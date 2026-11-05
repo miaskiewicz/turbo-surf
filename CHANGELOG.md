@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
+  native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
+  with Chrome 156's handshake header order, cookies, origin and `connect-src` (ws/wss match
+  like http/https); `EventSource` streams over the page's fetch path with reconnection,
+  `retry` and `Last-Event-ID`. Transport reads are unref'd, so an open socket or stream
+  never holds a render. Events, close codes, readyState transitions, frame types and the
+  handshake are checked against a localhost Chrome 156 control
+  (`network-transports-chrome156.json`). `WebTransport` validates like Chrome and fails its
+  handshake honestly; HTTP/3 is split to #175.
 - **Changed (deps)**: turbo-dom crates come from turbo-dom's `release/0.8.0` branch
   (`f4c13a39`, a `[patch.crates-io]` git pin until 0.8.0 is on crates.io). The binding's new
   `ActivationQuery::Sticky` (media autoplay, turbo-dom#323) is answered from sticky activation.

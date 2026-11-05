@@ -71,6 +71,45 @@ function serveResource(request, response) {
   response.end(body.slice(Number(range[1]), Number(range[2]) + 1));
 }
 
+const PIXEL_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=";
+
+// The page script that inserts (and then mutates) a dictionary link after parse.
+function dynamicLinkScript(item, target) {
+  if (!item.dynamic) return "";
+  const create = item.foreign
+    ? "document.createElementNS('http://www.w3.org/2000/svg','link')"
+    : "document.createElement('link')";
+  const attach = item.shadow
+    ? `const host=document.createElement('div');document.body.append(host);host.attachShadow({mode:${JSON.stringify(item.shadow)}}).append(link);link.addEventListener('load',()=>dictionaryEvents.push(['shadow:load',Date.now(),document.readyState]));`
+    : "document.head.append(link);";
+  const remove = item.remove
+    ? "link.addEventListener('load',()=>dictionaryEvents.push(['detached:load',Date.now(),document.readyState]));setTimeout(()=>link.remove(),50);"
+    : "";
+  const relChange = item.relChange ? "setTimeout(()=>link.rel='alternate',50);" : "";
+  const hrefChange = item.hrefChange
+    ? `setTimeout(()=>link.href=${JSON.stringify(target + "&version=2")},50);`
+    : "";
+  return `const link=${create};link.setAttribute('rel','compression-dictionary');link.setAttribute('href',${JSON.stringify(target)});${attach}${remove}${relChange}${hrefChange}`;
+}
+
+// The subresource that holds the load event open past the dictionary fetch.
+function delayedMarkup(item, id) {
+  if (item.lifecycleDelay === "image") return `<img src="/delayed-image?case=${id}">`;
+  if (!item.lifecycleDelay) return "";
+  return `<script src="/delayed-script?case=${id}"${item.lifecycleDelay === "defer" ? " defer" : ""}></script>`;
+}
+
+const parserLinked = (item) => !item.head && (!item.header || item.both) && !item.dynamic;
+
+export function dictionaryPage(item, id, target) {
+  const link = `<link rel="compression-dictionary" href="${target}"${item.integrity ? ` integrity="${item.integrity}"` : ""}>`;
+  const timers = item.lifecycleDelay
+    ? "setTimeout(()=>dictionaryEvents.push(['timer',Date.now(),document.readyState]),0);setTimeout(()=>dictionaryEvents.push(['future-timer',Date.now(),document.readyState]),100);"
+    : "";
+  return `<!doctype html><head><script>globalThis.dictionaryEvents=[];for(const type of ['DOMContentLoaded','load'])addEventListener(type,()=>dictionaryEvents.push([type,Date.now(),document.readyState]));for(const type of ['load','error'])document.addEventListener(type,e=>{if(e.target.localName==='link')dictionaryEvents.push(['link:'+type,Date.now(),document.readyState])},true);</script>${parserLinked(item) ? link : ""}</head><body><script>${dynamicLinkScript(item, target)}${timers}</script>${delayedMarkup(item, id)}`;
+}
+
 export async function startDictionaryServers() {
   const cert = new X509Certificate(
     readFileSync(
@@ -88,15 +127,15 @@ export async function startDictionaryServers() {
     sockets = new Set(),
     timers = new Set();
   let primary, peer;
-  const handler = (request, response) => {
-    const url = new URL(request.url, "https://localhost"),
-      id = Number(url.searchParams.get("case") || 0),
-      item = dictionaryCases[id];
-    if (url.pathname === "/wire") {
-      response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify(wire));
-      return;
-    }
+  // Finish a response 600ms later, keeping the timer cancellable on close().
+  const later = (finish) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      finish();
+    }, 600);
+    timers.add(timer);
+  };
+  const record = (request, response, url, id) => {
     const entry = {
       case: id,
       path: url.pathname,
@@ -110,46 +149,31 @@ export async function startDictionaryServers() {
     response.on("close", () => {
       entry.aborted = !response.writableFinished;
     });
-    if (url.pathname === "/dictionary") {
-      response.setHeader(
-        "Use-As-Dictionary",
-        `match=${JSON.stringify(item.match || "/resource-" + id)}, id="case-${id}"`,
-      );
-      response.setHeader("Cache-Control", "max-age=600");
-      if (item.cors) response.setHeader("Access-Control-Allow-Origin", "*");
-      const timer = setTimeout(() => {
-        timers.delete(timer);
-        entry.finished = Date.now();
-        response.end("authored reusable compression dictionary case " + id);
-      }, 600);
-      timers.add(timer);
-      return;
-    }
-    if (url.pathname === "/delayed-script" || url.pathname === "/delayed-image") {
-      const image = url.pathname === "/delayed-image";
-      response.setHeader("Content-Type", image ? "image/png" : "application/javascript");
-      const timer = setTimeout(() => {
-        timers.delete(timer);
-        response.end(
-          image
-            ? Buffer.from(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=",
-                "base64",
-              )
-            : "dictionaryEvents.push(['script',Date.now(),document.readyState]);",
-        );
-      }, 600);
-      timers.add(timer);
-      return;
-    }
-    if (url.pathname.startsWith("/resource-")) {
-      serveResource(request, response);
-      return;
-    }
-    if (url.pathname !== "/page") {
-      response.end("");
-      return;
-    }
+    return entry;
+  };
+  const serveDictionary = (response, item, id, entry) => {
+    response.setHeader(
+      "Use-As-Dictionary",
+      `match=${JSON.stringify(item.match || "/resource-" + id)}, id="case-${id}"`,
+    );
+    response.setHeader("Cache-Control", "max-age=600");
+    if (item.cors) response.setHeader("Access-Control-Allow-Origin", "*");
+    later(() => {
+      entry.finished = Date.now();
+      response.end("authored reusable compression dictionary case " + id);
+    });
+  };
+  const serveDelayed = (response, image) => {
+    response.setHeader("Content-Type", image ? "image/png" : "application/javascript");
+    later(() =>
+      response.end(
+        image
+          ? Buffer.from(PIXEL_PNG, "base64")
+          : "dictionaryEvents.push(['script',Date.now(),document.readyState]);",
+      ),
+    );
+  };
+  const servePage = (response, item, id) => {
     response.setHeader("Content-Type", "text/html");
     response.setHeader("Cache-Control", "no-store");
     response.setHeader(
@@ -159,19 +183,26 @@ export async function startDictionaryServers() {
     if (item.csp) response.setHeader("Content-Security-Policy", item.csp);
     const target = (item.cross ? peer : primary) + "/dictionary?case=" + id;
     if (item.header) response.setHeader("Link", `<${target}>; rel="compression-dictionary"`);
-    const link = `<link rel="compression-dictionary" href="${target}"${item.integrity ? ` integrity="${item.integrity}"` : ""}>`;
-    const dynamicScript = item.dynamic
-      ? `const link=${item.foreign ? "document.createElementNS('http://www.w3.org/2000/svg','link')" : "document.createElement('link')"};link.setAttribute('rel','compression-dictionary');link.setAttribute('href',${JSON.stringify(target)});${item.shadow ? `const host=document.createElement('div');document.body.append(host);host.attachShadow({mode:${JSON.stringify(item.shadow)}}).append(link);link.addEventListener('load',()=>dictionaryEvents.push(['shadow:load',Date.now(),document.readyState]));` : "document.head.append(link);"}${item.remove ? "link.addEventListener('load',()=>dictionaryEvents.push(['detached:load',Date.now(),document.readyState]));setTimeout(()=>link.remove(),50);" : ""}${item.relChange ? "setTimeout(()=>link.rel='alternate',50);" : ""}${item.hrefChange ? `setTimeout(()=>link.href=${JSON.stringify(target + "&version=2")},50);` : ""}`
-      : "";
-    const delayed =
-      item.lifecycleDelay === "image"
-        ? `<img src="/delayed-image?case=${id}">`
-        : item.lifecycleDelay
-          ? `<script src="/delayed-script?case=${id}"${item.lifecycleDelay === "defer" ? " defer" : ""}></script>`
-          : "";
-    response.end(
-      `<!doctype html><head><script>globalThis.dictionaryEvents=[];for(const type of ['DOMContentLoaded','load'])addEventListener(type,()=>dictionaryEvents.push([type,Date.now(),document.readyState]));for(const type of ['load','error'])document.addEventListener(type,e=>{if(e.target.localName==='link')dictionaryEvents.push(['link:'+type,Date.now(),document.readyState])},true);</script>${!item.head && (!item.header || item.both) && !item.dynamic ? link : ""}</head><body><script>${dynamicScript}${item.lifecycleDelay ? "setTimeout(()=>dictionaryEvents.push(['timer',Date.now(),document.readyState]),0);setTimeout(()=>dictionaryEvents.push(['future-timer',Date.now(),document.readyState]),100);" : ""}</script>${delayed}`,
-    );
+    response.end(dictionaryPage(item, id, target));
+  };
+  const route = (request, response, url, id, entry) => {
+    const item = dictionaryCases[id];
+    if (url.pathname === "/dictionary") return serveDictionary(response, item, id, entry);
+    if (url.pathname === "/delayed-script" || url.pathname === "/delayed-image")
+      return serveDelayed(response, url.pathname === "/delayed-image");
+    if (url.pathname.startsWith("/resource-")) return serveResource(request, response);
+    if (url.pathname !== "/page") return response.end("");
+    servePage(response, item, id);
+  };
+  const handler = (request, response) => {
+    const url = new URL(request.url, "https://localhost"),
+      id = Number(url.searchParams.get("case") || 0);
+    if (url.pathname === "/wire") {
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify(wire));
+      return;
+    }
+    route(request, response, url, id, record(request, response, url, id));
   };
   const servers = [
     createServer({ key, cert: cert.toString() }, handler),

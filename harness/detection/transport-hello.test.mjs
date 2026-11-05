@@ -35,12 +35,11 @@ test("TLS parser rejects truncated input before accessing random or secret bytes
   assert.throws(() => parseClientHello(Buffer.from([22])), /truncated ClientHello/);
 });
 
-function helloRecord() {
-  const u16 = (value) => Buffer.from([value >> 8, value & 255]);
-  const vector = (bytes) => Buffer.concat([u16(bytes.length), bytes]);
-  const alpn = vector(Buffer.from([2, 104, 50, 8, ...Buffer.from("http/1.1")]));
-  const shares = vector(Buffer.concat([u16(29), vector(Buffer.alloc(32, 9))]));
-  const extensions = Buffer.concat([u16(16), vector(alpn), u16(51), vector(shares)]);
+const u16 = (value) => Buffer.from([value >> 8, value & 255]);
+const vector = (bytes) => Buffer.concat([u16(bytes.length), bytes]);
+const extension = (type, body) => Buffer.concat([u16(type), vector(body)]);
+
+function helloRecord(extensions = defaultExtensions()) {
   const body = Buffer.concat([
     u16(0x0303),
     Buffer.alloc(32, 7),
@@ -55,6 +54,49 @@ function helloRecord() {
   ]);
   return Buffer.concat([Buffer.from([22, 3, 1]), vector(handshake)]);
 }
+
+function defaultExtensions() {
+  const alpn = vector(Buffer.from([2, 104, 50, 8, ...Buffer.from("http/1.1")]));
+  const shares = vector(Buffer.concat([u16(29), vector(Buffer.alloc(32, 9))]));
+  return Buffer.concat([extension(16, alpn), extension(51, shares)]);
+}
+
+test("ClientHello parser decodes uint16 lists, root ids and leaves other extensions opaque", () => {
+  const hello = parseClientHello(
+    helloRecord(
+      Buffer.concat([
+        extension(10, vector(Buffer.concat([u16(29), u16(23)]))),
+        extension(13, vector(u16(0x0403))),
+        extension(43, Buffer.from([4, 3, 4, 3, 3])),
+        extension(51764, Buffer.from([0, 2, 1, 2])),
+        extension(0, Buffer.from([1, 2, 3])),
+      ]),
+    ),
+  );
+  assert.deepEqual(hello.extensions, [
+    { type: 10, length: 6, values: [29, 23] },
+    { type: 13, length: 4, values: [0x0403] },
+    { type: 43, length: 5, values: [0x0304, 0x0303] },
+    { type: 51764, length: 4, publicRootIds: "00020102" },
+    { type: 0, length: 3 },
+  ]);
+});
+
+test("ClientHello parser rejects malformed extension bodies", () => {
+  const cases = [
+    [extension(10, Buffer.from([0, 1, 7])), /invalid uint16 list/],
+    [extension(16, Buffer.from([0, 5, 2])), /invalid ALPN protocol list/],
+    [extension(16, vector(Buffer.from([0]))), /invalid ALPN protocol/],
+    [extension(16, vector(Buffer.from([4, 104]))), /invalid ALPN protocol/],
+    [extension(51, Buffer.from([0])), /invalid key share list/],
+    [extension(51, vector(Buffer.from([0, 29]))), /truncated key share/],
+    [extension(51, vector(Buffer.from([0, 29, 0, 9, 1]))), /truncated key share body/],
+    [Buffer.from([0, 16, 0]), /truncated TLS extension/],
+    [Buffer.from([0, 16, 0, 9, 1]), /truncated TLS extension body/],
+  ];
+  for (const [extensions, error] of cases)
+    assert.throws(() => parseClientHello(helloRecord(extensions)), error);
+});
 
 test("ClientHello parser retains TLS versions, ALPN and key share capabilities", () => {
   const hello = parseClientHello(helloRecord());

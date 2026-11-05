@@ -82,6 +82,78 @@ async function waitForStall(t, ready, finished) {
   }
 }
 
+function assertOwnedLeader(owner, initial) {
+  const leader = initial.find((row) => row.pid === owner.pid);
+  assert.ok(leader, "OS independently sees the captured Chrome leader");
+  assert.equal(leader.group, owner.pid);
+  assert.ok(leader.command.includes(`--user-data-dir=${owner.profile}`));
+}
+
+function assertControlledExit(t, result) {
+  assert.equal(
+    t.signal.aborted,
+    false,
+    "an outer timeout cannot stand in for the controlled abort",
+  );
+  assert.equal(result.aborted, true);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.error, null);
+  assert.equal(result.signal, null, "cooperative collector exits before the cleanup-only KILL");
+  assert.ok(Number.isInteger(result.code) && result.code !== 0);
+}
+
+// A PID still alive must belong to a different process than the one observed.
+function assertNoSurvivors(observed) {
+  for (const [pid, prior] of observed) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (error.code === "ESRCH") continue;
+      throw error;
+    }
+    assert.equal(
+      sameProcess(
+        prior,
+        processRows().find((row) => row.pid === pid),
+      ),
+      false,
+      "a reused unrelated PID cannot count as a surviving owned process",
+    );
+  }
+}
+
+function assertInterruptedTrace(trace, backend, beforeVersion) {
+  assert.equal(trace.captureComplete, false);
+  assert.equal(trace.backend, backend === "cdp" ? "raw-cdp" : "patchright");
+  assert.ok(
+    trace.collectorErrors.some(
+      (error) => error.phase === "interrupted" && error.signal === "SIGTERM",
+    ),
+  );
+  assert.equal(trace.executable, chrome);
+  assert.equal(version(trace.browserVersion), version(beforeVersion));
+  assert.equal(typeof trace.browserV8Version, "string");
+  if (backend === "cdp") {
+    assert.equal(trace.browserContext.nonDefaultContext, true);
+    assert.equal(trace.browserContext.createdContextVerified, true);
+  }
+}
+
+// Cleanup after a failed proof: SIGKILL only processes whose recorded identity still matches.
+function killRecorded(owner, observed) {
+  const fallback = [];
+  for (const row of ownedRows(owner, observed)) {
+    if (!sameProcess(observed.get(row.pid), row)) continue;
+    try {
+      process.kill(row.pid, "SIGKILL");
+      fallback.push(row.pid);
+    } catch (error) {
+      if (error.code !== "ESRCH") fallback.push({ pid: row.pid, error: String(error) });
+    }
+  }
+  return fallback;
+}
+
 for (const backend of ["cdp", "patchright"]) {
   test(
     `controlled SIGTERM checkpoints and retires owned ${backend} Chrome`,
@@ -189,11 +261,7 @@ for (const backend of ["cdp", "patchright"]) {
         assert.equal(owner.executable, chrome);
         assert.equal(owner.detached, true);
         assert.equal(existsSync(owner.profile), true);
-        const initial = sample();
-        const leader = initial.find((row) => row.pid === owner.pid);
-        assert.ok(leader, "OS independently sees the captured Chrome leader");
-        assert.equal(leader.group, owner.pid);
-        assert.ok(leader.command.includes(`--user-data-dir=${owner.profile}`));
+        assertOwnedLeader(owner, sample());
         observations.push({ at: Date.now(), action: "controlled-abort", stalled });
         controller.abort();
         monitor = setInterval(() => {
@@ -206,58 +274,20 @@ for (const backend of ["cdp", "patchright"]) {
         result = await pending;
         clearInterval(monitor);
         assert.equal(monitorError, undefined);
-        assert.equal(
-          t.signal.aborted,
-          false,
-          "an outer timeout cannot stand in for the controlled abort",
-        );
-        assert.equal(result.aborted, true);
-        assert.equal(result.timedOut, false);
-        assert.equal(result.error, null);
-        assert.equal(
-          result.signal,
-          null,
-          "cooperative collector exits before the cleanup-only KILL",
-        );
-        assert.ok(Number.isInteger(result.code) && result.code !== 0);
+        assertControlledExit(t, result);
         assert.equal(existsSync(output), true);
         assert.equal(
           observations.every((row) => row.evidencePresent !== false),
           true,
         );
         assert.deepEqual(sample(), [], "the owned browser group and observed helpers are gone");
-        for (const [pid, prior] of observed) {
-          try {
-            process.kill(pid, 0);
-          } catch (error) {
-            if (error.code === "ESRCH") continue;
-            throw error;
-          }
-          assert.equal(
-            sameProcess(
-              prior,
-              processRows().find((row) => row.pid === pid),
-            ),
-            false,
-            "a reused unrelated PID cannot count as a surviving owned process",
-          );
-        }
+        assertNoSurvivors(observed);
         assert.equal(existsSync(owner.profile), false);
-        const trace = JSON.parse(readFileSync(join(output, "trace.json"), "utf8"));
-        assert.equal(trace.captureComplete, false);
-        assert.equal(trace.backend, backend === "cdp" ? "raw-cdp" : "patchright");
-        assert.ok(
-          trace.collectorErrors.some(
-            (error) => error.phase === "interrupted" && error.signal === "SIGTERM",
-          ),
+        assertInterruptedTrace(
+          JSON.parse(readFileSync(join(output, "trace.json"), "utf8")),
+          backend,
+          beforeVersion,
         );
-        assert.equal(trace.executable, chrome);
-        assert.equal(version(trace.browserVersion), version(beforeVersion));
-        assert.equal(typeof trace.browserV8Version, "string");
-        if (backend === "cdp") {
-          assert.equal(trace.browserContext.nonDefaultContext, true);
-          assert.equal(trace.browserContext.createdContextVerified, true);
-        }
         assert.equal(sha(chrome), beforeHash);
         assert.equal(
           execFileSync(chrome, ["--version"], { encoding: "utf8" }).trim(),
@@ -269,17 +299,7 @@ for (const backend of ["cdp", "patchright"]) {
         if (pending) result = await pending;
         clearInterval(monitor);
         // A failed assertion retains the leak proof, then cleans up only recorded identities.
-        const fallback = [];
-        if (!passed && owner)
-          for (const row of ownedRows(owner, observed)) {
-            if (!sameProcess(observed.get(row.pid), row)) continue;
-            try {
-              process.kill(row.pid, "SIGKILL");
-              fallback.push(row.pid);
-            } catch (error) {
-              if (error.code !== "ESRCH") fallback.push({ pid: row.pid, error: String(error) });
-            }
-          }
+        const fallback = !passed && owner ? killRecorded(owner, observed) : [];
         server.closeAllConnections();
         if (server.listening) await new Promise((done) => server.close(done));
         writeFileSync(

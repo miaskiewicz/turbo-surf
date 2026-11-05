@@ -11,6 +11,71 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
 export const isGrease = (value) => (value & 0x0f0f) === 0x0a0a && value >> 8 === (value & 0xff);
 
+const words = (bytes) => {
+  if (bytes.length % 2) throw new Error("invalid uint16 list");
+  return Array.from({ length: bytes.length / 2 }, (_, i) => bytes.readUInt16BE(i * 2));
+};
+
+// A uint16-length-prefixed list whose prefix must cover the whole extension body.
+function prefixedList(bytes, message) {
+  if (bytes.length < 2 || bytes.readUInt16BE() + 2 !== bytes.length) throw new Error(message);
+}
+
+function alpnProtocols(bytes) {
+  prefixedList(bytes, "invalid ALPN protocol list");
+  const protocols = [];
+  for (let at = 2; at < bytes.length; ) {
+    const length = bytes[at++];
+    if (!length || at + length > bytes.length) throw new Error("invalid ALPN protocol");
+    protocols.push(bytes.subarray(at, at + length).toString("latin1"));
+    at += length;
+  }
+  return protocols;
+}
+
+function keyShares(bytes) {
+  prefixedList(bytes, "invalid key share list");
+  const shares = [];
+  for (let at = 2; at < bytes.length; ) {
+    if (at + 4 > bytes.length) throw new Error("truncated key share");
+    const group = bytes.readUInt16BE(at),
+      length = bytes.readUInt16BE(at + 2);
+    at += 4;
+    if (at + length > bytes.length) throw new Error("truncated key share body");
+    shares.push({ group, length });
+    at += length;
+  }
+  return shares;
+}
+
+// Extension type -> [entry field, decoder] for the public capabilities retained.
+const EXTENSION_FIELDS = new Map([
+  [10, ["values", (bytes) => words(bytes.subarray(2))]],
+  [13, ["values", (bytes) => words(bytes.subarray(2))]],
+  [43, ["values", (bytes) => words(bytes.subarray(1))]],
+  [16, ["protocols", alpnProtocols]],
+  [51, ["keyShares", keyShares]],
+  [51764, ["publicRootIds", (bytes) => bytes.toString("hex")]],
+]);
+
+function parseExtensions(extensionBytes) {
+  const extensions = [];
+  for (let i = 0; i < extensionBytes.length; ) {
+    if (i + 4 > extensionBytes.length) throw new Error("truncated TLS extension");
+    const type = extensionBytes.readUInt16BE(i);
+    const length = extensionBytes.readUInt16BE(i + 2);
+    i += 4;
+    if (i + length > extensionBytes.length) throw new Error("truncated TLS extension body");
+    const bytes = extensionBytes.subarray(i, i + length);
+    i += length;
+    const entry = { type, length };
+    const field = EXTENSION_FIELDS.get(type);
+    if (field) entry[field[0]] = field[1](bytes);
+    extensions.push(entry);
+  }
+  return extensions;
+}
+
 // Parsed public capabilities accompany the exact raw record saved by the collector.
 export function parseClientHello(record) {
   let offset = 0;
@@ -33,53 +98,9 @@ export function parseClientHello(record) {
   const legacyVersion = u16();
   take(32);
   take(take(1)[0]);
-  const words = (bytes) => {
-    if (bytes.length % 2) throw new Error("invalid uint16 list");
-    return Array.from({ length: bytes.length / 2 }, (_, i) => bytes.readUInt16BE(i * 2));
-  };
   const ciphers = words(vector());
   const compressionMethods = Array.from(take(take(1)[0]));
-  const extensionBytes = vector();
-  const extensions = [];
-  for (let i = 0; i < extensionBytes.length; ) {
-    if (i + 4 > extensionBytes.length) throw new Error("truncated TLS extension");
-    const type = extensionBytes.readUInt16BE(i);
-    const length = extensionBytes.readUInt16BE(i + 2);
-    i += 4;
-    if (i + length > extensionBytes.length) throw new Error("truncated TLS extension body");
-    const bytes = extensionBytes.subarray(i, i + length);
-    i += length;
-    const entry = { type, length };
-    if ([10, 13].includes(type)) entry.values = words(bytes.subarray(2));
-    if (type === 43) entry.values = words(bytes.subarray(1));
-    if (type === 16) {
-      if (bytes.length < 2 || bytes.readUInt16BE() + 2 !== bytes.length)
-        throw new Error("invalid ALPN protocol list");
-      entry.protocols = [];
-      for (let at = 2; at < bytes.length; ) {
-        const length = bytes[at++];
-        if (!length || at + length > bytes.length) throw new Error("invalid ALPN protocol");
-        entry.protocols.push(bytes.subarray(at, at + length).toString("latin1"));
-        at += length;
-      }
-    }
-    if (type === 51) {
-      if (bytes.length < 2 || bytes.readUInt16BE() + 2 !== bytes.length)
-        throw new Error("invalid key share list");
-      entry.keyShares = [];
-      for (let at = 2; at < bytes.length; ) {
-        if (at + 4 > bytes.length) throw new Error("truncated key share");
-        const group = bytes.readUInt16BE(at),
-          length = bytes.readUInt16BE(at + 2);
-        at += 4;
-        if (at + length > bytes.length) throw new Error("truncated key share body");
-        entry.keyShares.push({ group, length });
-        at += length;
-      }
-    }
-    if (type === 51764) entry.publicRootIds = bytes.toString("hex");
-    extensions.push(entry);
-  }
+  const extensions = parseExtensions(vector());
   return { recordVersion, legacyVersion, compressionMethods, ciphers, extensions };
 }
 

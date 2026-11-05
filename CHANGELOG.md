@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (network transports, #188)**: a render session's trust anchor now covers its
+  `wss:` sockets as well as its https fetches. `ClientHints::with_trust_anchor(der)`
+  configures both; before, `new WebSocket('wss://…')` to a server signed by an embedder or
+  test CA failed while `fetch` to the same server succeeded. Tested against a localhost TLS
+  server (`tests/wss_trust_anchor.rs`).
 - **Fixed (CSP, #110, #177, #154)**: `'strict-dynamic'` trusts only script-inserted
   `<script>` elements (parser-inserted ones need a nonce; host sources, `'self'` and
   `'unsafe-inline'` are dropped), for enforced and report-only policies. Source matching

@@ -13,7 +13,9 @@ use deno_core::{op2, v8, OpState, ToJsBuffer};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use turbo_surf_core::request_context::{Credentials, Destination, RequestContext, RequestMode};
+use turbo_surf_core::request_context::{
+    ClientHints, Credentials, Destination, RequestContext, RequestMode,
+};
 use turbo_surf_core::websocket::{self, WsCommand, WsEvent, WsHandle, WsRequest};
 
 type Events = Rc<RefCell<Option<tokio::sync::mpsc::UnboundedReceiver<WsEvent>>>>;
@@ -142,7 +144,11 @@ pub(super) fn op_ws_open<'s>(
         user_agent,
         accept_language: profile.accept_language.to_owned(),
         cookie,
-        trust_anchor: None,
+        // The session's anchor, as its https fetches trust it (#188).
+        trust_anchor: state
+            .try_borrow::<ClientHints>()
+            .and_then(ClientHints::trust_anchor)
+            .map(<[u8]>::to_vec),
     });
     let transports = transports(state);
     transports.next += 1;

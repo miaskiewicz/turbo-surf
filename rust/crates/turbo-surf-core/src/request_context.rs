@@ -408,6 +408,9 @@ struct HintState {
     client: Mutex<Option<(tokio::runtime::Id, crate::http_backend::Client)>>,
     builder: Option<Arc<ClientBuilderFactory>>,
     upload_client: Mutex<Option<(tokio::runtime::Id, crate::http_backend::Client)>>,
+    // The DER anchor behind `builder`, for transports that build their own client
+    // (`wss:` upgrades, #188).
+    trust_anchor: Option<Vec<u8>>,
 }
 
 impl ClientHints {
@@ -423,6 +426,23 @@ impl ClientHints {
             builder: Some(Arc::new(builder)),
             ..Default::default()
         }))
+    }
+    /// A transport that trusts `der` (an embedder or test CA) on top of the default
+    /// roots, for every request of the session: fetches through the builder above and
+    /// `wss:` sockets through [`ClientHints::trust_anchor`]. Verification stays on.
+    pub fn with_trust_anchor(der: Vec<u8>) -> Self {
+        let anchor = der.clone();
+        Self(Arc::new(HintState {
+            builder: Some(Arc::new(move || {
+                crate::net::client_builder_with_trust(&anchor)
+            })),
+            trust_anchor: Some(der),
+            ..Default::default()
+        }))
+    }
+    /// The session's extra DER trust anchor, when it was configured with one.
+    pub fn trust_anchor(&self) -> Option<&[u8]> {
+        self.0.trust_anchor.as_deref()
     }
     pub(crate) fn manual_client(
         &self,

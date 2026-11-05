@@ -1,8 +1,8 @@
 {
-  "browser": "Chrome/155.0.8059.79",
-  "v8": "15.5.35.23",
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
   "probeSha256": "7d6ef4beb9020eb6f24e6637c6420a345822fe33a0788076d773ac69006c8ea5",
-  "collectorSha256": "579f2152c8ff18f38b6b22f68fcc71fae09795d86801d8a47dd5528c68802f49",
+  "collectorSha256": "911136eea5afe1ead321e4deb8d9f92bc9894ff8946df32e2aed303e2b0d3bcb",
   "flags": [
     "--remote-debugging-port=0",
     "--user-data-dir=<fresh-profile>",

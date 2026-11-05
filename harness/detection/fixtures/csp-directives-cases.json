@@ -1,0 +1,134 @@
+[
+  {
+    "id": "strict-dynamic",
+    "headers": [
+      [
+        "Content-Security-Policy",
+        "script-src 'nonce-n' 'strict-dynamic' 'self' 'unsafe-inline' http:"
+      ]
+    ],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "strict-dynamic-report-only",
+    "headers": [
+      [
+        "Content-Security-Policy-Report-Only",
+        "script-src 'nonce-n' 'strict-dynamic' 'self' 'unsafe-inline' http:"
+      ]
+    ],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "strict-dynamic-elem",
+    "headers": [
+      [
+        "Content-Security-Policy",
+        "script-src 'nonce-n'; script-src-elem 'nonce-n' 'strict-dynamic'"
+      ]
+    ],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "strict-dynamic-default-src",
+    "headers": [["Content-Security-Policy", "default-src 'nonce-n' 'strict-dynamic' 'self'"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "blocked-uri",
+    "headers": [
+      ["Content-Security-Policy", "script-src 'nonce-n' 'self'; connect-src 'self'; img-src 'self'"]
+    ],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "blocked-uri-report-only",
+    "headers": [
+      [
+        "Content-Security-Policy-Report-Only",
+        "script-src 'nonce-n' 'self'; connect-src 'self'; img-src 'self'"
+      ]
+    ],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-self",
+    "headers": [["Content-Security-Policy", "connect-src 'self'"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-star",
+    "headers": [["Content-Security-Policy", "connect-src *"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-http-scheme",
+    "headers": [["Content-Security-Policy", "connect-src http:"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-https-scheme",
+    "headers": [["Content-Security-Policy", "connect-src https:"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-ws-scheme",
+    "headers": [["Content-Security-Policy", "connect-src ws:"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-wss-scheme",
+    "headers": [["Content-Security-Policy", "connect-src wss:"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-http-host",
+    "headers": [["Content-Security-Policy", "connect-src http://127.0.0.1:{port}"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-https-host",
+    "headers": [["Content-Security-Policy", "connect-src https://127.0.0.1:{port}"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-ws-host",
+    "headers": [["Content-Security-Policy", "connect-src ws://127.0.0.1:{port}"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-wss-host",
+    "headers": [["Content-Security-Policy", "connect-src wss://127.0.0.1:{port}"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-schemeless-host",
+    "headers": [["Content-Security-Policy", "connect-src 127.0.0.1:{port}"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-wildcard-port",
+    "headers": [["Content-Security-Policy", "connect-src localhost:*"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-ws-cross-host",
+    "headers": [["Content-Security-Policy", "connect-src ws://localhost:{port}"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "connect-none-report-only",
+    "headers": [["Content-Security-Policy-Report-Only", "connect-src 'none'"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body></body></html>"
+  },
+  {
+    "id": "worker-media",
+    "headers": [["Content-Security-Policy", "worker-src 'none'; media-src 'none'"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body data-extra=\"worker-media\"></body></html>"
+  },
+  {
+    "id": "worker-script-fallback",
+    "headers": [["Content-Security-Policy", "script-src 'nonce-n'; media-src 'self'"]],
+    "html": "<!doctype html><html><head><script nonce=\"n\">window.__ran=[];window.__violations=[];document.addEventListener(\"securitypolicyviolation\",(e)=>__violations.push([e.blockedURI,e.effectiveDirective,e.disposition]))</script><script src=\"/s/parser-same.js\"></script><script src=\"http://localhost:{port}/s/parser-cross.js\"></script><script nonce=\"n\" src=\"http://localhost:{port}/s/parser-nonce.js\"></script><script>__ran.push('parser-inline')</script></head><body data-extra=\"worker-media\"></body></html>"
+  }
+]

@@ -883,5 +883,12 @@
     "All four scoped homepage-only performance controls reach the500-pump cap; only the three clean runs have a post-verdict pendingWork1 observation. This is not global idle.",
     "Raw captures, source URLs, bodies, cookies, request IDs, certificates and absolute timestamps remain private.",
     "Latest consent/search retry at59f7835 supersedes the earlier88528ae both-Chrome-blocked comparison; two clean Chrome baselines now succeed. Initial native opens still exhaust20s in3/4 captures."
-  ]
+  ],
+  "staleSourceHashes": {
+    "note": "The recorded hashes of these collector sources predate their #154 complexity refactor (same behaviour, new bytes). This receipt was not re-run (no Google traffic from the refactor); it documents the sources as measured, not the current files.",
+    "current": {
+      "interface-trace.js": "5c23468a7c66ec57b1374144a75cf8e81ef334ae7337730955b61024e4cca0c2",
+      "chrome-cdp-trace.mjs": "cc70521202b9d9f0806c75b8803a4a31c2443469ac51bb11a87b0bf326b1054e"
+    }
+  }
 }

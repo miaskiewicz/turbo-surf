@@ -4,17 +4,21 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 test("saved Chrome controls retain the exact collector source they measured", () => {
-  for (const [name, collector] of [
-    ["classic-script-errors", "classic-script-errors"],
-    ["document-legacy", "document-legacy"],
-    ["event-ownership", "event-ownership"],
-    ["popover-lifecycle", "popover-lifecycle"],
-    ["message-transfers", "message-transfer"],
-    ["range-live", "range-live"],
-    ["dom-adoption", "dom-adoption"],
-    ["dom-variadic-errors", "dom-variadic-errors"],
-    ["frame-insertion-errors", "frame-insertion-errors"],
-    ["mutation-events", "mutation-events"],
+  // dom-adoption and dom-variadic-errors were re-recorded on the frozen Chrome 156 headless
+  // shell after the #154 refactor; the rest remain Chrome 155 controls.
+  const chrome155 = /^Chrome\/155\./;
+  const chrome156 = /^HeadlessChrome\/156\.0\.8078\.47$/;
+  for (const [name, collector, browser] of [
+    ["classic-script-errors", "classic-script-errors", chrome155],
+    ["document-legacy", "document-legacy", chrome155],
+    ["event-ownership", "event-ownership", chrome155],
+    ["popover-lifecycle", "popover-lifecycle", chrome155],
+    ["message-transfers", "message-transfer", chrome155],
+    ["range-live", "range-live", chrome155],
+    ["dom-adoption", "dom-adoption", chrome156],
+    ["dom-variadic-errors", "dom-variadic-errors", chrome156],
+    ["frame-insertion-errors", "frame-insertion-errors", chrome155],
+    ["mutation-events", "mutation-events", chrome155],
   ]) {
     const fixture = JSON.parse(
       readFileSync(new URL(`./fixtures/${name}-chrome155.json`, import.meta.url), "utf8"),
@@ -25,7 +29,7 @@ test("saved Chrome controls retain the exact collector source they measured", ()
       fixture.collectorSha256,
       `${name}: remeasure the Chrome control after changing its collector`,
     );
-    assert.match(fixture.browserVersion, /^Chrome\/155\./);
+    assert.match(fixture.browserVersion, browser);
     assert.ok(fixture.result && typeof fixture.result === "object");
   }
 });

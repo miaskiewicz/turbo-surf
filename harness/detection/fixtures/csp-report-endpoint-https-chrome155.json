@@ -1,15 +1,15 @@
 {
-  "browser": "Chrome/155.0.8059.79",
-  "v8": "15.5.35.23",
+  "browser": "Chrome/156.0.8078.80",
+  "v8": "15.6.75.27",
   "casesSha256": "bcbf06a5fca7facabf78050d766e8888d9e04b52f16016b660882dadbd46d1af",
   "probeSha256": "7b496e973d76776e343ac7e3ec95e2c17aaf7ec4ccca14d5b72eb6f01b4aa451",
-  "collectorSha256": "68e99be51b7650259f96b9055a8756eaf1c91ba36accc3b758b018298a371d0a",
+  "collectorSha256": "df1e8e7bf475f14bcc190b262d9fbb751e9cdc8dae1fb067bbcdce30313e1426",
   "flags": [
     "--remote-debugging-port=0",
     "--user-data-dir=<fresh-profile>",
     "--no-first-run",
     "--no-default-browser-check",
-    "--ignore-certificate-errors-spki-list=bjP1I8+uKD6M5+2mQ3UHN0Bx9DuTUSmbzfZez/q6LwA=",
+    "--ignore-certificate-errors-spki-list=tgZhMuDR4ffcvwcdvk0UExoYIcSg3V4sRX6nubjtqQc=",
     "--disable-extensions",
     "--disable-component-extensions-with-background-pages",
     "about:blank"
@@ -149,10 +149,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -168,7 +168,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0wJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9MCZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyBjb25uZWN0LXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTAiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0wJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9MCZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyBjb25uZWN0LXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTAiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=0&private=authored",
@@ -192,10 +192,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -211,7 +211,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0xJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9MSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIGh0dHBzOi8vbG9jYWxob3N0OjU2NzYzL3JlcG9ydD9jYXNlPTEiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0xJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9MSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIGh0dHBzOi8vbG9jYWxob3N0OjYwOTc5L3JlcG9ydD9jYXNlPTEiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=1&private=authored",
@@ -235,10 +235,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -254,7 +254,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0yJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9MiZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTIiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0yJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9MiZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTIiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=2&private=authored",
@@ -278,10 +278,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -297,7 +297,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0zJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9MyZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlZGlyZWN0MzA3P2Nhc2U9MyIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0zJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9MyZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlZGlyZWN0MzA3P2Nhc2U9MyIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=3&private=authored",
@@ -321,10 +321,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -340,7 +340,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT00JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9NCZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlZGlyZWN0MzAyP2Nhc2U9NCIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT00JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9NCZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlZGlyZWN0MzAyP2Nhc2U9NCIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=4&private=authored",
@@ -364,10 +364,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -383,7 +383,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT01JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9NSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTUmbj1hIC9yZXBvcnQ/Y2FzZT01Jm49YiIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT01JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9NSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTUmbj1hIC9yZXBvcnQ/Y2FzZT01Jm49YiIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=5&private=authored",
@@ -407,10 +407,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -426,7 +426,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT01JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9NSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTUmbj1hIC9yZXBvcnQ/Y2FzZT01Jm49YiIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT01JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9NSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTUmbj1hIC9yZXBvcnQ/Y2FzZT01Jm49YiIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=5&private=authored",
@@ -450,10 +450,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -469,7 +469,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT02JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9NiZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTYgL3JlcG9ydD9jYXNlPTYiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT02JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9NiZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTYgL3JlcG9ydD9jYXNlPTYiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=6&private=authored",
@@ -493,10 +493,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -512,7 +512,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT02JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9NiZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTYgL3JlcG9ydD9jYXNlPTYiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT02JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9NiZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTYgL3JlcG9ydD9jYXNlPTYiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=6&private=authored",
@@ -536,10 +536,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -555,7 +555,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT03JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9NyZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT03IiwiZGlzcG9zaXRpb24iOiJyZXBvcnQiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT03JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9NyZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT03IiwiZGlzcG9zaXRpb24iOiJyZXBvcnQiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=7&private=authored",
@@ -579,10 +579,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -598,7 +598,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT04JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9OCZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT04IiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh7aC9In19",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT04JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9OCZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT04IiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh7aC9In19",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=8&private=authored",
@@ -625,10 +625,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -644,7 +644,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT05JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9OSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT05IiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiY29sb3I6cmVkIn19",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT05JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9OSZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT05IiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiY29sb3I6cmVkIn19",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=9&private=authored",
@@ -668,10 +668,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -687,7 +687,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0xNiZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9zdGFydD9jYXNlPTE2JnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwib3JpZ2luYWwtcG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXVyaSAvcmVwb3J0P2Nhc2U9MTYiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoxLCJjb2x1bW4tbnVtYmVyIjo3OSwic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0xNiZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9zdGFydD9jYXNlPTE2JnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwib3JpZ2luYWwtcG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXVyaSAvcmVwb3J0P2Nhc2U9MTYiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoxLCJjb2x1bW4tbnVtYmVyIjo3OSwic291cmNlLWZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=16&private=authored",
@@ -711,10 +711,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -730,7 +730,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0xNyZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9zdGFydD9jYXNlPTE3JnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwib3JpZ2luYWwtcG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXVyaSAvaG9sZC1yZXBvcnQ/Y2FzZT0xNyIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjEsImNvbHVtbi1udW1iZXIiOjc5LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiIn19",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0xNyZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9zdGFydD9jYXNlPTE3JnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwib3JpZ2luYWwtcG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXVyaSAvaG9sZC1yZXBvcnQ/Y2FzZT0xNyIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjEsImNvbHVtbi1udW1iZXIiOjc5LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiIn19",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=17&private=authored",
@@ -754,10 +754,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -773,7 +773,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0yMyZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9zdGFydD9jYXNlPTIzJnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwib3JpZ2luYWwtcG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTIzIiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoi7aCAXCJcXFxu7bCAIn19",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0yMyZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9zdGFydD9jYXNlPTIzJnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwib3JpZ2luYWwtcG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTIzIiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoi7aCAXCJcXFxu7bCAIn19",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=23&private=authored",
@@ -797,10 +797,10 @@
       "method": "POST",
       "headers": {
         "content-type": "application/csp-report",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": "\"macOS\"",
         "priority": null,
@@ -816,7 +816,7 @@
         "pragma": null,
         "accept": "*/*"
       },
-      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0yNCZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9zdGFydD9jYXNlPTI0JnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6ImNvbm5lY3Qtc3JjIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6ImNvbm5lY3Qtc3JjIiwib3JpZ2luYWwtcG9saWN5IjoiY29ubmVjdC1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT0yNCIsImRpc3Bvc2l0aW9uIjoicmVwb3J0IiwiYmxvY2tlZC11cmkiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9hbGxvd2VkP2Nhc2U9MjQiLCJsaW5lLW51bWJlciI6MjAsImNvbHVtbi1udW1iZXIiOjUsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0yNCZwcml2YXRlPWF1dGhvcmVkIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9zdGFydD9jYXNlPTI0JnNvdXJjZT1hdXRob3JlZCIsInZpb2xhdGVkLWRpcmVjdGl2ZSI6ImNvbm5lY3Qtc3JjIiwiZWZmZWN0aXZlLWRpcmVjdGl2ZSI6ImNvbm5lY3Qtc3JjIiwib3JpZ2luYWwtcG9saWN5IjoiY29ubmVjdC1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT0yNCIsImRpc3Bvc2l0aW9uIjoicmVwb3J0IiwiYmxvY2tlZC11cmkiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9hbGxvd2VkP2Nhc2U9MjQiLCJsaW5lLW51bWJlciI6MjAsImNvbHVtbi1udW1iZXIiOjUsInNvdXJjZS1maWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
       "body": {
         "csp-report": {
           "document-uri": "https://127.0.0.1:PORT/page?case=24&private=authored",
@@ -840,7 +840,7 @@
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -859,7 +859,7 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1NTU0MiwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MTkmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcxOSIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvc3RhcnQ/Y2FzZT0xOSZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvcGFnZT9jYXNlPTE5JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1NS4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
+      "rawBodyBase64": "W3siYWdlIjo1NTI2MSwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MTkmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcxOSIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5Nzkvc3RhcnQ/Y2FzZT0xOSZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvcGFnZT9jYXNlPTE5JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1Ni4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
       "body": [
         {
           "age": {
@@ -892,7 +892,7 @@
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -911,7 +911,7 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1NjEwNSwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MTgmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcxOCIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvc3RhcnQ/Y2FzZT0xOCZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvcGFnZT9jYXNlPTE4JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1NS4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
+      "rawBodyBase64": "W3siYWdlIjo1NTg5NywiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MTgmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcxOCIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5Nzkvc3RhcnQ/Y2FzZT0xOCZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvcGFnZT9jYXNlPTE4JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1Ni4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
       "body": [
         {
           "age": {
@@ -944,7 +944,7 @@
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -963,7 +963,7 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1NDk1OCwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjo3OSwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MjAmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MSwib3JpZ2luYWxQb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdG8gZzIwIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9zdGFydD9jYXNlPTIwJnNvdXJjZT1hdXRob3JlZCIsInNhbXBsZSI6IiIsInNvdXJjZUZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzQ29kZSI6MjAwfSwidHlwZSI6ImNzcC12aW9sYXRpb24iLCJ1cmwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MjAmcHJpdmF0ZT1hdXRob3JlZCIsInVzZXJfYWdlbnQiOiJNb3ppbGxhLzUuMCAoTWFjaW50b3NoOyBJbnRlbCBNYWMgT1MgWCAxMF8xNV83KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTU1LjAuMC4wIFNhZmFyaS81MzcuMzYifV0=",
+      "rawBodyBase64": "W3siYWdlIjo1NDY1NCwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjo3OSwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MjAmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MSwib3JpZ2luYWxQb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdG8gZzIwIiwicmVmZXJyZXIiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9zdGFydD9jYXNlPTIwJnNvdXJjZT1hdXRob3JlZCIsInNhbXBsZSI6IiIsInNvdXJjZUZpbGUiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzQ29kZSI6MjAwfSwidHlwZSI6ImNzcC12aW9sYXRpb24iLCJ1cmwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MjAmcHJpdmF0ZT1hdXRob3JlZCIsInVzZXJfYWdlbnQiOiJNb3ppbGxhLzUuMCAoTWFjaW50b3NoOyBJbnRlbCBNYWMgT1MgWCAxMF8xNV83KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTU2LjAuMC4wIFNhZmFyaS81MzcuMzYifV0=",
       "body": [
         {
           "age": {
@@ -991,64 +991,12 @@
       ]
     },
     {
-      "case": 21,
-      "url": "/report?case=21",
-      "method": "POST",
-      "headers": {
-        "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
-        "accept-language": "en-US,en;q=0.9",
-        "accept-encoding": "gzip, deflate, br, zstd",
-        "sec-ch-ua": null,
-        "sec-ch-ua-mobile": null,
-        "sec-ch-ua-platform": null,
-        "priority": null,
-        "access-control-request-method": null,
-        "access-control-request-headers": null,
-        "origin": "https://127.0.0.1:PORT",
-        "referer": null,
-        "cookie": "source=1; report_response=24",
-        "sec-fetch-site": null,
-        "sec-fetch-mode": null,
-        "sec-fetch-dest": null,
-        "cache-control": null,
-        "pragma": null,
-        "accept": null
-      },
-      "rawBodyBase64": "W3siYWdlIjo1NDM5MiwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MjEmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcyMSIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvc3RhcnQ/Y2FzZT0yMSZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvcGFnZT9jYXNlPTIxJnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1NS4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
-      "body": [
-        {
-          "age": {
-            "nonnegative": true
-          },
-          "body": {
-            "blockedURL": "inline",
-            "columnNumber": 17,
-            "disposition": "enforce",
-            "documentURL": "https://127.0.0.1:PORT/page?case=21&private=authored",
-            "effectiveDirective": "style-src-attr",
-            "lineNumber": 24,
-            "originalPolicy": "style-src 'none'; report-to g21",
-            "referrer": "https://127.0.0.1:PORT/start?case=21&source=authored",
-            "sourceFile": "https://127.0.0.1:PORT/csp-report-endpoint-probe.js",
-            "statusCode": 200,
-            "sampleUnits": []
-          },
-          "type": "csp-violation",
-          "url": "https://127.0.0.1:PORT/page?case=21&private=authored",
-          "user_agent": {
-            "matchesWire": true
-          }
-        }
-      ]
-    },
-    {
       "case": 13,
       "url": "/report?case=13",
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -1067,7 +1015,7 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1ODkwNSwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MTMmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC11cmkgL2ZhbGxiYWNrP2Nhc2U9MTM7IHJlcG9ydC10byBnMTMiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9MTMmc291cmNlPWF1dGhvcmVkIiwic2FtcGxlIjoiY29sb3I6cmVkIiwic291cmNlRmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXNDb2RlIjoyMDB9LCJ0eXBlIjoiY3NwLXZpb2xhdGlvbiIsInVybCI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0xMyZwcml2YXRlPWF1dGhvcmVkIiwidXNlcl9hZ2VudCI6Ik1vemlsbGEvNS4wIChNYWNpbnRvc2g7IEludGVsIE1hYyBPUyBYIDEwXzE1XzcpIEFwcGxlV2ViS2l0LzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZS8xNTUuMC4wLjAgU2FmYXJpLzUzNy4zNiJ9XQ==",
+      "rawBodyBase64": "W3siYWdlIjo1ODc5MCwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MTMmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC11cmkgL2ZhbGxiYWNrP2Nhc2U9MTM7IHJlcG9ydC10byBnMTMiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9MTMmc291cmNlPWF1dGhvcmVkIiwic2FtcGxlIjoiY29sb3I6cmVkIiwic291cmNlRmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXNDb2RlIjoyMDB9LCJ0eXBlIjoiY3NwLXZpb2xhdGlvbiIsInVybCI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0xMyZwcml2YXRlPWF1dGhvcmVkIiwidXNlcl9hZ2VudCI6Ik1vemlsbGEvNS4wIChNYWNpbnRvc2g7IEludGVsIE1hYyBPUyBYIDEwXzE1XzcpIEFwcGxlV2ViS2l0LzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZS8xNTYuMC4wLjAgU2FmYXJpLzUzNy4zNiJ9XQ==",
       "body": [
         {
           "age": {
@@ -1100,7 +1048,7 @@
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -1119,7 +1067,7 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1Mzg0NiwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MjImcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC10byBnMjIiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9MjImc291cmNlPWF1dGhvcmVkIiwic2FtcGxlIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh77+977+977+9Iiwic291cmNlRmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXNDb2RlIjoyMDB9LCJ0eXBlIjoiY3NwLXZpb2xhdGlvbiIsInVybCI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0yMiZwcml2YXRlPWF1dGhvcmVkIiwidXNlcl9hZ2VudCI6Ik1vemlsbGEvNS4wIChNYWNpbnRvc2g7IEludGVsIE1hYyBPUyBYIDEwXzE1XzcpIEFwcGxlV2ViS2l0LzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZS8xNTUuMC4wLjAgU2FmYXJpLzUzNy4zNiJ9XQ==",
+      "rawBodyBase64": "W3siYWdlIjo1MzQ3NiwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MjImcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC10byBnMjIiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9MjImc291cmNlPWF1dGhvcmVkIiwic2FtcGxlIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh77+977+977+9Iiwic291cmNlRmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXNDb2RlIjoyMDB9LCJ0eXBlIjoiY3NwLXZpb2xhdGlvbiIsInVybCI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0yMiZwcml2YXRlPWF1dGhvcmVkIiwidXNlcl9hZ2VudCI6Ik1vemlsbGEvNS4wIChNYWNpbnRvc2g7IEludGVsIE1hYyBPUyBYIDEwXzE1XzcpIEFwcGxlV2ViS2l0LzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZS8xNTYuMC4wLjAgU2FmYXJpLzUzNy4zNiJ9XQ==",
       "body": [
         {
           "age": {
@@ -1156,7 +1104,7 @@
       "method": "GET",
       "headers": {
         "content-type": null,
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -1179,12 +1127,12 @@
       "body": null
     },
     {
-      "case": 18,
-      "url": "/redirect-target?case=18",
+      "case": 21,
+      "url": "/report?case=21",
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -1203,7 +1151,59 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1NjEwNSwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MTgmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcxOCIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvc3RhcnQ/Y2FzZT0xOCZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvcGFnZT9jYXNlPTE4JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1NS4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
+      "rawBodyBase64": "W3siYWdlIjo1NDA0MSwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MjEmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcyMSIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5Nzkvc3RhcnQ/Y2FzZT0yMSZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvcGFnZT9jYXNlPTIxJnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1Ni4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
+      "body": [
+        {
+          "age": {
+            "nonnegative": true
+          },
+          "body": {
+            "blockedURL": "inline",
+            "columnNumber": 17,
+            "disposition": "enforce",
+            "documentURL": "https://127.0.0.1:PORT/page?case=21&private=authored",
+            "effectiveDirective": "style-src-attr",
+            "lineNumber": 24,
+            "originalPolicy": "style-src 'none'; report-to g21",
+            "referrer": "https://127.0.0.1:PORT/start?case=21&source=authored",
+            "sourceFile": "https://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+            "statusCode": 200,
+            "sampleUnits": []
+          },
+          "type": "csp-violation",
+          "url": "https://127.0.0.1:PORT/page?case=21&private=authored",
+          "user_agent": {
+            "matchesWire": true
+          }
+        }
+      ]
+    },
+    {
+      "case": 18,
+      "url": "/redirect-target?case=18",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/reports+json",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": null,
+        "sec-ch-ua-mobile": null,
+        "sec-ch-ua-platform": null,
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "https://127.0.0.1:PORT",
+        "referer": null,
+        "cookie": "source=1; report_response=24",
+        "sec-fetch-site": null,
+        "sec-fetch-mode": null,
+        "sec-fetch-dest": null,
+        "cache-control": null,
+        "pragma": null,
+        "accept": null
+      },
+      "rawBodyBase64": "W3siYWdlIjo1NTg5NywiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MTgmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXRvIGcxOCIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5Nzkvc3RhcnQ/Y2FzZT0xOCZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvcGFnZT9jYXNlPTE4JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1Ni4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
       "body": [
         {
           "age": {
@@ -1236,7 +1236,7 @@
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -1255,7 +1255,7 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1Nzc5NiwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MTUmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXVyaSAvZmFsbGJhY2s/Y2FzZT0xNTsgcmVwb3J0LXRvIGcxNSIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvc3RhcnQ/Y2FzZT0xNSZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NTY3NjMvcGFnZT9jYXNlPTE1JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1NS4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
+      "rawBodyBase64": "W3siYWdlIjo1NzYxNywiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MTUmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJzsgcmVwb3J0LXVyaSAvZmFsbGJhY2s/Y2FzZT0xNTsgcmVwb3J0LXRvIGcxNSIsInJlZmVycmVyIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5Nzkvc3RhcnQ/Y2FzZT0xNSZzb3VyY2U9YXV0aG9yZWQiLCJzYW1wbGUiOiIiLCJzb3VyY2VGaWxlIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1c0NvZGUiOjIwMH0sInR5cGUiOiJjc3AtdmlvbGF0aW9uIiwidXJsIjoiaHR0cHM6Ly8xMjcuMC4wLjE6NjA5NzkvcGFnZT9jYXNlPTE1JnByaXZhdGU9YXV0aG9yZWQiLCJ1c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1Ni4wLjAuMCBTYWZhcmkvNTM3LjM2In1d",
       "body": [
         {
           "age": {
@@ -1288,7 +1288,7 @@
       "method": "OPTIONS",
       "headers": {
         "content-type": null,
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -1316,7 +1316,7 @@
       "method": "POST",
       "headers": {
         "content-type": "application/reports+json",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         "accept-language": "en-US,en;q=0.9",
         "accept-encoding": "gzip, deflate, br, zstd",
         "sec-ch-ua": null,
@@ -1335,7 +1335,7 @@
         "pragma": null,
         "accept": null
       },
-      "rawBodyBase64": "W3siYWdlIjo1ODM1NSwiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo1Njc2My9wYWdlP2Nhc2U9MTQmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC10byBnMTQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3N0YXJ0P2Nhc2U9MTQmc291cmNlPWF1dGhvcmVkIiwic2FtcGxlIjoiY29sb3I6cmVkIiwic291cmNlRmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXNDb2RlIjoyMDB9LCJ0eXBlIjoiY3NwLXZpb2xhdGlvbiIsInVybCI6Imh0dHBzOi8vMTI3LjAuMC4xOjU2NzYzL3BhZ2U/Y2FzZT0xNCZwcml2YXRlPWF1dGhvcmVkIiwidXNlcl9hZ2VudCI6Ik1vemlsbGEvNS4wIChNYWNpbnRvc2g7IEludGVsIE1hYyBPUyBYIDEwXzE1XzcpIEFwcGxlV2ViS2l0LzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZS8xNTUuMC4wLjAgU2FmYXJpLzUzNy4zNiJ9XQ==",
+      "rawBodyBase64": "W3siYWdlIjo1ODE3NywiYm9keSI6eyJibG9ja2VkVVJMIjoiaW5saW5lIiwiY29sdW1uTnVtYmVyIjoxNywiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiZG9jdW1lbnRVUkwiOiJodHRwczovLzEyNy4wLjAuMTo2MDk3OS9wYWdlP2Nhc2U9MTQmcHJpdmF0ZT1hdXRob3JlZCIsImVmZmVjdGl2ZURpcmVjdGl2ZSI6InN0eWxlLXNyYy1hdHRyIiwibGluZU51bWJlciI6MjQsIm9yaWdpbmFsUG9saWN5Ijoic3R5bGUtc3JjICdub25lJyAncmVwb3J0LXNhbXBsZSc7IHJlcG9ydC10byBnMTQiLCJyZWZlcnJlciI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3N0YXJ0P2Nhc2U9MTQmc291cmNlPWF1dGhvcmVkIiwic2FtcGxlIjoiY29sb3I6cmVkIiwic291cmNlRmlsZSI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXNDb2RlIjoyMDB9LCJ0eXBlIjoiY3NwLXZpb2xhdGlvbiIsInVybCI6Imh0dHBzOi8vMTI3LjAuMC4xOjYwOTc5L3BhZ2U/Y2FzZT0xNCZwcml2YXRlPWF1dGhvcmVkIiwidXNlcl9hZ2VudCI6Ik1vemlsbGEvNS4wIChNYWNpbnRvc2g7IEludGVsIE1hYyBPUyBYIDEwXzE1XzcpIEFwcGxlV2ViS2l0LzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZS8xNTYuMC4wLjAgU2FmYXJpLzUzNy4zNiJ9XQ==",
       "body": [
         {
           "age": {
@@ -1756,11 +1756,11 @@
       "referrer": "https://127.0.0.1:PORT/start?case=24&source=authored"
     },
     {
-      "url": "/allowed?case=24",
+      "url": "/favicon.ico",
       "referrer": "https://127.0.0.1:PORT/page?case=24&private=authored"
     },
     {
-      "url": "/favicon.ico",
+      "url": "/allowed?case=24",
       "referrer": "https://127.0.0.1:PORT/page?case=24&private=authored"
     }
   ]

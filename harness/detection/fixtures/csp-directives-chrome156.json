@@ -1,0 +1,597 @@
+{
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "casesSha256": "d33c7b4895b05d5a55f18ea3731b129263ead98faeeb265422076542062f96a1",
+  "probeSha256": "5b54d8d0141edffb148ed7d9b50383d2fb54c366a254578e4450f53ced0a6e4b",
+  "collectorSha256": "b40a68207249dc1eb01ac692f40bd0f933467aa2e00038b2a9cdb2c1434e62b1",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--use-mock-keychain",
+    "--password-store=basic",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "strict-dynamic",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": ["parser-nonce", "dynamic-same", "dynamic-cross", "dynamic-inline"],
+        "violations": [
+          ["http://127.0.0.1:<port>/s/parser-same.js", "script-src-elem", "enforce"],
+          ["http://localhost:<port>/s/parser-cross.js", "script-src-elem", "enforce"],
+          ["inline", "script-src-elem", "enforce"],
+          ["inline", "script-src-attr", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "strict-dynamic-report-only",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/s/parser-same.js", "script-src-elem", "report"],
+          ["http://localhost:<port>/s/parser-cross.js", "script-src-elem", "report"],
+          ["inline", "script-src-elem", "report"],
+          ["inline", "script-src-attr", "report"],
+          ["inline", "script-src-attr", "report"]
+        ]
+      }
+    },
+    {
+      "id": "strict-dynamic-elem",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": ["parser-nonce", "dynamic-same", "dynamic-cross", "dynamic-inline"],
+        "violations": [
+          ["http://127.0.0.1:<port>/s/parser-same.js", "script-src-elem", "enforce"],
+          ["http://localhost:<port>/s/parser-cross.js", "script-src-elem", "enforce"],
+          ["inline", "script-src-elem", "enforce"],
+          ["inline", "script-src-attr", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "strict-dynamic-default-src",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": ["parser-nonce", "dynamic-same", "dynamic-cross", "dynamic-inline"],
+        "violations": [
+          ["http://127.0.0.1:<port>/s/parser-same.js", "script-src-elem", "enforce"],
+          ["http://localhost:<port>/s/parser-cross.js", "script-src-elem", "enforce"],
+          ["inline", "script-src-elem", "enforce"],
+          ["inline", "script-src-attr", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"],
+          ["http://localhost:<port>/i/cross.png?q=1", "img-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "blocked-uri",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "error",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": ["parser-same", "parser-nonce", "dynamic-same"],
+        "violations": [
+          ["http://localhost:<port>/s/parser-cross.js", "script-src-elem", "enforce"],
+          ["inline", "script-src-elem", "enforce"],
+          ["http://localhost:<port>/s/dynamic-cross.js", "script-src-elem", "enforce"],
+          ["inline", "script-src-elem", "enforce"],
+          ["inline", "script-src-attr", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"],
+          ["http://localhost:<port>/i/cross.png?q=1", "img-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "blocked-uri-report-only",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://localhost:<port>/s/parser-cross.js", "script-src-elem", "report"],
+          ["inline", "script-src-elem", "report"],
+          ["http://localhost:<port>/s/dynamic-cross.js", "script-src-elem", "report"],
+          ["inline", "script-src-elem", "report"],
+          ["inline", "script-src-attr", "report"],
+          ["inline", "script-src-attr", "report"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "report"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "report"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "report"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "report"],
+          ["http://localhost:<port>/i/cross.png?q=1", "img-src", "report"]
+        ]
+      }
+    },
+    {
+      "id": "connect-self",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-star",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": []
+      }
+    },
+    {
+      "id": "connect-http-scheme",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-https-scheme",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-ws-scheme",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-wss-scheme",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-http-host",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-https-host",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-ws-host",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-wss-host",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-schemeless-host",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-wildcard-port",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-ws-cross-host",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": "TypeError",
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "enforce"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "enforce"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "enforce"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "enforce"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "connect-none-report-only",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "report"],
+          ["http://127.0.0.1:<port>/f/same?q=1", "connect-src", "report"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "report"],
+          ["http://localhost:<port>/f/cross?q=1", "connect-src", "report"],
+          ["ws://127.0.0.1:<port>/ws/same", "connect-src", "report"],
+          ["ws://localhost:<port>/ws/cross", "connect-src", "report"],
+          ["wss://127.0.0.1:<port>/ws/secure", "connect-src", "report"],
+          ["wss://localhost:<port>/ws/secure-cross", "connect-src", "report"]
+        ]
+      }
+    },
+    {
+      "id": "worker-media",
+      "result": {
+        "dynamicSame": "load",
+        "dynamicCross": "load",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "worker": "created",
+        "ran": [
+          "parser-same",
+          "parser-cross",
+          "parser-nonce",
+          "parser-inline",
+          "dynamic-same",
+          "dynamic-cross",
+          "dynamic-inline",
+          "attribute"
+        ],
+        "violations": [
+          ["http://127.0.0.1:<port>/s/worker.js", "worker-src", "enforce"],
+          ["http://127.0.0.1:<port>/m/audio.mp3", "media-src", "enforce"]
+        ]
+      }
+    },
+    {
+      "id": "worker-script-fallback",
+      "result": {
+        "dynamicSame": "error",
+        "dynamicCross": "error",
+        "dynamicInline": "inline",
+        "fetchSame": 204,
+        "fetchCross": "TypeError",
+        "sockets": ["created", "created", "created", "created"],
+        "worker": "created",
+        "ran": ["parser-nonce"],
+        "violations": [
+          ["http://127.0.0.1:<port>/s/parser-same.js", "script-src-elem", "enforce"],
+          ["http://localhost:<port>/s/parser-cross.js", "script-src-elem", "enforce"],
+          ["inline", "script-src-elem", "enforce"],
+          ["http://127.0.0.1:<port>/s/dynamic-same.js", "script-src-elem", "enforce"],
+          ["http://localhost:<port>/s/dynamic-cross.js", "script-src-elem", "enforce"],
+          ["inline", "script-src-elem", "enforce"],
+          ["inline", "script-src-attr", "enforce"],
+          ["http://127.0.0.1:<port>/s/worker.js", "worker-src", "enforce"]
+        ]
+      }
+    }
+  ]
+}

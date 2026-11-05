@@ -11,6 +11,87 @@ use turbo_surf_render::PageSession;
 const FIXTURE: &str = include_str!("../../../../harness/detection/fixtures/lifecycle.html");
 const PIXEL: &[u8] = include_bytes!("../../../../harness/detection/fixtures/pixel.png");
 
+type RequestLog = Arc<Mutex<Vec<(String, BTreeMap<String, String>)>>>;
+
+async fn read_head(socket: &mut tokio::net::TcpStream) -> Option<Vec<u8>> {
+    let mut request = Vec::new();
+    while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+        let mut chunk = [0; 1024];
+        let n = socket.read(&mut chunk).await.unwrap();
+        if n == 0 {
+            return None;
+        }
+        request.extend_from_slice(&chunk[..n]);
+    }
+    Some(request)
+}
+
+/// (MIME type, body, delay ms) for each fixture resource.
+fn resource(path: &str) -> (&'static str, &'static [u8], u64) {
+    match path {
+        "/main.css" => (
+            "text/css",
+            b"@import '/import.css'; sentinel { color: blue; }".as_slice(),
+            0,
+        ),
+        "/import.css" => ("text/css", b"em { color: red; }".as_slice(), 0),
+        "/dynamic.css" => ("text/css", b"dynamic-sentinel {}".as_slice(), 0),
+        "/defer.js" => (
+            "application/javascript",
+            b"fixtureLog('defer:'+document.readyState);".as_slice(),
+            0,
+        ),
+        "/pixel.png" => ("image/png", PIXEL, 150),
+        "/broken.png" => ("image/png", b"not an image".as_slice(), 200),
+        "/dynamic.png" => ("image/png", PIXEL, 250),
+        _ => ("text/plain", b"missing".as_slice(), 0),
+    }
+}
+
+async fn serve(
+    mut socket: tokio::net::TcpStream,
+    log: RequestLog,
+    resource_gate: Arc<tokio::sync::Semaphore>,
+) {
+    let Some(request) = read_head(&mut socket).await else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&request);
+    let path = text
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap();
+    let headers: BTreeMap<String, String> = text
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            Some((name.to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
+    log.lock().unwrap().push((path.to_string(), headers));
+    if path == "/resources-ready" {
+        resource_gate.add_permits(3);
+    }
+    if path.ends_with(".png") {
+        resource_gate.acquire().await.unwrap().forget();
+    }
+    let (mime, body, delay) = resource(path);
+    tokio::time::sleep(Duration::from_millis(delay)).await;
+    let name = path.trim_start_matches('/').replace('.', "_");
+    let deletion = if path == "/pixel.png" {
+        "Set-Cookie: stale=; Max-Age=0; Path=/\r\n"
+    } else {
+        ""
+    };
+    let head=format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nSet-Cookie: {name}=loaded; Path=/\r\n{deletion}Connection: close\r\n\r\n",body.len());
+    socket.write_all(head.as_bytes()).await.unwrap();
+    socket.write_all(body).await.unwrap();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn session_runs_deferred_scripts_at_interactive_and_waits_for_decoded_resources_after_dcl() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -19,74 +100,8 @@ async fn session_runs_deferred_scripts_at_interactive_and_waits_for_decoded_reso
     let log = requests.clone();
     let resource_gate = Arc::new(tokio::sync::Semaphore::new(0));
     let server = tokio::spawn(async move {
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let log = log.clone();
-            let resource_gate = resource_gate.clone();
-            tokio::spawn(async move {
-                let mut request = Vec::new();
-                loop {
-                    let mut chunk = [0; 1024];
-                    let n = socket.read(&mut chunk).await.unwrap();
-                    if n == 0 {
-                        return;
-                    }
-                    request.extend_from_slice(&chunk[..n]);
-                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let text = String::from_utf8_lossy(&request);
-                let path = text
-                    .lines()
-                    .next()
-                    .unwrap()
-                    .split_whitespace()
-                    .nth(1)
-                    .unwrap();
-                let headers: BTreeMap<String, String> = text
-                    .lines()
-                    .skip(1)
-                    .filter_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        Some((name.to_ascii_lowercase(), value.trim().to_string()))
-                    })
-                    .collect();
-                log.lock().unwrap().push((path.to_string(), headers));
-                if path == "/resources-ready" {
-                    resource_gate.add_permits(3);
-                }
-                if path.ends_with(".png") {
-                    resource_gate.acquire().await.unwrap().forget();
-                }
-                let (mime, body, delay) = match path {
-                    "/main.css" => (
-                        "text/css",
-                        b"@import '/import.css'; sentinel { color: blue; }".as_slice(),
-                        0,
-                    ),
-                    "/import.css" => ("text/css", b"em { color: red; }".as_slice(), 0),
-                    "/dynamic.css" => ("text/css", b"dynamic-sentinel {}".as_slice(), 0),
-                    "/defer.js" => (
-                        "application/javascript",
-                        b"fixtureLog('defer:'+document.readyState);".as_slice(),
-                        0,
-                    ),
-                    "/pixel.png" => ("image/png", PIXEL, 150),
-                    "/broken.png" => ("image/png", b"not an image".as_slice(), 200),
-                    "/dynamic.png" => ("image/png", PIXEL, 250),
-                    _ => ("text/plain", b"missing".as_slice(), 0),
-                };
-                tokio::time::sleep(Duration::from_millis(delay)).await;
-                let name = path.trim_start_matches('/').replace('.', "_");
-                let deletion = if path == "/pixel.png" {
-                    "Set-Cookie: stale=; Max-Age=0; Path=/\r\n"
-                } else {
-                    ""
-                };
-                let head=format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nSet-Cookie: {name}=loaded; Path=/\r\n{deletion}Connection: close\r\n\r\n",body.len());
-                socket.write_all(head.as_bytes()).await.unwrap();
-                socket.write_all(body).await.unwrap();
-            });
+        while let Ok((socket, _)) = listener.accept().await {
+            tokio::spawn(serve(socket, log.clone(), resource_gate.clone()));
         }
     });
     let mut seed = CookieJar::new();

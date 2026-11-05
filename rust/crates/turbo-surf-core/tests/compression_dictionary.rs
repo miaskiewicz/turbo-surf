@@ -34,6 +34,98 @@ impl Drop for Server {
         self.task.abort();
     }
 }
+async fn serve(
+    acceptor: tokio_rustls::TlsAcceptor,
+    socket: tokio::net::TcpStream,
+    output: RequestRows,
+) {
+    let Ok(mut socket) = acceptor.accept(socket).await else {
+        return;
+    };
+    let Some(text) = read_head(&mut socket).await else {
+        return;
+    };
+    let head = text.starts_with("HEAD ");
+    let path = text.split_whitespace().nth(1).unwrap().to_owned();
+    let headers: BTreeMap<String, String> = text
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.trim().to_owned()))
+        .collect();
+    output.lock().unwrap().push((path.clone(), headers.clone()));
+    let revalidated = headers.contains_key("if-none-match");
+    let (response, body) = response_for(&path, revalidated);
+    if socket.write_all(response.as_bytes()).await.is_ok() && !revalidated && !head {
+        let _ = socket.write_all(&body).await;
+    }
+    let _ = socket.shutdown().await;
+}
+
+async fn read_head<S: tokio::io::AsyncRead + Unpin>(socket: &mut S) -> Option<String> {
+    let mut request = Vec::new();
+    while !request.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        if socket.read(&mut byte).await.unwrap_or(0) == 0 {
+            return None;
+        }
+        request.extend_from_slice(&byte);
+    }
+    Some(String::from_utf8(request).unwrap())
+}
+
+fn response_body(path: &str, dictionary: bool, plain: bool) -> Vec<u8> {
+    let bytes: &[u8] = match () {
+        _ if dictionary => DICTIONARY,
+        _ if plain => b"cleared",
+        _ if path.ends_with("dcz") => DCZ,
+        _ => DCB,
+    };
+    let mut body = bytes.to_vec();
+    if path.contains("bad-hash") {
+        body[10] ^= 1;
+    }
+    body
+}
+
+fn response_for(path: &str, revalidated: bool) -> (String, Vec<u8>) {
+    let dictionary = path.starts_with("/dictionary");
+    let plain = path == "/clear";
+    let encoding = if path.ends_with("dcz") { "dcz" } else { "dcb" };
+    let body = response_body(path, dictionary, plain);
+    let status = if revalidated {
+        "304 Not Modified"
+    } else {
+        "200 OK"
+    };
+    let cache_control = if path.contains("no-store") {
+        "no-store"
+    } else {
+        "max-age=60"
+    };
+    let mut response = format!("HTTP/1.1 {status}\r\nConnection: close\r\nCache-Control: {cache_control}\r\nETag: \"authored\"\r\nContent-Type: text/html\r\n");
+    if plain {
+        response.push_str("Clear-Site-Data: \"cache\"\r\n");
+    }
+    if dictionary {
+        response.push_str("Use-As-Dictionary: match=\"/resource/*\", id=\"wire-dictionary\"\r\n");
+    } else if !plain {
+        response.push_str(&format!(
+            "Content-Encoding: {encoding}\r\nVary: Available-Dictionary, Accept-Encoding\r\n"
+        ));
+    }
+    if path.contains("repeated-encoding") {
+        response.push_str("Content-Encoding: gzip\r\n");
+    }
+    let length = match () {
+        _ if path.contains("large-head") => usize::MAX,
+        _ if revalidated => 0,
+        _ => body.len(),
+    };
+    response.push_str(&format!("Content-Length: {length}\r\n\r\n"));
+    (response, body)
+}
+
 impl Server {
     async fn new() -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -58,52 +150,7 @@ impl Server {
                 let (socket, _) = listener.accept().await.unwrap();
                 let acceptor = acceptor.clone();
                 let output = output.clone();
-                children.spawn(async move {
-                    let Ok(mut socket) = acceptor.accept(socket).await else {
-                        return;
-                    };
-                    let mut request = Vec::new();
-                    loop {
-                        let mut byte = [0];
-                        if socket.read(&mut byte).await.unwrap_or(0) == 0 {
-                            return;
-                        }
-                        request.extend_from_slice(&byte);
-                        if request.ends_with(b"\r\n\r\n") {
-                            break;
-                        }
-                    }
-                    let text = String::from_utf8(request).unwrap();
-                    let head = text.starts_with("HEAD ");
-                    let path = text.split_whitespace().nth(1).unwrap().to_owned();
-                    let headers: BTreeMap<String, String> = text.lines().skip(1)
-                        .filter_map(|line| line.split_once(':'))
-                        .map(|(key, value)| (key.to_ascii_lowercase(), value.trim().to_owned()))
-                        .collect();
-                    output.lock().unwrap().push((path.clone(), headers.clone()));
-                    let dictionary = path.starts_with("/dictionary");
-                    let plain = path == "/clear";
-                    let encoding = if path.ends_with("dcz") { "dcz" } else { "dcb" };
-                    let bytes = if dictionary { DICTIONARY } else if plain { b"cleared" } else if encoding == "dcz" { DCZ } else { DCB };
-                    let mut body = bytes.to_vec();
-                    if path.contains("bad-hash") { body[10] ^= 1; }
-                    let revalidated = headers.contains_key("if-none-match");
-                    let status = if revalidated { "304 Not Modified" } else { "200 OK" };
-                    let cache_control = if path.contains("no-store") { "no-store" } else { "max-age=60" };
-                    let mut response = format!("HTTP/1.1 {status}\r\nConnection: close\r\nCache-Control: {cache_control}\r\nETag: \"authored\"\r\nContent-Type: text/html\r\n");
-                    if plain { response.push_str("Clear-Site-Data: \"cache\"\r\n"); }
-                    if dictionary { response.push_str("Use-As-Dictionary: match=\"/resource/*\", id=\"wire-dictionary\"\r\n"); }
-                    else if !plain { response.push_str(&format!("Content-Encoding: {encoding}\r\nVary: Available-Dictionary, Accept-Encoding\r\n")); }
-                    if path.contains("repeated-encoding") {
-                        response.push_str("Content-Encoding: gzip\r\n");
-                    }
-                    let length = if path.contains("large-head") { usize::MAX } else if revalidated { 0 } else { body.len() };
-                    response.push_str(&format!("Content-Length: {length}\r\n\r\n"));
-                    if socket.write_all(response.as_bytes()).await.is_ok() && !revalidated && !head {
-                        let _ = socket.write_all(&body).await;
-                    }
-                    let _ = socket.shutdown().await;
-                });
+                children.spawn(serve(acceptor, socket, output));
                 while children.try_join_next().is_some() {}
             }
         });

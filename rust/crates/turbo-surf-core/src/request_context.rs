@@ -740,6 +740,23 @@ mod tests {
         assert!(!context.sends_credentials("https://styles.test/assets/import.css"));
     }
 
+    /// Chrome 156 (identity battery fixture): a same-origin @font-face GET carries
+    /// `Origin`, as CORS script requests do (turbo-surf#166).
+    #[test]
+    fn same_origin_font_requests_carry_origin() {
+        let font = RequestContext::resource(
+            "https://example.com/style.css",
+            Destination::Font,
+            RequestMode::Cors,
+        );
+        let h = font.headers("https://example.com/font.woff2", "GET");
+        assert_eq!(h["sec-fetch-dest"], "font");
+        assert_eq!(
+            h.get("origin").map(String::as_str),
+            Some("https://example.com")
+        );
+    }
+
     #[test]
     fn contexts_distinguish_navigation_script_and_cors() {
         let nav = RequestContext::navigation(Some("https://example.com/?q=1#hash".into()), false);

@@ -63,6 +63,17 @@
   `Window()` throws "Illegal constructor" on both engines (#129).
 - **Refactored (#154)**: `window_proxy.rs` and `message_ports.rs` functions are at cc <= 15.
 
+- **Fixed (forms, #139/#140)**: form targets resolve over the whole frame tree as in Chrome
+  156: the submitter's subtree first, then the rest in creation order (siblings, cousins, named
+  ancestors). A frame counts only if the submitter shares its origin or an ancestor's (sandboxed
+  submitters: descendants only). `javascript:` actions run in the chosen same-origin navigable,
+  including `_parent` and `_top`. Child-frame form navigations check the submitter's `form-action`
+  on every redirect hop. A refused hop cancels the navigation (no load, the document stays) and
+  reports the violation against the initial URL. `_blank` and unknown names would open a new
+  window, which a no-browser engine lacks, so `submit()` throws. Controls:
+  `child-frame-form-{redirects,targets}-probe.js`, `tests/child_frame_form_targets.rs`.
+- **Refactored (#154)**: `form_submission.rs` functions are at cc <= 15.
+
 ## [0.7.1] — 2026-11-05
 
 Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).

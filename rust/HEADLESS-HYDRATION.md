@@ -1547,9 +1547,14 @@ live control collections, RadioNodeList, native labels, validation and FormData
 lifecycle have independent behavior, receiver-realm and collection controls.
 Genuine GET/POST form submission uses actual network/cookie state and policy
 checks, from the top document and (0.7.1, #111) from child frames, whose target
-navigable (`_self`, `_parent`, `_top`, named child frames) the parent's frame
-loader fetches with navigation semantics. Form-action on child-frame redirect
-hops (#139), frame-tree-wide target names and `_blank` (#140) remain follow-up work.
+navigable (`_self`, `_parent`, `_top`, named frames) the parent's frame loader
+fetches with navigation semantics. Names resolve over the whole frame tree as in
+Chrome 156 (the submitter's subtree first, then the rest in creation order, skipping
+frames whose own or ancestor origin the submitter does not share; #140), and the
+submitter's `form-action` is checked on every redirect hop: a refused hop cancels
+the navigation and reports the violation against its initial URL (#139). `_blank`
+and unknown names would open a new window, which a no-browser engine does not have:
+`submit()` throws (a `javascript:` action there is dropped).
 
 Private native ownership backs Window/MessagePort and genuine stream transfers.
 Response/upload streams, cancellation, cache/referrer effects, partitioned and

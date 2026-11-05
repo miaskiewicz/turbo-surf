@@ -28,7 +28,9 @@ const probeNames = values.probes
   : ["observable-shape-probe.js", "observable-semantics-probe.js", "blob-text-stream-probe.js"];
 const directory = mkdtempSync(join(tmpdir(), "turbo-web-apis-oracle-"));
 // `/echo…` answers with the request it received (form-navigation probes read it
-// back from the navigated frame); `/csp-…` pages carry a `form-action 'none'` policy.
+// back from the navigated frame); `/csp-…` pages carry a `form-action 'none'` policy,
+// `/self-csp…` pages `form-action 'self'`; `/redirectNNN?to=` answers with that
+// redirect status; `/xo-submit?targets=` submits a form to each [name, action] pair.
 const echoHeaders = [
   "content-type",
   "content-length",
@@ -47,6 +49,25 @@ const server = createServer((request, response) => {
   request.on("end", () => {
     response.setHeader("Content-Type", "text/html");
     const origin = `http://${request.headers.host}`;
+    const query = new URL(request.url, origin).searchParams;
+    const redirect = /^\/redirect(\d{3})\?/.exec(request.url);
+    if (redirect) {
+      response.writeHead(Number(redirect[1]), { Location: query.get("to") });
+      response.end();
+      return;
+    }
+    if (request.url.startsWith("/xo-submit?")) {
+      const submit = `for (const [target, action] of ${query.get("targets")}) {
+        const form = document.createElement("form");
+        form.method = "post"; form.action = action; form.target = target;
+        document.body.append(form);
+        try { form.submit(); } catch (_) {}
+      }`;
+      response.end(
+        `<!doctype html><html><head></head><body><script>${submit}</script></body></html>`,
+      );
+      return;
+    }
     if (request.url.startsWith("/echo")) {
       const boundary = /boundary=(\S+)/.exec(request.headers["content-type"] ?? "")?.[1];
       const scrub = (text) => {
@@ -70,8 +91,13 @@ const server = createServer((request, response) => {
       );
       return;
     }
-    const policy = request.url.startsWith("/csp-")
-      ? `<meta http-equiv="Content-Security-Policy" content="form-action 'none'">`
+    const directive = request.url.startsWith("/csp-")
+      ? "'none'"
+      : request.url.startsWith("/self-csp")
+        ? "'self'"
+        : "";
+    const policy = directive
+      ? `<meta http-equiv="Content-Security-Policy" content="form-action ${directive}">`
       : "";
     response.end(`<!doctype html><html><head>${policy}</head><body></body></html>`);
   });

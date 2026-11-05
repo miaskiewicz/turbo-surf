@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fixed (IndexedDB, #148)**: a throwing `addEventListener` listener of a request's
+  `success` / `error` event (or of its transaction or database on the bubble path) now
+  aborts the transaction with `AbortError: Uncaught exception in event handler.`, like an
+  `on*` handler; a listener of an event dispatched from inside the listener does not. Surf
+  reads the binding's did-listeners-throw flag (turbo-dom#301) instead of watching window
+  `error` events, and `on*` handler exceptions now propagate to the binding, which reports
+  them. Checked against a Chrome 156 control (`indexeddb-events-chrome156.json`). A new
+  cross-site control (`indexeddb-partition-chrome156.json`, branded Chrome 156: a cross-site
+  frame, an A -> B -> A frame and `StorageAccessHandle.indexedDB`) matches as is. The event
+  path's capture phase, per-listener microtask checkpoints and end-of-task transaction
+  deactivation stay pinned as known gaps; they and the registry's realm lifetime moved to #193.
 - **Fixed (CSP, #110, #177, #154)**: `'strict-dynamic'` trusts only script-inserted
   `<script>` elements (parser-inserted ones need a nonce; host sources, `'self'` and
   `'unsafe-inline'` are dropped), for enforced and report-only policies. Source matching

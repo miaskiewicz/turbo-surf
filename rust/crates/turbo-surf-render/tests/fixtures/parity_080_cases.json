@@ -1,0 +1,44 @@
+[
+  {
+    "id": "line-box-dpr1",
+    "dpr": 1,
+    "html": "<!doctype html><html><head></head><body><p id=p>Hello world</p><div id=d>text</div></body></html>",
+    "probe": "(() => { const p = document.getElementById('p'), d = document.getElementById('d'); return [p.getBoundingClientRect().height, d.getBoundingClientRect().height, getComputedStyle(p).height, devicePixelRatio]; })()"
+  },
+  {
+    "id": "line-box-dpr2",
+    "dpr": 2,
+    "html": "<!doctype html><html><head></head><body><p id=p>Hello world</p><div id=d>text</div></body></html>",
+    "probe": "(() => { const p = document.getElementById('p'), d = document.getElementById('d'); return [p.getBoundingClientRect().height, d.getBoundingClientRect().height, getComputedStyle(p).height, devicePixelRatio]; })()"
+  },
+  {
+    "id": "used-size",
+    "dpr": 1,
+    "html": "<!doctype html><html><head><style>body{margin:8px}.pad{padding:10px 7px;border:3px solid rgb(0, 0, 0)}</style></head><body><div id=block></div><div id=fixed style='width:200px;height:40px'></div><div id=padded class=pad style='width:200px;height:40px'></div><div id=borderBox class=pad style='box-sizing:border-box;width:200px;height:40px'></div><div id=percent style='width:33.33%;height:10px'></div><div id=clamped style='width:500px;max-width:100px;min-height:30px'></div><div style='display:flex;width:300px'><div id=flexFixed style='width:40px;height:10px'></div><div id=flexGrow style='flex:1;height:10px'></div></div><canvas id=canvas></canvas><div id=emMove style='font-size:20px;width:50px;height:10px;transform:translate(1em, 2em)'></div><div id=emInherit style='font-size:12px'><div id=emChild style='width:50px;height:10px;transform:translateX(2em)'></div></div><div id=pctMove style='width:200px;height:50px;transform:translate(50%, 10%)'></div></body></html>",
+    "probe": "(() => { const ids = ['block','fixed','padded','borderBox','percent','clamped','flexFixed','flexGrow','canvas']; const out = {}; for (const id of ids) { const s = getComputedStyle(document.getElementById(id)); out[id] = [s.width, s.height]; } out.transforms = ['emMove','emChild','pctMove'].map((id) => getComputedStyle(document.getElementById(id)).transform); return out; })()"
+  },
+  {
+    "id": "svg-viewbox-only",
+    "dpr": 1,
+    "html": "<!doctype html><html><head><style>body{margin:0}</style></head><body><div style='width:400px'><img id=i src=\"data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20300%20100'%3E%3Crect%20width%3D'300'%20height%3D'100'%20fill%3D'red'%2F%3E%3C%2Fsvg%3E\"></div><div style='width:400px;height:50px'><img id=h style='height:50px' src=\"data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20300%20100'%3E%3Crect%20width%3D'300'%20height%3D'100'%20fill%3D'red'%2F%3E%3C%2Fsvg%3E\"></div></body></html>",
+    "probe": "(() => { const r = (id) => { const el = document.getElementById(id), b = el.getBoundingClientRect(); return [el.complete, el.width, el.height, b.width, b.height]; }; return { i: r('i'), h: r('h') }; })()"
+  },
+  {
+    "id": "css-wide-and-button",
+    "dpr": 1,
+    "html": "<!doctype html><html><head></head><body><div id=initial style='background-color:initial'></div><div id=inherit style='background-color:red'><span id=child style='background-color:inherit'></span></div><button id=button>x</button><input id=submit type=submit value=go></body></html>",
+    "probe": "(() => ['initial','inherit','child','button','submit'].map((id) => getComputedStyle(document.getElementById(id)).backgroundColor))()"
+  },
+  {
+    "id": "border-spacing-hit",
+    "dpr": 1,
+    "html": "<!doctype html><html><head><style>body{margin:0}td{width:50px;height:50px;padding:0}</style></head><body><table id=t style='border-spacing:20px'><tbody id=b><tr id=r><td id=c1>a</td><td id=c2>b</td></tr></tbody></table></body></html>",
+    "probe": "(() => { const a = document.getElementById('c1').getBoundingClientRect(), b = document.getElementById('c2').getBoundingClientRect(); const at = (x, y) => { const el = document.elementFromPoint(x, y); return el ? el.id || el.tagName : null; }; return [at((a.right + b.left) / 2, a.top + a.height / 2), at(a.left + 5, a.top - 5), at(5, 5), at(a.left + 5, a.top + 5)]; })()"
+  },
+  {
+    "id": "css-supports",
+    "dpr": 1,
+    "html": "<!doctype html><html><head></head><body></body></html>",
+    "probe": "(() => [[\"anchor-name\",\"--a\"],[\"position-try-fallbacks\",\"flip-block\"],[\"interpolate-size\",\"allow-keywords\"],[\"field-sizing\",\"content\"],[\"text-box\",\"trim-both cap alphabetic\"],[\"reading-flow\",\"flex-visual\"],[\"corner-shape\",\"squircle\"],[\"dynamic-range-limit\",\"standard\"],[\"order\",\"sibling-index()\"],[\"color\",\"if(style(--x: 1): red; else: blue)\"],[\"clip-path\",\"shape(from 0 0, line to 10px 10px)\"],[\"scroll-marker-group\",\"after\"],[\"text-wrap\",\"pretty\"],[\"color\",\"contrast-color(red)\"],[\"anchor-scope\",\"all\"],[\"overlay\",\"auto\"],[\"timeline-scope\",\"--t\"],[\"content-visibility\",\"auto\"],[\"colour\",\"red\"],[\"color\",\"bogus\"]].map(([p, v]) => [p + ': ' + v, CSS.supports(p, v), CSS.supports(p + ': ' + v), CSS.supports('(' + p + ': ' + v + ')')]))()"
+  }
+]

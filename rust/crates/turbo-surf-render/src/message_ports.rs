@@ -590,6 +590,15 @@ fn op_port_new_channel<'s>(
         .collect::<Vec<_>>();
     Ok(v8::Array::new_with_elements(scope, &values))
 }
+/// The sender's peer while its endpoint is still this token's open generation.
+fn live_peer(source: &EndpointHandle, token: &PortToken) -> Option<Option<u32>> {
+    let state = source.borrow();
+    (state.generation == token.generation && !state.closed).then_some(state.peer)
+}
+fn entangled_with(destination: &EndpointHandle, token: &PortToken) -> bool {
+    let state = destination.borrow();
+    !state.closed && state.peer == Some(token.id)
+}
 #[op2(nofast, reentrant)]
 fn op_port_post_message<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -608,12 +617,8 @@ fn op_port_post_message<'s>(
     };
     let (token, source) = lookup_endpoint(scope, object)?;
     let Some(source) = source else { return Ok(()) };
-    let peer = {
-        let source = source.borrow();
-        if source.generation != token.generation || source.closed {
-            return Ok(());
-        }
-        source.peer
+    let Some(peer) = live_peer(&source, &token) else {
+        return Ok(());
     };
     let registry = registry(scope);
     let destination = peer.and_then(|peer| registry.borrow().endpoints.get(&peer).cloned());
@@ -633,16 +638,11 @@ fn op_port_post_message<'s>(
     let prepared = result?;
     // A missing/closed/doomed receiver still performs the specified transfer,
     // but consumes no delivery queue capacity.
-    let source_live = {
-        let state = source.borrow();
-        state.generation == token.generation && !state.closed && state.peer == peer
-    };
-    let deliver = source_live
+    let deliver = live_peer(&source, &token) == Some(peer)
         && peer.is_some_and(|peer| !prepared.transfers_endpoint(peer))
-        && destination.as_ref().is_some_and(|destination| {
-            let state = destination.borrow();
-            !state.closed && state.peer == Some(token.id)
-        });
+        && destination
+            .as_ref()
+            .is_some_and(|destination| entangled_with(destination, &token));
     if deliver {
         reservation
             .as_mut()

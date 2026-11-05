@@ -228,6 +228,49 @@ export async function engineStep(
 
 const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 
+/** The no-JS tier is what the native side's wire records compare against Chrome. */
+const sideRequest = (side, request) => side === "chrome" || request.tier === "nojs";
+
+/** One side's raw ClientHello record, normalized view and fingerprints (null without an h2 hello). */
+export function transportSide(side, fixture, major) {
+  const ids = new Set(
+    fixture.requests
+      .filter((request) => sideRequest(side, request))
+      .map((request) => request.connection),
+  );
+  const connection = representativeConnection(fixture.connections, "A", "h2", ids);
+  if (!connection) return null;
+  const bytes = Buffer.from(connection.hello.rawBase64, "base64");
+  const name = `fixtures/transport-${side === "chrome" ? "chrome" : "native"}${major}-client-hello.bin`;
+  const nav = fixture.requests.find(
+    (request) => request.kind === "nav" && sideRequest(side, request),
+  );
+  return {
+    raw: { fixture: name, sha256: sha256(bytes), bytes: bytes.length, data: bytes },
+    view: transportView(connection),
+    record: {
+      akamai: connection.h2?.akamai,
+      ja4: connection.hello.ja4,
+      navHeaders: nav?.headers,
+    },
+  };
+}
+
+const transportDifferences = (parity) =>
+  parity
+    ? parity.deltas
+        .filter((delta) => delta.area === "transport")
+        .map(({ path, expected, actual, class: kind }) => ({
+          path,
+          expected,
+          actual,
+          class: kind,
+        }))
+    : null;
+
+/** One normalized view (`hello` / `h2`) per side. */
+const sideViews = (views, key) => ({ chrome: views.chrome?.[key], native: views.native?.[key] });
+
 /** TRANSPORT-<major>.json: Chrome vs turbo-surf TLS/H2 + navigation wire, raw hellos kept. */
 export function transportReport(chrome, native, parity, previous) {
   const { major } = versionOf(chrome);
@@ -237,25 +280,11 @@ export function transportReport(chrome, native, parity, previous) {
   const views = {};
   const records = {};
   for (const [side, fixture] of Object.entries(sides)) {
-    const ids = new Set(
-      fixture.requests
-        .filter((request) => (side === "chrome" ? true : request.tier === "nojs"))
-        .map((request) => request.connection),
-    );
-    const connection = representativeConnection(fixture.connections, "A", "h2", ids);
-    if (!connection) continue;
-    const bytes = Buffer.from(connection.hello.rawBase64, "base64");
-    const name = `fixtures/transport-${side === "chrome" ? "chrome" : "native"}${major}-client-hello.bin`;
-    raw[side] = { fixture: name, sha256: sha256(bytes), bytes: bytes.length, data: bytes };
-    views[side] = transportView(connection);
-    const nav = fixture.requests.find(
-      (request) => request.kind === "nav" && (side === "chrome" || request.tier === "nojs"),
-    );
-    records[side] = {
-      akamai: connection.h2?.akamai,
-      ja4: connection.hello.ja4,
-      navHeaders: nav?.headers,
-    };
+    const found = transportSide(side, fixture, major);
+    if (!found) continue;
+    raw[side] = found.raw;
+    views[side] = found.view;
+    records[side] = found.record;
   }
   return {
     report: {
@@ -273,19 +302,10 @@ export function transportReport(chrome, native, parity, previous) {
       rawRecords: Object.fromEntries(
         Object.entries(raw).map(([side, { data: _data, ...rest }]) => [side, rest]),
       ),
-      tls: { chrome: views.chrome?.hello, native: views.native?.hello },
+      tls: sideViews(views, "hello"),
       fingerprints: records,
-      http2: { chrome: views.chrome?.h2, native: views.native?.h2 },
-      differences: parity
-        ? parity.deltas
-            .filter((delta) => delta.area === "transport")
-            .map(({ path, expected, actual, class: kind }) => ({
-              path,
-              expected,
-              actual,
-              class: kind,
-            }))
-        : null,
+      http2: sideViews(views, "h2"),
+      differences: transportDifferences(parity),
       identityParity: parity ? parity.summary : null,
     },
     raw,
@@ -302,83 +322,74 @@ function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function printReport(report) {
-  const line = (text = "") => console.log(text);
+const line = (text = "") => console.log(text);
+const deltaWhere = (delta) => delta.kind ?? delta.origin ?? "";
+const deltaWhat = (delta) => delta.header ?? delta.path ?? "";
+
+function printVersionDiff({ from, to, deltas }) {
+  line(`\n${from.full} → ${to.full}: ${deltas.length} release deltas`);
+  for (const delta of deltas)
+    line(
+      `  [${delta.action}] ${delta.area} ${delta.type} ${deltaWhere(delta)} ${deltaWhat(delta)}`.trimEnd(),
+    );
+}
+
+function printParity(parity) {
+  line(`\nturbo-surf parity: ${JSON.stringify(parity.summary)}`);
+  for (const delta of parity.deltas.filter((entry) => entry.class === "tell"))
+    line(
+      `  [tell] ${delta.area} ${delta.type} ${delta.tier ?? ""} ${deltaWhere(delta)} ${deltaWhat(delta)}`.trimEnd(),
+    );
+}
+
+function printBlockers(blockers) {
+  line("\nSTOPPED — these deltas need a human (see CHROME-REVERSION.md, 'Handling deltas'):");
+  for (const blocker of blockers) line(`  - ${blocker.reason}`);
+}
+
+/** The console summary of a re-version run. */
+export function printReport(report) {
   line(
     `Chrome ${report.chrome.version} (${report.status}); registry default ${report.registryDefault}`,
   );
   if (report.oracle) line(`oracle: ${report.oracle.frozen} ${report.oracle.executable}`);
-  if (report.versionDiff) {
-    const { from, to, deltas } = report.versionDiff;
-    line(`\n${from.full} → ${to.full}: ${deltas.length} release deltas`);
-    for (const delta of deltas)
-      line(
-        `  [${delta.action}] ${delta.area} ${delta.type} ${delta.kind ?? delta.origin ?? ""} ${delta.header ?? delta.path ?? ""}`.trimEnd(),
-      );
-  }
+  if (report.versionDiff) printVersionDiff(report.versionDiff);
   if (report.chromeDrift?.length)
     line(`\nChrome drift vs its fixture: ${report.chromeDrift.length} deltas`);
-  if (report.parity) {
-    line(`\nturbo-surf parity: ${JSON.stringify(report.parity.summary)}`);
-    for (const delta of report.parity.deltas.filter((entry) => entry.class === "tell"))
-      line(
-        `  [tell] ${delta.area} ${delta.type} ${delta.tier ?? ""} ${delta.kind ?? delta.origin ?? ""} ${delta.header ?? delta.path ?? ""}`.trimEnd(),
-      );
-  }
+  if (report.parity) printParity(report.parity);
   if (report.engine)
     line(`\nengine step: ${report.engine.status}; ${JSON.stringify(report.engineIdentity)}`);
-  if (report.blockers?.length) {
-    line("\nSTOPPED — these deltas need a human (see CHROME-REVERSION.md, 'Handling deltas'):");
-    for (const blocker of report.blockers) line(`  - ${blocker.reason}`);
-  }
+  if (report.blockers?.length) printBlockers(report.blockers);
   for (const path of report.written ?? []) line(`wrote ${relative(ROOT, path)}`);
   if (report.reportPath) line(`report ${relative(ROOT, report.reportPath)}`);
 }
 
-export async function main(argv) {
-  const args = [...argv];
-  const has = (name) => args.includes(name);
-  const flag = (name) => (has(name) ? args[args.indexOf(name) + 1] : undefined);
-  if (!flag("--chrome")) {
-    console.error(
-      "Usage: node reversion-chrome.mjs --chrome <Chrome.app|executable> [--check] [--offline] [--native <identity_battery>] [--skip-native] [--skip-engine] [--engine-mode --resolve|--check] [--fixture-only]",
-    );
-    return EXIT.usage;
-  }
-  const check = has("--check");
-  const registry = readRegistry();
-  const report = { registryDefault: registry.defaultMajor, written: [] };
-  report.chrome = await detectChrome(flag("--chrome"));
-  report.status = releaseStatus(report.chrome.version, registry);
-  const major = Number(report.chrome.version.split(".")[0]);
-  const baseline = currentIdentity(registry).fixture;
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "Z");
-  report.reportPath = join(here, "artifacts", `reversion-${major}-${stamp}.json`);
-  const finish = (code) => {
-    report.exitCode = code;
-    writeJson(report.reportPath, report);
-    printReport(report);
-    return code;
-  };
+const NEWER = ["new-major", "new-build"];
 
-  if (check) {
-    // CI / scheduled mode: never writes fixtures, the registry or oracles.
-    if (has("--offline"))
-      return finish(["new-major", "new-build"].includes(report.status) ? EXIT.newer : EXIT.ok);
-    const measured = await collect({ chrome: report.chrome.executable });
-    const own = existsSync(fixturePath(major)) ? readJson(fixturePath(major)) : null;
-    if (own && versionOf(own).full === report.chrome.version)
-      report.chromeDrift = drift(own, measured);
-    if (!has("--skip-native") && baseline) {
-      const native = await collect({ native: await nativeBinary(flag("--native")) });
-      report.parity = diffParity(baseline, native, { knownGaps: readJson(KNOWN_GAPS) });
-    }
-    if (["new-major", "new-build"].includes(report.status)) return finish(EXIT.newer);
-    if (report.chromeDrift?.length) return finish(EXIT.chromeDrift);
-    if (report.parity?.summary.tell) return finish(EXIT.nativeDrift);
-    return finish(EXIT.ok);
-  }
+/** `--check` exit code from a finished check report (newer Chrome first, then drift). */
+export function checkExit(report) {
+  if (NEWER.includes(report.status)) return EXIT.newer;
+  if (report.chromeDrift?.length) return EXIT.chromeDrift;
+  if (report.parity?.summary.tell) return EXIT.nativeDrift;
+  return EXIT.ok;
+}
 
+// CI / scheduled mode: never writes fixtures, the registry or oracles.
+async function checkMode(cli, report, { major, baseline }) {
+  if (cli.has("--offline")) return NEWER.includes(report.status) ? EXIT.newer : EXIT.ok;
+  const measured = await collect({ chrome: report.chrome.executable });
+  const own = existsSync(fixturePath(major)) ? readJson(fixturePath(major)) : null;
+  if (own && versionOf(own).full === report.chrome.version)
+    report.chromeDrift = drift(own, measured);
+  if (!cli.has("--skip-native") && baseline) {
+    const native = await collect({ native: await nativeBinary(cli.flag("--native")) });
+    report.parity = diffParity(baseline, native, { knownGaps: readJson(KNOWN_GAPS) });
+  }
+  return checkExit(report);
+}
+
+/** Measure the frozen oracle and write chrome-identity-<major>.json. */
+async function recordFixture(report, major) {
   report.oracle = await freezeOracle(report.chrome);
   const fixture = await collect({ chrome: report.oracle.executable });
   if (fixture.missing.length || fixture.errors.length)
@@ -395,50 +406,32 @@ export async function main(argv) {
     report.chromeDrift = drift(readJson(target), fixture);
   writeJson(target, fixture);
   report.written.push(target);
+  return { fixture, target };
+}
 
-  const previousRelease = registry.releases.find((entry) => entry.major === registry.defaultMajor);
+function releaseBlockers(report, { baseline, fixture, major, previousRelease }) {
   if (baseline && versionOf(baseline).major !== major) {
     report.versionDiff = diffVersions(baseline, fixture);
     report.blockers = blockers(report.versionDiff, {
       transportBase: previousRelease.transportBaseMajor,
     });
   } else report.blockers = [];
-  report.engine = await engineStep(report.chrome.version, {
-    skip: has("--skip-engine"),
-    mode: flag("--engine-mode") ?? "--resolve",
-  });
-  if (report.blockers.length) return finish(EXIT.human);
-  if (has("--fixture-only")) return finish(EXIT.ok);
+}
 
-  let release;
-  try {
-    release = measuredRelease(fixture, previousRelease);
-  } catch (error) {
-    report.blockers.push({ reason: error.message });
-    return finish(EXIT.human);
-  }
-  const updated = applyRelease(registry, release, {
-    fixture: relative(ROOT, target),
-    browser: fixture.browser.product,
-    v8: fixture.browser.v8,
-    collectedAt: fixture.collectedAt,
-    bundleSha256: fixture.browser.bundleSha256,
-  });
-  writeJson(REGISTRY, updated);
-  report.written.push(REGISTRY);
+async function nativeParity(cli, report, fixture) {
+  const native = await collect({ native: await nativeBinary(cli.flag("--native")) });
+  report.parity = diffParity(fixture, native, { knownGaps: readJson(KNOWN_GAPS) });
+  report.engineIdentity = {
+    chromeV8: fixture.browser.v8,
+    nativeV8: native.build.v8Version,
+    matches: String(native.build.v8Version).startsWith(
+      fixture.browser.v8.split(".").slice(0, 2).join("."),
+    ),
+  };
+  return native;
+}
 
-  let native = null;
-  if (!has("--skip-native")) {
-    native = await collect({ native: await nativeBinary(flag("--native")) });
-    report.parity = diffParity(fixture, native, { knownGaps: readJson(KNOWN_GAPS) });
-    report.engineIdentity = {
-      chromeV8: fixture.browser.v8,
-      nativeV8: native.build.v8Version,
-      matches: String(native.build.v8Version).startsWith(
-        fixture.browser.v8.split(".").slice(0, 2).join("."),
-      ),
-    };
-  }
+function writeTransport(report, { registry, major, fixture, native }) {
   const previousTransport = [registry.defaultMajor, major]
     .map((value) => join(here, `TRANSPORT-${value}.json`))
     .find((path) => existsSync(path));
@@ -455,8 +448,73 @@ export async function main(argv) {
   const transportPath = join(here, `TRANSPORT-${major}.json`);
   writeJson(transportPath, transport.report);
   report.written.push(transportPath);
+}
+
+async function reversion(cli, report, { registry, major, baseline }) {
+  const { fixture, target } = await recordFixture(report, major);
+  const previousRelease = registry.releases.find((entry) => entry.major === registry.defaultMajor);
+  releaseBlockers(report, { baseline, fixture, major, previousRelease });
+  report.engine = await engineStep(report.chrome.version, {
+    skip: cli.has("--skip-engine"),
+    mode: cli.flag("--engine-mode") ?? "--resolve",
+  });
+  if (report.blockers.length) return EXIT.human;
+  if (cli.has("--fixture-only")) return EXIT.ok;
+
+  let release;
+  try {
+    release = measuredRelease(fixture, previousRelease);
+  } catch (error) {
+    report.blockers.push({ reason: error.message });
+    return EXIT.human;
+  }
+  const updated = applyRelease(registry, release, {
+    fixture: relative(ROOT, target),
+    browser: fixture.browser.product,
+    v8: fixture.browser.v8,
+    collectedAt: fixture.collectedAt,
+    bundleSha256: fixture.browser.bundleSha256,
+  });
+  writeJson(REGISTRY, updated);
+  report.written.push(REGISTRY);
+
+  const native = cli.has("--skip-native") ? null : await nativeParity(cli, report, fixture);
+  writeTransport(report, { registry, major, fixture, native });
   await formatJson(report.written.filter((path) => path.endsWith(".json")));
-  return finish(report.parity?.summary.tell ? EXIT.nativeDrift : EXIT.ok);
+  return report.parity?.summary.tell ? EXIT.nativeDrift : EXIT.ok;
+}
+
+/** `has(name)` / `flag(name)` (the value after `name`) over a CLI argument list. */
+export function cliArgs(argv) {
+  const args = [...argv];
+  const has = (name) => args.includes(name);
+  const flag = (name) => (has(name) ? args[args.indexOf(name) + 1] : undefined);
+  return { has, flag };
+}
+
+export async function main(argv) {
+  const cli = cliArgs(argv);
+  if (!cli.flag("--chrome")) {
+    console.error(
+      "Usage: node reversion-chrome.mjs --chrome <Chrome.app|executable> [--check] [--offline] [--native <identity_battery>] [--skip-native] [--skip-engine] [--engine-mode --resolve|--check] [--fixture-only]",
+    );
+    return EXIT.usage;
+  }
+  const registry = readRegistry();
+  const report = { registryDefault: registry.defaultMajor, written: [] };
+  report.chrome = await detectChrome(cli.flag("--chrome"));
+  report.status = releaseStatus(report.chrome.version, registry);
+  const major = Number(report.chrome.version.split(".")[0]);
+  const baseline = currentIdentity(registry).fixture;
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "Z");
+  report.reportPath = join(here, "artifacts", `reversion-${major}-${stamp}.json`);
+  const code = cli.has("--check")
+    ? await checkMode(cli, report, { major, baseline })
+    : await reversion(cli, report, { registry, major, baseline });
+  report.exitCode = code;
+  writeJson(report.reportPath, report);
+  printReport(report);
+  return code;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

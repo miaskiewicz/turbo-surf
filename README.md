@@ -365,7 +365,7 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
   real native functions); the `toString` anti-hook trap is itself shapeless.
 - **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for
-  selected solids/shapes), `measureText` uses the faces live layout uses (system faces plus the document's loaded `@font-face` / `FontFace` faces, #130; static screenshots still paint system/bundled faces only), context
+  selected solids/shapes), `measureText` uses the faces live layout uses (system faces plus the document's loaded `@font-face` / `FontFace` faces, #130; static `screenshot`s load the page's `@font-face` faces themselves, #142), context
   class-tags as `CanvasRenderingContext2D` + `getContextAttributes`.
 - **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
   `readPixels` matched Chrome for the shared gradient scene when Metal was accessible.
@@ -421,7 +421,8 @@ Known gaps, each tracked in its own issue:
 [workers](https://github.com/miaskiewicz/turbo-surf/issues/104),
 [canvas captureStream / offscreen / PiP, WebGL](https://github.com/miaskiewicz/turbo-surf/issues/106),
 [IndexedDB event-path residuals](https://github.com/miaskiewicz/turbo-surf/issues/148),
-[placeholder APIs (caches, cookieStore, Navigation, locks, WebSocket)](https://github.com/miaskiewicz/turbo-surf/issues/108),
+[placeholder APIs (caches, cookieStore, Navigation, locks)](https://github.com/miaskiewicz/turbo-surf/issues/108),
+[WebTransport over HTTP/3](https://github.com/miaskiewicz/turbo-surf/issues/175),
 [abort reaction / microtask order](https://github.com/miaskiewicz/turbo-surf/issues/136),
 [fetch residuals: compression-dictionary, Range, consumed-body text](https://github.com/miaskiewicz/turbo-surf/issues/137),
 [CSP directives / reporting](https://github.com/miaskiewicz/turbo-surf/issues/110),

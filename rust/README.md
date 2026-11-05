@@ -166,7 +166,8 @@ place, and the render returns the hydrated HTML (the Lane B contract).
   that binding onto deno_core's context, then layers the non-DOM `window` env a real
   page needs (`navigator`, `location`, virtual timers + real microtasks, `fetch`/XHR
   **over the tier-1 net stack**, `URL`, `crypto`(+`subtle`), `MessageChannel`,
-  `ReadableStream`, `AbortController`, `BroadcastChannel`, `WebSocket`,
+  `ReadableStream`, `AbortController`, `BroadcastChannel`, `WebSocket`/`WebSocketStream`/
+  `EventSource` over native transports (#144),
   `document.cookie` bridged to the shared `CookieJar`, observers, history) + the
   hydration pump (executes injected `<script>` chunks, drains to quiescence).
   Host-owned hydration diagnostics retain the last lifecycle phase and completed

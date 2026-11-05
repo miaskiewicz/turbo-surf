@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
+import { dictionaryPage } from "./compression-dictionary-server.mjs";
 
 const source = readFileSync(
   new URL("../../rust/crates/turbo-surf-render/src/compression_dictionary.js", import.meta.url),
@@ -302,4 +303,31 @@ test("dictionary networking tasks are bounded, private, separately dispatched an
   context.controls.retire();
   assert.equal(context.controls.count(), 0);
   assert.equal(run(), 0, "retirement releases queued callbacks");
+});
+
+test("dictionary fixture pages place the link by case shape", () => {
+  const target = "https://localhost:1/dictionary?case=7";
+  const link = `<link rel="compression-dictionary" href="${target}">`;
+  const page = (item) => dictionaryPage(item, 7, target);
+  assert.ok(page({}).includes(`${link}</head><body><script></script>`));
+  assert.ok(page({ both: true, header: true }).includes(link));
+  for (const item of [{ header: true }, { head: true }, { dynamic: true }])
+    assert.ok(!page(item).includes("<link"), JSON.stringify(item));
+  assert.ok(page({ integrity: "sha256-x" }).includes(`${target}" integrity="sha256-x">`));
+  const svg = page({ dynamic: true, foreign: true, remove: true });
+  assert.ok(svg.includes("createElementNS('http://www.w3.org/2000/svg','link')"));
+  assert.ok(svg.includes("document.head.append(link);link.addEventListener('load'"));
+  const shadow = page({ dynamic: true, shadow: "closed", relChange: true, hrefChange: true });
+  assert.ok(shadow.includes(`attachShadow({mode:"closed"})`));
+  assert.ok(shadow.endsWith(`setTimeout(()=>link.href="${target}&version=2",50);</script>`));
+  assert.ok(shadow.includes("setTimeout(()=>link.rel='alternate',50);"));
+  assert.ok(page({ lifecycleDelay: "image" }).endsWith(`<img src="/delayed-image?case=7">`));
+  assert.ok(
+    page({ lifecycleDelay: "defer" }).endsWith(
+      `<script src="/delayed-script?case=7" defer></script>`,
+    ),
+  );
+  const parser = page({ lifecycleDelay: "parser" });
+  assert.ok(parser.endsWith(`<script src="/delayed-script?case=7"></script>`));
+  assert.ok(parser.includes("['future-timer',Date.now(),document.readyState]),100);</script>"));
 });

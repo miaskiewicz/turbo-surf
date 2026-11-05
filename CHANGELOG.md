@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (network transports, #188)**: a render session's trust anchor now covers its
+  `wss:` sockets as well as its https fetches. `ClientHints::with_trust_anchor(der)`
+  configures both; before, `new WebSocket('wss://…')` to a server signed by an embedder or
+  test CA failed while `fetch` to the same server succeeded. Tested against a localhost TLS
+  server (`tests/wss_trust_anchor.rs`).
 - **Fixed (postMessage source, #90, #85)**: a posted message's `event.source` is the
   incumbent window (the calling frame's realm), not the entered one, as in Chrome 156:
   `a.eval("parent.postMessage(..)")`, a child-realm function called from the parent, nested

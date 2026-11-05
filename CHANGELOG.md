@@ -11,6 +11,17 @@
   to their baseline. The same file reproduces #183 on an idle localhost (sixty frame loads
   in one session) — the tail stayed under three seconds on this machine, so #183's reported
   7-14 s slowdown looks like concurrent build load rather than a teardown leak.
+- **Fixed (CSP worker-src, #104, #190)**: `new Worker(url)` under `worker-src 'none'`
+  now fires a `securitypolicyviolation` whose `blockedURI` is the worker script URL
+  and whose `effectiveDirective` is `worker-src`, matching Chrome 156; the CSP3
+  fallback chain (`worker-src` -> `child-src` -> `script-src` -> `default-src`) is
+  applied, so a page under `script-src 'nonce-n'` without `worker-src` reports the
+  same violation. The Worker shell still constructs (`new Worker('/x.js')` returns a
+  Worker object), as in Chrome. `media-src` enforcement still waits on media loads
+  (split as #204). Checked against `csp-directives-chrome156.json`
+  (`tests/csp_directives.rs`). The remaining dedicated-worker runtime (a separate V8
+  realm per worker with DedicatedWorkerGlobalScope, module workers, blob: workers,
+  and SharedWorker/ServiceWorker) is tracked as #203.
 - **Fixed (render, #138)**: synchronous `XMLHttpRequest` (`open(..., false)`) now
   blocks in `send()` and loads the response, over http(s), `blob:` and `data:` URLs.
   Native `op_fetch_sync` runs the page's own fetch pipeline (CSP, CORS, cookies,

@@ -8,7 +8,8 @@ use std::io::{Read, Write};
 use turbo_surf_render::PageSession;
 
 const PROBE: &str = include_str!("../../../../harness/detection/sync-xhr-probe.js");
-const CONTROL: &str = include_str!("../../../../harness/detection/fixtures/sync-xhr-chrome156.json");
+const CONTROL: &str =
+    include_str!("../../../../harness/detection/fixtures/sync-xhr-chrome156.json");
 const DOCUMENT: &str = "<!doctype html><html><head></head><body></body></html>";
 
 fn control() -> Value {

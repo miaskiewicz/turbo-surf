@@ -88,6 +88,8 @@ mod blob_urls;
 mod form_navigation;
 #[path = "privacy_sandbox.rs"]
 mod privacy_sandbox;
+#[path = "sync_xhr.rs"]
+mod sync_xhr;
 use privacy_sandbox::{op_private_token_issuer, op_private_token_query};
 #[path = "form_submission.rs"]
 mod form_submission;
@@ -2468,6 +2470,10 @@ async fn op_fetch(
     #[string] url: String,
     #[string] init_json: String,
 ) -> FetchOut {
+    page_fetch(state, url, init_json).await
+}
+// The fetch itself, shared with synchronous XMLHttpRequest (sync_xhr.rs).
+async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String) -> FetchOut {
     apply_report_cookies(&mut state.borrow_mut());
     let (base, jar_rc, ua, client_hints) = {
         let s = state.borrow();
@@ -7382,6 +7388,7 @@ deno_core::extension!(
         blob_urls::op_blob_url_revoke,
         blob_urls::op_blob_url_key,
         blob_urls::op_blob_url_read,
+        sync_xhr::op_fetch_sync,
         op_load_image,
         op_decode_data_image,
         op_dictionary_active,

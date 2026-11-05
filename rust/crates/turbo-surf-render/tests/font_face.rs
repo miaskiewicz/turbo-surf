@@ -227,3 +227,43 @@ async fn embedded_web_font_block_range_matches_chrome156() {
 async fn embedded_web_font_mixed_range_matches_chrome156() {
     assert_case("range-mixed", RANGE_MIXED_HEIGHT).await;
 }
+
+/// Chrome 156: the style update during loading starts a used `@font-face` face, in the
+/// top document and in a frame, and the face's load delays the window load event; an
+/// unused face stays unloaded (turbo-surf#166). No script reads layout here.
+#[tokio::test(flavor = "current_thread")]
+async fn used_css_faces_load_before_the_load_event_without_a_layout_read() {
+    let source = serve(false).await;
+    let face = r#"@font-face{font-family:Plex;src:url(/fonts/plex.woff2) format("woff2")}"#;
+    let cases = [
+        (
+            format!(
+                r#"<!doctype html><style>{face}</style><p style="font-family:Plex">font</p><script>addEventListener("load",()=>{{window.__fontLoad="load:"+[...document.fonts].map(f=>f.status)}})</script>"#
+            ),
+            "load:loaded",
+        ),
+        (
+            format!(
+                r#"<!doctype html><iframe id="f" srcdoc='<style>{face}</style><p style="font-family:Plex">font</p>'></iframe><script>addEventListener("load",()=>{{window.__fontLoad="load:"+[...document.getElementById("f").contentDocument.fonts].map(f=>f.status)}})</script>"#
+            ),
+            "load:loaded",
+        ),
+        (
+            format!(
+                r#"<!doctype html><style>{face}</style><p>font</p><script>addEventListener("load",()=>{{window.__fontLoad="load:"+[...document.fonts].map(f=>f.status)}})</script>"#
+            ),
+            "load:unloaded",
+        ),
+    ];
+    for (html, expected) in cases {
+        let mut page = PageSession::open(&html, &format!("{source}/page"), "", "", 20000)
+            .await
+            .unwrap();
+        let actual = page
+            .eval_json_expression("window.__fontLoad")
+            .await
+            .unwrap();
+        page.close();
+        assert_eq!(actual, format!("\"{expected}\""), "{html}");
+    }
+}

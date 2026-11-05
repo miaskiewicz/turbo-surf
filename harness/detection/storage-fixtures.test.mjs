@@ -14,7 +14,8 @@ test("storage control pins all authored scripts and the actual Chrome collector"
   assert.equal(digest("./storage-probe.js"), fixture.probeSha256);
   assert.equal(digest("./storage-widget-probe.js"), fixture.widgetSha256);
   assert.equal(digest("./authored-storage-chrome.mjs"), fixture.collectorSha256);
-  assert.equal(fixture.browser, "Chrome/155.0.8059.79");
-  assert.equal(fixture.v8, "15.5.35.23");
+  // Re-recorded on the frozen Chrome for Testing headless shell after the #154 refactor.
+  assert.equal(fixture.browser, "HeadlessChrome/156.0.8078.47");
+  assert.equal(fixture.v8, "15.6.75.19");
   assert.deepEqual(fixture.errors, []);
 });

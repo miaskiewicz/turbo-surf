@@ -1,8 +1,8 @@
 {
-  "browser": "Chrome/155.0.8059.80",
-  "v8": "15.5.35.23",
-  "probeSha256": "22d791af9cc6d30f1405d2384fbb712b2ac33bbc9e271e32f0ea1a6a04e188df",
-  "collectorSha256": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
+  "browser": "HeadlessChrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "probeSha256": "fa20a11caeac384fadac668e8048d42d5ddf45d7ac51b82bfebbce6b176ab7d5",
+  "collectorSha256": "cc70521202b9d9f0806c75b8803a4a31c2443469ac51bb11a87b0bf326b1054e",
   "errors": [],
   "result": [
     {
@@ -71,10 +71,10 @@
       "hostStyle": "",
       "srcdoc": null,
       "parentStyle": null,
-      "rect": [0, 17.5, 0, 0],
-      "rects": [[0, 17.5, 0, 0]],
+      "rect": [0, 17, 0, 0],
+      "rects": [[0, 17, 0, 0]],
       "client": [0, 0, 0, 0],
-      "offset": [0, 18, 0, 0],
+      "offset": [0, 17, 0, 0],
       "viewport": [0, 0],
       "media": {
         "(width:0px)": true,
@@ -103,9 +103,9 @@
       "childHtml": "<div id=\"fixed\" style=\"width:27px;height:11px\"></div><div id=\"units\" style=\"width:50vw;height:50vh\"></div><iframe id=\"nested\" style=\"width:37px;height:19px;border:0\"></iframe>",
       "document": {
         "compatMode": "BackCompat",
-        "font": "16px Times",
+        "font": "16px \"Times New Roman\"",
         "lineHeight": "normal",
-        "textRange": [0, 30, 29.3359375, 18.5]
+        "textRange": [0, 30, 29.34375, 17]
       },
       "children": {
         "fixed": [0, 0, 27, 11],
@@ -121,10 +121,10 @@
       "hostStyle": "",
       "srcdoc": "<!doctype html><body style=\"margin:0\">",
       "parentStyle": null,
-      "rect": [0, 17.5, 0, 0],
-      "rects": [[0, 17.5, 0, 0]],
+      "rect": [0, 17, 0, 0],
+      "rects": [[0, 17, 0, 0]],
       "client": [0, 0, 0, 0],
-      "offset": [0, 18, 0, 0],
+      "offset": [0, 17, 0, 0],
       "viewport": [0, 0],
       "media": {
         "(width:0px)": true,
@@ -153,9 +153,9 @@
       "childHtml": "<div id=\"fixed\" style=\"width:27px;height:11px\"></div><div id=\"units\" style=\"width:50vw;height:50vh\"></div><iframe id=\"nested\" style=\"width:37px;height:19px;border:0\"></iframe><div id=\"percentage\" style=\"width:50%;height:50%\"></div>",
       "document": {
         "compatMode": "CSS1Compat",
-        "font": "16px Times",
+        "font": "16px \"Times New Roman\"",
         "lineHeight": "normal",
-        "textRange": [0, 34, 29.3359375, 18.5]
+        "textRange": [0, 34, 29.34375, 17]
       },
       "children": {
         "fixed": [0, 0, 27, 11],
@@ -208,10 +208,10 @@
       "hostStyle": "",
       "srcdoc": null,
       "parentStyle": null,
-      "rect": [0, 17.5, 300, 0],
-      "rects": [[0, 17.5, 300, 0]],
+      "rect": [0, 17, 300, 0],
+      "rects": [[0, 17, 300, 0]],
       "client": [0, 0, 300, 0],
-      "offset": [0, 18, 300, 0],
+      "offset": [0, 17, 300, 0],
       "viewport": [300, 0],
       "media": {
         "(width:0px)": false,
@@ -268,10 +268,10 @@
       "hostStyle": "",
       "srcdoc": null,
       "parentStyle": null,
-      "rect": [0, 2.5, 20, 15],
-      "rects": [[0, 2.5, 20, 15]],
+      "rect": [0, 2, 20, 15],
+      "rects": [[0, 2, 20, 15]],
       "client": [0, 0, 20, 15],
-      "offset": [0, 3, 20, 15],
+      "offset": [0, 2, 20, 15],
       "viewport": [20, 15]
     },
     {
@@ -316,10 +316,10 @@
       "hostStyle": "height:0",
       "srcdoc": null,
       "parentStyle": null,
-      "rect": [0, 17.5, 10, 0],
-      "rects": [[0, 17.5, 10, 0]],
+      "rect": [0, 17, 10, 0],
+      "rects": [[0, 17, 10, 0]],
       "client": [0, 0, 10, 0],
-      "offset": [0, 18, 10, 0],
+      "offset": [0, 17, 10, 0],
       "viewport": [10, 0]
     },
     {
@@ -340,10 +340,10 @@
       "hostStyle": "height:0",
       "srcdoc": null,
       "parentStyle": null,
-      "rect": [0, 17.5, 10, 0],
-      "rects": [[0, 17.5, 10, 0]],
+      "rect": [0, 17, 10, 0],
+      "rects": [[0, 17, 10, 0]],
       "client": [0, 0, 10, 0],
-      "offset": [0, 18, 10, 0],
+      "offset": [0, 17, 10, 0],
       "viewport": [10, 0]
     },
     {
@@ -389,8 +389,8 @@
           "rects": []
         },
         "controlSelection": {
-          "rect": [0, 202.5, 86.6953125, 19],
-          "rects": [[0, 202.5, 86.6953125, 19]]
+          "rect": [0, 202, 86.703125, 19],
+          "rects": [[0, 202, 86.703125, 19]]
         }
       }
     },

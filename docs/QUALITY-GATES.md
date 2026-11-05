@@ -139,10 +139,10 @@ each threshold):
 
 At 15 the backlog is 109 functions (0.9% of all functions); 10 would more than double it
 (230) and reach into ordinary dispatch code, while 20 would leave a 16-20 band whose branch
-sets are already too large to test exhaustively. Two backlog files are hash-pinned by a
-Chrome control (`harness/detection/chrome-cdp-trace.mjs` and `input-state.js`, checked by
-`resource-scan-order-chrome.test.mjs`): refactoring either re-captures that control in the
-same change.
+sets are already too large to test exhaustively. Many `harness/detection` probes and
+collectors are hash-pinned by a Chrome control (for example `chrome-cdp-trace.mjs` and
+`input-state.js`, checked by `resource-scan-order-chrome.test.mjs`): refactoring one
+re-captures its controls in the same change.
 
 ### Backlog (`function:line=cc`)
 
@@ -182,43 +182,6 @@ Rust (54):
 - `rust/crates/turbo-surf-render/tests/csp_reporting.rs`: source_pinned_chrome_reports_use_actual_private_transport:392=20
 - `rust/crates/turbo-surf-render/tests/lifecycle_resources.rs`: session_runs_deferred_scripts_at_interactive_and_waits_for_decoded_resources_after_dcl:15=17
 
-JS (55; `function:<line>` is an anonymous function):
-- `harness/detection/activation-headers-chrome.mjs`: function:32=17
-- `harness/detection/audio-advanced-contract-probe.js`: function:1=18
-- `harness/detection/audio-advanced-probe.js`: function:1=26
-- `harness/detection/authored-cache-advanced-chrome.mjs`: function:20=38
-- `harness/detection/authored-cache-unread-chrome.mjs`: function:20=44
-- `harness/detection/chrome-cdp-trace.mjs`: function:152=20, capture:248=62
-- `harness/detection/chrome-network-metadata.mjs`: enrichResponseTransport:34=17, summarizeResponseTransport:98=19
-- `harness/detection/chrome-trace.mjs`: capture:89=37
-- `harness/detection/collector-interruption.test.mjs`: function:102=23
-- `harness/detection/compare.mjs`: function:125=21, function:206=30, function:248=17
-- `harness/detection/compression-dictionary-server.mjs`: function:91=29
-- `harness/detection/cpu-profile-summary.mjs`: summarizeCpuProfile:6=28
-- `harness/detection/csp-report-endpoint-chrome.mjs`: function:51=18
-- `harness/detection/css-security.mjs`: cssSecurityErrors:21=24
-- `harness/detection/document-parser.mjs`: parserErrors:40=35
-- `harness/detection/dom-adoption-probe.js`: function:1=28
-- `harness/detection/dom-tokens-aria-probe.js`: function:3=16
-- `harness/detection/dom-variadic-errors-probe.js`: function:1=18
-- `harness/detection/form-methods-probe.js`: function:1=20
-- `harness/detection/identity-diff.mjs`: actionFor:367=17, diffVersions:394=19, measuredRelease:508=26
-- `harness/detection/identity-server.mjs`: function:150=17
-- `harness/detection/identity-wire.mjs`: describeClientHello:78=18, describeFrame:192=17
-- `harness/detection/input-state.js`: function:2=19
-- `harness/detection/interface-trace.js`: function:121=29, function:210=23
-- `harness/detection/leading-space-geometry-probe.js`: function:60=22
-- `harness/detection/lifecycle.mjs`: lifecycleErrors:23=23
-- `harness/detection/live-text-geometry-probe.js`: function:1=19
-- `harness/detection/modules.mjs`: frameModuleErrors:48=26, moduleErrors:73=47, evaluationErrors:126=38, captureModules:187=16
-- `harness/detection/native-iframe-layout-probe.js`: function:1=17
-- `harness/detection/navigation-observation.test.mjs`: function:279=28
-- `harness/detection/redirect-policy.mjs`: redirectErrors:19=26
-- `harness/detection/reversion-chrome.mjs`: transportReport:232=20, printReport:305=24, main:338=32
-- `harness/detection/script-credentials.mjs`: credentialErrors:43=37, function:93=29
-- `harness/detection/storage-probe.js`: function:1=18
-- `harness/detection/stylesheet-origins.mjs`: stylesheetErrors:20=22
-- `harness/detection/summarize-run.mjs`: processSummary:99=23, summarizeRun:133=31, function:286=20
-- `harness/detection/transport-hello.mjs`: parseClientHello:15=23
-- `harness/detection/trusted-types-probe.js`: function:2=21
-- `harness/detection/window-timer-semantics-chrome.mjs`: captureWindowTimerSemantics:14=19
+JS (0): cleared by #154 (`npm run -s complexity:js` exits 0). The last 20 functions were
+hash-pinned Chrome probes and collectors under `harness/detection`; their controls were
+re-recorded in the same change (see CHANGELOG).

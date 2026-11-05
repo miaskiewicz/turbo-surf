@@ -13,6 +13,23 @@
   `new Window()` throws Chrome's "Failed to construct 'Window': Illegal constructor" and
   `Window()` throws "Illegal constructor" on both engines (#129).
 - **Refactored (#154)**: `window_proxy.rs` and `message_ports.rs` functions are at cc <= 15.
+- **Refactored (#154, JS)**: the last 20 JS functions above cc 15 are split into named
+  helpers and tables with the same behaviour, so `npm run -s complexity:js` exits 0. They were
+  all hash-pinned Chrome probes and collectors under `harness/detection`: `chrome-cdp-trace.mjs`,
+  `input-state.js`, `interface-trace.js`, the cache, CSP-report, timer and identity collectors
+  (`identity-server.mjs`, `identity-wire.mjs`), and the dom-adoption, dom-variadic-errors,
+  form-methods, live-text-geometry, native-iframe-layout, storage, trusted-types and
+  leading-space-geometry probes. Their controls are re-recorded on the frozen Chrome for
+  Testing headless shell 156.0.8078.47. The cache, dom-adoption, dom-variadic-errors,
+  form-methods and resource-scan-order controls have no data change. The window-timer
+  control changes only in timing noise. The headless shell does change the data of several
+  controls: CSP reports (no Reporting-API delivery over HTTPS, no favicon requests, and
+  headless UA-CH and Accept-Language headers), storage (`requestStorageAccess` rejects with
+  NotAllowedError), and live-text, native-iframe and leading-space geometry (default font and
+  device pixel ratio). Trusted Types also maps the new Chrome 156 `onchecked` and
+  `onopenerchange` attributes. The Google and observability receipts
+  (`GOOGLE-LAST-RUN.json`, `GOOGLE-DIAGNOSTICS.json`, `OBSERVABILITY-LAST-RUN.json`) were not
+  re-run; their `staleSourceHashes` field marks the recorded hashes that predate the refactor.
 
 ## [0.7.1] — 2026-11-05
 

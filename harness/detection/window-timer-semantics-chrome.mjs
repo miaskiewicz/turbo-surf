@@ -11,6 +11,87 @@ const hash = (name) =>
   createHash("sha256")
     .update(readFileSync(join(here, name)))
     .digest("hex");
+const sourceNames = [
+  "window-timer-semantics-chrome.mjs",
+  "window-timer-semantics-probe.js",
+  "window-timer-semantics.html",
+  "chrome-cdp-trace.mjs",
+  "observation-window.mjs",
+  "main-navigation.mjs",
+  "collector-lifecycle.mjs",
+];
+const startServer = async (server) => {
+  await new Promise((done, fail) => {
+    server.once("error", fail);
+    server.listen(0, "127.0.0.1", done);
+  });
+};
+const writeConfig = (evidence, port) => {
+  const configPath = join(evidence, "config.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      url: `http://127.0.0.1:${port}/`,
+      chromePath:
+        process.env.TURBO_SURF_CHROME_PATH ||
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      chromeIncognito: true,
+      interfaces: false,
+      debugger: false,
+      disableExtensions: true,
+      steps: [],
+      waitMs: 0,
+      probes: [join(here, "window-timer-semantics-probe.js")],
+    }),
+    { mode: 0o600 },
+  );
+  return configPath;
+};
+const runCollector = async (evidence, configPath, signal) => {
+  for (const name of ["stdout", "stderr"])
+    writeFileSync(join(evidence, `${name}.log`), "", { mode: 0o600 });
+  const processResult = await superviseChild(
+    process.execPath,
+    [join(here, "chrome-cdp-trace.mjs"), configPath, join(evidence, "trace")],
+    {
+      timeoutMs: 45000,
+      signal,
+      onOutput: (name, bytes) => appendFileSync(join(evidence, `${name}.log`), bytes),
+    },
+  );
+  writeFileSync(join(evidence, "process.json"), JSON.stringify(processResult, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  if (
+    processResult.code !== 0 ||
+    processResult.timedOut ||
+    processResult.aborted ||
+    processResult.error
+  )
+    throw new Error("Timer Chrome collection failed; evidence retained");
+};
+const readTrace = (evidence) => {
+  const trace = JSON.parse(readFileSync(join(evidence, "trace/trace.json"), "utf8"));
+  if (
+    trace.captureComplete !== true ||
+    !Array.isArray(trace.collectorErrors) ||
+    trace.collectorErrors.length ||
+    trace.errors.length
+  )
+    throw new Error("Timer Chrome collection was incomplete or reported an exception");
+  if (trace.probes.length !== 1 || trace.probes[0].error || !trace.probes[0].result?.semantics)
+    throw new Error("Timer probe did not produce its measured result");
+  return trace;
+};
+const timerControl = (trace) => ({
+  browser: trace.browserVersion,
+  v8: trace.browserV8Version,
+  sourceHashes: Object.fromEntries(sourceNames.map((name) => [name, hash(name)])),
+  errors: trace.errors,
+  result: trace.probes[0].result,
+  scope:
+    "Genuine localhost task semantics and observed nesting delays. Timing is not an execution-time guarantee.",
+});
 export async function captureWindowTimerSemantics(outputArgument, signal) {
   if (typeof WebSocket === "undefined")
     throw new Error("This Chrome collector requires Node 22 WebSocket support");
@@ -29,78 +110,9 @@ export async function captureWindowTimerSemantics(outputArgument, signal) {
     response.end(html);
   });
   try {
-    await new Promise((done, fail) => {
-      server.once("error", fail);
-      server.listen(0, "127.0.0.1", done);
-    });
-    const configPath = join(evidence, "config.json");
-    writeFileSync(
-      configPath,
-      JSON.stringify({
-        url: `http://127.0.0.1:${server.address().port}/`,
-        chromePath:
-          process.env.TURBO_SURF_CHROME_PATH ||
-          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        chromeIncognito: true,
-        interfaces: false,
-        debugger: false,
-        disableExtensions: true,
-        steps: [],
-        waitMs: 0,
-        probes: [join(here, "window-timer-semantics-probe.js")],
-      }),
-      { mode: 0o600 },
-    );
-    for (const name of ["stdout", "stderr"])
-      writeFileSync(join(evidence, `${name}.log`), "", { mode: 0o600 });
-    const processResult = await superviseChild(
-      process.execPath,
-      [join(here, "chrome-cdp-trace.mjs"), configPath, join(evidence, "trace")],
-      {
-        timeoutMs: 45000,
-        signal,
-        onOutput: (name, bytes) => appendFileSync(join(evidence, `${name}.log`), bytes),
-      },
-    );
-    writeFileSync(join(evidence, "process.json"), JSON.stringify(processResult, null, 2) + "\n", {
-      mode: 0o600,
-    });
-    if (
-      processResult.code !== 0 ||
-      processResult.timedOut ||
-      processResult.aborted ||
-      processResult.error
-    )
-      throw new Error("Timer Chrome collection failed; evidence retained");
-    const trace = JSON.parse(readFileSync(join(evidence, "trace/trace.json"), "utf8"));
-    if (
-      trace.captureComplete !== true ||
-      !Array.isArray(trace.collectorErrors) ||
-      trace.collectorErrors.length ||
-      trace.errors.length
-    )
-      throw new Error("Timer Chrome collection was incomplete or reported an exception");
-    if (trace.probes.length !== 1 || trace.probes[0].error || !trace.probes[0].result?.semantics)
-      throw new Error("Timer probe did not produce its measured result");
-    const control = {
-      browser: trace.browserVersion,
-      v8: trace.browserV8Version,
-      sourceHashes: Object.fromEntries(
-        [
-          "window-timer-semantics-chrome.mjs",
-          "window-timer-semantics-probe.js",
-          "window-timer-semantics.html",
-          "chrome-cdp-trace.mjs",
-          "observation-window.mjs",
-          "main-navigation.mjs",
-          "collector-lifecycle.mjs",
-        ].map((name) => [name, hash(name)]),
-      ),
-      errors: trace.errors,
-      result: trace.probes[0].result,
-      scope:
-        "Genuine localhost task semantics and observed nesting delays. Timing is not an execution-time guarantee.",
-    };
+    await startServer(server);
+    await runCollector(evidence, writeConfig(evidence, server.address().port), signal);
+    const control = timerControl(readTrace(evidence));
     writeFileSync(output, JSON.stringify(control, null, 2) + "\n", { flag: "wx", mode: 0o600 });
     return control;
   } finally {

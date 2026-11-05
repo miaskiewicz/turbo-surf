@@ -14,8 +14,9 @@ for (const name of ["cache-advanced", "cache-unread"]) {
         .digest("hex");
     assert.equal(digest(`./${name}-probe.js`), fixture.probeSha256);
     assert.equal(digest(`./authored-${name}-chrome.mjs`), fixture.collectorSha256);
-    assert.equal(fixture.browser, "Chrome/155.0.8059.79");
-    assert.equal(fixture.v8, "15.5.35.23");
+    // Re-recorded on the frozen Chrome for Testing headless shell after the #154 refactor.
+    assert.equal(fixture.browser, "HeadlessChrome/156.0.8078.47");
+    assert.equal(fixture.v8, "15.6.75.19");
     assert.deepEqual(fixture.errors, []);
   });
 }

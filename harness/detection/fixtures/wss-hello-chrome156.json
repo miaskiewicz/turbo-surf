@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 1,
+  "browser": {
+    "product": "HeadlessChrome/156.0.8078.47",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36"
+  },
+  "executableSha256": "3c3950c515a97109e1220670ecc31c1f73605ed8379e36a45d1bee064a991162",
+  "collector": "03ded714e43ab29f63038275c4f299ef6edf5a23f0faa0f6915f7154b998ace8",
+  "flags": [
+    "--remote-debugging-pipe",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--use-mock-keychain",
+    "--password-store=basic",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "note": "Loopback ClientHello only (127.0.0.1 listener closes after the record). https = top-level navigation, wss = new WebSocket() from about:blank. Raw records keep randoms and key shares; views drop GREASE and the ECH payload length.",
+  "raw": {
+    "https": "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",
+    "wss": "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"
+  },
+  "views": {
+    "https": {
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47, 53
+        ],
+        "cipherGrease": true,
+        "extensions": [
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [4588, 29, 23, 24],
+            "grease": true
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+            "grease": true
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [772, 771],
+            "grease": true
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ],
+            "keyShareGreaseCount": 1
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 65037
+          },
+          {
+            "type": 65281,
+            "length": 1
+          }
+        ],
+        "extensionGreaseCount": 2
+      },
+      "ja4": "t13i1515h2_8daaf6152771_806a8c22fdea",
+      "ja3n": "4cc9d9021e1f6b341f186aa7fa099388",
+      "alpn": ["h2", "http/1.1"],
+      "applicationSettings": {
+        "codepoint": 17613,
+        "protocols": ["h2"]
+      },
+      "certificateCompression": [2],
+      "groups": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+      "keyShareGroups": [4588, 29],
+      "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+      "trustAnchors": null
+    },
+    "wss": {
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47, 53
+        ],
+        "cipherGrease": true,
+        "extensions": [
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [4588, 29, 23, 24],
+            "grease": true
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+            "grease": true
+          },
+          {
+            "type": 16,
+            "length": 11,
+            "protocols": ["http/1.1"]
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [772, 771],
+            "grease": true
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ],
+            "keyShareGreaseCount": 1
+          },
+          {
+            "type": 65037
+          },
+          {
+            "type": 65281,
+            "length": 1
+          }
+        ],
+        "extensionGreaseCount": 2
+      },
+      "ja4": "t13i1514h1_8daaf6152771_e4c2b8c727f2",
+      "ja3n": "3a9dd9c6f28c1f5e5ff01fc2a35a5de2",
+      "alpn": ["http/1.1"],
+      "applicationSettings": null,
+      "certificateCompression": [2],
+      "groups": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+      "keyShareGroups": [4588, 29],
+      "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+      "trustAnchors": null
+    }
+  }
+}

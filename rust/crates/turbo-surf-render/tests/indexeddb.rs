@@ -190,3 +190,83 @@ async fn indexeddb_is_shared_within_a_storage_partition() {
         r#"[[["shared",3]],["parent",true],"[object IDBFactory]",true,["shared"]]"#
     );
 }
+
+const PARTITION_PROBE: &str =
+    include_str!("../../../../harness/detection/indexeddb-partition-probe.js");
+const PARTITION_WIDGET: &str =
+    include_str!("../../../../harness/detection/indexeddb-partition-widget.js");
+const PARTITION_CONTROL: &str =
+    include_str!("../../../../harness/detection/fixtures/indexeddb-partition-chrome156.json");
+
+/// Serves the partition control's frames on localhost: `/idb-widget?…` runs the widget,
+/// `/idb-middle?…` embeds it from 127.0.0.1 (the A -> B -> A chain).
+async fn serve_partition_frames(listener: tokio::net::TcpListener) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let port = listener.local_addr().unwrap().port();
+    while let Ok((mut socket, _)) = listener.accept().await {
+        tokio::spawn(async move {
+            let mut bytes = [0; 8192];
+            let count = socket.read(&mut bytes).await.unwrap_or(0);
+            let head = String::from_utf8_lossy(&bytes[..count]);
+            let path = head.split(' ').nth(1).unwrap_or("/");
+            let query = path.split_once('?').map_or("", |(_, query)| query);
+            let body = if path.starts_with("/idb-middle?") {
+                format!("<iframe src=\"http://127.0.0.1:{port}/idb-widget?{query}\"></iframe><script>addEventListener('message',event=>parent.postMessage(event.data,'*'))</script>")
+            } else {
+                format!("<!doctype html><script>{PARTITION_WIDGET}</script>")
+            };
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            let _ = socket.write_all(response.as_bytes()).await;
+        });
+    }
+}
+
+/// IndexedDB is partitioned like Chrome 156 (#148): a cross-site 127.0.0.1 frame under a
+/// localhost page, and the A -> B -> A frame under a 127.0.0.1 page, each get their own
+/// databases, a same-origin frame shares the page's, and a StorageAccessHandle's
+/// `indexedDB` opens the frame origin's unpartitioned databases. Headless shell denies
+/// requestStorageAccess, so the control is the frozen branded Chrome 156 build.
+#[tokio::test(flavor = "current_thread")]
+async fn indexeddb_partitions_match_chrome156() {
+    let control: Value = serde_json::from_str(PARTITION_CONTROL).unwrap();
+    assert_eq!(control["browser"], "Chrome/156.0.8078.80");
+    for (key, source) in [
+        ("probeSha256", PARTITION_PROBE),
+        ("widgetSha256", PARTITION_WIDGET),
+    ] {
+        assert_eq!(
+            control[key],
+            format!("{:x}", Sha256::digest(source)),
+            "stale {key}"
+        );
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(serve_partition_frames(listener));
+    let storage = turbo_surf_render::BrowserStorage::default();
+    let probe = PARTITION_PROBE.trim().trim_end_matches(';');
+    let mut actual = Vec::new();
+    for host in ["localhost", "127.0.0.1"] {
+        let mut page = PageSession::open_with_browsing_state(
+            "<!doctype html><body>IndexedDB partition control",
+            &format!("http://{host}:{port}/"),
+            "",
+            "",
+            15000,
+            "",
+            turbo_surf_core::request_context::ClientHints::default(),
+            &[],
+            storage.clone(),
+        )
+        .await
+        .unwrap();
+        let result = page
+            .eval(&format!("(async()=>{{globalThis.__RESULT=JSON.stringify(await({probe}));}})().catch(e=>{{globalThis.__RESULT=JSON.stringify({{error:String(e),stack:e.stack}});}})"))
+            .await
+            .unwrap();
+        page.close();
+        actual.push(serde_json::from_str::<Value>(&result).unwrap());
+    }
+    server.abort();
+    assert_eq!(Value::Array(actual), control["result"]);
+}

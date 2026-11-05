@@ -1319,8 +1319,10 @@ pub(crate) fn capture_viewport(scope: &mut v8::PinScope) -> Result<(), String> {
         width: values[0],
         height: values[1],
         device_scale,
-        // Calibrated by independent fractional Chrome155 controls; JS DPR is separate.
-        layout_scale: 2.0,
+        // Chrome snaps text metrics to the screen's device pixels: the default line box
+        // is 18px at scale 1 and 18.5px at 2 (turbo-surf#158). The page's
+        // devicePixelRatio is the scale of the screen surf presents.
+        layout_scale: device_scale as f32,
         host: HostMedia::capture(crate::runtime::native_pointer_media_capability(context)),
     }));
     Ok(())

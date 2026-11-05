@@ -57,26 +57,21 @@
       individualRanges: intervals.map(([a, b]) => range(a, b)),
     };
   };
-  const cases = definitions.map((definition) => {
-    if (definition.mode === "ordinary") return ordinaryCase(definition);
-    const { atom, prefix, mode } = definition;
-    const direct = mode === "direct" || mode === "direct-wrapped";
-    document.body.innerHTML = "";
-    document.body.style.cssText = "margin:0";
-    const host = document.createElement("div");
-    host.style.cssText = `width:${mode === "line-wrapped" || mode === "direct-wrapped" ? 45 : 1000}px;font-family:${JSON.stringify(family)};font-size:16px;line-height:24px`;
-    let a = null;
-    if (atom !== "none") {
-      a = document.createElement(atom === "image" ? "img" : "span");
-      a.id = "atom";
-      a.style.cssText = `display:${atom === "image" ? "inline" : "inline-block"};width:10px;height:10px`;
-      host.append(a);
-    }
-    if (mode === "after-br") {
-      const before = document.createElement("span");
-      before.textContent = "z";
-      host.append(before, document.createElement("br"));
-    }
+  const appendAtom = (host, atom) => {
+    if (atom === "none") return null;
+    const a = document.createElement(atom === "image" ? "img" : "span");
+    a.id = "atom";
+    a.style.cssText = `display:${atom === "image" ? "inline" : "inline-block"};width:10px;height:10px`;
+    host.append(a);
+    return a;
+  };
+  const appendBreak = (host, mode) => {
+    if (mode !== "after-br") return;
+    const before = document.createElement("span");
+    before.textContent = "z";
+    host.append(before, document.createElement("br"));
+  };
+  const createCaption = (prefix, mode, direct) => {
     const caption = direct
       ? document.createTextNode(prefix + "abc")
       : document.createElement("span");
@@ -86,17 +81,43 @@
     }
     if (mode === "decorated")
       caption.style.cssText = "padding:3px 5px;border:2px solid;margin:0 7px";
-    let wrapper = null;
-    if (mode === "nested-wrapper") {
-      wrapper = document.createElement("span");
-      wrapper.append(caption);
-      host.append(wrapper);
-    } else host.append(caption);
+    return caption;
+  };
+  const appendCaption = (host, caption, mode) => {
+    if (mode !== "nested-wrapper") {
+      host.append(caption);
+      return null;
+    }
+    const wrapper = document.createElement("span");
+    wrapper.append(caption);
+    host.append(wrapper);
+    return wrapper;
+  };
+  const appendFollowing = (host, direct) => {
     const following = document.createElement("span");
     following.textContent = "z";
     if (direct) following.id = "a";
     host.append(following);
+    return following;
+  };
+  const buildAtomCase = ({ atom, prefix, mode }, direct) => {
+    document.body.innerHTML = "";
+    document.body.style.cssText = "margin:0";
+    const host = document.createElement("div");
+    host.style.cssText = `width:${mode === "line-wrapped" || mode === "direct-wrapped" ? 45 : 1000}px;font-family:${JSON.stringify(family)};font-size:16px;line-height:24px`;
+    const a = appendAtom(host, atom);
+    appendBreak(host, mode);
+    const caption = createCaption(prefix, mode, direct);
+    const wrapper = appendCaption(host, caption, mode);
+    const following = appendFollowing(host, direct);
     document.body.append(host);
+    return { host, a, caption, wrapper, following };
+  };
+  const cases = definitions.map((definition) => {
+    if (definition.mode === "ordinary") return ordinaryCase(definition);
+    const { atom, prefix, mode } = definition;
+    const direct = mode === "direct" || mode === "direct-wrapped";
+    const { host, a, caption, wrapper, following } = buildAtomCase(definition, direct);
     const text = direct ? caption : caption.firstChild;
     const range = (start, end) => {
       const r = document.createRange();

@@ -9,11 +9,18 @@
   bounds, font metrics, baselines, `textAlign`/`textBaseline` offsets). Checked against a
   localhost Chrome 156 control over the IBM Plex Mono fixture
   (`canvas-measure-text-chrome156.json`).
-- **Tests (web APIs, #165)**: `tests/interface_members.rs` checks the own prototype members
-  of the 21 interfaces that were missing members in the expanded inventory against a
-  Chrome 156 control (`interface-members-chrome156.json`). All match except
-  `CSSStyleRule.cssRules` / `insertRule` / `deleteRule`, which land with the next turbo-dom
-  repin (turbo-dom#358) and are pinned as pending until then.
+- **Fixed (web APIs, #165)**: the 194 members the expanded inventory missed are present with
+  Chrome 156's descriptor kinds. XMLHttpRequest's two are surf's (#168); the rest came with
+  the turbo-dom repins (turbo-dom#323, #340, #358). `tests/interface_members.rs` checks every
+  own prototype member of those 21 interfaces against a Chrome 156 control
+  (`interface-members-chrome156.json`).
+- **Fixed (network transports, #179)**: `wss:` connects over surf's Chrome https transport
+  (wreq/BoringSSL) instead of tokio-rustls, so its ClientHello is the https one with only
+  Chrome's WebSocket changes: ALPN `http/1.1` only and no ALPS. The handshake head is
+  still Chrome's, byte for byte. Checked against a frozen Chrome 156 control
+  (`fixtures/wss-hello-chrome156.json`, `tests/wss_client_hello.rs`). The identity battery
+  gained a `wss:` TLS row (`wss-hello.mjs`, run by `reversion-chrome.mjs`). `tokio-rustls`
+  is now a dev-dependency only.
 - **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
   native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
   with Chrome 156's handshake header order, cookies, origin and `connect-src` (ws/wss match
@@ -67,6 +74,33 @@
   `new Window()` throws Chrome's "Failed to construct 'Window': Illegal constructor" and
   `Window()` throws "Illegal constructor" on both engines (#129).
 - **Refactored (#154)**: `window_proxy.rs` and `message_ports.rs` functions are at cc <= 15.
+- **Refactored (#154, JS)**: the last 20 JS functions above cc 15 are split into named
+  helpers and tables with the same behaviour, so `npm run -s complexity:js` exits 0. They were
+  all hash-pinned Chrome probes and collectors under `harness/detection`: `chrome-cdp-trace.mjs`,
+  `input-state.js`, `interface-trace.js`, the cache, CSP-report, timer and identity collectors
+  (`identity-server.mjs`, `identity-wire.mjs`), and the dom-adoption, dom-variadic-errors,
+  form-methods, live-text-geometry, native-iframe-layout, storage, trusted-types and
+  leading-space-geometry probes. Their controls are re-recorded:
+  - **Headless controls**, on the frozen Chrome for Testing headless shell 156.0.8078.47:
+    cache, dom-adoption, dom-variadic-errors, form-methods, resource-scan-order, window-timer
+    and trusted-types.
+  - **Headed controls**, on the new frozen branded oracle, Google Chrome 156.0.8078.80 (see
+    below), with the original window size and device pixel ratio: CSP reporting, storage,
+    live-text, native-iframe and leading-space geometry.
+
+  No control's data changes beyond version and timing noise, with one exception: Trusted
+  Types maps the new Chrome 156 `onchecked` and `onopenerchange` attributes.
+- **Changed (identity, #154)**: the new frozen branded oracle is Google Chrome
+  156.0.8078.80 (`~/.cache/turbo-consolidation/chrome156-80`, frozen to
+  `.native-builds/oracles/chrome156-8078.80`). `reversion-chrome.mjs` re-recorded
+  `chrome-identity-156.json` and `TRANSPORT-156.json` on it, and the default reported
+  release in `browser_releases.json` moves from 156.0.8078.47 to 156.0.8078.80. Only the full
+  version and the evidence change; header orders are unchanged. The identity battery reports
+  0 tells (38 known gaps, 11 environment, 1 collector). Oracles are documented in
+  `harness/detection/README.md` and `CHROME-REVERSION.md` §10.
+- The Google and observability receipts
+  (`GOOGLE-LAST-RUN.json`, `GOOGLE-DIAGNOSTICS.json`, `OBSERVABILITY-LAST-RUN.json`) were not
+  re-run; their `staleSourceHashes` field marks the recorded hashes that predate the refactor.
 
 - **Fixed (forms, #139/#140)**: form targets resolve over the whole frame tree as in Chrome
   156: the submitter's subtree first, then the rest in creation order (siblings, cousins, named

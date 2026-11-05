@@ -48,90 +48,105 @@ const expand = (value, id) =>
     .replaceAll("{port}", String(server.address().port))
     .replaceAll("http://", scheme + "://");
 const escaped = (value) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
-server = createServer(async (request, response) => {
-  const target = new URL(request.url, "http://localhost"),
-    id = Number(target.searchParams.get("case") || 0),
-    item = cases[id];
-  if (
-    [
-      "/report",
-      "/fallback",
-      "/hold-report",
-      "/redirect302",
-      "/redirect307",
-      "/redirect-target",
-    ].includes(target.pathname)
-  ) {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const body = Buffer.concat(chunks);
-    reports.push({
-      case: id,
-      url: request.url,
-      method: request.method,
-      headers: request.headers,
-      rawBodyBase64: body.toString("base64"),
-      body: body.length
-        ? JSON.parse(Buffer.from(decodeReport(body), "latin1").toString("utf8"))
-        : null,
+const reportPaths = [
+  "/report",
+  "/fallback",
+  "/hold-report",
+  "/redirect302",
+  "/redirect307",
+  "/redirect-target",
+];
+const recordReport = async (request, id) => {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const body = Buffer.concat(chunks);
+  reports.push({
+    case: id,
+    url: request.url,
+    method: request.method,
+    headers: request.headers,
+    rawBodyBase64: body.toString("base64"),
+    body: body.length
+      ? JSON.parse(Buffer.from(decodeReport(body), "latin1").toString("utf8"))
+      : null,
+  });
+};
+const reportResponses = {
+  OPTIONS: (response) => {
+    response.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST",
+      "Access-Control-Allow-Headers": "content-type",
     });
-    if (request.method === "OPTIONS") {
-      response.writeHead(204, {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST",
-        "Access-Control-Allow-Headers": "content-type",
-      });
-      response.end();
-      return;
-    }
-    if (target.pathname === "/redirect302" || target.pathname === "/redirect307") {
-      response.writeHead(Number(target.pathname.slice(9)), {
-        Location: "/redirect-target?case=" + id,
-      });
-      response.end();
-      return;
-    }
-    if (target.pathname === "/hold-report") {
-      response.on("close", () => closed.push({ case: id, canceled: !response.writableFinished }));
-      return;
-    }
+    response.end();
+  },
+  "/redirect302": (response, pathname, id) => {
+    response.writeHead(Number(pathname.slice(9)), { Location: "/redirect-target?case=" + id });
+    response.end();
+  },
+  "/hold-report": (response, _pathname, id) => {
+    response.on("close", () => closed.push({ case: id, canceled: !response.writableFinished }));
+  },
+  accepted: (response, _pathname, id) => {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
       "Set-Cookie": "report_response=" + id + "; Path=/; SameSite=Lax",
     });
     response.end();
-    return;
-  }
-  requests.push({ url: request.url, referrer: request.headers.referer || "" });
-  if (target.pathname === "/start") {
-    response.writeHead(200, { "Content-Type": "text/html", "Referrer-Policy": "unsafe-url" });
-    response.end("<!doctype html><body>owner</body>");
-    return;
-  }
+  },
+};
+reportResponses["/redirect307"] = reportResponses["/redirect302"];
+const serveReport = async (request, response, pathname, id) => {
+  await recordReport(request, id);
+  const respond =
+    request.method === "OPTIONS"
+      ? reportResponses.OPTIONS
+      : reportResponses[pathname] || reportResponses.accepted;
+  respond(response, pathname, id);
+};
+const reportToHeader = (id) =>
+  JSON.stringify({
+    group: "g" + id,
+    max_age: 3600,
+    endpoints: [{ url: scheme + "://127.0.0.1:" + server.address().port + "/report?case=" + id }],
+  });
+// Policy headers each case may author, in the order Chrome receives them.
+const caseHeaders = [
+  ["csp", "Content-Security-Policy", expand],
+  ["reportOnly", "Content-Security-Policy-Report-Only", expand],
+  ["endpoints", "Reporting-Endpoints", expand],
+  ["reportTo", "Report-To", (_value, id) => reportToHeader(id)],
+];
+const documentHeaders = (item, id) => {
   const headers = {
     "Content-Type": "text/html",
     "Cache-Control": "no-store",
     "Referrer-Policy": item.policy || "strict-origin-when-cross-origin",
   };
-  if (item.csp) headers["Content-Security-Policy"] = expand(item.csp, id);
-  if (item.reportOnly) headers["Content-Security-Policy-Report-Only"] = expand(item.reportOnly, id);
-  if (item.endpoints) headers["Reporting-Endpoints"] = expand(item.endpoints, id);
-  if (item.reportTo)
-    headers["Report-To"] = JSON.stringify({
-      group: "g" + id,
-      max_age: 3600,
-      endpoints: [{ url: scheme + "://127.0.0.1:" + server.address().port + "/report?case=" + id }],
-    });
-  response.writeHead(item.status || 200, headers);
-  response.end(
-    "<!doctype html><head>" +
-      (item.meta
-        ? '<meta http-equiv="Content-Security-Policy" content="' +
-          escaped(expand(item.meta, id)) +
-          '">'
-        : "") +
-      "</head><body></body>",
-  );
+  for (const [key, name, value] of caseHeaders) if (item[key]) headers[name] = value(item[key], id);
+  return headers;
+};
+const metaPolicy = (item, id) =>
+  item.meta
+    ? '<meta http-equiv="Content-Security-Policy" content="' + escaped(expand(item.meta, id)) + '">'
+    : "";
+const serveDocument = (request, response, pathname, item, id) => {
+  requests.push({ url: request.url, referrer: request.headers.referer || "" });
+  if (pathname === "/start") {
+    response.writeHead(200, { "Content-Type": "text/html", "Referrer-Policy": "unsafe-url" });
+    response.end("<!doctype html><body>owner</body>");
+    return;
+  }
+  response.writeHead(item.status || 200, documentHeaders(item, id));
+  response.end("<!doctype html><head>" + metaPolicy(item, id) + "</head><body></body>");
+};
+server = createServer(async (request, response) => {
+  const target = new URL(request.url, "http://localhost"),
+    id = Number(target.searchParams.get("case") || 0),
+    item = cases[id];
+  if (reportPaths.includes(target.pathname))
+    await serveReport(request, response, target.pathname, id);
+  else serveDocument(request, response, target.pathname, item, id);
 });
 const kill = (signal) => {
   if (!chrome?.pid || chrome.exitCode !== null || chrome.signalCode !== null) return;

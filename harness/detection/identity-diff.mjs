@@ -268,7 +268,7 @@ export const matches = (rule, delta) =>
   (!rule.allowAdded || (delta.added ?? []).every((item) => rule.allowAdded.includes(item))) &&
   (!rule.allowRemoved || (delta.removed ?? []).every((item) => rule.allowRemoved.includes(item)));
 
-function classify(delta, knownGaps) {
+export function classify(delta, knownGaps) {
   if (delta.area === "js") {
     if (ENVIRONMENT_PATHS.some((pattern) => pattern.test(delta.path))) return "environment";
     if (COLLECTOR_PATHS.some((pattern) => pattern.test(delta.path))) return "collector";

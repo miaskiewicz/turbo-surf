@@ -17,109 +17,99 @@ const probe = readFileSync(probePath, "utf8"),
   profile = mkdtempSync(join(tmpdir(), "turbo-dom-oracle-"));
 const counts = new Map();
 const requests = [];
-const server = createServer((request, response) => {
-  response.setHeader("Connection", "close");
-  response.setHeader("Date", new Date(Date.now() - 60000).toUTCString());
-  const target = new URL(request.url, "http://localhost");
-  if (target.pathname.startsWith("/resource/")) {
-    const count = (counts.get(request.url) || 0) + 1;
-    counts.set(request.url, count);
-    response.setHeader("Cache-Control", "max-age=3600");
-    if (target.pathname === "/resource/classic") {
-      response.setHeader("Content-Type", "text/javascript");
-      response.end(
-        `globalThis.resourceClassic=(globalThis.resourceClassic||[]);globalThis.resourceClassic.push(${count});`,
-      );
-      return;
-    }
-    if (target.pathname === "/resource/module") {
-      response.setHeader("Content-Type", "text/javascript");
-      response.end(`export const value=${count};`);
-      return;
-    }
-    if (target.pathname === "/resource/style") {
-      response.setHeader("Content-Type", "text/css");
-      response.end(`body{margin-left:${count}px}`);
-      return;
-    }
-    response.setHeader("Content-Type", "image/gif");
-    response.end(Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64"));
-    return;
-  }
-  if (target.pathname === "/module-frame") {
-    response.setHeader("Content-Type", "text/html");
-    response.end(
-      `<!doctype html><script type="module">import {value} from '/resource/module';top.postMessage({kind:'resource-module',key:new URL(location.href).searchParams.get('key'),value},'*')</script>`,
-    );
-    return;
-  }
-  if (target.pathname === "/stats") {
-    response.setHeader("Content-Type", "application/json");
-    response.setHeader("Cache-Control", "no-store");
-    response.end(JSON.stringify(counts.get(target.searchParams.get("path")) || 0));
-    return;
-  }
-  if (target.pathname === "/frame-direct") {
-    response.setHeader("Content-Type", "text/html");
-    response.end(
-      `<!doctype html><script>(async()=>{const response=await fetch('http://127.0.0.1:${server.address().port}/cache/nested');top.postMessage({kind:'cache-ancestor',key:new URL(location.href).searchParams.get('key'),count:response.headers.get('x-count')},'*')})()</script>`,
-    );
-    return;
-  }
-  if (target.pathname === "/frame-parent") {
-    response.setHeader("Content-Type", "text/html");
-    response.end(
-      `<!doctype html><iframe src="http://127.0.0.1:${server.address().port}/frame-direct?key=nested"></iframe>`,
-    );
-    return;
-  }
-  if (target.pathname.startsWith("/range/")) {
-    requests.push({
-      url: request.url,
-      range: request.headers.range || null,
-      ifRange: request.headers["if-range"] || null,
-    });
-    const count = (counts.get(request.url) || 0) + 1;
-    counts.set(request.url, count);
-    response.setHeader("Cache-Control", "max-age=3600");
-    response.setHeader("ETag", '"range"');
-    response.setHeader("X-Count", String(count));
-    response.setHeader("Content-Type", "text/plain");
-    response.setHeader("Accept-Ranges", "bytes");
-    const bytes = Buffer.from("abcdefghij");
-    const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range || "");
-    if (range) {
-      const start = range[1] ? Number(range[1]) : Math.max(0, bytes.length - Number(range[2]));
-      const end =
-        range[1] && range[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
-      if (start > end || start >= bytes.length) {
-        response.writeHead(416, { "Content-Range": `bytes */${bytes.length}` });
-        response.end();
-        return;
-      }
-      response.writeHead(206, { "Content-Range": `bytes ${start}-${end}/${bytes.length}` });
-      response.end(bytes.subarray(start, end + 1));
-      return;
-    }
-    response.end(bytes);
-    return;
-  }
-  if (target.pathname === "/clear") {
-    response.writeHead(200, {
-      "Clear-Site-Data": target.searchParams.get("types") || '"cache"',
-      "Cache-Control": "no-store",
-    });
-    response.end("cleared");
-    return;
-  }
-  if (!target.pathname.startsWith("/cache/")) {
-    response.setHeader("Content-Type", "text/html");
-    response.end("<!doctype html><body>HTTP cache control</body>");
-    return;
-  }
-  const key = request.url;
+const nextCount = (key) => {
   const count = (counts.get(key) || 0) + 1;
   counts.set(key, count);
+  return count;
+};
+const sendHtml = (response, body) => {
+  response.setHeader("Content-Type", "text/html");
+  response.end(body);
+};
+const resourceBodies = {
+  "/resource/classic": (count) => [
+    "text/javascript",
+    `globalThis.resourceClassic=(globalThis.resourceClassic||[]);globalThis.resourceClassic.push(${count});`,
+  ],
+  "/resource/module": (count) => ["text/javascript", `export const value=${count};`],
+  "/resource/style": (count) => ["text/css", `body{margin-left:${count}px}`],
+};
+const serveResource = (request, response, target) => {
+  const count = nextCount(request.url);
+  response.setHeader("Cache-Control", "max-age=3600");
+  const [type, body] = resourceBodies[target.pathname]?.(count) || [
+    "image/gif",
+    Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64"),
+  ];
+  response.setHeader("Content-Type", type);
+  response.end(body);
+};
+const serveStats = (_request, response, target) => {
+  response.setHeader("Content-Type", "application/json");
+  response.setHeader("Cache-Control", "no-store");
+  response.end(JSON.stringify(counts.get(target.searchParams.get("path")) || 0));
+};
+const serveModuleFrame = (_request, response) =>
+  sendHtml(
+    response,
+    `<!doctype html><script type="module">import {value} from '/resource/module';top.postMessage({kind:'resource-module',key:new URL(location.href).searchParams.get('key'),value},'*')</script>`,
+  );
+const serveFrameDirect = (_request, response) =>
+  sendHtml(
+    response,
+    `<!doctype html><script>(async()=>{const response=await fetch('http://127.0.0.1:${server.address().port}/cache/nested');top.postMessage({kind:'cache-ancestor',key:new URL(location.href).searchParams.get('key'),count:response.headers.get('x-count')},'*')})()</script>`,
+  );
+const serveFrameParent = (_request, response) =>
+  sendHtml(
+    response,
+    `<!doctype html><iframe src="http://127.0.0.1:${server.address().port}/frame-direct?key=nested"></iframe>`,
+  );
+const rangeBytes = Buffer.from("abcdefghij");
+// Resolve a single `bytes=start-end` / `bytes=-suffix` range against the fixed body.
+const rangeBounds = (match) => {
+  const start = match[1] ? Number(match[1]) : Math.max(0, rangeBytes.length - Number(match[2]));
+  const end =
+    match[1] && match[2]
+      ? Math.min(Number(match[2]), rangeBytes.length - 1)
+      : rangeBytes.length - 1;
+  return [start, end];
+};
+const serveRangeSlice = (response, match) => {
+  const [start, end] = rangeBounds(match);
+  if (start > end || start >= rangeBytes.length) {
+    response.writeHead(416, { "Content-Range": `bytes */${rangeBytes.length}` });
+    response.end();
+    return;
+  }
+  response.writeHead(206, { "Content-Range": `bytes ${start}-${end}/${rangeBytes.length}` });
+  response.end(rangeBytes.subarray(start, end + 1));
+};
+const serveRange = (request, response) => {
+  requests.push({
+    url: request.url,
+    range: request.headers.range || null,
+    ifRange: request.headers["if-range"] || null,
+  });
+  const count = nextCount(request.url);
+  response.setHeader("Cache-Control", "max-age=3600");
+  response.setHeader("ETag", '"range"');
+  response.setHeader("X-Count", String(count));
+  response.setHeader("Content-Type", "text/plain");
+  response.setHeader("Accept-Ranges", "bytes");
+  const match = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range || "");
+  if (match) serveRangeSlice(response, match);
+  else response.end(rangeBytes);
+};
+const serveClear = (_request, response, target) => {
+  response.writeHead(200, {
+    "Clear-Site-Data": target.searchParams.get("types") || '"cache"',
+    "Cache-Control": "no-store",
+  });
+  response.end("cleared");
+};
+const servePage = (_request, response) =>
+  sendHtml(response, "<!doctype html><body>HTTP cache control</body>");
+const cacheHeaders = (request, response, target, count) => {
   response.setHeader("Content-Type", "application/json");
   response.setHeader(
     "Cache-Control",
@@ -129,18 +119,25 @@ const server = createServer((request, response) => {
   response.setHeader("X-Count", String(count));
   response.setHeader("X-Merged", count === 1 ? "initial" : "validated");
   if (target.searchParams.has("vary")) response.setHeader("Vary", target.searchParams.get("vary"));
+};
+// Terminal cache responses short of the JSON body: a redirect or a 304 revalidation.
+const cacheShortCircuit = (request, response, target) => {
   if (target.searchParams.has("redirect")) {
     response.writeHead(Number(target.searchParams.get("redirect")) || 301, {
       Location: "/cache/redirect-target",
     });
     response.end();
-    return;
+    return true;
   }
-  if (request.headers["if-none-match"] === '"stable"') {
-    response.writeHead(304);
-    response.end();
-    return;
-  }
+  if (request.headers["if-none-match"] !== '"stable"') return false;
+  response.writeHead(304);
+  response.end();
+  return true;
+};
+const serveCache = (request, response, target) => {
+  const count = nextCount(request.url);
+  cacheHeaders(request, response, target, count);
+  if (cacheShortCircuit(request, response, target)) return;
   if (target.searchParams.has("status"))
     response.statusCode = Number(target.searchParams.get("status"));
   response.end(
@@ -153,6 +150,25 @@ const server = createServer((request, response) => {
       referer: !!request.headers.referer,
     }),
   );
+};
+const exact = (path) => (pathname) => pathname === path;
+const prefix = (path) => (pathname) => pathname.startsWith(path);
+const routes = [
+  [prefix("/resource/"), serveResource],
+  [exact("/module-frame"), serveModuleFrame],
+  [exact("/stats"), serveStats],
+  [exact("/frame-direct"), serveFrameDirect],
+  [exact("/frame-parent"), serveFrameParent],
+  [prefix("/range/"), serveRange],
+  [exact("/clear"), serveClear],
+  [(pathname) => !pathname.startsWith("/cache/"), servePage],
+];
+const server = createServer((request, response) => {
+  response.setHeader("Connection", "close");
+  response.setHeader("Date", new Date(Date.now() - 60000).toUTCString());
+  const target = new URL(request.url, "http://localhost");
+  const route = routes.find(([matches]) => matches(target.pathname));
+  (route ? route[1] : serveCache)(request, response, target);
 });
 let chrome, socket, connection;
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));

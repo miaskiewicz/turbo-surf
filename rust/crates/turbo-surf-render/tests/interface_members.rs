@@ -51,14 +51,10 @@ async fn interface_members_match_chrome156() {
     for (name, expected) in control["result"].as_object().unwrap() {
         divergences(name, &actual[name], expected, &mut out);
     }
-    assert_eq!(out, PENDING_REPIN, "members differing from Chrome 156");
+    assert!(
+        out.is_empty(),
+        "{} members differ:\n{}",
+        out.len(),
+        out.join("\n")
+    );
 }
-
-/// CSS Nesting's `CSSStyleRule` members landed in turbo-dom-browser-env after the pinned
-/// revision (miaskiewicz/turbo-dom#358, release/0.8.0 PR #368). The next turbo-dom repin
-/// empties this list; a fixed member then fails here until its row is removed.
-const PENDING_REPIN: &[&str] = &[
-    r#"CSSStyleRule.cssRules: missing (Chrome "getter")"#,
-    r#"CSSStyleRule.deleteRule: missing (Chrome "method")"#,
-    r#"CSSStyleRule.insertRule: missing (Chrome "method")"#,
-];

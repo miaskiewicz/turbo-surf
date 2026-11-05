@@ -23,9 +23,11 @@ import {
   diffVersions,
   measuredRelease,
   representativeConnection,
+  summarize,
   transportView,
   versionOf,
 } from "./identity-diff.mjs";
+import { diffWss, measureNative, recordChrome } from "./wss-hello.mjs";
 
 const run = promisify(execFile);
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -36,6 +38,7 @@ export const KNOWN_GAPS = join(here, "chrome-identity-known-gaps.json");
 export const ENGINE_STEP = join(here, "engine/reversion_v8.py");
 export const EXIT = { ok: 0, usage: 2, human: 3, newer: 10, chromeDrift: 11, nativeDrift: 12 };
 export const fixturePath = (major) => join(FIXTURES, `chrome-identity-${major}.json`);
+export const wssFixturePath = (major) => join(FIXTURES, `wss-hello-chrome${major}.json`);
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /** Registry JSON (the source build.rs compiles into browser::RELEASES). */
@@ -176,22 +179,13 @@ export async function freezeOracle(chrome) {
   };
 }
 
-/** Build (or locate) the native identity_battery example. */
-export async function nativeBinary(explicit) {
-  if (explicit) return resolve(explicit);
+/** Build a workspace example and return its debug path. */
+async function buildExample(pkg, example) {
   const manifest = join(ROOT, "rust/Cargo.toml");
   await new Promise((done, fail) => {
     const child = spawn(
       "cargo",
-      [
-        "build",
-        "--manifest-path",
-        manifest,
-        "-p",
-        "turbo-surf-mcp",
-        "--example",
-        "identity_battery",
-      ],
+      ["build", "--manifest-path", manifest, "-p", pkg, "--example", example],
       { stdio: ["ignore", "inherit", "inherit"] },
     );
     child.on("error", fail);
@@ -199,7 +193,32 @@ export async function nativeBinary(explicit) {
       code === 0 ? done() : fail(new Error(`cargo build exited ${code}`)),
     );
   });
-  return join(ROOT, "rust/target/debug/examples/identity_battery");
+  return join(ROOT, `rust/target/debug/examples/${example}`);
+}
+
+/** Build (or locate) the native identity_battery example. */
+export async function nativeBinary(explicit) {
+  if (explicit) return resolve(explicit);
+  return buildExample("turbo-surf-mcp", "identity_battery");
+}
+
+/** Build (or locate) the core wss_hello example (the battery's wss: TLS row). */
+export async function wssBinary(explicit) {
+  if (explicit) return resolve(explicit);
+  return buildExample("turbo-surf-core", "wss_hello");
+}
+
+/**
+ * Append the wss: TLS row (wss-hello.mjs, turbo-surf#179) to a parity result when the
+ * release has a wss control. Its deltas use area "wss" and the same classes.
+ */
+export async function withWssRow(parity, cli, major) {
+  const control = wssFixturePath(major);
+  if (cli.has("--skip-wss") || !existsSync(control)) return parity;
+  const native = await measureNative(await wssBinary(cli.flag("--native-wss")));
+  const row = diffWss(readJson(control), native, { knownGaps: readJson(KNOWN_GAPS) });
+  const deltas = [...parity.deltas, ...row.deltas];
+  return { deltas, summary: summarize(deltas) };
 }
 
 /** Optional V8 engine step owned by harness/detection/engine (--skip-engine skips). */
@@ -383,7 +402,11 @@ async function checkMode(cli, report, { major, baseline }) {
     report.chromeDrift = drift(own, measured);
   if (!cli.has("--skip-native") && baseline) {
     const native = await collect({ native: await nativeBinary(cli.flag("--native")) });
-    report.parity = diffParity(baseline, native, { knownGaps: readJson(KNOWN_GAPS) });
+    report.parity = await withWssRow(
+      diffParity(baseline, native, { knownGaps: readJson(KNOWN_GAPS) }),
+      cli,
+      report.registryDefault,
+    );
   }
   return checkExit(report);
 }
@@ -406,6 +429,10 @@ async function recordFixture(report, major) {
     report.chromeDrift = drift(readJson(target), fixture);
   writeJson(target, fixture);
   report.written.push(target);
+  // The wss: TLS row's control comes from the same frozen executable.
+  const wss = wssFixturePath(major);
+  writeJson(wss, await recordChrome(report.oracle.executable));
+  report.written.push(wss);
   return { fixture, target };
 }
 
@@ -420,7 +447,11 @@ function releaseBlockers(report, { baseline, fixture, major, previousRelease }) 
 
 async function nativeParity(cli, report, fixture) {
   const native = await collect({ native: await nativeBinary(cli.flag("--native")) });
-  report.parity = diffParity(fixture, native, { knownGaps: readJson(KNOWN_GAPS) });
+  report.parity = await withWssRow(
+    diffParity(fixture, native, { knownGaps: readJson(KNOWN_GAPS) }),
+    cli,
+    versionOf(fixture).major,
+  );
   report.engineIdentity = {
     chromeV8: fixture.browser.v8,
     nativeV8: native.build.v8Version,
@@ -496,7 +527,7 @@ export async function main(argv) {
   const cli = cliArgs(argv);
   if (!cli.flag("--chrome")) {
     console.error(
-      "Usage: node reversion-chrome.mjs --chrome <Chrome.app|executable> [--check] [--offline] [--native <identity_battery>] [--skip-native] [--skip-engine] [--engine-mode --resolve|--check] [--fixture-only]",
+      "Usage: node reversion-chrome.mjs --chrome <Chrome.app|executable> [--check] [--offline] [--native <identity_battery>] [--native-wss <wss_hello>] [--skip-native] [--skip-wss] [--skip-engine] [--engine-mode --resolve|--check] [--fixture-only]",
     );
     return EXIT.usage;
   }

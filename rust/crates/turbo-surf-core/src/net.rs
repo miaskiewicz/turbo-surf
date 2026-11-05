@@ -669,11 +669,12 @@ fn apply_emulation(
 /// change Chrome's WebSocket stack makes for an HTTP/1.1 upgrade. ALPN offers only
 /// `http/1.1`, and Chrome configures ALPS only for offered protocols, so no ALPS
 /// either. No redirects (Chrome fails a redirected handshake) and no idle pooling
-/// (an upgraded or refused connection is never lent to another request).
+/// (an upgraded or refused connection is never lent to another request). The rustls
+/// backend has no Chrome transport and dials `wss:` itself (websocket.rs).
+#[cfg(feature = "impersonate")]
 pub(crate) fn websocket_client_builder(
     anchor: Option<&[u8]>,
 ) -> Result<http::ClientBuilder, HttpError> {
-    #[cfg(feature = "impersonate")]
     let builder = {
         let mut emulation = chrome_emulation();
         if let Some(tls) = emulation.tls_options.as_mut() {
@@ -684,9 +685,6 @@ pub(crate) fn websocket_client_builder(
         }
         apply_emulation(http::Client::builder(), emulation)
     };
-    // The rustls backend negotiates ALPN per client, not per request version.
-    #[cfg(not(feature = "impersonate"))]
-    let builder = http::Client::builder().http1_only();
     let builder = builder
         .redirect(http::redirect::Policy::none())
         .pool_max_idle_per_host(0);

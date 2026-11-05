@@ -114,7 +114,8 @@ Direct ports of the JS modules, same behavior and edge cases:
   and rejects script overwrites of them. Self-contained HTTP-date parser (no chrono).
 - `net` — `fetch_html` over wreq/BoringSSL by default (`impersonate`), or reqwest/rustls
   with that feature disabled. `websocket` upgrades `wss:` over the same transport
-  (Chrome's https ClientHello with ALPN `http/1.1` only, #179). Charset sniff, byte
+  (Chrome's https ClientHello with ALPN `http/1.1` only, #179); the rustls build dials it
+  with tokio-rustls and writes the head raw (#189). Charset sniff, byte
   cap, content-type gate, CookieJar round-trip, manual per-hop redirect follow, and a
   **shared pooled `build_client()`** passed via `FetchOptions::client` so connections
   + TLS sessions are reused across pages. `request_context` derives destination/mode,

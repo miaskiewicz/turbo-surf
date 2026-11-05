@@ -13,7 +13,9 @@ use deno_core::{op2, v8, OpState, ToJsBuffer};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use turbo_surf_core::request_context::{Credentials, Destination, RequestContext, RequestMode};
+use turbo_surf_core::request_context::{
+    ClientHints, Credentials, Destination, RequestContext, RequestMode,
+};
 use turbo_surf_core::websocket::{self, WsCommand, WsEvent, WsHandle, WsRequest};
 
 type Events = Rc<RefCell<Option<tokio::sync::mpsc::UnboundedReceiver<WsEvent>>>>;
@@ -47,7 +49,7 @@ fn transports(state: &mut OpState) -> &mut NetworkTransports {
     state.borrow_mut::<NetworkTransports>()
 }
 
-/// The http(s) URL a ws(s) URL shares its origin, cookies and CSP host-source with.
+/// The http(s) URL a ws(s) URL shares its origin and cookies with.
 fn http_equivalent(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("wss:") {
         format!("https:{rest}")
@@ -58,20 +60,8 @@ fn http_equivalent(url: &str) -> String {
     }
 }
 
-/// The violation's blockedURI: Chrome 156 names a refused WebSocket or EventSource URL
-/// in full (fragment dropped), cross-origin ones included.
-fn blocked_url(url: &str) -> String {
-    url::Url::parse(url).map_or_else(
-        |_| url.to_owned(),
-        |mut parsed| {
-            parsed.set_fragment(None);
-            parsed.to_string()
-        },
-    )
-}
-
-/// `connect-src` for a WebSocket or EventSource URL. CSP3 matches ws/wss like http/https
-/// ('self' included), so either spelling may satisfy a source.
+/// `connect-src` for a WebSocket or EventSource URL; csp.rs matches ws/wss sources as
+/// Chrome 156 does.
 fn csp_allows<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
@@ -85,14 +75,11 @@ fn csp_allows<'s>(
         let policy = handle.policy.borrow();
         (policy.active.clone(), policy.report_only.clone())
     };
-    let http = http_equivalent(url);
-    let blocked = blocked_url(url);
+    let blocked = crate::csp::network_blocked_uri(url).unwrap_or_else(|| url.to_owned());
     let mut allowed = true;
     for (policy, disposition) in [(&active, "enforce"), (&report_only, "report")] {
-        let passes = policy.allows_request("connect-src", &http, "", false)
-            || policy.allows_request("connect-src", url, "", false);
-        if !passes {
-            let records = policy.request_violations("connect-src", &http, "");
+        if !policy.allows_request("connect-src", url, "", false) {
+            let records = policy.request_violations("connect-src", url, "");
             queue_csp_violations(
                 scope,
                 context,
@@ -157,7 +144,11 @@ pub(super) fn op_ws_open<'s>(
         user_agent,
         accept_language: profile.accept_language.to_owned(),
         cookie,
-        trust_anchor: None,
+        // The session's anchor, as its https fetches trust it (#188).
+        trust_anchor: state
+            .try_borrow::<ClientHints>()
+            .and_then(ClientHints::trust_anchor)
+            .map(<[u8]>::to_vec),
     });
     let transports = transports(state);
     transports.next += 1;

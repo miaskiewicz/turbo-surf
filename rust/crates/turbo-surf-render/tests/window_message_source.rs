@@ -6,20 +6,6 @@
 //! (`harness/detection/window-message-source-chrome-control.mjs`).
 use turbo_surf_render::PageSession;
 
-/// Posts made synchronously by child-realm code that the top realm called into
-/// (`a.eval(...)`, a child-realm function): surf attributes them to the entered (top)
-/// realm because the V8 binding exposes no incumbent-context API (turbo-surf#90).
-/// Chrome's value is the control's; surf's is the measured gap.
-const INCUMBENT_GAPS: &[(&str, &str)] = &[
-    ("top<-a:eval:true", "top<-a:eval:false"),
-    ("top<-a:function:true", "top<-a:function:false"),
-    ("top<-g:nested:true", "top<-g:nested:false"),
-    (
-        "top<-b:seen sibling:true,false:true",
-        "top<-b:seen sibling:false,true:true",
-    ),
-];
-
 #[tokio::test(flavor = "current_thread")]
 async fn message_sources_are_the_incumbent_window_like_chrome156() {
     let mut page = PageSession::open("<body>", "http://127.0.0.1/", "", "", 5000)
@@ -34,17 +20,27 @@ async fn message_sources_are_the_incumbent_window_like_chrome156() {
     .unwrap();
     let control = &control["result"];
     assert_eq!(actual["errors"], control["errors"]);
-    let expected: Vec<&str> = control["rows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|row| row.as_str().unwrap())
-        .map(|row| {
-            INCUMBENT_GAPS
-                .iter()
-                .find(|(chrome, _)| *chrome == row)
-                .map_or(row, |(_, surf)| surf)
-        })
-        .collect();
-    assert_eq!(actual["rows"], serde_json::json!(expected));
+    // Includes the synchronous posts child-realm code makes when the top realm calls
+    // into it (`a.eval(...)`, a child-realm function, nested, sibling): the source is
+    // the incumbent (calling frame's) realm, not the entered one (turbo-surf#90).
+    assert_eq!(actual["rows"], control["rows"]);
+}
+
+/// The natively entered `postMessage` (turbo-surf#90) is each realm's own Web IDL
+/// operation, as in Chrome 156: the frame's `Function`, length 1, no prototype, not a
+/// constructor, native source.
+#[tokio::test(flavor = "current_thread")]
+async fn post_message_entry_belongs_to_its_realm() {
+    let mut page = PageSession::open("<body>", "http://127.0.0.1/", "", "", 5000)
+        .await
+        .unwrap();
+    let probe = r#"(()=>{const f=document.createElement('iframe');document.body.append(f);
+const w=f.contentWindow,p=w.postMessage;let constructs;try{new p('x');constructs=false}catch(e){constructs=e instanceof w.TypeError||e instanceof TypeError}
+return [postMessage.constructor===Function,p.constructor===w.Function,p!==postMessage,p.length,p.name,
+Object.hasOwn(p,'prototype'),constructs,Function.prototype.toString.call(p)];})()"#;
+    let actual = page.eval_json_expression(probe).await.unwrap();
+    assert_eq!(
+        actual,
+        r#"[true,true,true,1,"postMessage",false,true,"function postMessage() { [native code] }"]"#
+    );
 }

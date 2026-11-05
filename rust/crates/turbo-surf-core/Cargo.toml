@@ -80,6 +80,9 @@ webpki-roots = "1"
 # https transport, #179).
 sha1 = "0.10"
 flate2 = "1"
+# wss: on the rustls backend (--no-default-features, #189) and the tests' TLS server.
+# Cargo has no "feature off" dependency; reqwest/hyper-rustls build it either way.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 
 [build-dependencies]
 # build.rs compiles src/browser_releases.json into browser::RELEASES.
@@ -87,7 +90,6 @@ serde_json = "1"
 
 [dev-dependencies]
 serde_json = "1"
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio = { version = "1", features = [
     "macros",
     "rt-multi-thread",

@@ -7303,6 +7303,7 @@ deno_core::extension!(
         op_storage_area,
         op_idb_registry,
         op_idb_checkpoint,
+        crate::indexed_db::op_idb_dispatch,
         op_storage_factory,
         op_storage_object,
         op_storage_access_factory,

@@ -89,7 +89,7 @@ async fn indexeddb_matches_chrome156() {
 }
 
 /// Measured Chrome behavior the engine does not reproduce yet, as `path = engine value`
-/// (#148's remainder, pinned exactly so a fix or a new divergence fails here).
+/// (#193, split from #148; pinned exactly so a fix or a new divergence fails here).
 ///
 /// `/path`: Chrome builds one event path request -> transaction -> database, with capture
 /// listeners on the database and transaction first (phase 1), and one event object. The

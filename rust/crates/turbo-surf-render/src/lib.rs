@@ -27,6 +27,7 @@ mod document_facts;
 mod document_response;
 mod fetch_cors;
 mod geometry_backend;
+mod indexed_db;
 mod integrity;
 mod layout_profile;
 mod live_container_queries;

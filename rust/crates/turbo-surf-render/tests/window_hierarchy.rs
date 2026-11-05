@@ -32,8 +32,8 @@ async fn window_hierarchy_and_message_targets_match_chrome() {
         serde_json::from_str(&page.eval_json_expression(SCRIPT).await.unwrap()).unwrap();
     let chrome: serde_json::Value = serde_json::from_str(CHROME_156).unwrap();
     assert_eq!(log, chrome);
-    // Chrome: the message source is the sender's WindowProxy (true); surf hands the
-    // parent a different object on both engines (turbo-surf#90: incumbent source).
+    // Chrome: the message source is the sender's (incumbent) WindowProxy, even for
+    // `w.eval(...)` called from the parent (turbo-surf#90).
     let sources = page.eval_json_expression("sources").await.unwrap();
-    assert_eq!(sources, "[false]");
+    assert_eq!(sources, "[true]");
 }

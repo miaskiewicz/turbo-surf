@@ -4660,17 +4660,80 @@ fn op_windows_same_origin(scope: &mut v8::PinScope, window: v8::Local<v8::Object
     a.strict_equals(b)
 }
 
+/// `window.postMessage`'s native entry. The message source is the incumbent realm
+/// (HTML "incumbent settings object"): V8's incumbent is the topmost JavaScript
+/// frame, so it must be read here, before the JS validation below becomes that
+/// frame (turbo-surf#90). The implementation receives the incumbent window, the
+/// argument count and the first three arguments.
+fn window_post_message_entry<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut result: v8::ReturnValue,
+) {
+    let Ok(implementation) = v8::Local::<v8::Function>::try_from(args.data()) else {
+        return;
+    };
+    let incumbent = scope.get_incumbent_context().global(scope);
+    let count = v8::Integer::new(scope, args.length());
+    let call_args = [
+        incumbent.into(),
+        count.into(),
+        args.get(0),
+        args.get(1),
+        args.get(2),
+    ];
+    if let Some(value) = implementation.call(scope, args.this().into(), &call_args) {
+        result.set(value);
+    }
+}
+
+#[op2]
+fn op_window_post_message_entry<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    implementation: v8::Local<'s, v8::Function>,
+) -> Result<v8::Local<'s, v8::Function>, JsErrorBox> {
+    // Ops run in the main realm; the entry belongs to its implementation's realm
+    // (`postMessage.constructor` is that realm's `Function`, as in Chrome).
+    let realm = implementation
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("postMessage entry unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, realm);
+    let function = v8::Function::builder(window_post_message_entry)
+        .data(implementation.into())
+        .length(1)
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+        .ok_or_else(|| JsErrorBox::generic("postMessage entry unavailable"))?;
+    let name = v8::String::new(scope, "postMessage").unwrap();
+    function.set_name(name);
+    Ok(function)
+}
+
+/// The incumbent window's context, as captured by `window_post_message_entry`.
+fn incumbent_window<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    incumbent: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    incumbent
+        .get_creation_context(scope)
+        .filter(|context| incumbent.strict_equals(context.global(scope).into()))
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))
+}
+
 #[op2(fast, reentrant)]
 fn op_window_post_message<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    incumbent: v8::Local<'s, v8::Object>,
     window: v8::Local<'s, v8::Object>,
     message: v8::Local<'s, v8::Value>,
     #[string] target_origin: &str,
     transfer: Option<v8::Local<'s, v8::Value>>,
     include_activation: bool,
 ) -> Result<(), JsErrorBox> {
+    let source = incumbent_window(scope, incumbent)?;
     queue_window_message(
         scope,
+        source,
         window,
         message,
         target_origin,
@@ -4701,32 +4764,20 @@ fn admit_window_snapshot(scope: &mut v8::PinScope, size: usize) -> Result<(), Js
     Ok(())
 }
 
-fn queue_window_message<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    window: v8::Local<'s, v8::Object>,
-    message: v8::Local<'s, v8::Value>,
+/// The `targetOrigin` a message from `source` (serialized as `origin`) must match.
+fn message_target_origin(
+    scope: &mut v8::PinScope,
+    source: v8::Local<v8::Context>,
+    origin: &str,
     target_origin: &str,
-    transfer: Option<v8::Local<'s, v8::Value>>,
-    include_activation: bool,
-) -> Result<(), JsErrorBox> {
-    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
-    let source = v8::Local::new(scope, source);
-    let activation = if include_activation {
-        user_activation::snapshot_bits(source)
-    } else {
-        -1
-    };
-    let target = window
-        .get_creation_context(scope)
-        .ok_or_else(|| JsErrorBox::generic("message target is not a Window"))?;
-    let origin = window_origin(scope, source);
-    let expected = match target_origin {
+) -> Result<MessageTargetOrigin, JsErrorBox> {
+    Ok(match target_origin {
         "*" => MessageTargetOrigin::Any,
         "/" if window_is_opaque(scope, source) => {
             let token = source.get_security_token(scope);
             MessageTargetOrigin::Opaque(v8::Global::new(scope, token))
         }
-        "/" => MessageTargetOrigin::Tuple(origin.clone()),
+        "/" => MessageTargetOrigin::Tuple(origin.to_string()),
         value => {
             let parsed = url::Url::parse(value)
                 .map_err(|_| JsErrorBox::new("DOMExceptionSyntaxError", "Invalid target origin"))?;
@@ -4737,25 +4788,62 @@ fn queue_window_message<'s>(
                 url::Origin::Opaque(..) => MessageTargetOrigin::Unmatchable,
             }
         }
+    })
+}
+
+/// Serializes (and transfers) a message in the `source` realm; `None` when a guest
+/// getter threw (the exception is rethrown to the poster).
+fn serialize_window_message<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+    expected: &MessageTargetOrigin,
+    message: v8::Local<'s, v8::Value>,
+    transfer: Option<v8::Local<'s, v8::Value>>,
+) -> Result<Option<crate::crypto_clone::CloneSnapshot>, JsErrorBox> {
+    let scope = &mut v8::ContextScope::new(scope, source);
+    v8::tc_scope!(let scope, scope);
+    let result = crate::crypto_clone::prepare_transfer(scope, message, transfer, None, true);
+    if scope.has_caught() || scope.has_terminated() {
+        scope.rethrow();
+        return Ok(None);
+    }
+    let prepared = result?;
+    // Guest getters may enqueue recursively or retire/navigate the receiver.
+    // Validate current capacity after them, before native ownership commits.
+    if source != target
+        && target.get_slot::<FrameRetired>().is_none()
+        && expected.matches(scope, target)
+    {
+        admit_window_snapshot(scope, prepared.size_bytes())?;
+    }
+    prepared.commit(scope).map(Some)
+}
+
+/// Queues a message from the `source` realm (the poster's incumbent window,
+/// turbo-surf#90) to `window`.
+fn queue_window_message<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    window: v8::Local<'s, v8::Object>,
+    message: v8::Local<'s, v8::Value>,
+    target_origin: &str,
+    transfer: Option<v8::Local<'s, v8::Value>>,
+    include_activation: bool,
+) -> Result<(), JsErrorBox> {
+    let activation = if include_activation {
+        user_activation::snapshot_bits(source)
+    } else {
+        -1
     };
-    let data = {
-        let scope = &mut v8::ContextScope::new(scope, source);
-        v8::tc_scope!(let scope, scope);
-        let result = crate::crypto_clone::prepare_transfer(scope, message, transfer, None, true);
-        if scope.has_caught() || scope.has_terminated() {
-            scope.rethrow();
-            return Ok(());
-        }
-        let prepared = result?;
-        // Guest getters may enqueue recursively or retire/navigate the receiver.
-        // Validate current capacity after them, before native ownership commits.
-        if source != target
-            && target.get_slot::<FrameRetired>().is_none()
-            && expected.matches(scope, target)
-        {
-            admit_window_snapshot(scope, prepared.size_bytes())?;
-        }
-        prepared.commit(scope)?
+    let target = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("message target is not a Window"))?;
+    let origin = window_origin(scope, source);
+    let expected = message_target_origin(scope, source, &origin, target_origin)?;
+    let Some(data) = serialize_window_message(scope, source, target, &expected, message, transfer)?
+    else {
+        return Ok(());
     };
     let (due, sequence) = {
         let state = JsRuntime::op_state_from(scope);
@@ -7265,6 +7353,7 @@ deno_core::extension!(
         op_frame_owner_element,
         op_window_top,
         op_window_post_message,
+        op_window_post_message_entry,
         op_frame_set_document,
         op_retire_frame,
         op_window_active,
@@ -9698,8 +9787,11 @@ const __streamTransferFactory =
 // poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
 // collectors read (data/origin/source/ports).
 const __postingWindow=globalThis, __postingException=DOMException;
-globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
-  if (arguments.length === 0) throw new __exceptionTypeError("A message is required");
+// The native entry (op_window_post_message_entry) captures the incumbent window
+// before this validation becomes the topmost frame (turbo-surf#90).
+const __windowPostMessageImpl = ({postMessage(incumbent, count, message, targetOrigin, transfer) {
+  if (count === 0) throw new __exceptionTypeError("A message is required");
+  if (targetOrigin === undefined) targetOrigin = "/";
   const receiver=this==null?__postingWindow:this;
   if(!ops.op_surf_is_window(receiver))throw new __exceptionTypeError("Illegal invocation");
   let includeActivation=false, fromOptions=false;
@@ -9719,8 +9811,9 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
     try {ops.op_surf_url_parse(targetOrigin,"");}
     catch(_){throw new __postingException("Invalid target origin","SyntaxError");}
   }
-  ops.op_window_post_message(receiver, message, targetOrigin, transferList, includeActivation);
+  ops.op_window_post_message(incumbent, receiver, message, targetOrigin, transferList, includeActivation);
 }}).postMessage;
+globalThis.postMessage = ops.op_window_post_message_entry(__windowPostMessageImpl);
 const __windowPostMessageNative=globalThis.postMessage, __windowPostingApply=Reflect.apply;
 ops.op_set_host_capabilities({postWindowMessage:(target,message,origin,transfer)=>__windowPostingApply(__windowPostMessageNative,target,[message,origin,transfer])});
 "##,
@@ -9749,7 +9842,11 @@ __G.windowView = (target) => {
     getPrototypeOf() { return null; },
     ownKeys() { return ["window", "self", "frames", "parent", "top", "postMessage", "closed", "blur", "focus", "close"]; },
   });
-  allowed.postMessage = (...args) => __windowPostingApply(__windowPostMessageNative,target,args);
+  // Natively entered too: views are shared across realms, so a JS wrapper here
+  // would make the realm that built the view the incumbent (turbo-surf#90).
+  allowed.postMessage = ops.op_window_post_message_entry(function (incumbent, count, message, targetOrigin, transfer) {
+    return __windowPostingApply(__windowPostMessageImpl, target, [incumbent, count, message, targetOrigin, transfer]);
+  });
   for (const name of ["blur", "focus", "close"]) allowed[name] = () => {};
   __windowViews.set(target, view);
   return view;

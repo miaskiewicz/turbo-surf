@@ -75,3 +75,41 @@ async fn animation_frames_stay_engine_owned() {
         serde_json::json!(["undefined", "finished", "1", 0, true])
     );
 }
+
+/// turbo-dom#313: an infinite CSS animation (a loading spinner) keeps requesting rendering
+/// frames, as in Chrome. A page that shows one still settles: opening it, an expression
+/// evaluated on it and the async render all return well inside their budgets, after the
+/// page's own load work ran, with the spinner still running.
+#[tokio::test(flavor = "current_thread")]
+async fn a_spinner_page_still_settles_within_the_budget() {
+    const SPINNER: &str = "<!doctype html><html><head><style>@keyframes spin{to{transform:rotate(360deg)}}\
+        .spinner{width:20px;height:20px;animation:spin 1s linear infinite}</style></head><body>\
+        <div class=spinner id=s></div><script>addEventListener('load',()=>{document.title='loaded'})</script>\
+        </body></html>";
+    let started = std::time::Instant::now();
+    let mut page = PageSession::open(SPINNER, "http://127.0.0.1/", "", "", 20_000)
+        .await
+        .unwrap();
+    let state = page
+        .eval_json_expression(
+            "[document.title, document.getAnimations().length, document.getAnimations()[0].playState]",
+        )
+        .await
+        .unwrap();
+    page.close();
+    assert_eq!(state, r#"["loaded",1,"running"]"#);
+    let rendered = turbo_surf_render::render_html_async(
+        SPINNER,
+        "document.getElementById('s').dataset.ran = 'yes'",
+    )
+    .await
+    .unwrap();
+    assert!(rendered.contains(r#"data-ran="yes""#), "{rendered}");
+    // A generous cap, not a timing: a frame loop the settle waited out would spend the
+    // whole 20 s budget (and the render's 10 s) instead.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "{:?}",
+        started.elapsed()
+    );
+}

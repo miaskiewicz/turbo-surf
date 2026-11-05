@@ -1,0 +1,7 @@
+@font-face{font-family:Plex;src:url(../fonts/missing.woff2) format("woff2"),url(../fonts/plex.woff2) format("woff2")}
+body{margin:0}
+p{margin:0}
+#sheet{font:20px Plex,monospace}
+#inline{font:30px PlexInline,monospace}
+#m,#n{background:#00f;color:#00f}
+#bar,#bar2{height:10px;background:#f00}

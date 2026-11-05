@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Changed (deps)**: turbo-dom crates come from turbo-dom's `release/0.8.0` branch
+  (`f4c13a39`, a `[patch.crates-io]` git pin until 0.8.0 is on crates.io). The binding's new
+  `ActivationQuery::Sticky` (media autoplay, turbo-dom#323) is answered from sticky activation.
+- **Fixed (computed style, #156)**: `getComputedStyle(el).width` / `height` of a rendered box
+  report its used px. Live layout answers the binding's `layoutUsedSize` hook
+  (turbo-dom#316) with the border and content box plus the font size, which also resolves
+  `%` and `em` translates (turbo-dom#353). Chrome's fullscreen UA rules now join live layout
+  while an element is fullscreen. Turbo-dom-owned rows are pinned as known gaps in
+  `tests/parity_080.rs`: unsnapped percentage widths, `em` against an inherited font size,
+  and named colors serialized as authored.
+- **Fixed (layout, #158)**: live layout's device scale follows `devicePixelRatio`; before, it
+  was always 2. The default line box is 18px at DPR 1 and 18.5px at DPR 2, as in Chrome 156
+  at a real (forced) device scale.
+- **Fixed (images, #161)**: a viewBox-only SVG `<img>` has a natural ratio but no natural size
+  (`image::probe_natural`, turbo-dom#320). It fills its container at that ratio, as in Chrome.
+- **Fixed (screenshots, #142)**: the static `screenshot` tool loads the page's `@font-face`
+  faces over the session. It takes each rule's first `url()` source that loads: linked-sheet
+  rules resolve against the sheet's URL, and WOFF/WOFF2 are unwrapped. It paints with
+  Chrome's web-font metrics through `screenshot_*_with_options`. `{ fonts: false }` opts out.
+- **Tested (#159, #160, #162, #313)**: `background-color: initial`, the `<button>` UA
+  background and a hit in the `border-spacing` gap match Chrome 156 after the repin
+  (`tests/parity_080.rs`). A page with an infinite CSS spinner still settles inside its budget.
+- **Known gap (#163)**: `CSS.supports` still answers from Lightning CSS. The engine's grammar
+  accepts Chrome 156's newer features, but it coerces its arguments with the page's `String`.
+
 - **Tested (Window messaging, #85/#90/#129)**: a Chrome 156 control
   (`harness/detection/window-message-source-chrome-control.mjs`,
   `tests/window_message_source.rs`) covers `event.source` on every posting path. A child

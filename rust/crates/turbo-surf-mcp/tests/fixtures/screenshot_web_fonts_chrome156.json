@@ -1,0 +1,19 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "viewport": [800, 600],
+  "filesSha256": {
+    "/": "b9fdbe6f1704d82719394906349c185c863ff8af30dfb580afd445905eaf6fad",
+    "/css/fonts.css": "0dc88069203b261795c853e9c0f51cce70d9aeabc185dd905e4c86016b42d591",
+    "/fonts/plex.woff2": "90d439fb973f86e8f08edf2435db988c2bd18ffe24b170246a0fd66f3c290239",
+    "/fonts/plex.ttf": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46"
+  },
+  "collectorSha256": "d200920217dad8566a67bebbeeaeb56bb9ca02c0c4d898c64bd2e6904346e94f",
+  "errors": [],
+  "result": {
+    "fonts": [["Plex", "loaded"], ["PlexInline", "loaded"]],
+    "m": [0, 0, 120, 25],
+    "n": [0, 35, 90, 39],
+    "bar": 25,
+    "bar2": 74
+  }
+}

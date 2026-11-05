@@ -716,6 +716,12 @@ node harness/detection/font-face-chrome-control.mjs --runner "$PWD/harness/detec
   --chrome <chrome-156> --out harness/detection/fixtures/font-face-chrome156.json
 ```
 
+A used `@font-face` face starts when a layout uses its family, and at the latest when
+the document's other load resources are in, so its load delays the window load event in
+the top document and in frames, as in Chrome 156 (turbo-surf#166,
+`font_face.rs::used_css_faces_load_before_the_load_event_without_a_layout_read`). The
+identity battery's frame font request carries Chrome's same-origin `Origin`.
+
 The [border cascade control](./fixtures/border-cascade-chrome155.json) retains
 the exact nine native regression cases and its shared
 [probe](./fixtures/border-cascade-probe.js). With the fixture server above running,

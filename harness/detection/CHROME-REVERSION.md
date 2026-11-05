@@ -422,9 +422,9 @@ Version-agnostic tests read the expected default from the registry or its fixtur
   in the seed pool.
 - `rust/crates/turbo-surf-render/tests/chrome_identity.rs`: runs the same probe in
   the render tier and compares it with the fixture field by field. The machine-bound
-  `architecture`/`platformVersion` come from the profile. Pinned assertions:
-  - `KNOWN_GAP user-agent-data-interface`
-  - the webdriver collector artifact
+  `architecture`/`platformVersion` come from the profile. The webdriver collector
+  artifact is pinned, and `navigator.userAgentData` is checked as a real
+  `NavigatorUAData` instance, `toJSON()` included.
 - `rust/crates/turbo-surf-render/tests/browser_release.rs`: compares the default
   identity with the fixture, and a pinned 155 identity with the independent
   `browser-release-chrome155.json` control. This is the explicit "older release
@@ -541,6 +541,10 @@ The 57 known-gap deltas fall under 13 rules:
 | js-engine-version | 3 | web-font-loading | 1 |
 | h1-connection-header | 2 | window-global-inventory | 1 |
 | h1-priority-header | 2 | | |
+
+Since closed in 0.7.1: `user-agent-data-interface` (turbo-surf#164, a real
+`NavigatorUAData`) and `web-font-loading` (turbo-surf#166, used faces load before
+the load event, frames included, with Chrome's same-origin `Origin`).
 
 ¹ Retired in 0.7.1: native form submission into a named child frame works since
 #111 (landed in #141), and the battery no longer records the `form-post` delta.

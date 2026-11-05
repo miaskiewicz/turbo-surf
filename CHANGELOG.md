@@ -11,7 +11,27 @@
   picks up the new serialization. The remaining #201 items (text/plain iframe
   body rendering, blob stylesheet MIME strictness, revoked-stylesheet
   `SecurityError` on `.sheet.cssRules`) touch the runtime JS surface and the
-  blob-url-resources probe / fixture, and are split into a follow-up issue.
+  blob-url-resources probe / fixture, and are split into #206.
+- **Fixed (GC / native-memory reclamation, #115)**: a retiring iframe context now releases
+  its blob URL entries from the native `URL.createObjectURL` store, and the host-side
+  `collect_message_port_garbage_for_testing` boundary prunes dead weak context handles from
+  the context-ownership registry. Soak coverage: `tests/gc_soak.rs` opens forty data-URL
+  iframes that each allocate a blob URL, a message channel and a 64-row detached subtree,
+  then checks that the message-port endpoints, queued bytes and host-context counts return
+  to their baseline. The same file reproduces #183 on an idle localhost (sixty frame loads
+  in one session) — the tail stayed under three seconds on this machine, so #183's reported
+  7-14 s slowdown looks like concurrent build load rather than a teardown leak.
+- **Fixed (CSP worker-src, #104, #190)**: `new Worker(url)` under `worker-src 'none'`
+  now fires a `securitypolicyviolation` whose `blockedURI` is the worker script URL
+  and whose `effectiveDirective` is `worker-src`, matching Chrome 156; the CSP3
+  fallback chain (`worker-src` -> `child-src` -> `script-src` -> `default-src`) is
+  applied, so a page under `script-src 'nonce-n'` without `worker-src` reports the
+  same violation. The Worker shell still constructs (`new Worker('/x.js')` returns a
+  Worker object), as in Chrome. `media-src` enforcement still waits on media loads
+  (split as #204). Checked against `csp-directives-chrome156.json`
+  (`tests/csp_directives.rs`). The remaining dedicated-worker runtime (a separate V8
+  realm per worker with DedicatedWorkerGlobalScope, module workers, blob: workers,
+  and SharedWorker/ServiceWorker) is tracked as #203.
 - **Fixed (render, #138)**: synchronous `XMLHttpRequest` (`open(..., false)`) now
   blocks in `send()` and loads the response, over http(s), `blob:` and `data:` URLs.
   Native `op_fetch_sync` runs the page's own fetch pipeline (CSP, CORS, cookies,

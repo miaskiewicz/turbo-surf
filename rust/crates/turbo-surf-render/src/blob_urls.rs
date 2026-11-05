@@ -48,6 +48,13 @@ pub(super) fn module_key(source: &str, opaque: bool, csp: &CspHandle) -> String 
     key(&origin, &top, partition, 0)
 }
 
+/// Host-only live blob URL count for soak controls; no guest-visible accessor.
+pub(crate) fn store_size(state: &OpState) -> usize {
+    state
+        .try_borrow::<Store>()
+        .map_or(0, |store| store.0.borrow().len())
+}
+
 /// The storage key a document's blob URLs live under, with the origin they print.
 fn storage_key(
     scope: &mut v8::PinScope,
@@ -158,6 +165,31 @@ pub(super) fn op_blob_url_read(
 ) -> Option<Vec<u8>> {
     let (key, _) = storage_key(scope, state, document)?;
     lookup(state, url, &key).map(|(bytes, _)| bytes.to_vec())
+}
+
+/// Drop the retiring context's blob URL entries from the native store. An
+/// opaque-origin document's URLs are only reachable from its own realm, so they
+/// can never be looked up again once that realm has retired.
+pub(crate) fn retire_context(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    let opaque_suffix = {
+        let Some(handle) = context.get_slot::<CspHandle>() else {
+            return;
+        };
+        let partition = handle
+            .partition
+            .as_ref()
+            .map_or(0, |partition| partition.id);
+        format!("\u{0}{partition}\u{0}{}", handle.id)
+    };
+    let state = JsRuntime::op_state_from(scope);
+    let state = state.borrow();
+    let Some(store) = state.try_borrow::<Store>() else {
+        return;
+    };
+    store
+        .0
+        .borrow_mut()
+        .retain(|_, entry| !entry.key.ends_with(&opaque_suffix));
 }
 
 pub(super) fn lookup(state: &OpState, url: &str, key: &str) -> Option<(Rc<[u8]>, String)> {

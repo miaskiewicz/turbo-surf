@@ -462,6 +462,7 @@ impl Policy {
             "img-src",
             "frame-src",
             "child-src",
+            "worker-src",
             "form-action",
             "report-uri",
             "report-to",
@@ -947,12 +948,14 @@ mod tests {
             ["sandbox allow-forms; form-action 'self'; script-src 'strict-dynamic'".into()],
         );
         assert_eq!(partial.unsupported(), vec!["sandbox"]);
-        // No Web Workers (#104) and no media loads: these stay reported as missing.
+        // Dedicated workers execute only as a shell (#104), but `new Worker` enforces
+        // worker-src on construction via `allows_request`; only media-src stays missing
+        // until media loads land (tracked in #190).
         let missing = Policy::new(
             "https://policy.test/",
             ["worker-src 'none'; media-src 'none'".into()],
         );
-        assert_eq!(missing.unsupported(), vec!["media-src", "worker-src"]);
+        assert_eq!(missing.unsupported(), vec!["media-src"]);
     }
 
     #[test]

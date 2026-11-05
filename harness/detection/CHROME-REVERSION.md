@@ -537,10 +537,13 @@ The 57 known-gap deltas fall under 13 rules:
 | css-feature-support | 18 | dpr-hint | 2 |
 | h2-stream-priority | 11 | author-header-position | 1 |
 | user-agent-data-interface | 9 | critical-ch-retry | 1 |
-| favicon | 5 | form-submission-to-frame | 1 |
+| favicon | 5 | form-submission-to-frame¹ | 1 |
 | js-engine-version | 3 | web-font-loading | 1 |
 | h1-connection-header | 2 | window-global-inventory | 1 |
 | h1-priority-header | 2 | | |
+
+¹ Retired in 0.7.1: native form submission into a named child frame works since
+#111 (landed in #141), and the battery no longer records the `form-post` delta.
 
 Timings: the battery takes about 12 s for Chrome and 8 s for turbo-surf. The first
 full run took 52 s with a warm build. A re-run that recompiled `identity_battery`

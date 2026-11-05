@@ -50,16 +50,6 @@
     "owner": "render"
   },
   {
-    "id": "form-submission-to-frame",
-    "match": {
-      "area": "request",
-      "type": "request-missing",
-      "kind": "form-post"
-    },
-    "reason": "Recorded before 0.7.1, when native form submission into another browsing context (target=<iframe name>) threw. 0.7.1 navigates named child frames (#111); the entry stays until the next parity remeasure records the battery again.",
-    "owner": "render/forms"
-  },
-  {
     "id": "user-agent-data-interface",
     "match": {
       "area": "js",

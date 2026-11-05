@@ -1,12 +1,13 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "recordedAt": "2026-11-04T13:16:46.497Z",
+  "recordedAt": "2026-11-05T11:07:14.140Z",
   "fixtures": {
     "font-face-probe.js": "6c4beb398aedd142ed37231e1dfd34bb79a5d5ecbf5b5a8a8cb70fd780dd4aa1",
     "font-face-ready-probe.js": "9748542e2fc436414124fedf6d3d24fbb4478156b95119a4bac8afb6695c99b7",
     "fixtures/embedded-font-range-probe.js": "7a8b2e47635af22bfb9bdbe69f854ad49e6c7934c3e4c4f53243d549a3e68093",
-    "fixtures/font-face-cases.json": "148deaa34aae2d7a6595447dfa0266f878042689a99ef31aaeb8d0367249014c"
+    "font-face-accessor-probe.js": "30d6a2b5e28b94d4b12d007482ddaf88a7cb29d0c0a7aa8b68d530c858a231fa",
+    "fixtures/font-face-cases.json": "15b6b434ddf795e7d5830402bc577199b66bca14c9a24ec3b8b34fed4c6ce08f"
   },
   "result": {
     "plain": {
@@ -693,6 +694,38 @@
             "lineHeight": "24px"
           }
         }
+      }
+    },
+    "accessor": {
+      "own": false,
+      "keys": [
+        "configurable",
+        "enumerable",
+        "get",
+        "set"
+      ],
+      "set": true,
+      "enumerable": true,
+      "configurable": true,
+      "name": "get fonts",
+      "length": 0,
+      "source": "function get fonts() { [native code] }",
+      "prototype": false,
+      "construct": "TypeError",
+      "same": true,
+      "brand": {
+        "object": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "undefined": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "element": [
+          "TypeError",
+          "Illegal invocation"
+        ]
       }
     }
   }

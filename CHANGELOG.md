@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Changed (mcp screenshot, #171)**: a session now captures the live IDL
+  `indeterminate` flag at the end of each render — tree-order indices over
+  `document.querySelectorAll('input')` — and forwards them to turbo-dom-raster as
+  `ScreenshotOptions.idl_states` (turbo-dom#371), so a static screenshot of a page a
+  script marked indeterminate paints the Chrome 156 dash the serialized HTML cannot
+  express.
+- **Fixed (core tests, #199)**: the two `transport_identity` tests that assert
+  Chrome's HTTP/1 header order and casing are gated on the `impersonate` feature;
+  the rustls build (`--no-default-features`) no longer fails them, and the
+  CI rustls step runs the whole core crate instead of just `--lib --test websocket`.
+- **Changed (deps)**: turbo-dom crates repinned to `release/0.8.0` `3d02b8db`
+  (version 0.8.0; was `c650aae5` / 0.7.1). The repin closes four known parity gaps
+  — turbo-dom#372 (live-layout percent widths snap to 1/64 px),
+  #375 (empty unknown inline `offsetWidth` is 0), #377 (live-layout web-font
+  content height for `@font-face` IBM Plex Mono 20 px matches Chrome's 25 px) and the
+  `em` translate + named-colour used-size divergences in `parity_080` — whose pins
+  retire with them; the embedded-font range cases pin the new inline y-position gap
+  (still owned by turbo-dom). `turbo-dom-v8` stays on `79ae001d` (generated
+  candidate for #90) until `150.4.1` reaches crates.io.
 - **Fixed (render, #201)**: CSP violation reports now serialize a `blob:` or
   `data:` `blockedURI` as the scheme alone (`"blob"` / `"data"`) like Chrome 156's
   blob-url-resources control, so the opaque origin and its random key never leak
@@ -66,9 +85,6 @@
   (`get_incumbent_context`, turbo-dom#367) before surf's own validation runs; the native
   WindowProxy's `postMessage` reads it too. The native-SDK overlay (v8 152.2.0,
   `engine-154/patches/sdk.patch`) gains the same `get_incumbent_context` link.
-- **Changed (deps)**: turbo-dom crates repinned to `release/0.8.0` `c650aae5`;
-  `turbo-dom-v8` comes from turbo-dom's generated candidate `79ae001d` (adds
-  `get_incumbent_context`) until its next crates.io release.
 - **Fixed (IndexedDB, #148)**: a throwing `addEventListener` listener of a request's
   `success` / `error` event (or of its transaction or database on the bubble path) now
   aborts the transaction with `AbortError: Uncaught exception in event handler.`, like an

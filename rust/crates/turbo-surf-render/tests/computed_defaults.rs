@@ -6,16 +6,6 @@
 mod binding_control;
 use turbo_dom_browser_env::test_support;
 
-/// surf's current transform-resolution boxes: Chrome's, except `xform`.
-fn transform_boxes() -> serde_json::Value {
-    let mut boxes = serde_json::json!({"page": [784, 1100, 784, 1100, 16], "none": [784, 0, 784, 0, 16],
-        "x12": [784, 0, 784, 0, 20], "xform": [784, 0, 784, 0, 16]});
-    for id in 1..=11 {
-        boxes[format!("x{id}")] = serde_json::json!([200, 100, 200, 100, 16]);
-    }
-    boxes
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn computed_defaults_and_titles_through_a_surf_session_match_chrome156() {
     // `used-size` (turbo-dom#316) reads every element's client rects, and live layout
@@ -31,10 +21,9 @@ async fn computed_defaults_and_titles_through_a_surf_session_match_chrome156() {
         test_support::COMPUTED_DEFAULTS_CASES_JSON,
         test_support::COMPUTED_DEFAULTS_CHROME156_JSON,
         |case| case["documentBase"].as_str().unwrap_or("http://localhost/"),
-        // An empty unknown inline (`<xform>`, last in its line) reads the line's width as
-        // offsetWidth (784) where Chrome reads 0: live layout's inline geometry
-        // (turbo-dom-layout cssom_view::inline), not the transform rows this case is for.
-        &[("transformBoxes", transform_boxes())],
+        // Every transform-resolution box matches, the empty unknown inline `<xform>`
+        // included (offsetWidth 0, turbo-dom#375).
+        &[],
         &["used-size"],
     )
     .await;

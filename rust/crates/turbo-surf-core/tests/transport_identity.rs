@@ -180,6 +180,9 @@ async fn navigate(url: &str, hints: &ClientHints) {
     .unwrap();
 }
 
+// Chrome's HTTP/1 wire (header order + casing) that only the default impersonate
+// backend sends; the rustls build skips it (turbo-surf#199).
+#[cfg(feature = "impersonate")]
 #[tokio::test]
 async fn http1_navigation_sends_connection_keep_alive_in_chromes_slot() {
     let chrome = &chrome("h1-nav")[0];
@@ -226,6 +229,9 @@ async fn an_origin_known_to_speak_http1_gets_no_priority_header() {
     assert_eq!(get(second, "connection"), Some("keep-alive"));
 }
 
+// Chrome's HTTP/1 wire (header order + casing) that only the default impersonate
+// backend sends; the rustls build skips it (turbo-surf#199).
+#[cfg(feature = "impersonate")]
 #[tokio::test]
 async fn critical_ch_restarts_once_with_the_accepted_hints_in_chromes_order() {
     let chrome = chrome("critical");

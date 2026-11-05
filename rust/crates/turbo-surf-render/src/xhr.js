@@ -4,8 +4,10 @@
 // (readystatechange 2 and 3, progress, readystatechange 4, load, loadend).
 // responseXML and responseType "document" parse XML MIME types with turbo-dom-browser-env's
 // XML parser (turbo-dom#186; ill-formed XML is null, as in Chrome) and, for "document",
-// text/html with the HTML parser. Not modelled: synchronous requests (async=false still
-// completes asynchronously) and upload progress events. setAttributionReporting and
+// text/html with the HTML parser. Synchronous requests (async=false, turbo-surf#138) block
+// in send() over op_fetch_sync with Chrome 156's window restrictions
+// (harness/detection/sync-xhr-probe.js). Not modelled: upload progress events and the
+// sync-XHR deprecation console message. setAttributionReporting and
 // setPrivateToken validate as Chrome 156 does (turbo-surf#165) and request nothing:
 // attribution reporting and Private State Token operations are not modelled.
 (() => {
@@ -36,6 +38,8 @@
     fromCharCode = String.fromCharCode,
     trim = String.prototype.trim,
     replace = String.prototype.replace;
+  const stringify = JSON.stringify,
+    startsWith = String.prototype.startsWith;
   const arrayPush = Array.prototype.push,
     arrayIncludes = Array.prototype.includes,
     arraySort = Array.prototype.sort;
@@ -120,6 +124,7 @@
         kind: "XMLHttpRequest",
         state: 0,
         send: false,
+        sync: false,
         method: "GET",
         url: null,
         headers: [],
@@ -281,12 +286,108 @@
     fire(record, request, "loadend");
   };
 
+  // Chrome 156 rejects these at open() for a document's synchronous request.
+  const synchronousOpen = (record) => {
+    if (record.responseType !== "")
+      throw failed(
+        "open",
+        "Synchronous requests from a document must not set a response type.",
+        "InvalidAccessError",
+      );
+    if (record.timeout)
+      throw failed("open", "Synchronous requests must not set a timeout.", "InvalidAccessError");
+  };
+  // The request body as the async path sends it, read synchronously.
+  const syncBody = (init, body) => {
+    if (body === null || body === undefined) return;
+    if (typeof body === "string") init.body = body;
+    else if (body instanceof ArrayBuffer) init.body_bytes = Array.from(new Uint8Array(body));
+    else if (ArrayBuffer.isView(body))
+      init.body_bytes = Array.from(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+    else if (body instanceof BlobValue) init.body_bytes = Array.from(__readBlobBytes(body));
+    else init.body = string(body);
+  };
+  // The fields __fetchFromSource marshals for the page's own fetch op.
+  const syncInit = (record, body) => {
+    const headers = {};
+    for (const [name, value] of record.headers) headers[name] = value;
+    const init = {
+      ...ops.op_document_cookie_site(__document),
+      method: record.method,
+      headers,
+      credentials: record.credentials ? "include" : "same-origin",
+      initiator: "xmlhttprequest",
+      source: ops.op_document_request_source(__document),
+      referrer_source: record.source(),
+      opaque_origin: ops.op_window_opaque(__document),
+      blob_key: apply(startsWith, record.url, ["blob:"])
+        ? ops.op_blob_url_key(__document)
+        : undefined,
+      csp: ops.op_csp_context(__document),
+    };
+    syncBody(init, body);
+    return apply(stringify, JSON, [init]);
+  };
+  const syncFailure = (record) =>
+    failed(
+      "send",
+      `Failed to load '${record.url}'${
+        apply(startsWith, record.url, ["blob:"]) && record.method !== "GET"
+          ? ": 'GET' is the only method allowed for 'blob:' URLs"
+          : ""
+      }.`,
+      "NetworkError",
+    );
+  const responseRecord = (record, result) => {
+    const list = [];
+    let typed = false;
+    for (const [name, value] of result.headers || []) {
+      const key = apply(lower, name, []);
+      if (key === "content-type") typed = true;
+      if (key !== "set-cookie" && key !== "set-cookie2") apply(arrayPush, list, [[key, value]]);
+    }
+    if (result.content_type && !typed)
+      apply(arrayPush, list, [["content-type", result.content_type]]);
+    return {
+      status: result.status,
+      statusText: result.status_text || "",
+      url: apply(replace, result.final_url || record.url, [/#.*$/, ""]),
+      headers: list,
+    };
+  };
+  // A synchronous send fires no loadstart or progress; failures throw instead of
+  // firing error events (Chrome 156 control).
+  const sendSynchronously = (request, record, body) => {
+    const generation = record.generation;
+    const result = ops.op_csp_request(__document, record.url, "connect-src", "")
+      ? ops.op_fetch_sync(record.url, syncInit(record, body))
+      : { status: 0 };
+    if (record.generation !== generation) return;
+    if (!result.status) {
+      reset(record);
+      record.state = 4;
+      throw syncFailure(record);
+    }
+    record.response = responseRecord(record, result);
+    record.bytes = new Uint8Array(result.body_bytes || []);
+    const size = record.bytes.length;
+    changeState(request, record, 4);
+    fire(record, request, "load", size, size, true);
+    fire(record, request, "loadend", size, size, true);
+  };
+
   getter("readyState", (record) => record.state);
   getter(
     "timeout",
     (record) => record.timeout,
     (record, value) => {
-      record.timeout = NumberValue(value) >>> 0;
+      value = NumberValue(value) >>> 0;
+      if (record.sync)
+        throw new Exception(
+          "Failed to set the 'timeout' property on 'XMLHttpRequest': Timeouts cannot be set for synchronous requests made from a document.",
+          "InvalidAccessError",
+        );
+      record.timeout = value;
     },
   );
   getter(
@@ -315,6 +416,11 @@
         throw new Exception(
           "Failed to set the 'responseType' property on 'XMLHttpRequest': The response type cannot be set if the object's state is LOADING or DONE.",
           "InvalidStateError",
+        );
+      if (record.sync)
+        throw new Exception(
+          "Failed to set the 'responseType' property on 'XMLHttpRequest': The response type cannot be changed for synchronous requests made from a document.",
+          "InvalidAccessError",
         );
       record.responseType = value;
     },
@@ -390,7 +496,7 @@
     name = apply(lower, string(name), []);
     return record.response ? headerValue(record.response.headers, name) : null;
   });
-  method("open", 2, function (verb, address, async = true, username = null, password = null) {
+  method("open", 2, function (verb, address, async, username, password) {
     const record = state(this);
     if (arguments.length < 2)
       throw new ErrorType(
@@ -411,15 +517,22 @@
     }
     if (username !== null && username !== undefined) parsed.username = string(username);
     if (password !== null && password !== undefined) parsed.password = string(password);
-    void async;
+    // Web IDL: an explicit third argument converts to boolean, undefined included.
+    const synchronous = arguments.length > 2 && !async;
     reset(record);
+    // Chrome aborts and resets to UNSENT before the synchronous checks can throw.
+    const previous = record.state;
+    record.state = 0;
+    record.send = false;
+    if (synchronous) synchronousOpen(record);
+    record.sync = synchronous;
     record.method = ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].includes(normalized)
       ? normalized
       : verb;
     record.url = parsed.href;
     record.headers = [];
-    record.send = false;
-    if (record.state !== 1) changeState(this, record, 1);
+    if (previous !== 1) changeState(this, record, 1);
+    else record.state = 1;
   });
   method("overrideMimeType", 1, function (mime) {
     const record = state(this);
@@ -449,6 +562,7 @@
     if (record.send)
       throw failed("send", "The object's state must be OPENED.", "InvalidStateError");
     if (record.method === "GET" || record.method === "HEAD") body = null;
+    if (record.sync) return sendSynchronously(this, record, body);
     record.send = true;
     const request = this,
       generation = record.generation;

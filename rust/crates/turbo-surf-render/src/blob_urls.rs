@@ -4,7 +4,8 @@
 //! by the creating document's storage key (origin, top-level site, credentialless
 //! partition); an opaque origin mints `blob:null/…`, reachable only from the same
 //! document. Fetches resolve a URL only under the same key, so a revoked, foreign
-//! or cross-partition URL fails like a missing one.
+//! or cross-partition URL fails like a missing one. Scripts, modules, stylesheets,
+//! images and iframes resolve blob: sources from the same store (turbo-surf#146).
 use super::*;
 
 struct Entry {
@@ -13,8 +14,39 @@ struct Entry {
     content_type: String,
 }
 
-#[derive(Default)]
-pub(super) struct Store(std::collections::HashMap<String, Entry>);
+/// Shared by the op state and the module loader, which fetches outside any op.
+#[derive(Clone, Default)]
+pub(super) struct Store(Rc<RefCell<std::collections::HashMap<String, Entry>>>);
+
+impl Store {
+    /// A live entry's bytes and type, only under the creating storage key.
+    pub(super) fn lookup(&self, url: &str, key: &str) -> Option<(Rc<[u8]>, String)> {
+        let url = url.split('#').next().unwrap_or(url);
+        self.0
+            .borrow()
+            .get(url)
+            .filter(|entry| entry.key == key)
+            .map(|entry| (entry.bytes.clone(), entry.content_type.clone()))
+    }
+}
+
+fn key(origin: &str, top: &str, partition: u32, document_id: u32) -> String {
+    format!("{origin}\u{0}{top}\u{0}{partition}\u{0}{document_id}")
+}
+
+/// The storage key of the top-level document the module loader serves: its
+/// origin (or its own opaque origin), the page's site and its partition.
+pub(super) fn module_key(source: &str, opaque: bool, csp: &CspHandle) -> String {
+    let partition = csp.partition.as_ref().map_or(0, |partition| partition.id);
+    let top = turbo_surf_core::request_context::schemeful_site(source).unwrap_or_default();
+    if opaque {
+        return key("null", &top, partition, csp.id);
+    }
+    let origin = url::Url::parse(source)
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_default();
+    key(&origin, &top, partition, 0)
+}
 
 /// The storage key a document's blob URLs live under, with the origin they print.
 fn storage_key(
@@ -42,10 +74,7 @@ fn storage_key(
     };
     let top = turbo_surf_core::request_context::schemeful_site(&state.borrow::<Base>().0)
         .unwrap_or_default();
-    Some((
-        format!("{origin}\u{0}{top}\u{0}{partition}\u{0}{document_id}"),
-        origin,
-    ))
+    Some((key(&origin, &top, partition, document_id), origin))
 }
 
 fn uuid() -> Result<String, JsErrorBox> {
@@ -79,7 +108,7 @@ pub(super) fn op_blob_url_create(
     let (key, origin) = storage_key(scope, state, document)
         .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
     let url = format!("blob:{origin}/{}", uuid()?);
-    state.borrow_mut::<Store>().0.insert(
+    state.borrow::<Store>().0.borrow_mut().insert(
         url.clone(),
         Entry {
             key,
@@ -101,7 +130,7 @@ pub(super) fn op_blob_url_revoke(
     let Some((key, _)) = storage_key(scope, state, document) else {
         return;
     };
-    let store = &mut state.borrow_mut::<Store>().0;
+    let mut store = state.borrow::<Store>().0.borrow_mut();
     if store.get(url).is_some_and(|entry| entry.key == key) {
         store.remove(url);
     }
@@ -131,14 +160,8 @@ pub(super) fn op_blob_url_read(
     lookup(state, url, &key).map(|(bytes, _)| bytes.to_vec())
 }
 
-fn lookup(state: &OpState, url: &str, key: &str) -> Option<(Rc<[u8]>, String)> {
-    let url = url.split('#').next().unwrap_or(url);
-    state
-        .try_borrow::<Store>()?
-        .0
-        .get(url)
-        .filter(|entry| entry.key == key)
-        .map(|entry| (entry.bytes.clone(), entry.content_type.clone()))
+pub(super) fn lookup(state: &OpState, url: &str, key: &str) -> Option<(Rc<[u8]>, String)> {
+    state.try_borrow::<Store>()?.lookup(url, key)
 }
 
 /// A single `bytes=` range against `size`: `None` when absent, `Some(None)` when
@@ -226,6 +249,106 @@ pub(super) fn fetch_blob(
         final_url: url.to_string(),
         ..Default::default()
     }
+}
+
+/// The navigation record of an iframe loading a blob: document; the response
+/// fills in its URL, body and headers.
+pub(super) fn frame(
+    partition: Option<Rc<CredentiallessPartition>>,
+    source: &str,
+    referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
+) -> FrameDocument {
+    FrameDocument {
+        response_metadata: crate::DocumentResponseMetadata {
+            status: 200,
+            referrer: crate::document_response::local_navigation_referrer(source, referrer_policy),
+        },
+        partition,
+        url: String::new(),
+        html: String::new(),
+        headers: Vec::new(),
+    }
+}
+
+/// An `<img>` blob: source, under the key the image loader sends.
+pub(super) fn image(
+    state: &OpState,
+    target: &str,
+    metadata: &serde_json::Value,
+) -> Option<FetchedBytes> {
+    let key = metadata.get("blob_key").and_then(|key| key.as_str())?;
+    let (bytes, content_type) = lookup(state, target, key)?;
+    Some(FetchedBytes {
+        final_url: target.split('#').next().unwrap_or(target).to_string(),
+        bytes: bytes.to_vec(),
+        status: 200,
+        content_type,
+    })
+}
+
+/// A page fetch that may target a blob: URL.
+pub(super) struct Load<'a> {
+    pub(super) target: &'a str,
+    pub(super) init: &'a serde_json::Value,
+    pub(super) method: Option<&'a str>,
+    pub(super) headers: &'a std::collections::BTreeMap<String, String>,
+    pub(super) destination: Destination,
+}
+
+/// blob: loads answered from the store after the request's CSP check: fetch() and
+/// XHR, stylesheets and other subresources, and iframe documents. Scripts resolve
+/// theirs in script_fetch, which owns their redirect and integrity rules.
+pub(super) fn scheme_load(
+    state: &Rc<RefCell<OpState>>,
+    load: Load<'_>,
+    frame: Option<FrameDocument>,
+) -> Option<FetchOut> {
+    if !load.target.starts_with("blob:") || load.destination == Destination::Script {
+        return None;
+    }
+    let field = |name: &str| load.init.get(name).and_then(|value| value.as_str());
+    let key = field("blob_key").unwrap_or("");
+    if load.destination == Destination::Empty && frame.is_none() {
+        let xhr = field("initiator") == Some("xmlhttprequest");
+        let state = state.borrow();
+        return Some(fetch_blob(
+            &state,
+            load.target,
+            load.method,
+            load.headers,
+            key,
+            xhr,
+        ));
+    }
+    Some(fetch_resource(state, load.target, load.headers, key, frame))
+}
+
+/// A blob: subresource (stylesheet, other non-script destinations, or an iframe
+/// document): the scheme fetch above with the decoded text the loaders read.
+fn fetch_resource(
+    state: &Rc<RefCell<OpState>>,
+    target: &str,
+    headers: &std::collections::BTreeMap<String, String>,
+    key: &str,
+    frame: Option<FrameDocument>,
+) -> FetchOut {
+    let mut out = fetch_blob(&state.borrow(), target, None, headers, key, false);
+    if !out.ok {
+        return out;
+    }
+    out.body = crate::script_fetch::decode_text(&out.body_bytes, &out.content_type);
+    let Some(mut document) = frame else {
+        return out;
+    };
+    document.url = out.final_url.clone();
+    document.html = out.body.clone();
+    document.headers = out.headers.clone();
+    let mut state = state.borrow_mut();
+    let frames = state.borrow_mut::<FrameContexts>();
+    frames.next_document += 1;
+    out.frame_document = frames.next_document;
+    frames.documents.insert(out.frame_document, document);
+    out
 }
 
 /// The percent-decoded (and base64-decoded) body of a `data:` URL with its

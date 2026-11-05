@@ -88,6 +88,8 @@ mod blob_urls;
 mod form_navigation;
 #[path = "privacy_sandbox.rs"]
 mod privacy_sandbox;
+#[path = "sync_xhr.rs"]
+mod sync_xhr;
 use privacy_sandbox::{op_private_token_issuer, op_private_token_query};
 #[path = "form_submission.rs"]
 mod form_submission;
@@ -187,6 +189,7 @@ struct NetModuleLoader {
     inline_sources: InlineModules,
     credentials: ModuleCredentials,
     csp: CspHandle,
+    blob_store: blob_urls::Store,
     #[cfg(turbo_surf_native_proxy)]
     module_stages: ModuleStages,
 }
@@ -1787,6 +1790,8 @@ impl ModuleLoader for NetModuleLoader {
                 .map_or(0, |partition| partition.id),
             if opaque_origin { self.csp.id } else { 0 },
         );
+        let blob_store = self.blob_store.clone();
+        let blob_key = blob_urls::module_key(&self.source, opaque_origin, &self.csp);
         ModuleLoadResponse::Async(Box::pin(async move {
             let mut local = jar.borrow().fork_for_request();
             let mut headers = std::collections::BTreeMap::new();
@@ -1818,6 +1823,7 @@ impl ModuleLoader for NetModuleLoader {
                     response_side_effects: Some(storage_effects.as_ref()),
                     cache_partition: &cache_partition,
                     request: Some(&allowed),
+                    blob: Some(&|url| blob_store.lookup(url, &blob_key)),
                     ..Default::default()
                 },
                 &credentials.integrity,
@@ -2489,6 +2495,10 @@ async fn op_fetch(
     #[string] url: String,
     #[string] init_json: String,
 ) -> FetchOut {
+    page_fetch(state, url, init_json).await
+}
+// The fetch itself, shared with synchronous XMLHttpRequest (sync_xhr.rs).
+async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String) -> FetchOut {
     apply_report_cookies(&mut state.borrow_mut());
     let (base, jar_rc, ua, client_hints) = {
         let s = state.borrow();
@@ -2630,20 +2640,20 @@ async fn op_fetch(
     let iframe = init.get("destination").and_then(|value| value.as_str()) == Some("iframe");
     // fetch()/XHR destinations; scripts, styles and images keep their own data: paths.
     let scheme_fetch = destination == Destination::Empty && !iframe;
-    if target.starts_with("blob:") && scheme_fetch {
-        let key = init
-            .get("blob_key")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let xhr = init.get("initiator").and_then(|value| value.as_str()) == Some("xmlhttprequest");
-        return blob_urls::fetch_blob(
-            &state.borrow(),
-            &target,
-            method.as_deref(),
-            &headers,
-            key,
-            xhr,
-        );
+    let blob_key = init
+        .get("blob_key")
+        .and_then(|key| key.as_str())
+        .unwrap_or("");
+    let frame = iframe.then(|| blob_urls::frame(partition.clone(), source, referrer_policy));
+    let blob = blob_urls::Load {
+        target: &target,
+        init: &init,
+        method: method.as_deref(),
+        headers: &headers,
+        destination,
+    };
+    if let Some(out) = blob_urls::scheme_load(&state, blob, frame) {
+        return out;
     }
     if target.starts_with("data:") && scheme_fetch {
         return blob_urls::fetch_data(&target);
@@ -2958,6 +2968,7 @@ async fn op_fetch(
                             policy.allows_request(directive, target, nonce, redirected)
                         }),
                         embedder: embedder_policy,
+                        blob: Some(&|url| blob_urls::lookup(&state.borrow(), url, blob_key)),
                     },
                     integrity,
                 )
@@ -3254,6 +3265,8 @@ async fn op_load_image(
             status: 200,
             content_type: data.mime,
         })
+    } else if target.starts_with("blob:") {
+        blob_urls::image(&state.borrow(), &target, &metadata)
     } else {
         fetch_typed_bytes(&target, opts).await.ok()
     };
@@ -7493,6 +7506,7 @@ deno_core::extension!(
         blob_urls::op_blob_url_revoke,
         blob_urls::op_blob_url_key,
         blob_urls::op_blob_url_read,
+        sync_xhr::op_fetch_sync,
         op_load_image,
         op_decode_data_image,
         op_dictionary_active,
@@ -10787,7 +10801,7 @@ function __loadImage(el, win = globalThis, parser = false, restart = false) {
     const url = new URL(src, source).href, start = __resourceNow(win);
     try {
       await 0;
-      if (!data && ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
+      if (!data && ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(doc):undefined}));
     } catch (_) {}
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
@@ -11806,7 +11820,7 @@ __G.domSig = (() => {
       else {
         const url = record.navigationURL || resolveFrameUrl(el);
         if (url && url !== "about:blank") {
-          const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)});
+          const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(__document):undefined});
           const request = record.navigationRequest; record.navigationRequest = "";
           const response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init);
           if (request && ops.op_form_navigation_blocked(request) && record.epoch === epoch) { record.loaded = true; return; }
@@ -13446,6 +13460,7 @@ fn make_runtime_with_storage_and_options(
     }));
     let inline_sources = InlineModules::default();
     let module_credentials = ModuleCredentials::default();
+    let blob_store = blob_urls::Store::default();
     let module_origins = Rc::new(ModuleOrigins::new(
         turbo_surf_core::request_context::origin(base).is_none(),
         turbo_surf_core::request_context::origin(base).is_none(),
@@ -13505,6 +13520,7 @@ fn make_runtime_with_storage_and_options(
             inline_sources: inline_sources.clone(),
             credentials: module_credentials.clone(),
             csp: csp.clone(),
+            blob_store: blob_store.clone(),
             #[cfg(turbo_surf_native_proxy)]
             module_stages: module_stages.clone(),
         })),
@@ -13546,7 +13562,7 @@ fn make_runtime_with_storage_and_options(
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put(NetworkLog::default());
-    state.put(blob_urls::Store::default());
+    state.put(blob_store);
     state.put(form_submission::Queue::default());
     state.put(storage);
     state.put(ResponseHeaders::default());

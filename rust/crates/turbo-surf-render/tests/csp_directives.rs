@@ -126,8 +126,8 @@ async fn compare(skip: impl Fn(&str, &mut Value)) -> Vec<String> {
 }
 
 /// Surf has no Web Workers (#104) and loads no media, so `new Worker` throws and an audio
-/// `src` never fetches; those two observations are tracked by the split issue (#110
-/// follow-up). The worker-src/media-src policy resolution itself is unit-tested in csp.rs.
+/// `src` never fetches; those two observations are tracked by #190 (split from
+/// #110). The worker-src/media-src policy resolution itself is unit-tested in csp.rs.
 fn without_workers_and_media(_: &str, result: &mut Value) {
     result.as_object_mut().unwrap().remove("worker");
     result["violations"]

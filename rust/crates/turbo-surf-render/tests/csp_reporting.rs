@@ -388,221 +388,274 @@ fn header_projection(headers: &BTreeMap<String, String>) -> Value {
     );
     Value::Object(value)
 }
+/// The source-pinned Chrome endpoint control for one transport.
+fn endpoint_fixture(tls: bool) -> Value {
+    let fixture: Value = serde_json::from_str(if tls {
+        include_str!(
+            "../../../../harness/detection/fixtures/csp-report-endpoint-https-chrome155.json"
+        )
+    } else {
+        include_str!("../../../../harness/detection/fixtures/csp-report-endpoint-chrome155.json")
+    })
+    .unwrap();
+    assert_eq!(fixture["browser"], "Chrome/155.0.8059.79");
+    assert_eq!(fixture["v8"], "15.5.35.23");
+    assert_eq!(fixture["errors"], json!([]));
+    use sha2::{Digest, Sha256};
+    for (key, text) in [
+        ("casesSha256", CASES),
+        ("probeSha256", PROBE),
+        (
+            "collectorSha256",
+            include_str!("../../../../harness/detection/csp-report-endpoint-chrome.mjs"),
+        ),
+    ] {
+        assert_eq!(
+            fixture[key].as_str().unwrap(),
+            format!("{:x}", Sha256::digest(text.as_bytes()))
+        );
+    }
+    fixture
+}
+
+/// One endpoint case: the authored item, its index and transport.
+struct EndpointCase<'a> {
+    item: &'a Value,
+    id: usize,
+    tls: bool,
+    is_frame: bool,
+    is_hold: bool,
+}
+
+/// A profile storage whose report transport trusts the test certificate (TLS) and
+/// whose credentialed response observer records each admitted target.
+fn report_storage(tls: bool) -> (BrowserStorage, Arc<Mutex<Vec<String>>>) {
+    let mut storage = BrowserStorage::default();
+    if tls {
+        storage.set_csp_report_transport_for_testing(
+            turbo_surf_core::net::report_client_with_trust(CERT).unwrap(),
+        );
+    }
+    let effects = Arc::new(Mutex::new(Vec::<String>::new()));
+    let output = effects.clone();
+    storage.set_csp_report_response_effects(Arc::new(move |context, target, _| {
+        assert!(context.sends_credentials(target));
+        output.lock().unwrap().push(target.into());
+    }));
+    (storage, effects)
+}
+
+/// Opens the case's document (or the frame owner) and runs its probe.
+async fn run_endpoint_case(
+    case: &EndpointCase<'_>,
+    server: &Server,
+    storage: &BrowserStorage,
+) -> PageSession {
+    let (item, id, tls) = (case.item, case.id, case.tls);
+    let origin = format!(
+        "{}://127.0.0.1:{}",
+        if tls { "https" } else { "http" },
+        server.port
+    );
+    let (base, page_headers, document) = if case.is_frame {
+        (
+            format!("{origin}/start?case={id}&source=authored#referrer"),
+            vec![("Referrer-Policy".into(), "unsafe-url".into())],
+            "<!doctype html><body>owner</body>".into(),
+        )
+    } else {
+        (
+            format!("{origin}/page?case={id}&private=authored#fragment"),
+            headers(item, id, server.port, tls),
+            html(item, id, server.port, tls),
+        )
+    };
+    let mut seed = turbo_surf_core::cookies::CookieJar::new();
+    seed.add("source", "1", "127.0.0.1", "/", None);
+    seed.add("cross", "2", "localhost", "/", None);
+    let mut page = PageSession::open_with_document_response(
+        &document,
+        &base,
+        &seed.storage_state(),
+        "",
+        10000,
+        "",
+        ClientHints::default(),
+        &page_headers,
+        storage.clone(),
+        DocumentResponseMetadata {
+            status: 200,
+            referrer: format!("{origin}/start?case={id}&source=authored"),
+        },
+    )
+    .await
+    .unwrap();
+    if case.is_frame {
+        page.eval(&format!("(()=>{{const frame=document.createElement('iframe');frame.id='frame';frame.src={};document.body.append(frame);}})()",json!(format!("{origin}/page?case={id}&private=authored#fragment")))).await.unwrap();
+        assert_eq!(
+            page.eval_expression(
+                "document.getElementById('frame').contentWindow.location.pathname"
+            )
+            .await
+            .unwrap(),
+            "/page"
+        );
+        page.eval(&format!("(()=>{{const child=document.getElementById(\"frame\");child.contentDocument.body.setAttribute(\"style\",\"color:red\");child.remove();}})()\n//# sourceURL={origin}/csp-report-endpoint-probe.js")).await.unwrap();
+        page.collect_message_port_garbage_for_testing();
+    } else {
+        let mut input = item.clone();
+        input["meta"] = Value::Null;
+        input["id"] = json!(id);
+        page.eval(&format!(
+            "({})({})\n//# sourceURL={origin}/csp-report-endpoint-probe.js",
+            PROBE.trim().trim_end_matches(';'),
+            input
+        ))
+        .await
+        .unwrap();
+    }
+    page
+}
+
+/// The uploads the server received for this case, once delivery settled.
+async fn case_uploads(
+    case: &EndpointCase<'_>,
+    server: &Server,
+    storage: &BrowserStorage,
+) -> Vec<Wire> {
+    let id = case.id;
+    if case.is_hold {
+        until(|| {
+            server
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|row| row.path.contains(&format!("case={id}")))
+        })
+        .await;
+    } else {
+        until(|| storage.csp_report_diagnostics_for_testing()["jobs"] == 0).await;
+    }
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    server
+        .rows
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|row| {
+            url::Url::parse(&format!("http://localhost{}", row.path))
+                .unwrap()
+                .query_pairs()
+                .any(|(key, value)| key == "case" && value == id.to_string())
+        })
+        .cloned()
+        .collect()
+}
+
+fn assert_case_wire(case: &EndpointCase<'_>, actual: &[Wire], expected: &[&Value], port: u16) {
+    let (name, tls) = (&case.item["name"], case.tls);
+    assert_eq!(actual.len(), expected.len(), "{name} tls={tls}");
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(
+            wire_projection(actual, port),
+            json!({"url":expected["url"],"method":expected["method"],"body":expected["body"]}),
+            "{name} tls={tls}"
+        );
+        let expected_headers: BTreeMap<String, String> = expected["headers"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.to_string())))
+            .map(current_release_identity)
+            .collect();
+        assert_eq!(
+            normalize(header_projection(&actual.headers), port),
+            header_projection(&expected_headers),
+            "{name} tls={tls}"
+        );
+    }
+}
+
+/// Response cookies reach the observer and the document; DOM events match Chrome.
+async fn assert_case_effects(
+    case: &EndpointCase<'_>,
+    page: &mut PageSession,
+    effects: &Mutex<Vec<String>>,
+    expected: &[&Value],
+    fixture: &Value,
+) {
+    let (item, id) = (case.item, case.id);
+    let credentialed = |row: &&&Value| row["headers"]["cookie"].is_string();
+    if !case.is_hold {
+        let admitted = expected.iter().filter(credentialed).count();
+        assert_eq!(
+            effects.lock().unwrap().len(),
+            admitted,
+            "raw admission {}",
+            item["name"]
+        );
+    }
+    let report_cookie = expected.iter().any(|row| {
+        row["method"] == "POST"
+            && credentialed(&row)
+            && row["url"].as_str().unwrap().starts_with("/report")
+    });
+    if !case.is_hold && !case.is_frame && report_cookie {
+        assert!(
+            page.eval_expression("document.cookie")
+                .await
+                .unwrap()
+                .contains(&format!("report_response={id}")),
+            "{}",
+            item["name"]
+        );
+    }
+    if !case.is_frame {
+        assert_eq!(
+            page.eval_expression("reportEventCount")
+                .await
+                .unwrap()
+                .parse::<u64>()
+                .unwrap(),
+            fixture["result"][id]["eventCount"].as_u64().unwrap(),
+            "DOM events {}",
+            item["name"]
+        );
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn source_pinned_chrome_reports_use_actual_private_transport() {
     let _guard = SERIAL.lock().await;
     let cases: Vec<Value> = serde_json::from_str(CASES).unwrap();
     for tls in [false, true] {
         let server = Server::start(tls).await;
-        let origin = format!(
-            "{}://127.0.0.1:{}",
-            if tls { "https" } else { "http" },
-            server.port
-        );
-        let fixture: Value = serde_json::from_str(if tls {
-            include_str!(
-                "../../../../harness/detection/fixtures/csp-report-endpoint-https-chrome155.json"
-            )
-        } else {
-            include_str!(
-                "../../../../harness/detection/fixtures/csp-report-endpoint-chrome155.json"
-            )
-        })
-        .unwrap();
-        assert_eq!(fixture["browser"], "Chrome/155.0.8059.79");
-        assert_eq!(fixture["v8"], "15.5.35.23");
-        assert_eq!(fixture["errors"], json!([]));
-        use sha2::{Digest, Sha256};
-        for (key, text) in [
-            ("casesSha256", CASES),
-            ("probeSha256", PROBE),
-            (
-                "collectorSha256",
-                include_str!("../../../../harness/detection/csp-report-endpoint-chrome.mjs"),
-            ),
-        ] {
-            assert_eq!(
-                fixture[key].as_str().unwrap(),
-                format!("{:x}", Sha256::digest(text.as_bytes()))
-            );
-        }
-
+        let fixture = endpoint_fixture(tls);
         let mut storages = Vec::new();
         for (id, item) in cases.iter().enumerate() {
-            if tls && item["frame"].as_bool() == Some(true) {
+            let is_frame = item["frame"].as_bool() == Some(true);
+            if tls && is_frame {
                 continue;
             }
-            let mut storage = BrowserStorage::default();
-            if tls {
-                storage.set_csp_report_transport_for_testing(
-                    turbo_surf_core::net::report_client_with_trust(CERT).unwrap(),
-                );
-            }
-            let effects = Arc::new(Mutex::new(Vec::<String>::new()));
-            let output = effects.clone();
-            storage.set_csp_report_response_effects(Arc::new(move |context, target, _| {
-                assert!(context.sends_credentials(target));
-                output.lock().unwrap().push(target.into());
-            }));
-            let is_frame = item["frame"].as_bool() == Some(true);
-            let base = if is_frame {
-                format!("{origin}/start?case={id}&source=authored#referrer")
-            } else {
-                format!("{origin}/page?case={id}&private=authored#fragment")
+            let case = EndpointCase {
+                item,
+                id,
+                tls,
+                is_frame,
+                is_hold: item["name"] == "frame-hold-gc",
             };
-            let page_headers = if is_frame {
-                vec![("Referrer-Policy".into(), "unsafe-url".into())]
-            } else {
-                headers(item, id, server.port, tls)
-            };
-            let document = if is_frame {
-                "<!doctype html><body>owner</body>".into()
-            } else {
-                html(item, id, server.port, tls)
-            };
-            let mut seed = turbo_surf_core::cookies::CookieJar::new();
-            seed.add("source", "1", "127.0.0.1", "/", None);
-            seed.add("cross", "2", "localhost", "/", None);
-            let mut page = PageSession::open_with_document_response(
-                &document,
-                &base,
-                &seed.storage_state(),
-                "",
-                10000,
-                "",
-                ClientHints::default(),
-                &page_headers,
-                storage.clone(),
-                DocumentResponseMetadata {
-                    status: 200,
-                    referrer: format!("{origin}/start?case={id}&source=authored"),
-                },
-            )
-            .await
-            .unwrap();
-            if is_frame {
-                page.eval(&format!("(()=>{{const frame=document.createElement('iframe');frame.id='frame';frame.src={};document.body.append(frame);}})()",json!(format!("{origin}/page?case={id}&private=authored#fragment")))).await.unwrap();
-                assert_eq!(
-                    page.eval_expression(
-                        "document.getElementById('frame').contentWindow.location.pathname"
-                    )
-                    .await
-                    .unwrap(),
-                    "/page"
-                );
-                page.eval(&format!("(()=>{{const child=document.getElementById(\"frame\");child.contentDocument.body.setAttribute(\"style\",\"color:red\");child.remove();}})()\n//# sourceURL={origin}/csp-report-endpoint-probe.js")).await.unwrap();
-                page.collect_message_port_garbage_for_testing();
-            } else {
-                let mut input = item.clone();
-                input["meta"] = Value::Null;
-                input["id"] = json!(id);
-                page.eval(&format!(
-                    "({})({})\n//# sourceURL={origin}/csp-report-endpoint-probe.js",
-                    PROBE.trim().trim_end_matches(';'),
-                    input
-                ))
-                .await
-                .unwrap();
-            }
+            let (storage, effects) = report_storage(tls);
+            let mut page = run_endpoint_case(&case, &server, &storage).await;
             let expected = fixture["wire"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .filter(|row| row["case"] == id)
                 .collect::<Vec<_>>();
-            let is_hold = item["name"] == "frame-hold-gc";
-            if is_hold {
-                until(|| {
-                    server
-                        .rows
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .any(|row| row.path.contains(&format!("case={id}")))
-                })
-                .await;
-            } else {
-                until(|| storage.csp_report_diagnostics_for_testing()["jobs"] == 0).await;
-            }
-            tokio::time::sleep(Duration::from_millis(30)).await;
-            let actual = server
-                .rows
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|row| {
-                    url::Url::parse(&format!("http://localhost{}", row.path))
-                        .unwrap()
-                        .query_pairs()
-                        .any(|(key, value)| key == "case" && value == id.to_string())
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            assert_eq!(actual.len(), expected.len(), "{} tls={tls}", item["name"]);
-            for (actual, expected) in actual.iter().zip(&expected) {
-                assert_eq!(
-                    wire_projection(actual, server.port),
-                    json!({"url":expected["url"],"method":expected["method"],"body":expected["body"]}),
-                    "{} tls={tls}",
-                    item["name"]
-                );
-                let expected_headers: BTreeMap<String, String> = expected["headers"]
-                    .as_object()
-                    .unwrap()
-                    .iter()
-                    .filter_map(|(key, value)| {
-                        value.as_str().map(|value| (key.clone(), value.to_string()))
-                    })
-                    .map(current_release_identity)
-                    .collect();
-                assert_eq!(
-                    normalize(header_projection(&actual.headers), server.port),
-                    header_projection(&expected_headers),
-                    "{} tls={tls}",
-                    item["name"]
-                );
-            }
-            if !is_hold {
-                let admitted = expected
-                    .iter()
-                    .filter(|row| row["headers"]["cookie"].is_string())
-                    .count();
-                assert_eq!(
-                    effects.lock().unwrap().len(),
-                    admitted,
-                    "raw admission {}",
-                    item["name"]
-                );
-            }
-            if !is_hold
-                && !is_frame
-                && expected.iter().any(|row| {
-                    row["method"] == "POST"
-                        && row["headers"]["cookie"].is_string()
-                        && row["url"].as_str().unwrap().starts_with("/report")
-                })
-            {
-                assert!(
-                    page.eval_expression("document.cookie")
-                        .await
-                        .unwrap()
-                        .contains(&format!("report_response={id}")),
-                    "{}",
-                    item["name"]
-                );
-            }
-            if !is_frame {
-                assert_eq!(
-                    page.eval_expression("reportEventCount")
-                        .await
-                        .unwrap()
-                        .parse::<u64>()
-                        .unwrap(),
-                    fixture["result"][id]["eventCount"].as_u64().unwrap(),
-                    "DOM events {}",
-                    item["name"]
-                );
-            }
+            let actual = case_uploads(&case, &server, &storage).await;
+            assert_case_wire(&case, &actual, &expected, server.port);
+            assert_case_effects(&case, &mut page, &effects, &expected, &fixture).await;
             page.close();
             storages.push(storage);
         }

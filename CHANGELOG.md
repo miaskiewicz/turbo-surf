@@ -24,6 +24,14 @@
 - **Tested (#159, #160, #162, #313)**: `background-color: initial`, the `<button>` UA
   background and a hit in the `border-spacing` gap match Chrome 156 after the repin
   (`tests/parity_080.rs`). A page with an infinite CSS spinner still settles inside its budget.
+- **Tested (zoom, #124)**: under a capped huge zoom (`zoom:1e30`), `getComputedStyle(el).width`
+  reports the saturated used content width (`31.5544px` for a 100px box with 1px padding), as
+  in Chrome 156. The `layoutUsedSize` hook (#156) feeds it; `tests/zoom_extremes.rs` pins it.
+  #117 (unknown pseudo-classes drop one rule, not layout) and #105 (unnamed and named size
+  container queries) were already fixed on this line; their Chrome 156 regressions pass.
+- **Refactored (render, #154)**: live layout's capture, scoped selector matching, zoom value
+  scaling, stylesheet rule walking, scroll-into-view, Range geometry and the geometry clone
+  snapshot are split into small helpers; every function in those files is at cc <= 15.
 - **Known gap (#163)**: `CSS.supports` still answers from Lightning CSS. The engine's grammar
   accepts Chrome 156's newer features, but it coerces its arguments with the page's `String`.
 

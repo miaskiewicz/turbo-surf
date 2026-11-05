@@ -90,39 +90,9 @@ fn prepare_rule(
     let matcher = Matcher { tree, root, graph };
     let mut specificity_by_node = std::collections::HashMap::<Handle, u32>::new();
     for (selector, source) in style.selectors.0.iter().zip(&sources) {
-        // Native query results are version-cached. Context-sensitive and dynamic
-        // pseudos retain per-node matching: their state need not bump tree.version.
-        let batched = root == tree.root() && !source.contains(':');
-        if batched {
-            #[cfg(test)]
-            BATCH_QUERIES.with(|count| count.set(count.get() + 1));
-            let nodes = tree
-                .query_selector_all_checked(source)
-                .map_err(|error| format!("native selector match failed: {error:?}"))?;
-            for &node in nodes.iter() {
-                if graph.scopes.get(&node) == Some(&root) {
-                    let value = specificity_by_node.entry(node).or_default();
-                    *value = (*value).max(selector.specificity());
-                }
-            }
-        } else {
-            let shadow = shadow_selector(selector);
-            let mut validated = false;
-            for &node in graph.scopes.keys() {
-                if tree.node_type_id(node) != 1 {
-                    continue;
-                }
-                let matches = if shadow {
-                    matcher.matches(selector, node, false)?
-                } else {
-                    graph.scopes.get(&node) == Some(&root)
-                        && matches_validated(tree, node, source, &mut validated)?
-                };
-                if matches {
-                    let value = specificity_by_node.entry(node).or_default();
-                    *value = (*value).max(selector.specificity());
-                }
-            }
+        for node in matcher.selector_nodes(selector, source)? {
+            let value = specificity_by_node.entry(node).or_default();
+            *value = (*value).max(selector.specificity());
         }
     }
     let mut targets = specificity_by_node
@@ -278,6 +248,45 @@ struct Matcher<'a> {
     graph: &'a Composition,
 }
 impl Matcher<'_> {
+    /// The elements of this scope one selector of a rule matches.
+    fn selector_nodes(&self, selector: &Selector<'_>, source: &str) -> Result<Vec<Handle>, String> {
+        // Native query results are version-cached. Context-sensitive and dynamic
+        // pseudos retain per-node matching: their state need not bump tree.version.
+        if self.root == self.tree.root() && !source.contains(':') {
+            return self.batched_nodes(source);
+        }
+        let shadow = shadow_selector(selector);
+        let mut validated = false;
+        let mut result = Vec::new();
+        for &node in self.graph.scopes.keys() {
+            if self.tree.node_type_id(node) != 1 {
+                continue;
+            }
+            let matches = if shadow {
+                self.matches(selector, node, false)?
+            } else {
+                self.graph.scopes.get(&node) == Some(&self.root)
+                    && matches_validated(self.tree, node, source, &mut validated)?
+            };
+            if matches {
+                result.push(node);
+            }
+        }
+        Ok(result)
+    }
+    fn batched_nodes(&self, source: &str) -> Result<Vec<Handle>, String> {
+        #[cfg(test)]
+        BATCH_QUERIES.with(|count| count.set(count.get() + 1));
+        let nodes = self
+            .tree
+            .query_selector_all_checked(source)
+            .map_err(|error| format!("native selector match failed: {error:?}"))?;
+        Ok(nodes
+            .iter()
+            .copied()
+            .filter(|node| self.graph.scopes.get(node) == Some(&self.root))
+            .collect())
+    }
     fn matches(
         &self,
         selector: &Selector<'_>,
@@ -362,53 +371,15 @@ impl Matcher<'_> {
         argument: bool,
     ) -> Result<bool, String> {
         let mut ordinary = String::new();
-        let mut host = false;
-        let mut slotted = false;
+        // Set by a part that lets a node outside this scope match (the host, a
+        // slotted node).
+        let mut crosses = false;
         for part in parts {
-            match part {
-                Component::Host(selector) => {
-                    host = true;
-                    if self.graph.hosts.get(&self.root) != Some(&node) {
-                        return Ok(false);
-                    }
-                    if let Some(selector) = selector {
-                        if !self.matches(selector, node, true)? {
-                            return Ok(false);
-                        }
-                    }
-                }
-                Component::Slotted(selector) => {
-                    slotted = true;
-                    let assigned = self.graph.parents.get(&node).is_some_and(|slot| {
-                        self.tree.local_name(*slot) == Some("slot")
-                            && self.tree.parent(node) != Some(*slot)
-                            && self.graph.scopes.get(slot) == Some(&self.root)
-                    });
-                    if !assigned || !self.matches(selector, node, true)? {
-                        return Ok(false);
-                    }
-                }
-                Component::Is(selectors)
-                | Component::Where(selectors)
-                | Component::Negation(selectors) => {
-                    let mut any = false;
-                    for selector in selectors {
-                        any |= self.matches(selector, node, argument)?;
-                    }
-                    let negation = matches!(part, Component::Negation(_));
-                    if any == negation {
-                        return Ok(false);
-                    }
-                    // A featureless host may participate through :is(:host)
-                    // or :where(:host), but not through an ordinary negation.
-                    host |= !negation && any && self.graph.hosts.get(&self.root) == Some(&node);
-                }
-                _ => part
-                    .to_css(&mut ordinary)
-                    .map_err(|_| "native selector serialization failed")?,
+            if !self.part(part, node, argument, &mut ordinary, &mut crosses)? {
+                return Ok(false);
             }
         }
-        if !argument && self.graph.scopes.get(&node) != Some(&self.root) && !host && !slotted {
+        if !argument && self.graph.scopes.get(&node) != Some(&self.root) && !crosses {
             return Ok(false);
         }
         if ordinary.is_empty() {
@@ -417,6 +388,71 @@ impl Matcher<'_> {
         self.tree
             .matches_checked(node, &ordinary)
             .map_err(|error| format!("native selector match failed: {error:?}"))
+    }
+    /// One simple selector of a compound: whether it still matches. Ordinary parts
+    /// are serialized into `ordinary` for one native match.
+    fn part(
+        &self,
+        part: &Component<'_>,
+        node: Handle,
+        argument: bool,
+        ordinary: &mut String,
+        crosses: &mut bool,
+    ) -> Result<bool, String> {
+        match part {
+            Component::Host(selector) => {
+                *crosses = true;
+                self.host(selector.as_ref(), node)
+            }
+            Component::Slotted(selector) => {
+                *crosses = true;
+                self.slotted(selector, node)
+            }
+            Component::Is(selectors) | Component::Where(selectors) => {
+                let any = self.any(selectors, node, argument)?;
+                // A featureless host may participate through :is(:host)
+                // or :where(:host), but not through an ordinary negation.
+                *crosses |= any && self.is_host(node);
+                Ok(any)
+            }
+            Component::Negation(selectors) => Ok(!self.any(selectors, node, argument)?),
+            _ => {
+                part.to_css(ordinary)
+                    .map_err(|_| "native selector serialization failed")?;
+                Ok(true)
+            }
+        }
+    }
+    fn is_host(&self, node: Handle) -> bool {
+        self.graph.hosts.get(&self.root) == Some(&node)
+    }
+    fn host(&self, selector: Option<&Selector<'_>>, node: Handle) -> Result<bool, String> {
+        if !self.is_host(node) {
+            return Ok(false);
+        }
+        selector.map_or(Ok(true), |selector| self.matches(selector, node, true))
+    }
+    fn slotted(&self, selector: &Selector<'_>, node: Handle) -> Result<bool, String> {
+        let assigned = self.graph.parents.get(&node).is_some_and(|slot| {
+            self.tree.local_name(*slot) == Some("slot")
+                && self.tree.parent(node) != Some(*slot)
+                && self.graph.scopes.get(slot) == Some(&self.root)
+        });
+        Ok(assigned && self.matches(selector, node, true)?)
+    }
+    fn any(
+        &self,
+        selectors: &[Selector<'_>],
+        node: Handle,
+        argument: bool,
+    ) -> Result<bool, String> {
+        // Every argument is matched (not short-circuited), so a selector the native
+        // matcher rejects surfaces wherever it appears in the list.
+        let mut any = false;
+        for selector in selectors {
+            any |= self.matches(selector, node, argument)?;
+        }
+        Ok(any)
     }
 }
 

@@ -98,5 +98,8 @@ async fn huge_zoom_saturates_the_border_box_like_chrome156() {
     )
     .unwrap();
     page.close();
-    assert_eq!(value, json!([33_554_432, 34, 12_000_000, 12, "10px", "31.5544px"]));
+    assert_eq!(
+        value,
+        json!([33_554_432, 34, 12_000_000, 12, "10px", "31.5544px"])
+    );
 }

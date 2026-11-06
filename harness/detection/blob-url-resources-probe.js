@@ -147,6 +147,33 @@
     const imported = blob(["#blob-style-probe { color: rgb(10, 11, 12) }"], "text/css");
     return stylesheet(blob([`@import url(${JSON.stringify(imported)});`], "text/css"));
   })();
+  // MIME strictness: a blob with a non-text/css type must not apply, even when
+  // the bytes parse as CSS. Chrome skips the sniff branch for blob: responses.
+  out.styleWrongMime = await stylesheet(
+    blob(["#blob-style-probe { color: rgb(20, 30, 40) }"], "text/plain"),
+  );
+  // SecurityError on cssRules access after the blob URL was revoked post-load:
+  // the stylesheet's response origin is opaque once the backing blob is gone.
+  out.styleRevoked = await (async () => {
+    const url = blob(["#blob-style-probe { color: rgb(30, 40, 50) }"], "text/css");
+    const element = document.createElement("link");
+    element.rel = "stylesheet";
+    element.href = url;
+    const done = settle(element);
+    document.head.append(element);
+    const result = await done;
+    URL.revokeObjectURL(url);
+    const rules = (() => {
+      try {
+        return element.sheet ? element.sheet.cssRules.length : null;
+      } catch (value) {
+        return value.name;
+      }
+    })();
+    const color = getComputedStyle(probe).color;
+    element.remove();
+    return [result, rules, color];
+  })();
 
   // Images.
   out.image = await image(blob([png], "image/png"));
@@ -183,6 +210,9 @@
   out.iframe = await frame(
     blob(["<!doctype html><title>blob frame</title><body>framed"], "text/html"),
   );
+  // A text/plain blob body renders in Chrome's styled text viewer: the raw bytes
+  // show as text inside a `<pre>`, document.contentType reports "text/plain".
+  out.iframeText = await frame(blob(["plain <b>text</b>"], "text/plain"));
 
   // Content-Security-Policy: blob: matches only an explicit blob: scheme source.
   const policyFrame = async (policy) => {

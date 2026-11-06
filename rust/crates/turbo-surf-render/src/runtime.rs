@@ -5549,6 +5549,70 @@ fn install_frame_environment_marker<'s>(
     Ok(())
 }
 
+/// The essence (type/subtype, lowercased, no parameters) of the response's
+/// Content-Type header, or "text/html" when there is no response or no header.
+/// Chrome's `document.contentType` reports this normalized form.
+fn frame_response_content_type(document: Option<&FrameDocument>) -> String {
+    let Some(document) = document else {
+        return "text/html".to_string();
+    };
+    let header = document
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .map(|(_, value)| value.as_str())
+        .unwrap_or("");
+    let essence = header
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if essence.is_empty() {
+        "text/html".to_string()
+    } else {
+        essence
+    }
+}
+
+/// Escape the HTML special characters a `<pre>` text child needs (`&`, `<`,
+/// `>`): other characters stay as themselves. The top-level viewer inherits
+/// the default `pre` white-space rules, so no further transforms apply.
+fn escape_pre_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// A text/plain blob / data response renders in Chrome's styled text viewer: the
+/// decoded bytes sit inside a `<pre>` with no `<title>`, so `body.textContent`
+/// is the original text and `document.title` is empty.
+fn wrap_text_plain_body(text: &str) -> String {
+    format!(
+        "<!doctype html><html><head></head><body><pre>{}</pre></body></html>",
+        escape_pre_text(text)
+    )
+}
+
+/// The UTF-16 code units installed as the frame's HTML. A text/plain response
+/// is wrapped in Chrome's text viewer shell; everything else goes in verbatim.
+fn frame_document_html_units(document: &FrameDocument, content_type: &str) -> Vec<u16> {
+    if content_type == "text/plain" {
+        wrap_text_plain_body(&document.html)
+            .encode_utf16()
+            .collect()
+    } else {
+        document.html.encode_utf16().collect()
+    }
+}
+
 /// Build the per-frame [`CspHandle`]: a response document gets its headers
 /// applied directly; an about:blank / srcdoc frame inherits the parent's
 /// current policy / reporting state.
@@ -5852,13 +5916,15 @@ fn op_frame_set_document<'s>(
                 .unwrap_or(url)
                 .to_string(),
         )));
+        let frame_content_type = frame_response_content_type(document.as_ref());
+        metadata["contentType"] = serde_json::Value::String(frame_content_type.clone());
         let html_units = if embedding_blocked {
             "<!doctype html><html><head></head><body></body></html>"
                 .encode_utf16()
                 .collect::<Vec<_>>()
         } else {
             document.as_ref().map_or(supplied_units, |document| {
-                document.html.encode_utf16().collect()
+                frame_document_html_units(document, &frame_content_type)
             })
         };
         let html = String::from_utf16_lossy(&html_units);
@@ -10570,11 +10636,21 @@ ops.op_set_host_capabilities({deliverWindowMessage:__deliverWindowMessage});
 for (const __on of ["onmessage", "onerror", "onmessageerror", "ononline", "onoffline", "onpopstate", "onhashchange", "onbeforeunload", "onunload", "onload"]) {
   try { if (globalThis[__on] === undefined) globalThis[__on] = null; } catch (_e) {}
 }
-// document.contentType — real Chrome reports "text/html" for an HTML document; the
-// reCAPTCHA VM reads it. The binding doesn't expose it, so add an own accessor.
+// document.contentType — the binding (turbo-dom-browser-env dom_implementation.js)
+// returns "text/html" for a plain HTML document. Wrap its getter so a blob/data
+// iframe with a text/plain response reports "text/plain" (Chrome's text viewer),
+// while every other document keeps the binding's answer.
 try {
-  if (globalThis.document && globalThis.document.contentType === undefined) {
-    Object.defineProperty(globalThis.document, "contentType", { configurable: true, get() { return "text/html"; } });
+  const nativeContentType = Object.getOwnPropertyDescriptor(Document.prototype, "contentType")?.get;
+  if (nativeContentType) {
+    Object.defineProperty(Document.prototype, "contentType", { configurable: true, enumerable: true,
+      get: __documentFunction(function () {
+        if (this === __document && __documentRuntimeState && __documentRuntimeState.contentType) {
+          return __documentRuntimeState.contentType;
+        }
+        return nativeContentType.call(this);
+      }, "get contentType", 0),
+    });
   }
 } catch (_e) {}
 // User Timing stores real entries; navigation records only phases this runtime observes.
@@ -11403,7 +11479,7 @@ const __elementNextElementSibling=Object.getOwnPropertyDescriptor(Element.protot
     r##"
 function __cssHost(doc) {let host=__intrinsicApply(__intrinsicWeakGet,__resourceCSSHosts,[doc]);if(!host){host=ops.op_interface_record_get(doc).cssHost;__intrinsicApply(__intrinsicWeakSet,__resourceCSSHosts,[doc,host]);}return host;}
 function __cssOriginClean(response) {return response.originClean===true;}
-function __validSheetResponse(response, doc, clean) {const mime=(response.contentType||"").split(";")[0].trim().toLowerCase();return mime==="text/css" || !response.nosniff && (__resourceCompatMode.call(doc)==="BackCompat" && clean || __cssHost(doc).looksLikeCSS(response.text));}
+function __validSheetResponse(response, doc, clean) {const mime=(response.contentType||"").split(";")[0].trim().toLowerCase();if (mime==="text/css") return true; if ((response.url||"").startsWith("blob:")) return false; return !response.nosniff && (__resourceCompatMode.call(doc)==="BackCompat" && clean || __cssHost(doc).looksLikeCSS(response.text));}
 function __fireResourceEvent(el, kind, win = globalThis) {
   let ev;
   try { ev = new __hostEvent(kind); } catch (_) { ev = {type:kind}; }
@@ -11548,7 +11624,20 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
           receivedResponse=true;
           const text=response.text;
           __recordResource(win, url, "link", start);recorded=true;
-          if(!response.ok||!__validSheetResponse(response,doc,__cssOriginClean(response,doc.URL||win.location.href,request.mode)))throw new Error("Stylesheet request failed");
+          if(!response.ok)throw new Error("Stylesheet request failed");
+          if(!__validSheetResponse(response,doc,__cssOriginClean(response,doc.URL||win.location.href,request.mode))) {
+            // Chrome: a blob response that fails the strict MIME check still loads
+            // an empty, disabled sheet (fires "load", no rules apply); for other
+            // schemes the existing error path fires "error" with no sheet.
+            if((response.url||url).startsWith("blob:")) {
+              // The blob response is same-origin, so the attached empty sheet
+              // stays clean — cssRules reads an empty RuleList (no SecurityError).
+              __cssHost(doc).attachLinked(el,"",response.url||url,__cssOriginClean(response,doc.URL||win.location.href,request.mode));
+              if(__resources.get(el)===state)__fireResourceEvent(el,"load",win);
+              return;
+            }
+            throw new Error("Stylesheet request failed");
+          }
           if(__resources.get(el)!==state)return;
           const sheet=__cssHost(doc).attachLinked(el,text,response.url||url,__cssOriginClean(response,doc.URL||win.location.href,request.mode));
           __resourceStyleRequests.set(sheet,{...request,originClean:__cssOriginClean(response,doc.URL||win.location.href,request.mode)});
@@ -12423,6 +12512,7 @@ __G.domSig = (() => {
     globalThis.origin = metadata.origin;
     location.href = metadata.location;
     __documentRuntimeState.frame = metadata;
+    __documentRuntimeState.contentType = metadata.contentType || "text/html";
     __initializeDocumentBase();
     __documentRuntimeState.referrer = ops.op_document_referrer(__document);
     globalThis.frames = globalThis;

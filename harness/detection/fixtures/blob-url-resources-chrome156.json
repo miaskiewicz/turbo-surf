@@ -1,7 +1,7 @@
 {
   "browser": "HeadlessChrome/156.0.8078.47",
   "v8": "15.6.75.19",
-  "probeSha256": "50244863fce0413e57b493be06c5677ff4d2475500345f01b6c95bb2e2a120fe",
+  "probeSha256": "d89883d0bf21ba27ef80d2a53cca757796bdad2f9d26c1e55f29b0a792249dc8",
   "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
   "flags": [
     "--remote-debugging-port=0",
@@ -13,5 +13,5 @@
     "about:blank"
   ],
   "errors": [],
-  "result": "{\"script\":[\"load\",[[\"classic\",true]]],\"scriptPlainMime\":[\"load\",[\"plain\"]],\"scriptUntyped\":[\"load\",[\"untyped\"]],\"scriptImageMime\":[\"load\",[\"image\"]],\"scriptCrossorigin\":[\"load\",[\"cors\"]],\"scriptRevoked\":[\"error\",[]],\"scriptRevokedAfterSrc\":[\"error\",[]],\"scriptRevokedAfterInsert\":[\"load\",[\"after insert\"]],\"scriptFragment\":[\"load\",[\"fragment\"]],\"scriptForeign\":[\"error\",[]],\"module\":[\"load\",[[\"module\",\"dependency\",true]]],\"moduleDynamic\":\"dependency\",\"modulePlainMime\":[\"error\",[]],\"style\":[\"load\",1,\"rgb(1, 2, 3)\"],\"styleImport\":[\"load\",1,\"rgb(10, 11, 12)\"],\"image\":[\"load\",3,2],\"imageUntyped\":[\"load\",3,2],\"imageGarbage\":[\"error\",0,0],\"imageRevoked\":[\"error\",0,0],\"iframe\":[\"load\",[true,true,\"text/html\",\"framed\",\"blob frame\"]],\"cspSelf\":[\"error\",[],\"error\"],\"cspBlob\":[\"load\",[\"csp script\"],\"load\"],\"cspStar\":[\"error\",[],\"error\"]}"
+  "result": "{\"script\":[\"load\",[[\"classic\",true]]],\"scriptPlainMime\":[\"load\",[\"plain\"]],\"scriptUntyped\":[\"load\",[\"untyped\"]],\"scriptImageMime\":[\"load\",[\"image\"]],\"scriptCrossorigin\":[\"load\",[\"cors\"]],\"scriptRevoked\":[\"error\",[]],\"scriptRevokedAfterSrc\":[\"error\",[]],\"scriptRevokedAfterInsert\":[\"load\",[\"after insert\"]],\"scriptFragment\":[\"load\",[\"fragment\"]],\"scriptForeign\":[\"error\",[]],\"module\":[\"load\",[[\"module\",\"dependency\",true]]],\"moduleDynamic\":\"dependency\",\"modulePlainMime\":[\"error\",[]],\"style\":[\"load\",1,\"rgb(1, 2, 3)\"],\"styleImport\":[\"load\",1,\"rgb(10, 11, 12)\"],\"styleWrongMime\":[\"load\",0,\"rgb(0, 0, 0)\"],\"styleRevoked\":[\"load\",1,\"rgb(30, 40, 50)\"],\"image\":[\"load\",3,2],\"imageUntyped\":[\"load\",3,2],\"imageGarbage\":[\"error\",0,0],\"imageRevoked\":[\"error\",0,0],\"iframe\":[\"load\",[true,true,\"text/html\",\"framed\",\"blob frame\"]],\"iframeText\":[\"load\",[true,true,\"text/plain\",\"plain <b>text</b>\",\"\"]],\"cspSelf\":[\"error\",[],\"error\"],\"cspBlob\":[\"load\",[\"csp script\"],\"load\"],\"cspStar\":[\"error\",[],\"error\"]}"
 }

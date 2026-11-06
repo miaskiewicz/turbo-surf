@@ -14,25 +14,17 @@ use turbo_surf_render::PageSession;
 const CASES: &[u8] = include_bytes!("fixtures/parity_080_cases.json");
 /// Known gaps owned by turbo-dom, as (case, JSON pointer into its result, surf's current
 /// value): each is required to still differ from Chrome, so a fix fails its pin and the
-/// gap is retired with it.
+/// gap is retired with it. The 18 CSS.supports features that previously rejected every
+/// Chrome 156 property/value form are now accepted by the engine's grammar
+/// (`__tsNs.cssSupports` / `cssSupportsProperty`, turbo-dom#322) with its private
+/// `String` coercion (turbo-dom#370), so the surf wrapper routes there (turbo-surf#163)
+/// and the pins are retired.
 const GAPS: &[(&str, &str, &str)] = &[];
-/// CSS.supports answers from surf's Lightning CSS grammar, which rejects the 18 Chrome 156
-/// features (every form). The engine's grammar (`cssSupports` / `cssSupportsProperty`,
-/// turbo-dom#322) accepts them, but coerces its arguments with the page's `String`, which
-/// a page may replace (turbo-dom: private coercion), so CSS.supports cannot route there yet.
-const UNSUPPORTED_FEATURES: usize = 18;
 
 fn gaps() -> Vec<(&'static str, String, String)> {
-    let mut gaps: Vec<_> = GAPS
-        .iter()
+    GAPS.iter()
         .map(|(id, pointer, value)| (*id, pointer.to_string(), value.to_string()))
-        .collect();
-    for row in 0..UNSUPPORTED_FEATURES {
-        for form in 1..=3 {
-            gaps.push(("css-supports", format!("/{row}/{form}"), "false".into()));
-        }
-    }
-    gaps
+        .collect()
 }
 const CONTROL: &str = include_str!("fixtures/parity_080_chrome156.json");
 

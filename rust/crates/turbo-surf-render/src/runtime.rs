@@ -10831,14 +10831,19 @@ if (typeof globalThis.CSS === "undefined") {
     }
     return out;
   };
+  // Route to the turbo-dom engine's grammar (__tsNs.cssSupports / cssSupportsProperty,
+  // turbo-dom#322), which accepts every Chrome 156 property/value Lightning CSS does not
+  // (turbo-surf#163). The engine coerces its arguments with a captured `String` primordial
+  // (turbo-dom#370), so a page that replaces `globalThis.String` cannot poison the answer.
+  const cssSupportsCondition = __G.cssSupports, cssSupportsProperty = __G.cssSupportsProperty;
   globalThis.CSS = {
     supports(condition) {
       if (!arguments.length) throw new cssTypeError("Failed to execute 'supports' on 'CSS': 1 argument required, but only 0 present.");
       const text = value => { if (typeof value === "symbol") throw new cssTypeError("Cannot convert a Symbol value to a string"); return cssString(value); };
       const source = text(condition);
       return arguments.length > 1
-        ? ops.op_native_css_supports(source, text(arguments[1]), true)
-        : ops.op_native_css_supports(source, "", false);
+        ? cssSupportsProperty(source, text(arguments[1]))
+        : cssSupportsCondition(source);
     },
     escape: cssEscape,
   };

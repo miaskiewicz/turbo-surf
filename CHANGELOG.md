@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Fixed (CSS.supports, #163)**: the `CSS.supports(condition)` and
+  `CSS.supports(property, value)` wrapper now routes to the turbo-dom engine's
+  grammar (`__tsNs.cssSupports` / `cssSupportsProperty`, turbo-dom#322) instead of
+  surf's Lightning CSS evaluator, so every Chrome 156 property/value the parity
+  write-up listed (`anchor-name`, `position-try-fallbacks`, `interpolate-size`,
+  `field-sizing`, `text-box`, `reading-flow`, `corner-shape`,
+  `dynamic-range-limit`, `order: sibling-index()`, `color: if(...)` /
+  `contrast-color(...)`, `clip-path: shape(...)`, `scroll-marker-group`,
+  `text-wrap: pretty`, `anchor-scope`, `overlay`, `timeline-scope`,
+  `content-visibility`) answers `true` in all three forms (name/value,
+  bare declaration, parenthesized condition). The engine captures `String` at
+  install (turbo-dom#370), so poisoning `globalThis.String` cannot change the
+  answer and surf's private-coercion control still passes. Four engine-side
+  selector/vendor-prefix over-accepts (`-moz-appearance: none`,
+  `selector(div,span)`, `selector(:is(:bogus))`, `selector(:where(:bogus, p))`)
+  are pinned in the `genuine_css_supports_overloads_...` control until the next
+  turbo-dom tightening.
 - **Fixed (render, #206)**: three Chrome 156 parity gaps on `blob:` subresources
   carried over from #201. A `blob:` iframe whose response is `text/plain` now
   renders Chrome's styled text viewer (the raw bytes sit inside a `<pre>`, so

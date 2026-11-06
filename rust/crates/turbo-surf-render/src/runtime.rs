@@ -2498,6 +2498,731 @@ async fn op_fetch(
     page_fetch(state, url, init_json).await
 }
 // The fetch itself, shared with synchronous XMLHttpRequest (sync_xhr.rs).
+/// Inputs for [`try_scheme_fetch`].
+struct TryScheme<'a> {
+    state: &'a Rc<RefCell<OpState>>,
+    target: &'a str,
+    source: &'a str,
+    init: &'a serde_json::Value,
+    method: Option<&'a str>,
+    headers: &'a std::collections::BTreeMap<String, String>,
+    destination: Destination,
+    partition: &'a Option<Rc<CredentiallessPartition>>,
+    referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
+    iframe: bool,
+    scheme_fetch: bool,
+}
+
+/// Handle a blob: / data: URL before any real network traffic. Returns `None`
+/// when the target is an ordinary http(s) URL and the caller should proceed.
+fn try_scheme_fetch(args: TryScheme<'_>) -> Option<FetchOut> {
+    let TryScheme {
+        state,
+        target,
+        source,
+        init,
+        method,
+        headers,
+        destination,
+        partition,
+        referrer_policy,
+        iframe,
+        scheme_fetch,
+    } = args;
+    let frame = iframe.then(|| blob_urls::frame(partition.clone(), source, referrer_policy));
+    let blob = blob_urls::Load {
+        target,
+        init,
+        method,
+        headers,
+        destination,
+    };
+    if let Some(out) = blob_urls::scheme_load(state, blob, frame) {
+        return Some(out);
+    }
+    if target.starts_with("data:") && scheme_fetch {
+        return Some(blob_urls::fetch_data(target));
+    }
+    if target.starts_with("data:") && iframe {
+        return Some(handle_data_iframe_fetch(
+            state,
+            target,
+            source,
+            referrer_policy,
+            partition,
+        ));
+    }
+    None
+}
+
+/// True when the initiating document's CSP or active mixed-content policy
+/// refuses to send this request before it ever reaches the network.
+fn fetch_request_blocked_by_policy(
+    policy: &crate::csp::Policy,
+    directive: &str,
+    target: &str,
+    nonce: &str,
+    source: &str,
+) -> bool {
+    !policy.allows_request(directive, target, nonce, false)
+        || !crate::resource_policy::active_mixed_content_allowed(source, target)
+}
+
+/// True when `mode: "same-origin"` refuses this hop — either the initiator is
+/// an opaque origin or the target lives on another origin.
+fn same_origin_mode_blocks(
+    mode: RequestMode,
+    context: &RequestContext,
+    source: &str,
+    target: &str,
+) -> bool {
+    mode == RequestMode::SameOrigin
+        && (context.opaque_origin || !turbo_surf_core::request_context::same_origin(source, target))
+}
+
+/// True when the fetch init bag asks for a streaming body (no destination, no
+/// SRI, `stream: true`).
+fn is_streaming_fetch(destination: Destination, integrity: &str, init: &serde_json::Value) -> bool {
+    destination == Destination::Empty
+        && integrity.is_empty()
+        && init.get("stream").and_then(|value| value.as_bool()) == Some(true)
+}
+
+/// Evaluate the response-policy for one hop: record where the response came
+/// from and its referrer, update the shared crossed-origin flag, and refuse
+/// the response when the embedder or CORS policy rejects it.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_response_policy(
+    context: &RequestContext,
+    target: &str,
+    headers: &[(String, String)],
+    embedder_policy: crate::resource_policy::EmbedderPolicy,
+    response_received: &std::sync::atomic::AtomicBool,
+    response_referrer: &std::sync::Mutex<String>,
+    response_location: &std::sync::Mutex<String>,
+    crossed_origin: &std::sync::atomic::AtomicBool,
+) -> bool {
+    response_received.store(true, std::sync::atomic::Ordering::Relaxed);
+    *response_location.lock().unwrap() = target.to_string();
+    *response_referrer.lock().unwrap() = context
+        .source
+        .as_deref()
+        .and_then(|source| {
+            context
+                .referrer_policy
+                .referrer(context.referrer.as_deref().unwrap_or(source), target)
+        })
+        .unwrap_or_default();
+    let cross = context.opaque_origin
+        || context.origin_tainted
+        || !context
+            .source
+            .as_deref()
+            .is_some_and(|source| turbo_surf_core::request_context::same_origin(source, target));
+    crossed_origin.fetch_or(cross, std::sync::atomic::Ordering::Relaxed);
+    crate::resource_policy::embedder_allowed(embedder_policy, context, target, headers)
+        && (context.mode != RequestMode::Cors
+            || !cross
+            || crate::fetch_cors::allowed(context, headers))
+}
+
+/// Parsed body / headers fields the fetch init bag passes alongside the URL.
+struct ParsedFetchBody {
+    method: Option<String>,
+    body: Option<String>,
+    body_bytes: Option<Vec<u8>>,
+    headers: std::collections::BTreeMap<String, String>,
+}
+
+/// Parse the method / body / headers trio from the fetch init bag, stripping
+/// the browser-controlled headers the guest never gets to override (sec-*,
+/// cookie / origin / referer / host / user-agent / upgrade-insecure-requests).
+fn parse_fetch_body(init: &serde_json::Value) -> ParsedFetchBody {
+    let method = init
+        .get("method")
+        .and_then(|m| m.as_str())
+        .map(|m| m.to_ascii_uppercase());
+    let body = init
+        .get("body")
+        .and_then(|b| b.as_str())
+        .map(|b| b.to_string());
+    let body_bytes = init
+        .get("body_bytes")
+        .and_then(|value| serde_json::from_value::<Vec<u8>>(value.clone()).ok());
+    let mut headers: std::collections::BTreeMap<String, String> = init
+        .get("headers")
+        .and_then(|h| deno_core::serde_json::from_value(h.clone()).ok())
+        .unwrap_or_default();
+    headers.retain(|name, _| {
+        let name = name.to_ascii_lowercase();
+        !name.starts_with("sec-")
+            && !matches!(
+                name.as_str(),
+                "cookie"
+                    | "origin"
+                    | "referer"
+                    | "host"
+                    | "user-agent"
+                    | "upgrade-insecure-requests"
+            )
+    });
+    ParsedFetchBody {
+        method,
+        body,
+        body_bytes,
+        headers,
+    }
+}
+
+/// Build the per-fetch cache environment: materialise the `BrowserStorage`
+/// slot, pick a cache mode, derive the cache partition (accounting for an
+/// opaque-origin cache nonce), and snapshot the storage-side effects observer.
+fn build_fetch_cache_env(
+    state: &Rc<RefCell<OpState>>,
+    init: &serde_json::Value,
+    base: &str,
+    source: &str,
+    partition: &Option<Rc<CredentiallessPartition>>,
+    opaque_origin: bool,
+    opaque_cache_nonce: u32,
+) -> (
+    turbo_surf_core::http_cache::HttpCache,
+    turbo_surf_core::http_cache::CacheMode,
+    String,
+    std::sync::Arc<turbo_surf_core::net::ResponseSideEffects<'static>>,
+) {
+    let http_cache = {
+        let mut state = state.borrow_mut();
+        if !state.has::<BrowserStorage>() {
+            state.put(BrowserStorage::default());
+        }
+        state.borrow::<BrowserStorage>().http_cache()
+    };
+    let cache_mode = init
+        .get("cache")
+        .and_then(|value| value.as_str())
+        .and_then(turbo_surf_core::http_cache::CacheMode::parse)
+        .unwrap_or_default();
+    let partition_id = partition.as_ref().map_or(0, |partition| partition.id);
+    let cache_partition = http_cache_partition(
+        base,
+        source,
+        partition_id,
+        if opaque_origin { opaque_cache_nonce } else { 0 },
+    );
+    let storage_effects = state
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .partition_response_effects(partition_id);
+    (http_cache, cache_mode, cache_partition, storage_effects)
+}
+
+/// Snapshot the fetch's initiating policy / referrer / embedder state. An
+/// upload-conversion cancel job carries the authoritative snapshot already
+/// (its document / realm may have gone away); otherwise take it from the
+/// request's CSP handle.
+fn build_fetch_policy_snapshot(
+    cancel_job: Option<&std::sync::Arc<fetch_streams::Job>>,
+    csp: Option<&CspHandle>,
+) -> FetchPolicySnapshot {
+    if let Some(job) = cancel_job {
+        return job.policy.clone();
+    }
+    let Some(handle) = csp else {
+        return FetchPolicySnapshot::default();
+    };
+    let policy = handle.policy.borrow();
+    FetchPolicySnapshot {
+        active: policy.active.clone(),
+        referrer: policy.referrer_policy,
+        embedder: policy.embedder_policy,
+    }
+}
+
+/// Handle the streaming fetch path (for `destination: ""` with `stream: true`
+/// and no SRI): drive `fetch_stream`, convert its result to a [`FetchOut`],
+/// merge the jar / release the cancel job, and append a streamed log entry.
+#[allow(clippy::too_many_arguments)]
+async fn run_stream_fetch_branch(
+    target: &str,
+    source: &str,
+    context: &RequestContext,
+    method: Option<&str>,
+    cancel_id: u32,
+    cancel_job: Option<&std::sync::Arc<fetch_streams::Job>>,
+    mut opts: FetchOptions<'_>,
+    local: &mut CookieJar,
+    jar_rc: &Jar,
+    state: &Rc<RefCell<OpState>>,
+    response_received: &std::sync::atomic::AtomicBool,
+    policy_blocked: &std::sync::atomic::AtomicBool,
+    crossed_origin: &std::sync::atomic::AtomicBool,
+) -> FetchOut {
+    let response = {
+        opts.jar = Some(local);
+        let request = turbo_surf_core::net::fetch_stream(target, opts);
+        if let Some(job) = cancel_job {
+            fetch_streams::until_cancelled(job, request).await
+        } else {
+            Some(request.await)
+        }
+    };
+    let out = stream_response_to_out(
+        response,
+        target,
+        source,
+        context,
+        cancel_id,
+        cancel_job,
+        response_received,
+        policy_blocked,
+        crossed_origin,
+    )
+    .await;
+    // Snapshot the local jar's request-scoped cookie changes back into the shared
+    // jar (same handling as the blocking path below).
+    //
+    // The borrow is dropped before the state borrow below.
+    let local_snapshot = std::mem::take(local);
+    jar_rc.borrow_mut().merge_request_changes(local_snapshot);
+    if out.stream_id == 0 {
+        fetch_streams::release(&mut state.borrow_mut(), cancel_id);
+    }
+    let entry = serde_json::json!({
+        "url": target,
+        "status": out.status,
+        "ok": out.ok,
+        "method": method.unwrap_or("GET"),
+        "contentType": out.content_type,
+        "streamed": true,
+        "streamId": cancel_id,
+        "body": "",
+        "bodyIncomplete": true,
+    });
+    let mut state = state.borrow_mut();
+    let log = state.borrow_mut::<NetworkLog>();
+    if log.0.len() == 1000 {
+        log.0.pop_front();
+    }
+    log.0.push_back(entry);
+    out
+}
+
+/// `fetch_html` wrapper that re-checks Subresource Integrity against the
+/// response body with the right opaque-redirect gating (a `redirect: manual`
+/// 3xx bypasses the check, otherwise same-origin / allow-cors traffic enforces
+/// it).
+async fn fetch_html_with_integrity(
+    target: &str,
+    opts: FetchOptions<'_>,
+    integrity: &str,
+    source: &str,
+    mode: RequestMode,
+    init: &serde_json::Value,
+    crossed_origin: &std::sync::atomic::AtomicBool,
+) -> Result<turbo_surf_core::net::FetchResult, String> {
+    let response = fetch_html(target, opts)
+        .await
+        .map_err(|error| error.to_string())?;
+    let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
+        || !turbo_surf_core::request_context::same_origin(source, &response.final_url);
+    let opaque_redirect = init.get("redirect").and_then(|value| value.as_str()) == Some("manual")
+        && matches!(response.status, 301 | 302 | 303 | 307 | 308);
+    if crate::integrity::matches(
+        &response.body_bytes,
+        integrity,
+        !opaque_redirect && (mode != RequestMode::NoCors || !cross),
+    ) {
+        Ok(response)
+    } else {
+        Err("Response failed integrity validation".into())
+    }
+}
+
+/// Convert the result of a streaming `fetch_stream` into the wire-level
+/// [`FetchOut`], installing the body on the cancel job when one is active.
+#[allow(clippy::too_many_arguments)]
+async fn stream_response_to_out(
+    response: Option<
+        Result<turbo_surf_core::net::StreamingResult, turbo_surf_core::net::HttpError>,
+    >,
+    target: &str,
+    source: &str,
+    context: &RequestContext,
+    cancel_id: u32,
+    cancel_job: Option<&std::sync::Arc<fetch_streams::Job>>,
+    response_received: &std::sync::atomic::AtomicBool,
+    policy_blocked: &std::sync::atomic::AtomicBool,
+    crossed_origin: &std::sync::atomic::AtomicBool,
+) -> FetchOut {
+    match response {
+        None => FetchOut {
+            aborted: true,
+            final_url: target.to_string(),
+            ..Default::default()
+        },
+        Some(Err(error)) => FetchOut {
+            response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
+            policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+            cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
+            final_url: target.to_string(),
+            body: error.to_string(),
+            ..Default::default()
+        },
+        Some(Ok(response)) => {
+            install_stream_fetch_out(
+                response,
+                target,
+                source,
+                context,
+                cancel_id,
+                cancel_job,
+                crossed_origin,
+            )
+            .await
+        }
+    }
+}
+
+/// Successful-response branch of [`stream_response_to_out`]: build the
+/// [`FetchOut`] and, if a cancel job owns the body, install it or report an
+/// aborted outcome.
+async fn install_stream_fetch_out(
+    response: turbo_surf_core::net::StreamingResult,
+    target: &str,
+    source: &str,
+    context: &RequestContext,
+    cancel_id: u32,
+    cancel_job: Option<&std::sync::Arc<fetch_streams::Job>>,
+    crossed_origin: &std::sync::atomic::AtomicBool,
+) -> FetchOut {
+    let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
+        || !turbo_surf_core::request_context::same_origin(source, &response.final_url);
+    let out = FetchOut {
+        status_text: response.status_text,
+        stream_id: cancel_id,
+        response_received: true,
+        cross_origin: cross,
+        nosniff: response.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("x-content-type-options")
+                && value.trim().eq_ignore_ascii_case("nosniff")
+        }),
+        headers: crate::fetch_cors::exposed_headers(context, response.headers, cross),
+        redirected: response.redirected,
+        status: response.status,
+        ok: (200..300).contains(&response.status),
+        content_type: response.content_type,
+        final_url: response.final_url,
+        ..Default::default()
+    };
+    let Some(job) = cancel_job else {
+        return FetchOut {
+            final_url: target.to_string(),
+            ..Default::default()
+        };
+    };
+    if fetch_streams::install(job, response.body).await {
+        out
+    } else {
+        FetchOut {
+            aborted: true,
+            final_url: target.to_string(),
+            ..Default::default()
+        }
+    }
+}
+
+/// Build the native `RequestContext` for this fetch from the init bag — the
+/// referrer / referrer-policy / credentials / opaque-origin flags that let the
+/// policy / CORS code see what the guest fetch asked for.
+fn build_fetch_request_context(
+    init: &serde_json::Value,
+    source: &str,
+    destination: Destination,
+    mode: RequestMode,
+    referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
+    embedder_policy: crate::resource_policy::EmbedderPolicy,
+) -> RequestContext {
+    let mut context = RequestContext::resource(source, destination, mode);
+    context.referrer = init
+        .get("referrer_source")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    context.referrer_policy = referrer_policy;
+    context.credentialless =
+        embedder_policy == crate::resource_policy::EmbedderPolicy::Credentialless;
+    if let Some(referrer) = init.get("referrer").and_then(|value| value.as_str()) {
+        if referrer != "about:client" {
+            context.referrer = Some(referrer.to_string());
+        }
+    }
+    context.top_level_source = init
+        .get("top_level_source")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    context.cookie_site_is_opaque = init
+        .get("cookie_site_is_opaque")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    context.opaque_origin = init
+        .get("opaque_origin")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if let Some(credentials) = parse_fetch_credentials(init) {
+        context.credentials = credentials;
+    }
+    context
+}
+
+/// Resolve the fetch destination from the init bag's `destination` string.
+fn parse_fetch_destination(init: &serde_json::Value) -> Destination {
+    match init.get("destination").and_then(|s| s.as_str()) {
+        Some("script") => Destination::Script,
+        Some("iframe") => Destination::Iframe,
+        Some("style") => Destination::Style,
+        Some("image") => Destination::Image,
+        Some("font") => Destination::Font,
+        _ => Destination::Empty,
+    }
+}
+
+/// Resolve the request mode from the init bag's `mode` string, defaulting per
+/// destination (iframe → navigate, script → no-cors, else cors).
+fn parse_fetch_request_mode(init: &serde_json::Value, destination: Destination) -> RequestMode {
+    match init.get("mode").and_then(|s| s.as_str()) {
+        Some("no-cors") => RequestMode::NoCors,
+        Some("cors") => RequestMode::Cors,
+        Some("same-origin") => RequestMode::SameOrigin,
+        Some("navigate") => RequestMode::Navigate,
+        _ if destination == Destination::Iframe => RequestMode::Navigate,
+        _ if destination == Destination::Script => RequestMode::NoCors,
+        _ => RequestMode::Cors,
+    }
+}
+
+/// Resolve the request credentials from the init bag's `credentials` string.
+/// Returns `None` when the init bag is silent (caller keeps the default).
+fn parse_fetch_credentials(init: &serde_json::Value) -> Option<Credentials> {
+    let value = init.get("credentials").and_then(|s| s.as_str())?;
+    Some(match value {
+        "omit" => Credentials::Omit,
+        "include" => Credentials::Include,
+        _ => Credentials::SameOrigin,
+    })
+}
+
+/// Resolve the redirect mode from the init bag's `redirect` string.
+fn parse_fetch_redirect_mode(init: &serde_json::Value) -> turbo_surf_core::net::RedirectMode {
+    match init.get("redirect").and_then(|value| value.as_str()) {
+        Some("manual") => turbo_surf_core::net::RedirectMode::Manual,
+        Some("error") => turbo_surf_core::net::RedirectMode::Error,
+        _ => turbo_surf_core::net::RedirectMode::Follow,
+    }
+}
+
+/// The CSP fetch-directive matching a request destination.
+fn fetch_csp_directive(destination: Destination) -> &'static str {
+    match destination {
+        Destination::Script => "script-src-elem",
+        Destination::Style => "style-src-elem",
+        Destination::Image => "img-src",
+        Destination::Font => "font-src",
+        Destination::Iframe => "frame-src",
+        _ => "connect-src",
+    }
+}
+
+/// A `data:` URL loaded as an iframe document: decode, register as a frame
+/// response so install/configure can pick it up, and synthesize the FetchOut.
+fn handle_data_iframe_fetch(
+    state: &Rc<RefCell<OpState>>,
+    target: &str,
+    source: &str,
+    referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
+    partition: &Option<Rc<CredentiallessPartition>>,
+) -> FetchOut {
+    let decoded = decode_data_document(target);
+    let ok = decoded.is_some();
+    let (body, content_type) = decoded.unwrap_or_default();
+    let mut state = state.borrow_mut();
+    let frames = state.borrow_mut::<FrameContexts>();
+    frames.next_document += 1;
+    let id = frames.next_document;
+    frames.documents.insert(
+        id,
+        FrameDocument {
+            response_metadata: crate::DocumentResponseMetadata {
+                status: 200,
+                referrer: crate::document_response::local_navigation_referrer(
+                    source,
+                    referrer_policy,
+                ),
+            },
+            partition: partition.clone(),
+            url: target.to_string(),
+            html: body.clone(),
+            headers: Vec::new(),
+        },
+    );
+    FetchOut {
+        status: if ok { 200 } else { 0 },
+        ok,
+        body_bytes: body.as_bytes().to_vec(),
+        body,
+        content_type,
+        frame_document: id,
+        final_url: target.to_string(),
+        ..Default::default()
+    }
+}
+
+/// Locals threaded into [`fetch_response_to_out`].
+struct FetchResponseOut<'a> {
+    state: &'a Rc<RefCell<OpState>>,
+    response: turbo_surf_core::net::FetchResult,
+    destination: Destination,
+    source: &'a str,
+    target: &'a str,
+    context: &'a RequestContext,
+    init: &'a serde_json::Value,
+    partition: &'a Option<Rc<CredentiallessPartition>>,
+    response_referrer: &'a std::sync::Mutex<String>,
+    response_location: &'a std::sync::Mutex<String>,
+    crossed_origin: &'a std::sync::atomic::AtomicBool,
+    script_errors_muted: bool,
+}
+
+/// Convert a successful [`fetch_html::Response`] into the [`FetchOut`] wire
+/// shape, stashing any iframe / frame-script side records.
+fn fetch_response_to_out(args: FetchResponseOut<'_>) -> FetchOut {
+    let FetchResponseOut {
+        state,
+        response: r,
+        destination,
+        source,
+        target,
+        context,
+        init,
+        partition,
+        response_referrer,
+        response_location,
+        crossed_origin,
+        script_errors_muted,
+    } = args;
+    let frame_document = if destination == Destination::Iframe {
+        let mut state = state.borrow_mut();
+        let frames = state.borrow_mut::<FrameContexts>();
+        frames.next_document += 1;
+        let id = frames.next_document;
+        frames.documents.insert(
+            id,
+            FrameDocument {
+                response_metadata: crate::DocumentResponseMetadata {
+                    status: r.status,
+                    referrer: response_referrer.lock().unwrap().clone(),
+                },
+                partition: partition.clone(),
+                url: response_location.lock().unwrap().clone(),
+                html: r.html.clone(),
+                headers: r.headers.clone(),
+            },
+        );
+        id
+    } else {
+        0
+    };
+    let frame_script = if destination == Destination::Script
+        && init.get("frame_script").and_then(|v| v.as_bool()) == Some(true)
+    {
+        let mut state = state.borrow_mut();
+        let frames = state.borrow_mut::<FrameContexts>();
+        frames.next_script += 1;
+        let id = frames.next_script;
+        frames.scripts.insert(
+            id,
+            FrameScriptResponse {
+                request_url: target.to_string(),
+                url: r.final_url.clone(),
+                code: r.html.clone(),
+                muted_errors: script_errors_muted,
+            },
+        );
+        id
+    } else {
+        0
+    };
+    let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
+        || !turbo_surf_core::request_context::same_origin(source, &r.final_url);
+    FetchOut {
+        status_text: r.status_text,
+        stream_id: 0,
+        aborted: false,
+        integrity_blocked: false,
+        script_errors_muted,
+        nosniff: r.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("x-content-type-options")
+                && value.trim().eq_ignore_ascii_case("nosniff")
+        }),
+        response_received: true,
+        policy_blocked: false,
+        cross_origin: cross,
+        body_bytes: r.body_bytes,
+        headers: crate::fetch_cors::exposed_headers(context, r.headers, cross),
+        redirected: r.redirected,
+        status: r.status,
+        ok: (200..300).contains(&r.status),
+        body: r.html,
+        content_type: r.content_type,
+        frame_document,
+        frame_script,
+        final_url: r.final_url,
+    }
+}
+
+/// Locals threaded into [`fetch_error_to_out`].
+struct FetchErrorOut<'a> {
+    error: String,
+    target: &'a str,
+    response_received: &'a std::sync::atomic::AtomicBool,
+    policy_blocked: &'a std::sync::atomic::AtomicBool,
+    crossed_origin: &'a std::sync::atomic::AtomicBool,
+}
+
+/// Convert a [`page_fetch`] error into the [`FetchOut`] shape the renderer
+/// expects back on the JS side (preserving policy / cross-origin / integrity
+/// flags observed before the error surfaced).
+fn fetch_error_to_out(args: FetchErrorOut<'_>) -> FetchOut {
+    let FetchErrorOut {
+        error,
+        target,
+        response_received,
+        policy_blocked,
+        crossed_origin,
+    } = args;
+    FetchOut {
+        status_text: String::new(),
+        stream_id: 0,
+        aborted: false,
+        script_errors_muted: false,
+        nosniff: false,
+        integrity_blocked: error == "Response failed integrity validation"
+            || error == "Script response failed integrity validation",
+        response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
+        policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+        cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
+        body_bytes: Vec::new(),
+        headers: Vec::new(),
+        redirected: false,
+        status: 0,
+        ok: false,
+        body: String::new(),
+        content_type: String::new(),
+        frame_document: 0,
+        frame_script: 0,
+        final_url: target.to_string(),
+    }
+}
+
 async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String) -> FetchOut {
     apply_report_cookies(&mut state.borrow_mut());
     let (base, jar_rc, ua, client_hints) = {
@@ -2527,45 +3252,14 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
             ..Default::default()
         };
     }
-    let method = init
-        .get("method")
-        .and_then(|m| m.as_str())
-        .map(|m| m.to_ascii_uppercase());
-    let body = init
-        .get("body")
-        .and_then(|b| b.as_str())
-        .map(|b| b.to_string());
-    let body_bytes = init
-        .get("body_bytes")
-        .and_then(|value| serde_json::from_value::<Vec<u8>>(value.clone()).ok());
-    let mut headers: std::collections::BTreeMap<String, String> = init
-        .get("headers")
-        .and_then(|h| deno_core::serde_json::from_value(h.clone()).ok())
-        .unwrap_or_default();
-    // These headers are browser-controlled; guest fetch cannot override their
-    // context, inject another origin's cookies, or supply a custom identity.
-    headers.retain(|name, _| {
-        let name = name.to_ascii_lowercase();
-        !name.starts_with("sec-")
-            && !matches!(
-                name.as_str(),
-                "cookie"
-                    | "origin"
-                    | "referer"
-                    | "host"
-                    | "user-agent"
-                    | "upgrade-insecure-requests"
-            )
-    });
+    let ParsedFetchBody {
+        method,
+        body,
+        body_bytes,
+        mut headers,
+    } = parse_fetch_body(&init);
     let source = init.get("source").and_then(|s| s.as_str()).unwrap_or(&base);
-    let destination = match init.get("destination").and_then(|s| s.as_str()) {
-        Some("script") => Destination::Script,
-        Some("iframe") => Destination::Iframe,
-        Some("style") => Destination::Style,
-        Some("image") => Destination::Image,
-        Some("font") => Destination::Font,
-        _ => Destination::Empty,
-    };
+    let destination = parse_fetch_destination(&init);
     let csp = init.get("csp").and_then(|id| id.as_u64()).and_then(|id| {
         state
             .borrow()
@@ -2588,22 +3282,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let jar_rc = partition
         .as_ref()
         .map_or(jar_rc, |partition| partition.jar.clone());
-    // Upload conversion can suspend before this op. Native job preparation owns
-    // the initiating policy snapshot without retaining its guest document or realm.
-    let snapshot = cancel_job
-        .as_ref()
-        .map(|job| job.policy.clone())
-        .unwrap_or_else(|| {
-            csp.as_ref()
-                .map_or_else(FetchPolicySnapshot::default, |handle| {
-                    let policy = handle.policy.borrow();
-                    FetchPolicySnapshot {
-                        active: policy.active.clone(),
-                        referrer: policy.referrer_policy,
-                        embedder: policy.embedder_policy,
-                    }
-                })
-        });
+    let snapshot = build_fetch_policy_snapshot(cancel_job.as_ref(), csp.as_ref());
     let referrer_policy = init
         .get("referrerPolicy")
         .and_then(|value| value.as_str())
@@ -2612,14 +3291,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let embedder_policy = snapshot.embedder;
     let policy = snapshot.active;
     let opaque_cache_nonce = csp.as_ref().map_or(0, |handle| handle.id);
-    let directive = match destination {
-        Destination::Script => "script-src-elem",
-        Destination::Style => "style-src-elem",
-        Destination::Image => "img-src",
-        Destination::Font => "font-src",
-        Destination::Iframe => "frame-src",
-        _ => "connect-src",
-    };
+    let directive = fetch_csp_directive(destination);
     let nonce = init
         .get("nonce")
         .and_then(|value| value.as_str())
@@ -2628,9 +3300,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         .get("integrity")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if !policy.allows_request(directive, &target, nonce, false)
-        || !crate::resource_policy::active_mixed_content_allowed(source, &target)
-    {
+    if fetch_request_blocked_by_policy(&policy, directive, &target, nonce, source) {
         return FetchOut {
             policy_blocked: true,
             final_url: target,
@@ -2644,100 +3314,31 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         .get("blob_key")
         .and_then(|key| key.as_str())
         .unwrap_or("");
-    let frame = iframe.then(|| blob_urls::frame(partition.clone(), source, referrer_policy));
-    let blob = blob_urls::Load {
+    if let Some(out) = try_scheme_fetch(TryScheme {
+        state: &state,
         target: &target,
+        source,
         init: &init,
         method: method.as_deref(),
         headers: &headers,
         destination,
-    };
-    if let Some(out) = blob_urls::scheme_load(&state, blob, frame) {
+        partition: &partition,
+        referrer_policy,
+        iframe,
+        scheme_fetch,
+    }) {
         return out;
     }
-    if target.starts_with("data:") && scheme_fetch {
-        return blob_urls::fetch_data(&target);
-    }
-    if target.starts_with("data:") && iframe {
-        let decoded = decode_data_document(&target);
-        let ok = decoded.is_some();
-        let (body, content_type) = decoded.unwrap_or_default();
-        let mut state = state.borrow_mut();
-        let frames = state.borrow_mut::<FrameContexts>();
-        frames.next_document += 1;
-        let id = frames.next_document;
-        frames.documents.insert(
-            id,
-            FrameDocument {
-                response_metadata: crate::DocumentResponseMetadata {
-                    status: 200,
-                    referrer: crate::document_response::local_navigation_referrer(
-                        source,
-                        referrer_policy,
-                    ),
-                },
-                partition: partition.clone(),
-                url: target.clone(),
-                html: body.clone(),
-                headers: Vec::new(),
-            },
-        );
-        return FetchOut {
-            status: if ok { 200 } else { 0 },
-            ok,
-            body_bytes: body.as_bytes().to_vec(),
-            body,
-            content_type,
-            frame_document: id,
-            final_url: target,
-            ..Default::default()
-        };
-    }
-    let mode = match init.get("mode").and_then(|s| s.as_str()) {
-        Some("no-cors") => RequestMode::NoCors,
-        Some("cors") => RequestMode::Cors,
-        Some("same-origin") => RequestMode::SameOrigin,
-        Some("navigate") => RequestMode::Navigate,
-        _ if destination == Destination::Iframe => RequestMode::Navigate,
-        _ if destination == Destination::Script => RequestMode::NoCors,
-        _ => RequestMode::Cors,
-    };
-    let mut context = RequestContext::resource(source, destination, mode);
-    context.referrer = init
-        .get("referrer_source")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-    context.referrer_policy = referrer_policy;
-    context.credentialless =
-        embedder_policy == crate::resource_policy::EmbedderPolicy::Credentialless;
-    if let Some(referrer) = init.get("referrer").and_then(|value| value.as_str()) {
-        if referrer != "about:client" {
-            context.referrer = Some(referrer.to_string());
-        }
-    }
-    context.top_level_source = init
-        .get("top_level_source")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-    context.cookie_site_is_opaque = init
-        .get("cookie_site_is_opaque")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    context.opaque_origin = init
-        .get("opaque_origin")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if let Some(credentials) = init.get("credentials").and_then(|s| s.as_str()) {
-        context.credentials = match credentials {
-            "omit" => Credentials::Omit,
-            "include" => Credentials::Include,
-            _ => Credentials::SameOrigin,
-        };
-    }
-    if mode == RequestMode::SameOrigin
-        && (context.opaque_origin
-            || !turbo_surf_core::request_context::same_origin(source, &target))
-    {
+    let mode = parse_fetch_request_mode(&init, destination);
+    let context = build_fetch_request_context(
+        &init,
+        source,
+        destination,
+        mode,
+        referrer_policy,
+        embedder_policy,
+    );
+    if same_origin_mode_blocks(mode, &context, source, &target) {
         return FetchOut {
             final_url: target,
             ..Default::default()
@@ -2790,67 +3391,32 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let response_referrer = std::sync::Mutex::new(String::new());
     let response_location = std::sync::Mutex::new(target.clone());
     let response_policy = |context: &RequestContext, target: &str, headers: &[(String, String)]| {
-        response_received.store(true, std::sync::atomic::Ordering::Relaxed);
-        *response_location.lock().unwrap() = target.to_string();
-        *response_referrer.lock().unwrap() = context
-            .source
-            .as_deref()
-            .and_then(|source| {
-                context
-                    .referrer_policy
-                    .referrer(context.referrer.as_deref().unwrap_or(source), target)
-            })
-            .unwrap_or_default();
-        let cross = context.opaque_origin
-            || context.origin_tainted
-            || !context.source.as_deref().is_some_and(|source| {
-                turbo_surf_core::request_context::same_origin(source, target)
-            });
-        crossed_origin.fetch_or(cross, std::sync::atomic::Ordering::Relaxed);
-        crate::resource_policy::embedder_allowed(embedder_policy, context, target, headers)
-            && (context.mode != RequestMode::Cors
-                || !cross
-                || crate::fetch_cors::allowed(context, headers))
+        evaluate_response_policy(
+            context,
+            target,
+            headers,
+            embedder_policy,
+            &response_received,
+            &response_referrer,
+            &response_location,
+            &crossed_origin,
+        )
     };
-    let http_cache = {
-        let mut state = state.borrow_mut();
-        if !state.has::<BrowserStorage>() {
-            state.put(BrowserStorage::default());
-        }
-        state.borrow::<BrowserStorage>().http_cache()
-    };
-    let cache_mode = init
-        .get("cache")
-        .and_then(|value| value.as_str())
-        .and_then(turbo_surf_core::http_cache::CacheMode::parse)
-        .unwrap_or_default();
-    let cache_partition = http_cache_partition(
+    let (http_cache, cache_mode, cache_partition, storage_effects) = build_fetch_cache_env(
+        &state,
+        &init,
         &base,
         source,
-        partition.as_ref().map_or(0, |partition| partition.id),
-        if context.opaque_origin {
-            opaque_cache_nonce
-        } else {
-            0
-        },
+        &partition,
+        context.opaque_origin,
+        opaque_cache_nonce,
     );
-    let storage_partition = partition.as_ref().map_or(0, |partition| partition.id);
-    let storage_effects = state
-        .borrow()
-        .borrow::<BrowserStorage>()
-        .partition_response_effects(storage_partition);
     let mut opts = FetchOptions {
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_mode,
         cache_partition: cache_partition.clone(),
-        redirect: Some(
-            match init.get("redirect").and_then(|value| value.as_str()) {
-                Some("manual") => turbo_surf_core::net::RedirectMode::Manual,
-                Some("error") => turbo_surf_core::net::RedirectMode::Error,
-                _ => turbo_surf_core::net::RedirectMode::Follow,
-            },
-        ),
+        redirect: Some(parse_fetch_redirect_mode(&init)),
         response_policy: Some(&response_policy),
         request_policy: Some(&request_policy),
         before_request: Some(&before_request),
@@ -2872,83 +3438,23 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         jar: None,
         ..Default::default()
     };
-    if destination == Destination::Empty
-        && integrity.is_empty()
-        && init.get("stream").and_then(|value| value.as_bool()) == Some(true)
-    {
-        let response = {
-            opts.jar = Some(&mut local);
-            let request = turbo_surf_core::net::fetch_stream(&target, opts);
-            if let Some(job) = &cancel_job {
-                fetch_streams::until_cancelled(job, request).await
-            } else {
-                Some(request.await)
-            }
-        };
-        let out = match response {
-            None => FetchOut {
-                aborted: true,
-                final_url: target.clone(),
-                ..Default::default()
-            },
-            Some(Err(error)) => FetchOut {
-                response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
-                policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
-                cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
-                final_url: target.clone(),
-                body: error.to_string(),
-                ..Default::default()
-            },
-            Some(Ok(response)) => {
-                let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
-                    || !turbo_surf_core::request_context::same_origin(source, &response.final_url);
-                let out = FetchOut {
-                    status_text: response.status_text,
-                    stream_id: cancel_id,
-                    response_received: true,
-                    cross_origin: cross,
-                    nosniff: response.headers.iter().any(|(name, value)| {
-                        name.eq_ignore_ascii_case("x-content-type-options")
-                            && value.trim().eq_ignore_ascii_case("nosniff")
-                    }),
-                    headers: crate::fetch_cors::exposed_headers(&context, response.headers, cross),
-                    redirected: response.redirected,
-                    status: response.status,
-                    ok: (200..300).contains(&response.status),
-                    content_type: response.content_type,
-                    final_url: response.final_url,
-                    ..Default::default()
-                };
-                if let Some(job) = &cancel_job {
-                    if fetch_streams::install(job, response.body).await {
-                        out
-                    } else {
-                        FetchOut {
-                            aborted: true,
-                            final_url: target.clone(),
-                            ..Default::default()
-                        }
-                    }
-                } else {
-                    FetchOut {
-                        final_url: target.clone(),
-                        ..Default::default()
-                    }
-                }
-            }
-        };
-        jar_rc.borrow_mut().merge_request_changes(local);
-        if out.stream_id == 0 {
-            fetch_streams::release(&mut state.borrow_mut(), cancel_id)
-        }
-        let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"streamed":true,"streamId":cancel_id,"body":"","bodyIncomplete":true});
-        let mut state = state.borrow_mut();
-        let log = state.borrow_mut::<NetworkLog>();
-        if log.0.len() == 1000 {
-            log.0.pop_front();
-        }
-        log.0.push_back(entry);
-        return out;
+    if is_streaming_fetch(destination, integrity, &init) {
+        return run_stream_fetch_branch(
+            &target,
+            source,
+            &context,
+            method.as_deref(),
+            cancel_id,
+            cancel_job.as_ref(),
+            opts,
+            &mut local,
+            &jar_rc,
+            &state,
+            &response_received,
+            &policy_blocked,
+            &crossed_origin,
+        )
+        .await;
     }
     let mut script_errors_muted = false;
     let response = {
@@ -2979,28 +3485,16 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
                 })
             } else {
                 opts.jar = Some(&mut local);
-                fetch_html(&target, opts)
-                    .await
-                    .map_err(|error| error.to_string())
-                    .and_then(|response| {
-                        let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
-                            || !turbo_surf_core::request_context::same_origin(
-                                source,
-                                &response.final_url,
-                            );
-                        let opaque_redirect = init.get("redirect").and_then(|value| value.as_str())
-                            == Some("manual")
-                            && matches!(response.status, 301 | 302 | 303 | 307 | 308);
-                        if crate::integrity::matches(
-                            &response.body_bytes,
-                            integrity,
-                            !opaque_redirect && (mode != RequestMode::NoCors || !cross),
-                        ) {
-                            Ok(response)
-                        } else {
-                            Err("Response failed integrity validation".into())
-                        }
-                    })
+                fetch_html_with_integrity(
+                    &target,
+                    opts,
+                    integrity,
+                    source,
+                    mode,
+                    &init,
+                    &crossed_origin,
+                )
+                .await
             }
         };
         if let Some(job) = &cancel_job {
@@ -3019,102 +3513,27 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         };
     };
     let out = match response {
-        Ok(r) => {
-            let frame_document = if destination == Destination::Iframe {
-                let mut state = state.borrow_mut();
-                let frames = state.borrow_mut::<FrameContexts>();
-                frames.next_document += 1;
-                let id = frames.next_document;
-                frames.documents.insert(
-                    id,
-                    FrameDocument {
-                        response_metadata: crate::DocumentResponseMetadata {
-                            status: r.status,
-                            referrer: response_referrer.lock().unwrap().clone(),
-                        },
-                        partition: partition.clone(),
-                        url: response_location.lock().unwrap().clone(),
-                        html: r.html.clone(),
-                        headers: r.headers.clone(),
-                    },
-                );
-                id
-            } else {
-                0
-            };
-            let frame_script = if destination == Destination::Script
-                && init.get("frame_script").and_then(|v| v.as_bool()) == Some(true)
-            {
-                let mut state = state.borrow_mut();
-                let frames = state.borrow_mut::<FrameContexts>();
-                frames.next_script += 1;
-                let id = frames.next_script;
-                frames.scripts.insert(
-                    id,
-                    FrameScriptResponse {
-                        request_url: target.clone(),
-                        url: r.final_url.clone(),
-                        code: r.html.clone(),
-                        muted_errors: script_errors_muted,
-                    },
-                );
-                id
-            } else {
-                0
-            };
-            FetchOut {
-                status_text: r.status_text,
-                stream_id: 0,
-                aborted: false,
-                integrity_blocked: false,
-                script_errors_muted,
-                nosniff: r.headers.iter().any(|(name, value)| {
-                    name.eq_ignore_ascii_case("x-content-type-options")
-                        && value.trim().eq_ignore_ascii_case("nosniff")
-                }),
-                response_received: true,
-                policy_blocked: false,
-                cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
-                    || !turbo_surf_core::request_context::same_origin(source, &r.final_url),
-                body_bytes: r.body_bytes,
-                headers: crate::fetch_cors::exposed_headers(
-                    &context,
-                    r.headers,
-                    crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
-                        || !turbo_surf_core::request_context::same_origin(source, &r.final_url),
-                ),
-                redirected: r.redirected,
-                status: r.status,
-                ok: (200..300).contains(&r.status),
-                body: r.html,
-                content_type: r.content_type,
-                frame_document,
-                frame_script,
-                final_url: r.final_url,
-            }
-        }
-        Err(error) => FetchOut {
-            status_text: String::new(),
-            stream_id: 0,
-            aborted: false,
-            script_errors_muted: false,
-            nosniff: false,
-            integrity_blocked: error == "Response failed integrity validation"
-                || error == "Script response failed integrity validation",
-            response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
-            policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
-            cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
-            body_bytes: Vec::new(),
-            headers: Vec::new(),
-            redirected: false,
-            status: 0,
-            ok: false,
-            body: String::new(),
-            content_type: String::new(),
-            frame_document: 0,
-            frame_script: 0,
-            final_url: target.clone(),
-        },
+        Ok(r) => fetch_response_to_out(FetchResponseOut {
+            state: &state,
+            response: r,
+            destination,
+            source,
+            target: &target,
+            context: &context,
+            init: &init,
+            partition: &partition,
+            response_referrer: &response_referrer,
+            response_location: &response_location,
+            crossed_origin: &crossed_origin,
+            script_errors_muted,
+        }),
+        Err(error) => fetch_error_to_out(FetchErrorOut {
+            error,
+            target: &target,
+            response_received: &response_received,
+            policy_blocked: &policy_blocked,
+            crossed_origin: &crossed_origin,
+        }),
     };
     jar_rc.borrow_mut().merge_request_changes(local);
     fetch_streams::release(&mut state.borrow_mut(), cancel_id);
@@ -4927,6 +5346,356 @@ fn queue_window_message<'s>(
     Ok(())
 }
 
+/// The locals [`finish_frame_document_install`] borrows from its caller. Using
+/// a struct beats a 9-arg function for readability.
+struct FrameDocumentInstall<'s, 'a> {
+    context: v8::Local<'s, v8::Context>,
+    parent: v8::Local<'s, v8::Context>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    document: Option<&'a FrameDocument>,
+    html_units: &'a [u16],
+    url: &'a str,
+    metadata: &'a mut serde_json::Value,
+    document_base: String,
+}
+
+/// Fallback `DocumentResponseMetadata` for a frame with no fetched response
+/// (srcdoc / about:blank): derive its `referrer` from the parent's own location
+/// and the host element's `referrerpolicy`.
+fn compute_local_frame_response_metadata<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    metadata: &serde_json::Value,
+) -> crate::DocumentResponseMetadata {
+    let source = parent.get_slot::<FrameDocumentLocation>().map_or_else(
+        || {
+            JsRuntime::op_state_from(scope)
+                .borrow()
+                .borrow::<Base>()
+                .0
+                .clone()
+        },
+        |location| location.0.clone(),
+    );
+    let referrer =
+        if metadata.get("location").and_then(|value| value.as_str()) == Some("about:blank") {
+            source
+        } else {
+            let policy = frame_referrer_policy_token(scope, host)
+                .as_deref()
+                .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
+                .unwrap_or_else(|| {
+                    parent
+                        .get_slot::<CspHandle>()
+                        .map_or(Default::default(), |handle| {
+                            handle.policy.borrow().referrer_policy
+                        })
+                });
+            crate::document_response::local_navigation_referrer(&source, policy)
+        };
+    crate::DocumentResponseMetadata {
+        status: 0,
+        referrer,
+    }
+}
+
+/// Install the per-frame runtime: register modules, parse the source HTML in
+/// the right installer flavour, hand over the document facts and
+/// window proxy, install the environment / crypto / audio / geometry cores,
+/// then call `configureFrame`. Split out of [`op_frame_set_document`]'s
+/// closure to keep its cyclomatic complexity under the gate.
+fn finish_frame_document_install<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: FrameDocumentInstall<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let FrameDocumentInstall {
+        context,
+        parent,
+        parent_window,
+        host,
+        document,
+        html_units,
+        url,
+        metadata,
+        document_base,
+    } = args;
+    let core = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .core
+        .clone()
+        .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    frame_modules::register_frame_modules(scope, &document_base)?;
+    install_frame_document_html(scope, context, html_units, metadata);
+    install_css_authorization(scope)?;
+    // Before the environment bootstrap, which already creates the parsed iframes.
+    let facts = match document {
+        Some(document) => DocumentFacts::response(scope, context, &document.url, &document.headers),
+        None => DocumentFacts::inherited(scope, context, parent),
+    };
+    install_document_facts(scope, facts);
+    window_proxy::install_document(scope);
+    let global = context.global(scope);
+    let core = v8::Local::new(scope, core);
+
+    install_frame_document_location(scope, global, url, metadata);
+    let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
+    context.set_slot(Rc::new(BootstrapDepth(depth)));
+    install_frame_environment_marker(scope, context)?;
+    install_environment(scope, core).map_err(JsErrorBox::generic)?;
+    let secure = secure_context(scope);
+    let crypto_core = core
+        .to_object(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    if parent
+        .remove_slot::<FailFrameInitializationForTesting>()
+        .is_some()
+    {
+        parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
+        return Err(JsErrorBox::generic("injected frame initialization failure"));
+    }
+    window_proxy::capture_exception(scope);
+    install_frame_environment_marker(scope, context)?;
+    metadata["base"] = serde_json::Value::String(document_base);
+    let metadata_location = metadata
+        .get("location")
+        .and_then(|value| value.as_str())
+        .unwrap_or("about:blank")
+        .to_string();
+    let json = v8::String::new(scope, &metadata.to_string()).unwrap();
+    let metadata = v8::json::parse(scope, json).unwrap();
+    call_frame_helper(
+        scope,
+        "configureFrame",
+        &[metadata, parent_window.into(), host.into()],
+    )
+    .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
+    window_proxy::install_location(scope, &metadata_location);
+    crate::browser_env::finish_key_order(scope);
+    run_frame_init_script(scope)?;
+    Ok(global)
+}
+
+/// Pick the right HTML installer for this frame: srcdoc uses the srcdoc path,
+/// others take either the source-positions or plain UTF-16 installer.
+fn install_frame_document_html<'s>(
+    scope: &mut v8::ContextScope<'_, 's, v8::HandleScope<'_>>,
+    context: v8::Local<'s, v8::Context>,
+    html_units: &[u16],
+    metadata: &serde_json::Value,
+) {
+    let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
+        let policy = handle.policy.borrow();
+        policy.initial_base.has_policy() || policy.report_only.has_policy()
+    });
+    crate::browser_env::defer_key_order(scope);
+    if metadata["location"] == "about:srcdoc" {
+        crate::browser_env::install_independent_srcdoc_units(scope, html_units, source_positions);
+    } else if source_positions {
+        crate::browser_env::install_independent_utf16_source_positions(scope, html_units);
+    } else {
+        crate::browser_env::install_independent_html_units(scope, html_units);
+    }
+}
+
+/// Seed `location.href` / `location.origin` on the frame's own window so it
+/// matches the installed document before `configureFrame` runs.
+fn install_frame_document_location<'s>(
+    scope: &mut v8::ContextScope<'_, 's, v8::HandleScope<'_>>,
+    global: v8::Local<'s, v8::Object>,
+    url: &str,
+    metadata: &serde_json::Value,
+) {
+    let location_key = v8::String::new(scope, "location").unwrap();
+    let Some(location) = global
+        .get(scope, location_key.into())
+        .and_then(|v| v.to_object(scope))
+    else {
+        return;
+    };
+    let origin = metadata
+        .get("origin")
+        .and_then(|v| v.as_str())
+        .unwrap_or("null");
+    for (name, value) in [("href", url), ("origin", origin)] {
+        let key = v8::String::new(scope, name).unwrap();
+        let value = v8::String::new(scope, value).unwrap();
+        location.set(scope, key.into(), value.into());
+    }
+}
+
+/// Stamp `isFrame = true` on the frame-engine namespace (if present) and stash
+/// its handle on the context, so later host code can find it.
+fn install_frame_environment_marker<'s>(
+    scope: &mut v8::ContextScope<'_, 's, v8::HandleScope<'_>>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<(), JsErrorBox> {
+    let Some(namespace) = frame_namespace(scope) else {
+        return Ok(());
+    };
+    let name = v8::String::new(scope, "isFrame").unwrap();
+    let flag = v8::Boolean::new(scope, true);
+    namespace.set(scope, name.into(), flag.into());
+    context.set_slot(Rc::new(FrameEnvironment(
+        crate::context_ownership::object(scope, namespace)
+            .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
+    )));
+    Ok(())
+}
+
+/// Build the per-frame [`CspHandle`]: a response document gets its headers
+/// applied directly; an about:blank / srcdoc frame inherits the parent's
+/// current policy / reporting state.
+fn build_frame_csp_handle<'s>(
+    parent: v8::Local<'s, v8::Context>,
+    document: Option<&FrameDocument>,
+    url: &str,
+    html: &str,
+) -> CspHandle {
+    if let Some(document) = document.filter(|document| !document.url.starts_with("data:")) {
+        return CspHandle::new(url, &document.headers, html);
+    }
+    let handle = CspHandle::new(url, &[], html);
+    let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
+        return handle;
+    };
+    let inherited = parent_policy.policy.borrow().current().clone();
+    let mut policy = handle.policy.borrow_mut();
+    policy.header = inherited.clone();
+    policy.initial_base.inherit_headers(&inherited);
+    policy.active = inherited;
+    policy.report_only = parent_policy.policy.borrow().report_only.clone();
+    policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
+    policy.reporting_endpoints = parent_policy.policy.borrow().reporting_endpoints.clone();
+    policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
+    drop(policy);
+    handle
+}
+
+/// Inherit the parent frame's permissions-policy into this child: a document
+/// response's own `Permissions-Policy` header starts fresh; the container's
+/// `allow` attribute is then overlaid, carrying any delegations.
+fn inherit_frame_permissions_policy<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    csp: &CspHandle,
+    parent: v8::Local<'s, v8::Context>,
+    context: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    document: Option<&FrameDocument>,
+) {
+    let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
+        return;
+    };
+    let parent_origin = window_origin(scope, parent);
+    let child_origin = window_origin(scope, context);
+    if let Some(document) = document {
+        csp.policy.borrow_mut().permissions_policy =
+            crate::permissions_policy::PermissionsPolicy::from_headers(
+                &child_origin,
+                &document.headers,
+            );
+    }
+    let allow = frame_container_allow(scope, host);
+    csp.policy.borrow_mut().permissions_policy.inherit(
+        &parent_policy.policy.borrow().permissions_policy,
+        &parent_origin,
+        &child_origin,
+        &child_origin,
+        &allow,
+    );
+}
+
+/// Install this frame's [`SharedMemoryCapability`]: cross-origin-isolated when
+/// the sandbox is open, the context is secure, and both the parent's own
+/// capability and the permissions policy grant it.
+fn install_frame_shared_memory_capability<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    csp: &CspHandle,
+    parent: v8::Local<'s, v8::Context>,
+    context: v8::Local<'s, v8::Context>,
+    sandbox_opaque: bool,
+    embedding_blocked: bool,
+) {
+    let child_origin = window_origin(scope, context);
+    let allowed = !sandbox_opaque
+        && !embedding_blocked
+        && secure_context_for(scope, context)
+        && parent
+            .get_slot::<SharedMemoryCapability>()
+            .is_some_and(|capability| capability.allowed)
+        && csp.policy.borrow().permissions_policy.allows(
+            "cross-origin-isolated",
+            &child_origin,
+            &child_origin,
+        );
+    let group = parent
+        .get_slot::<SharedMemoryCapability>()
+        .map_or(csp.id, |capability| capability.group);
+    context.set_slot(Rc::new(SharedMemoryCapability {
+        allowed,
+        group,
+        origin: child_origin,
+    }));
+}
+
+/// Fetch's "embedded resource policies" check for a child frame: refuse the
+/// embed when an ancestor is retired, the chain is too deep, the response's
+/// COEP/CORP + permissions-policy reject this embedder, or the response's own
+/// embedder policy conflicts. Split from [`op_frame_set_document`]'s closure
+/// to keep its cyclomatic complexity under the gate.
+fn frame_embedding_blocked<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    document: &FrameDocument,
+    credentialless: bool,
+) -> bool {
+    let mut ancestors = Vec::new();
+    let mut context = parent;
+    loop {
+        if ancestors.len() > 12 || context.get_slot::<FrameRetired>().is_some() {
+            return true;
+        }
+        ancestors.push(window_origin(scope, context));
+        let Some(link) = context.get_slot::<FrameParent>() else {
+            break;
+        };
+        let Some(owner) = link.0.to_local(scope) else {
+            return true;
+        };
+        context = owner;
+    }
+    if !crate::resource_policy::ancestors_allowed(&document.url, &document.headers, &ancestors) {
+        return true;
+    }
+    let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
+        return false;
+    };
+    let policy = parent_policy.policy.borrow().embedder_policy;
+    if policy == crate::resource_policy::EmbedderPolicy::UnsafeNone || credentialless {
+        return false;
+    }
+    let mut request = turbo_surf_core::request_context::RequestContext::resource(
+        &window_origin(scope, parent),
+        turbo_surf_core::request_context::Destination::Iframe,
+        turbo_surf_core::request_context::RequestMode::NoCors,
+    );
+    request.opaque_origin = window_is_opaque(scope, parent);
+    crate::resource_policy::EmbedderPolicy::from_headers(&document.headers)
+        == crate::resource_policy::EmbedderPolicy::UnsafeNone
+        || !crate::resource_policy::embedder_allowed(
+            policy,
+            &request,
+            &document.url,
+            &document.headers,
+        )
+}
+
 #[op2(reentrant)]
 fn op_frame_set_document<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -5001,7 +5770,7 @@ fn op_frame_set_document<'s>(
         context = window.get_creation_context(scope).unwrap();
         replaced = Some(previous);
     }
-    let result = (|| {
+    let configure = || {
         let mut sandbox = FrameSandbox::from_host(scope, parent, host);
         if let Some(document) = &document {
             let policy = crate::csp::Policy::new(
@@ -5016,51 +5785,9 @@ fn op_frame_set_document<'s>(
         }
         let credentialless =
             crate::browser_env::node_attribute(scope, host, "credentialless").is_some();
-        let embedding_blocked = document.as_ref().is_some_and(|document| {
-            let mut ancestors = Vec::new();
-            let mut context = parent;
-            loop {
-                if ancestors.len() > 12 || context.get_slot::<FrameRetired>().is_some() {
-                    return true;
-                }
-                ancestors.push(window_origin(scope, context));
-                let Some(link) = context.get_slot::<FrameParent>() else {
-                    break;
-                };
-                let Some(owner) = link.0.to_local(scope) else {
-                    return true;
-                };
-                context = owner;
-            }
-            if !crate::resource_policy::ancestors_allowed(
-                &document.url,
-                &document.headers,
-                &ancestors,
-            ) {
-                return true;
-            }
-            let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
-                return false;
-            };
-            let policy = parent_policy.policy.borrow().embedder_policy;
-            if policy == crate::resource_policy::EmbedderPolicy::UnsafeNone || credentialless {
-                return false;
-            }
-            let mut request = turbo_surf_core::request_context::RequestContext::resource(
-                &window_origin(scope, parent),
-                turbo_surf_core::request_context::Destination::Iframe,
-                turbo_surf_core::request_context::RequestMode::NoCors,
-            );
-            request.opaque_origin = window_is_opaque(scope, parent);
-            crate::resource_policy::EmbedderPolicy::from_headers(&document.headers)
-                == crate::resource_policy::EmbedderPolicy::UnsafeNone
-                || !crate::resource_policy::embedder_allowed(
-                    policy,
-                    &request,
-                    &document.url,
-                    &document.headers,
-                )
-        });
+        let embedding_blocked = document
+            .as_ref()
+            .is_some_and(|d| frame_embedding_blocked(scope, parent, d, credentialless));
         if embedding_blocked {
             sandbox.opaque = true;
             sandbox.origin_restricted = true;
@@ -5111,10 +5838,12 @@ fn op_frame_set_document<'s>(
         {
             metadata["location"] = serde_json::Value::String("about:blank".into());
         }
-        let url = metadata
+        let url_owned = metadata
             .get("url")
             .and_then(|v| v.as_str())
-            .unwrap_or("about:blank");
+            .unwrap_or("about:blank")
+            .to_string();
+        let url = url_owned.as_str();
         context.set_slot(Rc::new(FrameDocumentUrl(url.to_string())));
         context.set_slot(Rc::new(FrameDocumentLocation(
             metadata
@@ -5133,61 +5862,9 @@ fn op_frame_set_document<'s>(
             })
         };
         let html = String::from_utf16_lossy(&html_units);
-        let mut csp = if let Some(document) = document
-            .as_ref()
-            .filter(|document| !document.url.starts_with("data:"))
-        {
-            CspHandle::new(url, &document.headers, &html)
-        } else {
-            let handle = CspHandle::new(url, &[], &html);
-            if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
-                let inherited = parent_policy.policy.borrow().current().clone();
-                let mut policy = handle.policy.borrow_mut();
-                policy.header = inherited.clone();
-                policy.initial_base.inherit_headers(&inherited);
-                policy.active = inherited;
-                policy.report_only = parent_policy.policy.borrow().report_only.clone();
-                policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
-                policy.reporting_endpoints =
-                    parent_policy.policy.borrow().reporting_endpoints.clone();
-                policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
-            }
-            handle
-        };
+        let mut csp = build_frame_csp_handle(parent, document.as_ref(), url, &html);
         let response_metadata = document.as_ref().map_or_else(
-            || {
-                let source = parent.get_slot::<FrameDocumentLocation>().map_or_else(
-                    || {
-                        JsRuntime::op_state_from(scope)
-                            .borrow()
-                            .borrow::<Base>()
-                            .0
-                            .clone()
-                    },
-                    |location| location.0.clone(),
-                );
-                let referrer = if metadata.get("location").and_then(|value| value.as_str())
-                    == Some("about:blank")
-                {
-                    source
-                } else {
-                    let policy = frame_referrer_policy_token(scope, host)
-                        .as_deref()
-                        .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
-                        .unwrap_or_else(|| {
-                            parent
-                                .get_slot::<CspHandle>()
-                                .map_or(Default::default(), |handle| {
-                                    handle.policy.borrow().referrer_policy
-                                })
-                        });
-                    crate::document_response::local_navigation_referrer(&source, policy)
-                };
-                crate::DocumentResponseMetadata {
-                    status: 0,
-                    referrer,
-                }
-            },
+            || compute_local_frame_response_metadata(scope, parent, host, &metadata),
             |document| document.response_metadata.clone(),
         );
         csp.response_metadata.replace(response_metadata.clone());
@@ -5196,45 +5873,15 @@ fn op_frame_set_document<'s>(
             .as_ref()
             .and_then(|document| document.partition.clone())
             .or_else(|| frame_partition(scope, &mut state.borrow_mut(), parent, host));
-        if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
-            let parent_origin = window_origin(scope, parent);
-            let child_origin = window_origin(scope, context);
-            if let Some(document) = &document {
-                csp.policy.borrow_mut().permissions_policy =
-                    crate::permissions_policy::PermissionsPolicy::from_headers(
-                        &child_origin,
-                        &document.headers,
-                    );
-            }
-            let allow = frame_container_allow(scope, host);
-            csp.policy.borrow_mut().permissions_policy.inherit(
-                &parent_policy.policy.borrow().permissions_policy,
-                &parent_origin,
-                &child_origin,
-                &child_origin,
-                &allow,
-            );
-        }
-        let child_origin = window_origin(scope, context);
-        let allowed = !sandbox.opaque
-            && !embedding_blocked
-            && secure_context_for(scope, context)
-            && parent
-                .get_slot::<SharedMemoryCapability>()
-                .is_some_and(|capability| capability.allowed)
-            && csp.policy.borrow().permissions_policy.allows(
-                "cross-origin-isolated",
-                &child_origin,
-                &child_origin,
-            );
-        let group = parent
-            .get_slot::<SharedMemoryCapability>()
-            .map_or(csp.id, |capability| capability.group);
-        context.set_slot(Rc::new(SharedMemoryCapability {
-            allowed,
-            group,
-            origin: child_origin,
-        }));
+        inherit_frame_permissions_policy(scope, &csp, parent, context, host, document.as_ref());
+        install_frame_shared_memory_capability(
+            scope,
+            &csp,
+            parent,
+            context,
+            sandbox.opaque,
+            embedding_blocked,
+        );
         let initial_base = csp.policy.borrow().initial_base.clone();
         context.set_slot(Rc::new(csp.clone()));
         JsRuntime::op_state_from(scope)
@@ -5261,117 +5908,22 @@ fn op_frame_set_document<'s>(
         }
         let document_base = policy.base.clone();
         context.set_slot(Rc::new(policy));
-        let core = JsRuntime::op_state_from(scope)
-            .borrow()
-            .borrow::<FrameContexts>()
-            .core
-            .clone()
-            .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
-        let scope = &mut v8::ContextScope::new(scope, context);
-        frame_modules::register_frame_modules(scope, &document_base)?;
-        let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
-            let policy = handle.policy.borrow();
-            policy.initial_base.has_policy() || policy.report_only.has_policy()
-        });
-        crate::browser_env::defer_key_order(scope);
-        if metadata["location"] == "about:srcdoc" {
-            crate::browser_env::install_independent_srcdoc_units(
-                scope,
-                &html_units,
-                source_positions,
-            );
-        } else if source_positions {
-            crate::browser_env::install_independent_utf16_source_positions(scope, &html_units);
-        } else {
-            crate::browser_env::install_independent_html_units(scope, &html_units);
-        }
-        install_css_authorization(scope)?;
-        // Before the environment bootstrap, which already creates the parsed iframes.
-        let facts = match &document {
-            Some(document) => {
-                DocumentFacts::response(scope, context, &document.url, &document.headers)
-            }
-            None => DocumentFacts::inherited(scope, context, parent),
-        };
-        install_document_facts(scope, facts);
-        window_proxy::install_document(scope);
-        let global = context.global(scope);
-        let core = v8::Local::new(scope, core);
-
-        let location_key = v8::String::new(scope, "location").unwrap();
-        if let Some(location) = global
-            .get(scope, location_key.into())
-            .and_then(|v| v.to_object(scope))
-        {
-            for (name, value) in [
-                ("href", url),
-                (
-                    "origin",
-                    metadata
-                        .get("origin")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("null"),
-                ),
-            ] {
-                let key = v8::String::new(scope, name).unwrap();
-                let value = v8::String::new(scope, value).unwrap();
-                location.set(scope, key.into(), value.into());
-            }
-        }
-        let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
-        context.set_slot(Rc::new(BootstrapDepth(depth)));
-        if let Some(namespace) = frame_namespace(scope) {
-            let name = v8::String::new(scope, "isFrame").unwrap();
-            let flag = v8::Boolean::new(scope, true);
-            namespace.set(scope, name.into(), flag.into());
-            context.set_slot(Rc::new(FrameEnvironment(
-                crate::context_ownership::object(scope, namespace).ok_or_else(|| {
-                    JsErrorBox::generic("Frame environment ownership interrupted")
-                })?,
-            )));
-        }
-        install_environment(scope, core).map_err(JsErrorBox::generic)?;
-        let secure = secure_context(scope);
-        let crypto_core = core
-            .to_object(scope)
-            .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
-        crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
-        crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-        crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-        if parent
-            .remove_slot::<FailFrameInitializationForTesting>()
-            .is_some()
-        {
-            parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
-            return Err(JsErrorBox::generic("injected frame initialization failure"));
-        }
-        window_proxy::capture_exception(scope);
-        if let Some(namespace) = frame_namespace(scope) {
-            context.set_slot(Rc::new(FrameEnvironment(
-                crate::context_ownership::object(scope, namespace).ok_or_else(|| {
-                    JsErrorBox::generic("Frame environment ownership interrupted")
-                })?,
-            )));
-        }
-        metadata["base"] = serde_json::Value::String(document_base);
-        let metadata_location = metadata
-            .get("location")
-            .and_then(|value| value.as_str())
-            .unwrap_or("about:blank")
-            .to_string();
-        let json = v8::String::new(scope, &metadata.to_string()).unwrap();
-        let metadata = v8::json::parse(scope, json).unwrap();
-        call_frame_helper(
+        finish_frame_document_install(
             scope,
-            "configureFrame",
-            &[metadata, parent_window.into(), host.into()],
+            FrameDocumentInstall {
+                context,
+                parent,
+                parent_window,
+                host,
+                document: document.as_ref(),
+                html_units: &html_units,
+                url,
+                metadata: &mut metadata,
+                document_base,
+            },
         )
-        .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
-        window_proxy::install_location(scope, &metadata_location);
-        crate::browser_env::finish_key_order(scope);
-        run_frame_init_script(scope)?;
-        Ok(global)
-    })();
+    };
+    let result = configure();
     if result.is_err() {
         retire_failed_frame_tree(scope, context);
     }
@@ -5813,66 +6365,7 @@ fn allocate_frame<'s>(
     }
     let global = context.global(scope);
     if initialize {
-        let scope = &mut v8::ContextScope::new(scope, context);
-        if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
-            let mut csp = CspHandle::new("about:blank", &[], "");
-            csp.partition = parent_policy.partition.clone();
-            let inherited = parent_policy.policy.borrow().current().clone();
-            {
-                let mut policy = csp.policy.borrow_mut();
-                policy.header = inherited.clone();
-                policy.initial_base.inherit_headers(&inherited);
-                policy.active = inherited;
-                policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
-                policy.reporting_endpoints =
-                    parent_policy.policy.borrow().reporting_endpoints.clone();
-                policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
-                policy.permissions_policy =
-                    parent_policy.policy.borrow().permissions_policy.clone();
-            }
-            context.set_slot(Rc::new(csp.clone()));
-            JsRuntime::op_state_from(scope)
-                .borrow_mut()
-                .borrow_mut::<CspContexts>()
-                .0
-                .insert(csp.id, csp);
-        }
-        crate::browser_env::defer_key_order(scope);
-        crate::browser_env::install_independent_html(
-            scope,
-            "<!DOCTYPE html><html><head></head><body></body></html>",
-        );
-        install_css_authorization(scope)?;
-        let facts = DocumentFacts::inherited(scope, context, parent);
-        install_document_facts(scope, facts);
-        window_proxy::install_document(scope);
-
-        let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
-            storage_events::retire(context);
-            context.set_slot(Rc::new(FrameRetired));
-            crate::context_ownership::release_parent(scope, context);
-            JsErrorBox::generic("frame initialization was interrupted")
-        })?;
-        let name = v8::String::new(scope, "isFrame").unwrap();
-        let flag = v8::Boolean::new(scope, true);
-        namespace.set(scope, name.into(), flag.into());
-        context.set_slot(Rc::new(FrameEnvironment(
-            crate::context_ownership::object(scope, namespace)
-                .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
-        )));
-        context.set_slot(Rc::new(BootstrapDepth(depth)));
-        install_environment(scope, core).map_err(JsErrorBox::generic)?;
-        let secure = secure_context(scope);
-        let crypto_core = core
-            .to_object(scope)
-            .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
-        crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
-        crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-        crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-        window_proxy::capture_exception(scope);
-        crate::browser_env::finish_key_order(scope);
-        run_frame_init_script(scope)?;
-        // Host capabilities are passed privately and never installed on the global.
+        initialize_new_frame(scope, context, parent, core, depth)?;
     }
     let retained = v8::Global::new(scope, context);
     JsRuntime::op_state_from(scope)
@@ -5881,6 +6374,90 @@ fn allocate_frame<'s>(
         .contexts
         .push(retained);
     Ok(global)
+}
+
+/// Bring up a freshly-allocated child frame context: inherit the parent's CSP,
+/// install the HTML scaffold / document / environment, and register the shared
+/// crypto / audio / geometry cores. Split from [`allocate_frame`] to keep that
+/// function under the complexity gate.
+fn initialize_new_frame<'s>(
+    outer: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    parent: v8::Local<'s, v8::Context>,
+    core: v8::Local<'s, v8::Value>,
+    depth: u32,
+) -> Result<(), JsErrorBox> {
+    let scope = &mut v8::ContextScope::new(outer, context);
+    inherit_parent_csp(scope, context, parent);
+    crate::browser_env::defer_key_order(scope);
+    crate::browser_env::install_independent_html(
+        scope,
+        "<!DOCTYPE html><html><head></head><body></body></html>",
+    );
+    install_css_authorization(scope)?;
+    let facts = DocumentFacts::inherited(scope, context, parent);
+    install_document_facts(scope, facts);
+    window_proxy::install_document(scope);
+
+    let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
+        storage_events::retire(context);
+        context.set_slot(Rc::new(FrameRetired));
+        crate::context_ownership::release_parent(scope, context);
+        JsErrorBox::generic("frame initialization was interrupted")
+    })?;
+    let name = v8::String::new(scope, "isFrame").unwrap();
+    let flag = v8::Boolean::new(scope, true);
+    namespace.set(scope, name.into(), flag.into());
+    context.set_slot(Rc::new(FrameEnvironment(
+        crate::context_ownership::object(scope, namespace)
+            .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
+    )));
+    context.set_slot(Rc::new(BootstrapDepth(depth)));
+    install_environment(scope, core).map_err(JsErrorBox::generic)?;
+    let secure = secure_context(scope);
+    let crypto_core = core
+        .to_object(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    window_proxy::capture_exception(scope);
+    crate::browser_env::finish_key_order(scope);
+    run_frame_init_script(scope)?;
+    // Host capabilities are passed privately and never installed on the global.
+    Ok(())
+}
+
+/// Copy the parent context's CSP / embedder / permissions / referrer policy
+/// into a fresh handle attached to `context`, and register it with the host
+/// bookkeeping map.
+fn inherit_parent_csp<'s>(
+    scope: &mut v8::ContextScope<'_, 's, v8::HandleScope<'_>>,
+    context: v8::Local<'s, v8::Context>,
+    parent: v8::Local<'s, v8::Context>,
+) {
+    let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
+        return;
+    };
+    let mut csp = CspHandle::new("about:blank", &[], "");
+    csp.partition = parent_policy.partition.clone();
+    let inherited = parent_policy.policy.borrow().current().clone();
+    {
+        let mut policy = csp.policy.borrow_mut();
+        policy.header = inherited.clone();
+        policy.initial_base.inherit_headers(&inherited);
+        policy.active = inherited;
+        policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
+        policy.reporting_endpoints = parent_policy.policy.borrow().reporting_endpoints.clone();
+        policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
+        policy.permissions_policy = parent_policy.policy.borrow().permissions_policy.clone();
+    }
+    context.set_slot(Rc::new(csp.clone()));
+    JsRuntime::op_state_from(scope)
+        .borrow_mut()
+        .borrow_mut::<CspContexts>()
+        .0
+        .insert(csp.id, csp);
 }
 
 #[op2(nofast, reentrant)]
@@ -6560,6 +7137,53 @@ impl BrowserStorage {
     }
 }
 
+/// True when `url` is a potentially-trustworthy origin for the purposes of
+/// Fetch's "secure contexts" gate: https, or http on localhost / 127.0.0.1 / ::1.
+fn is_trustworthy_target(url: &url::Url) -> bool {
+    let loopback = match url.host() {
+        Some(url::Host::Domain(host)) => host == "localhost" || host.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    url.scheme() == "https" || url.scheme() == "http" && loopback
+}
+
+/// True when a response's `Clear-Site-Data` headers ask for the `"storage"`
+/// (or `"*"`) directive.
+fn clear_site_data_requests_storage(headers: &[(String, String)]) -> bool {
+    headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("clear-site-data"))
+        .any(|(_, value)| {
+            value
+                .split(',')
+                .map(str::trim)
+                .any(|token| matches!(token, "\"storage\"" | "\"*\""))
+        })
+}
+
+/// Pick the right scope for `Clear-Site-Data`'s storage key. A top-level
+/// navigation uses the target itself and is never a cross-site ancestor; a
+/// subresource or iframe keeps the top-level source and flags cross-site
+/// embedding so the right partitioned-storage rows match.
+fn storage_clear_scope<'a>(context: &'a RequestContext, target: &'a str) -> (&'a str, bool) {
+    let top_navigation =
+        context.destination == Destination::Document && context.mode == RequestMode::Navigate;
+    if top_navigation {
+        return (target, false);
+    }
+    let source = context
+        .top_level_source
+        .as_deref()
+        .or(context.source.as_deref())
+        .unwrap_or(target);
+    let cross_site_ancestor = context.cookie_site_is_opaque
+        || context.destination == Destination::Iframe
+            && !turbo_surf_core::request_context::same_site(source, target);
+    (source, cross_site_ancestor)
+}
+
 fn clear_storage_from_response(
     storage: &std::sync::Mutex<StorageAreas>,
     partition: u32,
@@ -6570,46 +7194,13 @@ fn clear_storage_from_response(
     let Ok(url) = url::Url::parse(target) else {
         return;
     };
-    let loopback = match url.host() {
-        Some(url::Host::Domain(host)) => host == "localhost" || host.ends_with(".localhost"),
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        None => false,
-    };
-    let trustworthy = url.scheme() == "https" || url.scheme() == "http" && loopback;
-    if !trustworthy || !context.sends_credentials(target) {
+    if !is_trustworthy_target(&url) || !context.sends_credentials(target) {
         return;
     }
-    let clears = headers
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("clear-site-data"))
-        .any(|(_, value)| {
-            value
-                .split(',')
-                .map(str::trim)
-                .any(|token| matches!(token, "\"storage\"" | "\"*\""))
-        });
-    if !clears {
+    if !clear_site_data_requests_storage(headers) {
         return;
     }
-    let top_navigation =
-        context.destination == Destination::Document && context.mode == RequestMode::Navigate;
-    let source = if top_navigation {
-        target
-    } else {
-        context
-            .top_level_source
-            .as_deref()
-            .or(context.source.as_deref())
-            .unwrap_or(target)
-    };
-    let cross_site_ancestor = if top_navigation {
-        false
-    } else {
-        context.cookie_site_is_opaque
-            || context.destination == Destination::Iframe
-                && !turbo_surf_core::request_context::same_site(source, target)
-    };
+    let (source, cross_site_ancestor) = storage_clear_scope(context, target);
     let Some(site) = turbo_surf_core::request_context::schemeful_site(source) else {
         return;
     };
@@ -6938,6 +7529,158 @@ impl StorageEdit {
     }
 }
 
+/// `localStorage.getItem` / `removeItem` on a key longer than any stored one
+/// cannot match — return null early (after validating the area id). Returns
+/// `None` when the caller should fall through to a full dispatch.
+fn short_circuit_oversized_storage_key<'s>(
+    state: &OpState,
+    scope: &mut v8::PinScope<'s, '_>,
+    id: u32,
+    command: &str,
+    key_length: usize,
+) -> Result<Option<v8::Local<'s, v8::Value>>, JsErrorBox> {
+    const QUOTA_UNITS: usize = 5 * 1024 * 1024;
+    if key_length <= QUOTA_UNITS || !matches!(command, "get" | "delete") {
+        return Ok(None);
+    }
+    let backing = state.borrow::<BrowserStorage>().clone();
+    let valid = backing
+        .0
+        .lock()
+        .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?
+        .values
+        .contains_key(&id);
+    if !valid {
+        return Err(JsErrorBox::type_error("Storage area unavailable"));
+    }
+    Ok(Some(v8::null(scope).into()))
+}
+
+/// Dispatch one storage area operation ("get"/"set"/"delete"/"clear"/"keys")
+/// to its backing entry list. Returns the wire reply and (for mutating calls)
+/// the edit to apply plus the mutation record for the storage-event stream.
+fn dispatch_storage_command(
+    command: &str,
+    values: &[(Vec<u16>, Vec<u16>)],
+    key: Vec<u16>,
+    value: Vec<u16>,
+    url: String,
+    quota_units: usize,
+) -> Result<
+    (
+        StorageReply,
+        Option<(StorageEdit, storage_events::Mutation)>,
+    ),
+    JsErrorBox,
+> {
+    match command {
+        "get" => Ok((storage_get(values, &key), None)),
+        "set" => storage_set(values, key, value, url, quota_units),
+        "delete" => Ok(storage_delete(values, key, url)),
+        "clear" => Ok(storage_clear(values, url)),
+        "keys" => Ok((
+            StorageReply::Keys(values.iter().map(|(name, _)| name.clone()).collect()),
+            None,
+        )),
+        _ => Err(JsErrorBox::type_error("Unknown storage operation")),
+    }
+}
+
+/// `getItem` — look up the value for a key or report null.
+fn storage_get(values: &[(Vec<u16>, Vec<u16>)], key: &[u16]) -> StorageReply {
+    values
+        .iter()
+        .find(|(name, _)| name.as_slice() == key)
+        .map_or(StorageReply::Null, |(_, value)| {
+            StorageReply::Value(value.clone())
+        })
+}
+
+/// `setItem` — reject on quota, build the edit + mutation for an actual change,
+/// or report Null when the new value already matches the stored one.
+fn storage_set(
+    values: &[(Vec<u16>, Vec<u16>)],
+    key: Vec<u16>,
+    value: Vec<u16>,
+    url: String,
+    quota_units: usize,
+) -> Result<
+    (
+        StorageReply,
+        Option<(StorageEdit, storage_events::Mutation)>,
+    ),
+    JsErrorBox,
+> {
+    let other_units: usize = values
+        .iter()
+        .filter(|(name, _)| *name != key)
+        .map(|(name, value)| name.len() + value.len())
+        .sum();
+    if other_units + key.len() + value.len() > quota_units {
+        return Err(JsErrorBox::range_error("Storage quota exceeded"));
+    }
+    let index = values.iter().position(|(name, _)| *name == key);
+    let edit = if index.is_none_or(|index| values[index].1 != value) {
+        let mutation = storage_events::Mutation {
+            key: Some(key.clone()),
+            old: index.map(|index| values[index].1.clone()),
+            new: Some(value.clone()),
+            url,
+        };
+        Some((StorageEdit::Set(index, key, value), mutation))
+    } else {
+        None
+    };
+    Ok((StorageReply::Null, edit))
+}
+
+/// `removeItem` — build the edit + mutation when the key exists, else no-op.
+fn storage_delete(
+    values: &[(Vec<u16>, Vec<u16>)],
+    key: Vec<u16>,
+    url: String,
+) -> (
+    StorageReply,
+    Option<(StorageEdit, storage_events::Mutation)>,
+) {
+    let Some(index) = values.iter().position(|(name, _)| *name == key) else {
+        return (StorageReply::Null, None);
+    };
+    let edit = Some((
+        StorageEdit::Remove(index),
+        storage_events::Mutation {
+            key: Some(key),
+            old: Some(values[index].1.clone()),
+            new: None,
+            url,
+        },
+    ));
+    (StorageReply::Null, edit)
+}
+
+/// `clear` — build the edit + mutation only when there's something to drop.
+fn storage_clear(
+    values: &[(Vec<u16>, Vec<u16>)],
+    url: String,
+) -> (
+    StorageReply,
+    Option<(StorageEdit, storage_events::Mutation)>,
+) {
+    if values.is_empty() {
+        return (StorageReply::Null, None);
+    }
+    let edit = Some((
+        StorageEdit::Clear,
+        storage_events::Mutation {
+            key: None,
+            old: None,
+            new: None,
+            url,
+        },
+    ));
+    (StorageReply::Null, edit)
+}
+
 #[op2]
 fn op_storage_call<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -6968,18 +7711,9 @@ fn op_storage_call<'s>(
     }
     // An oversized key cannot have been stored. Avoid materializing a guest rope
     // that cannot possibly match an entry or pass the write quota.
-    if key.length() > QUOTA_UNITS && matches!(command, "get" | "delete") {
-        let backing = state.borrow::<BrowserStorage>().clone();
-        let valid = backing
-            .0
-            .lock()
-            .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?
-            .values
-            .contains_key(&id);
-        if !valid {
-            return Err(JsErrorBox::type_error("Storage area unavailable"));
-        }
-        return Ok(v8::null(scope).into());
+    if let Some(out) = short_circuit_oversized_storage_key(state, scope, id, command, key.length())?
+    {
+        return Ok(out);
     }
     let recipients = storage_events::recipients(scope, state, Some(owner), id);
     let key = crate::browser_env::string_code_units(scope, key);
@@ -6998,66 +7732,8 @@ fn op_storage_call<'s>(
         let values = values
             .get_mut(&id)
             .ok_or_else(|| JsErrorBox::type_error("Storage area unavailable"))?;
-        let mut edit = None;
-        let reply = match command {
-            "get" => values
-                .iter()
-                .find(|(name, _)| *name == key)
-                .map_or(StorageReply::Null, |(_, value)| {
-                    StorageReply::Value(value.clone())
-                }),
-            "set" => {
-                let other_units: usize = values
-                    .iter()
-                    .filter(|(name, _)| *name != key)
-                    .map(|(name, value)| name.len() + value.len())
-                    .sum();
-                if other_units + key.len() + value.len() > QUOTA_UNITS {
-                    return Err(JsErrorBox::range_error("Storage quota exceeded"));
-                }
-                let index = values.iter().position(|(name, _)| *name == key);
-                if index.is_none_or(|index| values[index].1 != value) {
-                    let mutation = storage_events::Mutation {
-                        key: Some(key.clone()),
-                        old: index.map(|index| values[index].1.clone()),
-                        new: Some(value.clone()),
-                        url,
-                    };
-                    edit = Some((StorageEdit::Set(index, key, value), mutation));
-                }
-                StorageReply::Null
-            }
-            "delete" => {
-                if let Some(index) = values.iter().position(|(name, _)| *name == key) {
-                    edit = Some((
-                        StorageEdit::Remove(index),
-                        storage_events::Mutation {
-                            key: Some(key),
-                            old: Some(values[index].1.clone()),
-                            new: None,
-                            url,
-                        },
-                    ));
-                }
-                StorageReply::Null
-            }
-            "clear" => {
-                if !values.is_empty() {
-                    edit = Some((
-                        StorageEdit::Clear,
-                        storage_events::Mutation {
-                            key: None,
-                            old: None,
-                            new: None,
-                            url,
-                        },
-                    ));
-                }
-                StorageReply::Null
-            }
-            "keys" => StorageReply::Keys(values.iter().map(|(name, _)| name.clone()).collect()),
-            _ => return Err(JsErrorBox::type_error("Unknown storage operation")),
-        };
+        let (reply, edit) =
+            dispatch_storage_command(command, values, key, value, url, QUOTA_UNITS)?;
         let wake = if let Some((edit, mutation)) = edit {
             storage_events::commit(state, recipients, subscribers, id, mutation, || {
                 edit.apply(values)
@@ -7072,7 +7748,16 @@ fn op_storage_call<'s>(
     }
     // V8 allocation may collect a credentialless realm whose native partition
     // destructor reclaims this storage; no backing lock can survive that call.
-    Ok(match reply {
+    Ok(storage_reply_to_js(scope, reply))
+}
+
+/// Convert the sync reply from [`dispatch_storage_command`] into the V8 value
+/// the caller will see (null / string / array).
+fn storage_reply_to_js<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    reply: StorageReply,
+) -> v8::Local<'s, v8::Value> {
+    match reply {
         StorageReply::Null => v8::null(scope).into(),
         StorageReply::Value(units) => storage_string(scope, &units),
         StorageReply::Keys(keys) => {
@@ -7083,7 +7768,7 @@ fn op_storage_call<'s>(
             }
             array.into()
         }
-    })
+    }
 }
 
 #[op2(fast)]
@@ -13645,6 +14330,90 @@ fn make_runtime_with_storage_and_options(
 /// Graft the native DOM binding onto the runtime's context (parsing `html` into the
 /// tree), then layer the non-DOM env globals over the ops. After this the page
 /// script runs against a real `document`.
+/// Refresh the per-context CSP / permissions-policy / sandbox / shared-memory
+/// state from the current response's headers. Split from [`install_dom`] so
+/// that function stays under the complexity gate.
+fn install_dom_csp_handle<'a, 'b>(
+    scope: &mut v8::PinScope<'a, 'b>,
+    context: v8::Local<'a, v8::Context>,
+    base: &str,
+    html: &str,
+) {
+    let Some(csp) = context.get_slot::<CspHandle>() else {
+        return;
+    };
+    let headers = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<ResponseHeaders>()
+        .0
+        .clone();
+    let response_metadata = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<crate::DocumentResponseMetadata>()
+        .clone();
+    csp.response_metadata.replace(response_metadata);
+    csp.dictionaries
+        .replace(compression_dictionary::Discovery::new(base, &headers));
+    *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
+    context.remove_slot::<FrameSandbox>();
+    install_csp_sandbox_flags(scope, context, &csp);
+    if let Some(origins) = context.get_slot::<ModuleOrigins>() {
+        origins.opaque.set(window_is_opaque(scope, context));
+        origins
+            .cookie_site_opaque
+            .set(frame_cookie_site_is_opaque(scope, context));
+    }
+    let origin = window_origin(scope, context);
+    csp.policy.borrow_mut().permissions_policy =
+        crate::permissions_policy::PermissionsPolicy::from_headers(&origin, &headers);
+    let allowed = cross_origin_isolated_allowed(&csp, headers.as_slice(), base, &origin);
+    context.set_slot(Rc::new(SharedMemoryCapability {
+        allowed,
+        group: csp.id,
+        origin,
+    }));
+}
+
+/// Apply the document's sandbox CSP header: install a [`FrameSandbox`] slot
+/// reflecting the opaque / origin-restricted state, and default the context's
+/// security token when the policy demands an opaque origin.
+fn install_csp_sandbox_flags<'a, 'b>(
+    scope: &mut v8::PinScope<'a, 'b>,
+    context: v8::Local<'a, v8::Context>,
+    csp: &CspHandle,
+) {
+    if csp.policy.borrow().header.sandbox_restrictions().is_none() {
+        return;
+    }
+    let mut flags = FrameSandbox {
+        opaque: !context.get_security_token(scope).is_string(),
+        ..Default::default()
+    };
+    flags.apply_csp(&csp.policy.borrow().header);
+    if flags.origin_restricted {
+        context.use_default_security_token();
+    }
+    context.set_slot(Rc::new(flags));
+}
+
+/// True when this document may use SharedArrayBuffer (cross-origin isolated):
+/// trustworthy url, isolated opener, non-UnsafeNone embedder policy, and the
+/// permissions-policy grants `cross-origin-isolated` to `self`.
+fn cross_origin_isolated_allowed(
+    csp: &CspHandle,
+    headers: &[(String, String)],
+    base: &str,
+    origin: &str,
+) -> bool {
+    let policy = csp.policy.borrow();
+    trustworthy_url(base)
+        && crate::resource_policy::isolated_opener(headers)
+        && policy.embedder_policy != crate::resource_policy::EmbedderPolicy::UnsafeNone
+        && policy
+            .permissions_policy
+            .allows_self("cross-origin-isolated", origin)
+}
+
 fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String> {
     {
         let state = rt.op_state();
@@ -13670,54 +14439,7 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let context = v8::Local::new(&scope, context);
         let mut scope = v8::ContextScope::new(&mut scope, context);
         set_origin_token(&mut scope, context, base);
-        if let Some(csp) = context.get_slot::<CspHandle>() {
-            let headers = JsRuntime::op_state_from(&scope)
-                .borrow()
-                .borrow::<ResponseHeaders>()
-                .0
-                .clone();
-            let response_metadata = JsRuntime::op_state_from(&scope)
-                .borrow()
-                .borrow::<crate::DocumentResponseMetadata>()
-                .clone();
-            csp.response_metadata.replace(response_metadata);
-            csp.dictionaries
-                .replace(compression_dictionary::Discovery::new(base, &headers));
-            *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
-            context.remove_slot::<FrameSandbox>();
-            if csp.policy.borrow().header.sandbox_restrictions().is_some() {
-                let mut flags = FrameSandbox {
-                    opaque: !context.get_security_token(&scope).is_string(),
-                    ..Default::default()
-                };
-                flags.apply_csp(&csp.policy.borrow().header);
-                if flags.origin_restricted {
-                    context.use_default_security_token();
-                }
-                context.set_slot(Rc::new(flags));
-            }
-            if let Some(origins) = context.get_slot::<ModuleOrigins>() {
-                origins.opaque.set(window_is_opaque(&mut scope, context));
-                origins
-                    .cookie_site_opaque
-                    .set(frame_cookie_site_is_opaque(&mut scope, context));
-            }
-            let origin = window_origin(&mut scope, context);
-            csp.policy.borrow_mut().permissions_policy =
-                crate::permissions_policy::PermissionsPolicy::from_headers(&origin, &headers);
-            let policy = csp.policy.borrow();
-            let allowed = trustworthy_url(base)
-                && crate::resource_policy::isolated_opener(&headers)
-                && policy.embedder_policy != crate::resource_policy::EmbedderPolicy::UnsafeNone
-                && policy
-                    .permissions_policy
-                    .allows_self("cross-origin-isolated", &origin);
-            context.set_slot(Rc::new(SharedMemoryCapability {
-                allowed,
-                group: csp.id,
-                origin,
-            }));
-        }
+        install_dom_csp_handle(&mut scope, context, base, html);
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::seed_location(&mut scope, base);
         let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
@@ -14143,6 +14865,454 @@ fn promise_settled(rt: &mut JsRuntime, value: &v8::Global<v8::Value>) -> bool {
         .unwrap_or(true)
 }
 
+/// Decide what to do next once due timers have run: with real-time timers and
+/// something to await we park on the next deadline, otherwise (fake clock) we
+/// let the queue tick forward one more step. Returns `Some(Poll)` when the
+/// caller must surface it; `None` to fall through.
+#[allow(clippy::too_many_arguments)]
+fn select_next_window_timer(
+    rt: &mut JsRuntime,
+    cx: &mut std::task::Context<'_>,
+    window_timer_wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
+    window_deadline: Option<tokio::time::Instant>,
+    frame_timer_budget: &mut u32,
+    real_timers: bool,
+    await_window_timer: bool,
+    event_loop_pending: bool,
+) -> Option<std::task::Poll<Option<Result<(), String>>>> {
+    if *frame_timer_budget == 0 {
+        return None;
+    }
+    if event_loop_pending || await_window_timer {
+        return park_on_window_timer_deadline(cx, window_timer_wake, window_deadline);
+    }
+    if !real_timers {
+        *window_timer_wake = None;
+        if let WindowTimerStep::Fired(outcome) = run_due_window_timers(rt, frame_timer_budget, true)
+        {
+            return Some(outcome);
+        }
+    }
+    None
+}
+
+/// Arrange a precise wake-up for the next Window-timer `deadline`. Allocates
+/// (or refreshes) a `tokio::time::sleep_until` future; when the sleep is
+/// already ready the loop forces another turn to run the timer. Returns
+/// `Some(Poll)` when the caller must surface that Poll result; `None` to
+/// continue falling through.
+fn park_on_window_timer_deadline(
+    cx: &mut std::task::Context<'_>,
+    window_timer_wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
+    window_deadline: Option<tokio::time::Instant>,
+) -> Option<std::task::Poll<Option<Result<(), String>>>> {
+    let Some(deadline) = window_deadline else {
+        *window_timer_wake = None;
+        return None;
+    };
+    if window_timer_wake
+        .as_ref()
+        .is_none_or(|(previous, _)| *previous != deadline)
+    {
+        *window_timer_wake = Some((deadline, Box::pin(tokio::time::sleep_until(deadline))));
+    }
+    let sleep = window_timer_wake.as_mut().unwrap();
+    if std::future::Future::poll(sleep.1.as_mut(), cx).is_ready() {
+        cx.waker().wake_by_ref();
+        return Some(std::task::Poll::Ready(None));
+    }
+    None
+}
+
+/// Outcome of one [`run_due_window_timers`] slice.
+enum WindowTimerStep {
+    /// A timer fired: the loop should return this Poll outcome.
+    Fired(std::task::Poll<Option<Result<(), String>>>),
+    /// Nothing fired; the attached deadline (if any) is the earliest wake-up.
+    Idle(Option<tokio::time::Instant>),
+}
+
+/// Run one slice of the Window-timer queue: fire any due timers (observing the
+/// remaining `frame_timer_budget`), checkpoint microtasks, and report the next
+/// deadline so the outer loop can arrange a precise wake-up. `advance_clock`
+/// controls whether the fake-clock timers tick when the queue is otherwise
+/// idle.
+fn run_due_window_timers(
+    rt: &mut JsRuntime,
+    frame_timer_budget: &mut u32,
+    advance_clock: bool,
+) -> WindowTimerStep {
+    if *frame_timer_budget == 0 {
+        return WindowTimerStep::Idle(None);
+    }
+    let turn = run_next_window_timer(rt, advance_clock);
+    *frame_timer_budget = frame_timer_budget.saturating_sub(turn.fired);
+    if turn.fired == 0 {
+        return WindowTimerStep::Idle(turn.deadline);
+    }
+    match checkpoint_window_timer(rt) {
+        Ok(()) => WindowTimerStep::Fired(std::task::Poll::Ready(None)),
+        Err(error) => WindowTimerStep::Fired(std::task::Poll::Ready(Some(Err(error)))),
+    }
+}
+
+/// Run one native background resource task (image load, font decode, …) and
+/// finish its microtasks. Returns `Some(Poll::Ready)` to yield back; `None`
+/// when no background task was available.
+fn drain_next_background_resource_task(
+    rt: &mut JsRuntime,
+) -> Option<std::task::Poll<Option<Result<(), String>>>> {
+    if run_next_background_resource_task(rt) == 0 {
+        return None;
+    }
+    rt.v8_isolate().perform_microtask_checkpoint();
+    if rt.v8_isolate().is_execution_terminating() {
+        return Some(std::task::Poll::Ready(Some(Err(
+            "Resource task microtasks were interrupted".into(),
+        ))));
+    }
+    Some(std::task::Poll::Ready(None))
+}
+
+/// True when the loop must park the future: an awaited Window timer keeps
+/// going, a shared storage inbox wakes the host future, or long-lived unref'd
+/// sockets / event streams keep the awaited operation live.
+fn should_keep_pending(
+    rt: &JsRuntime,
+    storage_waiter: &Option<crate::storage_inbox::Waiter>,
+    completion: Option<&v8::Global<v8::Value>>,
+    await_window_timer: bool,
+    has_window_timer_wake: bool,
+    result: &std::task::Poll<Result<(), String>>,
+) -> bool {
+    if await_window_timer && has_window_timer_wake {
+        return true;
+    }
+    let settled = matches!(result, std::task::Poll::Ready(Ok(())));
+    if completion.is_some() && storage_waiter.is_some() && settled {
+        return true;
+    }
+    completion.is_some() && settled && network_transports::live(&rt.op_state().borrow())
+}
+
+/// Dispatch one pending storage event (if any). Returns `Some(Poll::Ready)` to
+/// surface an error or yield back to the outer loop; `None` when nothing was
+/// delivered and the caller should fall through.
+fn drain_pending_storage_event(
+    rt: &mut JsRuntime,
+) -> Option<std::task::Poll<Option<Result<(), String>>>> {
+    if storage_events::pending(&rt.op_state().borrow()) == 0 {
+        return None;
+    }
+    let delivered = {
+        deno_core::scope!(scope, rt);
+        storage_events::deliver_next(scope)
+    };
+    match delivered {
+        Ok(0) => None,
+        Ok(_) => {
+            rt.v8_isolate().perform_microtask_checkpoint();
+            if rt.v8_isolate().is_execution_terminating() {
+                return Some(std::task::Poll::Ready(Some(Err(
+                    "Microtask execution was interrupted".into(),
+                ))));
+            }
+            Some(std::task::Poll::Ready(None))
+        }
+        Err(error) => Some(std::task::Poll::Ready(Some(Err(error.to_string())))),
+    }
+}
+
+/// Evaluate the namespace-predicate `condition` (turbo-surf#87): return
+/// `Some(Poll::Ready(Ok(())))` when the gate reports `"true"`, propagate an
+/// error, or `None` to let the loop continue selecting work.
+fn evaluate_completion_condition(
+    rt: &mut JsRuntime,
+    condition: Option<&str>,
+) -> Option<std::task::Poll<Option<Result<(), String>>>> {
+    let condition = condition?;
+    let value = namespace_call(rt, condition, &[]);
+    match value.and_then(|value| read_string(rt, value)) {
+        Ok(value) if value == "true" => Some(std::task::Poll::Ready(Some(Ok(())))),
+        Err(error) => Some(std::task::Poll::Ready(Some(Err(error)))),
+        _ => None,
+    }
+}
+
+/// True when the event loop should yield back to the outer loop because a
+/// native-proxy module stage, a window message, or a pending classic-script
+/// job is queued.
+fn has_pending_frame_work(rt: &JsRuntime) -> bool {
+    #[cfg(turbo_surf_native_proxy)]
+    if !rt
+        .op_state()
+        .borrow()
+        .borrow::<ModuleStages>()
+        .0
+        .borrow()
+        .is_empty()
+    {
+        return true;
+    }
+    if !rt
+        .op_state()
+        .borrow()
+        .borrow::<FrameContexts>()
+        .messages
+        .is_empty()
+    {
+        return true;
+    }
+    // Polling may resume an async fetch and enqueue its script. Yield to Rust
+    // immediately rather than waiting on the script's JS promise.
+    !rt.op_state()
+        .borrow()
+        .borrow::<ClassicScripts>()
+        .jobs
+        .is_empty()
+}
+
+/// Drain one pending module-graph completion stage: call the bootstrap
+/// `completeModuleGraph` helper on the staged realm, skipping retired frames.
+/// Returns `true` when a stage was handled (the loop should `continue`).
+#[cfg(turbo_surf_native_proxy)]
+fn drive_pending_module_stage(rt: &mut JsRuntime) -> Result<bool, String> {
+    let stage = rt
+        .op_state()
+        .borrow()
+        .borrow::<ModuleStages>()
+        .0
+        .borrow_mut()
+        .pop_front();
+    let Some(stage) = stage else {
+        return Ok(false);
+    };
+    let context = stage.context;
+    let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+    let mut scope = scope.init();
+    let context = v8::Local::new(&scope, context);
+    let scope = &mut v8::ContextScope::new(&mut scope, context);
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Ok(true);
+    }
+    let specifier = v8::String::new(scope, &stage.specifier).unwrap();
+    let ready = v8::Boolean::new(scope, stage.ready);
+    let details: v8::Local<v8::Value> = match stage.exception {
+        Some((error, filename, line, column)) => {
+            build_module_error_details(scope, error, &filename, line, column)
+        }
+        None => v8::null(scope).into(),
+    };
+    call_frame_helper(
+        scope,
+        "completeModuleGraph",
+        &[specifier.into(), ready.into(), details],
+    )
+    .ok_or("module completion failed")?;
+    Ok(true)
+}
+
+/// Shape the `{error, filename, lineno, colno}` details object the bootstrap
+/// helper expects when a module graph entry raised a parse / eval exception.
+#[cfg(turbo_surf_native_proxy)]
+fn build_module_error_details<'s>(
+    scope: &mut v8::ContextScope<'_, 's, v8::HandleScope<'_>>,
+    error: v8::Global<v8::Value>,
+    filename: &str,
+    line: u32,
+    column: u32,
+) -> v8::Local<'s, v8::Value> {
+    let details = v8::Object::new(scope);
+    for (name, value) in [
+        ("error", v8::Local::new(scope, error)),
+        ("filename", v8::String::new(scope, filename).unwrap().into()),
+        ("lineno", v8::Integer::new_from_unsigned(scope, line).into()),
+        (
+            "colno",
+            v8::Integer::new_from_unsigned(scope, column).into(),
+        ),
+    ] {
+        let key = v8::String::new(scope, name).unwrap();
+        details.set(scope, key.into(), value);
+    }
+    details.into()
+}
+
+/// Run one pending classic-script job: set its `document.currentScript` slot,
+/// evaluate the code, restore the slot, then resolve / reject the waiter's
+/// promise (reporting the error through the `reportClassicScriptError`
+/// bootstrap helper on failure). Split from [`drain_event_loop_until_completion`]
+/// to keep that function under the complexity gate.
+fn run_pending_classic_script(rt: &mut JsRuntime, job: ClassicScriptJob) -> Result<(), String> {
+    let ClassicScriptJob {
+        resolver,
+        source,
+        code,
+        context: script_context,
+        waiter_context,
+        document,
+        muted_errors,
+        element,
+    } = job;
+    let previous_script = capture_current_script(rt, &script_context, &document, element.as_ref());
+    let result = execute_frame_script(rt, script_context.clone(), &source, &code);
+    if script_execution_interrupted(rt, result.as_ref()) {
+        rt.v8_isolate().cancel_terminate_execution();
+        reject_classic_script_as_interrupted(
+            rt,
+            &script_context,
+            &document,
+            previous_script,
+            &waiter_context,
+            &resolver,
+        )?;
+        rt.v8_isolate().terminate_execution();
+        return Err("Classic script execution was interrupted".into());
+    }
+    let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+    let mut scope = scope.init();
+    let failure =
+        report_classic_script_result(&mut scope, &script_context, result, &source, muted_errors)?;
+    if let Some(previous) = previous_script {
+        let context = v8::Local::new(&scope, &script_context);
+        let scope = &mut v8::ContextScope::new(&mut scope, context);
+        let previous = v8::Local::new(scope, previous);
+        let document = v8::Local::new(scope, &document);
+        resource_lifecycle::restore_current_script(scope, document, previous);
+    }
+    settle_classic_script_waiter(&mut scope, &waiter_context, &resolver, failure);
+    Ok(())
+}
+
+/// Capture `document.currentScript` before a classic script runs so it can be
+/// restored after, returning a global handle to the previous value (or `None`
+/// if the slot was never set on this document).
+fn capture_current_script(
+    rt: &mut JsRuntime,
+    script_context: &v8::Global<v8::Context>,
+    document: &v8::Global<v8::Object>,
+    element: Option<&v8::Global<v8::Object>>,
+) -> Option<v8::Global<v8::Value>> {
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, script_context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let document = v8::Local::new(scope, document);
+    let value = match element {
+        Some(element) => v8::Local::new(scope, element).into(),
+        None => v8::null(scope).into(),
+    };
+    resource_lifecycle::set_current_script(scope, document, value)
+        .map(|value| v8::Global::new(scope, value))
+}
+
+/// True when the isolate was terminated or the script explicitly surfaced an
+/// interruption failure — both mean the loop must bail out.
+fn script_execution_interrupted(
+    rt: &mut JsRuntime,
+    result: Result<&(), &ClassicScriptFailure>,
+) -> bool {
+    rt.v8_isolate().is_execution_terminating()
+        || result.err().is_some_and(|failure| failure.interrupted)
+}
+
+/// Reject the waiter promise with a synthesized "interrupted" error and
+/// restore `document.currentScript` before the caller terminates the isolate.
+fn reject_classic_script_as_interrupted(
+    rt: &mut JsRuntime,
+    script_context: &v8::Global<v8::Context>,
+    document: &v8::Global<v8::Object>,
+    previous_script: Option<v8::Global<v8::Value>>,
+    waiter_context: &v8::Global<v8::Context>,
+    resolver: &v8::Global<v8::PromiseResolver>,
+) -> Result<(), String> {
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, script_context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    if let Some(previous) = previous_script {
+        let document = v8::Local::new(scope, document);
+        let previous = v8::Local::new(scope, previous);
+        resource_lifecycle::restore_current_script(scope, document, previous);
+    }
+    let context = v8::Local::new(scope, waiter_context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let resolver = v8::Local::new(scope, resolver);
+    let message = v8::String::new(scope, "Classic script execution was interrupted")
+        .ok_or("Classic interruption allocation failed")?;
+    let error = v8::Exception::error(scope, message);
+    resolver.reject(scope, error);
+    Ok(())
+}
+
+/// Report the outcome of a classic-script run through the bootstrap helper,
+/// returning a global handle to the error on failure (or `None` on success).
+fn report_classic_script_result<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    script_context: &v8::Global<v8::Context>,
+    result: Result<(), ClassicScriptFailure>,
+    source: &str,
+    muted_errors: bool,
+) -> Result<Option<v8::Global<v8::Value>>, String> {
+    let failure = match result {
+        Ok(()) => return Ok(None),
+        Err(failure) => failure,
+    };
+    let context = v8::Local::new(scope, script_context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let error = match failure.error {
+        Some(error) => v8::Local::new(scope, error),
+        None => {
+            let message = v8::String::new(scope, &failure.message)
+                .ok_or("Classic error allocation failed")?;
+            v8::Exception::error(scope, message)
+        }
+    };
+    let details = serde_json::json!({
+        "message": failure.message,
+        "filename": source,
+        "lineno": failure.line,
+        "colno": failure.column,
+    });
+    let json = v8::String::new(scope, &details.to_string())
+        .ok_or("Classic error metadata allocation failed")?;
+    let details = v8::json::parse(scope, json).ok_or("Invalid classic error metadata")?;
+    if muted_errors {
+        let json = v8::String::new(
+            scope,
+            "{\"message\":\"Script error.\",\"filename\":\"\",\"lineno\":0,\"colno\":0}",
+        )
+        .ok_or("Muted error metadata allocation failed")?;
+        let details = v8::json::parse(scope, json).ok_or("Invalid muted error metadata")?;
+        let muted = v8::null(scope);
+        call_frame_helper(scope, "reportClassicScriptError", &[muted.into(), details]);
+    } else {
+        call_frame_helper(scope, "reportClassicScriptError", &[error, details]);
+    }
+    Ok(Some(v8::Global::new(scope, error)))
+}
+
+/// Resolve or reject the classic-script waiter promise from the final
+/// [`report_classic_script_result`] outcome.
+fn settle_classic_script_waiter<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    waiter_context: &v8::Global<v8::Context>,
+    resolver: &v8::Global<v8::PromiseResolver>,
+    failure: Option<v8::Global<v8::Value>>,
+) {
+    let context = v8::Local::new(scope, waiter_context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let resolver = v8::Local::new(scope, resolver);
+    match failure {
+        Some(error) => {
+            let error = v8::Local::new(scope, error);
+            resolver.reject(scope, error);
+        }
+        None => {
+            let value = v8::undefined(scope);
+            resolver.resolve(scope, value.into());
+        }
+    }
+}
+
 async fn drain_event_loop_until_completion(
     rt: &mut JsRuntime,
     condition: Option<&str>,
@@ -14169,55 +15339,8 @@ async fn drain_event_loop_until_completion(
             return Ok(());
         }
         #[cfg(turbo_surf_native_proxy)]
-        {
-            let stage = rt
-                .op_state()
-                .borrow()
-                .borrow::<ModuleStages>()
-                .0
-                .borrow_mut()
-                .pop_front();
-            if let Some(stage) = stage {
-                let context = stage.context;
-                let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
-                let mut scope = scope.init();
-                let context = v8::Local::new(&scope, context);
-                let scope = &mut v8::ContextScope::new(&mut scope, context);
-                if context.get_slot::<FrameRetired>().is_some() {
-                    continue;
-                }
-                let specifier = v8::String::new(scope, &stage.specifier).unwrap();
-                let ready = v8::Boolean::new(scope, stage.ready);
-                let details: v8::Local<v8::Value> =
-                    if let Some((error, filename, line, column)) = stage.exception {
-                        let details = v8::Object::new(scope);
-                        for (name, value) in [
-                            ("error", v8::Local::new(scope, error)),
-                            (
-                                "filename",
-                                v8::String::new(scope, &filename).unwrap().into(),
-                            ),
-                            ("lineno", v8::Integer::new_from_unsigned(scope, line).into()),
-                            (
-                                "colno",
-                                v8::Integer::new_from_unsigned(scope, column).into(),
-                            ),
-                        ] {
-                            let key = v8::String::new(scope, name).unwrap();
-                            details.set(scope, key.into(), value);
-                        }
-                        details.into()
-                    } else {
-                        v8::null(scope).into()
-                    };
-                call_frame_helper(
-                    scope,
-                    "completeModuleGraph",
-                    &[specifier.into(), ready.into(), details],
-                )
-                .ok_or("module completion failed")?;
-                continue;
-            }
+        if drive_pending_module_stage(rt)? {
+            continue;
         }
         let message = {
             let state = rt.op_state();
@@ -14234,116 +15357,8 @@ async fn drain_event_loop_until_completion(
             let mut state = state.borrow_mut();
             state.borrow_mut::<ClassicScripts>().jobs.pop_front()
         };
-        if let Some(ClassicScriptJob {
-            resolver,
-            source,
-            code,
-            context: script_context,
-            waiter_context,
-            document,
-            muted_errors,
-            element,
-        }) = job
-        {
-            let previous_script = {
-                deno_core::scope!(scope, rt);
-                let context = v8::Local::new(scope, &script_context);
-                let scope = &mut v8::ContextScope::new(scope, context);
-                let document = v8::Local::new(scope, &document);
-                let value = match &element {
-                    Some(element) => v8::Local::new(scope, element).into(),
-                    None => v8::null(scope).into(),
-                };
-                resource_lifecycle::set_current_script(scope, document, value)
-                    .map(|value| v8::Global::new(scope, value))
-            };
-            let result = execute_frame_script(rt, script_context.clone(), &source, &code);
-            if rt.v8_isolate().is_execution_terminating()
-                || result
-                    .as_ref()
-                    .err()
-                    .is_some_and(|failure| failure.interrupted)
-            {
-                rt.v8_isolate().cancel_terminate_execution();
-                {
-                    deno_core::scope!(scope, rt);
-                    let context = v8::Local::new(scope, &script_context);
-                    let scope = &mut v8::ContextScope::new(scope, context);
-                    if let Some(previous) = previous_script {
-                        let document = v8::Local::new(scope, &document);
-                        let previous = v8::Local::new(scope, previous);
-                        resource_lifecycle::restore_current_script(scope, document, previous);
-                    }
-                    let context = v8::Local::new(scope, waiter_context);
-                    let scope = &mut v8::ContextScope::new(scope, context);
-                    let resolver = v8::Local::new(scope, resolver);
-                    let message =
-                        v8::String::new(scope, "Classic script execution was interrupted")
-                            .ok_or("Classic interruption allocation failed")?;
-                    let error = v8::Exception::error(scope, message);
-                    resolver.reject(scope, error);
-                }
-                rt.v8_isolate().terminate_execution();
-                return Err("Classic script execution was interrupted".into());
-            }
-            let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
-            let mut scope = scope.init();
-            let failure = match result {
-                Ok(()) => None,
-                Err(failure) => {
-                    let context = v8::Local::new(&scope, &script_context);
-                    let scope = &mut v8::ContextScope::new(&mut scope, context);
-                    let error = match failure.error {
-                        Some(error) => v8::Local::new(scope, error),
-                        None => {
-                            let message = v8::String::new(scope, &failure.message)
-                                .ok_or("Classic error allocation failed")?;
-                            v8::Exception::error(scope, message)
-                        }
-                    };
-                    let details = serde_json::json!({"message":failure.message,
-                        "filename":source,"lineno":failure.line,"colno":failure.column});
-                    let json = v8::String::new(scope, &details.to_string())
-                        .ok_or("Classic error metadata allocation failed")?;
-                    let details =
-                        v8::json::parse(scope, json).ok_or("Invalid classic error metadata")?;
-                    if muted_errors {
-                        let json=v8::String::new(scope,"{\"message\":\"Script error.\",\"filename\":\"\",\"lineno\":0,\"colno\":0}")
-                            .ok_or("Muted error metadata allocation failed")?;
-                        let details =
-                            v8::json::parse(scope, json).ok_or("Invalid muted error metadata")?;
-                        let muted = v8::null(scope);
-                        call_frame_helper(
-                            scope,
-                            "reportClassicScriptError",
-                            &[muted.into(), details],
-                        );
-                    } else {
-                        call_frame_helper(scope, "reportClassicScriptError", &[error, details]);
-                    }
-                    Some(v8::Global::new(scope, error))
-                }
-            };
-            if let Some(previous) = previous_script {
-                let context = v8::Local::new(&scope, &script_context);
-                let scope = &mut v8::ContextScope::new(&mut scope, context);
-                let previous = v8::Local::new(scope, previous);
-                let document = v8::Local::new(scope, &document);
-                resource_lifecycle::restore_current_script(scope, document, previous);
-            }
-            let context = v8::Local::new(&scope, waiter_context);
-            let scope = &mut v8::ContextScope::new(&mut scope, context);
-            let resolver = v8::Local::new(scope, resolver);
-            match failure {
-                Some(error) => {
-                    let error = v8::Local::new(scope, error);
-                    resolver.reject(scope, error);
-                }
-                None => {
-                    let value = v8::undefined(scope);
-                    resolver.resolve(scope, value.into());
-                }
-            }
+        if let Some(job) = job {
+            run_pending_classic_script(rt, job)?;
             continue;
         }
         let result = std::future::poll_fn(|cx| {
@@ -14356,152 +15371,49 @@ async fn drain_event_loop_until_completion(
             if completion.is_some_and(|promise| promise_settled(rt, promise)) {
                 return std::task::Poll::Ready(Some(Ok(())));
             }
-            #[cfg(turbo_surf_native_proxy)]
-            if !rt
-                .op_state()
-                .borrow()
-                .borrow::<ModuleStages>()
-                .0
-                .borrow()
-                .is_empty()
-            {
-                return std::task::Poll::Ready(None);
-            }
-            if !rt
-                .op_state()
-                .borrow()
-                .borrow::<FrameContexts>()
-                .messages
-                .is_empty()
-            {
-                return std::task::Poll::Ready(None);
-            }
-            // Polling may resume an async fetch and enqueue its script. Yield to
-            // Rust immediately rather than waiting on the script's JS promise.
-            if !rt
-                .op_state()
-                .borrow()
-                .borrow::<ClassicScripts>()
-                .jobs
-                .is_empty()
-            {
+            if has_pending_frame_work(rt) {
                 return std::task::Poll::Ready(None);
             }
 
-            // Storage tasks have their own source and can arrive while a
-            // Promise waits without any Window timer. Dispatch one task before
-            // selecting timers, then finish its microtasks before the next task.
-            if storage_events::pending(&rt.op_state().borrow()) > 0 {
-                let delivered = {
-                    deno_core::scope!(scope, rt);
-                    storage_events::deliver_next(scope)
-                };
-                match delivered {
-                    Ok(0) => {}
-                    Ok(_) => {
-                        rt.v8_isolate().perform_microtask_checkpoint();
-                        if rt.v8_isolate().is_execution_terminating() {
-                            return std::task::Poll::Ready(Some(Err(
-                                "Microtask execution was interrupted".into(),
-                            )));
-                        }
-                        return std::task::Poll::Ready(None);
-                    }
-                    Err(error) => {
-                        return std::task::Poll::Ready(Some(Err(error.to_string())));
-                    }
-                }
+            if let Some(outcome) = drain_pending_storage_event(rt) {
+                return outcome;
             }
-
-            // A completed parser/load gate returns to its host lifecycle turn
-            // before selecting another Window task. Pending gates still drive
-            // timers below, including resource errors during blocking scripts.
-            // `condition` names a namespace predicate, called natively (turbo-surf#87).
-            if let Some(condition) = condition {
-                let value = namespace_call(rt, condition, &[]);
-                match value.and_then(|value| read_string(rt, value)) {
-                    Ok(value) if value == "true" => {
-                        return std::task::Poll::Ready(Some(Ok(())));
-                    }
-                    Err(error) => return std::task::Poll::Ready(Some(Err(error))),
-                    _ => {}
-                }
+            if let Some(outcome) = evaluate_completion_condition(rt, condition) {
+                return outcome;
             }
             // Already-due timer tasks precede background networking tasks; a
             // resource event must not advance the clock to a future timer.
-            let mut window_deadline = None;
-            if frame_timer_budget > 0 {
-                let turn = run_next_window_timer(rt, false);
-                window_deadline = turn.deadline;
-                frame_timer_budget = frame_timer_budget.saturating_sub(turn.fired);
-                if turn.fired > 0 {
-                    if let Err(error) = checkpoint_window_timer(rt) {
-                        return std::task::Poll::Ready(Some(Err(error)));
-                    }
-                    return std::task::Poll::Ready(None);
-                }
-            }
-            if run_next_background_resource_task(rt) > 0 {
-                rt.v8_isolate().perform_microtask_checkpoint();
-                if rt.v8_isolate().is_execution_terminating() {
-                    return std::task::Poll::Ready(Some(Err(
-                        "Resource task microtasks were interrupted".into(),
-                    )));
-                }
-                return std::task::Poll::Ready(None);
+            let window_deadline = match run_due_window_timers(rt, &mut frame_timer_budget, false) {
+                WindowTimerStep::Fired(outcome) => return outcome,
+                WindowTimerStep::Idle(deadline) => deadline,
+            };
+            if let Some(outcome) = drain_next_background_resource_task(rt) {
+                return outcome;
             }
             // Native I/O and official system timers use real monotonic time.
             // Do not leap a Window timer past their earlier wake-up. Keep one
             // precise wake so a stalled native request cannot starve the timer.
             let await_window_timer = real_timers && (completion.is_some() || condition.is_some());
-            if frame_timer_budget > 0 && (result.is_pending() || await_window_timer) {
-                if let Some(deadline) = window_deadline {
-                    if window_timer_wake
-                        .as_ref()
-                        .is_none_or(|(previous, _)| *previous != deadline)
-                    {
-                        window_timer_wake =
-                            Some((deadline, Box::pin(tokio::time::sleep_until(deadline))));
-                    }
-                    if std::future::Future::poll(window_timer_wake.as_mut().unwrap().1.as_mut(), cx)
-                        .is_ready()
-                    {
-                        cx.waker().wake_by_ref();
-                        return std::task::Poll::Ready(None);
-                    }
-                } else {
-                    window_timer_wake = None;
-                }
-            } else if frame_timer_budget > 0 && !real_timers {
-                window_timer_wake = None;
-                let turn = run_next_window_timer(rt, true);
-                frame_timer_budget = frame_timer_budget.saturating_sub(turn.fired);
-                if turn.fired > 0 {
-                    if let Err(error) = checkpoint_window_timer(rt) {
-                        return std::task::Poll::Ready(Some(Err(error)));
-                    }
-                    return std::task::Poll::Ready(None);
-                }
+            if let Some(outcome) = select_next_window_timer(
+                rt,
+                cx,
+                &mut window_timer_wake,
+                window_deadline,
+                &mut frame_timer_budget,
+                real_timers,
+                await_window_timer,
+                result.is_pending(),
+            ) {
+                return outcome;
             }
-            // A Window timer is not a Deno op. Keep an explicit awaited task alive,
-            // but leave unrelated future timers queued when an idle pump returns.
-            if await_window_timer && window_timer_wake.is_some() {
-                return std::task::Poll::Pending;
-            }
-            // A JS Promise can await another native worker's storage task even
-            // when Deno has no pending op. The inbox wakes this host future.
-            if completion.is_some()
-                && storage_waiter.is_some()
-                && matches!(result, std::task::Poll::Ready(Ok(())))
-            {
-                return std::task::Poll::Pending;
-            }
-            // Open sockets and event streams read through unref'd ops (#144): they never
-            // hold a render, but an awaited operation keeps waiting for their events.
-            if completion.is_some()
-                && matches!(result, std::task::Poll::Ready(Ok(())))
-                && network_transports::live(&rt.op_state().borrow())
-            {
+            if should_keep_pending(
+                rt,
+                &storage_waiter,
+                completion,
+                await_window_timer,
+                window_timer_wake.is_some(),
+                &result,
+            ) {
                 return std::task::Poll::Pending;
             }
             result.map(Some)
@@ -15352,6 +16264,31 @@ fn hydrate_pass(rt: &mut JsRuntime) -> Result<v8::Global<v8::Value>, String> {
     )
 }
 
+/// The unified post-load pump: a single "run scripts+timers, then drain" pass
+/// isn't enough for a real SPA (React kicks a fetch → yields → the fetch
+/// resolves → React schedules more work via a MessageChannel → …). Loop until
+/// the namespace predicate `pendingWork` goes false or the pump budget runs
+/// out. Split from [`hydrate_installed_document`] to keep it under the
+/// complexity gate.
+async fn run_post_load_hydration_pumps(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
+    const MAX_PUMPS: usize = 500;
+    for round in 0..MAX_PUMPS {
+        hydrate_pass(rt)?;
+        drain_event_loop(rt).await?;
+        drain_module_scripts(rt, base).await?;
+        drain_event_loop(rt).await?;
+        rt.op_state()
+            .borrow_mut()
+            .borrow_mut::<HydrationProgress>()
+            .completed_pumps = round + 1;
+        let pending = namespace_call(rt, "pendingWork", &[])?;
+        if read_string(rt, pending)? != "1" {
+            break;
+        }
+    }
+    Ok(())
+}
+
 async fn hydrate_installed_document(
     rt: &mut JsRuntime,
     base: &str,
@@ -15385,22 +16322,8 @@ async fn hydrate_installed_document(
     // fetch… So loop — run the hydration pump, drain async ops (microtasks + fetches +
     // injected-script loads), check whether JS still has queued work — until it
     // quiesces. The watchdog bounds wall time; MAX_PUMPS bounds a pathological spin.
-    const MAX_PUMPS: usize = 500;
     hydration_phase(rt, HydrationPhase::PostLoadHydration);
-    for round in 0..MAX_PUMPS {
-        hydrate_pass(rt)?;
-        drain_event_loop(rt).await?;
-        drain_module_scripts(rt, base).await?;
-        drain_event_loop(rt).await?;
-        rt.op_state()
-            .borrow_mut()
-            .borrow_mut::<HydrationProgress>()
-            .completed_pumps = round + 1;
-        let pending = namespace_call(rt, "pendingWork", &[])?;
-        if read_string(rt, pending)? != "1" {
-            break;
-        }
-    }
+    run_post_load_hydration_pumps(rt, base).await?;
     run_lifecycle(rt, "dispatchDocumentComplete").map_err(|error| error.to_string())?;
     hydration_phase(rt, HydrationPhase::PostLoadQuiescence);
     drain_to_quiescence(rt).await?;
@@ -15552,48 +16475,82 @@ async fn drain_to_quiescence_with_scripts(
     let mut stable = 0usize;
     let mut last_sig = String::new();
     for _ in 0..MAX_ROUNDS {
-        // RUN any newly-injected <script>s, then drain. An interaction can pull a chunk at
-        // runtime — Next's `dynamic(() => import('…'))` (lazy modals: AddVacationTimeModal,
-        // etc.) appends a <script src> when the component first renders. Without running it
-        // the chunk never executes, the import() promise never resolves, and the modal never
-        // appears. Native script flags and mutation admission prevent repeat execution.
-        if execute_document_scripts {
-            hydrate_pass(rt)?;
-        }
-        drain_event_loop(rt).await?;
-        if execute_document_scripts {
-            let base = rt.op_state().borrow().borrow::<Base>().0.clone();
-            drain_module_scripts(rt, &base).await?;
-        }
-        let fired = run_window_timers(rt, 2000)?;
-        drain_event_loop(rt).await?;
-        let pending = namespace_call(rt, "pendingWork", &[])?;
-        let sig_v = namespace_call(rt, "domSig", &[])?;
-        let fetches = namespace_call(rt, "pendingFetchCount", &[])?;
-        let still = read_string(rt, pending)? == "1";
-        let fired_any = fired != 0;
-        let awaiting_fetch = read_string(rt, fetches)? != "0";
-        if !still && !fired_any {
+        let fired = quiescence_pump_scripts(rt, execute_document_scripts).await?;
+        let state = sample_quiescence_state(rt, fired)?;
+        if !state.still && !state.fired_any {
             break; // genuinely idle
         }
         // A request is outstanding: keep pumping (don't let the stable-DOM early-out
         // fire) so the response's re-render — a modal close, a redirect — lands.
-        if awaiting_fetch {
+        if state.awaiting_fetch {
             stable = 0;
             continue;
         }
-        let sig = read_string(rt, sig_v)?;
-        if sig == last_sig {
+        if state.sig == last_sig {
             stable += 1;
             if stable >= STABLE_ROUNDS {
                 break; // render settled; remaining timers are background churn
             }
         } else {
             stable = 0;
-            last_sig = sig;
+            last_sig = state.sig;
         }
     }
     Ok(())
+}
+
+/// One round's forward progress: run newly-injected classic + module scripts
+/// (when `execute_document_scripts` is set — the interaction path's safety
+/// valve), drain the event loop, fire any due Window timers, then drain again.
+/// Returns how many Window timers fired this round.
+async fn quiescence_pump_scripts(
+    rt: &mut JsRuntime,
+    execute_document_scripts: bool,
+) -> Result<u32, String> {
+    // RUN any newly-injected <script>s, then drain. An interaction can pull a chunk at
+    // runtime — Next's `dynamic(() => import('…'))` (lazy modals: AddVacationTimeModal,
+    // etc.) appends a <script src> when the component first renders. Without running it
+    // the chunk never executes, the import() promise never resolves, and the modal never
+    // appears. Native script flags and mutation admission prevent repeat execution.
+    if execute_document_scripts {
+        hydrate_pass(rt)?;
+    }
+    drain_event_loop(rt).await?;
+    if execute_document_scripts {
+        let base = rt.op_state().borrow().borrow::<Base>().0.clone();
+        drain_module_scripts(rt, &base).await?;
+    }
+    let fired = run_window_timers(rt, 2000)?;
+    drain_event_loop(rt).await?;
+    Ok(fired)
+}
+
+/// Observed state at the end of one quiescence round: whether JS still has
+/// work queued, whether this round's Window timers fired, whether a fetch is
+/// outstanding, and the DOM signature used to detect render settling.
+struct QuiescenceSample {
+    still: bool,
+    fired_any: bool,
+    awaiting_fetch: bool,
+    sig: String,
+}
+
+/// Call the namespace predicates `pendingWork` / `domSig` / `pendingFetchCount`
+/// and fold them (together with the pump's fired-timer count) into a
+/// [`QuiescenceSample`].
+fn sample_quiescence_state(rt: &mut JsRuntime, fired: u32) -> Result<QuiescenceSample, String> {
+    let pending = namespace_call(rt, "pendingWork", &[])?;
+    let sig_v = namespace_call(rt, "domSig", &[])?;
+    let fetches = namespace_call(rt, "pendingFetchCount", &[])?;
+    let still = read_string(rt, pending)? == "1";
+    let awaiting_fetch = read_string(rt, fetches)? != "0";
+    let sig = read_string(rt, sig_v)?;
+    Ok(QuiescenceSample {
+        still,
+        fired_any: fired != 0,
+        awaiting_fetch,
+        sig,
+    })
 }
 
 /// Stable host lifecycle labels; page scripts cannot replace these diagnostics.

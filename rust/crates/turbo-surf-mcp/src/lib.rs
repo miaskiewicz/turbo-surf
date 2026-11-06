@@ -3258,9 +3258,54 @@ fn arg_u32(args: &Value, key: &str) -> Option<u32> {
         .map(|n| n.min(u32::MAX as u64) as u32)
 }
 
+/// Handle the small synchronous session-state setters (user agent / mode /
+/// consent flags / fingerprint / history mirrors / in-memory snapshots). Returns
+/// `None` when `name` is not one of them.
+fn call_sync_session_tool(
+    session: &mut Session,
+    name: &str,
+    args: &Value,
+) -> Option<Result<Value, String>> {
+    let out = match name {
+        "set_user_agent" => {
+            session.ua = Some(arg_str(args, "value").unwrap_or("").to_string());
+            json!({ "ok": true })
+        }
+        "set_mode" => {
+            session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
+            json!({ "mode": session.mode })
+        }
+        "set_bypass_consent" => {
+            // Toggle consent-wall cookie seeding (google/youtube interstitial).
+            // Default is on; pass `{ "enabled": false }` to fetch the raw response.
+            let on = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            session.bypass_consent = Some(on);
+            json!({ "bypassConsent": on })
+        }
+        "set_consent_socs" => {
+            // Param-driven SOCS override. Omitted/null → built-in default; a string
+            // (incl. "") is used verbatim ("" = seed no SOCS, raw consent-gated page).
+            session.consent_socs = arg_str(args, "socs").map(str::to_string);
+            json!({ "consentSocs": session.consent_socs })
+        }
+        "stealth_status" => session.stealth_status(),
+        "set_fingerprint" => {
+            return Some(session.set_fingerprint(args.get("overrides").unwrap_or(args)));
+        }
+        "latest_dom" => json!(session.dom_history.last()),
+        "dom_history" => json!(session.dom_history),
+        "requests" => json!(session.requests),
+        _ => return None,
+    };
+    Some(Ok(out))
+}
+
 /// Run a tool by name, returning its result value (the caller wraps it in the
 /// MCP `content` envelope).
 pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Result<Value, String> {
+    if let Some(res) = call_sync_session_tool(session, name, args) {
+        return res;
+    }
     let sel = || arg_str(args, "selector").ok_or_else(|| format!("{name}: missing 'selector'"));
     let val = || arg_str(args, "value").unwrap_or("").to_string();
     let script = || arg_str(args, "script").ok_or_else(|| format!("{name}: missing 'script'"));
@@ -3282,10 +3327,6 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         "reload" => session.reload().await,
         "go_back" => session.go_back().await,
         "go_forward" => session.go_forward().await,
-        "set_user_agent" => {
-            session.ua = Some(val());
-            Ok(json!({ "ok": true }))
-        }
         // --- interaction ---
         "click" | "click_selector" => session.click(sel()?).await,
         "submit" => session.submit(arg_str(args, "selector")).await,
@@ -3309,23 +3350,6 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             })
         }
         // --- render / JS tier ---
-        "set_mode" => {
-            session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
-            Ok(json!({ "mode": session.mode }))
-        }
-        "set_bypass_consent" => {
-            // Toggle consent-wall cookie seeding (google/youtube interstitial).
-            // Default is on; pass `{ "enabled": false }` to fetch the raw response.
-            let on = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-            session.bypass_consent = Some(on);
-            Ok(json!({ "bypassConsent": on }))
-        }
-        "set_consent_socs" => {
-            // Param-driven SOCS override. Omitted/null → built-in default; a string
-            // (incl. "") is used verbatim ("" = seed no SOCS, raw consent-gated page).
-            session.consent_socs = arg_str(args, "socs").map(str::to_string);
-            Ok(json!({ "consentSocs": session.consent_socs }))
-        }
         "eval_js" | "evaluate" => session.eval_js(script()?),
         "inject_js" => session.inject_js(script()?).await,
         "render" => match arg_str(args, "script") {
@@ -3356,15 +3380,22 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             probe_mint(url).await
         }
         "human_interact" => session.human_interact(args).await,
-        "stealth_status" => Ok(session.stealth_status()),
-        "set_fingerprint" => session.set_fingerprint(args.get("overrides").unwrap_or(args)),
-        "latest_dom" => Ok(json!(session.dom_history.last())),
-        "dom_history" => Ok(json!(session.dom_history)),
         "screenshot" => session.screenshot(args).await,
         "set_viewport" => session.set_viewport(args),
         "run_playwright" => tool_run_playwright(session, args).await,
-        "requests" => Ok(json!(session.requests)),
-        // --- session / network ---
+        // --- session / network / bulk ---
+        _ => call_network_or_read_tool(session, name, args).await,
+    }
+}
+
+/// Session/network and bulk tools, plus the DOM-read fallback. Split out of
+/// [`call_tool`] to keep each dispatch under the complexity gate.
+async fn call_network_or_read_tool(
+    session: &mut Session,
+    name: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    match name {
         "set_extra_headers" => tool_set_headers(session, args),
         "get_cookies" => {
             serde_json::from_str(&session.jar.storage_state()).map_err(|e| e.to_string())
@@ -3381,7 +3412,6 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             serde_json::from_str(&body).map_err(|e| format!("invalid JSON: {e}"))
         }
         "robots_check" => tool_robots_check(session, args).await,
-        // --- bulk ---
         "crawl" => tool_crawl(args).await,
         "batch" => tool_batch(args).await,
         _ => call_read_tool(session, name, args),

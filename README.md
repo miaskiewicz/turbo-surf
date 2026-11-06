@@ -743,8 +743,8 @@ PR CI (`.github/workflows/ci.yml`) runs on ubuntu:
   workspace `fail-under` (93.0, `rust/tarpaulin.toml`) or any per-crate floor in
   `rust/coverage-floors.json` — render 95.0, core 99.4, mcp 99.6, view 99.9, page and
   transform 100; the napi/py bindings are excluded.
-- **Complexity, report-only**: `complexity / rust` and `complexity / js` (cc <= 15 per
-  function) run with `continue-on-error` until the post-0.6.0 refactor clears the backlog.
+- **Complexity, blocking**: `complexity / rust` and `complexity / js` (cc <= 15 per function)
+  gate the workflow; one limit for the whole repo, no allow-list.
 
 macOS, Windows and Linux binaries and wheels are built only by the release workflows
 (`release.yml`, `release-py.yml`). Details: [`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md).

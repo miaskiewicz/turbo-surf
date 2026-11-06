@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Changed (quality gates, #154)**: cyclomatic-complexity CI jobs are now
+  blocking at cc <= 15. The Rust backlog (46 functions in `turbo-surf-core`,
+  `turbo-surf-mcp`, `turbo-surf-py` and `turbo-surf-render`) was refactored by
+  decomposition (small named helpers, table dispatch) with no behaviour change,
+  tests and coverage floors preserved; both `complexity / rust` and
+  `complexity / js` lose their `continue-on-error`, and `docs/QUALITY-GATES.md`,
+  README and CLAUDE.md drop the "report-only / backlog" language. One limit for
+  the whole repo, no allow-list, no file skips.
 - **Fixed (tests, #194)**: the `expression_rejection_and_runaway_microtasks_...`
   render test split into two: `expression_rejection_surfaces_the_underlying_error`
   (5000 ms budget, generous enough for the microtask-queue drain that carries the

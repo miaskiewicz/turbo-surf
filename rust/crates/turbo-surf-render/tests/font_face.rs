@@ -185,20 +185,27 @@ const WEB_FONT_HEIGHT: &[&str] = &[
     "/ready/heights/TTF = 26 (chrome 25)",
     "/ready/heights/WOFF2 = 26 (chrome 25)",
 ];
+// turbo-dom#377 (release/0.8.0 d1237332) aligned the live-layout content heights for
+// the embedded web face: the heading / contentsRange rects now match Chrome at 25px.
+// The inline content box's y-position still trails by 0.5 px (11.5 / 7.5 / 43.5 / 79.5
+// vs Chrome's 11 / 7 / 43 / 79): a separate, still-open live-layout gap owned by
+// turbo-dom. `rows/link/rects/*/3 = 26` in RANGE_MIXED is the plain-font row (the
+// mixed-range case paints one row in Plex, another in the default serif), which the
+// web-font metric policy does not reach.
 const RANGE_BLOCK_HEIGHT: &[&str] = &[
-    "/rows/heading/contentsRange/bounds/3 = 26 (chrome 25)",
-    "/rows/heading/contentsRange/rects/0/3 = 26 (chrome 25)",
-    "/rows/link/contentsRange/bounds/3 = 26 (chrome 25)",
-    "/rows/link/contentsRange/rects/1/3 = 26 (chrome 25)",
+    "/rows/heading/contentsRange/bounds/1 = 11.5 (chrome 11)",
+    "/rows/heading/contentsRange/rects/0/1 = 11.5 (chrome 11)",
+    "/rows/link/contentsRange/bounds/1 = 11.5 (chrome 11)",
+    "/rows/link/contentsRange/rects/1/1 = 11.5 (chrome 11)",
 ];
 const RANGE_MIXED_HEIGHT: &[&str] = &[
-    "/rows/heading/contentsRange/bounds/3 = 26 (chrome 25)",
-    "/rows/heading/contentsRange/rects/0/3 = 26 (chrome 25)",
+    "/rows/heading/contentsRange/bounds/1 = 43.5 (chrome 43)",
+    "/rows/heading/contentsRange/rects/0/1 = 43.5 (chrome 43)",
     "/rows/link/bounds/3 = 98 (chrome 97)",
-    "/rows/link/contentsRange/bounds/3 = 98 (chrome 97)",
-    "/rows/link/contentsRange/rects/0/3 = 26 (chrome 25)",
-    "/rows/link/contentsRange/rects/2/3 = 26 (chrome 25)",
-    "/rows/link/contentsRange/rects/3/3 = 26 (chrome 25)",
+    "/rows/link/contentsRange/bounds/1 = 7.5 (chrome 7)",
+    "/rows/link/contentsRange/rects/0/1 = 7.5 (chrome 7)",
+    "/rows/link/contentsRange/rects/2/1 = 43.5 (chrome 43)",
+    "/rows/link/contentsRange/rects/3/1 = 79.5 (chrome 79)",
     "/rows/link/rects/0/3 = 26 (chrome 25)",
     "/rows/link/rects/2/3 = 26 (chrome 25)",
 ];

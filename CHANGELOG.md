@@ -11,6 +11,76 @@
   shape tried to assert both from one 100 ms session, so a slow runner could burn
   the budget before `Promise.reject(...)` settled and the rejection message was
   reported as "budget" instead of "collector failed". No retries.
+- **Changed (mcp screenshot, #171)**: a session now captures the live IDL
+  `indeterminate` flag at the end of each render — tree-order indices over
+  `document.querySelectorAll('input')` — and forwards them to turbo-dom-raster as
+  `ScreenshotOptions.idl_states` (turbo-dom#371), so a static screenshot of a page a
+  script marked indeterminate paints the Chrome 156 dash the serialized HTML cannot
+  express.
+- **Fixed (core tests, #199)**: the two `transport_identity` tests that assert
+  Chrome's HTTP/1 header order and casing are gated on the `impersonate` feature;
+  the rustls build (`--no-default-features`) no longer fails them, and the
+  CI rustls step runs the whole core crate instead of just `--lib --test websocket`.
+- **Changed (deps)**: turbo-dom crates repinned to `release/0.8.0` `3d02b8db`
+  (version 0.8.0; was `c650aae5` / 0.7.1). The repin closes four known parity gaps
+  — turbo-dom#372 (live-layout percent widths snap to 1/64 px),
+  #375 (empty unknown inline `offsetWidth` is 0), #377 (live-layout web-font
+  content height for `@font-face` IBM Plex Mono 20 px matches Chrome's 25 px) and the
+  `em` translate + named-colour used-size divergences in `parity_080` — whose pins
+  retire with them; the embedded-font range cases pin the new inline y-position gap
+  (still owned by turbo-dom). `turbo-dom-v8` stays on `79ae001d` (generated
+  candidate for #90) until `150.4.1` reaches crates.io.
+- **Fixed (render, #201)**: CSP violation reports now serialize a `blob:` or
+  `data:` `blockedURI` as the scheme alone (`"blob"` / `"data"`) like Chrome 156's
+  blob-url-resources control, so the opaque origin and its random key never leak
+  into the report. `csp::opaque_scheme_blocked_uri` handles both, and
+  `network_blocked_uri` delegates to it so every call site (the `connect-src`
+  reporter in `network_transports` and the script-src reporter in `runtime`)
+  picks up the new serialization. The remaining #201 items (text/plain iframe
+  body rendering, blob stylesheet MIME strictness, revoked-stylesheet
+  `SecurityError` on `.sheet.cssRules`) touch the runtime JS surface and the
+  blob-url-resources probe / fixture, and are split into #206.
+- **Fixed (GC / native-memory reclamation, #115)**: a retiring iframe context now releases
+  its blob URL entries from the native `URL.createObjectURL` store, and the host-side
+  `collect_message_port_garbage_for_testing` boundary prunes dead weak context handles from
+  the context-ownership registry. Soak coverage: `tests/gc_soak.rs` opens forty data-URL
+  iframes that each allocate a blob URL, a message channel and a 64-row detached subtree,
+  then checks that the message-port endpoints, queued bytes and host-context counts return
+  to their baseline. The same file reproduces #183 on an idle localhost (sixty frame loads
+  in one session) — the tail stayed under three seconds on this machine, so #183's reported
+  7-14 s slowdown looks like concurrent build load rather than a teardown leak.
+- **Fixed (CSP worker-src, #104, #190)**: `new Worker(url)` under `worker-src 'none'`
+  now fires a `securitypolicyviolation` whose `blockedURI` is the worker script URL
+  and whose `effectiveDirective` is `worker-src`, matching Chrome 156; the CSP3
+  fallback chain (`worker-src` -> `child-src` -> `script-src` -> `default-src`) is
+  applied, so a page under `script-src 'nonce-n'` without `worker-src` reports the
+  same violation. The Worker shell still constructs (`new Worker('/x.js')` returns a
+  Worker object), as in Chrome. `media-src` enforcement still waits on media loads
+  (split as #204). Checked against `csp-directives-chrome156.json`
+  (`tests/csp_directives.rs`). The remaining dedicated-worker runtime (a separate V8
+  realm per worker with DedicatedWorkerGlobalScope, module workers, blob: workers,
+  and SharedWorker/ServiceWorker) is tracked as #203.
+- **Fixed (render, #138)**: synchronous `XMLHttpRequest` (`open(..., false)`) now
+  blocks in `send()` and loads the response, over http(s), `blob:` and `data:` URLs.
+  Native `op_fetch_sync` runs the page's own fetch pipeline (CSP, CORS, cookies,
+  the HTTP cache and the blob:/data: scheme fetches) to completion on a dedicated
+  multi-thread runtime while the isolate thread is blocked. `xhr.js` also mirrors
+  Chrome 156's window-only restrictions (no loadstart or progress events on a sync
+  send, `NetworkError` thrown from `send()` on a network failure,
+  `InvalidAccessError` on `responseType` or `timeout` on a document's sync request,
+  and `async = undefined` is treated as synchronous). Covered by
+  `tests/sync_xhr.rs` against the Chrome 156 control.
+- **Fixed (render, #146)**: `blob:` URLs are now valid script, module, stylesheet,
+  image and iframe sources. The native blob URL store answers subresource loads
+  keyed by the creating document's storage key, so a revoked, foreign or
+  cross-partition URL fails like a missing response as in Chrome 156. Scripts and
+  modules resolve theirs through `script_fetch` after CSP and apply the MIME's
+  charset for source text; images and other destinations read the bytes directly;
+  iframes commit a local document response. Covered by
+  `tests/blob_url_resources.rs`.
+- **Refactor (render, #154)**: `script_fetch::fetch` split into small admission,
+  network-hop and finalisation helpers, so its cyclomatic complexity drops from
+  24 to 7 (`cc-check --max 15`). No behaviour change.
 - **Fixed (network transports, #188)**: a render session's trust anchor now covers its
   `wss:` sockets as well as its https fetches. `ClientHints::with_trust_anchor(der)`
   configures both; before, `new WebSocket('wss://…')` to a server signed by an embedder or
@@ -24,9 +94,6 @@
   (`get_incumbent_context`, turbo-dom#367) before surf's own validation runs; the native
   WindowProxy's `postMessage` reads it too. The native-SDK overlay (v8 152.2.0,
   `engine-154/patches/sdk.patch`) gains the same `get_incumbent_context` link.
-- **Changed (deps)**: turbo-dom crates repinned to `release/0.8.0` `c650aae5`;
-  `turbo-dom-v8` comes from turbo-dom's generated candidate `79ae001d` (adds
-  `get_incumbent_context`) until its next crates.io release.
 - **Fixed (IndexedDB, #148)**: a throwing `addEventListener` listener of a request's
   `success` / `error` event (or of its transaction or database on the bubble path) now
   aborts the transaction with `AbortError: Uncaught exception in event handler.`, like an

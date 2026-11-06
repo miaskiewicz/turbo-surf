@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed (tests, #194)**: the `expression_rejection_and_runaway_microtasks_...`
+  render test split into two: `expression_rejection_surfaces_the_underlying_error`
+  (5000 ms budget, generous enough for the microtask-queue drain that carries the
+  rejection on a loaded CI runner) and `expression_runaway_microtasks_hit_the_budget_and_leave_the_session_usable`
+  (keeps the 100 ms budget, asserts "budget" is reported for a deterministic
+  runaway microtask chain, then re-evals to prove the session survives). The old
+  shape tried to assert both from one 100 ms session, so a slow runner could burn
+  the budget before `Promise.reject(...)` settled and the rejection message was
+  reported as "budget" instead of "collector failed". No retries.
 - **Changed (mcp screenshot, #171)**: a session now captures the live IDL
   `indeterminate` flag at the end of each render — tree-order indices over
   `document.querySelectorAll('input')` — and forwards them to turbo-dom-raster as

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Fixed (render, #206)**: three Chrome 156 parity gaps on `blob:` subresources
+  carried over from #201. A `blob:` iframe whose response is `text/plain` now
+  renders Chrome's styled text viewer (the raw bytes sit inside a `<pre>`, so
+  `document.body.textContent` is the original text and `document.title` is
+  empty), and `document.contentType` reports the response's essence
+  ("text/plain" for the viewer, "text/html" elsewhere) by wrapping the
+  turbo-dom-browser-env native getter rather than hardcoding "text/html". A
+  `blob:` stylesheet now requires a strict `text/css` MIME: a response with any
+  other type still fires `load` on the link, but attaches an empty sheet with no
+  rules (Chrome's "loaded but disabled"), while non-`blob:` stylesheets keep the
+  existing CORS/quirks sniff fallback. Reading `.sheet.cssRules` on a sheet
+  whose backing `blob:` URL was revoked after the link resolved already matched
+  Chrome and is now pinned by the `styleRevoked` sub-case. The
+  `blob-url-resources` detection probe gains `iframeText`, `styleWrongMime` and
+  `styleRevoked`, and `harness/detection/fixtures/blob-url-resources-chrome156.json`
+  is re-recorded. Closes #206.
 - **Changed (quality gates, #154)**: cyclomatic-complexity CI jobs are now
   blocking at cc <= 15. The Rust backlog (46 functions in `turbo-surf-core`,
   `turbo-surf-mcp`, `turbo-surf-py` and `turbo-surf-render`) was refactored by

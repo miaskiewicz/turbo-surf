@@ -4,6 +4,8 @@
 > on [turbo-dom](https://github.com/miaskiewicz/turbo-dom). Fetch + parse + extract
 > + run page JS with no headless browser; 100×+ faster on server-rendered pages.
 
+> Working on this repo? See [docs/AGENTS.md](./docs/AGENTS.md) for one-command wrappers around the common workflows (oracle launch, Chrome 156 control recording, addon build, identity/parity checks, coverage, release prep).
+
 turbo-surf is a single native (Rust) engine — no Chromium, no headless browser
 (it can still render a reasonably-representative **synthetic screenshot** on
 demand — see below):

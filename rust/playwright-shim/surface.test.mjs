@@ -116,6 +116,37 @@ test("response events drain host records while opaque bodies stay hidden in page
   }
 });
 
+test("request events drain host records alongside responses", async () => {
+  const target = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("host-only-response");
+  });
+  await new Promise((done) => target.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${target.address().port}/private`;
+  const source = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(
+      `<body><script>fetch(${JSON.stringify(endpoint)},{mode:'no-cors'}).then(r=>r.text());</script></body>`,
+    );
+  });
+  await new Promise((done) => source.listen(0, "127.0.0.1", done));
+  const page = newPage();
+  const requests = [];
+  page.on("request", (request) => {
+    if (request.url() === endpoint) requests.push(request);
+  });
+  try {
+    await page.goto(`http://127.0.0.1:${source.address().port}/`, { waitUntil: "networkidle" });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url(), endpoint);
+  } finally {
+    await page.close();
+    source.closeAllConnections();
+    target.closeAllConnections();
+    await Promise.all([source, target].map((server) => new Promise((done) => server.close(done))));
+  }
+});
+
 // --- Locator: composition (pure JS) ---------------------------------------
 test("Locator composition: count/first/last/nth/all", async () => {
   const p = await fresh();

@@ -37,66 +37,86 @@ export function enrichResponseTransport(requests, responses, events) {
   const key = (event) => `${event.sessionId ?? ""}:${event.params.requestId}`;
   for (const event of events) {
     if (event.event === "requestWillBeSent") {
-      const { request, wallTime, redirectResponse } = event.params;
-      if (redirectResponse) attach(event, redirectResponse, requestMatches.get(key(event)));
+      const { redirectResponse } = event.params;
+      if (redirectResponse)
+        attachTransport(responses, event, redirectResponse, requestMatches.get(key(event)));
       requestMatches.delete(key(event));
       if (event.targetScope !== "main-frame-navigation") continue;
-      const candidates = requests.filter(
-        (row) =>
-          row.cdpTargetScope === "main-frame-navigation" &&
-          row.url === request.url &&
-          row.method === request.method &&
-          (event.sessionId === undefined || row.sessionId === event.sessionId),
-      );
-      const time = wallTime * 1000;
-      const first = candidates[0];
-      const browserStart = first?.timing?.startTime;
-      const matchingEvents = events.filter(
-        (entry) =>
-          entry.event === "requestWillBeSent" &&
-          entry.targetScope === "main-frame-navigation" &&
-          entry.sessionId === event.sessionId &&
-          entry.params.request.url === request.url &&
-          entry.params.request.method === request.method,
-      );
-      if (
-        candidates.length === 1 &&
-        matchingEvents.length === 1 &&
-        !assigned.has(first) &&
-        Number.isFinite(time) &&
-        time > 0 &&
-        Number.isFinite(browserStart) &&
-        browserStart > 0
-      ) {
-        assigned.add(first);
-        requestMatches.set(key(event), first);
-      }
+      const first = uniqueNavigationRequest(requests, events, event, assigned);
+      if (!first) continue;
+      assigned.add(first);
+      requestMatches.set(key(event), first);
     } else if (event.event === "responseReceived")
-      attach(event, event.params.response, requestMatches.get(key(event)));
+      attachTransport(responses, event, event.params.response, requestMatches.get(key(event)));
   }
   for (const row of responses)
     if (!row.transport)
       row.transport = { source: "unavailable", reason: "no-unambiguous-cdp-response" };
+}
 
-  function attach(event, response, request) {
-    if (!request) return;
-    const candidates = responses.filter(
-      (row) =>
-        !row.transport &&
-        row.requestId === request.id &&
-        row.url === response.url &&
-        row.status === response.status,
-    );
-    if (candidates.length !== 1) return;
-    const row = candidates[0];
-    row.protocolRequestId = event.params.requestId;
-    row.transport = responseTransport(response);
-    row.transport.association = "main-frame-navigation-unique-url-method";
-  }
+const positiveFinite = (value) => Number.isFinite(value) && value > 0;
+
+// The single unassigned navigation row a main-frame requestWillBeSent identifies, or null
+// when the URL/method pair is ambiguous on either side or its clocks are unusable.
+export function uniqueNavigationRequest(requests, events, event, assigned) {
+  const { request, wallTime } = event.params;
+  const candidates = requests.filter(
+    (row) =>
+      row.cdpTargetScope === "main-frame-navigation" &&
+      row.url === request.url &&
+      row.method === request.method &&
+      (event.sessionId === undefined || row.sessionId === event.sessionId),
+  );
+  const first = candidates[0];
+  const matchingEvents = events.filter(
+    (entry) =>
+      entry.event === "requestWillBeSent" &&
+      entry.targetScope === "main-frame-navigation" &&
+      entry.sessionId === event.sessionId &&
+      entry.params.request.url === request.url &&
+      entry.params.request.method === request.method,
+  );
+  const unique = candidates.length === 1 && matchingEvents.length === 1 && !assigned.has(first);
+  return unique && positiveFinite(wallTime * 1000) && positiveFinite(first?.timing?.startTime)
+    ? first
+    : null;
+}
+
+function attachTransport(responses, event, response, request) {
+  if (!request) return;
+  const candidates = responses.filter(
+    (row) =>
+      !row.transport &&
+      row.requestId === request.id &&
+      row.url === response.url &&
+      row.status === response.status,
+  );
+  if (candidates.length !== 1) return;
+  const row = candidates[0];
+  row.protocolRequestId = event.params.requestId;
+  row.transport = responseTransport(response);
+  row.transport.association = "main-frame-navigation-unique-url-method";
+}
+
+const histogram = (values) => Object.fromEntries(values.map((value) => [value, 0]));
+// A histogram bucket: "unknown" for a missing value, "other" for one outside the buckets.
+const bucketOf = (counts, value) =>
+  value == null ? "unknown" : Object.hasOwn(counts, value) ? value : "other";
+
+function tallyResponseTransport(summary, response) {
+  const transport = response.transport?.source === "cdp-response" ? response.transport : null;
+  summary[transport ? "observed" : "unknown"]++;
+  summary.protocols[bucketOf(summary.protocols, transport?.protocol)]++;
+  summary.tlsProtocols[bucketOf(summary.tlsProtocols, transport?.securityDetails?.protocol)]++;
+  for (const field of ["securityDetails", "timing"])
+    summary[field][transport?.[field] ? "present" : "missing"]++;
+  for (const field of ["connectionReused", "fromDiskCache", "fromServiceWorker"])
+    summary[field][
+      typeof transport?.[field] === "boolean" ? String(transport[field]) : "unknown"
+    ]++;
 }
 
 export function summarizeResponseTransport(responses = []) {
-  const histogram = (values) => Object.fromEntries(values.map((value) => [value, 0]));
   const summary = {
     source: "cdp-response",
     packetCapture: false,
@@ -111,24 +131,7 @@ export function summarizeResponseTransport(responses = []) {
     fromDiskCache: { true: 0, false: 0, unknown: 0 },
     fromServiceWorker: { true: 0, false: 0, unknown: 0 },
   };
-  for (const response of responses) {
-    const transport = response.transport?.source === "cdp-response" ? response.transport : null;
-    summary[transport ? "observed" : "unknown"]++;
-    const protocol = transport?.protocol;
-    const tls = transport?.securityDetails?.protocol;
-    summary.protocols[
-      protocol == null ? "unknown" : Object.hasOwn(summary.protocols, protocol) ? protocol : "other"
-    ]++;
-    summary.tlsProtocols[
-      tls == null ? "unknown" : Object.hasOwn(summary.tlsProtocols, tls) ? tls : "other"
-    ]++;
-    for (const field of ["securityDetails", "timing"])
-      summary[field][transport?.[field] ? "present" : "missing"]++;
-    for (const field of ["connectionReused", "fromDiskCache", "fromServiceWorker"])
-      summary[field][
-        typeof transport?.[field] === "boolean" ? String(transport[field]) : "unknown"
-      ]++;
-  }
+  for (const response of responses) tallyResponseTransport(summary, response);
   return summary;
 }
 

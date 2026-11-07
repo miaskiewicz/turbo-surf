@@ -1,0 +1,91 @@
+{
+  "browser": "Chrome/156.0.8078.80",
+  "v8": "15.6.75.27",
+  "widgetSha256": "49daa4e5b93b441b537b979248a0840237aca8ef9ae86002200bb4c3348b831d",
+  "probeSha256": "1f6ac53f85b28f92d6c9a530c7f9d9d63b54d6ad9a55644fb0a929971209f3fe",
+  "collectorSha256": "aa1ddf2fbb128ca6b7030932aa84b9bb1aac91443e85372a59c49ae25d3d982b",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--use-mock-keychain",
+    "--password-store=basic",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "run": "localhost",
+      "top": {
+        "previous": null,
+        "final": "top"
+      },
+      "direct": {
+        "step": "direct",
+        "own": {
+          "listed": false,
+          "previous": null
+        },
+        "handle": {
+          "tag": "[object IDBFactory]",
+          "same": false,
+          "sameObject": true,
+          "listed": false,
+          "previous": null
+        }
+      },
+      "nested": {
+        "step": "nested",
+        "own": {
+          "listed": true,
+          "previous": "direct"
+        },
+        "handle": {
+          "tag": "[object IDBFactory]",
+          "same": false,
+          "sameObject": true,
+          "listed": true,
+          "previous": "direct-handle"
+        }
+      }
+    },
+    {
+      "run": "127.0.0.1",
+      "top": {
+        "previous": null,
+        "final": "nested-handle"
+      },
+      "direct": {
+        "step": "direct",
+        "own": {
+          "listed": true,
+          "previous": "top"
+        },
+        "handle": {
+          "tag": "[object IDBFactory]",
+          "same": false,
+          "sameObject": true,
+          "listed": true,
+          "previous": "direct"
+        }
+      },
+      "nested": {
+        "step": "nested",
+        "own": {
+          "listed": false,
+          "previous": null
+        },
+        "handle": {
+          "tag": "[object IDBFactory]",
+          "same": false,
+          "sameObject": true,
+          "listed": true,
+          "previous": "direct-handle"
+        }
+      }
+    }
+  ]
+}

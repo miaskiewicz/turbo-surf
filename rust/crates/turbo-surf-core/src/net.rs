@@ -596,7 +596,13 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str, socs: Optio
 // Per-call profile overrides are not applied on this backend.
 fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     #[cfg(feature = "impersonate")]
-    let builder = {
+    let builder = apply_emulation(builder, chrome_emulation());
+    builder
+}
+
+#[cfg(feature = "impersonate")]
+fn chrome_emulation() -> wreq::Emulation {
+    {
         use wreq::IntoEmulation;
         let profile = crate::fingerprint::default_profile();
         // Resolve the upstream wreq-util Chrome profile to a concrete `Emulation` so its
@@ -642,14 +648,50 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
         // The upstream Chrome 154 profile owns signature-algorithm GREASE and
         // real trust-anchor IDs. Do not replace its Chromium root list with the
         // empty extension used by the former compatibility patch.
-        builder
-            .emulation(emulation)
-            // Override AFTER emulation (wreq applies the profile immediately, so
-            // later fine-tuning wins) to use the configured full patch version
-            // from the browser registry.
-            .user_agent(profile.user_agent.as_str())
-    };
+        emulation
+    }
+}
+
+#[cfg(feature = "impersonate")]
+fn apply_emulation(
+    builder: http::ClientBuilder,
+    emulation: wreq::Emulation,
+) -> http::ClientBuilder {
     builder
+        .emulation(emulation)
+        // Override AFTER emulation (wreq applies the profile immediately, so
+        // later fine-tuning wins) to use the configured full patch version
+        // from the browser registry.
+        .user_agent(crate::fingerprint::default_profile().user_agent.as_str())
+}
+
+/// The transport for a `wss:` upgrade (#179): the https emulation with the TLS
+/// change Chrome's WebSocket stack makes for an HTTP/1.1 upgrade. ALPN offers only
+/// `http/1.1`, and Chrome configures ALPS only for offered protocols, so no ALPS
+/// either. No redirects (Chrome fails a redirected handshake) and no idle pooling
+/// (an upgraded or refused connection is never lent to another request). The rustls
+/// backend has no Chrome transport and dials `wss:` itself (websocket.rs).
+#[cfg(feature = "impersonate")]
+pub(crate) fn websocket_client_builder(
+    anchor: Option<&[u8]>,
+) -> Result<http::ClientBuilder, HttpError> {
+    let builder = {
+        let mut emulation = chrome_emulation();
+        if let Some(tls) = emulation.tls_options.as_mut() {
+            tls.alpn_protocols = Some(std::borrow::Cow::Borrowed(&[
+                http::tls::AlpnProtocol::HTTP1,
+            ]));
+            tls.alps_protocols = None;
+        }
+        apply_emulation(http::Client::builder(), emulation)
+    };
+    let builder = builder
+        .redirect(http::redirect::Policy::none())
+        .pool_max_idle_per_host(0);
+    match anchor {
+        Some(der) => with_trust(builder, der),
+        None => Ok(builder),
+    }
 }
 
 // The upstream wreq-util recipe a registry release names. Only recipes whose
@@ -773,7 +815,12 @@ pub fn build_report_client() -> ReportClient {
 /// Native transport builder with an embedder-supplied DER trust anchor.
 /// Certificate verification remains enabled; the factory is never guest-visible.
 pub fn client_builder_with_trust(der: &[u8]) -> Result<http::ClientBuilder, HttpError> {
-    let builder = client_builder().redirect(http::redirect::Policy::none());
+    with_trust(
+        client_builder().redirect(http::redirect::Policy::none()),
+        der,
+    )
+}
+fn with_trust(builder: http::ClientBuilder, der: &[u8]) -> Result<http::ClientBuilder, HttpError> {
     #[cfg(feature = "impersonate")]
     let builder = builder.tls_cert_store(
         http::tls::trust::CertStore::builder()
@@ -1545,6 +1592,201 @@ async fn cached_request(
     cached_request_once(opts, hop, client, true).await
 }
 
+/// Arguments to [`send_and_revalidate`] — the "no reusable cached response"
+/// path through [`cached_request_once`].
+struct SendAndRevalidate<'a, 'b> {
+    opts: &'a mut FetchOptions<'b>,
+    hop: &'a Hop,
+    client: &'a http::Client,
+    restart: bool,
+    headers: &'a mut BTreeMap<String, String>,
+    mode: CacheMode,
+    range_header: Option<&'a str>,
+    candidate: Option<(crate::http_cache::Entry, bool)>,
+    fill: Option<RangeFill>,
+    generation: u64,
+    cache: Option<&'a HttpCache>,
+}
+
+/// Merge revalidation / range / cache-control request headers from the
+/// candidate cached entry, then send the request. Split from
+/// [`cached_request_once`] to keep its cyclomatic complexity under the gate.
+async fn send_and_revalidate<'a, 'b>(
+    args: SendAndRevalidate<'a, 'b>,
+) -> Result<http::Response, HttpError> {
+    let SendAndRevalidate {
+        opts,
+        hop,
+        client,
+        restart,
+        headers,
+        mode,
+        range_header,
+        candidate,
+        fill,
+        generation,
+        cache,
+    } = args;
+    if mode == CacheMode::OnlyIfCached {
+        return Err(HttpError::new("HTTP cache miss", ErrorCode::Network));
+    }
+    apply_revalidation_headers(headers, &fill, range_header, candidate.as_ref());
+    apply_cache_control_mode(headers, mode);
+    let mut response = send(
+        client,
+        Outgoing {
+            method: &hop.method,
+            url: &hop.url,
+            headers,
+            body: &hop.body,
+            body_bytes: &hop.body_bytes,
+            upload: opts.upload_body.take(),
+            restart,
+        },
+    )
+    .await?;
+    if opts.response_side_effects.is_some() {
+        let effects = NetworkResponseEffects {
+            url: final_url(&response),
+            headers: response_headers_pairs(&response),
+        };
+        response.extensions_mut().insert(effects);
+    }
+    let raw_effects = response
+        .extensions()
+        .get::<NetworkResponseEffects>()
+        .cloned();
+    ingest_set_cookie(opts, &response, &hop.url);
+    if let Some(fill) = fill.filter(|_| response.status().as_u16() == 206) {
+        return finish_range_response(opts, hop, headers, response, fill, generation);
+    }
+    if response.status().as_u16() == 304 {
+        return finish_304_revalidation(
+            response,
+            candidate,
+            headers,
+            range_header,
+            raw_effects,
+            hop.method.as_str(),
+            cache,
+        );
+    }
+    Ok(response)
+}
+
+/// Install range / if-range / cached validators on the request headers for a
+/// revalidation or partial-fill hop.
+fn apply_revalidation_headers(
+    headers: &mut BTreeMap<String, String>,
+    fill: &Option<RangeFill>,
+    range_header: Option<&str>,
+    candidate: Option<&(crate::http_cache::Entry, bool)>,
+) {
+    if let Some(fill) = fill {
+        headers.insert(
+            "range".into(),
+            format!(
+                "bytes={}-{}",
+                fill.range.start + fill.prefix.len(),
+                fill.range.end - 1
+            ),
+        );
+        headers.insert("if-range".into(), fill.validator.clone());
+    } else if range_header.is_none() {
+        if let Some((entry, _)) = candidate {
+            entry.validators(headers);
+        }
+    }
+}
+
+/// Seed `cache-control` / `pragma` request headers for Reload / NoStore /
+/// NoCache modes (each left untouched when the caller already set the field).
+fn apply_cache_control_mode(headers: &mut BTreeMap<String, String>, mode: CacheMode) {
+    match mode {
+        CacheMode::Reload | CacheMode::NoStore => {
+            headers
+                .entry("cache-control".into())
+                .or_insert("no-cache".into());
+            headers.entry("pragma".into()).or_insert("no-cache".into());
+        }
+        CacheMode::NoCache => {
+            headers
+                .entry("cache-control".into())
+                .or_insert("max-age=0".into());
+        }
+        _ => {}
+    }
+}
+
+/// Convert a response's header map into the `(name, value)` owned-pairs form
+/// used by cache entries and response-effects records.
+fn response_headers_pairs(response: &http::Response) -> Vec<(String, String)> {
+    response
+        .headers()
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (key.as_str().to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
+/// Merge the 304 response headers into the cached entry, store the refreshed
+/// entry, and produce the client-visible response (honouring HEAD + effects).
+fn finish_304_revalidation(
+    response: http::Response,
+    candidate: Option<(crate::http_cache::Entry, bool)>,
+    headers: &BTreeMap<String, String>,
+    range_header: Option<&str>,
+    raw_effects: Option<NetworkResponseEffects>,
+    method: &str,
+    cache: Option<&HttpCache>,
+) -> Result<http::Response, HttpError> {
+    let Some((mut entry, _)) = candidate else {
+        return Ok(response);
+    };
+    let response_headers = response_headers_pairs(&response);
+    entry.merge(&response_headers, headers);
+    let mut prepared = entry.range_response(range_header).ok_or_else(|| {
+        HttpError::new(
+            "Incomplete cached response for revalidation",
+            ErrorCode::Network,
+        )
+    })?;
+    if let Some(cache) = cache {
+        cache.store(entry);
+    }
+    if method == "HEAD" {
+        prepared.body.clear();
+    }
+    let mut response = prepared.response();
+    if let Some(effects) = raw_effects {
+        response.extensions_mut().insert(effects);
+    }
+    Ok(response)
+}
+
+/// Fetch's conditional-request bypass: when the caller supplied any If-* header
+/// on a Default-cache-mode request, drop the HTTP cache for this hop and send
+/// to the network (so surf never short-circuits a caller's revalidation).
+fn resolve_cache_mode(opts: &FetchOptions<'_>, headers: &BTreeMap<String, String>) -> CacheMode {
+    const CONDITIONAL: &[&str] = &[
+        "if-none-match",
+        "if-modified-since",
+        "if-unmodified-since",
+        "if-match",
+        "if-range",
+    ];
+    let conditional = CONDITIONAL.iter().any(|name| headers.contains_key(*name));
+    if opts.http_cache.is_some() && opts.cache_mode == CacheMode::Default && conditional {
+        CacheMode::NoStore
+    } else {
+        opts.cache_mode
+    }
+}
+
 async fn cached_request_once(
     opts: &mut FetchOptions<'_>,
     hop: &Hop,
@@ -1586,22 +1828,7 @@ async fn cached_request_once(
     let range_header = (hop.method == "GET")
         .then(|| headers.get("range").cloned())
         .flatten();
-    let mode = if opts.http_cache.is_some()
-        && opts.cache_mode == CacheMode::Default
-        && [
-            "if-none-match",
-            "if-modified-since",
-            "if-unmodified-since",
-            "if-match",
-            "if-range",
-        ]
-        .iter()
-        .any(|name| headers.contains_key(*name))
-    {
-        CacheMode::NoStore
-    } else {
-        opts.cache_mode
-    };
+    let mode = resolve_cache_mode(opts, &headers);
     if mode == CacheMode::OnlyIfCached && (!eligible || range_header.is_some()) {
         return Err(HttpError::new("HTTP cache miss", ErrorCode::Network));
     }
@@ -1638,115 +1865,74 @@ async fn cached_request_once(
         }
         entry.response()
     } else {
-        if mode == CacheMode::OnlyIfCached {
-            return Err(HttpError::new("HTTP cache miss", ErrorCode::Network));
-        }
-        if let Some(fill) = &fill {
-            headers.insert(
-                "range".into(),
-                format!(
-                    "bytes={}-{}",
-                    fill.range.start + fill.prefix.len(),
-                    fill.range.end - 1
-                ),
-            );
-            headers.insert("if-range".into(), fill.validator.clone());
-        } else if range_header.is_none() {
-            if let Some((entry, _)) = &candidate {
-                entry.validators(&mut headers);
-            }
-        }
-        match mode {
-            CacheMode::Reload | CacheMode::NoStore => {
-                headers
-                    .entry("cache-control".into())
-                    .or_insert("no-cache".into());
-                headers.entry("pragma".into()).or_insert("no-cache".into());
-            }
-            CacheMode::NoCache => {
-                headers
-                    .entry("cache-control".into())
-                    .or_insert("max-age=0".into());
-            }
-            _ => {}
-        }
-        let mut response = send(
+        send_and_revalidate(SendAndRevalidate {
+            opts,
+            hop,
             client,
-            Outgoing {
-                method: &hop.method,
-                url: &hop.url,
-                headers: &headers,
-                body: &hop.body,
-                body_bytes: &hop.body_bytes,
-                upload: opts.upload_body.take(),
-                restart,
-            },
-        )
-        .await?;
-        if opts.response_side_effects.is_some() {
-            let effects = NetworkResponseEffects {
-                url: final_url(&response),
-                headers: response
-                    .headers()
-                    .iter()
-                    .filter_map(|(key, value)| {
-                        value
-                            .to_str()
-                            .ok()
-                            .map(|value| (key.as_str().to_owned(), value.to_owned()))
-                    })
-                    .collect(),
-            };
-            response.extensions_mut().insert(effects);
-        }
-        let raw_effects = response
-            .extensions()
-            .get::<NetworkResponseEffects>()
-            .cloned();
-        ingest_set_cookie(opts, &response, &hop.url);
-        if let Some(fill) = fill.filter(|_| response.status().as_u16() == 206) {
-            return finish_range_response(opts, hop, &headers, response, fill, generation);
-        }
-        if response.status().as_u16() == 304 {
-            if let Some((mut entry, _)) = candidate {
-                let response_headers = response
-                    .headers()
-                    .iter()
-                    .filter_map(|(key, value)| {
-                        value
-                            .to_str()
-                            .ok()
-                            .map(|value| (key.as_str().to_owned(), value.to_owned()))
-                    })
-                    .collect::<Vec<_>>();
-                entry.merge(&response_headers, &headers);
-                let mut prepared =
-                    entry
-                        .range_response(range_header.as_deref())
-                        .ok_or_else(|| {
-                            HttpError::new(
-                                "Incomplete cached response for revalidation",
-                                ErrorCode::Network,
-                            )
-                        })?;
-                if let Some(cache) = cache {
-                    cache.store(entry);
-                }
-                if hop.method == "HEAD" {
-                    prepared.body.clear();
-                }
-                let mut response = prepared.response();
-                if let Some(effects) = raw_effects {
-                    response.extensions_mut().insert(effects);
-                }
-                response
-            } else {
-                response
-            }
-        } else {
-            response
-        }
+            restart,
+            headers: &mut headers,
+            mode,
+            range_header: range_header.as_deref(),
+            candidate,
+            fill,
+            generation,
+            cache,
+        })
+        .await?
     };
+    attach_post_response_extensions(
+        opts,
+        hop,
+        &headers,
+        &mut res,
+        PostResponseContext {
+            cache,
+            mode,
+            eligible,
+            generation,
+            selected_dictionary,
+            dictionary_store,
+            dictionary_generation,
+            dictionary_context: &dictionary_context,
+        },
+    );
+    Ok(res)
+}
+
+/// Inputs threaded into [`attach_post_response_extensions`] — a struct beats a
+/// 10-arg function for readability and keeps the field names in sight at the
+/// call site.
+struct PostResponseContext<'a> {
+    cache: Option<&'a HttpCache>,
+    mode: CacheMode,
+    eligible: bool,
+    generation: u64,
+    selected_dictionary: Option<SelectedDictionary>,
+    dictionary_store: Option<DictionaryStore>,
+    dictionary_generation: u64,
+    dictionary_context: &'a RequestContext,
+}
+
+/// Invalidate the cache on unsafe writes, attach pending-store / dictionary /
+/// head markers, and stash a pending compression dictionary. Split out of
+/// [`cached_request_once`] to keep its complexity under the gate.
+fn attach_post_response_extensions(
+    opts: &FetchOptions<'_>,
+    hop: &Hop,
+    headers: &BTreeMap<String, String>,
+    res: &mut http::Response,
+    ctx: PostResponseContext<'_>,
+) {
+    let PostResponseContext {
+        cache,
+        mode,
+        eligible,
+        generation,
+        selected_dictionary,
+        dictionary_store,
+        dictionary_generation,
+        dictionary_context,
+    } = ctx;
     if !matches!(hop.method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE")
         && res.status().as_u16() < 400
     {
@@ -1763,9 +1949,9 @@ async fn cached_request_once(
             cache.pending(
                 &opts.cache_partition,
                 &hop.url,
-                &headers,
-                &res,
-                status_text(&res),
+                headers,
+                res,
+                status_text(res),
                 generation,
             )
         }) {
@@ -1780,33 +1966,52 @@ async fn cached_request_once(
     }
     if hop.method != "HEAD" && mode != CacheMode::NoStore {
         if let Some(store) = &dictionary_store {
-            let headers = res
-                .headers()
-                .iter()
-                .filter_map(|(name, value)| {
-                    value
-                        .to_str()
-                        .ok()
-                        .map(|value| (name.as_str().to_owned(), value.to_owned()))
-                })
-                .collect();
-            if let Some(pending) = PendingDictionary::new(
+            attach_pending_dictionary(
+                opts,
+                hop,
+                res,
                 store,
                 dictionary_generation,
-                &opts.cache_partition,
-                &hop.url,
-                &dictionary_context,
-                res.status().as_u16(),
-                headers,
-                res.extensions()
-                    .get::<crate::http_cache::CachedStoredAt>()
-                    .map_or_else(std::time::SystemTime::now, |time| time.0),
-            ) {
-                res.extensions_mut().insert(pending);
-            }
+                dictionary_context,
+            );
         }
     }
-    Ok(res)
+}
+
+/// If the response's headers match a compression-dictionary rule, remember the
+/// pending-store entry so the body reader can finish it when the bytes drain.
+fn attach_pending_dictionary(
+    opts: &FetchOptions<'_>,
+    hop: &Hop,
+    res: &mut http::Response,
+    store: &DictionaryStore,
+    dictionary_generation: u64,
+    dictionary_context: &RequestContext,
+) {
+    let headers = res
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect();
+    if let Some(pending) = PendingDictionary::new(
+        store,
+        dictionary_generation,
+        &opts.cache_partition,
+        &hop.url,
+        dictionary_context,
+        res.status().as_u16(),
+        headers,
+        res.extensions()
+            .get::<crate::http_cache::CachedStoredAt>()
+            .map_or_else(std::time::SystemTime::now, |time| time.0),
+    ) {
+        res.extensions_mut().insert(pending);
+    }
 }
 
 async fn follow_manually_response(
@@ -1821,16 +2026,7 @@ async fn follow_manually_response(
             ErrorCode::Network,
         ));
     }
-    let cl = match opts.client_hints {
-        Some(hints) if streaming_upload => hints.upload_client()?,
-        Some(hints) => hints.manual_client()?,
-        None if streaming_upload => {
-            crate::upload_body::guard(client_builder().redirect(http::redirect::Policy::none()))
-                .build()
-                .map_err(|e| err(e, ErrorCode::Network))?
-        }
-        None => client(http::redirect::Policy::none()).map_err(|e| err(e, ErrorCode::Network))?,
-    };
+    let cl = build_follow_client(opts, streaming_upload)?;
     let mut hop = Hop {
         url: start.to_string(),
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
@@ -1838,124 +2034,241 @@ async fn follow_manually_response(
         body_bytes: opts.body_bytes.clone(),
     };
     for redirects in 0.. {
-        if opts
-            .request_policy
-            .is_some_and(|allowed| !allowed(&hop.url, redirects > 0))
-        {
-            return Err(HttpError::new(
-                "Request blocked by native document policy",
-                ErrorCode::Network,
-            ));
-        }
-        if opts.context.as_ref().is_some_and(|context| {
-            context.mode == crate::request_context::RequestMode::SameOrigin
-                && (context.opaque_origin
-                    || context.origin_tainted
-                    || context.source.as_deref().is_none_or(|source| {
-                        !crate::request_context::same_origin(source, &hop.url)
-                    }))
-        }) {
-            return Err(HttpError::new(
-                "Request redirect violates same-origin mode",
-                ErrorCode::Network,
-            ));
-        }
+        check_request_policy(opts, &hop, redirects)?;
+        check_same_origin_mode(opts, &hop)?;
         let mut res = cached_request(opts, &hop, &cl).await?;
         let final_url = final_url(&res);
-        if let (Some(effects), Some(observer)) = (
-            res.extensions().get::<NetworkResponseEffects>(),
-            opts.response_side_effects,
-        ) {
-            let context = opts.context.clone().unwrap_or_default();
-            if context.sends_credentials(&effects.url) {
-                observer(&context, &effects.url, &effects.headers);
-            }
-        }
-        if let Some(allowed) = opts.response_policy {
-            let context = opts.context.clone().unwrap_or_default();
-            let headers = res
-                .headers()
-                .iter()
-                .filter_map(|(name, value)| {
-                    value
-                        .to_str()
-                        .ok()
-                        .map(|value| (name.as_str().to_string(), value.to_string()))
-                })
-                .collect::<Vec<_>>();
-            if !allowed(&context, &hop.url, &headers) {
-                return Err(HttpError::new(
-                    "Response blocked by native document policy",
-                    ErrorCode::Network,
-                ));
-            }
-        }
+        notify_response_effects(opts, &res);
+        check_response_policy(opts, &hop, &res)?;
         if res.status().as_u16() == 204 {
             if let Some(pending) = res.extensions_mut().remove::<PendingStore>() {
                 pending.cache.store(pending.entry);
             }
         }
-        match redirect_location(&res) {
-            Some(_) if opts.redirect == Some(RedirectMode::Error) => {
-                return Err(HttpError::new(
-                    "Request redirect mode is error",
-                    ErrorCode::Network,
-                ))
-            }
-            Some(_) if opts.redirect == Some(RedirectMode::Manual) => {
-                return Ok((res, final_url, false))
-            }
-            Some(loc) if redirects < max_redirects => {
-                let next = advance(&hop, &res, &loc)?;
-                if streaming_upload && next.method != "GET" && res.status().as_u16() != 303 {
-                    return Err(HttpError::new(
-                        "Cannot replay a streaming request body",
-                        ErrorCode::Network,
-                    ));
-                }
-
-                if !crate::request_context::same_origin(&hop.url, &next.url) {
-                    opts.headers
-                        .retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
-                }
-                if hop.method != next.method {
-                    opts.headers.retain(|name, _| {
-                        !matches!(
-                            name.to_ascii_lowercase().as_str(),
-                            "content-encoding"
-                                | "content-language"
-                                | "content-location"
-                                | "content-type"
-                                | "content-length"
-                        )
-                    });
-                }
-                if let Some(context) = opts.context.as_mut() {
-                    if let Some(value) = list_header(&res, "referrer-policy") {
-                        if let Some(policy) =
-                            crate::referrer_policy::ReferrerPolicy::from_header(&value)
-                        {
-                            context.referrer_policy = policy;
-                        }
-                    }
-                    context.follow_redirect(&hop.url, &next.url);
-                }
-                if let Some(mut pending) = res.extensions_mut().remove::<PendingStore>() {
-                    pending.entry.body = read_capped(res, DEFAULT_MAX_BYTES).await?.to_vec();
-                    pending.cache.store(pending.entry);
-                }
-                hop = next;
-            }
-            Some(_) if opts.redirect == Some(RedirectMode::Follow) => {
-                return Err(HttpError::new(
-                    "Request redirect limit exceeded",
-                    ErrorCode::Network,
-                ))
-            }
-            _ => return Ok((res, final_url, redirects > 0)),
-        }
+        let loc = match redirect_dispatch(opts, redirects, max_redirects, &res) {
+            RedirectDispatch::Return => return Ok((res, final_url, redirects > 0)),
+            RedirectDispatch::ReturnAsFinal => return Ok((res, final_url, false)),
+            RedirectDispatch::Error(e) => return Err(e),
+            RedirectDispatch::Follow(loc) => loc,
+        };
+        hop = apply_redirect_hop(opts, hop, res, &loc, streaming_upload).await?;
     }
     unreachable!("redirect loop always returns at the cap")
+}
+
+/// Pick the reqwest client follow_manually_response should use: client-hints
+/// aware when available, upload-body-aware when the caller is streaming.
+fn build_follow_client(
+    opts: &FetchOptions<'_>,
+    streaming_upload: bool,
+) -> Result<http::Client, HttpError> {
+    match opts.client_hints {
+        Some(hints) if streaming_upload => hints.upload_client(),
+        Some(hints) => hints.manual_client(),
+        None if streaming_upload => {
+            crate::upload_body::guard(client_builder().redirect(http::redirect::Policy::none()))
+                .build()
+                .map_err(|e| err(e, ErrorCode::Network))
+        }
+        None => client(http::redirect::Policy::none()).map_err(|e| err(e, ErrorCode::Network)),
+    }
+}
+
+/// Fetch's request-policy gate — refuse the hop when the native document
+/// policy says so (first request plus every redirect).
+fn check_request_policy(
+    opts: &FetchOptions<'_>,
+    hop: &Hop,
+    redirects: usize,
+) -> Result<(), HttpError> {
+    if opts
+        .request_policy
+        .is_some_and(|allowed| !allowed(&hop.url, redirects > 0))
+    {
+        return Err(HttpError::new(
+            "Request blocked by native document policy",
+            ErrorCode::Network,
+        ));
+    }
+    Ok(())
+}
+
+/// Fetch's same-origin mode check: an opaque / tainted / cross-origin redirect
+/// aborts the fetch rather than leaking the request to another origin.
+fn check_same_origin_mode(opts: &FetchOptions<'_>, hop: &Hop) -> Result<(), HttpError> {
+    let violates = opts.context.as_ref().is_some_and(|context| {
+        context.mode == crate::request_context::RequestMode::SameOrigin
+            && (context.opaque_origin
+                || context.origin_tainted
+                || context
+                    .source
+                    .as_deref()
+                    .is_none_or(|source| !crate::request_context::same_origin(source, &hop.url)))
+    });
+    if violates {
+        return Err(HttpError::new(
+            "Request redirect violates same-origin mode",
+            ErrorCode::Network,
+        ));
+    }
+    Ok(())
+}
+
+/// Call `opts.response_side_effects` for responses that carry recorded network
+/// effects and that would have sent credentials in Fetch terms.
+fn notify_response_effects(opts: &FetchOptions<'_>, res: &http::Response) {
+    if let (Some(effects), Some(observer)) = (
+        res.extensions().get::<NetworkResponseEffects>(),
+        opts.response_side_effects,
+    ) {
+        let context = opts.context.clone().unwrap_or_default();
+        if context.sends_credentials(&effects.url) {
+            observer(&context, &effects.url, &effects.headers);
+        }
+    }
+}
+
+/// Fetch's response-policy gate — surface the response to the native document
+/// policy (CSP / mixed content / etc.) and refuse it if blocked.
+fn check_response_policy(
+    opts: &FetchOptions<'_>,
+    hop: &Hop,
+    res: &http::Response,
+) -> Result<(), HttpError> {
+    let Some(allowed) = opts.response_policy else {
+        return Ok(());
+    };
+    let context = opts.context.clone().unwrap_or_default();
+    let headers = res
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect::<Vec<_>>();
+    if !allowed(&context, &hop.url, &headers) {
+        return Err(HttpError::new(
+            "Response blocked by native document policy",
+            ErrorCode::Network,
+        ));
+    }
+    Ok(())
+}
+
+/// What [`follow_manually_response`] should do with the current response once
+/// its redirect location (and the caller's redirect mode) have been inspected.
+enum RedirectDispatch {
+    /// Return the response as a final (unredirected) answer.
+    Return,
+    /// Return the response verbatim (`redirect: manual` convention).
+    ReturnAsFinal,
+    /// Bubble this error out.
+    Error(HttpError),
+    /// Follow this location as the next hop.
+    Follow(String),
+}
+
+/// Classify the response for the manual-redirect loop: compare the redirect
+/// location (if any) against the caller's `opts.redirect` and the remaining
+/// redirect budget, and return the shape of the next step.
+fn redirect_dispatch(
+    opts: &FetchOptions<'_>,
+    redirects: usize,
+    max_redirects: usize,
+    res: &http::Response,
+) -> RedirectDispatch {
+    let Some(loc) = redirect_location(res) else {
+        return RedirectDispatch::Return;
+    };
+    if opts.redirect == Some(RedirectMode::Error) {
+        return RedirectDispatch::Error(HttpError::new(
+            "Request redirect mode is error",
+            ErrorCode::Network,
+        ));
+    }
+    if opts.redirect == Some(RedirectMode::Manual) {
+        return RedirectDispatch::ReturnAsFinal;
+    }
+    if redirects < max_redirects {
+        return RedirectDispatch::Follow(loc);
+    }
+    if opts.redirect == Some(RedirectMode::Follow) {
+        return RedirectDispatch::Error(HttpError::new(
+            "Request redirect limit exceeded",
+            ErrorCode::Network,
+        ));
+    }
+    RedirectDispatch::Return
+}
+
+/// Apply one redirect: compute the next hop, enforce the streaming-upload
+/// invariant, prune headers per the Fetch spec, update the request context,
+/// and finalise any pending cache store for the old response body.
+async fn apply_redirect_hop(
+    opts: &mut FetchOptions<'_>,
+    hop: Hop,
+    mut res: http::Response,
+    loc: &str,
+    streaming_upload: bool,
+) -> Result<Hop, HttpError> {
+    let next = advance(&hop, &res, loc)?;
+    if streaming_upload && next.method != "GET" && res.status().as_u16() != 303 {
+        return Err(HttpError::new(
+            "Cannot replay a streaming request body",
+            ErrorCode::Network,
+        ));
+    }
+    prune_redirect_headers(opts, &hop, &next);
+    update_redirect_context(opts, &hop, &next, &res);
+    if let Some(mut pending) = res.extensions_mut().remove::<PendingStore>() {
+        pending.entry.body = read_capped(res, DEFAULT_MAX_BYTES).await?.to_vec();
+        pending.cache.store(pending.entry);
+    }
+    Ok(next)
+}
+
+/// Strip the request headers the Fetch spec drops on redirect: `Authorization`
+/// on cross-origin redirects, and the five content-* headers when the method
+/// changes between hops.
+fn prune_redirect_headers(opts: &mut FetchOptions<'_>, hop: &Hop, next: &Hop) {
+    if !crate::request_context::same_origin(&hop.url, &next.url) {
+        opts.headers
+            .retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
+    }
+    if hop.method != next.method {
+        opts.headers.retain(|name, _| {
+            !matches!(
+                name.to_ascii_lowercase().as_str(),
+                "content-encoding"
+                    | "content-language"
+                    | "content-location"
+                    | "content-type"
+                    | "content-length"
+            )
+        });
+    }
+}
+
+/// Carry the request context across the redirect: honour any `Referrer-Policy`
+/// header the hop set, then update origin / referrer state for the next URL.
+fn update_redirect_context(
+    opts: &mut FetchOptions<'_>,
+    hop: &Hop,
+    next: &Hop,
+    res: &http::Response,
+) {
+    let Some(context) = opts.context.as_mut() else {
+        return;
+    };
+    if let Some(value) = list_header(res, "referrer-policy") {
+        if let Some(policy) = crate::referrer_policy::ReferrerPolicy::from_header(&value) {
+            context.referrer_policy = policy;
+        }
+    }
+    context.follow_redirect(&hop.url, &next.url);
 }
 
 fn advance(hop: &Hop, res: &http::Response, loc: &str) -> Result<Hop, HttpError> {
@@ -2173,13 +2486,10 @@ pub struct FetchedBytes {
     pub content_type: String,
 }
 
-/// [`fetch_bytes`], also returning the final response's `Content-Type`.
-pub async fn fetch_typed_bytes(
-    url: &str,
-    mut opts: FetchOptions<'_>,
-) -> Result<FetchedBytes, HttpError> {
-    let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
-    if opts.redirect.is_some()
+/// True when any option on `opts` forces the manual redirect / cache / policy
+/// path instead of letting the reqwest client follow redirects on its own.
+fn needs_manual_redirect_path(opts: &FetchOptions<'_>) -> bool {
+    opts.redirect.is_some()
         || opts.max_redirects.is_some()
         || opts.http_cache.is_some()
         || opts.dictionary_store.is_some()
@@ -2189,24 +2499,42 @@ pub async fn fetch_typed_bytes(
         || opts.response_policy.is_some()
         || opts.response_side_effects.is_some()
         || opts.before_request.is_some()
-    {
-        let redirects = opts.max_redirects.unwrap_or(20);
-        let (res, final_url, _) = follow_manually_response(&mut opts, url, redirects).await?;
-        let status = res.status().as_u16();
-        let content_type = header_value(&res, "content-type");
-        let cache_store = res.extensions().get::<PendingStore>().cloned();
-        let bytes = read_capped(res, max_bytes).await?;
-        if let Some(mut pending) = cache_store {
-            pending.entry.body = bytes[pending.skip_prefix.min(bytes.len())..].to_vec();
-            pending.cache.store(pending.entry);
-        }
-        return Ok(FetchedBytes {
-            final_url,
-            bytes,
-            status,
-            content_type,
-        });
+}
+
+/// Manual redirect / cache / policy branch of [`fetch_typed_bytes`]: drive
+/// [`follow_manually_response`], materialise its body up to `max_bytes`, and
+/// stash a pending cache entry if the response carried one.
+async fn fetch_typed_bytes_manual(
+    opts: &mut FetchOptions<'_>,
+    url: &str,
+    max_bytes: usize,
+) -> Result<FetchedBytes, HttpError> {
+    let redirects = opts.max_redirects.unwrap_or(20);
+    let (res, final_url, _) = follow_manually_response(opts, url, redirects).await?;
+    let status = res.status().as_u16();
+    let content_type = header_value(&res, "content-type");
+    let cache_store = res.extensions().get::<PendingStore>().cloned();
+    let bytes = read_capped(res, max_bytes).await?;
+    if let Some(mut pending) = cache_store {
+        pending.entry.body = bytes[pending.skip_prefix.min(bytes.len())..].to_vec();
+        pending.cache.store(pending.entry);
     }
+    Ok(FetchedBytes {
+        final_url,
+        bytes,
+        status,
+        content_type,
+    })
+}
+
+/// Direct branch of [`fetch_typed_bytes`]: borrow the caller's client (or make a
+/// default redirect-following one), send one request, and read the response
+/// body up to `max_bytes`. No caching / policy hooks fire in this path.
+async fn fetch_typed_bytes_direct(
+    opts: &mut FetchOptions<'_>,
+    url: &str,
+    max_bytes: usize,
+) -> Result<FetchedBytes, HttpError> {
     let cl = match opts.client {
         Some(c) => c.clone(),
         None => {
@@ -2214,7 +2542,7 @@ pub async fn fetch_typed_bytes(
         }
     };
     let method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
-    let headers = build_headers(url, &method, &opts);
+    let headers = build_headers(url, &method, opts);
     let res = send(
         &cl,
         Outgoing {
@@ -2229,7 +2557,7 @@ pub async fn fetch_typed_bytes(
     )
     .await?;
     let final_url = final_url(&res);
-    ingest_set_cookie(&mut opts, &res, &final_url);
+    ingest_set_cookie(opts, &res, &final_url);
     let status = res.status().as_u16();
     let content_type = header_value(&res, "content-type");
     let bytes = read_capped(res, max_bytes).await?;
@@ -2239,6 +2567,18 @@ pub async fn fetch_typed_bytes(
         status,
         content_type,
     })
+}
+
+/// [`fetch_bytes`], also returning the final response's `Content-Type`.
+pub async fn fetch_typed_bytes(
+    url: &str,
+    mut opts: FetchOptions<'_>,
+) -> Result<FetchedBytes, HttpError> {
+    let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
+    if needs_manual_redirect_path(&opts) {
+        return fetch_typed_bytes_manual(&mut opts, url, max_bytes).await;
+    }
+    fetch_typed_bytes_direct(&mut opts, url, max_bytes).await
 }
 
 #[cfg(test)]

@@ -87,7 +87,9 @@ fn loaded_images(document: u32) -> (u64, LoadedImageResolver) {
     })
 }
 /// Record the outcome of an `<img>` load (`src` is its raw attribute): a decoded image's
-/// natural size, or none for a broken one.
+/// natural size, or none for a broken one. `ratio` (else 0) is a viewBox-only SVG's
+/// natural aspect ratio from `image::probe_natural`: such an image has no natural size
+/// for layout and sizes from its container and the ratio, as in Chrome (turbo-surf#161).
 #[op2(fast)]
 pub(crate) fn op_live_image_loaded(
     scope: &mut v8::PinScope,
@@ -95,9 +97,16 @@ pub(crate) fn op_live_image_loaded(
     #[string] src: String,
     width: u32,
     height: u32,
+    ratio: f64,
 ) {
     let document = turbo_dom_browser_env::host_internals::document_id_of(scope, image) as u32;
-    let size = (width > 0 && height > 0).then(|| Intrinsic::new(width, height, true));
+    let size = (width > 0 && height > 0).then(|| {
+        if ratio > 0.0 && ratio.is_finite() {
+            Intrinsic::ratio_only(width, height, ratio as f32, true)
+        } else {
+            Intrinsic::new(width, height, true)
+        }
+    });
     LOADED_IMAGES.with(|images| {
         let mut images = images.borrow_mut();
         let entry = images.entry(document).or_default();
@@ -271,10 +280,19 @@ pub(crate) fn op_live_image_box<'s>(
 ) -> Result<Option<ImageBox>, JsErrorBox> {
     image_box(scope, receiver).map_err(JsErrorBox::generic)
 }
-fn image_box<'s>(
+/// A rendered element's first border-box fragment with its used box metrics, the layout
+/// it came from and its source id; `None` while the element has no box (disconnected, no
+/// browsing context, `display:none` on it or an ancestor, `display:contents`).
+type RenderedBox = (
+    std::rc::Rc<LayoutView>,
+    turbo_dom_layout::layout_snapshot::SourceId,
+    turbo_dom_layout::layout_snapshot::Rect,
+    turbo_dom_layout::layout_snapshot::UsedBoxMetrics,
+);
+fn rendered_box<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
-) -> Result<Option<ImageBox>, String> {
+) -> Result<Option<RenderedBox>, String> {
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
     if !input.connected || !input.browsing_context {
         return Ok(None);
@@ -295,12 +313,19 @@ fn image_box<'s>(
     if source.excluded_from_layout || view.omitted.contains(&id) || contents {
         return Ok(None);
     }
-    let Some((rect, used)) = source.fragment_indices.iter().find_map(|&index| {
+    let found = source.fragment_indices.iter().find_map(|&index| {
         let fragment = &view.snapshot.fragments()[index];
         (fragment.kind == turbo_dom_layout::layout_snapshot::GeometryKind::BorderBox)
             .then_some(fragment.used_box.map(|used| (fragment.rect, used)))
             .flatten()
-    }) else {
+    });
+    Ok(found.map(|(rect, used)| (view.clone(), id, rect, used)))
+}
+fn image_box<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<ImageBox>, String> {
+    let Some((view, id, rect, used)) = rendered_box(scope, receiver)? else {
         return Ok(None);
     };
     let zoom = view.zoom(id);
@@ -317,6 +342,46 @@ fn image_box<'s>(
         x: rect.x as i32,
         y: rect.y as i32,
     }))
+}
+/// The binding's `layoutUsedSize(element)` (turbo-dom#316, #353): [border-box width,
+/// border-box height, content-box width, content-box height, font size] in the element's
+/// unzoomed CSS px, the used values getComputedStyle reports for width / height and
+/// resolves `%` / `em` translates against; `None` for an element without a box of its own
+/// (a non-atomic inline fragment included).
+#[op2(reentrant)]
+#[serde]
+pub(crate) fn op_live_element_used_size<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<[f64; 5]>, JsErrorBox> {
+    let rendered = rendered_box(scope, receiver).map_err(JsErrorBox::generic)?;
+    Ok(rendered.and_then(|(view, id, rect, used)| used_size(&view, id, rect, used)))
+}
+fn used_size(
+    view: &LayoutView,
+    id: turbo_dom_layout::layout_snapshot::SourceId,
+    rect: turbo_dom_layout::layout_snapshot::Rect,
+    used: turbo_dom_layout::layout_snapshot::UsedBoxMetrics,
+) -> Option<[f64; 5]> {
+    if used.inline_fragment {
+        return None;
+    }
+    let zoom = f64::from(view.zoom(id));
+    let font_size = view
+        .styles
+        .get(&id)
+        .and_then(|entry| entry.style.get("font-size"))
+        .and_then(|value| value.strip_suffix("px"))
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(16.0 * zoom);
+    let unzoom = |size: f32| f64::from(size) / zoom;
+    Some([
+        unzoom(rect.width),
+        unzoom(rect.height),
+        unzoom(used.content_width),
+        unzoom(used.content_height),
+        font_size / zoom,
+    ])
 }
 #[derive(Serialize)]
 pub(crate) struct Geometry {
@@ -913,62 +978,15 @@ fn scroll_into_view<'s>(
         scrolling::alignment(alignments[0], mode)?,
         scrolling::alignment(alignments[1], mode)?,
     ];
-    let mut changed = Vec::new();
-    let mut viewport_changed = false;
-    if let Some(current) = scroll_view(scope, receiver)? {
-        let view = &current.view;
-        let boxed = element_geometry(view, current.id)?;
-        if !boxed.rects.is_empty() {
-            let state = scroll_state(current.context);
-            for scroller_id in into_view_scrollers(view, current.id, nearest)? {
-                let mut values = state.values.borrow_mut();
-                let translation = scrolling::scroll_translation(
-                    &view.snapshot,
-                    &view.styles,
-                    current.id,
-                    &values,
-                )?;
-                let bounds = boxed.bounds;
-                let world = [
-                    f64::from(bounds.x - translation[0]),
-                    f64::from(bounds.y - translation[1]),
-                    f64::from(bounds.width),
-                    f64::from(bounds.height),
-                ];
-                let (key, metrics, port, local) = if scroller_id == scrolling::VIEWPORT {
-                    let (key, metrics) = viewport_scroller(view, &current.viewport)?;
-                    let size = [
-                        f64::from(current.viewport.width),
-                        f64::from(current.viewport.height),
-                    ];
-                    (key, metrics, [0.0, 0.0, size[0], size[1]], world)
-                } else {
-                    let (key, metrics) = scroller(view, &current.viewport, scroller_id)?;
-                    let (port, local) = scroller_space(view, scroller_id, world, &values)?;
-                    (key, metrics, port, local)
-                };
-                let offset = values.get(&key).copied().unwrap_or([0.0; 2]);
-                let mut target = [None; 2];
-                for axis in 0..2 {
-                    let start = local[axis] - port[axis] + offset[axis];
-                    target[axis] = Some(scrolling::expose(
-                        start,
-                        local[axis + 2],
-                        offset[axis],
-                        port[axis + 2],
-                        behaviors[axis],
-                    ));
-                }
-                let (_, moved) =
-                    apply_scroll(&mut values, key, &metrics, &current.viewport, target, false);
-                if moved && key == scrolling::VIEWPORT {
-                    viewport_changed = true;
-                } else if moved {
-                    changed.push(key);
-                }
-            }
-        }
-    }
+    let moved = match scroll_view(scope, receiver)? {
+        Some(current) => expose_in_scrollers(&current, nearest, behaviors)?,
+        None => Vec::new(),
+    };
+    let viewport_changed = moved.contains(&scrolling::VIEWPORT);
+    let changed: Vec<_> = moved
+        .into_iter()
+        .filter(|key| *key != scrolling::VIEWPORT)
+        .collect();
     let elements = crate::live_layout_dom::wrap_elements(scope, receiver, &changed, 1)?;
     let viewport = v8::Boolean::new(scope, viewport_changed);
     Ok(null_record(
@@ -976,6 +994,73 @@ fn scroll_into_view<'s>(
         [("elements", elements.into()), ("viewport", viewport.into())],
     )?
     .into())
+}
+/// Expose the element in each scrolling box of its into-view chain, innermost
+/// first; the boxes (the viewport included) whose offset moved, in that order.
+fn expose_in_scrollers(
+    current: &ScrollView<'_>,
+    nearest: bool,
+    behaviors: [[turbo_dom_layout::cssom_view::scroll::Align; 3]; 2],
+) -> Result<Vec<turbo_dom_layout::layout_snapshot::SourceId>, String> {
+    let view = &current.view;
+    let boxed = element_geometry(view, current.id)?;
+    if boxed.rects.is_empty() {
+        return Ok(Vec::new());
+    }
+    let state = scroll_state(current.context);
+    let mut moved = Vec::new();
+    for scroller_id in into_view_scrollers(view, current.id, nearest)? {
+        let mut values = state.values.borrow_mut();
+        if let Some(key) = expose_in(current, scroller_id, boxed.bounds, &mut values, behaviors)? {
+            moved.push(key);
+        }
+    }
+    Ok(moved)
+}
+/// One into-view step: scroll `scroller_id` so the element's `bounds` show, and
+/// report its key when its offset moved.
+fn expose_in(
+    current: &ScrollView<'_>,
+    scroller_id: turbo_dom_layout::layout_snapshot::SourceId,
+    bounds: turbo_dom_layout::layout_snapshot::Rect,
+    values: &mut std::collections::BTreeMap<turbo_dom_layout::layout_snapshot::SourceId, [f64; 2]>,
+    behaviors: [[turbo_dom_layout::cssom_view::scroll::Align; 3]; 2],
+) -> Result<Option<turbo_dom_layout::layout_snapshot::SourceId>, String> {
+    use turbo_dom_layout::cssom_view::scroll as scrolling;
+    let view = &current.view;
+    let translation =
+        scrolling::scroll_translation(&view.snapshot, &view.styles, current.id, values)?;
+    let world = [
+        f64::from(bounds.x - translation[0]),
+        f64::from(bounds.y - translation[1]),
+        f64::from(bounds.width),
+        f64::from(bounds.height),
+    ];
+    let (key, metrics, port, local) = if scroller_id == scrolling::VIEWPORT {
+        let (key, metrics) = viewport_scroller(view, &current.viewport)?;
+        let size = [
+            f64::from(current.viewport.width),
+            f64::from(current.viewport.height),
+        ];
+        (key, metrics, [0.0, 0.0, size[0], size[1]], world)
+    } else {
+        let (key, metrics) = scroller(view, &current.viewport, scroller_id)?;
+        let (port, local) = scroller_space(view, scroller_id, world, values)?;
+        (key, metrics, port, local)
+    };
+    let offset = values.get(&key).copied().unwrap_or([0.0; 2]);
+    let target: [Option<f64>; 2] = std::array::from_fn(|axis| {
+        let start = local[axis] - port[axis] + offset[axis];
+        Some(scrolling::expose(
+            start,
+            local[axis + 2],
+            offset[axis],
+            port[axis + 2],
+            behaviors[axis],
+        ))
+    });
+    let (_, moved) = apply_scroll(values, key, &metrics, &current.viewport, target, false);
+    Ok(moved.then_some(key))
 }
 fn scroll_root(view: &LayoutView) -> Option<turbo_dom_layout::layout_snapshot::SourceId> {
     view.styles
@@ -1319,8 +1404,10 @@ pub(crate) fn capture_viewport(scope: &mut v8::PinScope) -> Result<(), String> {
         width: values[0],
         height: values[1],
         device_scale,
-        // Calibrated by independent fractional Chrome155 controls; JS DPR is separate.
-        layout_scale: 2.0,
+        // Chrome snaps text metrics to the screen's device pixels: the default line box
+        // is 18px at scale 1 and 18.5px at 2 (turbo-surf#158). The page's
+        // devicePixelRatio is the scale of the screen surf presents.
+        layout_scale: device_scale as f32,
         host: HostMedia::capture(crate::runtime::native_pointer_media_capability(context)),
     }));
     Ok(())
@@ -1545,41 +1632,9 @@ fn range_geometry<'s>(
         let state = scroll_state(context);
         let offsets = state.values.borrow();
         for selection in selections {
-            let selected_source = match *selection {
-                turbo_dom_layout::cssom_view::range::Selection::Element(source)
-                | turbo_dom_layout::cssom_view::range::Selection::Text { source, .. } => source,
-            };
-            if view.omitted.contains(&selected_source) {
+            let Some((source, mut boxes)) = selection_boxes(&view, selection)? else {
                 continue;
-            }
-            let (source, mut boxes) = match *selection {
-                turbo_dom_layout::cssom_view::range::Selection::Element(id) => {
-                    (id, element_geometry(&view, id)?.rects)
-                }
-                turbo_dom_layout::cssom_view::range::Selection::Text { source, start, end } => {
-                    let source_info = view
-                        .snapshot
-                        .source(source)
-                        .ok_or("native Range source missing")?;
-                    if source_info.excluded_from_layout {
-                        continue;
-                    }
-                    if view.snapshot.unsupported_svg_source_geometry(source) {
-                        return Err("native SVG text geometry is unsupported".into());
-                    }
-                    let boxes = view
-                        .snapshot
-                        .text_range_boxes(source, start, end)
-                        .map_err(|error| error.to_string())?
-                        .into_iter()
-                        .map(|cell| cell.transformed_bounds)
-                        .collect();
-                    (source, boxes)
-                }
             };
-            if boxes.is_empty() {
-                continue;
-            }
             let translation = turbo_dom_layout::cssom_view::scroll::scroll_translation(
                 &view.snapshot,
                 &view.styles,
@@ -1600,6 +1655,54 @@ fn range_geometry<'s>(
         bounds: values(bounds),
         rects: rects.into_iter().map(values).collect(),
     })
+}
+/// One selected piece of a Range: its source and untranslated border / text boxes,
+/// or `None` when it lays out no box.
+fn selection_boxes(
+    view: &LayoutView,
+    selection: &turbo_dom_layout::cssom_view::range::Selection,
+) -> Result<
+    Option<(
+        turbo_dom_layout::layout_snapshot::SourceId,
+        Vec<turbo_dom_layout::layout_snapshot::Rect>,
+    )>,
+    String,
+> {
+    use turbo_dom_layout::cssom_view::range::Selection;
+    let (source, boxes) = match *selection {
+        Selection::Element(id) if !view.omitted.contains(&id) => {
+            (id, element_geometry(view, id)?.rects)
+        }
+        Selection::Text { source, start, end } if !view.omitted.contains(&source) => {
+            (source, text_selection_boxes(view, source, start, end)?)
+        }
+        _ => return Ok(None),
+    };
+    Ok((!boxes.is_empty()).then_some((source, boxes)))
+}
+fn text_selection_boxes(
+    view: &LayoutView,
+    source: turbo_dom_layout::layout_snapshot::SourceId,
+    start: usize,
+    end: usize,
+) -> Result<Vec<turbo_dom_layout::layout_snapshot::Rect>, String> {
+    let source_info = view
+        .snapshot
+        .source(source)
+        .ok_or("native Range source missing")?;
+    if source_info.excluded_from_layout {
+        return Ok(Vec::new());
+    }
+    if view.snapshot.unsupported_svg_source_geometry(source) {
+        return Err("native SVG text geometry is unsupported".into());
+    }
+    Ok(view
+        .snapshot
+        .text_range_boxes(source, start, end)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|cell| cell.transformed_bounds)
+        .collect())
 }
 
 #[op2(reentrant)]

@@ -70,6 +70,19 @@ pub async fn matches_control_with_gaps(
     base: fn(&Value) -> &str,
     gaps: &[(&str, Value)],
 ) {
+    matches_control_except(probe, cases, control, base, gaps, &[]).await;
+}
+
+/// [`matches_control_with_gaps`], without running the cases whose id is in `skipped`
+/// (a case the probe cannot run through surf yet; each caller states why).
+pub async fn matches_control_except(
+    probe: &str,
+    cases: &[u8],
+    control: &str,
+    base: fn(&Value) -> &str,
+    gaps: &[(&str, Value)],
+    skipped: &[&str],
+) {
     let control: Value = serde_json::from_str(control).unwrap();
     // turbo-dom records controls from Chrome 156 or its headless shell (turbo-dom#305).
     let browser = control["browser"].as_str().unwrap();
@@ -90,6 +103,9 @@ pub async fn matches_control_with_gaps(
     assert_eq!(cases.len(), expected.len());
     for (case, expected) in cases.iter().zip(expected) {
         assert_eq!(case["id"], expected["id"]);
+        if skipped.iter().any(|id| case["id"] == *id) {
+            continue;
+        }
         // A generous cap, not a timing: the probes are in-isolate but lay out live, and the
         // largest (computed_defaults' pseudo-element tables) take ~45 s of a debug build on a
         // host at load average 200.
@@ -99,7 +115,8 @@ pub async fn matches_control_with_gaps(
                 .unwrap();
         let actual = run_probe(&mut page, probe).await;
         let expected = expected["result"].as_object().unwrap();
-        for (name, pinned) in gaps {
+        // A gap pins a member of the cases whose control records it.
+        for (name, pinned) in gaps.iter().filter(|(name, _)| expected.contains_key(*name)) {
             assert_eq!(
                 actual[*name], *pinned,
                 "{}: known gap {name} changed",

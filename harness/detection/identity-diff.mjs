@@ -204,6 +204,17 @@ export function representativeConnection(connections, origin, alpn, ids) {
   );
 }
 
+// The transport rows: the battery page's H2 origin, the HTTP/1.1-only origin and the
+// page's wss: socket (#187), which Chrome dials offering only http/1.1.
+export const TRANSPORT_ROWS = [
+  ["A", "h2"],
+  ["B", "http/1.1"],
+  ["W", "http/1.1"],
+];
+// Only the page opens the wss: socket, and its handshake is not a logged request, so
+// turbo-surf's W connection is not tied to a request id.
+const nativeRowIds = (origin, ids) => (origin === "W" ? undefined : ids);
+
 export const transportView = (connection) =>
   connection && {
     hello: connection.hello.normalized,
@@ -268,7 +279,7 @@ export const matches = (rule, delta) =>
   (!rule.allowAdded || (delta.added ?? []).every((item) => rule.allowAdded.includes(item))) &&
   (!rule.allowRemoved || (delta.removed ?? []).every((item) => rule.allowRemoved.includes(item)));
 
-function classify(delta, knownGaps) {
+export function classify(delta, knownGaps) {
   if (delta.area === "js") {
     if (ENVIRONMENT_PATHS.some((pattern) => pattern.test(delta.path))) return "environment";
     if (COLLECTOR_PATHS.some((pattern) => pattern.test(delta.path))) return "collector";
@@ -330,13 +341,10 @@ export function diffParity(chrome, native, { knownGaps = [] } = {}) {
       if (!expected.has(key))
         deltas.push({ area: "request", type: "request-extra", tier, kind: request.kind, key });
   }
-  for (const [origin, alpn] of [
-    ["A", "h2"],
-    ["B", "http/1.1"],
-  ]) {
+  for (const [origin, alpn] of TRANSPORT_ROWS) {
     const left = transportView(representativeConnection(chrome.connections, origin, alpn));
     const right = transportView(
-      representativeConnection(native.connections, origin, alpn, nativeIds),
+      representativeConnection(native.connections, origin, alpn, nativeRowIds(origin, nativeIds)),
     );
     if (!left || !right) {
       deltas.push({ area: "transport", type: "connection-missing", origin, alpn, path: origin });
@@ -364,40 +372,42 @@ export const ACTIONS = {
   info: "recorded only",
 };
 
-function actionFor(delta) {
-  if (delta.area === "transport") return "human";
-  if (delta.kind === "favicon" || ENVIRONMENT_HEADERS.has(delta.header)) return "info";
-  if (
-    delta.area === "js" &&
-    [...ENVIRONMENT_PATHS, ...COLLECTOR_PATHS].some((pattern) => pattern.test(delta.path))
-  )
-    return "info";
-  if (delta.area === "request") {
-    if (delta.type === "header-order" || delta.type === "pseudo-order") return "registry";
-    if (delta.type === "header-value" && ["accept", "priority"].includes(delta.header))
-      return "registry";
-    if (delta.type === "stream-priority") return "info";
-    return "human";
-  }
-  if (delta.area === "js") {
-    if (delta.path === "navigator.deviceMemory") return "registry";
-    if (/^(engine|features\.builtins|features\.prototypes\.(?!Navigator)|intl\.)/.test(delta.path))
-      return "engine";
-    if (delta.path.startsWith("features.")) return "engine";
-    if (/^(navigator|userAgentData)\./.test(delta.path)) return "human";
-    return "info";
-  }
+// Environment and collector differences are recorded, whatever area they surface in.
+const recordedOnly = (delta) =>
+  delta.kind === "favicon" ||
+  ENVIRONMENT_HEADERS.has(delta.header) ||
+  (delta.area === "js" &&
+    [...ENVIRONMENT_PATHS, ...COLLECTOR_PATHS].some((pattern) => pattern.test(delta.path)));
+
+function requestAction(delta) {
+  if (delta.type === "header-order" || delta.type === "pseudo-order") return "registry";
+  if (delta.type === "header-value" && ["accept", "priority"].includes(delta.header))
+    return "registry";
+  if (delta.type === "stream-priority") return "info";
+  return "human";
+}
+
+function jsAction(delta) {
+  if (delta.path === "navigator.deviceMemory") return "registry";
+  if (/^(engine|features\.builtins|features\.prototypes\.(?!Navigator)|intl\.)/.test(delta.path))
+    return "engine";
+  if (delta.path.startsWith("features.")) return "engine";
+  if (/^(navigator|userAgentData)\./.test(delta.path)) return "human";
   return "info";
 }
 
-/** Older Chrome fixture vs newer Chrome fixture: the release delta, with actions. */
-export function diffVersions(previous, next) {
-  const oldVersion = versionOf(previous);
-  const newVersion = versionOf(next);
-  const deltas = [];
+const AREA_ACTIONS = { request: requestAction, js: jsAction };
+
+export function actionFor(delta) {
+  if (delta.area === "transport") return "human";
+  if (recordedOnly(delta)) return "info";
+  return AREA_ACTIONS[delta.area]?.(delta) ?? "info";
+}
+
+// The GREASE brand algorithm is code, not data: a mismatch needs a human.
+function brandErrors(fixtures) {
   const errors = [];
-  // The GREASE brand algorithm is code, not data: a mismatch needs a human.
-  for (const fixture of [previous, next]) {
+  for (const fixture of fixtures) {
     const version = versionOf(fixture);
     const nav = (fixture.requests ?? []).find((request) => request.kind === "nav");
     const brands = nav?.headers.find(([name]) => lower(name) === "sec-ch-ua")?.[1];
@@ -406,47 +416,53 @@ export function diffVersions(previous, next) {
         `sec-ch-ua for Chrome ${version.major} is ${brands}, not the brand algorithm's ${brandHeader(version.major, String(version.major), false)}`,
       );
   }
+  return errors;
+}
+
+function releaseRequestDeltas(previous, next, normalize) {
+  const deltas = [];
+  const left = requestIndex(previous.requests);
+  for (const [key, request] of requestIndex(next.requests)) {
+    const before = left.get(key);
+    const context = { kind: request.kind, key };
+    if (before) deltas.push(...compareHeaders(before, request, context, normalize));
+    else if (!previous.partial) deltas.push({ area: "request", type: "request-new", ...context });
+  }
+  return deltas;
+}
+
+function releaseTransportDeltas(previous, next) {
+  const deltas = [];
+  for (const [origin, alpn] of TRANSPORT_ROWS) {
+    const left = transportView(representativeConnection(previous.connections, origin, alpn));
+    const right = transportView(representativeConnection(next.connections, origin, alpn));
+    if (left && right)
+      for (const delta of compareTree("transport", left, right))
+        deltas.push({ ...delta, origin, alpn });
+  }
+  return deltas;
+}
+
+/** Older Chrome fixture vs newer Chrome fixture: the release delta, with actions. */
+export function diffVersions(previous, next) {
+  const oldVersion = versionOf(previous);
+  const newVersion = versionOf(next);
+  const errors = brandErrors([previous, next]);
+  const normalize = (value) => normalizeVersion(normalizeVersion(value, oldVersion), newVersion);
   const measured = (fixture) => new Set(fixture.measured ?? ["requests", "transport", "js"]);
   const both = (part) => measured(previous).has(part) && measured(next).has(part);
-  if (both("requests")) {
-    const left = requestIndex(previous.requests);
-    const right = requestIndex(next.requests);
-    for (const [key, request] of right) {
-      const before = left.get(key);
-      const context = { kind: request.kind, key };
-      if (!before) {
-        if (!previous.partial) deltas.push({ area: "request", type: "request-new", ...context });
-        continue;
-      }
-      deltas.push(
-        ...compareHeaders(before, request, context, (value) =>
-          normalizeVersion(normalizeVersion(value, oldVersion), newVersion),
-        ),
-      );
-    }
-  }
-  if (both("transport"))
-    for (const [origin, alpn] of [
-      ["A", "h2"],
-      ["B", "http/1.1"],
-    ]) {
-      const left = transportView(representativeConnection(previous.connections, origin, alpn));
-      const right = transportView(representativeConnection(next.connections, origin, alpn));
-      if (left && right)
-        for (const delta of compareTree("transport", left, right))
-          deltas.push({ ...delta, origin, alpn });
-    }
-  if (both("js")) {
-    const normalize = (value) => normalizeVersion(normalizeVersion(value, oldVersion), newVersion);
-    deltas.push(
-      ...compareTree(
+  const parts = {
+    requests: () => releaseRequestDeltas(previous, next, normalize),
+    transport: () => releaseTransportDeltas(previous, next),
+    js: () =>
+      compareTree(
         "js",
         normalizeBrands(previous.js, oldVersion),
         normalizeBrands(next.js, newVersion),
         normalize,
       ),
-    );
-  }
+  };
+  const deltas = Object.entries(parts).flatMap(([part, collect]) => (both(part) ? collect() : []));
   // A partial (imported) baseline only constrains what it actually recorded.
   const kept = previous.partial
     ? deltas.filter((delta) => delta.expected !== undefined && delta.expected !== null)
@@ -500,6 +516,60 @@ export function h1Spellings(requests) {
   return spellings;
 }
 
+const headerValue = (request, name) =>
+  request?.headers.find(([key]) => lower(key) === name)?.[1] ?? null;
+const byKey = ([a], [b]) => (a < b ? -1 : 1);
+const sortedEntries = (object) => Object.fromEntries(Object.entries(object).sort(byKey));
+
+// Header-name sequences per request class (author headers and pseudo-headers dropped).
+function classSequences(index) {
+  const classes = new Map();
+  for (const [key, request] of index) {
+    const names = request.headers
+      .map(([name]) => lower(name))
+      .filter((name) => !isPseudo(name) && !AUTHOR_HEADER.test(name));
+    // A Critical-CH restart reorders headers: its own `-restart` class.
+    const restart = key.startsWith("critical@") && !key.endsWith("#0");
+    const cls = `${requestClass(request.headers, request.method)}${restart ? "-restart" : ""}`;
+    if (!classes.has(cls)) classes.set(cls, []);
+    classes.get(cls).push(names);
+  }
+  return classes;
+}
+
+function mergedRequestOrders(index, headerOrder, spellings, major) {
+  const requestOrders = {};
+  for (const [cls, sequences] of [...classSequences(index)].sort(byKey)) {
+    const merged = mergeOrders(sequences);
+    if (merged.conflict)
+      throw new Error(
+        `Chrome ${major} orders ${merged.conflict.join(" / ")} inconsistently within request class ${cls}; split the class before re-versioning`,
+      );
+    requestOrders[cls] = withCookieSlot(merged.order, headerOrder).map(
+      (name) => spellings.get(name) ?? name,
+    );
+  }
+  return requestOrders;
+}
+
+// First accept/priority per destination among cold (un-hinted) subresource requests.
+function coldDefaults(index) {
+  const accept = {};
+  const priority = {};
+  const cold = [...index.values()].filter(
+    (request) => requestClass(request.headers, request.method).endsWith("-hinted") === false,
+  );
+  for (const request of cold) {
+    const destination = headerValue(request, "sec-fetch-dest");
+    if (!destination || request.method === "OPTIONS" || request.kind === "favicon") continue;
+    if (!["document", "iframe"].includes(destination))
+      accept[destination] ??= headerValue(request, "accept");
+    const header = headerValue(request, "priority");
+    if (header) priority[destination] ??= header;
+  }
+  return { accept: sortedEntries(accept), priority: sortedEntries(priority) };
+}
+
 /**
  * Registry entry measured from a Chrome fixture. `previous` supplies the fields
  * the battery does not measure (transport recipe) and the cookie slot (a cold
@@ -514,58 +584,20 @@ export function measuredRelease(fixture, previous) {
   const index = requestIndex(requests);
   const nav = index.get("nav@A#GET#0");
   if (!nav) throw new Error("The fixture has no cold top-level navigation (kind nav)");
-  const value = (request, name) =>
-    request?.headers.find(([key]) => lower(key) === name)?.[1] ?? null;
   const navOrder = nav.headers.map(([name]) => lower(name)).filter((name) => !isPseudo(name));
   const headerOrder = withCookieSlot(navOrder, previous?.headerOrder ?? []);
-  const spellings = h1Spellings(requests);
-  const classes = new Map();
-  for (const [key, request] of index) {
-    const names = request.headers
-      .map(([name]) => lower(name))
-      .filter((name) => !isPseudo(name) && !AUTHOR_HEADER.test(name));
-    // A Critical-CH restart reorders headers: its own `-restart` class.
-    const restart = key.startsWith("critical@") && !key.endsWith("#0");
-    const cls = `${requestClass(request.headers, request.method)}${restart ? "-restart" : ""}`;
-    if (!classes.has(cls)) classes.set(cls, []);
-    classes.get(cls).push(names);
-  }
-  const requestOrders = {};
-  for (const [cls, sequences] of [...classes].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    const merged = mergeOrders(sequences);
-    if (merged.conflict)
-      throw new Error(
-        `Chrome ${major} orders ${merged.conflict.join(" / ")} inconsistently within request class ${cls}; split the class before re-versioning`,
-      );
-    requestOrders[cls] = withCookieSlot(merged.order, headerOrder).map(
-      (name) => spellings.get(name) ?? name,
-    );
-  }
-  const accept = {};
-  const priority = {};
-  const cold = [...index.values()].filter(
-    (request) => requestClass(request.headers, request.method).endsWith("-hinted") === false,
-  );
-  for (const request of cold) {
-    const destination = value(request, "sec-fetch-dest");
-    if (!destination || request.method === "OPTIONS" || request.kind === "favicon") continue;
-    if (!["document", "iframe"].includes(destination))
-      accept[destination] ??= value(request, "accept");
-    const header = value(request, "priority");
-    if (header) priority[destination] ??= header;
-  }
-  const sorted = (object) =>
-    Object.fromEntries(Object.entries(object).sort(([a], [b]) => (a < b ? -1 : 1)));
+  const requestOrders = mergedRequestOrders(index, headerOrder, h1Spellings(requests), major);
+  const { accept, priority } = coldDefaults(index);
   return {
     major,
     fullVersion: full,
     headerOrder,
-    navigationAccept: value(nav, "accept"),
+    navigationAccept: headerValue(nav, "accept"),
     defaultDeviceMemory: fixture.js?.navigator?.deviceMemory ?? previous?.defaultDeviceMemory,
     transportBaseMajor: previous?.transportBaseMajor,
     requestOrders,
-    accept: sorted(accept),
-    priority: sorted(priority),
+    accept,
+    priority,
   };
 }
 

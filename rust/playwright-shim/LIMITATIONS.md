@@ -127,7 +127,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `isClosed`, `close`, `video` (→ null), `workers` (→ []) | ✅ | |
 | `screenshot` | ⚠️ | Synthetic native render (PNG, or SVG via `{type:"svg"}`) — representative, not browser-faithful. `path` and `fullPage` work; `clip` is ignored. |
 | `pdf` | ❌ | Throws — no PDF implementation in the shim. |
-| `hover`, `dragAndDrop`, `mouse.*`, `touchscreen.*` | ❌ | Throws — no input hardware. |
+| `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate so JS hover handlers (menu-open) fire. Static snapshot: no-op. Not hardware input. |
+| `dragAndDrop`, `mouse.*`, `touchscreen.*` | ❌ | Throws — no input hardware. |
 | `keyboard.*` | ⚠️ | Key-event dispatch in a live session; no-op without one, incomplete text-editing defaults. |
 | `route`, `routeFromHAR`, `unroute` | ❌ | Throws — no in-process interception. |
 | `exposeBinding`, `exposeFunction` | ❌ | Throws — no persistent JS↔host binding across renders. |
@@ -147,9 +148,12 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `fill`, `clear`, `type`, `pressSequentially`, `check`, `uncheck`, `setChecked`, `selectOption`, `click`, `dblclick`, `tap`, `press` | ✅ | DOM-level (same intent model as Page). |
 | `evaluate` | ⚠️ | Needs a CSS-selector-backed locator (element passed by `document.querySelector`). |
 | `ariaSnapshot` | ✅ | |
-| `focus`, `blur`, `dispatchEvent`, `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no focus model, no layout, static DOM). |
-| `screenshot`, `boundingBox` | ❌ | Throws — pixels. |
-| `hover`, `dragTo`, `selectText` | ❌ | Throws — input hardware. |
+| `dispatchEvent` | ✅ | Live app only: fires the named DOM event into the isolate (e.g. a row's `click`). Static snapshot: no-op. |
+| `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate. Static snapshot: no-op. Not hardware input. |
+| `focus`, `blur`, `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no focus model, no layout, static DOM). |
+| `boundingBox` | ⚠️ | Returns `null` (there genuinely is no browser-faithful box). Geometry-conditional helpers (smooth-scroll, visibility-by-rect) no-op cleanly instead of throwing. |
+| `screenshot` | ❌ | Throws — pixels. |
+| `dragTo`, `selectText` | ❌ | Throws — input hardware. |
 
 ## expect (5 assertion classes)
 

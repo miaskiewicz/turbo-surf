@@ -3,8 +3,8 @@
 //! same-window messages and both realms' zero-delay timers interleave as one FIFO,
 //! and posting a message does not consume a timer id. Expected log: Chrome 156
 //! (156.0.8078.47, headless) running the same script on a localhost page. (Chrome's
-//! `event.source` for the child's post is the incumbent child window; the stock SDK
-//! has no incumbent-realm API, so the log records data only.)
+//! `event.source` for the child's post is the incumbent child window, checked in
+//! `window_message_source.rs` (turbo-surf#90); this log records data only.)
 use turbo_surf_render::PageSession;
 
 const SCRIPT: &str = r#"const log=[];globalThis.log=log;const f=document.createElement('iframe');document.body.append(f);const w=f.contentWindow;

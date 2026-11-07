@@ -27,6 +27,7 @@ mod document_facts;
 mod document_response;
 mod fetch_cors;
 mod geometry_backend;
+mod indexed_db;
 mod integrity;
 mod layout_profile;
 mod live_container_queries;
@@ -71,6 +72,7 @@ pub use runtime::{
     HydrationPhase, HydrationProgress, NavigationActivationSnapshot, PageSession,
     PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
+pub use web_fonts::{font_face_sources, web_font_face, WebFontSource};
 
 /// Actual native engine version, independently of navigator's browser identity.
 pub fn v8_version() -> &'static str {

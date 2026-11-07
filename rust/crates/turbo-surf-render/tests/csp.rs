@@ -178,8 +178,10 @@ async fn unsupported_active_csp_is_reported_from_native_policy_state() {
             "connect-src 'none'".into(),
         ),
     ];
-    let mut page=PageSession::open_with_response_headers(r#"<head><meta http-equiv='Content-Security-Policy' content="worker-src 'none'"></head><body><script nonce=good>globalThis.unsupported_csp=[];</script></body>"#,"http://policy.test/page","","",10000,"",ClientHints::default(),&headers).await.unwrap();
-    let expected = vec!["form-action", "script-src: 'strict-dynamic'", "worker-src"];
+    let mut page=PageSession::open_with_response_headers(r#"<head><meta http-equiv='Content-Security-Policy' content="media-src 'none'"></head><body><script nonce=good>globalThis.unsupported_csp=[];</script></body>"#,"http://policy.test/page","","",10000,"",ClientHints::default(),&headers).await.unwrap();
+    // 'strict-dynamic' (#110), form-action and worker-src are enforced; media loads
+    // are still missing (#190), so media-src stays reported as unsupported.
+    let expected = vec!["media-src"];
     assert_eq!(page.hydration_diagnostics().unsupported_csp, expected);
     page.eval("globalThis.hydration_diagnostics={unsupported_csp:[]};")
         .await

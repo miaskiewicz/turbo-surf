@@ -142,6 +142,35 @@ export async function startIdentityServers(route) {
     for (const waiter of waiters) waiter();
   };
 
+  const requestEntry = (request, protocol, label, connection, length) => {
+    const path = request.url;
+    const match = /^\/t\/([a-z0-9-]+)\/k\/([a-z0-9-]+)/.exec(path);
+    return {
+      tier: match?.[1] ?? null,
+      kind: match?.[2] ?? null,
+      method: request.method,
+      path,
+      origin: label(request),
+      protocol,
+      httpVersion: request.httpVersion,
+      headers: headerList(request.rawHeaders),
+      bodyBytes: length,
+      connection: connection?.id ?? null,
+      streamId: protocol === "h2" ? request.stream.id : null,
+    };
+  };
+
+  // HTTP/2 requests also carry the connection's pseudo-header order and the stream's
+  // HEADERS-frame priority from the tapped wire.
+  const annotateH2 = (entry, connection, request) => {
+    const pseudo = entry.headers.map(([name]) => name).filter((name) => name.startsWith(":"));
+    connection.pseudoOrder ||= pseudo;
+    entry.streamPriority =
+      connection.tap.frames.find(
+        (frame) => frame.type === "HEADERS" && frame.streamId === request.stream.id,
+      )?.priority ?? null;
+  };
+
   const handle = (protocol, label) => (request, response) => {
     let length = 0;
     request.on("data", (chunk) => {
@@ -149,29 +178,8 @@ export async function startIdentityServers(route) {
     });
     request.on("end", () => {
       const connection = owner.get(protocol === "h2" ? request.stream.session : request.socket);
-      const path = request.url;
-      const match = /^\/t\/([a-z0-9-]+)\/k\/([a-z0-9-]+)/.exec(path);
-      const entry = {
-        tier: match?.[1] ?? null,
-        kind: match?.[2] ?? null,
-        method: request.method,
-        path,
-        origin: label(request),
-        protocol,
-        httpVersion: request.httpVersion,
-        headers: headerList(request.rawHeaders),
-        bodyBytes: length,
-        connection: connection?.id ?? null,
-        streamId: protocol === "h2" ? request.stream.id : null,
-      };
-      if (connection && protocol === "h2") {
-        const pseudo = entry.headers.map(([name]) => name).filter((name) => name.startsWith(":"));
-        connection.pseudoOrder ||= pseudo;
-        entry.streamPriority =
-          connection.tap.frames.find(
-            (frame) => frame.type === "HEADERS" && frame.streamId === request.stream.id,
-          )?.priority ?? null;
-      }
+      const entry = requestEntry(request, protocol, label, connection, length);
+      if (connection && protocol === "h2") annotateH2(entry, connection, request);
       record(entry);
       const reply = route(entry, ports);
       response.writeHead(reply.status ?? 200, reply.headers ?? {});
@@ -257,12 +265,31 @@ export async function startIdentityServers(route) {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
   });
+  const wss = await tlsOrigin("W", ["http/1.1"]);
   const servers = [
     ...(await tlsOrigin("A", ["h2", "http/1.1"])),
     ...(await tlsOrigin("B", ["http/1.1"])),
     ...(await tlsOrigin("C", ["h2", "http/1.1"])),
+    ...wss,
     plain,
   ];
+  // W is the battery page's wss: socket (#187): only its ClientHello is measured, so
+  // the upgrade (on W's HTTP/1.1 server, the last entry) is answered and closed at
+  // once and never enters the request log.
+  wss.at(-1).on("upgrade", (request, socket) => {
+    const key = request.headers["sec-websocket-key"] ?? "";
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.end(
+      Buffer.concat([
+        Buffer.from(
+          `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+        ),
+        Buffer.from([0x88, 0x00]),
+      ]),
+    );
+  });
   ports.D = await listen(plain, 0, "127.0.0.1");
 
   const origins = {
@@ -272,6 +299,7 @@ export async function startIdentityServers(route) {
     C: `https://127.0.0.1:${ports.C}`,
     CX: `https://localhost:${ports.C}`,
     D: `http://127.0.0.1:${ports.D}`,
+    W: `wss://127.0.0.1:${ports.W}`,
   };
 
   return {

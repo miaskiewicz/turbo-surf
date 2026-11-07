@@ -332,31 +332,61 @@ fn transform(src: &str, ts: bool, jsx: bool) -> PyResult<String> {
     turbo_surf_transform::transform(src, ts, jsx).map_err(TurboSurfError::new_err)
 }
 
-/// Register module-level functions.
-fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(version, m)?)?;
+/// Register the synthetic PNG raster surface (with / without stylesheets or
+/// image assets).
+fn register_png_screenshot_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(screenshot, m)?)?;
+    m.add_function(wrap_pyfunction!(screenshot_with_css, m)?)?;
+    m.add_function(wrap_pyfunction!(screenshot_with_assets, m)?)
+}
+
+/// Register the SVG raster surface plus the asset-URL discovery helpers that
+/// pair with the `*_with_css` / `*_with_assets` entry points.
+fn register_svg_screenshot_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(screenshot_svg, m)?)?;
+    m.add_function(wrap_pyfunction!(screenshot_svg_with_css, m)?)?;
+    m.add_function(wrap_pyfunction!(screenshot_svg_with_assets, m)?)?;
+    m.add_function(wrap_pyfunction!(stylesheet_hrefs, m)?)?;
+    m.add_function(wrap_pyfunction!(image_urls, m)?)
+}
+
+/// Register the plain-text extraction surface (markdown / text / title / html /
+/// links).
+fn register_text_view_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(markdown, m)?)?;
     m.add_function(wrap_pyfunction!(text, m)?)?;
-    m.add_function(wrap_pyfunction!(screenshot, m)?)?;
-    m.add_function(wrap_pyfunction!(screenshot_svg, m)?)?;
-    m.add_function(wrap_pyfunction!(stylesheet_hrefs, m)?)?;
-    m.add_function(wrap_pyfunction!(screenshot_with_css, m)?)?;
-    m.add_function(wrap_pyfunction!(screenshot_svg_with_css, m)?)?;
-    m.add_function(wrap_pyfunction!(image_urls, m)?)?;
-    m.add_function(wrap_pyfunction!(screenshot_with_assets, m)?)?;
-    m.add_function(wrap_pyfunction!(screenshot_svg_with_assets, m)?)?;
     m.add_function(wrap_pyfunction!(title, m)?)?;
     m.add_function(wrap_pyfunction!(html, m)?)?;
-    m.add_function(wrap_pyfunction!(links, m)?)?;
+    m.add_function(wrap_pyfunction!(links, m)?)
+}
+
+/// Register the structured-view surface (interactive elements, accessibility
+/// tree, hydration state, detect, query, extract).
+fn register_structured_view_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(interactive_elements, m)?)?;
     m.add_function(wrap_pyfunction!(accessibility_tree, m)?)?;
     m.add_function(wrap_pyfunction!(hydration_state, m)?)?;
     m.add_function(wrap_pyfunction!(detect, m)?)?;
     m.add_function(wrap_pyfunction!(query, m)?)?;
-    m.add_function(wrap_pyfunction!(extract, m)?)?;
+    m.add_function(wrap_pyfunction!(extract, m)?)
+}
+
+/// Register the JS render / transform surface (evaluate / render / swc
+/// transform) plus `version`.
+fn register_render_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;
     m.add_function(wrap_pyfunction!(render, m)?)?;
     m.add_function(wrap_pyfunction!(transform, m)?)
+}
+
+/// Register module-level functions.
+fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    register_png_screenshot_functions(m)?;
+    register_svg_screenshot_functions(m)?;
+    register_text_view_functions(m)?;
+    register_structured_view_functions(m)?;
+    register_render_functions(m)
 }
 
 /// The Python extension module `turbo_surf._turbo_surf`. Re-exported by the

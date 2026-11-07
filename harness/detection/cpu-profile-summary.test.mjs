@@ -74,6 +74,38 @@ test("incomplete or corrupted sampling evidence fails instead of reporting a fal
   }
 });
 
+test("profile shape, frame fields and the limit are each validated", () => {
+  assert.throws(() => summarizeCpuProfile(profile(), 0), /limit must be positive/);
+  assert.throws(() => summarizeCpuProfile(profile(), 1.5), /limit must be positive/);
+  for (const mutate of [
+    (value) => delete value.nodes,
+    (value) => delete value.samples,
+    (value) => delete value.timeDeltas,
+    (value) => delete value.startTime,
+    (value) => delete value.endTime,
+    (value) => delete value.nodes[0].callFrame,
+    (value) => {
+      value.nodes[0].id = "1";
+    },
+    (value) => {
+      value.nodes[0].callFrame.scriptId = 8;
+    },
+    (value) => {
+      value.nodes[0].callFrame.lineNumber = 1.5;
+    },
+    (value) => {
+      value.nodes[0].callFrame.columnNumber = null;
+    },
+    (value) => {
+      value.timeDeltas[2] = 800;
+    },
+  ]) {
+    const value = profile();
+    mutate(value);
+    assert.throws(() => summarizeCpuProfile(value));
+  }
+});
+
 test("out-of-order Inspector timestamps stay paired with their sampled frames", () => {
   const value = profile();
   value.timeDeltas = [200, -100, 900];

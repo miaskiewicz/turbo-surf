@@ -5,7 +5,7 @@
   "releases": [
     {
       "major": 156,
-      "fullVersion": "156.0.8078.47",
+      "fullVersion": "156.0.8078.80",
       "headerOrder": [
         "sec-ch-ua",
         "sec-ch-ua-mobile",
@@ -215,10 +215,10 @@
       },
       "evidence": {
         "fixture": "harness/detection/fixtures/chrome-identity-156.json",
-        "browser": "Chrome/156.0.8078.47",
-        "v8": "15.6.75.19",
-        "collectedAt": "2026-10-25T15:21:42.684Z",
-        "bundleSha256": "465e3ecf48f92450f897c8665d2e7b5c1bdb24536ecfb7d74c15a5504fc5c078"
+        "browser": "Chrome/156.0.8078.80",
+        "v8": "15.6.75.27",
+        "collectedAt": "2026-11-05T17:13:36.054Z",
+        "bundleSha256": "d6a91183c237faeb55d8d51a79d85de979e9bb637b38cf2fb92db57286331c7a"
       }
     },
     {

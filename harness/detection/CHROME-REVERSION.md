@@ -34,6 +34,7 @@ Files:
 | `harness/detection/chrome-identity.test.mjs` | Offline unit tests for all of the above |
 | `harness/detection/fixtures/chrome-identity-<major>.json` | One measured Chrome identity per release |
 | `harness/detection/TRANSPORT-<major>.json` (+ `fixtures/transport-*<major>-client-hello.bin`) | Chrome vs turbo-surf TLS/H2 record |
+| `harness/detection/wss-hello.mjs` (+ `fixtures/wss-hello-chrome<major>.json`) | The battery's `wss:` TLS row: Chrome's https and WebSocket ClientHellos, diffed against `turbo-surf-core`'s `wss_hello` example (#179) |
 | `rust/crates/turbo-surf-core/src/browser_releases.json` | The registry (compiled by `turbo-surf-core/build.rs`) |
 | `rust/crates/turbo-surf-mcp/examples/identity_battery.rs` | turbo-surf's side of the battery (no-JS and render tiers) |
 
@@ -124,6 +125,7 @@ client→server HTTP/2 frames before Node's own HTTP/2 server sees them.
 | C | `https://127.0.0.1:P3` | H2 — client-hint opt-in origin |
 | CX | `https://localhost:P3` | H2 — Critical-CH origin |
 | D | `http://127.0.0.1:P4` | plain HTTP/1.1 |
+| W | `wss://127.0.0.1:P5` | TLS, HTTP/1.1 only — the page's `wss:` socket (#187) |
 
 Ports, the per-run tier prefix (`/t/<tier>/`) and host names are labelled
 (`<A>`, `<A-host>`, `/t/~/`), so two runs compare structurally. The certificate is
@@ -162,7 +164,12 @@ Each connection records:
 - for H2, the frame preamble (SETTINGS order and values, WINDOW_UPDATE, PRIORITY
   frames), pseudo-header order and the Akamai string
 
-The diff uses the first fresh (non-PSK) connection per origin and ALPN.
+The diff uses the first fresh (non-PSK) connection per origin and ALPN: A over
+h2, B over HTTP/1.1, and W, the battery page's `new WebSocket()` (#187). W answers
+the upgrade with a 101 and a close frame and logs no request, so only its
+ClientHello is compared. Chrome offers only `http/1.1` there, with no ALPS.
+turbo-surf's render tier dials it without the loopback trust anchor, so its
+handshake fails after the ClientHello, which is all the row reads.
 
 ### JS identity (`js`, from chrome-identity-probe.js)
 
@@ -246,6 +253,13 @@ Step 1 does the following, in order. It is safe to re-run.
    sets `defaultMajor` to the newest measured major and writes `browser_releases.json`.
 8. Builds `identity_battery` (`cargo build -p turbo-surf-mcp --example
    identity_battery`), runs the battery against turbo-surf and diffs in parity mode.
+   The battery's own W row (above) compares the page's `wss:` hello. The parity also
+   gets the standalone `wss:` TLS row (area `wss`, `wss-hello.mjs`): turbo-surf's
+   wss ClientHello must differ from its https one exactly where Chrome's does (ALPN
+   `http/1.1` only, no ALPS), and match Chrome's wss hello apart from deltas its https
+   hello shares (class `oracle-https`). Step 3 records its control
+   (`fixtures/wss-hello-chrome<major>.json`) from the same frozen executable;
+   `--native-wss <wss_hello>` reuses a built example, `--skip-wss` skips the row.
 9. Writes `TRANSPORT-<major>.json` and the two raw ClientHello `.bin` files, then
    formats the JSON with biome.
 10. Prints the delta report and saves it to
@@ -552,3 +566,33 @@ the load event, frames included, with Chrome's same-origin `Origin`).
 Timings: the battery takes about 12 s for Chrome and 8 s for turbo-surf. The first
 full run took 52 s with a warm build. A re-run that recompiled `identity_battery`
 took 2.5 min. Two consecutive re-runs gave zero same-build drift.
+
+## 10. Re-version 156.0.8078.47 → 156.0.8078.80 (0.8.0, #154)
+
+The 0.8.0 oracle is branded Google Chrome `156.0.8078.80` (V8 15.6.75.27), copied so it
+cannot auto-update to `~/.cache/turbo-consolidation/chrome156-80/Google Chrome.app` and
+frozen by `reversion-chrome.mjs` to `.native-builds/oracles/chrome156-8078.80` (bundle
+`d6a91183…`). It was run with `--use-mock-keychain --password-store=basic`, localhost only.
+
+- **Identity.** `reversion-chrome.mjs --chrome <that app> --skip-engine` re-recorded
+  `fixtures/chrome-identity-156.json` and `TRANSPORT-156.json`, after the
+  `identity-server.mjs` / `identity-wire.mjs` refactor changed the collector hashes.
+  `browser_releases.json` now defaults to `156.0.8078.80`. The full version and the
+  evidence block are the only registry changes; header orders, Accept and Priority are
+  unchanged. Native parity: 38 known gaps, 11 environment, 1 collector
+  (`navigator.webdriver`), 0 tells.
+- **Headed controls.** The controls that need a normal headed browser were
+  re-recorded on the same frozen .80, with the original window size and device pixel
+  ratio: csp-report-endpoint (http and https), storage, live-text-geometry,
+  native-iframe-layout and leading-space-geometry (`--force-device-scale-factor=2`,
+  `headed-direct-cdp`). Their data matches the Chrome 155 / 156.0.8078.4 controls they
+  replace. The only differences are the `sec-ch-ua` GREASE brand, which is version noise,
+  and the order and age of Reporting-API deliveries.
+- **Headless controls** stay on the Chrome for Testing headless shell `156.0.8078.47`
+  (`~/.cache/turbo-consolidation/chrome156/chrome-headless-shell-mac-arm64`). The headless
+  shell differs from headed Chrome:
+  - no Reporting-API delivery over HTTPS
+  - `requestStorageAccess` rejects
+  - a different default serif font
+  - device pixel ratio 1
+  - headless UA-CH headers

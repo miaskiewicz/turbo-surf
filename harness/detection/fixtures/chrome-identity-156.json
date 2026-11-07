@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "subject": "chrome",
-  "collectedAt": "2026-10-25T15:21:42.684Z",
+  "collectedAt": "2026-11-05T17:13:36.054Z",
   "browser": {
-    "product": "Chrome/156.0.8078.47",
-    "v8": "15.6.75.19",
-    "revision": "@1d17a2e2ee147bb7d6ae2ab6abdb3a2510c17775",
+    "product": "Chrome/156.0.8078.80",
+    "v8": "15.6.75.27",
+    "revision": "@fb096c0011f9d50f0a264a9376420cdea9c421e3",
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
-    "executableSha256": "2346fb044448ef1e7aef6593a19c0d258b194694e37c214f0bbd39e68e5ea881",
-    "bundleSha256": "465e3ecf48f92450f897c8665d2e7b5c1bdb24536ecfb7d74c15a5504fc5c078"
+    "executableSha256": "3f0acaf1e585195596d73ffa1824baa72c3c3ac115b5cfc43d789030a3f23d93",
+    "bundleSha256": "d6a91183c237faeb55d8d51a79d85de979e9bb637b38cf2fb92db57286331c7a"
   },
   "flags": [
     "--remote-debugging-port=0",
@@ -21,10 +21,10 @@
     "about:blank"
   ],
   "collector": {
-    "chrome-identity-battery.mjs": "b57c026e3db4cfe5e629b814a4fa5698a2aa2eaa74320e052e23cb30c7b185d2",
+    "chrome-identity-battery.mjs": "ecdf3ab9d6688d448bcea88135b0711b34c81b468246e55af4a168be179c25da",
     "chrome-identity-probe.js": "fae8f16807d6ad34e79acf9843f0146854f02415be1865b81ca9683404f5f5eb",
-    "identity-server.mjs": "e1b60628f7a78249f6045418774d8ef9b3c23530fa9f5296daa9efa0fc88d8f2",
-    "identity-wire.mjs": "9539d75da4c93a4fc373438363a84bc32fcf1fec8bb59b68cdd943e5b2f82100"
+    "identity-server.mjs": "087bac7120a1195f9899270bf73182e54dd9a5b1085761d1d93e9b7294140d2a",
+    "identity-wire.mjs": "7fca1a2e4cfa37af33097e6db5e8dfeba5f2425c6b8473a812e704918da80778"
   },
   "environment": {
     "platform": "darwin",
@@ -115,7 +115,7 @@
       "connection": 0,
       "streamPriority": {
         "exclusive": true,
-        "dependency": 1,
+        "dependency": 0,
         "weight": 256
       }
     },
@@ -242,6 +242,46 @@
     },
     {
       "tier": "chrome",
+      "kind": "fetch",
+      "method": "GET",
+      "path": "/t/~/k/fetch",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/fetch"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
       "kind": "iframe",
       "method": "GET",
       "path": "/t/~/k/iframe",
@@ -286,46 +326,6 @@
     },
     {
       "tier": "chrome",
-      "kind": "fetch",
-      "method": "GET",
-      "path": "/t/~/k/fetch",
-      "origin": "A",
-      "protocol": "h2",
-      "headers": [
-        [":method", "GET"],
-        [":authority", "<A-host>"],
-        [":scheme", "https"],
-        [":path", "/t/~/k/fetch"],
-        ["sec-ch-ua-platform", "\"macOS\""],
-        [
-          "user-agent",
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
-        ],
-        [
-          "sec-ch-ua",
-          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
-        ],
-        ["sec-ch-ua-mobile", "?0"],
-        ["accept", "*/*"],
-        ["sec-fetch-site", "same-origin"],
-        ["sec-fetch-mode", "cors"],
-        ["sec-fetch-dest", "empty"],
-        ["referer", "<A>/t/~/k/nav"],
-        ["accept-encoding", "gzip, deflate, br, zstd"],
-        ["accept-language", "en-US,en;q=0.9"],
-        ["cookie", "battery=1"],
-        ["priority", "u=1, i"]
-      ],
-      "bodyBytes": 0,
-      "connection": 0,
-      "streamPriority": {
-        "exclusive": true,
-        "dependency": 11,
-        "weight": 220
-      }
-    },
-    {
-      "tier": "chrome",
       "kind": "font-style",
       "method": "GET",
       "path": "/t/~/k/font-style",
@@ -357,7 +357,7 @@
         ["priority", "u=0"]
       ],
       "bodyBytes": 0,
-      "connection": 0,
+      "connection": 1,
       "streamPriority": {
         "exclusive": true,
         "dependency": 0,
@@ -400,10 +400,10 @@
         ["priority", "u=1, i"]
       ],
       "bodyBytes": 3,
-      "connection": 0,
+      "connection": 1,
       "streamPriority": {
         "exclusive": true,
-        "dependency": 15,
+        "dependency": 1,
         "weight": 220
       }
     },
@@ -441,51 +441,11 @@
         ["priority", "u=0"]
       ],
       "bodyBytes": 0,
-      "connection": 0,
+      "connection": 1,
       "streamPriority": {
         "exclusive": true,
         "dependency": 0,
         "weight": 256
-      }
-    },
-    {
-      "tier": null,
-      "kind": "favicon",
-      "method": "GET",
-      "path": "/favicon.ico",
-      "origin": "A",
-      "protocol": "h2",
-      "headers": [
-        [":method", "GET"],
-        [":authority", "<A-host>"],
-        [":scheme", "https"],
-        [":path", "/favicon.ico"],
-        ["sec-ch-ua-platform", "\"macOS\""],
-        [
-          "user-agent",
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
-        ],
-        [
-          "sec-ch-ua",
-          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
-        ],
-        ["sec-ch-ua-mobile", "?0"],
-        ["accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
-        ["sec-fetch-site", "same-origin"],
-        ["sec-fetch-mode", "no-cors"],
-        ["sec-fetch-dest", "image"],
-        ["referer", "<A>/t/~/k/nav"],
-        ["accept-encoding", "gzip, deflate, br, zstd"],
-        ["accept-language", "en-US,en;q=0.9"],
-        ["cookie", "battery=1"],
-        ["priority", "u=1, i"]
-      ],
-      "bodyBytes": 0,
-      "connection": 0,
-      "streamPriority": {
-        "exclusive": true,
-        "dependency": 19,
-        "weight": 220
       }
     },
     {
@@ -525,6 +485,46 @@
       "streamPriority": {
         "exclusive": true,
         "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "tier": null,
+      "kind": "favicon",
+      "method": "GET",
+      "path": "/favicon.ico",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/favicon.ico"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "image"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 1,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 5,
         "weight": 220
       }
     },
@@ -640,7 +640,7 @@
         ["priority", "u=1, i"]
       ],
       "bodyBytes": 0,
-      "connection": 0,
+      "connection": 1,
       "streamPriority": {
         "exclusive": true,
         "dependency": 0,
@@ -688,7 +688,7 @@
         ["priority", "u=0, i"]
       ],
       "bodyBytes": 9,
-      "connection": 0,
+      "connection": 1,
       "streamPriority": {
         "exclusive": true,
         "dependency": 0,
@@ -733,7 +733,7 @@
         ["priority", "u=0, i"]
       ],
       "bodyBytes": 0,
-      "connection": 3,
+      "connection": 1,
       "streamPriority": {
         "exclusive": true,
         "dependency": 0,
@@ -769,39 +769,6 @@
         ["Sec-Fetch-Mode", "navigate"],
         ["Sec-Fetch-User", "?1"],
         ["Sec-Fetch-Dest", "document"],
-        ["Accept-Encoding", "gzip, deflate, br, zstd"],
-        ["Accept-Language", "en-US,en;q=0.9"],
-        ["Cookie", "battery=1"]
-      ],
-      "bodyBytes": 0,
-      "connection": 4,
-      "streamPriority": null
-    },
-    {
-      "tier": null,
-      "kind": "favicon",
-      "method": "GET",
-      "path": "/favicon.ico",
-      "origin": "B",
-      "protocol": "http/1.1",
-      "headers": [
-        ["Host", "<B-host>"],
-        ["Connection", "keep-alive"],
-        ["sec-ch-ua-platform", "\"macOS\""],
-        [
-          "User-Agent",
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
-        ],
-        [
-          "sec-ch-ua",
-          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
-        ],
-        ["sec-ch-ua-mobile", "?0"],
-        ["Accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
-        ["Sec-Fetch-Site", "same-origin"],
-        ["Sec-Fetch-Mode", "no-cors"],
-        ["Sec-Fetch-Dest", "image"],
-        ["Referer", "<B>/t/~/k/h1-nav"],
         ["Accept-Encoding", "gzip, deflate, br, zstd"],
         ["Accept-Language", "en-US,en;q=0.9"],
         ["Cookie", "battery=1"]
@@ -848,48 +815,37 @@
       "streamPriority": null
     },
     {
-      "tier": "chrome",
-      "kind": "ch-accept",
+      "tier": null,
+      "kind": "favicon",
       "method": "GET",
-      "path": "/t/~/k/ch-accept",
-      "origin": "C",
-      "protocol": "h2",
+      "path": "/favicon.ico",
+      "origin": "B",
+      "protocol": "http/1.1",
       "headers": [
-        [":method", "GET"],
-        [":authority", "<C-host>"],
-        [":scheme", "https"],
-        [":path", "/t/~/k/ch-accept"],
+        ["Host", "<B-host>"],
+        ["Connection", "keep-alive"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
         [
           "sec-ch-ua",
           "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
         ],
         ["sec-ch-ua-mobile", "?0"],
-        ["sec-ch-ua-platform", "\"macOS\""],
-        ["upgrade-insecure-requests", "1"],
-        [
-          "user-agent",
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
-        ],
-        [
-          "accept",
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
-        ],
-        ["sec-fetch-site", "none"],
-        ["sec-fetch-mode", "navigate"],
-        ["sec-fetch-user", "?1"],
-        ["sec-fetch-dest", "document"],
-        ["accept-encoding", "gzip, deflate, br, zstd"],
-        ["accept-language", "en-US,en;q=0.9"],
-        ["cookie", "battery=1"],
-        ["priority", "u=0, i"]
+        ["Accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["Sec-Fetch-Site", "same-origin"],
+        ["Sec-Fetch-Mode", "no-cors"],
+        ["Sec-Fetch-Dest", "image"],
+        ["Referer", "<B>/t/~/k/h1-nav"],
+        ["Accept-Encoding", "gzip, deflate, br, zstd"],
+        ["Accept-Language", "en-US,en;q=0.9"],
+        ["Cookie", "battery=1"]
       ],
       "bodyBytes": 0,
-      "connection": 6,
-      "streamPriority": {
-        "exclusive": true,
-        "dependency": 0,
-        "weight": 256
-      }
+      "connection": 4,
+      "streamPriority": null
     },
     {
       "tier": null,
@@ -926,6 +882,50 @@
     },
     {
       "tier": "chrome",
+      "kind": "ch-accept",
+      "method": "GET",
+      "path": "/t/~/k/ch-accept",
+      "origin": "C",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/ch-accept"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 5,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
       "kind": "ch-sub",
       "method": "GET",
       "path": "/t/~/k/ch-sub",
@@ -938,7 +938,7 @@
         [":path", "/t/~/k/ch-sub"],
         [
           "sec-ch-ua-full-version-list",
-          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.80\", \"Google Chrome\";v=\"156.0.8078.80\""
         ],
         ["sec-ch-ua-platform", "\"macOS\""],
         ["device-memory", "32"],
@@ -953,9 +953,9 @@
         ["sec-ch-ua-bitness", "\"64\""],
         ["sec-ch-ua-wow64", "?0"],
         ["sec-ch-ua-arch", "\"arm\""],
-        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-ua-full-version", "\"156.0.8078.80\""],
         ["sec-ch-viewport-width", "1200"],
-        ["downlink", "1.7"],
+        ["downlink", "2.55"],
         ["ect", "4g"],
         ["sec-ch-device-memory", "32"],
         ["sec-ch-prefers-reduced-motion", "no-preference"],
@@ -964,7 +964,7 @@
           "user-agent",
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
         ],
-        ["rtt", "50"],
+        ["rtt", "100"],
         ["sec-ch-ua-platform-version", "\"27.2.0\""],
         ["accept", "*/*"],
         ["sec-fetch-site", "same-origin"],
@@ -977,7 +977,7 @@
         ["priority", "u=1, i"]
       ],
       "bodyBytes": 0,
-      "connection": 6,
+      "connection": 5,
       "streamPriority": {
         "exclusive": true,
         "dependency": 0,
@@ -998,7 +998,7 @@
         [":path", "/favicon.ico"],
         [
           "sec-ch-ua-full-version-list",
-          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.80\", \"Google Chrome\";v=\"156.0.8078.80\""
         ],
         ["sec-ch-ua-platform", "\"macOS\""],
         ["device-memory", "32"],
@@ -1013,9 +1013,9 @@
         ["sec-ch-ua-bitness", "\"64\""],
         ["sec-ch-ua-wow64", "?0"],
         ["sec-ch-ua-arch", "\"arm\""],
-        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-ua-full-version", "\"156.0.8078.80\""],
         ["sec-ch-viewport-width", "1200"],
-        ["downlink", "1.7"],
+        ["downlink", "2.55"],
         ["ect", "4g"],
         ["sec-ch-device-memory", "32"],
         ["sec-ch-prefers-reduced-motion", "no-preference"],
@@ -1024,7 +1024,7 @@
           "user-agent",
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
         ],
-        ["rtt", "50"],
+        ["rtt", "100"],
         ["sec-ch-ua-platform-version", "\"27.2.0\""],
         ["accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
         ["sec-fetch-site", "same-origin"],
@@ -1037,10 +1037,10 @@
         ["priority", "u=1, i"]
       ],
       "bodyBytes": 0,
-      "connection": 6,
+      "connection": 5,
       "streamPriority": {
         "exclusive": true,
-        "dependency": 3,
+        "dependency": 0,
         "weight": 220
       }
     },
@@ -1061,14 +1061,14 @@
         ["sec-ch-dpr", "2"],
         ["sec-ch-viewport-width", "1200"],
         ["rtt", "50"],
-        ["downlink", "1.55"],
+        ["downlink", "2.4"],
         ["ect", "4g"],
         [
           "sec-ch-ua",
           "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
         ],
         ["sec-ch-ua-mobile", "?0"],
-        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-ua-full-version", "\"156.0.8078.80\""],
         ["sec-ch-ua-arch", "\"arm\""],
         ["sec-ch-ua-platform", "\"macOS\""],
         ["sec-ch-ua-platform-version", "\"27.2.0\""],
@@ -1077,7 +1077,7 @@
         ["sec-ch-ua-wow64", "?0"],
         [
           "sec-ch-ua-full-version-list",
-          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.80\", \"Google Chrome\";v=\"156.0.8078.80\""
         ],
         ["sec-ch-ua-form-factors", "\"Desktop\""],
         ["sec-ch-prefers-color-scheme", "light"],
@@ -1181,7 +1181,7 @@
         ["sec-ch-ua-platform", "\"macOS\""],
         [
           "sec-ch-ua-full-version-list",
-          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.80\", \"Google Chrome\";v=\"156.0.8078.80\""
         ],
         ["sec-fetch-site", "none"],
         ["sec-fetch-mode", "navigate"],
@@ -1213,7 +1213,7 @@
         [":path", "/favicon.ico"],
         [
           "sec-ch-ua-full-version-list",
-          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.80\", \"Google Chrome\";v=\"156.0.8078.80\""
         ],
         ["sec-ch-ua-arch", "\"arm\""],
         ["sec-ch-ua-platform", "\"macOS\""],
@@ -1249,13 +1249,13 @@
       "id": 0,
       "origin": "A",
       "family": "IPv4",
-      "rawSha256": "dc0d2078a9386b0924fb23218996dd786d62beccf1214ab895b3b78fdff18550",
+      "rawSha256": "d5286cd6f6b501aa7f4b7a419fd8fb71244fbb4f0dc7abcc8c6a9e856d8452bc",
       "hello": {
         "recordVersion": 769,
         "legacyVersion": 771,
         "compressionMethods": [0],
         "ciphers": [
-          39578, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          43690, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
           47, 53
         ],
         "extensions": [
@@ -1264,58 +1264,15 @@
             "length": 0
           },
           {
-            "type": 35,
-            "length": 0
-          },
-          {
-            "type": 45,
-            "length": 2
-          },
-          {
-            "type": 27,
-            "length": 3
-          },
-          {
-            "type": 23,
-            "length": 0
-          },
-          {
-            "type": 5,
-            "length": 5
-          },
-          {
-            "type": 43,
-            "length": 7,
-            "values": [56026, 772, 771]
-          },
-          {
-            "type": 51764,
-            "length": 186,
-            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
-          },
-          {
-            "type": 65037,
-            "length": 186
-          },
-          {
-            "type": 10,
-            "length": 12,
-            "values": [10794, 4588, 29, 23, 24]
-          },
-          {
-            "type": 11,
-            "length": 2
-          },
-          {
-            "type": 18,
-            "length": 0
+            "type": 65281,
+            "length": 1
           },
           {
             "type": 51,
             "length": 1263,
             "keyShares": [
               {
-                "group": 10794,
+                "group": 19018,
                 "length": 1
               },
               {
@@ -1329,8 +1286,35 @@
             ]
           },
           {
-            "type": 17613,
+            "type": 5,
             "length": 5
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 65037,
+            "length": 282
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [60138, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [19018, 772, 771]
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 35,
+            "length": 0
           },
           {
             "type": 16,
@@ -1338,47 +1322,63 @@
             "protocols": ["h2", "http/1.1"]
           },
           {
-            "type": 13,
-            "length": 26,
-            "values": [47802, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+            "type": 27,
+            "length": 3
           },
           {
-            "type": 65281,
-            "length": 1
+            "type": 23,
+            "length": 0
           },
           {
-            "type": 2570,
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [19018, 4588, 29, 23, 24]
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 43690,
             "length": 1
           }
         ],
-        "pskModes": [1],
-        "certificateCompression": [2],
-        "echOuterType": 0,
         "pointFormats": [0],
+        "echOuterType": 0,
+        "certificateCompression": [2],
+        "pskModes": [1],
         "applicationSettings": {
           "codepoint": 17613,
           "protocols": ["h2"]
         },
         "extensionOrder": [
-          27242, 35, 45, 27, 23, 5, 43, 51764, 65037, 10, 11, 18, 51, 17613, 16, 13, 65281, 2570
+          27242, 65281, 51, 5, 11, 65037, 13, 43, 51764, 35, 16, 27, 23, 45, 18, 10, 17613, 43690
         ],
         "extensionNames": [
-          "session_ticket",
-          "psk_key_exchange_modes",
-          "compress_certificate",
-          "extended_master_secret",
+          "renegotiation_info",
+          "key_share",
           "status_request",
+          "ec_point_formats",
+          "encrypted_client_hello",
+          "signature_algorithms",
           "supported_versions",
           "trust_anchors",
-          "encrypted_client_hello",
-          "supported_groups",
-          "ec_point_formats",
-          "signed_certificate_timestamp",
-          "key_share",
-          "application_settings",
+          "session_ticket",
           "alpn",
-          "signature_algorithms",
-          "renegotiation_info"
+          "compress_certificate",
+          "extended_master_secret",
+          "psk_key_exchange_modes",
+          "signed_certificate_timestamp",
+          "supported_groups",
+          "application_settings"
         ],
         "supportedVersions": [772, 771],
         "groups": [4588, 29, 23, 24],
@@ -1482,13 +1482,13 @@
           ],
           "extensionGreaseCount": 2
         },
-        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,35-45-27-23-5-43-51764-65037-10-11-18-51-17613-16-13-65281,4588-29-23-24,0",
-        "ja3Hash": "0c5d73f5568f59c6baf71c9c2d41757e",
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,65281-51-5-11-65037-13-43-51764-35-16-27-23-45-18-10-17613,4588-29-23-24,0",
+        "ja3Hash": "fcffeee065ce3c162c28041ddd96bba4",
         "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
         "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
         "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
         "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
-        "rawBase64": "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"
+        "rawBase64": "FgMBB8YBAAfCAwM+jIQAGif3/wnJcwPN5oM1g8EeiNBMddQQnUM5uKTXKCB45/bal3ZZWoIhZEPsLMMcg70YBca1aqrKCRXK7v+GTAAgqqoTARMCEwPAK8AvwCzAMMypzKjAE8AUAJwAnQAvADUBAAdZamoAAP8BAAEAADME7wTtSkoAAQAR7ATA6UbECbph13iA/BMYGJrPG7qJ9JMA+OxhmlbPVxqq6CO38yIs2zCUtIDFt2kHVlVy8KZDzvpR2yGQgGJ1w8kYOOyGkqGib7mrZBEZgSKU93Y2regZsQhfnYYT49GeM9eM/LkKV6coZJqdTWTE6vufuSkMquikNKayGXo92FYoWoR1dtaZkFpXVzQeWoZxqqUhNsKTbFYnBie13PE4U4LFATYXu0rBY8AigbW4sHbLv+g2jThTHAm4Z6SHqAXH7bWIwFF7+5pcdndxEkowDogDBNUOKDC0X/UYUlVATVIir7guNxQxDCXNXhcXVFYcjVyWAoOqInwaXYAu0VYO2RKqzSwrnXUDScp5h4B+vLQMwqNtmUeGspKnlMphylW5xXGZHeOyEOOOE+R8i9suY4wKH3lV36OY4QE1FSIOAGiatZa4mNt6WpFtm9im+OY2D7HL+QAi9CMRY/ykVcaWEiozhYWNnuCYW+Zr0oqt5mFqb7KoL0NUbupxTOADTYygc8S7ynpMnKVHdfdnDTrLZkewE2zBO6fP6WM92sajUvFE/os7SVpaMxOrCLRSr6GbgsQLe2ps/SOrACRZsGNv1qNfN0wYBIcvGrAk21JLl/fH2nV2sEA/pkGLjzbG2XgeNHLFejkHn9RlLzN6gylHnYIEF/QtpBmKSMcGGCFcS0HPN1kc9lgo0WSRRrtVnKqzbSZ2RIqoQ6O4RboGSvlhhZA0G3u1LBOUvhxBFrhTLhQ6x1Oa7ycRbzmzFWUDkpREiFpN2BPL9+F+/EqSdsRqzQjQURgwCQdMHKo7bLeXUkqKPFYRMrkEJgiIWSSlo4OQwHS7OSsmYhnECnIlGjiwLQJMJtZJnZpKtzsVWpDJdrPKC3u5KOhW55O0SUKJ5UwHgijAJ8c6TMBxDgqVxIxpU7AdCegLEEeA4qWVNVWgr9g/+eqls0Ep+RAXywYXI5JoRfwHgXumsHcZBdND8vmTePMjrFej0uC/S0Wxc9qZ8lduomGAGlq513udboTKAWVj49evyWSUtyNXrEMB59BbEkWS7BtjlVC05fxl++oSvOSRc7CfxeewPgab0yJmClFLxfVfOFdQBTgVoaAkfNk1/fK+xphXb0KKGzug08xCRAqu2bcPEYVnP+NFhBtPmIpNH5O5cAhkyot0LnVOWDRMLAeCTURMpaAzLdQy9wUwGGYkdxh9j0OqCgU9NGSlzyeVJYRQSLMpf2g3oaEBnvhzorPCo5tTwnOJOQhL/hOfn/qAWYS3u3BtUXyJ41AKZ5wibSaoPIRLMdekPxF3Z+enm/h9sCieVrIfH3DOWDdPkhklQDNvpkDHyRIdWdw+QGGzx5Qy2IzKDDwd/kEVerxghHDMMCvCBHV0knanZ1mzMzQNPuR/KOORPtMbNpAw+RijjZNT4OWpnlmiqPQHY7OcdalGuYnJZ6w8opK7hsQ8U+uryDJTaVwG58XKp+Vp3rY4Evs4bmp++0YMq0tWfFEdQNvPBZZJYVNZB7m6VHKmCENqunRISGBD9pVyUZpXE5BUYgSrWnB/qtluKoMn1SQvxMehieZ6N7Nx0afB7JI2X3HPN9UU6JGONNqDGKMFFPcUd9KPgBXc8ZfMa6Sxm6J50JtVVAAdACDTXWC+/9vYqi3G9l32mqwWgxRWXg5rQuRs5U0H1lSuFgAFAAUBAAAAAAALAAIBAP4NARoAAAEAAWoAIK1fHPxgvZ5pY4fy5veAG9n4LX4KVRxe8DvuMzkGZGh5APA9zzw874l2rLUwh0PzFDfsoZpT3+zc0JoznV1HYrkR6vwg1lWjXsnjW2gvsoHVC8OHxVvOyTZnVyOj/GsodzBO1Qa0fumw7hdM2xXEF3GmxtgSSSCW41Yr2zlFhBVeRXE3dOfr0keyQflXPflCXaFJzr1DQjkqajH0xLkYdRCQTQloGxIBpA8dSMOH/Y3uwd8qm8dflCSMjLXUmWL62K12lz5kAPvXsMnRp+O+7F5ni2DSTRI8z5CWUJari148bkBGqq2YzapDYmK5HESUmC5lIuzSPQWW0kbO3iOZYk/1FIgUdd+oqLiLyqBDdJseFo8ADQAaABjq6gkECQUJBgQDCAQEAQUDCAUFAQgGBgEAKwAHBkpKAwQDA8o0ALoAuAWC3xMCAQWC3xMCBgWC3xMCDQWC3xMCDgWC3xMCDwWC3xMCEgWC3xMCEwWC3xMCFAiDmmSMmy0BBwiDmmSMmy0BCAiDmmSMmy0BCQiDmmSMmy0BCgiDmmSMmy0BCwiDmmSMmy0BDAiDmmSMmy0BDQiDmmSMmy0BEgiDmmSMmy0BEwTWeQkBBNZ5CQQE1nkJBQTWeQkGBNZ5CQcE1nkJCATWeQkKBNZ5CQsE1nkJDATWeQkNBNZ5CQ8AIwAAABAADgAMAmgyCGh0dHAvMS4xABsAAwIAAgAXAAAALQACAQEAEgAAAAoADAAKSkoR7AAdABcAGETNAAUAAwJoMqqqAAEA"
       },
       "alpn": "h2",
       "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
@@ -1587,7 +1587,7 @@
           "endHeaders": true,
           "priority": {
             "exclusive": true,
-            "dependency": 1,
+            "dependency": 0,
             "weight": 256
           }
         },
@@ -1634,6 +1634,19 @@
           "type": "HEADERS",
           "flags": 37,
           "streamId": 11,
+          "length": 48,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 13,
           "length": 44,
           "endStream": true,
           "endHeaders": true,
@@ -1642,541 +1655,32 @@
             "dependency": 0,
             "weight": 256
           }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 13,
-          "length": 47,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 11,
-            "weight": 220
-          }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 15,
-          "length": 70,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 0,
-            "weight": 256
-          }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 36,
-          "streamId": 17,
-          "length": 69,
-          "endStream": false,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 15,
-            "weight": 220
-          }
-        },
-        {
-          "type": "DATA",
-          "flags": 1,
-          "streamId": 17,
-          "length": 3
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 19,
-          "length": 74,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 0,
-            "weight": 256
-          }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 21,
-          "length": 32,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 19,
-            "weight": 220
-          }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 23,
-          "length": 34,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 0,
-            "weight": 220
-          }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 36,
-          "streamId": 25,
-          "length": 53,
-          "endStream": false,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 0,
-            "weight": 256
-          }
-        },
-        {
-          "type": "DATA",
-          "flags": 1,
-          "streamId": 25,
-          "length": 9
         }
       ],
       "h2Error": null
     },
     {
-      "id": 2,
-      "origin": "A",
-      "family": "IPv6",
-      "rawSha256": "3b31b439576ad82a2c59a451b349e53340ca2bf4002af957fc6bbe5e9a7da99d",
-      "hello": {
-        "recordVersion": 769,
-        "legacyVersion": 771,
-        "compressionMethods": [0],
-        "ciphers": [
-          39578, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
-          47, 53
-        ],
-        "extensions": [
-          {
-            "type": 2570,
-            "length": 0
-          },
-          {
-            "type": 18,
-            "length": 0
-          },
-          {
-            "type": 16,
-            "length": 14,
-            "protocols": ["h2", "http/1.1"]
-          },
-          {
-            "type": 5,
-            "length": 5
-          },
-          {
-            "type": 11,
-            "length": 2
-          },
-          {
-            "type": 65037,
-            "length": 250
-          },
-          {
-            "type": 51764,
-            "length": 186,
-            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
-          },
-          {
-            "type": 10,
-            "length": 12,
-            "values": [35466, 4588, 29, 23, 24]
-          },
-          {
-            "type": 65281,
-            "length": 1
-          },
-          {
-            "type": 0,
-            "length": 14
-          },
-          {
-            "type": 35,
-            "length": 0
-          },
-          {
-            "type": 13,
-            "length": 26,
-            "values": [43690, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
-          },
-          {
-            "type": 45,
-            "length": 2
-          },
-          {
-            "type": 27,
-            "length": 3
-          },
-          {
-            "type": 17613,
-            "length": 5
-          },
-          {
-            "type": 23,
-            "length": 0
-          },
-          {
-            "type": 51,
-            "length": 1263,
-            "keyShares": [
-              {
-                "group": 35466,
-                "length": 1
-              },
-              {
-                "group": 4588,
-                "length": 1216
-              },
-              {
-                "group": 29,
-                "length": 32
-              }
-            ]
-          },
-          {
-            "type": 43,
-            "length": 7,
-            "values": [47802, 772, 771]
-          },
-          {
-            "type": 27242,
-            "length": 1
-          }
-        ],
-        "pointFormats": [0],
-        "echOuterType": 0,
-        "serverName": "localhost",
-        "pskModes": [1],
-        "certificateCompression": [2],
-        "applicationSettings": {
-          "codepoint": 17613,
-          "protocols": ["h2"]
-        },
-        "extensionOrder": [
-          2570, 18, 16, 5, 11, 65037, 51764, 10, 65281, 0, 35, 13, 45, 27, 17613, 23, 51, 43, 27242
-        ],
-        "extensionNames": [
-          "signed_certificate_timestamp",
-          "alpn",
-          "status_request",
-          "ec_point_formats",
-          "encrypted_client_hello",
-          "trust_anchors",
-          "supported_groups",
-          "renegotiation_info",
-          "server_name",
-          "session_ticket",
-          "signature_algorithms",
-          "psk_key_exchange_modes",
-          "compress_certificate",
-          "application_settings",
-          "extended_master_secret",
-          "key_share",
-          "supported_versions"
-        ],
-        "supportedVersions": [772, 771],
-        "groups": [4588, 29, 23, 24],
-        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
-        "keyShareGroups": [4588, 29],
-        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
-        "alpn": ["h2", "http/1.1"],
-        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
-        "normalized": {
-          "recordVersion": 769,
-          "legacyVersion": 771,
-          "compressionMethods": [0],
-          "ciphers": [
-            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
-            53
-          ],
-          "cipherGrease": true,
-          "extensions": [
-            {
-              "type": 0,
-              "length": 14
-            },
-            {
-              "type": 5,
-              "length": 5
-            },
-            {
-              "type": 10,
-              "length": 12,
-              "values": [4588, 29, 23, 24],
-              "grease": true
-            },
-            {
-              "type": 11,
-              "length": 2
-            },
-            {
-              "type": 13,
-              "length": 26,
-              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
-              "grease": true
-            },
-            {
-              "type": 16,
-              "length": 14,
-              "protocols": ["h2", "http/1.1"]
-            },
-            {
-              "type": 18,
-              "length": 0
-            },
-            {
-              "type": 23,
-              "length": 0
-            },
-            {
-              "type": 27,
-              "length": 3
-            },
-            {
-              "type": 35,
-              "length": 0
-            },
-            {
-              "type": 43,
-              "length": 7,
-              "values": [772, 771],
-              "grease": true
-            },
-            {
-              "type": 45,
-              "length": 2
-            },
-            {
-              "type": 51,
-              "length": 1263,
-              "keyShares": [
-                {
-                  "group": 4588,
-                  "length": 1216
-                },
-                {
-                  "group": 29,
-                  "length": 32
-                }
-              ],
-              "keyShareGreaseCount": 1
-            },
-            {
-              "type": 17613,
-              "length": 5
-            },
-            {
-              "type": 51764,
-              "length": 186,
-              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
-            },
-            {
-              "type": 65037
-            },
-            {
-              "type": 65281,
-              "length": 1
-            }
-          ],
-          "extensionGreaseCount": 2
-        },
-        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,18-16-5-11-65037-51764-10-65281-0-35-13-45-27-17613-23-51-43,4588-29-23-24,0",
-        "ja3Hash": "e7f0a313d7ffc7ba7e14d560a216e7a9",
-        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
-        "ja3nHash": "bd4930bd9b000ee684830e44bab76fdf",
-        "ja4": "t13d1517h2_8daaf6152771_cb7bf5808d99",
-        "ja4Raw": "t13d1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
-        "rawBase64": "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"
-      },
-      "alpn": "h2",
-      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
-      "h2": {
-        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
-        "settings": [
-          {
-            "id": 1,
-            "name": "HEADER_TABLE_SIZE",
-            "value": 65536
-          },
-          {
-            "id": 2,
-            "name": "ENABLE_PUSH",
-            "value": 0
-          },
-          {
-            "id": 4,
-            "name": "INITIAL_WINDOW_SIZE",
-            "value": 6291456
-          },
-          {
-            "id": 6,
-            "name": "MAX_HEADER_LIST_SIZE",
-            "value": 262144
-          }
-        ],
-        "connectionWindowIncrement": 15663105,
-        "priorityFrames": [],
-        "firstHeadersPriority": {
-          "exclusive": true,
-          "dependency": 0,
-          "weight": 220
-        },
-        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
-      },
-      "h2Frames": [
-        {
-          "type": "SETTINGS",
-          "flags": 0,
-          "streamId": 0,
-          "length": 24,
-          "settings": [
-            {
-              "id": 1,
-              "value": 65536
-            },
-            {
-              "id": 2,
-              "value": 0
-            },
-            {
-              "id": 4,
-              "value": 6291456
-            },
-            {
-              "id": 6,
-              "value": 262144
-            }
-          ]
-        },
-        {
-          "type": "WINDOW_UPDATE",
-          "flags": 0,
-          "streamId": 0,
-          "length": 4,
-          "increment": 15663105
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 1,
-          "length": 383,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 0,
-            "weight": 220
-          }
-        },
-        {
-          "type": "SETTINGS",
-          "flags": 1,
-          "streamId": 0,
-          "length": 0,
-          "ack": true,
-          "settings": []
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 3,
-          "length": 114,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 0,
-            "weight": 220
-          }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 36,
-          "streamId": 5,
-          "length": 74,
-          "endStream": false,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
-            "dependency": 3,
-            "weight": 220
-          }
-        },
-        {
-          "type": "DATA",
-          "flags": 1,
-          "streamId": 5,
-          "length": 2
-        },
-        {
-          "type": "RST_STREAM",
-          "flags": 0,
-          "streamId": 3,
-          "length": 4,
-          "errorCode": 8
-        }
-      ],
-      "h2Error": null
-    },
-    {
-      "id": 3,
+      "id": 1,
       "origin": "A",
       "family": "IPv4",
-      "rawSha256": "cd06f0df3735cc87278e5517478c9e53a6a6af6da767bb2bf5ad875ebdd0e6c9",
+      "rawSha256": "78b23c4b592e9c5b4266e3106631b20495aacba2ce4635b963b81e8c28c9ffdc",
       "hello": {
         "recordVersion": 769,
         "legacyVersion": 771,
         "compressionMethods": [0],
         "ciphers": [
-          60138, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          23130, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
           47, 53
         ],
         "extensions": [
           {
-            "type": 2570,
+            "type": 23130,
             "length": 0
           },
           {
             "type": 10,
             "length": 12,
-            "values": [56026, 4588, 29, 23, 24]
-          },
-          {
-            "type": 18,
-            "length": 0
-          },
-          {
-            "type": 65281,
-            "length": 1
-          },
-          {
-            "type": 45,
-            "length": 2
-          },
-          {
-            "type": 43,
-            "length": 7,
-            "values": [19018, 772, 771]
-          },
-          {
-            "type": 5,
-            "length": 5
+            "values": [51914, 4588, 29, 23, 24]
           },
           {
             "type": 16,
@@ -2184,27 +1688,44 @@
             "protocols": ["h2", "http/1.1"]
           },
           {
+            "type": 5,
+            "length": 5
+          },
+          {
             "type": 27,
             "length": 3
           },
           {
-            "type": 65037,
-            "length": 250
+            "type": 23,
+            "length": 0
           },
           {
-            "type": 11,
+            "type": 43,
+            "length": 7,
+            "values": [51914, 772, 771]
+          },
+          {
+            "type": 45,
             "length": 2
           },
           {
-            "type": 35,
+            "type": 65037,
+            "length": 186
+          },
+          {
+            "type": 18,
             "length": 0
+          },
+          {
+            "type": 17613,
+            "length": 5
           },
           {
             "type": 51,
             "length": 1263,
             "keyShares": [
               {
-                "group": 56026,
+                "group": 51914,
                 "length": 1
               },
               {
@@ -2218,22 +1739,26 @@
             ]
           },
           {
-            "type": 23,
-            "length": 0
-          },
-          {
             "type": 51764,
             "length": 186,
             "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
           },
           {
-            "type": 17613,
-            "length": 5
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 11,
+            "length": 2
           },
           {
             "type": 13,
             "length": 26,
-            "values": [2570, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+            "values": [19018, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
           },
           {
             "type": 47802,
@@ -2244,33 +1769,34 @@
             "length": 235
           }
         ],
-        "pskModes": [1],
         "certificateCompression": [2],
+        "pskModes": [1],
         "echOuterType": 0,
-        "pointFormats": [0],
         "applicationSettings": {
           "codepoint": 17613,
           "protocols": ["h2"]
         },
+        "pointFormats": [0],
         "extensionOrder": [
-          2570, 10, 18, 65281, 45, 43, 5, 16, 27, 65037, 11, 35, 51, 23, 51764, 17613, 13, 47802, 41
+          23130, 10, 16, 5, 27, 23, 43, 45, 65037, 18, 17613, 51, 51764, 35, 65281, 11, 13, 47802,
+          41
         ],
         "extensionNames": [
           "supported_groups",
-          "signed_certificate_timestamp",
-          "renegotiation_info",
-          "psk_key_exchange_modes",
-          "supported_versions",
-          "status_request",
           "alpn",
+          "status_request",
           "compress_certificate",
-          "encrypted_client_hello",
-          "ec_point_formats",
-          "session_ticket",
-          "key_share",
           "extended_master_secret",
-          "trust_anchors",
+          "supported_versions",
+          "psk_key_exchange_modes",
+          "encrypted_client_hello",
+          "signed_certificate_timestamp",
           "application_settings",
+          "key_share",
+          "trust_anchors",
+          "session_ticket",
+          "renegotiation_info",
+          "ec_point_formats",
           "signature_algorithms",
           "pre_shared_key"
         ],
@@ -2380,13 +1906,13 @@
           ],
           "extensionGreaseCount": 2
         },
-        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,10-18-65281-45-43-5-16-27-65037-11-35-51-23-51764-17613-13-41,4588-29-23-24,0",
-        "ja3Hash": "ab6ce1c57c35d285a5050ad3a7b042f0",
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,10-16-5-27-23-43-45-65037-18-17613-51-51764-35-65281-11-13-41,4588-29-23-24,0",
+        "ja3Hash": "d57a78e19a66bc2c815b16b8942fcc5b",
         "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-41-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
         "ja3nHash": "019a3984e644876b935cea4d4bd210ff",
         "ja4": "t13i1517h2_8daaf6152771_e2d80978ab2e",
         "ja4Raw": "t13i1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,0029,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
-        "rawBase64": "FgMBCJUBAAiRAwP3E5dKdRrW+lr2TiHNG7G78a2bktVOEuWG2axBO1ot9iCVzU2VHBxlBzPrZMailmzoJqxE/wPYyZGR0GQM8UZeAgAg6uoTARMCEwPAK8AvwCzAMMypzKjAE8AUAJwAnQAvADUBAAgoCgoAAAAKAAwACtraEewAHQAXABgAEgAA/wEAAQAALQACAQEAKwAHBkpKAwQDAwAFAAUBAAAAAAAQAA4ADAJoMghodHRwLzEuMQAbAAMCAAL+DQD6AAABAAFWACAbY/BHdiBAbgpmJ5e8QZXw6I2pIzS/38V80cMFhAYkYwDQPC2GGBN/F3tjFgDr9hPe9wMpT11mYZn3/PNG6y7qgsgR8yHG4JNu1Z/6O6O/B4VjnBlTbhA6kVJL71tDTYxdqH5vCHhST7BHMwJsZl+tcB/TO8gtYocnDdZff2R2K6a74j5rmWqb0rqRsTUPkOEn+0J2aAIvp2P9PbqDnMDC7YsqAvjKE6WBPw+DfSr3WwqrY2wl+kgZCw9YIsEbvf7pL5pXh0UQo52KTuOWoOiqjTQydTuCtfrCQleTLrlsLSu+ZI5dpZ8D2lc1Kv4j0SIdVgALAAIBAAAjAAAAMwTvBO3a2gABABHsBMDChjXR4Sjl2Znd+GQFQRrqWCL0NEc2sIc5KDQt6rjpRxr32jM/MZbJ0DV0yg8CMZa+wZW7VIt7+ggERrruR0FG+1BaUXhXGrof8FAyjHJx8oU8oyraC38ioI8pFSnguRXuVb7XxzFfIGqdVaYZF5o2tDl48DllWKhl0ZZtFcADhkczgC145S+CF5S6OD0tpJg4IEW5wJtBqkdWiMKIJ0BocJL0gqBksZ+tZyGtokyjy0vpq6a703xr7KAx12rZqEGu8SxTojxoIhkOlaErOZFM1VjkoZiNhQQx+nFHUSKoRQol3Mj11bmOZBzdBs1EODpC6H27KTWPhXbmiI41poAxO4Vjt0eV9GbVQR1bqrw4XCoEIFCqYYvibJHxaQhumKtxo8xt/InltWK7AxBidIxsYqJz851FxA7HdwWymzdpVI/jk5X1kcHoKTYr9nb6d2DFe8hDDNC/t3mfdj6eAn95tmXPYKaimldigFIIuFU8t5A0IE9eMmNbJWj4+LfPuUimpj/18G9D1SNGNnPsnM85FMcC+6MxohPm+Bxjm3WfRZCGIoxuZz2lp52WRJwmu7rQJ0Jy+wwtul69IJif6nd8R179+HCLl3uROAFKQBiD7ClVMWTDI6o0gmJc52U/ds+/13Q/xJLD1Kq57FgHwY89UwnuxD5lETnmbLqk6AJG7Ic5nEhHEnLDhqcK4hAhtKt3M022V7WRY0UCZkiZmUYR1RubEXRFYgSK4hG91C0jvEdNB2YJcMXvhVHU6Go5xx6Gt0SAVgR9SyE4VnvaJajKYlTAkQx+CrnjVDX5hpXOaxzQOKZR8VN7vKdHsX3KdidbFJRxxhn70KPYaLACkQyyI8pgYgOMWS9IGFo91b9qxQdJkntG2poGlaLdkxSYQK1XObQ19VKDDBlnVBiCVivpiF4KUcbB3FhtHKnj9GbWZmIH8IlMh4GTIKcMBrMWDImjGhEpKyJmK14h2QHnTCizeLEaqSzZa6MAFFgBgxjWxAk6a7PzELIxUQOuYIUv2DysAzASNwN+aAw75mNUNkNzkiHx2DlT6yfu6BDlR8imyQbJmn9wYsF8fMJJa8DVBr2gdh8qlItMMbYwKgQIdCysF3rCocRJOsnxBWWn9FmVJ2LlmB4hVom1tDVM+mUHORQalA2RVGDgglUU0D2+R312dwK+VzjH8YZLkLhBwZNtymkNl4RlqsD14Yjb5BjMQ6wUZaHL63kj6qe+26z3U3vp8i0YcBE0yLktlFtTCFBzVV0yBGnqK5JVSQlOjFRutmOYqFxvIATwk53q5GYClMpTC4gsMKxP5ynM2bPFe2q9wsW7eoVxS0cAsBuxoKtdQksfGozFIqeA+WZhoJ/7hU90ZMLYFlCK1lmAyaUenL/bJqvnHFoSdRacJEQ5g0CfWx2/nDqqQi5M0IxaMDFacmJ+03olcUDliZzeo6A0ZlUIEKFmxbQNJHpXlR0UbMkHNavitadbyqzaFU53yCztmQhnzHoVWXaUQKymCgC2/K2NgIv09jk9c7iR05orCrlQF47ytfuDNpdH6s5JPRE5SapSDl6UZe0XlAc1n7pAS0XMR0tTUthS9Sgz+oNN+cAUWH9X0tD9D9oQ0OV1v7vhb2p6AB0AIPFsWBCI+TJcieqNfHcGS/QRdhT7RBWYW4eYRKQoE3E0ABcAAMo0ALoAuAWC3xMCAQWC3xMCBgWC3xMCDQWC3xMCDgWC3xMCDwWC3xMCEgWC3xMCEwWC3xMCFAiDmmSMmy0BBwiDmmSMmy0BCAiDmmSMmy0BCQiDmmSMmy0BCgiDmmSMmy0BCwiDmmSMmy0BDAiDmmSMmy0BDQiDmmSMmy0BEgiDmmSMmy0BEwTWeQkBBNZ5CQQE1nkJBQTWeQkGBNZ5CQcE1nkJCATWeQkKBNZ5CQsE1nkJDATWeQkNBNZ5CQ9EzQAFAAMCaDIADQAaABgKCgkECQUJBgQDCAQEAQUDCAUFAQgGBgG6ugABAAApAOsAxgDAcwZaL2ZUquW0ijHbDtb6twQ2WlNugrYY4GWnT9qHgS/ZgxQi1jdgLvXbWVRwj/BFNL5OJfNWjJ/ro7IYFOCXvNoIEOT7x3CF9kYlzJjM6t0eRais5BCUfkDOzNvgNOned7dw5eusV7jx9XJqWGB8VQQvafHx5zf1boPP1oJk283BMx5FsdI2vhzG+xzvhXc0By4ntswd7gXMVPLM7JHo/4OER6MDLh7QtyJnJnu6BDeemzRRPqjiq56Ua8fqbhJpt0/D9gAhIA8JF+0sKUhl3ehYeX5FLYJZUyYSl+Atkq8I4/TjS0oM"
+        "rawBase64": "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"
       },
       "alpn": "h2",
       "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
@@ -2459,7 +1985,7 @@
           "type": "HEADERS",
           "flags": 37,
           "streamId": 1,
-          "length": 525,
+          "length": 390,
           "endStream": true,
           "endHeaders": true,
           "priority": {
@@ -2469,271 +1995,111 @@
           }
         },
         {
+          "type": "HEADERS",
+          "flags": 36,
+          "streamId": 3,
+          "length": 144,
+          "endStream": false,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 1,
+            "weight": 220
+          }
+        },
+        {
+          "type": "DATA",
+          "flags": 1,
+          "streamId": 3,
+          "length": 3
+        },
+        {
           "type": "SETTINGS",
           "flags": 1,
           "streamId": 0,
           "length": 0,
           "ack": true,
           "settings": []
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 5,
+          "length": 74,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 7,
+          "length": 96,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 5,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 9,
+          "length": 34,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 36,
+          "streamId": 11,
+          "length": 205,
+          "endStream": false,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "DATA",
+          "flags": 1,
+          "streamId": 11,
+          "length": 9
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 13,
+          "length": 63,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
         }
       ],
       "h2Error": null
     },
     {
-      "id": 4,
-      "origin": "B",
-      "family": "IPv4",
-      "rawSha256": "38652944cbbfbcf12cfa142ad5e5302abb8ad04fd4baaa3eefbba6dc056d2cdf",
-      "hello": {
-        "recordVersion": 769,
-        "legacyVersion": 771,
-        "compressionMethods": [0],
-        "ciphers": [
-          14906, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
-          47, 53
-        ],
-        "extensions": [
-          {
-            "type": 47802,
-            "length": 0
-          },
-          {
-            "type": 18,
-            "length": 0
-          },
-          {
-            "type": 17613,
-            "length": 5
-          },
-          {
-            "type": 16,
-            "length": 14,
-            "protocols": ["h2", "http/1.1"]
-          },
-          {
-            "type": 11,
-            "length": 2
-          },
-          {
-            "type": 35,
-            "length": 0
-          },
-          {
-            "type": 51764,
-            "length": 186,
-            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
-          },
-          {
-            "type": 5,
-            "length": 5
-          },
-          {
-            "type": 45,
-            "length": 2
-          },
-          {
-            "type": 51,
-            "length": 1263,
-            "keyShares": [
-              {
-                "group": 51914,
-                "length": 1
-              },
-              {
-                "group": 4588,
-                "length": 1216
-              },
-              {
-                "group": 29,
-                "length": 32
-              }
-            ]
-          },
-          {
-            "type": 65037,
-            "length": 250
-          },
-          {
-            "type": 13,
-            "length": 26,
-            "values": [51914, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
-          },
-          {
-            "type": 43,
-            "length": 7,
-            "values": [10794, 772, 771]
-          },
-          {
-            "type": 27,
-            "length": 3
-          },
-          {
-            "type": 10,
-            "length": 12,
-            "values": [51914, 4588, 29, 23, 24]
-          },
-          {
-            "type": 65281,
-            "length": 1
-          },
-          {
-            "type": 23,
-            "length": 0
-          },
-          {
-            "type": 60138,
-            "length": 1
-          }
-        ],
-        "applicationSettings": {
-          "codepoint": 17613,
-          "protocols": ["h2"]
-        },
-        "pointFormats": [0],
-        "pskModes": [1],
-        "echOuterType": 0,
-        "certificateCompression": [2],
-        "extensionOrder": [
-          47802, 18, 17613, 16, 11, 35, 51764, 5, 45, 51, 65037, 13, 43, 27, 10, 65281, 23, 60138
-        ],
-        "extensionNames": [
-          "signed_certificate_timestamp",
-          "application_settings",
-          "alpn",
-          "ec_point_formats",
-          "session_ticket",
-          "trust_anchors",
-          "status_request",
-          "psk_key_exchange_modes",
-          "key_share",
-          "encrypted_client_hello",
-          "signature_algorithms",
-          "supported_versions",
-          "compress_certificate",
-          "supported_groups",
-          "renegotiation_info",
-          "extended_master_secret"
-        ],
-        "supportedVersions": [772, 771],
-        "groups": [4588, 29, 23, 24],
-        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
-        "keyShareGroups": [4588, 29],
-        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
-        "alpn": ["h2", "http/1.1"],
-        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
-        "normalized": {
-          "recordVersion": 769,
-          "legacyVersion": 771,
-          "compressionMethods": [0],
-          "ciphers": [
-            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
-            53
-          ],
-          "cipherGrease": true,
-          "extensions": [
-            {
-              "type": 5,
-              "length": 5
-            },
-            {
-              "type": 10,
-              "length": 12,
-              "values": [4588, 29, 23, 24],
-              "grease": true
-            },
-            {
-              "type": 11,
-              "length": 2
-            },
-            {
-              "type": 13,
-              "length": 26,
-              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
-              "grease": true
-            },
-            {
-              "type": 16,
-              "length": 14,
-              "protocols": ["h2", "http/1.1"]
-            },
-            {
-              "type": 18,
-              "length": 0
-            },
-            {
-              "type": 23,
-              "length": 0
-            },
-            {
-              "type": 27,
-              "length": 3
-            },
-            {
-              "type": 35,
-              "length": 0
-            },
-            {
-              "type": 43,
-              "length": 7,
-              "values": [772, 771],
-              "grease": true
-            },
-            {
-              "type": 45,
-              "length": 2
-            },
-            {
-              "type": 51,
-              "length": 1263,
-              "keyShares": [
-                {
-                  "group": 4588,
-                  "length": 1216
-                },
-                {
-                  "group": 29,
-                  "length": 32
-                }
-              ],
-              "keyShareGreaseCount": 1
-            },
-            {
-              "type": 17613,
-              "length": 5
-            },
-            {
-              "type": 51764,
-              "length": 186,
-              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
-            },
-            {
-              "type": 65037
-            },
-            {
-              "type": 65281,
-              "length": 1
-            }
-          ],
-          "extensionGreaseCount": 2
-        },
-        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,18-17613-16-11-35-51764-5-45-51-65037-13-43-27-10-65281-23,4588-29-23-24,0",
-        "ja3Hash": "5564a8fd2629606370ca4dc7497dd24a",
-        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
-        "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
-        "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
-        "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
-        "rawBase64": "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"
-      },
-      "alpn": "http/1.1",
-      "h2": null,
-      "h2Frames": null,
-      "h2Error": null
-    },
-    {
-      "id": 6,
-      "origin": "C",
-      "family": "IPv4",
-      "rawSha256": "eb04d92d37423efa6960515f7218c1a50af21de8a702e68354b1d65d97973a5d",
+      "id": 2,
+      "origin": "A",
+      "family": "IPv6",
+      "rawSha256": "e2924c4fff785b078ccc2d1b97411f787299647da2b6b3bcc6d5885d9dbb49be",
       "hello": {
         "recordVersion": 769,
         "legacyVersion": 771,
@@ -2744,44 +2110,49 @@
         ],
         "extensions": [
           {
-            "type": 6682,
+            "type": 23130,
             "length": 0
           },
           {
-            "type": 27,
-            "length": 3
-          },
-          {
-            "type": 13,
-            "length": 26,
-            "values": [39578, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
-          },
-          {
-            "type": 65037,
-            "length": 186
+            "type": 0,
+            "length": 14
           },
           {
             "type": 5,
             "length": 5
           },
           {
-            "type": 11,
-            "length": 2
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 65037,
+            "length": 186
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [6682, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
           },
           {
             "type": 23,
             "length": 0
           },
           {
-            "type": 17613,
-            "length": 5
-          },
-          {
             "type": 51,
             "length": 1263,
             "keyShares": [
               {
-                "group": 10794,
+                "group": 2570,
                 "length": 1
               },
               {
@@ -2795,8 +2166,368 @@
             ]
           },
           {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [47802, 772, 771]
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [2570, 4588, 29, 23, 24]
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 2570,
+            "length": 1
+          }
+        ],
+        "serverName": "localhost",
+        "echOuterType": 0,
+        "pointFormats": [0],
+        "certificateCompression": [2],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "pskModes": [1],
+        "extensionOrder": [
+          23130, 0, 5, 18, 51764, 65037, 65281, 13, 23, 51, 16, 11, 27, 43, 35, 17613, 10, 45, 2570
+        ],
+        "extensionNames": [
+          "server_name",
+          "status_request",
+          "signed_certificate_timestamp",
+          "trust_anchors",
+          "encrypted_client_hello",
+          "renegotiation_info",
+          "signature_algorithms",
+          "extended_master_secret",
+          "key_share",
+          "alpn",
+          "ec_point_formats",
+          "compress_certificate",
+          "supported_versions",
+          "session_ticket",
+          "application_settings",
+          "supported_groups",
+          "psk_key_exchange_modes"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 0,
+              "length": 14
+            },
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-5-18-51764-65037-65281-13-23-51-16-11-27-43-35-17613-10-45,4588-29-23-24,0",
+        "ja3Hash": "2217a4eea1ae2b5b25e64bcfabd9a760",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "bd4930bd9b000ee684830e44bab76fdf",
+        "ja4": "t13d1517h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13d1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "h2",
+      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 220
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      },
+      "h2Frames": [
+        {
+          "type": "SETTINGS",
+          "flags": 0,
+          "streamId": 0,
+          "length": 24,
+          "settings": [
+            {
+              "id": 1,
+              "value": 65536
+            },
+            {
+              "id": 2,
+              "value": 0
+            },
+            {
+              "id": 4,
+              "value": 6291456
+            },
+            {
+              "id": 6,
+              "value": 262144
+            }
+          ]
+        },
+        {
+          "type": "WINDOW_UPDATE",
+          "flags": 0,
+          "streamId": 0,
+          "length": 4,
+          "increment": 15663105
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 1,
+          "length": 382,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "SETTINGS",
+          "flags": 1,
+          "streamId": 0,
+          "length": 0,
+          "ack": true,
+          "settings": []
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 3,
+          "length": 114,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 36,
+          "streamId": 5,
+          "length": 74,
+          "endStream": false,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 3,
+            "weight": 220
+          }
+        },
+        {
+          "type": "DATA",
+          "flags": 1,
+          "streamId": 5,
+          "length": 2
+        }
+      ],
+      "h2Error": null
+    },
+    {
+      "id": 3,
+      "origin": "W",
+      "family": "IPv4",
+      "rawSha256": "0ee14b51400925b3b52ef5e14100d3b2e8bc2aca40a0fcc9697f2ee8305865bb",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          31354, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 56026,
+            "length": 0
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [56026, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
             "type": 65281,
             "length": 1
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [56026, 4588, 29, 23, 24]
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 11,
+            "length": 2
           },
           {
             "type": 51764,
@@ -2804,13 +2535,203 @@
             "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
           },
           {
-            "type": 45,
-            "length": 2
+            "type": 27,
+            "length": 3
           },
           {
-            "type": 10,
-            "length": 12,
-            "values": [10794, 4588, 29, 23, 24]
+            "type": 43,
+            "length": 7,
+            "values": [43690, 772, 771]
+          },
+          {
+            "type": 65037,
+            "length": 186
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 56026,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 16,
+            "length": 11,
+            "protocols": ["http/1.1"]
+          },
+          {
+            "type": 39578,
+            "length": 1
+          }
+        ],
+        "pskModes": [1],
+        "pointFormats": [0],
+        "certificateCompression": [2],
+        "echOuterType": 0,
+        "extensionOrder": [
+          56026, 13, 35, 65281, 10, 5, 45, 18, 23, 11, 51764, 27, 43, 65037, 51, 16, 39578
+        ],
+        "extensionNames": [
+          "signature_algorithms",
+          "session_ticket",
+          "renegotiation_info",
+          "supported_groups",
+          "status_request",
+          "psk_key_exchange_modes",
+          "signed_certificate_timestamp",
+          "extended_master_secret",
+          "ec_point_formats",
+          "trust_anchors",
+          "compress_certificate",
+          "supported_versions",
+          "encrypted_client_hello",
+          "key_share",
+          "alpn"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 11,
+              "protocols": ["http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,13-35-65281-10-5-45-18-23-11-51764-27-43-65037-51-16,4588-29-23-24,0",
+        "ja3Hash": "70ea7ce47b85c4e3c67ad4553f6465b0",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "8ecd4615387254c184f8c37f9458538e",
+        "ja4": "t13i1515h1_8daaf6152771_5b37b36a67c0",
+        "ja4Raw": "t13i1515h1_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "http/1.1",
+      "h2": null,
+      "h2Frames": null,
+      "h2Error": null
+    },
+    {
+      "id": 4,
+      "origin": "B",
+      "family": "IPv4",
+      "rawSha256": "d5f69f428f6effe0424dc669898c7cdcdc450922a863978a9e7f58659e905561",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          47802, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 2570,
+            "length": 0
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [31354, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
           },
           {
             "type": 16,
@@ -2818,51 +2739,111 @@
             "protocols": ["h2", "http/1.1"]
           },
           {
-            "type": 35,
-            "length": 0
-          },
-          {
             "type": 43,
             "length": 7,
-            "values": [10794, 772, 771]
+            "values": [43690, 772, 771]
           },
           {
             "type": 18,
             "length": 0
           },
           {
-            "type": 19018,
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 65037,
+            "length": 186
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 2570,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [2570, 4588, 29, 23, 24]
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 64250,
             "length": 1
           }
         ],
-        "certificateCompression": [2],
-        "echOuterType": 0,
-        "pointFormats": [0],
         "applicationSettings": {
           "codepoint": 17613,
           "protocols": ["h2"]
         },
+        "echOuterType": 0,
         "pskModes": [1],
+        "pointFormats": [0],
+        "certificateCompression": [2],
         "extensionOrder": [
-          6682, 27, 13, 65037, 5, 11, 23, 17613, 51, 65281, 51764, 45, 10, 16, 35, 43, 18, 19018
+          2570, 13, 16, 43, 18, 35, 17613, 51764, 65037, 45, 65281, 5, 51, 23, 10, 11, 27, 64250
         ],
         "extensionNames": [
-          "compress_certificate",
           "signature_algorithms",
-          "encrypted_client_hello",
-          "status_request",
-          "ec_point_formats",
-          "extended_master_secret",
-          "application_settings",
-          "key_share",
-          "renegotiation_info",
-          "trust_anchors",
-          "psk_key_exchange_modes",
-          "supported_groups",
           "alpn",
-          "session_ticket",
           "supported_versions",
-          "signed_certificate_timestamp"
+          "signed_certificate_timestamp",
+          "session_ticket",
+          "application_settings",
+          "trust_anchors",
+          "encrypted_client_hello",
+          "psk_key_exchange_modes",
+          "renegotiation_info",
+          "status_request",
+          "key_share",
+          "extended_master_secret",
+          "supported_groups",
+          "ec_point_formats",
+          "compress_certificate"
         ],
         "supportedVersions": [772, 771],
         "groups": [4588, 29, 23, 24],
@@ -2966,13 +2947,263 @@
           ],
           "extensionGreaseCount": 2
         },
-        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,27-13-65037-5-11-23-17613-51-65281-51764-45-10-16-35-43-18,4588-29-23-24,0",
-        "ja3Hash": "641e5b03d2b8b6f0c62dbb81867a6e6d",
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,13-16-43-18-35-17613-51764-65037-45-65281-5-51-23-10-11-27,4588-29-23-24,0",
+        "ja3Hash": "1a637d50cc689164ada9adcdc55c9114",
         "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
         "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
         "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
         "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
-        "rawBase64": "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"
+        "rawBase64": "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"
+      },
+      "alpn": "http/1.1",
+      "h2": null,
+      "h2Frames": null,
+      "h2Error": null
+    },
+    {
+      "id": 5,
+      "origin": "C",
+      "family": "IPv4",
+      "rawSha256": "6d03ce67ac5091f47877d76fa71913751befafbf9fcea7c3683a05f8f6cf64b6",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          6682, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 51914,
+            "length": 0
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [23130, 772, 771]
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [2570, 4588, 29, 23, 24]
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [64250, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 65037,
+            "length": 218
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 2570,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 6682,
+            "length": 1
+          }
+        ],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "pointFormats": [0],
+        "pskModes": [1],
+        "echOuterType": 0,
+        "certificateCompression": [2],
+        "extensionOrder": [
+          51914, 43, 51764, 10, 23, 17613, 65281, 11, 45, 5, 13, 18, 65037, 35, 16, 51, 27, 6682
+        ],
+        "extensionNames": [
+          "supported_versions",
+          "trust_anchors",
+          "supported_groups",
+          "extended_master_secret",
+          "application_settings",
+          "renegotiation_info",
+          "ec_point_formats",
+          "psk_key_exchange_modes",
+          "status_request",
+          "signature_algorithms",
+          "signed_certificate_timestamp",
+          "encrypted_client_hello",
+          "session_ticket",
+          "alpn",
+          "key_share",
+          "compress_certificate"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,43-51764-10-23-17613-65281-11-45-5-13-18-65037-35-16-51-27,4588-29-23-24,0",
+        "ja3Hash": "6a9a679853861256e5ec43e00a6ef93e",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
+        "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
       },
       "alpn": "h2",
       "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
@@ -3084,77 +3315,46 @@
           "endHeaders": true,
           "priority": {
             "exclusive": true,
-            "dependency": 3,
-            "weight": 220
-          }
-        },
-        {
-          "type": "HEADERS",
-          "flags": 37,
-          "streamId": 7,
-          "length": 60,
-          "endStream": true,
-          "endHeaders": true,
-          "priority": {
-            "exclusive": true,
             "dependency": 0,
-            "weight": 256
+            "weight": 220
           }
         }
       ],
       "h2Error": null
     },
     {
-      "id": 7,
+      "id": 6,
       "origin": "C",
-      "family": "IPv6",
-      "rawSha256": "bd594cdc0cda6916e21011ab5c4218c626baefcd5d2e7d66a48dcb643eb93936",
+      "family": "IPv4",
+      "rawSha256": "5b43fbb0cd0b2d3db09c3941424f5655fa246631783606ae067dc26930cc907f",
       "hello": {
         "recordVersion": 769,
         "legacyVersion": 771,
         "compressionMethods": [0],
         "ciphers": [
-          64250, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          43690, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
           47, 53
         ],
         "extensions": [
           {
-            "type": 56026,
+            "type": 31354,
             "length": 0
           },
           {
-            "type": 27,
-            "length": 3
-          },
-          {
-            "type": 43,
-            "length": 7,
-            "values": [19018, 772, 771]
-          },
-          {
-            "type": 0,
-            "length": 14
+            "type": 5,
+            "length": 5
           },
           {
             "type": 35,
             "length": 0
           },
           {
-            "type": 23,
-            "length": 0
+            "type": 65037,
+            "length": 186
           },
           {
-            "type": 16,
-            "length": 14,
-            "protocols": ["h2", "http/1.1"]
-          },
-          {
-            "type": 65281,
-            "length": 1
-          },
-          {
-            "type": 17613,
-            "length": 5
+            "type": 11,
+            "length": 2
           },
           {
             "type": 51764,
@@ -3162,21 +3362,17 @@
             "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
           },
           {
-            "type": 45,
-            "length": 2
-          },
-          {
-            "type": 13,
-            "length": 26,
-            "values": [10794, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
-          },
-          {
             "type": 18,
             "length": 0
           },
           {
-            "type": 11,
-            "length": 2
+            "type": 13,
+            "length": 26,
+            "values": [23130, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 23,
+            "length": 0
           },
           {
             "type": 51,
@@ -3197,8 +3393,22 @@
             ]
           },
           {
-            "type": 65037,
-            "length": 186
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [6682, 772, 771]
+          },
+          {
+            "type": 17613,
+            "length": 5
           },
           {
             "type": 10,
@@ -3206,44 +3416,398 @@
             "values": [19018, 4588, 29, 23, 24]
           },
           {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 23130,
+            "length": 1
+          },
+          {
+            "type": 41,
+            "length": 235
+          }
+        ],
+        "echOuterType": 0,
+        "pointFormats": [0],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "certificateCompression": [2],
+        "pskModes": [1],
+        "extensionOrder": [
+          31354, 5, 35, 65037, 11, 51764, 18, 13, 23, 51, 16, 65281, 43, 17613, 10, 27, 45, 23130,
+          41
+        ],
+        "extensionNames": [
+          "status_request",
+          "session_ticket",
+          "encrypted_client_hello",
+          "ec_point_formats",
+          "trust_anchors",
+          "signed_certificate_timestamp",
+          "signature_algorithms",
+          "extended_master_secret",
+          "key_share",
+          "alpn",
+          "renegotiation_info",
+          "supported_versions",
+          "application_settings",
+          "supported_groups",
+          "compress_certificate",
+          "psk_key_exchange_modes",
+          "pre_shared_key"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 41,
+              "length": 235
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-35-65037-11-51764-18-13-23-51-16-65281-43-17613-10-27-45-41,4588-29-23-24,0",
+        "ja3Hash": "6ed3c066ea8e50ab650148f9a0ef1fec",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-41-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "019a3984e644876b935cea4d4bd210ff",
+        "ja4": "t13i1517h2_8daaf6152771_e2d80978ab2e",
+        "ja4Raw": "t13i1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,0029,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "h2",
+      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 256
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      },
+      "h2Frames": [
+        {
+          "type": "SETTINGS",
+          "flags": 0,
+          "streamId": 0,
+          "length": 24,
+          "settings": [
+            {
+              "id": 1,
+              "value": 65536
+            },
+            {
+              "id": 2,
+              "value": 0
+            },
+            {
+              "id": 4,
+              "value": 6291456
+            },
+            {
+              "id": 6,
+              "value": 262144
+            }
+          ]
+        },
+        {
+          "type": "WINDOW_UPDATE",
+          "flags": 0,
+          "streamId": 0,
+          "length": 4,
+          "increment": 15663105
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 1,
+          "length": 890,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "SETTINGS",
+          "flags": 1,
+          "streamId": 0,
+          "length": 0,
+          "ack": true,
+          "settings": []
+        }
+      ],
+      "h2Error": null
+    },
+    {
+      "id": 7,
+      "origin": "C",
+      "family": "IPv6",
+      "rawSha256": "97621f4286883bac8e024738a82966849f4569987e5595f359e16767e7ac1277",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          60138, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 56026,
+            "length": 0
+          },
+          {
             "type": 5,
             "length": 5
           },
           {
-            "type": 47802,
+            "type": 10,
+            "length": 12,
+            "values": [23130, 4588, 29, 23, 24]
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [23130, 772, 771]
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [31354, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 0,
+            "length": 14
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 23130,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 65037,
+            "length": 250
+          },
+          {
+            "type": 51914,
             "length": 1
           }
         ],
-        "certificateCompression": [2],
+        "pointFormats": [0],
         "serverName": "localhost",
         "applicationSettings": {
           "codepoint": 17613,
           "protocols": ["h2"]
         },
         "pskModes": [1],
-        "pointFormats": [0],
+        "certificateCompression": [2],
         "echOuterType": 0,
         "extensionOrder": [
-          56026, 27, 43, 0, 35, 23, 16, 65281, 17613, 51764, 45, 13, 18, 11, 51, 65037, 10, 5, 47802
+          56026, 5, 10, 11, 18, 51764, 43, 13, 65281, 35, 0, 17613, 16, 45, 23, 51, 27, 65037, 51914
         ],
         "extensionNames": [
-          "compress_certificate",
-          "supported_versions",
-          "server_name",
-          "session_ticket",
-          "extended_master_secret",
-          "alpn",
-          "renegotiation_info",
-          "application_settings",
-          "trust_anchors",
-          "psk_key_exchange_modes",
-          "signature_algorithms",
-          "signed_certificate_timestamp",
-          "ec_point_formats",
-          "key_share",
-          "encrypted_client_hello",
+          "status_request",
           "supported_groups",
-          "status_request"
+          "ec_point_formats",
+          "signed_certificate_timestamp",
+          "trust_anchors",
+          "supported_versions",
+          "signature_algorithms",
+          "renegotiation_info",
+          "session_ticket",
+          "server_name",
+          "application_settings",
+          "alpn",
+          "psk_key_exchange_modes",
+          "extended_master_secret",
+          "key_share",
+          "compress_certificate",
+          "encrypted_client_hello"
         ],
         "supportedVersions": [772, 771],
         "groups": [4588, 29, 23, 24],
@@ -3351,13 +3915,13 @@
           ],
           "extensionGreaseCount": 2
         },
-        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,27-43-0-35-23-16-65281-17613-51764-45-13-18-11-51-65037-10-5,4588-29-23-24,0",
-        "ja3Hash": "4cbbd5f0110622fe9852ad8e8991be91",
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-18-51764-43-13-65281-35-0-17613-16-45-23-51-27-65037,4588-29-23-24,0",
+        "ja3Hash": "c37f861739e125b179e07fb7079d8947",
         "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
         "ja3nHash": "bd4930bd9b000ee684830e44bab76fdf",
         "ja4": "t13d1517h2_8daaf6152771_cb7bf5808d99",
         "ja4Raw": "t13d1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
-        "rawBase64": "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"
+        "rawBase64": "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"
       },
       "alpn": "h2",
       "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
@@ -3446,6 +4010,13 @@
           "length": 0,
           "ack": true,
           "settings": []
+        },
+        {
+          "type": "RST_STREAM",
+          "flags": 0,
+          "streamId": 1,
+          "length": 4,
+          "errorCode": 8
         },
         {
           "type": "HEADERS",
@@ -3569,28 +4140,28 @@
           },
           {
             "brand": "Chromium",
-            "version": "156.0.8078.47"
+            "version": "156.0.8078.80"
           },
           {
             "brand": "Google Chrome",
-            "version": "156.0.8078.47"
+            "version": "156.0.8078.80"
           }
         ],
         "mobile": false,
         "model": "",
         "platform": "macOS",
         "platformVersion": "27.2.0",
-        "uaFullVersion": "156.0.8078.47",
+        "uaFullVersion": "156.0.8078.80",
         "wow64": false
       }
     },
     "screen": {
-      "width": 2880,
-      "height": 1620,
-      "availWidth": 2880,
-      "availHeight": 1590,
-      "colorDepth": 30,
-      "pixelDepth": 30,
+      "width": 3360,
+      "height": 1890,
+      "availWidth": 3360,
+      "availHeight": 1860,
+      "colorDepth": 24,
+      "pixelDepth": 24,
       "devicePixelRatio": 2
     },
     "intl": {

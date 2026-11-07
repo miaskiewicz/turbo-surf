@@ -24,8 +24,9 @@ async fn form_validation_and_request_submit_match_fresh_chrome() {
     ] {
         assert_eq!(control[name], format!("{:x}", Sha256::digest(bytes)));
     }
-    assert_eq!(control["browser"], "Chrome/155.0.8059.80");
-    assert_eq!(control["v8"], "15.5.35.23");
+    // Re-recorded on the frozen Chrome 156 headless shell after the #154 refactor.
+    assert_eq!(control["browser"], "HeadlessChrome/156.0.8078.47");
+    assert_eq!(control["v8"], "15.6.75.19");
     assert_eq!(control["errors"], serde_json::json!([]));
     let cases: Value = serde_json::from_str(CASES).unwrap();
     assert_eq!(

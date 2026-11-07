@@ -29,6 +29,112 @@ async fn settle() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 }
 
+type Closed = Arc<Mutex<BTreeMap<String, bool>>>;
+
+async fn read_head(socket: &mut tokio::net::TcpStream) -> Option<Vec<u8>> {
+    let mut request = Vec::new();
+    while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+        let mut bytes = [0; 1024];
+        let count = socket.read(&mut bytes).await.unwrap();
+        if count == 0 {
+            return None;
+        }
+        request.extend_from_slice(&bytes[..count]);
+    }
+    Some(request)
+}
+
+async fn serve_frame(socket: &mut tokio::net::TcpStream) {
+    let body=b"<!doctype html><script>(async()=>{await fetch('/unread/retire');top.postMessage({kind:'unread-frame'},'*')})()</script>";
+    let mut response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).into_bytes();
+    response.extend(body);
+    let _ = socket.write_all(&response).await;
+}
+
+/// Send a response head and never its body; record whether the client closed.
+async fn serve_hold(socket: &mut tokio::net::TcpStream, path: String, closed: &Closed) {
+    let _=socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n").await;
+    let mut bytes = [0; 1];
+    let eof = matches!(socket.read(&mut bytes).await, Ok(0));
+    closed.lock().unwrap().insert(path, eof);
+}
+
+/// Send one body byte, then the rest unless the client cancels within 200ms.
+async fn serve_body(
+    socket: &mut tokio::net::TcpStream,
+    path: String,
+    query: &BTreeMap<String, String>,
+    closed: &Closed,
+) {
+    let size = query
+        .get("bytes")
+        .map_or(16384, |s| s.parse::<usize>().unwrap());
+    let control = query.get("control").map_or("max-age=3600", String::as_str);
+    let fields = if control == "absent" {
+        String::new()
+    } else {
+        format!("Cache-Control: {control}\r\n")
+    };
+    if socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nContent-Type: text/plain\r\n{fields}Connection: close\r\n\r\na").as_bytes()).await.is_err(){return;}
+    let mut byte = [0; 1];
+    let canceled = tokio::select! { biased; read=socket.read(&mut byte)=>matches!(read,Ok(0)),_ = tokio::time::sleep(std::time::Duration::from_millis(200))=>false };
+    if !canceled {
+        let _ = socket.write_all(&vec![b'a'; size - 1]).await;
+    }
+    closed.lock().unwrap().insert(path, canceled);
+}
+
+async fn serve(mut socket: tokio::net::TcpStream, closed: Closed) {
+    let Some(request) = read_head(&mut socket).await else {
+        return;
+    };
+    let head = String::from_utf8_lossy(&request);
+    let path = head.split_whitespace().nth(1).unwrap().to_string();
+    let target = url::Url::parse(&format!("http://localhost{path}")).unwrap();
+    let query: BTreeMap<_, _> = target.query_pairs().into_owned().collect();
+    match target.path() {
+        "/unread-frame" => serve_frame(&mut socket).await,
+        "/unread-hold" => serve_hold(&mut socket, path, &closed).await,
+        _ => serve_body(&mut socket, path, &query, &closed).await,
+    }
+}
+
+/// Unread bodies of growing sizes, held by a global or left for collection.
+async fn size_cases(page: &mut PageSession, result: &mut Map<String, Value>) {
+    for size in [65536, 262144, 1048576, 2097152] {
+        for kind in ["held", "gc"] {
+            let url = format!("/unread/size-{kind}?bytes={size}");
+            let assignment = if kind == "held" {
+                "globalThis.unreadHeld="
+            } else {
+                ""
+            };
+            evaluate(
+                page,
+                &format!(
+                    "(async()=>{{{assignment}await fetch({});}})()",
+                    serde_json::json!(url)
+                ),
+            )
+            .await;
+            if kind == "gc" {
+                collect(page);
+            }
+            settle().await;
+            result.insert(format!("{kind}-{size}"), check(page, &url).await);
+        }
+    }
+}
+
+fn hold_closed(closed: &Closed) -> bool {
+    closed
+        .lock()
+        .unwrap()
+        .get("/unread-hold")
+        .copied()
+        .unwrap_or(false)
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn unread_cache_completion_collection_and_cancellation_match_chrome() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -36,56 +142,8 @@ async fn unread_cache_completion_collection_and_cancellation_match_chrome() {
     let closed = Arc::new(Mutex::new(BTreeMap::<String, bool>::new()));
     let closures = closed.clone();
     let server = tokio::spawn(async move {
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let closed = closures.clone();
-            tokio::spawn(async move {
-                let mut request = Vec::new();
-                loop {
-                    let mut bytes = [0; 1024];
-                    let count = socket.read(&mut bytes).await.unwrap();
-                    if count == 0 {
-                        return;
-                    }
-                    request.extend_from_slice(&bytes[..count]);
-                    if request.windows(4).any(|part| part == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let head = String::from_utf8_lossy(&request);
-                let path = head.split_whitespace().nth(1).unwrap().to_string();
-                let target = url::Url::parse(&format!("http://localhost{path}")).unwrap();
-                let query: BTreeMap<_, _> = target.query_pairs().into_owned().collect();
-                if target.path() == "/unread-frame" {
-                    let body=b"<!doctype html><script>(async()=>{await fetch('/unread/retire');top.postMessage({kind:'unread-frame'},'*')})()</script>";
-                    let mut response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).into_bytes();
-                    response.extend(body);
-                    let _ = socket.write_all(&response).await;
-                    return;
-                }
-                if target.path() == "/unread-hold" {
-                    let _=socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n").await;
-                    let mut bytes = [0; 1];
-                    let eof = matches!(socket.read(&mut bytes).await, Ok(0));
-                    closed.lock().unwrap().insert(path, eof);
-                    return;
-                }
-                let size = query
-                    .get("bytes")
-                    .map_or(16384, |s| s.parse::<usize>().unwrap());
-                let control = query.get("control").map_or("max-age=3600", String::as_str);
-                let fields = if control == "absent" {
-                    String::new()
-                } else {
-                    format!("Cache-Control: {control}\r\n")
-                };
-                if socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nContent-Type: text/plain\r\n{fields}Connection: close\r\n\r\na").as_bytes()).await.is_err(){return;}
-                let mut byte = [0; 1];
-                let canceled = tokio::select! { biased; read=socket.read(&mut byte)=>matches!(read,Ok(0)),_ = tokio::time::sleep(std::time::Duration::from_millis(200))=>false };
-                if !canceled {
-                    let _ = socket.write_all(&vec![b'a'; size - 1]).await;
-                }
-                closed.lock().unwrap().insert(path, canceled);
-            });
+        while let Ok((socket, _)) = listener.accept().await {
+            tokio::spawn(serve(socket, closures.clone()));
         }
     });
     let mut page = PageSession::open(
@@ -127,29 +185,7 @@ async fn unread_cache_completion_collection_and_cancellation_match_chrome() {
     evaluate(&mut page, "unreadControl.retire()").await;
     settle().await;
     result.insert("retire".into(), check(&mut page, "/unread/retire").await);
-    for size in [65536, 262144, 1048576, 2097152] {
-        for kind in ["held", "gc"] {
-            let url = format!("/unread/size-{kind}?bytes={size}");
-            let assignment = if kind == "held" {
-                "globalThis.unreadHeld="
-            } else {
-                ""
-            };
-            evaluate(
-                &mut page,
-                &format!(
-                    "(async()=>{{{assignment}await fetch({});}})()",
-                    serde_json::json!(url)
-                ),
-            )
-            .await;
-            if kind == "gc" {
-                collect(&mut page);
-            }
-            settle().await;
-            result.insert(format!("{kind}-{size}"), check(&mut page, &url).await);
-        }
-    }
+    size_cases(&mut page, &mut result).await;
     for control in ["absent", "no-cache", "no-store"] {
         let url = format!("/unread/control?control={control}");
         evaluate(
@@ -166,17 +202,7 @@ async fn unread_cache_completion_collection_and_cancellation_match_chrome() {
     settle().await;
     result.insert(
         "holdClosed".into(),
-        serde_json::json!(if closed
-            .lock()
-            .unwrap()
-            .get("/unread-hold")
-            .copied()
-            .unwrap_or(false)
-        {
-            1
-        } else {
-            0
-        }),
+        serde_json::json!(if hold_closed(&closed) { 1 } else { 0 }),
     );
     let expected: Value = serde_json::from_str(include_str!(
         "../../../../harness/detection/fixtures/cache-unread-chrome155.json"
@@ -204,13 +230,7 @@ async fn unread_cache_completion_collection_and_cancellation_match_chrome() {
     // its sole creation-owner sender, even after the body wrapper was collected.
     page.close();
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while !closed
-            .lock()
-            .unwrap()
-            .get("/unread-hold")
-            .copied()
-            .unwrap_or(false)
-        {
+        while !hold_closed(&closed) {
             tokio::task::yield_now().await;
         }
     })

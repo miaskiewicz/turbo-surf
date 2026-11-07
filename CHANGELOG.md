@@ -1,5 +1,288 @@
 # Changelog
 
+## Unreleased
+
+## [0.8.0] — 2026-11-07
+
+- **Fixed (CSS.supports, #163)**: the `CSS.supports(condition)` and
+  `CSS.supports(property, value)` wrapper now routes to the turbo-dom engine's
+  grammar (`__tsNs.cssSupports` / `cssSupportsProperty`, turbo-dom#322) instead of
+  surf's Lightning CSS evaluator, so every Chrome 156 property/value the parity
+  write-up listed (`anchor-name`, `position-try-fallbacks`, `interpolate-size`,
+  `field-sizing`, `text-box`, `reading-flow`, `corner-shape`,
+  `dynamic-range-limit`, `order: sibling-index()`, `color: if(...)` /
+  `contrast-color(...)`, `clip-path: shape(...)`, `scroll-marker-group`,
+  `text-wrap: pretty`, `anchor-scope`, `overlay`, `timeline-scope`,
+  `content-visibility`) answers `true` in all three forms (name/value,
+  bare declaration, parenthesized condition). The engine captures `String` at
+  install (turbo-dom#370), so poisoning `globalThis.String` cannot change the
+  answer and surf's private-coercion control still passes. Four engine-side
+  selector/vendor-prefix over-accepts (`-moz-appearance: none`,
+  `selector(div,span)`, `selector(:is(:bogus))`, `selector(:where(:bogus, p))`)
+  are pinned in the `genuine_css_supports_overloads_...` control until the next
+  turbo-dom tightening.
+- **Fixed (render, #206)**: three Chrome 156 parity gaps on `blob:` subresources
+  carried over from #201. A `blob:` iframe whose response is `text/plain` now
+  renders Chrome's styled text viewer (the raw bytes sit inside a `<pre>`, so
+  `document.body.textContent` is the original text and `document.title` is
+  empty), and `document.contentType` reports the response's essence
+  ("text/plain" for the viewer, "text/html" elsewhere) by wrapping the
+  turbo-dom-browser-env native getter rather than hardcoding "text/html". A
+  `blob:` stylesheet now requires a strict `text/css` MIME: a response with any
+  other type still fires `load` on the link, but attaches an empty sheet with no
+  rules (Chrome's "loaded but disabled"), while non-`blob:` stylesheets keep the
+  existing CORS/quirks sniff fallback. Reading `.sheet.cssRules` on a sheet
+  whose backing `blob:` URL was revoked after the link resolved already matched
+  Chrome and is now pinned by the `styleRevoked` sub-case. The
+  `blob-url-resources` detection probe gains `iframeText`, `styleWrongMime` and
+  `styleRevoked`, and `harness/detection/fixtures/blob-url-resources-chrome156.json`
+  is re-recorded. Closes #206.
+- **Changed (quality gates, #154)**: cyclomatic-complexity CI jobs are now
+  blocking at cc <= 15. The Rust backlog (46 functions in `turbo-surf-core`,
+  `turbo-surf-mcp`, `turbo-surf-py` and `turbo-surf-render`) was refactored by
+  decomposition (small named helpers, table dispatch) with no behaviour change,
+  tests and coverage floors preserved; both `complexity / rust` and
+  `complexity / js` lose their `continue-on-error`, and `docs/QUALITY-GATES.md`,
+  README and CLAUDE.md drop the "report-only / backlog" language. One limit for
+  the whole repo, no allow-list, no file skips.
+- **Fixed (tests, #194)**: the `expression_rejection_and_runaway_microtasks_...`
+  render test split into two: `expression_rejection_surfaces_the_underlying_error`
+  (5000 ms budget, generous enough for the microtask-queue drain that carries the
+  rejection on a loaded CI runner) and `expression_runaway_microtasks_hit_the_budget_and_leave_the_session_usable`
+  (keeps the 100 ms budget, asserts "budget" is reported for a deterministic
+  runaway microtask chain, then re-evals to prove the session survives). The old
+  shape tried to assert both from one 100 ms session, so a slow runner could burn
+  the budget before `Promise.reject(...)` settled and the rejection message was
+  reported as "budget" instead of "collector failed". No retries.
+- **Changed (mcp screenshot, #171)**: a session now captures the live IDL
+  `indeterminate` flag at the end of each render — tree-order indices over
+  `document.querySelectorAll('input')` — and forwards them to turbo-dom-raster as
+  `ScreenshotOptions.idl_states` (turbo-dom#371), so a static screenshot of a page a
+  script marked indeterminate paints the Chrome 156 dash the serialized HTML cannot
+  express.
+- **Fixed (core tests, #199)**: the two `transport_identity` tests that assert
+  Chrome's HTTP/1 header order and casing are gated on the `impersonate` feature;
+  the rustls build (`--no-default-features`) no longer fails them, and the
+  CI rustls step runs the whole core crate instead of just `--lib --test websocket`.
+- **Changed (deps)**: turbo-dom crates repinned to `release/0.8.0` `3d02b8db`
+  (version 0.8.0; was `c650aae5` / 0.7.1). The repin closes four known parity gaps
+  — turbo-dom#372 (live-layout percent widths snap to 1/64 px),
+  #375 (empty unknown inline `offsetWidth` is 0), #377 (live-layout web-font
+  content height for `@font-face` IBM Plex Mono 20 px matches Chrome's 25 px) and the
+  `em` translate + named-colour used-size divergences in `parity_080` — whose pins
+  retire with them; the embedded-font range cases pin the new inline y-position gap
+  (still owned by turbo-dom). `turbo-dom-v8` stays on `79ae001d` (generated
+  candidate for #90) until `150.4.1` reaches crates.io.
+- **Fixed (render, #201)**: CSP violation reports now serialize a `blob:` or
+  `data:` `blockedURI` as the scheme alone (`"blob"` / `"data"`) like Chrome 156's
+  blob-url-resources control, so the opaque origin and its random key never leak
+  into the report. `csp::opaque_scheme_blocked_uri` handles both, and
+  `network_blocked_uri` delegates to it so every call site (the `connect-src`
+  reporter in `network_transports` and the script-src reporter in `runtime`)
+  picks up the new serialization. The remaining #201 items (text/plain iframe
+  body rendering, blob stylesheet MIME strictness, revoked-stylesheet
+  `SecurityError` on `.sheet.cssRules`) touch the runtime JS surface and the
+  blob-url-resources probe / fixture, and are split into #206.
+- **Fixed (GC / native-memory reclamation, #115)**: a retiring iframe context now releases
+  its blob URL entries from the native `URL.createObjectURL` store, and the host-side
+  `collect_message_port_garbage_for_testing` boundary prunes dead weak context handles from
+  the context-ownership registry. Soak coverage: `tests/gc_soak.rs` opens forty data-URL
+  iframes that each allocate a blob URL, a message channel and a 64-row detached subtree,
+  then checks that the message-port endpoints, queued bytes and host-context counts return
+  to their baseline. The same file reproduces #183 on an idle localhost (sixty frame loads
+  in one session) — the tail stayed under three seconds on this machine, so #183's reported
+  7-14 s slowdown looks like concurrent build load rather than a teardown leak.
+- **Fixed (CSP worker-src, #104, #190)**: `new Worker(url)` under `worker-src 'none'`
+  now fires a `securitypolicyviolation` whose `blockedURI` is the worker script URL
+  and whose `effectiveDirective` is `worker-src`, matching Chrome 156; the CSP3
+  fallback chain (`worker-src` -> `child-src` -> `script-src` -> `default-src`) is
+  applied, so a page under `script-src 'nonce-n'` without `worker-src` reports the
+  same violation. The Worker shell still constructs (`new Worker('/x.js')` returns a
+  Worker object), as in Chrome. `media-src` enforcement still waits on media loads
+  (split as #204). Checked against `csp-directives-chrome156.json`
+  (`tests/csp_directives.rs`). The remaining dedicated-worker runtime (a separate V8
+  realm per worker with DedicatedWorkerGlobalScope, module workers, blob: workers,
+  and SharedWorker/ServiceWorker) is tracked as #203.
+- **Fixed (render, #138)**: synchronous `XMLHttpRequest` (`open(..., false)`) now
+  blocks in `send()` and loads the response, over http(s), `blob:` and `data:` URLs.
+  Native `op_fetch_sync` runs the page's own fetch pipeline (CSP, CORS, cookies,
+  the HTTP cache and the blob:/data: scheme fetches) to completion on a dedicated
+  multi-thread runtime while the isolate thread is blocked. `xhr.js` also mirrors
+  Chrome 156's window-only restrictions (no loadstart or progress events on a sync
+  send, `NetworkError` thrown from `send()` on a network failure,
+  `InvalidAccessError` on `responseType` or `timeout` on a document's sync request,
+  and `async = undefined` is treated as synchronous). Covered by
+  `tests/sync_xhr.rs` against the Chrome 156 control.
+- **Fixed (render, #146)**: `blob:` URLs are now valid script, module, stylesheet,
+  image and iframe sources. The native blob URL store answers subresource loads
+  keyed by the creating document's storage key, so a revoked, foreign or
+  cross-partition URL fails like a missing response as in Chrome 156. Scripts and
+  modules resolve theirs through `script_fetch` after CSP and apply the MIME's
+  charset for source text; images and other destinations read the bytes directly;
+  iframes commit a local document response. Covered by
+  `tests/blob_url_resources.rs`.
+- **Refactor (render, #154)**: `script_fetch::fetch` split into small admission,
+  network-hop and finalisation helpers, so its cyclomatic complexity drops from
+  24 to 7 (`cc-check --max 15`). No behaviour change.
+- **Fixed (network transports, #188)**: a render session's trust anchor now covers its
+  `wss:` sockets as well as its https fetches. `ClientHints::with_trust_anchor(der)`
+  configures both; before, `new WebSocket('wss://…')` to a server signed by an embedder or
+  test CA failed while `fetch` to the same server succeeded. Tested against a localhost TLS
+  server (`tests/wss_trust_anchor.rs`).
+- **Fixed (postMessage source, #90, #85)**: a posted message's `event.source` is the
+  incumbent window (the calling frame's realm), not the entered one, as in Chrome 156:
+  `a.eval("parent.postMessage(..)")`, a child-realm function called from the parent, nested
+  `g.eval` and sibling posts now report the child. `window.postMessage` and the cross-origin
+  view's `postMessage` are native entries that read V8's incumbent context
+  (`get_incumbent_context`, turbo-dom#367) before surf's own validation runs; the native
+  WindowProxy's `postMessage` reads it too. The native-SDK overlay (v8 152.2.0,
+  `engine-154/patches/sdk.patch`) gains the same `get_incumbent_context` link.
+- **Fixed (IndexedDB, #148)**: a throwing `addEventListener` listener of a request's
+  `success` / `error` event (or of its transaction or database on the bubble path) now
+  aborts the transaction with `AbortError: Uncaught exception in event handler.`, like an
+  `on*` handler; a listener of an event dispatched from inside the listener does not. Surf
+  reads the binding's did-listeners-throw flag (turbo-dom#301) instead of watching window
+  `error` events, and `on*` handler exceptions now propagate to the binding, which reports
+  them. Checked against a Chrome 156 control (`indexeddb-events-chrome156.json`). A new
+  cross-site control (`indexeddb-partition-chrome156.json`, branded Chrome 156: a cross-site
+  frame, an A -> B -> A frame and `StorageAccessHandle.indexedDB`) matches as is. The event
+  path's capture phase, per-listener microtask checkpoints and end-of-task transaction
+  deactivation stay pinned as known gaps; they and the registry's realm lifetime moved to #193.
+- **Fixed (CSP, #110, #177, #154)**: `'strict-dynamic'` trusts only script-inserted
+  `<script>` elements (parser-inserted ones need a nonce; host sources, `'self'` and
+  `'unsafe-inline'` are dropped), for enforced and report-only policies. Source matching
+  follows Chrome 156 for `ws:`/`wss:` (`'self'` and `*` admit them, http(s) sources do not,
+  scheme upgrades need a non-exact port), so the network-transports ws->http workaround is
+  gone. Violation `blockedURI` names http(s)/ws(s) URLs in full (fragment and credentials
+  removed), cross-origin `fetch()` included; only `fetch` keeps Chrome's duplicate
+  report-only event. CSP3 fallback chains cover `worker-src`/`media-src`; their enforcement
+  waits on Workers and media loads (#190). `form-action` and `'strict-dynamic'` are no longer
+  reported as unsupported. Checked against a localhost Chrome 156 control
+  (`csp-directives-chrome156.json`); the CSP functions over cc 15 are decomposed.
+- **Fixed (canvas, #133)**: with a host text measurer installed (mcp, napi), canvas
+  `measureText` no longer returns a plain object whose bounding-box, font-box and baseline
+  fields were size ratios and whose width ignored `@font-face` faces. It returns the
+  binding's branded `TextMetrics` over the faces `set_canvas_fonts` registers (glyph ink
+  bounds, font metrics, baselines, `textAlign`/`textBaseline` offsets). Checked against a
+  localhost Chrome 156 control over the IBM Plex Mono fixture
+  (`canvas-measure-text-chrome156.json`).
+- **Fixed (web APIs, #165)**: the 194 members the expanded inventory missed are present with
+  Chrome 156's descriptor kinds. XMLHttpRequest's two are surf's (#168); the rest came with
+  the turbo-dom repins (turbo-dom#323, #340, #358). `tests/interface_members.rs` checks every
+  own prototype member of those 21 interfaces against a Chrome 156 control
+  (`interface-members-chrome156.json`).
+- **Fixed (network transports, #179)**: `wss:` connects over surf's Chrome https transport
+  (wreq/BoringSSL) instead of tokio-rustls, so its ClientHello is the https one with only
+  Chrome's WebSocket changes: ALPN `http/1.1` only and no ALPS. The handshake head is
+  still Chrome's, byte for byte. Checked against a frozen Chrome 156 control
+  (`fixtures/wss-hello-chrome156.json`, `tests/wss_client_hello.rs`). The identity battery
+  gained a `wss:` TLS row (`wss-hello.mjs`, run by `reversion-chrome.mjs`).
+- **Tested (identity battery, #187)**: the battery page opens a `wss:` WebSocket to a new
+  HTTP/1.1-only listener W. W captures the ClientHello, answers the upgrade with a 101 and
+  a close frame, and logs no request. Parity and version diffs compare W next to the A/B
+  transport rows. `chrome-identity-156.json` and `TRANSPORT-156.json` are re-recorded on
+  the frozen Chrome 156.0.8078.80. Chrome's W hello offers only `http/1.1` and no ALPS,
+  and it matches the standalone `wss-hello.mjs` view; turbo-surf's matches it. Parity: 0
+  tells. Apart from the W connection, the re-record changes only noise: H2 stream
+  dependencies, `downlink`/`rtt`, and the racy D favicon.
+- **Fixed (rustls backend, #189)**: on `--no-default-features`, `wss:` sent its upgrade
+  through reqwest, which lowercased Chrome's head and added `Accept: */*`, so the handshake
+  head was not Chrome's and the wss tests failed. The rustls backend now dials `wss:` with
+  tokio-rustls (ALPN `http/1.1`) and writes the head byte for byte, as `ws:` does; the
+  impersonate path is unchanged. CI's test job now runs clippy plus the core lib and
+  websocket tests on that build.
+- **Added (network transports, #144)**: `WebSocket` and `WebSocketStream` connect over a
+  native RFC 6455 client (`turbo_surf_core::websocket`, `ws:`/`wss:`, `permessage-deflate`)
+  with Chrome 156's handshake header order, cookies, origin and `connect-src` (CSP3 ws/wss
+  source matching, #177); `EventSource` streams over the page's fetch path with reconnection,
+  `retry` and `Last-Event-ID`. Transport reads are unref'd, so an open socket or stream
+  never holds a render. Events, close codes, readyState transitions, frame types and the
+  handshake are checked against a localhost Chrome 156 control
+  (`network-transports-chrome156.json`). `WebTransport` validates like Chrome and fails its
+  handshake honestly; HTTP/3 is split to #175.
+- **Changed (deps)**: turbo-dom crates come from turbo-dom's `release/0.8.0` branch
+  (`f4c13a39`, a `[patch.crates-io]` git pin until 0.8.0 is on crates.io). The binding's new
+  `ActivationQuery::Sticky` (media autoplay, turbo-dom#323) is answered from sticky activation.
+- **Fixed (computed style, #156)**: `getComputedStyle(el).width` / `height` of a rendered box
+  report its used px. Live layout answers the binding's `layoutUsedSize` hook
+  (turbo-dom#316) with the border and content box plus the font size, which also resolves
+  `%` and `em` translates (turbo-dom#353). Chrome's fullscreen UA rules now join live layout
+  while an element is fullscreen. Turbo-dom-owned rows are pinned as known gaps in
+  `tests/parity_080.rs`: unsnapped percentage widths, `em` against an inherited font size,
+  and named colors serialized as authored.
+- **Fixed (layout, #158)**: live layout's device scale follows `devicePixelRatio`; before, it
+  was always 2. The default line box is 18px at DPR 1 and 18.5px at DPR 2, as in Chrome 156
+  at a real (forced) device scale.
+- **Fixed (images, #161)**: a viewBox-only SVG `<img>` has a natural ratio but no natural size
+  (`image::probe_natural`, turbo-dom#320). It fills its container at that ratio, as in Chrome.
+- **Fixed (screenshots, #142)**: the static `screenshot` tool loads the page's `@font-face`
+  faces over the session. It takes each rule's first `url()` source that loads: linked-sheet
+  rules resolve against the sheet's URL, and WOFF/WOFF2 are unwrapped. It paints with
+  Chrome's web-font metrics through `screenshot_*_with_options`. `{ fonts: false }` opts out.
+- **Tested (#159, #160, #162, #313)**: `background-color: initial`, the `<button>` UA
+  background and a hit in the `border-spacing` gap match Chrome 156 after the repin
+  (`tests/parity_080.rs`). A page with an infinite CSS spinner still settles inside its budget.
+- **Tested (zoom, #124)**: under a capped huge zoom (`zoom:1e30`), `getComputedStyle(el).width`
+  reports the saturated used content width (`31.5544px` for a 100px box with 1px padding), as
+  in Chrome 156. The `layoutUsedSize` hook (#156) feeds it; `tests/zoom_extremes.rs` pins it.
+  #117 (unknown pseudo-classes drop one rule, not layout) and #105 (unnamed and named size
+  container queries) were already fixed on this line; their Chrome 156 regressions pass.
+- **Refactored (render, #154)**: live layout's capture, scoped selector matching, zoom value
+  scaling, stylesheet rule walking, scroll-into-view, Range geometry and the geometry clone
+  snapshot are split into small helpers; every function in those files is at cc <= 15.
+- **Known gap (#163)**: `CSS.supports` still answers from Lightning CSS. The engine's grammar
+  accepts Chrome 156's newer features, but it coerces its arguments with the page's `String`.
+
+- **Tested (Window messaging, #85/#90/#129)**: a Chrome 156 control
+  (`harness/detection/window-message-source-chrome-control.mjs`,
+  `tests/window_message_source.rs`) covers `event.source` on every posting path. A child
+  timer, a child script, self, parent-to-child and nested parent paths already match Chrome.
+  Four posts still report the top window as `event.source`: child code that the top realm calls
+  into synchronously (`frame.eval(...)`, a child-realm function, nested and sibling
+  `eval`). Chrome reports the sender there. These rows are pinned as a known gap: surf needs
+  an incumbent-context API in turbo-dom-v8 (#90; #85 is the same gap on the native engine).
+  `new Window()` throws Chrome's "Failed to construct 'Window': Illegal constructor" and
+  `Window()` throws "Illegal constructor" on both engines (#129).
+- **Refactored (#154)**: `window_proxy.rs` and `message_ports.rs` functions are at cc <= 15.
+- **Refactored (#154, JS)**: the last 20 JS functions above cc 15 are split into named
+  helpers and tables with the same behaviour, so `npm run -s complexity:js` exits 0. They were
+  all hash-pinned Chrome probes and collectors under `harness/detection`: `chrome-cdp-trace.mjs`,
+  `input-state.js`, `interface-trace.js`, the cache, CSP-report, timer and identity collectors
+  (`identity-server.mjs`, `identity-wire.mjs`), and the dom-adoption, dom-variadic-errors,
+  form-methods, live-text-geometry, native-iframe-layout, storage, trusted-types and
+  leading-space-geometry probes. Their controls are re-recorded:
+  - **Headless controls**, on the frozen Chrome for Testing headless shell 156.0.8078.47:
+    cache, dom-adoption, dom-variadic-errors, form-methods, resource-scan-order, window-timer
+    and trusted-types.
+  - **Headed controls**, on the new frozen branded oracle, Google Chrome 156.0.8078.80 (see
+    below), with the original window size and device pixel ratio: CSP reporting, storage,
+    live-text, native-iframe and leading-space geometry.
+
+  No control's data changes beyond version and timing noise, with one exception: Trusted
+  Types maps the new Chrome 156 `onchecked` and `onopenerchange` attributes.
+- **Changed (identity, #154)**: the new frozen branded oracle is Google Chrome
+  156.0.8078.80 (`~/.cache/turbo-consolidation/chrome156-80`, frozen to
+  `.native-builds/oracles/chrome156-8078.80`). `reversion-chrome.mjs` re-recorded
+  `chrome-identity-156.json` and `TRANSPORT-156.json` on it, and the default reported
+  release in `browser_releases.json` moves from 156.0.8078.47 to 156.0.8078.80. Only the full
+  version and the evidence change; header orders are unchanged. The identity battery reports
+  0 tells (38 known gaps, 11 environment, 1 collector). Oracles are documented in
+  `harness/detection/README.md` and `CHROME-REVERSION.md` §10.
+- The Google and observability receipts
+  (`GOOGLE-LAST-RUN.json`, `GOOGLE-DIAGNOSTICS.json`, `OBSERVABILITY-LAST-RUN.json`) were not
+  re-run; their `staleSourceHashes` field marks the recorded hashes that predate the refactor.
+
+- **Fixed (forms, #139/#140)**: form targets resolve over the whole frame tree as in Chrome
+  156: the submitter's subtree first, then the rest in creation order (siblings, cousins, named
+  ancestors). A frame counts only if the submitter shares its origin or an ancestor's (sandboxed
+  submitters: descendants only). `javascript:` actions run in the chosen same-origin navigable,
+  including `_parent` and `_top`. Child-frame form navigations check the submitter's `form-action`
+  on every redirect hop. A refused hop cancels the navigation (no load, the document stays) and
+  reports the violation against the initial URL. `_blank` and unknown names would open a new
+  window, which a no-browser engine lacks, so `submit()` throws. Controls:
+  `child-frame-form-{redirects,targets}-probe.js`, `tests/child_frame_form_targets.rs`.
+- **Refactored (#154)**: `form_submission.rs` functions are at cc <= 15.
+
 ## [0.7.1] — 2026-11-05
 
 Web API gaps closed against the frozen Chrome 156 oracle (PR #135, on top of 0.7.0).

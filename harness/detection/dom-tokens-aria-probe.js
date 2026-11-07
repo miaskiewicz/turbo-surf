@@ -50,8 +50,7 @@
   a.id = "aria-a";
   b.id = "aria-b";
   document.body.append(a, b);
-  const aria = {};
-  for (const property of ["ariaControlsElements", "ariaActiveDescendantElement"]) {
+  const reflect = (property) => {
     const many = property.endsWith("Elements"),
       attr = many ? "aria-controls" : "aria-activedescendant";
     const report = {};
@@ -78,8 +77,11 @@
       return "accepted";
     });
     report.afterInvalid = el.getAttribute(attr);
-    aria[property] = report;
-  }
+    return report;
+  };
+  const aria = {};
+  for (const property of ["ariaControlsElements", "ariaActiveDescendantElement"])
+    aria[property] = reflect(property);
   const detached = document.createElement("b");
   el.ariaControlsElements = [detached];
   aria.detached = {

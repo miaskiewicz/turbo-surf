@@ -120,6 +120,7 @@ deno_core::extension!(
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
         crate::live_layout_backend::op_live_image_box,
+        crate::live_layout_backend::op_live_element_used_size,
         crate::live_layout_backend::op_live_image_loaded,
         crate::web_fonts::op_font_face_parse,
         crate::web_fonts::op_font_face_attach,
@@ -347,26 +348,35 @@ pub(crate) fn point_matrix_snapshot<'s>(
     let result = record.call(scope, undefined.into(), &[object.into()])?;
     let result = v8::Local::<v8::Array>::try_from(result).ok()?;
     let kind = result.get_index(scope, 0)?;
-    let kind = match kind
+    let kind = kind
         .is_uint32()
         .then(|| kind.uint32_value(scope))
-        .flatten()?
-    {
-        kind @ 1..=5 => kind,
-        _ => return None,
-    };
+        .flatten()
+        .filter(|kind| (1..=5).contains(kind))?;
     let data = v8::Local::<v8::Array>::try_from(result.get_index(scope, 1)?).ok()?;
-    // Points carry 4 values, quads 16; a matrix carries 6 when it is 2D (its is2D
-    // flag, turbo-surf#89) and 16 when it is 3D.
-    let length = data.length();
-    let valid = match kind {
+    if !valid_length(kind, data.length()) {
+        return None;
+    }
+    let values = number_values(scope, data)?;
+    Some(PointMatrixData { kind, values })
+}
+
+/// Points carry 4 values, quads 16; a matrix carries 6 when it is 2D (its is2D
+/// flag, turbo-surf#89) and 16 when it is 3D.
+fn valid_length(kind: u32, length: u32) -> bool {
+    match kind {
         1 | 2 => length == 4,
         3 | 4 => length == 6 || length == 16,
         _ => length == 16,
-    };
-    if !valid {
-        return None;
     }
+}
+
+/// Every element as a number, or `None` when any is not one.
+fn number_values<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    data: v8::Local<'s, v8::Array>,
+) -> Option<Vec<f64>> {
+    let length = data.length();
     let mut values = Vec::with_capacity(length as usize);
     for index in 0..length {
         let value = data.get_index(scope, index)?;
@@ -375,7 +385,7 @@ pub(crate) fn point_matrix_snapshot<'s>(
         }
         values.push(value.number_value(scope)?);
     }
-    Some(PointMatrixData { kind, values })
+    Some(values)
 }
 
 /// Rebuilds the platform object in the current realm, or `None` when that realm

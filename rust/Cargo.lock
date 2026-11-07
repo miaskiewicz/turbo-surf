@@ -5938,7 +5938,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-core"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -6105,7 +6105,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-mcp"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -6126,7 +6126,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-napi"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "napi",
  "napi-build",
@@ -6145,7 +6145,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-page"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6157,7 +6157,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-py"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "pyo3",
  "serde",
@@ -6172,7 +6172,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-render"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -6237,14 +6237,14 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-transform"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "swc_core",
 ]
 
 [[package]]
 name = "turbo-surf-view"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "regex",

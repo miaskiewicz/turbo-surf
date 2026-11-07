@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.8.0] — 2026-11-07
+
 - **Fixed (CSS.supports, #163)**: the `CSS.supports(condition)` and
   `CSS.supports(property, value)` wrapper now routes to the turbo-dom engine's
   grammar (`__tsNs.cssSupports` / `cssSupportsProperty`, turbo-dom#322) instead of

@@ -869,7 +869,12 @@ class Page {
   // period, employments lists). Each entry → a minimal Response (url/status/json/text).
   async _drainNetworkEvents() {
     if (this._session == null) return;
-    if (!this._listeners.has("response") && !this._listeners.has("requestfinished")) return;
+    if (
+      !this._listeners.has("response") &&
+      !this._listeners.has("requestfinished") &&
+      !this._listeners.has("request")
+    )
+      return;
     let raw;
     try {
       raw = await native.liveNetworkLog(this._session);
@@ -888,6 +893,7 @@ class Page {
       const resp = makeNetResponse(e);
       resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
       this._recentResponses.push(resp);
+      this._emit("request", resp.request());
       this._emit("response", resp);
       this._emit("requestfinished", resp.request());
     }

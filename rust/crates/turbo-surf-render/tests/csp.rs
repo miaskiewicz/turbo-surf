@@ -200,3 +200,39 @@ async fn inline_handler_csp_distinguishes_attributes_from_assigned_functions() {
     assert_eq!(result, "[true,true,true]");
     assert!(page.hydration_diagnostics().unsupported_csp.is_empty());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn media_src_enforces_video_and_audio_src_loads() {
+    // turbo-surf#204: a `<video src>` / `<audio src>` under `media-src 'none'`
+    // fires a `securitypolicyviolation` whose effectiveDirective is `media-src`
+    // and whose blockedURI is the full URL (Chrome 156 shape).
+    let headers = vec![(
+        "Content-Security-Policy".into(),
+        "media-src 'none'".into(),
+    )];
+    let mut page = PageSession::open_with_response_headers(
+        r#"<body><script>globalThis.v=[];document.addEventListener("securitypolicyviolation",(e)=>v.push([e.blockedURI,e.effectiveDirective,e.disposition]));const a=document.createElement("video");a.src="/m/clip.mp4";document.body.append(a);const b=document.createElement("audio");b.src="/m/clip.mp3";document.body.append(b);</script></body>"#,
+        "http://media.test/page",
+        "",
+        "",
+        10000,
+        "",
+        ClientHints::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval("globalThis.__RESULT=JSON.stringify(globalThis.v)")
+        .await
+        .unwrap();
+    let rows: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        rows,
+        serde_json::json!([
+            ["http://media.test/m/clip.mp4", "media-src", "enforce"],
+            ["http://media.test/m/clip.mp3", "media-src", "enforce"],
+        ])
+    );
+    assert!(page.hydration_diagnostics().unsupported_csp.is_empty());
+}

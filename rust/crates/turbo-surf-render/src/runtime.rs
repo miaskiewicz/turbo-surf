@@ -10454,6 +10454,12 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   // Drained by deno_core but not yet dispatched: a handler attached meanwhile cancels it.
   const queued = new WeakSet();
   const handledBeforeReport = new WeakSet();
+  // Captured natives: this realm's handlers run AFTER page JS, which may have replaced
+  // WeakSet.prototype.{add,has,delete} with throwers (turbo-surf#87 / turbo-dom#172).
+  const weakSetAdd = WeakSet.prototype.add, weakSetHas = WeakSet.prototype.has, weakSetDelete = WeakSet.prototype.delete;
+  const wsAdd = (set, value) => __intrinsicApply(weakSetAdd, set, [value]);
+  const wsHas = (set, value) => __intrinsicApply(weakSetHas, set, [value]);
+  const wsDelete = (set, value) => __intrinsicApply(weakSetDelete, set, [value]);
   const fire = (type, promise, reason, cancelable) => {
     // A null-prototype init: page getters on Object.prototype never run here.
     const event = new hostRejectionEvent(type, {__proto__: null, promise, reason, cancelable, bubbles: false, composed: false});
@@ -10465,18 +10471,18 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   const realm = {
     __proto__: null,
     unhandled(promise, reason) {
-      queued.add(promise);
+      wsAdd(queued, promise);
       task(() => {
-        queued.delete(promise);
-        if (handledBeforeReport.has(promise)) {
-          handledBeforeReport.delete(promise);
+        wsDelete(queued, promise);
+        if (wsHas(handledBeforeReport, promise)) {
+          wsDelete(handledBeforeReport, promise);
           return;
         }
         const event = fire("unhandledrejection", promise, reason, true);
         // HTML: the promise joins the outstanding set either way (a later handler
         // still queues rejectionhandled, as in Chrome 156); preventDefault() only
         // suppresses the console report.
-        outstanding.add(promise);
+        wsAdd(outstanding, promise);
         if (event.defaultPrevented) return;
         if (typeof consoleError === "function") {
           try { Reflect.apply(consoleError, hostConsole, ["Uncaught (in promise)", reason]); } catch (_error) {}
@@ -10484,12 +10490,12 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
       });
     },
     handled(promise, reason) {
-      if (queued.has(promise)) {
-        handledBeforeReport.add(promise);
+      if (wsHas(queued, promise)) {
+        wsAdd(handledBeforeReport, promise);
         return;
       }
-      if (!outstanding.has(promise)) return;
-      outstanding.delete(promise);
+      if (!wsHas(outstanding, promise)) return;
+      wsDelete(outstanding, promise);
       task(() => fire("rejectionhandled", promise, reason, false));
     },
   };

@@ -2,13 +2,25 @@
 
 ## Unreleased
 
-- **Test (render, #244/#245/#246 — turbo-dom#395/#396/#397)**: three render
-  tests are `#[ignore]`-d against turbo-dom 0.8.0 pending upstream fixes on
-  turbo-dom v0.8.1. `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute`
+- **Fixed (render, #245 — turbo-dom#396)**: the promise-rejection realm that
+  surf-render installs on `deno_core` (`unhandled` / `handled` dispatchers
+  routed through `op_route_promise_rejection`) now calls
+  `WeakSet.prototype.{add,has,delete}` through natives captured at bootstrap
+  instead of looking them up live on `WeakSet.prototype`. The handler runs
+  AFTER page JS, which may have replaced every configurable prototype method
+  with a thrower (turbo-surf#87 / turbo-dom#172 contract); the previous live
+  call turned `queued.add(promise)` into `Error: patched WeakSet.prototype.add`
+  for any page running `page_patched_intrinsics_*`'s `patchAll()`. The
+  `WeakSet.prototype.add` entry in the FIXME on
+  `page_patched_intrinsics::page_patched_intrinsics_do_not_break_loading_or_append_child`
+  stops asserting under this fix; the second blocker on that test
+  (`iframe.contentWindow` reaches live `Promise[Symbol.species]`) is tracked
+  separately.
+- **Test (render, #244/#246 — turbo-dom#395/#397)**: two render tests remain
+  `#[ignore]`-d against turbo-dom 0.8.0 pending upstream fixes on turbo-dom
+  v0.8.1. `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute`
   (#244, turbo-dom#395 — `Composition.inline_overrides` on a styled element
-  zeros its box dims), `page_patched_intrinsics::*` ×2 (#245, turbo-dom#396 —
-  bootstrap calls `WeakSet.prototype.add` on the unhandled-rejection path
-  after page JS runs, regressing the #87 / turbo-dom#172 contract) and
+  zeros its box dims) and
   `frame_gc_contracts::collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents`
   (#246, turbo-dom#397 — `collect_message_port_garbage_for_testing` no longer
   prunes dead weak context handles). None of these affects the happy-path

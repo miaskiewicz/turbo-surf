@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, follow-ups to #221 / #222)**: payroll parity probe
+  v2 surfaced two residuals from the first pass. `Page.evaluate` on a
+  STATIC page (no live session) also round-trips through the JSON sentinel
+  now, so `page.evaluate(() => ({...}))` without a prior `networkidle` goto
+  returns the actual object. `waitForResponse` / `waitForRequest` /
+  `waitForEvent` poll `_drainNetworkEvents` UNCONDITIONALLY (previously
+  gated on `_live` at call time) — so a
+  `Promise.all([waitForResponse(...), goto(...)])` where the live session
+  only exists partway through the wait still short-circuits once the
+  response lands, instead of burning the full 15 s timeout.
+
 - **Fixed (playwright-shim, #230)**: `page.request()` and
   `BrowserContext.request()` now return an `APIRequestContext` bound to the
   parent `BrowserContext`'s cookie jar — outbound requests carry its current

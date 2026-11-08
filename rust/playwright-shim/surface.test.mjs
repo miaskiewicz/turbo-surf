@@ -814,6 +814,54 @@ test("waitForEvent('response') / ('request') resolve from the listener bus", asy
   assert.equal(req.method(), "GET");
 });
 
+// Payroll parity v2 found that `Promise.all([waitForResponse(...), goto(...)])`
+// still took the full 15s timeout. Root cause: `waitForResponse` gated its
+// drain-poll on `this._live` at CALL time, but when the call races with the
+// goto that will later establish the live session, `_live` is false then —
+// so poll was null and the drain never ran. Must keep polling once live.
+test("waitForResponse short-circuits even when _live comes up AFTER the call", async () => {
+  const p = newPage();
+  p._session = null; // not live yet (as if called before goto resolves)
+  p._actionSeq = 1;
+  p._recentResponses = [];
+  let drainCalls = 0;
+  p._drainNetworkEvents = async () => {
+    if (p._session == null) return; // the real drain early-returns too
+    drainCalls++;
+    if (drainCalls >= 2) {
+      const resp = { url: () => "https://x/api/ready", status: () => 200, _seq: 1 };
+      p._recentResponses.push(resp);
+      p._emit("response", resp);
+    }
+  };
+  const pending = p.waitForResponse((r) => r.url().includes("/api/ready"), { timeout: 500 });
+  // Simulate goto establishing the live session a moment later.
+  setTimeout(() => {
+    p._session = 1;
+  }, 30);
+  const got = await pending;
+  assert.equal(got.status(), 200, "must resolve the drained response, not the timeout synthetic");
+  assert.ok(drainCalls >= 2, `drain must run once live (got ${drainCalls})`);
+});
+
+// Gap C from payroll parity v2: static `page.evaluate` still returned
+// "[object Object]" because the JSON round-trip was only wired for the live
+// path. The static engine returns the trailing expression as a string, so
+// wrap the user script similarly.
+test("Page.evaluate returns typed values from a STATIC page too", async () => {
+  const p = newPage();
+  await p.setContent("<title>Home</title><h1>Welcome</h1>");
+  assert.deepEqual(
+    await p.evaluate(() => ({
+      title: document.title,
+      h1: document.querySelector("h1").textContent,
+    })),
+    { title: "Home", h1: "Welcome" },
+  );
+  assert.equal(await p.evaluate(() => 42), 42);
+  assert.deepEqual(await p.evaluate(() => [1, 2, 3]), [1, 2, 3]);
+});
+
 // APIRequestContext (page.request / context.request) used to use an empty
 // cookie jar, so specs that logged in via page.goto + session cookie and then
 // hit an API with `context.request.get(...)` sent no cookies at all.

@@ -14254,6 +14254,7 @@ __G.domSig = (() => {
     include_str!("font_loading.js"),
     include_str!("observers.js"),
     include_str!("interface_shapes.js"),
+    include_str!("canvas_media_stubs.js"),
     include_str!("user_activation.js"),
     include_str!("host_input.js"),
     include_str!("window_named_properties.js"),

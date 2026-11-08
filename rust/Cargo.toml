@@ -26,5 +26,15 @@ opt-level = 3
 lto = "thin"
 
 # turbo-dom 0.8.0 (and turbo-dom-v8 150.4.1) are on crates.io — the member
-# crates depend on `"0.8.0"` / `"150.4"` directly, no crates.io patch table
-# forwarding needed.
+# crates depend on `"0.8.0"` / `"150.4"` directly.
+#
+# v0.8.1 prep: pin the four turbo-dom crates at the local release/0.8.1
+# worktree (turbo-dom-wt-081) so the 0.8.1 fix set (incl. #395 / #417) is
+# exercised before turbo-dom 0.8.1 is cut on crates.io. Drop this block
+# once turbo-dom 0.8.1 is published and bump the member crates to "0.8.1".
+# turbo-dom-v8 150.4.x stays on crates.io (that path has no Cargo.toml).
+[patch.crates-io]
+turbo-dom = { path = "/Users/grzegorz/github-flux/turbo-dom-wt-081/crates/turbo-dom" }
+turbo-dom-browser-env = { path = "/Users/grzegorz/github-flux/turbo-dom-wt-081/crates/turbo-dom-browser-env" }
+turbo-dom-layout = { path = "/Users/grzegorz/github-flux/turbo-dom-wt-081/crates/turbo-dom-layout" }
+turbo-dom-raster = { path = "/Users/grzegorz/github-flux/turbo-dom-wt-081/crates/turbo-dom-raster" }

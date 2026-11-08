@@ -265,13 +265,17 @@ pub struct Session {
 /// Install process-global render hooks once: a raster-backed text measurer (system fonts on) that
 /// backs the render isolate's offsetWidth/offsetHeight, so a font-detection probe sees per-family
 /// metrics. The render crate has no font stack, so the host (this crate, which owns raster) injects it.
+// Named so tarpaulin can instrument the body (the equivalent closure stored in
+// Box<dyn Fn> does not get line-level coverage attributed through the dyn dispatch).
+fn measure_text_hook(text: &str, family: &str, size: f64) -> (f64, f64) {
+    let (w, h) = raster::measure_text(text, family, size as f32, true);
+    (w as f64, h as f64)
+}
+
 fn ensure_render_hooks() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        turbo_surf_render::set_measure_fn(Box::new(|text, family, size| {
-            let (w, h) = raster::measure_text(text, family, size as f32, true);
-            (w as f64, h as f64)
-        }));
+        turbo_surf_render::set_measure_fn(Box::new(measure_text_hook));
         // Raster-backed canvas toDataURL: replay the isolate's 2D display list into a real PNG
         // so canvas readback isn't an implausible ~94-byte stub (a fingerprint tell).
         turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {

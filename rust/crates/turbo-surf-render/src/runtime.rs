@@ -1010,6 +1010,7 @@ fn op_csp_script<'s>(
         return true;
     };
     let sample = csp_sample_units(scope, text);
+    let text_source = text;
     let text = text.to_rust_string_lossy(scope);
     let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
     let mut document_policy = handle.policy.borrow_mut();
@@ -1025,6 +1026,10 @@ fn op_csp_script<'s>(
     } else {
         crate::csp::ScriptInsertion::Script
     };
+    let trusted_types_required = url.is_empty()
+        && insertion == crate::csp::ScriptInsertion::Script
+        && (document_policy.current().requires_trusted_types()
+            || document_policy.report_only.requires_trusted_types());
     let script = crate::csp::Script {
         url,
         text: &text,
@@ -1035,7 +1040,29 @@ fn op_csp_script<'s>(
         let policy = document_policy.current().clone();
         let report_only = document_policy.report_only.clone();
         drop(document_policy);
-        let allowed = policy.allows_script(&script);
+        let mut allowed = policy.allows_script(&script);
+        if allowed && trusted_types_required {
+            // Under `require-trusted-types-for 'script'` an inline, non-parser-inserted
+            // script's child text content is a TrustedScript sink (sink
+            // "HTMLScriptElement text"). The IDL setters (`script.text`, `.textContent`,
+            // `.innerText`) are already enforced by the binding, but a `Node.append` /
+            // `appendChild` of a plain text node composes the body outside the setter
+            // and must still be gated at script preparation (Chrome 156; turbo-surf#122).
+            v8::tc_scope!(let tc, scope);
+            if crate::browser_env::trusted_type_string(
+                tc,
+                document,
+                text_source.into(),
+                "TrustedScript",
+                "HTMLScriptElement text",
+                "",
+            )
+            .is_none()
+            {
+                tc.reset();
+                allowed = false;
+            }
+        }
         queue_csp_report(
             scope,
             context,

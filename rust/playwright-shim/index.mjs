@@ -1418,10 +1418,13 @@ class Page {
   }
 
   // --- waiters (static engine: resolve immediately / poll evaluate) ---
-  // `waitForLoadState('networkidle')` is the other "page has settled" signal — treat
-  // it like the networkidle goto and hydrate the SPA if it hasn't been already.
-  async waitForLoadState(state) {
-    if (state === "networkidle" && !this._live) await this._openLiveSession();
+  // `waitForLoadState(...)` is the other "page has settled" signal. In Playwright
+  // all three states ('load' / 'domcontentloaded' / 'networkidle') end with the
+  // SPA's own scripts having run; the shim has one "settled" tier (a live
+  // session with the authored scripts drained), so treat them the same and
+  // hydrate if we aren't live yet.
+  async waitForLoadState(_state) {
+    if (!this._live) await this._openLiveSession();
   }
   async waitForTimeout(ms) {
     await new Promise((r) => setTimeout(r, Math.min(ms ?? 0, 50)));
@@ -1518,16 +1521,64 @@ class Page {
     }
     throw new Error("turbo-surf: waitForFunction timed out");
   }
-  async waitForNavigation() {
+  // `waitForNavigation` resolves when the URL changes from the one at call time.
+  // In a live session the change comes from a client redirect pumped by the next
+  // drain; outside one it's the paired `goto`/click's synchronous nav. Poll url.
+  async waitForNavigation(opts = {}) {
+    const startUrl = this._url;
+    const timeout = opts.timeout ?? 15000;
+    const deadline = Date.now() + timeout;
+    while (this._url === startUrl && Date.now() < deadline) {
+      if (this._live) {
+        try {
+          await native.liveEvalEngine(this._session, "globalThis.__RESULT = location.href;");
+        } catch {
+          /* session gone — fall through */
+        }
+        await this._refreshFromSession();
+      }
+      if (this._url !== startUrl) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
     return makeResponse({ status: 200, finalUrl: this._url });
   }
-  // waitForEvent('download') — resolve when a client-side export fires (the env captures
-  // `<a download>` clicks into __downloads). Used as `Promise.all([waitForEvent('download'),
-  // …click()])`: the click drives the session (running the anchor click → __downloads push)
-  // while this polls + drains __downloads from the live isolate.
+  // waitForEvent dispatches on name: 'download' drains the live isolate's
+  // __downloads buffer; 'response' / 'request' / 'requestfinished' resolve from
+  // the same listener bus the native-log drain feeds (#218/#222). Unknown names
+  // resolve to undefined — matches the pre-fix no-op for off-spec names.
   async waitForEvent(event, opts) {
-    if (event !== "download") return undefined;
     const timeout = (opts && typeof opts === "object" && opts.timeout) || 30000;
+    if (event === "response" || event === "request" || event === "requestfinished") {
+      const predicate =
+        opts && typeof opts === "object" && typeof opts.predicate === "function"
+          ? opts.predicate
+          : () => true;
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          this.off(event, onEvt);
+          if (poll) clearInterval(poll);
+          resolve(undefined);
+        }, timeout);
+        const onEvt = (payload) => {
+          try {
+            if (!predicate(payload)) return;
+          } catch {
+            return;
+          }
+          clearTimeout(timer);
+          if (poll) clearInterval(poll);
+          this.off(event, onEvt);
+          resolve(payload);
+        };
+        this.on(event, onEvt);
+        const poll = this._live
+          ? setInterval(() => {
+              this._drainNetworkEvents().catch(() => {});
+            }, 50)
+          : null;
+      });
+    }
+    if (event !== "download") return undefined;
     await this._ensureLive();
     if (this._session == null) return undefined;
     const start = Date.now();

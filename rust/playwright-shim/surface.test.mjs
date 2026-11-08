@@ -766,6 +766,54 @@ test("waitForResponse ignores a response that drained in an earlier step", async
   assert.equal(got.status(), 201, "should resolve to the fresh POST, not the stale GET");
 });
 
+// Rest of #229: non-'networkidle' load states, waitForNavigation, generic
+// waitForEvent('response'|'request'). The old shim returned a synthetic 200
+// for waitForNavigation without ever waiting, and only 'networkidle' did
+// anything in waitForLoadState — anything else was a silent no-op.
+test("waitForLoadState('load') / 'domcontentloaded' hydrates the page like 'networkidle'", async () => {
+  const server = site();
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/spa`, { waitUntil: "commit" });
+    assert.equal(p._session, null, "commit must NOT open a live session on its own");
+    await p.waitForLoadState("load");
+    assert.ok(p._session != null, "'load' must hydrate like 'networkidle'");
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("waitForNavigation resolves when the URL actually changes", async () => {
+  const p = newPage();
+  p._url = "http://x/start";
+  const pending = p.waitForNavigation({ timeout: 500 });
+  setTimeout(() => {
+    p._url = "http://x/next";
+  }, 20);
+  const r = await pending;
+  assert.equal(r.url(), "http://x/next", "must return a response pointing at the new URL");
+});
+
+test("waitForEvent('response') / ('request') resolve from the listener bus", async () => {
+  const p = newPage();
+  const fakeResp = {
+    url: () => "https://x/api/a",
+    status: () => 200,
+    request: () => ({ url: () => "https://x/api/a", method: () => "GET" }),
+  };
+  const pending = p.waitForEvent("response", { timeout: 500 });
+  setTimeout(() => p._emit("response", fakeResp), 10);
+  const r = await pending;
+  assert.equal(r.status(), 200);
+  const pendingReq = p.waitForEvent("request", { timeout: 500 });
+  setTimeout(() => p._emit("request", fakeResp.request()), 10);
+  const req = await pendingReq;
+  assert.equal(req.method(), "GET");
+});
+
 // page.route(fulfill) is the single most-used interception shape in payroll-app
 // specs: stub /api/foo with a fixture so the SPA hydrates with known data.
 // With no native request-interception hook, do it shim-side by monkey-patching

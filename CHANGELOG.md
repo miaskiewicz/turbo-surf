@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, #229 rest)**: `waitForLoadState('load')` and
+  `'domcontentloaded'` now hydrate the SPA like `'networkidle'` (one "settled"
+  tier in the shim). `waitForNavigation` polls for an actual URL change instead
+  of returning a synthetic 200 straight away. `waitForEvent('response')`,
+  `('request')` and `('requestfinished')` resolve from the native-log drain
+  bus (drain polled while waiting, same as #222/#218); `('download')` keeps
+  its prior behavior.
+
 - **Fixed (playwright-shim, #220 partial)**: `page.route(url, handler)` is now
   supported in a fulfill-only form — the handler runs once at register-time
   against a stub route, the captured `route.fulfill({status, body,

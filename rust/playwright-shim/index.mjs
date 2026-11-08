@@ -1113,11 +1113,21 @@ class Page {
     if (this._closed) throw new Error("page is closed");
     if (this._live) {
       const body = evalSource(script, arg);
+      // The native bridge returns a UTF-8 string, so round-trip structured values
+      // through JSON with a sentinel prefix: primitives / arrays / plain objects
+      // ride the JSON path; non-serializable results fall back to String(result).
       const out = await native.liveEvalExpression(
         this._session,
-        `(async () => { try { const result = await (${body}); return result === undefined ? "" : result; } catch { return ""; } })()`,
+        `(async () => { try { const result = await (${body}); if (result === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(result); } catch { return String(result); } } catch { return ""; } })()`,
       );
       await this._refreshFromSession();
+      if (typeof out === "string" && out.startsWith("__ts_json__:")) {
+        try {
+          return JSON.parse(out.slice("__ts_json__:".length));
+        } catch {
+          /* malformed payload — fall through to raw string */
+        }
+      }
       return out;
     }
     return native.evaluate(this._html, evalSource(script, arg));

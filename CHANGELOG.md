@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, #221)**: `page.evaluate` in a live session now
+  returns structured values (primitives, arrays, plain objects) instead of a
+  stringified `"[object Object]"`. The native bridge is still UTF-8-string
+  only, so the shim round-trips the result through `JSON.stringify` with a
+  sentinel prefix and parses it back; non-serializable values fall back to
+  `String(result)`. Payroll-app observer-style specs that read page state as
+  objects no longer have to `JSON.stringify` inside the expression and
+  `JSON.parse` on the test side.
 - **Fixed (playwright-shim, #222)**: `page.waitForResponse(predicate)` no longer
   burns its full timeout on a response that already landed. The native network
   log only drains on actions, so a bare `waitForResponse` after `goto` had no

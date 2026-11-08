@@ -26,5 +26,5 @@ opt-level = 3
 lto = "thin"
 
 # turbo-dom 0.8.0 (and turbo-dom-v8 150.4.1) are on crates.io — the member
-# crates depend on `"0.8.0"` / `"150.4"` directly, no [patch.crates-io]
+# crates depend on `"0.8.0"` / `"150.4"` directly, no crates.io patch table
 # forwarding needed.

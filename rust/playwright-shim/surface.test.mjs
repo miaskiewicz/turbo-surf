@@ -1103,6 +1103,67 @@ test("page.unroute drops a previously-registered route and lets the real server 
   }
 });
 
+// page.routeFromHAR(path) replays a Playwright/Chrome HAR file as a set of
+// fixtures: for every entry in `log.entries`, the request URL is registered as
+// a route returning that entry's response body/status/content-type — the live
+// app's fetch/XHR resolves against those fixtures instead of the real server.
+test("page.routeFromHAR plays back HAR entries as route fulfillments", async () => {
+  const { writeFile: wf, mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/countries')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.country; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end('{"country":"real-server"}');
+  });
+  const base = await listen(server);
+  const dir = await mkdtemp(join(tmpdir(), "turbo-surf-har-"));
+  const harPath = join(dir, "replay.har");
+  const har = {
+    log: {
+      version: "1.2",
+      entries: [
+        {
+          request: { method: "GET", url: `${base}/api/countries` },
+          response: {
+            status: 200,
+            headers: [{ name: "Content-Type", value: "application/json" }],
+            content: {
+              mimeType: "application/json",
+              text: JSON.stringify({ country: "FROM-HAR" }),
+            },
+          },
+        },
+      ],
+    },
+  };
+  await wf(harPath, JSON.stringify(har));
+  const p = newPage();
+  try {
+    await p.routeFromHAR(harPath);
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "FROM-HAR",
+      "routeFromHAR must inject the HAR entry's response body",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // Mirror of the waitForResponse drain-polling guard: payroll-style flows attach
 // `waitForRequest(/api\/x/)` to the step that fires the request, and the stub
 // used to resolve immediately with a synthetic page-URL GET — never seeing the

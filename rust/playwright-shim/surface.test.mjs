@@ -927,6 +927,33 @@ test("live hydration retains native response policy, status and selected referre
   }
 });
 
+// page.evaluate in a live session used to stringify the returned value, so an
+// object came back as "[object Object]" and tests had to JSON.stringify inside
+// the expression + JSON.parse outside. The payroll-app parity probe surfaced it
+// on observer-style specs that read page state as objects. Returns must now be
+// structured values: primitives as themselves, arrays/plain objects deep-equal.
+test("Page.evaluate returns typed values (object, array, number) from live session", async () => {
+  const server = site();
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/spa`, { waitUntil: "networkidle" });
+    assert.deepEqual(await p.evaluate(() => ({ count: 3, items: ["a", "b"], nested: { x: 1 } })), {
+      count: 3,
+      items: ["a", "b"],
+      nested: { x: 1 },
+    });
+    assert.equal(await p.evaluate(() => 42), 42);
+    assert.deepEqual(await p.evaluate(() => [1, 2, 3]), [1, 2, 3]);
+    assert.equal(await p.evaluate(() => true), true);
+    assert.equal(await p.evaluate(() => "hello"), "hello");
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // A getBy handle passed to the static waitForFunction resolves through the engine
 // namespace (turbo-dom#222): no live session, the handle is still the element.
 test("static waitForFunction resolves a getBy element handle", async () => {

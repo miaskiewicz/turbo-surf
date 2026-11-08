@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, #221)**: `page.evaluate` in a live session now
+  returns structured values (primitives, arrays, plain objects) instead of a
+  stringified `"[object Object]"`. The native bridge is still UTF-8-string
+  only, so the shim round-trips the result through `JSON.stringify` with a
+  sentinel prefix and parses it back; non-serializable values fall back to
+  `String(result)`. Payroll-app observer-style specs that read page state as
+  objects no longer have to `JSON.stringify` inside the expression and
+  `JSON.parse` on the test side.
+
 ## [0.8.0] — 2026-11-07
 
 - **Fixed (CSS.supports, #163)**: the `CSS.supports(condition)` and

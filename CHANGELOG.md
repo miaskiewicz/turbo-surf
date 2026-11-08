@@ -17,6 +17,12 @@
   saw ~15 s on a response that arrived in ~5 ms. The shim now drains once up
   front and polls the native log every 50 ms while waiting; short-lived
   requests resolve in the next tick.
+- **Fixed (playwright-shim, #229 partial)**: `page.waitForRequest(matcher)` is
+  now event-driven instead of returning a synthetic page-URL GET straight away.
+  Mirrors the `waitForResponse` fix from #222: drain the native log once up
+  front, poll it every 50 ms while waiting, and resolve from the `request`
+  listener bus (joined per #218). The rest of #229 (navigation / load-state
+  semantics) stays on v0.8.1.
 
 ## [0.8.0] — 2026-11-07
 

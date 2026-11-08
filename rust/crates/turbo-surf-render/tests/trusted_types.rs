@@ -142,6 +142,71 @@ async fn published_sdk_fails_closed_for_enforced_raw_eval_without_native_callbac
     page.close();
 }
 
+// turbo-surf#122 case 1: appending untrusted text as a <script>'s child does
+// not produce a trusted child text content, so under
+// `require-trusted-types-for 'script'` (with no `default` policy) the script's
+// classic execution must be blocked just like Chrome 156 blocks it.
+#[tokio::test(flavor = "current_thread")]
+async fn script_child_text_appended_untrusted_is_blocked_under_require_trusted_types() {
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body></body>",
+        "https://trusted.test/control",
+        "",
+        "",
+        15000,
+        "",
+        Default::default(),
+        &[(
+            "Content-Security-Policy".into(),
+            "require-trusted-types-for 'script'; trusted-types a".into(),
+        )],
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval_json_expression(
+            "(()=>{const s=document.createElement('script');document.body.append(s);\
+             s.append('globalThis.q=1');return String(globalThis.q)})()",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "\"undefined\"");
+    page.close();
+}
+
+// turbo-surf#122 case 2: a `javascript:` form action must pass through the
+// Trusted Types gate just like a `javascript:` navigation; under
+// `require-trusted-types-for 'script'` with no default policy Chrome 156
+// blocks the submission.
+#[tokio::test(flavor = "current_thread")]
+async fn javascript_form_action_is_blocked_under_require_trusted_types() {
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body>\
+         <form id=f1 action=\"javascript:void(globalThis.r1=1)\"></form></body>",
+        "https://trusted.test/control",
+        "",
+        "",
+        15000,
+        "",
+        Default::default(),
+        &[(
+            "Content-Security-Policy".into(),
+            "require-trusted-types-for 'script'".into(),
+        )],
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval_json_expression(
+            "(async()=>{document.getElementById('f1').submit();\
+             await new Promise(r=>setTimeout(r,100));return String(globalThis.r1)})()",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "\"undefined\"");
+    page.close();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn native_trusted_types_callbacks_release_retired_frames_unless_guest_retained() {
     const CASES: &str =

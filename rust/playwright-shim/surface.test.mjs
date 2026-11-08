@@ -739,7 +739,8 @@ test("honest throws: pixel / input / network-interception", async () => {
   await assert.rejects(() => p.mouse.click(0, 0), /input/);
   // keyboard.press is implemented (key-event dispatch via the live session) — not a throw.
   await assert.rejects(() => p.touchscreen.tap(0, 0), /input/);
-  await assert.rejects(() => p.route("**"), /interception/);
+  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
+  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
   await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
 });
 
@@ -763,6 +764,52 @@ test("waitForResponse ignores a response that drained in an earlier step", async
   p._emit("response", fresh);
   const got = await pending;
   assert.equal(got.status(), 201, "should resolve to the fresh POST, not the stale GET");
+});
+
+// page.route(fulfill) is the single most-used interception shape in payroll-app
+// specs: stub /api/foo with a fixture so the SPA hydrates with known data.
+// With no native request-interception hook, do it shim-side by monkey-patching
+// `fetch` in the live isolate (via an init script, before the app runs) and
+// route that single call to the collected fulfill response.
+test("page.route(url, fulfill) returns a fixture to the live app's fetch", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.hello; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    } else {
+      // The real server MUST NOT be hit on /api/foo — the route must intercept.
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end('{"hello":"real-server"}');
+    }
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("/api/foo", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked" }),
+      });
+    });
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "mocked",
+      "route.fulfill fixture must win over the real server response",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 // Mirror of the waitForResponse drain-polling guard: payroll-style flows attach

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, #220 partial)**: `page.route(url, handler)` is now
+  supported in a fulfill-only form — the handler runs once at register-time
+  against a stub route, the captured `route.fulfill({status, body,
+  contentType, headers})` payload is baked into an init script that
+  monkey-patches `fetch` and `XMLHttpRequest` inside the live isolate, and the
+  real server is never hit for matched URLs. Pattern can be a string
+  (substring or glob with `*`/`**`) or RegExp. `route.continue` / `abort` /
+  `fallback` and per-request dynamic responses stay unsupported; call
+  `page.route(...)` before the next live session opens. `page.unroute(...)`
+  drops a previously-registered pattern.
+
 - **Fixed (playwright-shim, #221)**: `page.evaluate` in a live session now
   returns structured values (primitives, arrays, plain objects) instead of a
   stringified `"[object Object]"`. The native bridge is still UTF-8-string

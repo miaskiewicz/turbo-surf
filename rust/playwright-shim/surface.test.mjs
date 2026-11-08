@@ -814,6 +814,54 @@ test("waitForEvent('response') / ('request') resolve from the listener bus", asy
   assert.equal(req.method(), "GET");
 });
 
+// Payroll parity v3: real integration still timed out at 15 s even after the
+// unit-level drain-polling fix. Root cause: a default `goto(url)` (no
+// `waitUntil:'networkidle'`) doesn't open a live session, so an inline
+// `<script>fetch('/api/...')</script>` inside the document never runs —
+// there's no real response to short-circuit on, and waitForResponse falls
+// through to the synthetic timeout. Auto-hydrate when the listener bus is
+// already subscribed so the inline-script fetches actually fire.
+test("Promise.all([waitForResponse(...), goto(url)]) short-circuits on the real response", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/page") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>p</title><div id="out"></div><script>
+           fetch('/api/data').then(r => r.json()).then(j => {
+             document.getElementById('out').textContent = j.v;
+           });
+         </script>`,
+      );
+    }
+    if (req.url === "/api/data") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end('{"v":"ok"}');
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    const started = Date.now();
+    const [resp] = await Promise.all([
+      p.waitForResponse((r) => r.url().includes("/api/data"), { timeout: 3000 }),
+      p.goto(`${base}/page`),
+    ]);
+    const elapsed = Date.now() - started;
+    assert.equal(resp.status(), 200);
+    assert.ok(
+      resp.url().includes("/api/data"),
+      "must resolve the REAL /api/data response, not the synthetic 200",
+    );
+    assert.ok(elapsed < 2000, `waitForResponse must short-circuit, took ${elapsed}ms`);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // Payroll parity v2 found that `Promise.all([waitForResponse(...), goto(...)])`
 // still took the full 15s timeout. Root cause: `waitForResponse` gated its
 // drain-poll on `this._live` at CALL time, but when the call races with the

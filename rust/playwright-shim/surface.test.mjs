@@ -814,6 +814,41 @@ test("waitForEvent('response') / ('request') resolve from the listener bus", asy
   assert.equal(req.method(), "GET");
 });
 
+// APIRequestContext (page.request / context.request) used to use an empty
+// cookie jar, so specs that logged in via page.goto + session cookie and then
+// hit an API with `context.request.get(...)` sent no cookies at all.
+test("page.request / context.request share the BrowserContext cookie jar (#230)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/login") {
+      res.writeHead(200, { "set-cookie": "sid=abc123; Path=/", "content-type": "text/html" });
+      return res.end("<title>in</title>");
+    }
+    if (req.url === "/api/me") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ cookie: req.headers.cookie ?? "" }));
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  const base = await listen(server);
+  const ctx = new BrowserContext();
+  try {
+    const p = await ctx.newPage();
+    await p.goto(`${base}/login`);
+    const r = await p.request().fetch(`${base}/api/me`);
+    const body = await r.json();
+    assert.equal(body.cookie, "sid=abc123", "page.request must send the login cookie");
+    // context.request() mirrors page.request().
+    const r2 = await ctx.request().fetch(`${base}/api/me`);
+    const body2 = await r2.json();
+    assert.equal(body2.cookie, "sid=abc123", "context.request must send the login cookie");
+  } finally {
+    await ctx.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // Focus model: `.focus()`, `.blur()`, `toBeFocused` were static no-ops or
 // always-fail assertions. The live isolate already tracks `document.activeElement`
 // per DOM spec; drive focus/blur into it and read activeElement back for the

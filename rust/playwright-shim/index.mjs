@@ -77,7 +77,10 @@ function buildRouteInitScript(routes) {
   return `(() => {
     const routes = ${table};
     const globToRegex = (p) => {
-      const esc = p.replace(/[.+^\${}()|\\[\\]\\\\]/g, "\\\\$&");
+      // Escape * and ? too, so the two translation passes below can locate
+      // every star — a bare * in the source would otherwise skip the escape
+      // step, leave ** unchanged, and produce an invalid regex (turbo-surf#240).
+      const esc = p.replace(/[.+^\${}()|\\[\\]\\\\*?]/g, "\\\\$&");
       const re = "^" + esc.replace(/\\\\\\*\\\\\\*/g, ".*").replace(/\\\\\\*/g, "[^/]*") + "$";
       return new RegExp(re);
     };

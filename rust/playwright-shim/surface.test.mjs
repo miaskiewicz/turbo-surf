@@ -739,7 +739,8 @@ test("honest throws: pixel / input / network-interception", async () => {
   await assert.rejects(() => p.mouse.click(0, 0), /input/);
   // keyboard.press is implemented (key-event dispatch via the live session) — not a throw.
   await assert.rejects(() => p.touchscreen.tap(0, 0), /input/);
-  await assert.rejects(() => p.route("**"), /interception/);
+  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
+  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
   await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
 });
 

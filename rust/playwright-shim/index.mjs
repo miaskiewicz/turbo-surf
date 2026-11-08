@@ -39,6 +39,129 @@ function cssAttrValue(text) {
   return `"${String(text).replace(/"/g, '\\"')}"`;
 }
 
+// --- page.route helpers (shim-side, fulfill-only) --------------------------
+// Normalize a route pattern + fulfill payload into a JSON-serializable record.
+// `patternKey` is the original user pattern as a string so `unroute` can match.
+function normalizeRoute(pattern, fulfill) {
+  const isRegex = pattern instanceof RegExp;
+  return {
+    kind: isRegex ? "regex" : "glob",
+    pattern: isRegex ? pattern.source : String(pattern),
+    flags: isRegex ? pattern.flags : "",
+    patternKey: isRegex ? pattern.source : String(pattern),
+    status: fulfill.status ?? 200,
+    headers: fulfill.headers ?? {},
+    contentType: fulfill.contentType ?? null,
+    body: fulfill.body == null ? "" : String(fulfill.body),
+  };
+}
+
+// Build an init script that monkey-patches `fetch` (and XMLHttpRequest for the
+// common open+send path) inside the live isolate. Routes are matched in the
+// order they were registered; a RegExp source uses `new RegExp(...)`, a glob
+// supports `**` (any chars) and `*` (any non-slash chars), with substring as a
+// final fallback.
+function buildRouteInitScript(routes) {
+  if (!routes || !routes.length) return "";
+  const table = JSON.stringify(
+    routes.map((r) => ({
+      kind: r.kind,
+      pattern: r.pattern,
+      flags: r.flags,
+      status: r.status,
+      headers: r.headers,
+      contentType: r.contentType,
+      body: r.body,
+    })),
+  );
+  return `(() => {
+    const routes = ${table};
+    const globToRegex = (p) => {
+      const esc = p.replace(/[.+^\${}()|\\[\\]\\\\]/g, "\\\\$&");
+      const re = "^" + esc.replace(/\\\\\\*\\\\\\*/g, ".*").replace(/\\\\\\*/g, "[^/]*") + "$";
+      return new RegExp(re);
+    };
+    const find = (url) => {
+      for (const r of routes) {
+        try {
+          if (r.kind === "regex") {
+            if (new RegExp(r.pattern, r.flags).test(url)) return r;
+          } else {
+            if (globToRegex(r.pattern).test(url)) return r;
+            if (url.indexOf(r.pattern) !== -1) return r;
+          }
+        } catch (_e) { /* skip malformed pattern */ }
+      }
+      return null;
+    };
+    const synth = (r) => {
+      const h = Object.assign({}, r.headers || {});
+      if (r.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
+        h["content-type"] = r.contentType;
+      return new Response(r.body, { status: r.status, headers: h });
+    };
+    if (typeof globalThis.fetch === "function") {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = function (input, init) {
+        const url = typeof input === "string" ? input : (input && input.url) || "";
+        const r = find(url);
+        if (r) return Promise.resolve(synth(r));
+        return origFetch(input, init);
+      };
+    }
+    if (typeof globalThis.XMLHttpRequest === "function") {
+      const OrigXHR = globalThis.XMLHttpRequest;
+      function MockXHR() {
+        this._mocked = null;
+        this._real = null;
+        this._url = "";
+        this._method = "GET";
+      }
+      MockXHR.prototype.open = function (method, url) {
+        this._method = method;
+        this._url = url;
+        this._mocked = find(url);
+        if (!this._mocked) {
+          this._real = new OrigXHR();
+          this._real.open(method, url);
+        }
+      };
+      MockXHR.prototype.setRequestHeader = function (name, value) {
+        if (this._real) this._real.setRequestHeader(name, value);
+      };
+      MockXHR.prototype.send = function (body) {
+        if (this._mocked) {
+          const r = this._mocked;
+          this.readyState = 4;
+          this.status = r.status;
+          this.responseText = r.body;
+          this.response = r.body;
+          try { if (typeof this.onreadystatechange === "function") this.onreadystatechange(); } catch (_e) {}
+          try { if (typeof this.onload === "function") this.onload(); } catch (_e) {}
+        } else if (this._real) {
+          const self = this;
+          this._real.onreadystatechange = function () {
+            self.readyState = self._real.readyState;
+            self.status = self._real.status;
+            self.responseText = self._real.responseText;
+            self.response = self._real.response;
+            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
+            if (self.readyState === 4) {
+              try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
+            }
+          };
+          this._real.send(body);
+        }
+      };
+      MockXHR.prototype.addEventListener = function (name, fn) {
+        if (name === "load") this.onload = fn;
+        else if (name === "readystatechange") this.onreadystatechange = fn;
+      };
+      globalThis.XMLHttpRequest = MockXHR;
+    }
+  })();`;
+}
+
 // ---------------------------------------------------------------------------
 // Locator — a lazy query over the page's current HTML. `_resolve(html)` returns
 // the match array (each `{ node, text, html }`) in ONE napi call; composition
@@ -779,9 +902,9 @@ class Page {
   // Init scripts use the native trusted entry point before authored scripts;
   // inserting a script tag would change parser locations and subject it to CSP.
   _initScriptSource() {
-    return [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])]
-      .map((source) => `try{ ${source} }catch(e){}`)
-      .join("\n");
+    const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
+    if (this._routeInitScript) all.unshift(this._routeInitScript);
+    return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
   }
 
   async _openLiveSession() {
@@ -1680,9 +1803,51 @@ class Page {
   // --- unsupported → honest throws ---
   pdf = UNSUPPORTED("page.pdf", PIXEL);
   dragAndDrop = UNSUPPORTED("page.dragAndDrop", INPUT);
-  route = UNSUPPORTED("page.route", NETIO);
+  // page.route(url, handler) — shim-side only, by monkey-patching `fetch` inside
+  // the live isolate via an init script. The handler is invoked once at route
+  // registration time against a stub route that captures the `fulfill` payload;
+  // `continue`/`abort`/`fallback` and per-request dynamic responses are NOT
+  // supported. Pattern: string (substring OR glob with `*`/`**`) or RegExp.
+  // XHR goes through this same wrapper for the common xhr.open+send path.
+  async route(urlPattern, handler) {
+    let fulfilled = null;
+    const req = {
+      url: () => (typeof urlPattern === "string" ? urlPattern : ""),
+      method: () => "GET",
+      postData: () => null,
+      postDataJSON: () => null,
+      headers: () => ({}),
+      resourceType: () => "xhr",
+    };
+    const stub = {
+      request: () => req,
+      fulfill: async (opts) => {
+        fulfilled = opts ?? {};
+      },
+      continue: async () => {},
+      abort: async () => {},
+      fallback: async () => {},
+    };
+    try {
+      await handler(stub, req);
+    } catch {
+      /* handler threw — leave fulfilled null, route is a no-op */
+    }
+    if (!fulfilled) return;
+    this._routes = this._routes ?? [];
+    this._routes.push(normalizeRoute(urlPattern, fulfilled));
+    // Refresh the init-script snapshot so the next live session sees the route.
+    this._routeInitScript = buildRouteInitScript(this._routes);
+  }
+  // Drop a previously-registered route by its original pattern (handler ignored
+  // here because the shim collapses each route to its fulfilled payload).
+  async unroute(urlPattern) {
+    if (!this._routes) return;
+    const key = urlPattern instanceof RegExp ? urlPattern.source : String(urlPattern);
+    this._routes = this._routes.filter((r) => r.patternKey !== key);
+    this._routeInitScript = buildRouteInitScript(this._routes);
+  }
   routeFromHAR = UNSUPPORTED("page.routeFromHAR", NETIO);
-  unroute = UNSUPPORTED("page.unroute", NETIO);
   pause = UNSUPPORTED("page.pause", "no inspector UI");
   exposeBinding = UNSUPPORTED(
     "page.exposeBinding",

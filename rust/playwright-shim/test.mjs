@@ -339,7 +339,8 @@ test("event registry: on('load') fires", async () => {
 test("honest throws for network/input/pixel", async () => {
   const page = newPage();
   await page.setContent("<a>x</a>");
-  await assert.rejects(() => page.route("**"), /interception/);
+  // page.route(fulfill) is now supported (#220); routeFromHAR still throws.
+  await assert.rejects(() => page.routeFromHAR("x.har"), /interception/);
   // No synthetic pointer device → raw mouse coords stay an honest throw. (hover() and
   // keyboard.press are real features now — key-event dispatch via the live session —
   // covered in surface.test.mjs, so they're NOT asserted to throw here.)

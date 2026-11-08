@@ -1018,6 +1018,50 @@ test("page.route(url, fulfill) returns a fixture to the live app's fetch", async
   }
 });
 
+// Payroll-style glob: `page.route("**/api/x**", ...)` with the fetch fired from
+// a parser-synchronous inline <script> and a URL that carries a query string.
+// The glob translator must escape `*` so the two-star prefix/suffix become `.*`
+// (matching origin + query), otherwise the init-script's matcher rejects every
+// URL and the real server wins (turbo-surf#240).
+test("page.route glob with ** matches an inline-script fetch carrying a query string", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/countries") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/tax-store-data?code=42&tenant=acme')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.earningCode; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end('{"earningCode":"REAL"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("**/api/tax-store-data**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ earningCode: "FAKE" }),
+      });
+    });
+    await p.goto(`${base}/countries`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "FAKE",
+      "** glob pattern must intercept the inline <script> fetch",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // Mirror of the waitForResponse drain-polling guard: payroll-style flows attach
 // `waitForRequest(/api\/x/)` to the step that fires the request, and the stub
 // used to resolve immediately with a synthetic page-URL GET — never seeing the

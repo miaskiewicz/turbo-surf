@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, #222 integration)**: `Promise.all([page.waitForResponse(predicate), page.goto(url)])` with no `waitUntil:'networkidle'` was still eating the full 15 s timeout — a default goto stays static, so an inline-script `fetch('/api/...')` inside the document never runs and the predicate matches only the synthetic timeout fallback. `goto` now auto-hydrates when a `response`/`request`/`requestfinished` listener is already subscribed, so the inline-script fetches actually fire and the wait resolves on the real response in the next drain tick.
+- **Docs (playwright-shim, #228 note)**: LIMITATIONS calls out that `setContent(...)` stays static — `.focus()` + `toBeFocused` need a live session (either hydrate or use a `networkidle` goto).
+
 - **Fixed (playwright-shim, follow-ups to #221 / #222)**: payroll parity probe
   v2 surfaced two residuals from the first pass. `Page.evaluate` on a
   STATIC page (no live session) also round-trips through the JSON sentinel

@@ -327,6 +327,42 @@ async fn failures_and_abnormal_closure() {
     server.await.unwrap();
 }
 
+// The closing handshake must not wait forever when the server never answers our close
+// frame. Chrome 156 forces the connection closed after ~5s with wasClean=false and code
+// 1006 (turbo-surf#178, found while fixing #144).
+#[tokio::test(start_paused = true)]
+async fn close_handshake_times_out_when_the_server_goes_silent() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        serve(socket, |mut stream| async move {
+            // Read the client's close frame but never answer; hold the socket open.
+            let (opcode, _) = read_client_frame(&mut stream).await;
+            assert_eq!(opcode, 8);
+            let mut rest = Vec::new();
+            let _ = stream.read_to_end(&mut rest).await;
+        })
+        .await;
+    });
+    let (handle, mut events) = open(WsRequest {
+        url: format!("ws://127.0.0.1:{port}/"),
+        ..WsRequest::default()
+    });
+    assert!(matches!(events.recv().await, Some(WsEvent::Open(_))));
+    handle.send(WsCommand::Close(Some(1000), "bye".into()));
+    assert_eq!(
+        events.recv().await,
+        Some(WsEvent::Closed {
+            clean: false,
+            code: 1006,
+            reason: String::new(),
+        })
+    );
+    drop(handle);
+    let _ = server.await;
+}
+
 // A wss: handshake answered with anything but 101 fails the connection; a redirect is
 // not followed (Chrome fails it too).
 #[tokio::test]

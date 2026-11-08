@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, #228)**: `locator.focus()` / `.blur()` and
+  `page.focus(selector)` now drive `el.focus()` / `el.blur()` into the live
+  isolate (so `document.activeElement` updates and the app's focus/blur
+  handlers fire). `expect(locator).toBeFocused()` probes
+  `document.activeElement` via a read-only live dispatch — keyboard-navigation
+  and focus-trap specs stop getting false negatives. Static snapshots stay
+  focus-less (`.not.toBeFocused` still passes there). `scrollIntoViewIfNeeded`
+  keeps the no-op behavior for now (no viewport geometry).
+
 - **Fixed (playwright-shim, #229 rest)**: `waitForLoadState('load')` and
   `'domcontentloaded'` now hydrate the SPA like `'networkidle'` (one "settled"
   tier in the shim). `waitForNavigation` polls for an actual URL change instead

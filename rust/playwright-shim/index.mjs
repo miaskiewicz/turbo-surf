@@ -580,10 +580,27 @@ class Locator {
     if (key === "Enter") return this.click();
     return undefined;
   }
-  async focus() {}
-  async blur() {}
-  async scrollIntoViewIfNeeded() {}
+  async focus() {
+    if (this._canDriveLive) return void (await this._driveLive("focus"));
+  }
+  async blur() {
+    if (this._canDriveLive) return void (await this._driveLive("blur"));
+  }
+  async scrollIntoViewIfNeeded() {
+    // No viewport, but a real page scrolls the element into view and also fires
+    // focus for a programmatic scroll on a focusable control — keep it a no-op
+    // today since the live engine has no viewport geometry.
+  }
   async highlight() {}
+  async _isFocused() {
+    if (!this._canDriveLive) return false;
+    try {
+      const r = await this._driveLive("isfocused");
+      return r === "true";
+    } catch {
+      return false;
+    }
+  }
   async waitFor(opts = {}) {
     // "Wait for this element" — for an SPA the element only exists after the app runs, so
     // ensure the page is hydrated (a live session). This covers the bare `goto(/login)` +
@@ -788,6 +805,23 @@ function interactionScript(selector, index, kind, value) {
         el.dispatchEvent(new Event("change", { bubbles: true }));
       }
       globalThis.__RESULT = "OK";
+    } })();`;
+  }
+  if (kind === "focus") {
+    return `(() => { ${pick} else {
+      if (typeof el.focus === "function") el.focus();
+      globalThis.__RESULT = "OK";
+    } })();`;
+  }
+  if (kind === "blur") {
+    return `(() => { ${pick} else {
+      if (typeof el.blur === "function") el.blur();
+      globalThis.__RESULT = "OK";
+    } })();`;
+  }
+  if (kind === "isfocused") {
+    return `(() => { ${pick} else {
+      globalThis.__RESULT = document.activeElement === el ? "true" : "false";
     } })();`;
   }
   if (kind === "hover") {
@@ -1046,8 +1080,9 @@ class Page {
   // re-render), then refresh the Page snapshot. `kind` is "click" | "fill".
   async _sessionDispatch(selector, index, kind, value) {
     // A new user interaction: responses produced by THIS action (and after) are "fresh"
-    // for any waitForResponse paired with it; responses from before are stale.
-    this._actionSeq++;
+    // for any waitForResponse paired with it; responses from before are stale. The
+    // "isfocused" probe is a read, not an interaction — don't tag responses off it.
+    if (kind !== "isfocused") this._actionSeq++;
     const r = await native.liveEvalEngine(
       this._session,
       interactionScript(selector, index ?? 0, kind, value),
@@ -1332,7 +1367,9 @@ class Page {
   async press(selector, key) {
     return this.locator(selector).press(key);
   }
-  async focus() {}
+  async focus(selector) {
+    return this.locator(selector).focus();
+  }
   async dispatchEvent() {}
 
   async _followIntent(intent) {
@@ -2279,8 +2316,15 @@ class LocatorExpect extends BaseExpect {
   async toBeEmpty(opts) {
     this._ok(await this._retry(() => this._snap().empty, opts), "expected element to be empty");
   }
-  async toBeFocused() {
-    this._ok(false === this._neg ? false : true, "focus state unavailable on a static DOM");
+  async toBeFocused(opts) {
+    // Static DOMs have no focus — the pre-fix behavior kept `.not.toBeFocused`
+    // passing and `.toBeFocused` failing. In a live session probe
+    // `document.activeElement` via the isolate.
+    if (!this._v._page._live) {
+      this._ok(this._neg, "focus state unavailable on a static DOM");
+      return;
+    }
+    this._ok(await this._retry(() => this._v._isFocused(), opts), "expected element to be focused");
   }
   async toBeInViewport(opts) {
     this._ok(

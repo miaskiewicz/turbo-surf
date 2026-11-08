@@ -151,7 +151,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `ariaSnapshot` | ✅ | |
 | `dispatchEvent` | ✅ | Live app only: fires the named DOM event into the isolate (e.g. a row's `click`). Static snapshot: no-op. |
 | `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate. Static snapshot: no-op. Not hardware input. |
-| `focus`, `blur`, `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no focus model, no layout, static DOM). |
+| `focus`, `blur` | ✅ | Live app only: calls `el.focus()` / `el.blur()` in the isolate so `document.activeElement` updates (and the app's focus/blur handlers fire). Static snapshot: no-op. |
+| `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no viewport, no layout — nothing to scroll into). |
 | `boundingBox` | ⚠️ | Returns `null` (there genuinely is no browser-faithful box). Geometry-conditional helpers (smooth-scroll, visibility-by-rect) no-op cleanly instead of throwing. |
 | `screenshot` | ❌ | Throws — pixels. |
 | `dragTo`, `selectText` | ❌ | Throws — input hardware. |
@@ -164,7 +165,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | **PageAssertions** | ✅ | `toHaveURL`, `toHaveTitle` (string / RegExp / `.not`). |
 | **GenericAssertions** | ✅ | jest-shaped: `toBe/toEqual/toStrictEqual/toContain/toContainEqual/toMatch/toMatchObject/toBeNull/Undefined/Defined/Truthy/Falsy/NaN/toBeGreaterThan(OrEqual)/toBeLessThan(OrEqual)/toBeCloseTo/toBeInstanceOf/toHaveLength/toHaveProperty/toThrow(Error)`, the `toHaveBeenCalled*` mock matchers, and `.resolves`/`.rejects`. |
 | **APIResponseAssertions** | ✅ | `toBeOK` (via the response's `ok()`). |
-| `toBeFocused` | ⚠️ | No focus model on a static DOM — treated as not-focused. |
+| `toBeFocused` | ⚠️ | Live app only: probes `document.activeElement` in the isolate. Static snapshot: treated as not-focused. |
 | `toHaveScreenshot`, `toMatchSnapshot` (**SnapshotAssertions**) | ❌ | Throws — pixels. |
 
 ## BrowserContext

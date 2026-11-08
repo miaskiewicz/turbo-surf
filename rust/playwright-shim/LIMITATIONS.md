@@ -99,9 +99,10 @@ module/fetch/XHR requests and screenshot assets. This preserves per-origin `Acce
 negotiation and HTTP-client state when a live runtime is replaced. Navigation/resource
 headers, referrer/Origin and credentials use explicit request contexts. This is not
 complete CORS enforcement or browser redirect/permissions-policy behavior.
-`APIRequestContext` calls, including the page/context request facade, currently do
-not retain this browser-context hint state or share its cookie jar. Concurrent live
-resource requests merge cookie writes/deletions rather than replacing the whole jar.
+`page.request()` and `BrowserContext.request()` share the parent context's cookie jar
+(reads + `Set-Cookie` writeback, #230) but still don't retain the `Accept-CH` hint state,
+and concurrent live resource requests merge cookie writes/deletions rather than replacing
+the whole jar. A bare `request.newContext()` (unbound) keeps its empty-jar behavior.
 HttpOnly cookies remain available to HTTP and storage state,
 while page JS cannot read, create or overwrite them through `document.cookie`.
 

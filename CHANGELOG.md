@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fixed (playwright-shim, #230)**: `page.request()` and
+  `BrowserContext.request()` now return an `APIRequestContext` bound to the
+  parent `BrowserContext`'s cookie jar — outbound requests carry its current
+  cookies, `Set-Cookie` writes merge back in, and both facades share the same
+  cached instance per context. A spec that logs in via `page.goto` and then
+  hits an API via `ctx.request.get(...)` now sends the session cookie.
+  `request.newContext(opts)` also accepts an internal `_browserContext` to
+  opt into the binding; the bare `request.newContext()` (unbound) keeps its
+  empty-jar behavior.
+
 - **Fixed (playwright-shim, #228)**: `locator.focus()` / `.blur()` and
   `page.focus(selector)` now drive `el.focus()` / `el.blur()` into the live
   isolate (so `document.activeElement` updates and the app's focus/blur

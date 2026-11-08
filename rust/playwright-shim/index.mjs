@@ -1765,7 +1765,7 @@ class Page {
     return this._context;
   }
   request() {
-    return request;
+    return this._context.request();
   }
   viewportSize() {
     return this._context._viewport;
@@ -2177,7 +2177,12 @@ class BrowserContext {
     return this.on(event, fn);
   }
   request() {
-    return request;
+    // Lazy: build one APIRequestContext per BrowserContext, bound to its
+    // cookie jar (reads + Set-Cookie writeback).
+    if (!this._requestCtx) {
+      this._requestCtx = request.newContext({ _browserContext: this });
+    }
+    return this._requestCtx;
   }
   browser() {
     return browserStub;
@@ -2877,9 +2882,19 @@ export const defineConfig = (config) => config;
 /** Device descriptors are no-ops (no real viewport/UA emulation). */
 export const devices = new Proxy({}, { get: () => ({}) });
 /** APIRequestContext: fetch over the shared Rust client. The response carries
- * the RAW body (makeResponse.text/json), not a re-serialized DOM. */
+ * the RAW body (makeResponse.text/json), not a re-serialized DOM.
+ *
+ * When bound to a parent BrowserContext (via the internal `_browserContext`
+ * option, which `page.request()` / `context.request()` pass in), reads/writes
+ * share the context's cookie jar: outbound requests carry the current cookies,
+ * `Set-Cookie` writes merge back in, so a login via `page.goto` is reflected
+ * in a later `ctx.request.get('/api/...')`. */
 export const request = {
-  async newContext(opts = {}) {
+  // Synchronous (no await needed) — tests chain `request.newContext({...}).fetch(...)`.
+  // Real Playwright returns a Promise here; the synchronous form also works at
+  // call-site (`(await request.newContext()).fetch(...)` resolves fine because
+  // awaiting a non-thenable returns the value unchanged).
+  newContext(opts = {}) {
     const headers = opts.extraHTTPHeaders ? JSON.stringify(opts.extraHTTPHeaders) : null;
     // Honor the context `baseURL` like real Playwright: a relative request path
     // (e.g. `ctx.get('/api/backend/...')`) resolves against it. Without this the
@@ -2893,6 +2908,7 @@ export const request = {
         return url;
       }
     };
+    const bc = opts._browserContext ?? null;
     const ctxHeaders = opts.extraHTTPHeaders ?? {};
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
@@ -2915,9 +2931,13 @@ export const request = {
     };
     const call = async (url, method, o = {}) => {
       const { body, hdr } = encode(o);
-      return makeResponse(
-        JSON.parse(await native.fetchWithCookies(resolve(url), "[]", method ?? null, body, hdr)),
-      );
+      const inCookies = bc && bc._cookies ? bc._cookies : "[]";
+      const raw = await native.fetchWithCookies(resolve(url), inCookies, method ?? null, body, hdr);
+      const parsed = JSON.parse(raw);
+      // Merge Set-Cookie writes back into the parent BrowserContext's jar so
+      // the next page.goto / page.request / context.request sees them.
+      if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;
+      return makeResponse(parsed);
     };
     return {
       get: (url, o = {}) => call(url, null, o),

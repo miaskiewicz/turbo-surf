@@ -765,6 +765,30 @@ test("waitForResponse ignores a response that drained in an earlier step", async
   assert.equal(got.status(), 201, "should resolve to the fresh POST, not the stale GET");
 });
 
+// Without an action to drive `_drainNetworkEvents`, the native network log keeps
+// sitting on the matching entry while waitForResponse burns its full timeout —
+// payroll-app saw ~15 s for a response that landed in ~5 ms. In a live session
+// waitForResponse must poll the drain itself, not just wait for someone else to
+// push into the listener bus.
+test("waitForResponse polls the native drain while waiting (live session)", async () => {
+  const p = newPage();
+  p._session = 1; // pretend a live session is open
+  p._actionSeq = 1;
+  p._recentResponses = [];
+  let drainCalls = 0;
+  p._drainNetworkEvents = async () => {
+    drainCalls++;
+    if (drainCalls >= 2) {
+      const resp = { url: () => "https://x/api/data", status: () => 418, _seq: 1 };
+      p._recentResponses.push(resp);
+      p._emit("response", resp);
+    }
+  };
+  const got = await p.waitForResponse((r) => r.url().includes("/api/data"), { timeout: 500 });
+  assert.equal(got.status(), 418, "must resolve the drained response, not the synthetic timeout");
+  assert.ok(drainCalls >= 2, `drain must be polled while waiting (got ${drainCalls})`);
+});
+
 test("waitForResponse returns a buffered response from the current action", async () => {
   const p = newPage();
   const mk = (url, status, seq) => ({ url: () => url, status: () => status, _seq: seq });

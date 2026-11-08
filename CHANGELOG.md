@@ -10,6 +10,13 @@
   `String(result)`. Payroll-app observer-style specs that read page state as
   objects no longer have to `JSON.stringify` inside the expression and
   `JSON.parse` on the test side.
+- **Fixed (playwright-shim, #222)**: `page.waitForResponse(predicate)` no longer
+  burns its full timeout on a response that already landed. The native network
+  log only drains on actions, so a bare `waitForResponse` after `goto` had no
+  one to push the matching entry onto the listener bus — payroll-app parity
+  saw ~15 s on a response that arrived in ~5 ms. The shim now drains once up
+  front and polls the native log every 50 ms while waiting; short-lived
+  requests resolve in the next tick.
 
 ## [0.8.0] — 2026-11-07
 

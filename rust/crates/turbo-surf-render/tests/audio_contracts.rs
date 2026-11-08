@@ -412,6 +412,68 @@ async fn low_reverse_and_scheduled_oscillator_parameter_quantums_match_chrome() 
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn offline_audio_unsupported_paths_throw_or_reject_without_silent_no_op() {
+    // Pins the "no unsupported method silently pretends to run DSP" contract
+    // documented in harness/detection/AUDIO.md for the deferred items of #27:
+    // custom oscillator waves, PeriodicWave construction, WaveShaper 2x/4x
+    // oversampling, offline suspend/resume, and realtime AudioContext.
+    let value = evaluate(
+        r#"
+      const sync = fn => { try { fn(); return null; } catch (e) { return { name: e.name, dom: e instanceof DOMException, message: e.message }; } };
+      const asyncErr = async fn => { try { await fn(); return null; } catch (e) { return { name: e.name, dom: e instanceof DOMException }; } };
+      const context = new OfflineAudioContext(1, 128, 44100);
+      const oscillator = context.createOscillator();
+      const shaper = context.createWaveShaper();
+      globalThis.__RESULT = JSON.stringify({
+        customType: sync(() => { oscillator.type = 'custom'; }),
+        setPeriodicWave: sync(() => oscillator.setPeriodicWave({})),
+        createPeriodicWave: typeof context.createPeriodicWave,
+        oversample2x: sync(() => { shaper.oversample = '2x'; }),
+        oversample4x: sync(() => { shaper.oversample = '4x'; }),
+        oversampleNone: sync(() => { shaper.oversample = 'none'; }),
+        oversampleBogus: sync(() => { shaper.oversample = 'bogus'; }),
+        suspend: await asyncErr(() => context.suspend(0.01)),
+        resume: await asyncErr(() => context.resume()),
+        suspendIsPromise: (() => { const p = context.suspend(0.01); p.catch(() => {}); return p instanceof Promise; })(),
+        resumeIsPromise: (() => { const p = context.resume(); p.catch(() => {}); return p instanceof Promise; })(),
+        realtime: sync(() => new AudioContext()),
+        oversampleValue: shaper.oversample,
+        type: oscillator.type,
+      });
+    "#,
+    )
+    .await;
+    // Oscillator type=custom is InvalidStateError; setPeriodicWave is unsupported.
+    assert_eq!(value["customType"]["name"], "InvalidStateError", "{value}");
+    assert_eq!(value["customType"]["dom"], true);
+    assert_eq!(value["setPeriodicWave"]["name"], "NotSupportedError");
+    assert_eq!(value["setPeriodicWave"]["dom"], true);
+    // createPeriodicWave is not exposed yet; probes see undefined. Tracked as
+    // #27 follow-up so a change here is a conscious parity decision.
+    assert_eq!(value["createPeriodicWave"], "undefined");
+    // WaveShaper oversample: 2x/4x throw; "none" keeps default; invalid values
+    // are silently ignored per Chrome's enum coercion.
+    assert_eq!(value["oversample2x"]["name"], "NotSupportedError");
+    assert_eq!(value["oversample2x"]["dom"], true);
+    assert_eq!(value["oversample4x"]["name"], "NotSupportedError");
+    assert_eq!(value["oversampleNone"], Value::Null);
+    assert_eq!(value["oversampleBogus"], Value::Null);
+    assert_eq!(value["oversampleValue"], "none");
+    // Offline suspend/resume return a rejected Promise, never silently succeed.
+    assert_eq!(value["suspendIsPromise"], true);
+    assert_eq!(value["resumeIsPromise"], true);
+    assert_eq!(value["suspend"]["name"], "NotSupportedError");
+    assert_eq!(value["suspend"]["dom"], true);
+    assert_eq!(value["resume"]["name"], "NotSupportedError");
+    assert_eq!(value["resume"]["dom"], true);
+    // Realtime AudioContext construction stays an explicit NotSupportedError.
+    assert_eq!(value["realtime"]["name"], "NotSupportedError");
+    assert_eq!(value["realtime"]["dom"], true);
+    // Oscillator type survives a rejected 'custom' assignment.
+    assert_eq!(value["type"], "sine");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn native_audio_private_automation_and_graph_records_do_not_call_guest_index_hooks() {
     let value=evaluate(r#"
  const c=new OfflineAudioContext(1,128,44100),s=c.createBufferSource(),b=c.createBuffer(1,128,44100),g=c.createGain();b.getChannelData(0).fill(.5);s.buffer=b;s.connect(g);g.connect(c.destination);

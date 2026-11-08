@@ -1478,8 +1478,46 @@ class Page {
         : null;
     });
   }
-  async waitForRequest() {
-    return { url: () => this._url, method: () => "GET" };
+  async waitForRequest(matcher, opts = {}) {
+    const test = (req) => {
+      try {
+        if (matcher == null) return true;
+        if (typeof matcher === "function") return !!matcher(req);
+        if (matcher instanceof RegExp) return matcher.test(req.url());
+        return req.url().includes(String(matcher));
+      } catch {
+        return false;
+      }
+    };
+    const callSeq = this._actionSeq;
+    // Drain once up front — the matching entry may already be in the native log.
+    if (this._live) await this._drainNetworkEvents();
+    const bufferedResp = (this._recentResponses ?? []).find(
+      (r) => (r._seq ?? 0) >= callSeq && test(r.request()),
+    );
+    if (bufferedResp) return bufferedResp.request();
+    return new Promise((resolve) => {
+      // Timeout returns the historical synthetic stub — some callers chain
+      // Promise.all([waitForRequest(...), action()]) and only need the action.
+      const timer = setTimeout(() => {
+        this.off("request", onReq);
+        if (poll) clearInterval(poll);
+        resolve({ url: () => this._url, method: () => "GET" });
+      }, opts.timeout ?? 15000);
+      const onReq = (req) => {
+        if (!test(req)) return;
+        clearTimeout(timer);
+        if (poll) clearInterval(poll);
+        this.off("request", onReq);
+        resolve(req);
+      };
+      this.on("request", onReq);
+      const poll = this._live
+        ? setInterval(() => {
+            this._drainNetworkEvents().catch(() => {});
+          }, 50)
+        : null;
+    });
   }
 
   // --- events (registry; we fire load/domcontentloaded; others are inert) ---

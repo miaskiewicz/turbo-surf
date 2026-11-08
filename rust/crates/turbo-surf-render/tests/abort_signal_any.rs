@@ -15,8 +15,8 @@ const CONTROL: &str =
 /// dependent) from the host with a microtask checkpoint after it (#136). Blink
 /// also checkpoints between two listeners of the same signal; those listeners
 /// run inside turbo-dom's private EventTarget dispatcher, which has no
-/// per-listener host checkpoint yet, so a signal's second listener still runs
-/// before its first listener's microtask.
+/// per-listener host checkpoint yet (tracked as turbo-dom#382), so a signal's
+/// second listener still runs before its first listener's microtask.
 const KNOWN_GAPS: &[&str] = &[
     "/timeoutListeners/1 = [\"timed\",1]",
     "/timeoutListeners/2 = [\"timed\",0,\"microtask\"]",

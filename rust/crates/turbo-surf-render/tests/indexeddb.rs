@@ -96,8 +96,8 @@ async fn indexeddb_matches_chrome156() {
 /// binding's dispatch has no "get the parent" for non-node targets, so surf fires a fresh
 /// event at each target in turn and capture listeners there run in the bubbling phase.
 /// `/microtasks`: Chrome checkpoints microtasks after every listener; the binding's
-/// dispatcher has no per-listener host checkpoint (the same gap as #136), so surf
-/// checkpoints after each target. `/deactivation`: Chrome deactivates a new transaction
+/// dispatcher has no per-listener host checkpoint (the same gap as #136, tracked
+/// in the binding as turbo-dom#382), so surf checkpoints after each target. `/deactivation`: Chrome deactivates a new transaction
 /// at the end of its task; surf does so in a 0 ms timer, after timers queued earlier.
 const EVENTS_KNOWN_GAPS: &[&str] = &[
     "/deactivation/1/1 = \"ok\"",

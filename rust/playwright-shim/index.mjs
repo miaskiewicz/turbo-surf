@@ -13,7 +13,7 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -42,6 +42,32 @@ function cssAttrValue(text) {
 // --- page.route helpers (shim-side, fulfill-only) --------------------------
 // Normalize a route pattern + fulfill payload into a JSON-serializable record.
 // `patternKey` is the original user pattern as a string so `unroute` can match.
+// Convert one HAR entry (Playwright / Chrome DevTools format) into the same
+// route record normalizeRoute produces. Matches the entry's URL exactly: the
+// init-script's globToRegex anchors non-wildcard patterns, so the request URL
+// must equal the recorded one (modulo the substring fallback). Entries missing
+// a URL or response body are skipped by the caller.
+function harEntryToRoute(entry) {
+  const url = entry?.request?.url;
+  if (!url) return null;
+  const resp = entry.response ?? {};
+  const headers = {};
+  for (const h of resp.headers || []) {
+    if (h && h.name) headers[String(h.name).toLowerCase()] = h.value == null ? "" : String(h.value);
+  }
+  const content = resp.content ?? {};
+  return {
+    kind: "glob",
+    pattern: url,
+    flags: "",
+    patternKey: url,
+    status: resp.status ?? 200,
+    headers,
+    contentType: content.mimeType ?? null,
+    body: content.text == null ? "" : String(content.text),
+  };
+}
+
 function normalizeRoute(pattern, fulfill) {
   const isRegex = pattern instanceof RegExp;
   return {
@@ -84,16 +110,33 @@ function buildRouteInitScript(routes) {
       const re = "^" + esc.replace(/\\\\\\*\\\\\\*/g, ".*").replace(/\\\\\\*/g, "[^/]*") + "$";
       return new RegExp(re);
     };
+    const candidates = (url) => {
+      // Match against the URL as-given AND its absolute/path forms, so a HAR
+      // entry's absolute URL matches a page fetch issued with a relative URL
+      // (and vice versa). Falls back to the raw input on any URL-parse error.
+      const out = [url];
+      try {
+        const base = typeof location !== "undefined" && location.href ? location.href : "about:blank";
+        const u = new URL(url, base);
+        if (out.indexOf(u.href) === -1) out.push(u.href);
+        const pq = u.pathname + u.search;
+        if (out.indexOf(pq) === -1) out.push(pq);
+      } catch (_e) { /* non-URL input — raw-only matching */ }
+      return out;
+    };
     const find = (url) => {
+      const urls = candidates(url);
       for (const r of routes) {
-        try {
-          if (r.kind === "regex") {
-            if (new RegExp(r.pattern, r.flags).test(url)) return r;
-          } else {
-            if (globToRegex(r.pattern).test(url)) return r;
-            if (url.indexOf(r.pattern) !== -1) return r;
-          }
-        } catch (_e) { /* skip malformed pattern */ }
+        for (const u of urls) {
+          try {
+            if (r.kind === "regex") {
+              if (new RegExp(r.pattern, r.flags).test(u)) return r;
+            } else {
+              if (globToRegex(r.pattern).test(u)) return r;
+              if (u.indexOf(r.pattern) !== -1) return r;
+            }
+          } catch (_e) { /* skip malformed pattern */ }
+        }
       }
       return null;
     };
@@ -2038,7 +2081,32 @@ class Page {
     this._routes = this._routes.filter((r) => r.patternKey !== key);
     this._routeInitScript = buildRouteInitScript(this._routes);
   }
-  routeFromHAR = UNSUPPORTED("page.routeFromHAR", NETIO);
+  // page.routeFromHAR(har, options?) — read a Playwright/Chrome HAR file and
+  // register each `log.entries[].request.url` as a route returning that entry's
+  // response body/status/content-type via the same init-script fetch/XHR
+  // wrapper. Playback-only; record mode is a follow-up. `options.url`, when
+  // provided, filters entries by URL (RegExp test, or substring match for a
+  // string). Unmatched requests fall through to the real network (Playwright's
+  // `notFound: 'fallback'`); strict abort mode is not implemented yet.
+  async routeFromHAR(har, options = {}) {
+    const raw = await readFile(har, "utf8");
+    const parsed = JSON.parse(raw);
+    const entries = parsed?.log?.entries ?? [];
+    const filter = options?.url ?? null;
+    const matches = (url) => {
+      if (filter == null) return true;
+      if (filter instanceof RegExp) return filter.test(url);
+      return String(url).indexOf(String(filter)) !== -1;
+    };
+    this._routes = this._routes ?? [];
+    for (const entry of entries) {
+      const route = harEntryToRoute(entry);
+      if (!route) continue;
+      if (!matches(route.pattern)) continue;
+      this._routes.push(route);
+    }
+    this._routeInitScript = buildRouteInitScript(this._routes);
+  }
   pause = UNSUPPORTED("page.pause", "no inspector UI");
   exposeBinding = UNSUPPORTED(
     "page.exposeBinding",

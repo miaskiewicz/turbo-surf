@@ -737,8 +737,8 @@ test("honest throws: pixel / input / network-interception", async () => {
   // honest throws.
   assert.equal(await p.locator("#go").boundingBox(), null);
   await assert.rejects(() => p.locator("#name").selectText(), /input/);
-  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
-  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
+  // page.route(fulfill) + page.routeFromHAR (HAR playback) are supported (#220);
+  // context.route still isn't.
   await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
 });
 
@@ -1052,6 +1052,110 @@ test("page.route glob with ** matches an inline-script fetch carrying a query st
       await p.locator("#root").textContent(),
       "FAKE",
       "** glob pattern must intercept the inline <script> fetch",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.unroute(url) must remove a previously-registered route so the next live
+// session sees the real server again (turbo-surf#220). Regression guard: without
+// a refreshed init-script snapshot, the fixture would keep winning after unroute.
+test("page.unroute drops a previously-registered route and lets the real server win", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.hello; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"hello":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("/api/foo", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked" }),
+      });
+    });
+    await p.unroute("/api/foo");
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "real-server",
+      "unroute must drop the fixture so the next session reaches the real server",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.routeFromHAR(path) replays a Playwright/Chrome HAR file as a set of
+// fixtures: for every entry in `log.entries`, the request URL is registered as
+// a route returning that entry's response body/status/content-type — the live
+// app's fetch/XHR resolves against those fixtures instead of the real server.
+test("page.routeFromHAR plays back HAR entries as route fulfillments", async () => {
+  const { writeFile: wf, mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/countries')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.country; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end('{"country":"real-server"}');
+  });
+  const base = await listen(server);
+  const dir = await mkdtemp(join(tmpdir(), "turbo-surf-har-"));
+  const harPath = join(dir, "replay.har");
+  const har = {
+    log: {
+      version: "1.2",
+      entries: [
+        {
+          request: { method: "GET", url: `${base}/api/countries` },
+          response: {
+            status: 200,
+            headers: [{ name: "Content-Type", value: "application/json" }],
+            content: {
+              mimeType: "application/json",
+              text: JSON.stringify({ country: "FROM-HAR" }),
+            },
+          },
+        },
+      ],
+    },
+  };
+  await wf(harPath, JSON.stringify(har));
+  const p = newPage();
+  try {
+    await p.routeFromHAR(harPath);
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "FROM-HAR",
+      "routeFromHAR must inject the HAR entry's response body",
     );
   } finally {
     await p.close();

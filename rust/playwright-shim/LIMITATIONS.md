@@ -45,9 +45,12 @@ surfaces remain unavailable or approximate:
   Without a live session every input call is a clean no-op. `keyboard` dispatches
   key events when a live session exists and is a no-op otherwise; it does not
   provide browser text-editing defaults.
-- **In-process network interception** — `route`/`unroute`/`routeFromHAR`. The
-  engine fetches over Rust+wreq (the default impersonate build) or reqwest; there
-  is no shim request-interception bus.
+- **In-process network interception** — `page.route(fulfill)` and
+  `page.routeFromHAR` are wired via an init-script `fetch`/XHR wrapper (register
+  BEFORE the next live session opens). The engine still fetches over Rust+wreq
+  (the default impersonate build) or reqwest; there is no shim request-
+  interception bus for dynamic `continue`/`abort`/`fallback` or context-scoped
+  routes, and HAR record mode is a follow-up.
   (`setExtraHTTPHeaders` and cookies ARE wired through — those are real.)
 
 Live `PageSession` calls retain the app's V8 isolate and drain timers, microtasks and
@@ -137,7 +140,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `dragAndDrop`, `mouse.*`, `touchscreen.*` | ✅ | Live app only: dispatches pointer / mouse / touch / HTML5-drag events into the isolate at element centers (or at `(x, y)` for coord-based entries). Static snapshot: no-op. Not hardware input. |
 | `keyboard.*` | ⚠️ | Key-event dispatch in a live session; no-op without one, incomplete text-editing defaults. |
 | `route`, `unroute` | ⚠️ | Shim-side only: the handler runs once at register-time against a stub route; only `route.fulfill(...)` is captured (`continue` / `abort` / `fallback` are no-ops, no per-request dynamic responses). The fulfilled fixture is injected into the live isolate via an init script that monkey-patches `fetch` and `XMLHttpRequest` — call `page.route(...)` BEFORE the next live session opens. |
-| `routeFromHAR` | ❌ | Throws — no HAR replay. |
+| `routeFromHAR` | ⚠️ | Playback-only. Each `log.entries[].request.url` is registered as a shim-side route returning that entry's response body / status / content-type via the init-script `fetch`/XHR wrapper — call BEFORE the next live session opens. `options.url` filters entries (RegExp or substring). Record mode and strict `notFound: 'abort'` are not implemented. |
 | `exposeBinding`, `exposeFunction` | ❌ | Throws — no persistent JS↔host binding across renders. |
 | `pause`, `addLocatorHandler`, `pickLocator` | ❌ | Throws / n/a — no inspector UI. |
 | `clock`, `coverage`, `tracing`, `requestGC` | ❌ | n/a — no devtools protocol. |
@@ -181,7 +184,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 |---|---|---|
 | `newPage`, `pages`, `cookies`, `addCookies`, `clearCookies`, `storageState`, `addInitScript`, `setExtraHTTPHeaders`, `browser`, `request`, `close` | ✅ | |
 | `grantPermissions`, `clearPermissions`, `setGeolocation`, `setOffline`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
-| `route`, `unroute`, `routeFromHAR`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
+| `route`, `unroute`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` and `page.routeFromHAR` work — see the Page table. |
 
 ## test runner & fixtures
 

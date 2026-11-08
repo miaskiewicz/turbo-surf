@@ -463,6 +463,7 @@ impl Policy {
             "frame-src",
             "child-src",
             "worker-src",
+            "media-src",
             "form-action",
             "report-uri",
             "report-to",
@@ -949,13 +950,13 @@ mod tests {
         );
         assert_eq!(partial.unsupported(), vec!["sandbox"]);
         // Dedicated workers execute only as a shell (#104), but `new Worker` enforces
-        // worker-src on construction via `allows_request`; only media-src stays missing
-        // until media loads land (tracked in #190).
-        let missing = Policy::new(
+        // worker-src on construction via `allows_request`; `<audio src>` / `<video src>`
+        // enforce media-src from the src setter (#204). No request directive is missing.
+        let covered = Policy::new(
             "https://policy.test/",
             ["worker-src 'none'; media-src 'none'".into()],
         );
-        assert_eq!(missing.unsupported(), vec!["media-src"]);
+        assert!(covered.unsupported().is_empty());
     }
 
     #[test]

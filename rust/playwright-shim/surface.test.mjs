@@ -468,12 +468,57 @@ test("Page click submits a GET form to the server", async () => {
 });
 
 // --- Page: frames + waiters ------------------------------------------------
-test("Page frames collapse to self", async () => {
+test("Page without iframes: mainFrame + frames() + frameLocator over host", async () => {
   const p = await fresh();
   assert.equal(p.mainFrame(), p);
   assert.deepEqual(p.frames(), [p]);
   assert.equal(p.frame(), p);
   assert.ok(p.frameLocator("main"));
+});
+
+// Engine iframe contexts exposed as Frame/FrameLocator. The host-vs-frame scope is
+// the whole point: a `#inside` button inside an iframe MUST NOT match on the host
+// page, and `frameLocator('iframe')` queries must land in the child document.
+test("Page.frames / frame({name}) / frameLocator: iframe srcdoc", async () => {
+  const p = newPage();
+  await p.setContent(`<html><body>
+    <h1>Host</h1>
+    <iframe name="child" srcdoc="<html><body><button id='inside'>Pay</button><p class='lead'>child lead</p></body></html>"></iframe>
+  </body></html>`);
+  // frames() lists the page + each iframe with content
+  const frames = p.frames();
+  assert.equal(frames.length, 2);
+  assert.equal(frames[0], p);
+  assert.notEqual(frames[1], p);
+  // frame({name}) finds the child
+  const child = p.frame({ name: "child" });
+  assert.ok(child, "frame({name}) resolves");
+  assert.equal(child.name(), "child");
+  assert.notEqual(child, p);
+  // child-scoped queries see the iframe content, not the host
+  assert.equal(await child.locator("#inside").count(), 1);
+  assert.equal(await child.locator("#inside").textContent(), "Pay");
+  assert.equal(await child.locator(".lead").textContent(), "child lead");
+  // host doesn't see the frame's content
+  assert.equal(await p.locator("#inside").count(), 0);
+  // frameLocator resolves inside the iframe
+  const fl = p.frameLocator("iframe[name=child]");
+  assert.equal(await fl.locator("#inside").count(), 1);
+  assert.equal(await fl.locator("#inside").textContent(), "Pay");
+  assert.equal(await fl.getByRole("button").count(), 1);
+  // host's p.locator('.lead') is the host's own lead if any (none here), not the frame's
+  assert.equal(await p.locator("p.lead").count(), 0);
+});
+
+test("Page.frame by string name", async () => {
+  const p = newPage();
+  await p.setContent(
+    `<body><iframe name="payment" srcdoc="<button id='b'>Go</button>"></iframe></body>`,
+  );
+  const f = p.frame("payment");
+  assert.ok(f);
+  assert.equal(f.name(), "payment");
+  assert.equal(await f.locator("#b").textContent(), "Go");
 });
 
 test("Page waiters resolve on the static DOM", async () => {
@@ -1052,6 +1097,49 @@ test("page.route glob with ** matches an inline-script fetch carrying a query st
       await p.locator("#root").textContent(),
       "FAKE",
       "** glob pattern must intercept the inline <script> fetch",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.unroute(url) must remove a previously-registered route so the next live
+// session sees the real server again (turbo-surf#220). Regression guard: without
+// a refreshed init-script snapshot, the fixture would keep winning after unroute.
+test("page.unroute drops a previously-registered route and lets the real server win", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.hello; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"hello":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("/api/foo", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked" }),
+      });
+    });
+    await p.unroute("/api/foo");
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "real-server",
+      "unroute must drop the fixture so the next session reaches the real server",
     );
   } finally {
     await p.close();

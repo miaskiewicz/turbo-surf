@@ -138,7 +138,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `keyboard.*` | ⚠️ | Key-event dispatch in a live session; no-op without one, incomplete text-editing defaults. |
 | `route`, `unroute` | ⚠️ | Shim-side only: the handler runs once at register-time against a stub route; only `route.fulfill(...)` is captured (`continue` / `abort` / `fallback` are no-ops, no per-request dynamic responses). The fulfilled fixture is injected into the live isolate via an init script that monkey-patches `fetch` and `XMLHttpRequest` — call `page.route(...)` BEFORE the next live session opens. |
 | `routeFromHAR` | ❌ | Throws — no HAR replay. |
-| `exposeBinding`, `exposeFunction` | ❌ | Throws — no persistent JS↔host binding across renders. |
+| `exposeBinding`, `exposeFunction` | ⚠️ | Supported fire-and-forget: the binding persists across navigations (via init scripts) and page calls reach the Node handler with serialized arguments. The host's return value is NOT surfaced back to in-page JS — a page `await` on the binding resolves to `undefined`. |
 | `pause`, `addLocatorHandler`, `pickLocator` | ❌ | Throws / n/a — no inspector UI. |
 | `clock`, `coverage`, `tracing`, `requestGC` | ❌ | n/a — no devtools protocol. |
 
@@ -181,7 +181,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 |---|---|---|
 | `newPage`, `pages`, `cookies`, `addCookies`, `clearCookies`, `storageState`, `addInitScript`, `setExtraHTTPHeaders`, `browser`, `request`, `close` | ✅ | |
 | `grantPermissions`, `clearPermissions`, `setGeolocation`, `setOffline`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
-| `route`, `unroute`, `routeFromHAR`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
+| `route`, `unroute`, `routeFromHAR`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
+| `exposeBinding`, `exposeFunction` | ⚠️ | Supported fire-and-forget at context scope: every page in the context (and future ones) sees the binding across navigations. Host return values are not surfaced to in-page JS. |
 
 ## test runner & fixtures
 

@@ -165,6 +165,42 @@ function buildRouteInitScript(routes) {
   })();`;
 }
 
+// --- page.exposeFunction / exposeBinding (fire-and-forget) ------------------
+// Install a persistent JS→host binding that survives navigation. Since the
+// deno_core isolate runs page JS synchronously inside one `liveEvalEngine`
+// call (no mid-eval callback into Node), the injected stub records each call
+// in a page-global queue and returns `Promise.resolve()`. The shim drains the
+// queue after every live interaction (`_sessionEval` / `evaluate` return,
+// session open) and invokes the Node host handlers then. This covers the
+// common instrumentation case (`captured.push(payload)` from a stubbed
+// telemetry sink, a progress counter, a test-only RPC). Host return values
+// are NOT surfaced back to in-page JS in this release — the page sees
+// `undefined` — because resolving an in-flight promise mid-eval would need a
+// napi hook into Node, tracked in the turbo-dom-browser-env roadmap.
+function buildExposeInitScript(names) {
+  if (!names || !names.length) return "";
+  const list = JSON.stringify(names);
+  return `(() => {
+    const bag = (globalThis.__tsExpose = globalThis.__tsExpose || { q: [], n: 0 });
+    const define = (name) => {
+      if (typeof globalThis[name] === "function" && globalThis[name].__ts) return;
+      const fn = function (...args) {
+        const id = ++bag.n;
+        try { bag.q.push({ id, name, args }); } catch (_e) { /* queue full */ }
+        return Promise.resolve(undefined);
+      };
+      try { Object.defineProperty(fn, "__ts", { value: true }); } catch (_e) {}
+      try {
+        Object.defineProperty(globalThis, name, { value: fn, configurable: true, writable: true });
+      } catch (_e) {
+        try { globalThis[name] = fn; } catch (_e2) {}
+      }
+    };
+    globalThis.__tsExposeDefine = define;
+    for (const n of ${list}) define(n);
+  })();`;
+}
+
 // ---------------------------------------------------------------------------
 // Locator — a lazy query over the page's current HTML. `_resolve(html)` returns
 // the match array (each `{ node, text, html }`) in ONE napi call; composition
@@ -1006,7 +1042,60 @@ class Page {
   _initScriptSource() {
     const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
     if (this._routeInitScript) all.unshift(this._routeInitScript);
+    const exposeNames = [...this._mergedBindings().keys()];
+    const exposeScript = buildExposeInitScript(exposeNames);
+    if (exposeScript) all.unshift(exposeScript);
     return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
+  }
+
+  // Merge context-level and page-level exposed bindings; page wins on name clash.
+  _mergedBindings() {
+    const out = new Map();
+    for (const [k, v] of this._context._bindings ?? []) out.set(k, v);
+    for (const [k, v] of this._bindings ?? []) out.set(k, v);
+    return out;
+  }
+
+  // Drain queued binding calls from the isolate and dispatch to Node handlers.
+  // Called after every live interaction. Fire-and-forget: a host-side throw
+  // is swallowed with a warning so one bad handler can't break the page.
+  async _drainBindings() {
+    if (this._session == null || this._draining) return;
+    const handlers = this._mergedBindings();
+    if (handlers.size === 0) return;
+    this._draining = true;
+    try {
+      const raw = await native.liveEvalEngine(
+        this._session,
+        "globalThis.__RESULT = JSON.stringify((globalThis.__tsExpose && globalThis.__tsExpose.q.splice(0)) || []);",
+      );
+      if (!raw) return;
+      let calls;
+      try {
+        calls = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      for (const call of calls) {
+        const entry = handlers.get(call.name);
+        if (!entry) continue;
+        const args = Array.isArray(call.args) ? call.args : [];
+        try {
+          if (entry.isBinding) {
+            await entry.fn({ page: this, context: this._context, frame: null }, ...args);
+          } else {
+            await entry.fn(...args);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`turbo-surf: exposed binding "${call.name}" threw —`, err?.message ?? err);
+        }
+      }
+    } catch {
+      /* isolate gone / eval failed — nothing to drain */
+    } finally {
+      this._draining = false;
+    }
   }
 
   async _openLiveSession() {
@@ -1023,6 +1112,7 @@ class Page {
     this._hydrated = true;
     this._loadedPath = pathOf(this._url);
     await this._refreshFromSession();
+    await this._drainBindings();
   }
 
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
@@ -1165,6 +1255,7 @@ class Page {
     if (this._session == null) return undefined;
     const r = await native.liveEvalEngine(this._session, script);
     await this._refreshFromSession();
+    await this._drainBindings();
     return r;
   }
   get _cookies() {
@@ -1362,6 +1453,7 @@ class Page {
         `(async () => { try { const result = await (${body}); if (result === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(result); } catch { return String(result); } } catch { return ""; } })()`,
       );
       await this._refreshFromSession();
+      await this._drainBindings();
       if (typeof out === "string" && out.startsWith("__ts_json__:")) {
         try {
           return JSON.parse(out.slice("__ts_json__:".length));
@@ -2040,14 +2132,26 @@ class Page {
   }
   routeFromHAR = UNSUPPORTED("page.routeFromHAR", NETIO);
   pause = UNSUPPORTED("page.pause", "no inspector UI");
-  exposeBinding = UNSUPPORTED(
-    "page.exposeBinding",
-    "no persistent JS<->host binding across renders",
-  );
-  exposeFunction = UNSUPPORTED(
-    "page.exposeFunction",
-    "no persistent JS<->host binding across renders",
-  );
+  // Persistent JS→host binding. The init-script path re-defines
+  // `globalThis[name]` on every live session open (so it survives page
+  // reloads + in-page navigations); when a session is already up we also
+  // define it now so the test can call it before the next navigation.
+  // Host return values are not surfaced to in-page JS — see
+  // buildExposeInitScript for the trade-off.
+  async exposeBinding(name, fn, _options) {
+    this._bindings = this._bindings ?? new Map();
+    this._bindings.set(String(name), { fn, isBinding: true });
+    if (this._live) {
+      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+    }
+  }
+  async exposeFunction(name, fn) {
+    this._bindings = this._bindings ?? new Map();
+    this._bindings.set(String(name), { fn, isBinding: false });
+    if (this._live) {
+      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+    }
+  }
 
   // Input devices: there's no compositor, but the live isolate runs the page's
   // JS, so pointer/mouse/touch handlers are real. The shim dispatches synthetic
@@ -2358,6 +2462,7 @@ class BrowserContext {
     this._testIdAttribute =
       opts.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
     this._initScripts = [];
+    this._bindings = new Map();
     this._pages = [];
     this._listeners = new Map();
   }
@@ -2434,8 +2539,25 @@ class BrowserContext {
   route = UNSUPPORTED("context.route", NETIO);
   routeFromHAR = UNSUPPORTED("context.routeFromHAR", NETIO);
   unroute = UNSUPPORTED("context.unroute", NETIO);
-  exposeBinding = UNSUPPORTED("context.exposeBinding", "no persistent JS<->host binding");
-  exposeFunction = UNSUPPORTED("context.exposeFunction", "no persistent JS<->host binding");
+  // Context-level expose: every Page in this context (and future ones) sees
+  // the binding; live pages pick it up on the next navigation. On an open
+  // session we also define it now so the current Page can use it immediately.
+  async exposeBinding(name, fn, _options) {
+    this._bindings.set(String(name), { fn, isBinding: true });
+    for (const page of this._pages) {
+      if (page._live) {
+        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+      }
+    }
+  }
+  async exposeFunction(name, fn) {
+    this._bindings.set(String(name), { fn, isBinding: false });
+    for (const page of this._pages) {
+      if (page._live) {
+        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+      }
+    }
+  }
 }
 
 const browserStub = {

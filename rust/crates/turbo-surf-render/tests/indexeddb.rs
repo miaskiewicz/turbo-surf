@@ -270,3 +270,52 @@ async fn indexeddb_partitions_match_chrome156() {
     server.abort();
     assert_eq!(Value::Array(actual), control["result"]);
 }
+
+/// #193 item 4 (split from #148, unchanged by that PR). When the first realm in
+/// a storage partition to touch `indexedDB` is a child frame, `IdbRegistries`
+/// stores a `v8::Global<v8::Object>` whose creation context is that child's
+/// realm; removing the frame then leaves the child's context alive because
+/// `OpState` keeps that strong handle. The inner records on `registry.dbs`,
+/// `registry.queues` and each per-DB `{connections, ...}` object are also
+/// created in the realm that touches them, so even once the top-level object
+/// moves to a neutral context the inner graph still roots the first-opener.
+///
+/// This test is `#[ignore]` so the release gate stays green; remove the ignore
+/// and the trailing `// #193 item 4` pin on the asserted count once the data
+/// model is realm-independent and the child frame collects. The partition
+/// control (`indexeddb_partitions_match_chrome156`) covers Chrome's partition
+/// semantics on the same backing store.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "#193 item 4: registry roots the first-opener realm; needs realm-independent IDB state"]
+async fn removed_first_opener_frame_releases_its_realm() {
+    let mut page = PageSession::open(
+        "<!doctype html><body><iframe id=f></iframe>",
+        "https://idb-lifetime.test/",
+        "",
+        "",
+        20_000,
+    )
+    .await
+    .unwrap();
+    // Child frame opens IDB first, making its realm the registry creator.
+    page.eval_json_expression(
+        r#"(async()=>{
+          const child=document.getElementById('f').contentWindow;
+          await new Promise(resolve=>{const request=child.indexedDB.open('leaked',1);
+            request.onupgradeneeded=()=>request.result.createObjectStore('s');
+            request.onsuccess=()=>{request.result.close();resolve();};});
+          document.getElementById('f').remove();
+          return 'removed';
+        })()"#,
+    )
+    .await
+    .unwrap();
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    let contexts = page.context_registry_diagnostics_for_testing();
+    // Expected after a fix: live == 1 (top realm only). Current engine: 2
+    // (top + the removed child, rooted by IdbRegistries). Flip to 1 and drop
+    // the ignore when #193 item 4 lands. // #193 item 4
+    assert_eq!(contexts["live"], 1, "{contexts}");
+}

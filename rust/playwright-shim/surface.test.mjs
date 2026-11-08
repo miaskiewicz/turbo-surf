@@ -814,6 +814,33 @@ test("waitForEvent('response') / ('request') resolve from the listener bus", asy
   assert.equal(req.method(), "GET");
 });
 
+// Focus model: `.focus()`, `.blur()`, `toBeFocused` were static no-ops or
+// always-fail assertions. The live isolate already tracks `document.activeElement`
+// per DOM spec; drive focus/blur into it and read activeElement back for the
+// matcher so keyboard-navigation specs don't get false negatives.
+test("locator.focus() + expect.toBeFocused() reflect document.activeElement in the live app", async () => {
+  const server = site();
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/spa`, { waitUntil: "networkidle" });
+    await p.setContent("<input id='a'><input id='b'><button id='go'>Go</button>");
+    await p._openLiveSession();
+    await p.locator("#a").focus();
+    await expect(p.locator("#a")).toBeFocused();
+    await expect(p.locator("#b")).not.toBeFocused();
+    await p.locator("#b").focus();
+    await expect(p.locator("#b")).toBeFocused();
+    await expect(p.locator("#a")).not.toBeFocused();
+    await p.locator("#b").blur();
+    await expect(p.locator("#b")).not.toBeFocused();
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // page.route(fulfill) is the single most-used interception shape in payroll-app
 // specs: stub /api/foo with a fixture so the SPA hydrates with known data.
 // With no native request-interception hook, do it shim-side by monkey-patching

@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Test (render, #244/#245/#246 — turbo-dom#395/#396/#397)**: three render
+  tests are `#[ignore]`-d against turbo-dom 0.8.0 pending upstream fixes on
+  turbo-dom v0.8.1. `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute`
+  (#244, turbo-dom#395 — `Composition.inline_overrides` on a styled element
+  zeros its box dims), `page_patched_intrinsics::*` ×2 (#245, turbo-dom#396 —
+  bootstrap calls `WeakSet.prototype.add` on the unhandled-rejection path
+  after page JS runs, regressing the #87 / turbo-dom#172 contract) and
+  `frame_gc_contracts::collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents`
+  (#246, turbo-dom#397 — `collect_message_port_garbage_for_testing` no longer
+  prunes dead weak context handles). None of these affects the happy-path
+  crawl/render surface; the FIXMEs drop once the upstream fixes ship.
+- **Test (render, turbo-dom#376)**: three MathML-rejection assertions updated
+  for turbo-dom-layout 0.8.0's `ca7e762d`, which now accepts MathML in live
+  layout with placeholder metrics. The null namespace stays unimplemented and
+  stands in for the "rejected namespace" cases. Affected:
+  `live_layout::tests::source_capture_refuses_unimplemented_namespace_and_excess_depth_or_text`,
+  `live_layout_budget_tests::namespace_rejection_covers_null_namespace_elements_but_not_svg_or_mathml`
+  (renamed), `live_layout_budget_tests::errors_report_the_first_violation_in_composed_document_order`.
+- **Chore (biome)**: `rust/crates/turbo-surf-mcp/tests/fixtures/web_fonts/fonts.css`
+  added to biome's ignore list — the minified CSS fixture is hash-pinned in
+  `screenshot_web_fonts_chrome156.json` (#142), so biome's formatter rewriting
+  it would break the SHA256 the control checks. Fixes the `Format check` CI
+  step on release/0.8.0.
+
 - **Fixed (playwright-shim, #222 integration)**: `Promise.all([page.waitForResponse(predicate), page.goto(url)])` with no `waitUntil:'networkidle'` was still eating the full 15 s timeout — a default goto stays static, so an inline-script `fetch('/api/...')` inside the document never runs and the predicate matches only the synthetic timeout fallback. `goto` now auto-hydrates when a `response`/`request`/`requestfinished` listener is already subscribed, so the inline-script fetches actually fire and the wait resolves on the real response in the next drain tick.
 - **Docs (playwright-shim, #228 note)**: LIMITATIONS calls out that `setContent(...)` stays static — `.focus()` + `toBeFocused` need a live session (either hydrate or use a `networkidle` goto).
 
@@ -77,6 +101,15 @@
   semantics) stays on v0.8.1.
 
 ## [0.8.0] — 2026-11-07
+
+- **Known gaps (render contract tests)**: three contract tests are `#[ignore]`-d
+  on v0.8.0 pending upstream fixes on turbo-dom v0.8.1. No happy-path
+  render/crawl impact; the tests pin invariants the embedder relies on.
+  Trackers: #244 (`inline_override_replaces_only…` ↔ turbo-dom#395), #245
+  (`page_patched_intrinsics_*` ↔ turbo-dom#396), #246
+  (`collected_frame_context_metadata…` ↔ turbo-dom#397). Re-enable on the
+  turbo-surf v0.8.1 follow-up PR once the upstream fixes land.
+
 
 - **Fixed (CSS.supports, #163)**: the `CSS.supports(condition)` and
   `CSS.supports(property, value)` wrapper now routes to the turbo-dom engine's

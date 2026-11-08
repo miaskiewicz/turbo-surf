@@ -560,7 +560,12 @@ mod tests {
 
     #[test]
     fn source_capture_refuses_unimplemented_namespace_and_excess_depth_or_text() {
-        let tree = Tree::parse("<math><mi>x</mi></math>");
+        // MathML is accepted by turbo-dom-layout 0.8.0 with placeholder metrics
+        // (turbo-dom#376); the null namespace is still unimplemented.
+        let mut tree = Tree::parse("<body></body>");
+        let body = tree.query_selector("body").unwrap();
+        let element = tree.create_element_namespace(None, "x");
+        tree.append_child(body, element);
         assert!(capture_tree(&tree, 1).err().unwrap().contains("namespace"));
         let html = format!(
             "{}x{}",

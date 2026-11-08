@@ -1060,6 +1060,49 @@ test("page.route glob with ** matches an inline-script fetch carrying a query st
   }
 });
 
+// page.unroute(url) must remove a previously-registered route so the next live
+// session sees the real server again (turbo-surf#220). Regression guard: without
+// a refreshed init-script snapshot, the fixture would keep winning after unroute.
+test("page.unroute drops a previously-registered route and lets the real server win", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.hello; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"hello":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("/api/foo", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked" }),
+      });
+    });
+    await p.unroute("/api/foo");
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "real-server",
+      "unroute must drop the fixture so the next session reaches the real server",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // Mirror of the waitForResponse drain-polling guard: payroll-style flows attach
 // `waitForRequest(/api\/x/)` to the step that fires the request, and the stub
 // used to resolve immediately with a synthetic page-URL GET — never seeing the

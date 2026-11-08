@@ -765,6 +765,31 @@ test("waitForResponse ignores a response that drained in an earlier step", async
   assert.equal(got.status(), 201, "should resolve to the fresh POST, not the stale GET");
 });
 
+// Mirror of the waitForResponse drain-polling guard: payroll-style flows attach
+// `waitForRequest(/api\/x/)` to the step that fires the request, and the stub
+// used to resolve immediately with a synthetic page-URL GET — never seeing the
+// real request. waitForRequest must drain the native log and return the actual
+// matching request (not the synthetic placeholder) when one is produced.
+test("waitForRequest polls the native drain and returns the matching request", async () => {
+  const p = newPage();
+  p._session = 1;
+  p._actionSeq = 1;
+  p._recentResponses = [];
+  let drainCalls = 0;
+  const fakeReq = () => ({ url: () => "https://x/api/widgets", method: () => "POST" });
+  p._drainNetworkEvents = async () => {
+    drainCalls++;
+    if (drainCalls >= 2) {
+      const req = fakeReq();
+      p._emit("request", req);
+    }
+  };
+  const got = await p.waitForRequest((r) => r.url().includes("/api/widgets"), { timeout: 500 });
+  assert.equal(got.method(), "POST");
+  assert.equal(got.url(), "https://x/api/widgets");
+  assert.ok(drainCalls >= 2, `drain must be polled while waiting (got ${drainCalls})`);
+});
+
 // Without an action to drive `_drainNetworkEvents`, the native network log keeps
 // sitting on the matching entry while waitForResponse burns its full timeout —
 // payroll-app saw ~15 s for a response that landed in ~5 ms. In a live session

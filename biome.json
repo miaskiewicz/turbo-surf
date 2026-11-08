@@ -62,6 +62,7 @@
       ".sidecar/**",
       "**/.chrome-profile/**",
       "harness/detection/artifacts/**",
+      "rust/crates/turbo-surf-mcp/tests/fixtures/web_fonts/fonts.css",
       "harness/detection/fixtures/idl-constructor-probe.js",
       "harness/detection/fixtures/border-cascade-probe.js",
       "harness/detection/fixtures/embedded-font-range-probe.js",

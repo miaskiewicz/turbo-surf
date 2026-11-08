@@ -1186,6 +1186,21 @@ class Page {
     // the running app. Default/'load'/'commit' stay raw (cheap fetch) — hydrating EVERY
     // goto is both slow and unnecessary for static pages.
     if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    // If a `waitForResponse` / `waitForRequest` is already subscribed when the
+    // caller does `Promise.all([waitForResponse(...), goto(url)])` without
+    // `waitUntil:'networkidle'`, the inline-script fetches that the predicate
+    // wants to observe only run inside a live session. Auto-hydrate so the
+    // wait short-circuits on a real response instead of timing out with
+    // the synthetic 200 fallback. Harmless when nothing is waiting.
+    else if (
+      !this._live &&
+      this._autoHydrate !== false &&
+      (this._listeners.has("response") ||
+        this._listeners.has("request") ||
+        this._listeners.has("requestfinished"))
+    ) {
+      await this._openLiveSession();
+    }
     return resp;
   }
   async reload(opts) {

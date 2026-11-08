@@ -152,7 +152,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `ariaSnapshot` | ✅ | |
 | `dispatchEvent` | ✅ | Live app only: fires the named DOM event into the isolate (e.g. a row's `click`). Static snapshot: no-op. |
 | `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate. Static snapshot: no-op. Not hardware input. |
-| `focus`, `blur` | ✅ | Live app only: calls `el.focus()` / `el.blur()` in the isolate so `document.activeElement` updates (and the app's focus/blur handlers fire). Static snapshot: no-op. |
+| `focus`, `blur` | ✅ | Live app only: calls `el.focus()` / `el.blur()` in the isolate so `document.activeElement` updates (and the app's focus/blur handlers fire). Static snapshot: no-op. A page made via `setContent(...)` stays static until a goto with `waitUntil:'networkidle'` or a `waitForLoadState` / explicit `_openLiveSession` opens the isolate — `.focus()` + `toBeFocused` on a pure `setContent` page will not work. |
 | `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no viewport, no layout — nothing to scroll into). |
 | `boundingBox` | ⚠️ | Returns `null` (there genuinely is no browser-faithful box). Geometry-conditional helpers (smooth-scroll, visibility-by-rect) no-op cleanly instead of throwing. |
 | `screenshot` | ❌ | Throws — pixels. |

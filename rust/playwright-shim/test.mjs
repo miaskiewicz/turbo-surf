@@ -339,8 +339,7 @@ test("event registry: on('load') fires", async () => {
 test("honest throws for network/input/pixel", async () => {
   const page = newPage();
   await page.setContent("<a>x</a>");
-  // page.route(fulfill) is now supported (#220); routeFromHAR still throws.
-  await assert.rejects(() => page.routeFromHAR("x.har"), /interception/);
+  // page.route(fulfill) + page.routeFromHAR (HAR playback) are now supported (#220).
   // hover/keyboard.press/mouse.*/touchscreen.*/dragTo/dragAndDrop are real
   // features now (event-dispatch into the live isolate, #227) — on a static
   // setContent page with no live session they clean no-op instead of throwing.

@@ -737,8 +737,8 @@ test("honest throws: pixel / input / network-interception", async () => {
   // honest throws.
   assert.equal(await p.locator("#go").boundingBox(), null);
   await assert.rejects(() => p.locator("#name").selectText(), /input/);
-  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
-  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
+  // page.route(fulfill) + page.routeFromHAR (HAR playback) are supported (#220);
+  // context.route still isn't.
   await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
 });
 

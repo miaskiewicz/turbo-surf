@@ -1436,6 +1436,9 @@ class Page {
     // url.includes('/bulk-upload') grabs the template GET from a prior step instead of
     // waiting for this step's POST. (_seq is the action that produced the response.)
     const callSeq = this._actionSeq;
+    // Drain once before the buffered check — the matching entry may already be
+    // sitting in the native log from the action that produced it.
+    if (this._live) await this._drainNetworkEvents();
     const buffered = (this._recentResponses ?? []).find((r) => (r._seq ?? 0) >= callSeq && test(r));
     if (buffered) return buffered;
     return new Promise((resolve) => {
@@ -1444,15 +1447,25 @@ class Page {
       // to run — a hard reject there would fail otherwise-passing flows.
       const timer = setTimeout(() => {
         this.off("response", onResp);
+        if (poll) clearInterval(poll);
         resolve(makeResponse({ status: 200, finalUrl: this._url }));
       }, opts.timeout ?? 15000);
       const onResp = (resp) => {
         if (!test(resp)) return;
         clearTimeout(timer);
+        if (poll) clearInterval(poll);
         this.off("response", onResp);
         resolve(resp);
       };
       this.on("response", onResp);
+      // No action is driving `_drainNetworkEvents` here, so poll the native log
+      // ourselves — otherwise a response that landed in a few ms sits in the log
+      // until the caller's next step and this wait eats its full timeout.
+      const poll = this._live
+        ? setInterval(() => {
+            this._drainNetworkEvents().catch(() => {});
+          }, 50)
+        : null;
     });
   }
   async waitForRequest() {

@@ -258,6 +258,25 @@ async fn until(mut predicate: impl FnMut() -> bool) {
     .unwrap();
 }
 fn json_wtf8(bytes: &[u8]) -> Value {
+    // Keep lone units in an array before serde's scalar-string decoder sees them.
+    let text = String::from_utf8(escape_cesu8_surrogates(bytes)).unwrap();
+    let key = if text.contains("\"script-sample\"") {
+        "script-sample"
+    } else {
+        "sample"
+    };
+    let prefix = format!("\"{key}\":\"");
+    let start = text.find(&prefix).unwrap() + prefix.len();
+    let end = find_string_end(&text, start);
+    let units = string_code_units(&text[start..end]);
+    let replacement = format!("\"{key}Units\":{}", json!(units));
+    let mut normalized = text[..start - prefix.len()].to_string();
+    normalized.push_str(&replacement);
+    normalized.push_str(&text[end + 1..]);
+    serde_json::from_str(&normalized).unwrap()
+}
+
+fn escape_cesu8_surrogates(bytes: &[u8]) -> Vec<u8> {
     let mut valid = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
@@ -276,50 +295,46 @@ fn json_wtf8(bytes: &[u8]) -> Value {
             index += 1;
         }
     }
-    // Keep lone units in an array before serde's scalar-string decoder sees them.
-    let text = String::from_utf8(valid).unwrap();
-    let key = if text.contains("\"script-sample\"") {
-        "script-sample"
-    } else {
-        "sample"
-    };
-    let prefix = format!("\"{key}\":\"");
-    let start = text.find(&prefix).unwrap() + prefix.len();
-    let mut end = start;
+    valid
+}
+
+fn find_string_end(text: &str, start: usize) -> usize {
     let mut escaped = false;
     for (offset, ch) in text[start..].char_indices() {
         if ch == '"' && !escaped {
-            end = start + offset;
-            break;
+            return start + offset;
         }
         escaped = ch == '\\' && !escaped;
     }
-    let sample = &text[start..end];
+    start
+}
+
+fn string_code_units(sample: &str) -> Vec<u16> {
     let mut units = Vec::new();
     let mut chars = sample.chars();
     while let Some(ch) = chars.next() {
         if ch == '\\' {
-            match chars.next().unwrap() {
-                'u' => {
-                    let code: String = chars.by_ref().take(4).collect();
-                    units.push(u16::from_str_radix(&code, 16).unwrap());
-                }
-                'n' => units.push(10),
-                'r' => units.push(13),
-                't' => units.push(9),
-                'b' => units.push(8),
-                'f' => units.push(12),
-                ch => units.extend(ch.to_string().encode_utf16()),
-            }
+            push_escape_units(&mut units, &mut chars);
         } else {
             units.extend(ch.to_string().encode_utf16());
         }
     }
-    let replacement = format!("\"{key}Units\":{}", json!(units));
-    let mut normalized = text[..start - prefix.len()].to_string();
-    normalized.push_str(&replacement);
-    normalized.push_str(&text[end + 1..]);
-    serde_json::from_str(&normalized).unwrap()
+    units
+}
+
+fn push_escape_units(units: &mut Vec<u16>, chars: &mut std::str::Chars<'_>) {
+    match chars.next().unwrap() {
+        'u' => {
+            let code: String = chars.by_ref().take(4).collect();
+            units.push(u16::from_str_radix(&code, 16).unwrap());
+        }
+        'n' => units.push(10),
+        'r' => units.push(13),
+        't' => units.push(9),
+        'b' => units.push(8),
+        'f' => units.push(12),
+        ch => units.extend(ch.to_string().encode_utf16()),
+    }
 }
 fn normalize(value: Value, port: u16) -> Value {
     match value {

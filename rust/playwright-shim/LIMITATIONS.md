@@ -189,9 +189,39 @@ Runs on `node:test`. `test`, `test.describe(.skip/.only)`, `test.skip/only/fixme
 `test.step`, `test.beforeAll/afterAll/beforeEach/afterEach`, `test.extend`
 (custom fixtures), the built-in `{ page, context, browser, request, baseURL }`
 fixtures, and a `testInfo` (`outputPath`, `project`, `attach`, …) are supported.
-`defineConfig` is identity and `devices[...]` returns an empty descriptor — the
-Playwright CLI/`playwright.config` projects/reporters/`webServer` are **not**
-interpreted (you run specs with `node --test`, not `playwright test`).
+`defineConfig` is identity and `devices[...]` returns an empty descriptor.
+
+### `playwright.config` + CLI entry
+
+`bin/turbo-surf-test.mjs` (also installed as the `turbo-surf-test` bin by the
+npm launcher) reads a `playwright.config.{ts,mts,js,mjs,cjs}` and runs each
+project as its own `node --import register.mjs --test` sweep:
+
+```sh
+npx turbo-surf-test               # auto-detects playwright.config.*
+npx turbo-surf-test --config pw.config.mjs --project chrome --reporter list
+```
+
+- **`projects`** — each one runs serially; `project.use` is merged over the
+  top-level `use` and forwarded via `TURBO_PW_USE` + the existing
+  `TURBO_SHIM_*` env (so `baseURL`/`locale`/`userAgent`/`testIdAttribute`
+  land in `BrowserContext` and the `baseURL` fixture). `testInfo.project`
+  reports the project name + merged `use`.
+- **`reporter`** — `list`/`spec`/`tap`/`dot` map to node:test's built-ins;
+  `html` captures TAP and writes a minimal `playwright-report.html` (override
+  path with `[['html', { outputFile: … }]]`).
+- **`webServer`** — spawn, poll `url` (or `http://127.0.0.1:${port}`) until it
+  responds, tear down at the end. Arrays are supported;
+  `reuseExistingServer: true` skips the spawn if a server is already answering.
+- **`testDir` / `testMatch` / `testIgnore`** — resolved per project; the default
+  match is `**/*.@(spec|test).@(ts|mts|js|mjs|cjs)` and the default ignore is
+  `**/node_modules/**`.
+
+`.ts` configs/specs need a Node that strips types inline (Node 23+, or Node 22
+with `--experimental-strip-types`); the shim doesn't ship its own TS loader.
+Browser-only reporters (`junit`/the real Playwright HTML trace viewer),
+sharding, retries, and `testConfig.webServer.stdout` capture are not
+implemented.
 
 ## Optional future perf lever (documented, not built)
 

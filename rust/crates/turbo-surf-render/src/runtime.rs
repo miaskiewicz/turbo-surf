@@ -12882,6 +12882,65 @@ __G.domSig = (() => {
   try { Object.defineProperty(globalThis, "Worker", { value: WorkerWrapper, writable: true, configurable: true }); } catch (_e) {}
 })();
 
+// Media loads (`<audio src>` / `<video src>`) enforce media-src on the resource
+// selection step (turbo-surf#204). The engine never fetches the media body, so
+// wrap the reflected `src` setter on HTMLMediaElement.prototype and the shared
+// setAttribute path: a non-empty src fires op_csp_request("media-src", resolved)
+// once per assignment, which queues the Chrome 156 violation shape (full URL as
+// blockedURI) through the same path as img-src / worker-src.
+(() => {
+  "use strict";
+  const Media = globalThis.HTMLMediaElement;
+  if (typeof Media !== "function" || !Media.prototype) return;
+  const resolveURL = globalThis.URL;
+  const baseHref = () => { try { return ops.op_document_request_url(); } catch (_e) { return ""; } };
+  const check = (url) => {
+    const raw = String(url);
+    if (!raw) return;
+    let resolved = raw;
+    try { resolved = new resolveURL(raw, baseHref()).href; } catch (_e) { return; }
+    try { ops.op_csp_request(__document, resolved, "media-src", ""); } catch (_e) {}
+  };
+  const descriptor = Object.getOwnPropertyDescriptor(Media.prototype, "src");
+  if (descriptor && descriptor.configurable && typeof descriptor.set === "function") {
+    const originalSet = descriptor.set;
+    const originalGet = descriptor.get;
+    try {
+      Object.defineProperty(Media.prototype, "src", {
+        configurable: true,
+        enumerable: descriptor.enumerable,
+        get: originalGet,
+        set: function (value) { check(value); return originalSet.call(this, value); },
+      });
+    } catch (_e) {}
+  }
+  const Element = globalThis.Element;
+  const nativeSetAttribute = Element && Element.prototype && Element.prototype.setAttribute;
+  const nativeSetAttributeNS = Element && Element.prototype && Element.prototype.setAttributeNS;
+  if (typeof nativeSetAttribute === "function") {
+    try {
+      Object.defineProperty(Element.prototype, "setAttribute", {
+        configurable: true, writable: true,
+        value: function setAttribute(name, value) {
+          if (this instanceof Media && typeof name === "string" && name.toLowerCase() === "src") check(value);
+          return nativeSetAttribute.call(this, name, value);
+        },
+      });
+    } catch (_e) {}
+  }
+  if (typeof nativeSetAttributeNS === "function") {
+    try {
+      Object.defineProperty(Element.prototype, "setAttributeNS", {
+        configurable: true, writable: true,
+        value: function setAttributeNS(ns, name, value) {
+          if (this instanceof Media && typeof name === "string" && name.toLowerCase() === "src") check(value);
+          return nativeSetAttributeNS.call(this, ns, name, value);
+        },
+      });
+    } catch (_e) {}
+  }
+})();
+
 // Web-IDL functions are embedded through V8 FunctionTemplates. Keep the
 // intrinsic Function.prototype.toString intact; guest delegates remain live.
 (() => {

@@ -161,7 +161,12 @@ async fn concurrent_open_polls_preserve_document_observers_and_timers() {
     assert_eq!(first.eval_expression("changes.length").await.unwrap(), "1");
 }
 
+// FIXME(#250, turbo-dom#417): turbo-dom 0.8.0 host-cancel of a pending
+// eval future hangs the peer session's eval forever (coverage shard
+// tarpaulin times out at 600s). Re-enable when the cancellation path is
+// restored on turbo-dom 0.8.1.
 #[tokio::test(flavor = "current_thread")]
+#[ignore]
 async fn canceling_pending_session_work_restores_the_peer_and_its_own_runtime() {
     let mut first = PageSession::open("<body>one", "https://first.test/", "", "", 5000)
         .await

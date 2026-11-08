@@ -107,7 +107,8 @@
   render/crawl impact; the tests pin invariants the embedder relies on.
   Trackers: #244 (`inline_override_replaces_only…` ↔ turbo-dom#395), #245
   (`page_patched_intrinsics_*` ↔ turbo-dom#396), #246
-  (`collected_frame_context_metadata…` ↔ turbo-dom#397). Re-enable on the
+  (`collected_frame_context_metadata…` ↔ turbo-dom#397), #250
+  (`canceling_pending_session_work…` ↔ turbo-dom#417). Re-enable on the
   turbo-surf v0.8.1 follow-up PR once the upstream fixes land.
 
 

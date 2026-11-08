@@ -14357,6 +14357,14 @@ fn make_runtime_with_storage_and_options(
     #[cfg(turbo_surf_native_proxy)]
     rt.v8_isolate()
         .set_failed_access_check_callback(window_proxy::failed_access);
+    // Install the JS wasm-streaming handler before we delete `Deno` from the
+    // global. deno_core panics the process if a page triggers
+    // `WebAssembly.*Streaming` without a handler registered. See turbo-surf#247.
+    rt.execute_script(
+        "turbo-surf:wasm-streaming",
+        include_str!("wasm_streaming.js"),
+    )
+    .expect("wasm streaming bootstrap must install before page scripts run");
     {
         deno_core::scope!(scope, &mut rt);
         let context = scope.get_current_context();

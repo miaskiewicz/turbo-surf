@@ -42,6 +42,39 @@ fn deno_global_is_deleted_from_page_scope() {
     }
 }
 
+// Real sites that ship WASM (fonts, image codecs, crypto, analytics) call
+// `WebAssembly.instantiateStreaming` / `compileStreaming`. Without a JS handler
+// registered via `Deno.core.setWasmStreamingCallback`, deno_core panics the
+// render process: "wasm streaming callback invoked before the JS handler was
+// set" (turbo-surf#247). The bootstrap must install the handler before any
+// page script can run.
+#[test]
+fn wasm_streaming_is_wired_up_before_page_scripts() {
+    let out = run_with_dom(
+        "<body></body>",
+        "(() => {\
+            try {\
+              const bytes = new Uint8Array([0,0x61,0x73,0x6d,1,0,0,0]);\
+              const response = new Response(bytes, { headers: { 'Content-Type': 'application/wasm' } });\
+              const promise = WebAssembly.instantiateStreaming(Promise.resolve(response));\
+              return JSON.stringify({ isPromise: promise instanceof Promise });\
+            } catch (e) {\
+              return JSON.stringify({ err: String(e && e.message || e) });\
+            }\
+          })()",
+    )
+    .expect("WebAssembly.instantiateStreaming must not panic the render process");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        v.get("err").is_none(),
+        "instantiateStreaming threw: {v} — the JS wasm-streaming handler is not installed"
+    );
+    assert_eq!(
+        v["isPromise"], true,
+        "instantiateStreaming must return a Promise: {v}"
+    );
+}
+
 // window.addEventListener/removeEventListener/dispatchEvent must be INHERITED (from
 // EventTarget.prototype via Window.prototype), NOT window own-props — real Chrome:
 // window.hasOwnProperty('addEventListener') === false. They must still work + be native-shaped.

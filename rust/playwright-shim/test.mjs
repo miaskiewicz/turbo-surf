@@ -341,10 +341,11 @@ test("honest throws for network/input/pixel", async () => {
   await page.setContent("<a>x</a>");
   // page.route(fulfill) is now supported (#220); routeFromHAR still throws.
   await assert.rejects(() => page.routeFromHAR("x.har"), /interception/);
-  // No synthetic pointer device → raw mouse coords stay an honest throw. (hover() and
-  // keyboard.press are real features now — key-event dispatch via the live session —
-  // covered in surface.test.mjs, so they're NOT asserted to throw here.)
-  await assert.rejects(() => page.mouse.click(0, 0), /input/);
+  // hover/keyboard.press/mouse.*/touchscreen.*/dragTo/dragAndDrop are real
+  // features now (event-dispatch into the live isolate, #227) — on a static
+  // setContent page with no live session they clean no-op instead of throwing.
+  // Their live behavior is covered in input-hardware.test.mjs.
+  await page.mouse.click(0, 0);
 });
 
 pwTest("@playwright/test fixture: { page } is injected", async ({ page }) => {

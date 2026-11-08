@@ -730,15 +730,13 @@ test("honest throws: pixel / input / network-interception", async () => {
   await assert.rejects(() => p.pdf(), /unavailable/);
   await assert.rejects(() => p.locator("#go").screenshot(), /unavailable/);
   // boundingBox returns null (no layout engine → unmeasurable), matching Playwright's null for
-  // a non-laid-out element — not a throw. hover()/keyboard.press are now real features. page-level
-  // screenshot is now a real synthetic render; the rest (pdf/element-screenshot/dragTo/selectText/
-  // mouse/touchscreen/route/exposeFunction) stay honest throws.
+  // a non-laid-out element — not a throw. hover/keyboard.press/mouse/touchscreen/dragTo/
+  // dragAndDrop are now real features: event-dispatch into the live isolate (#227), and on a
+  // static snapshot (no live session) they clean no-op. page-level screenshot is a real synthetic
+  // render; the rest (pdf/element-screenshot/selectText/routeFromHAR/exposeFunction) stay
+  // honest throws.
   assert.equal(await p.locator("#go").boundingBox(), null);
-  await assert.rejects(() => p.locator("#go").dragTo(p.locator("h1")), /input/);
   await assert.rejects(() => p.locator("#name").selectText(), /input/);
-  await assert.rejects(() => p.mouse.click(0, 0), /input/);
-  // keyboard.press is implemented (key-event dispatch via the live session) — not a throw.
-  await assert.rejects(() => p.touchscreen.tap(0, 0), /input/);
   // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
   await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
   await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);

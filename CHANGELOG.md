@@ -2,17 +2,28 @@
 
 ## Unreleased
 
-- **Test (render, #244/#245/#246 — turbo-dom#395/#396/#397)**: three render
-  tests are `#[ignore]`-d against turbo-dom 0.8.0 pending upstream fixes on
-  turbo-dom v0.8.1. `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute`
-  (#244, turbo-dom#395 — `Composition.inline_overrides` on a styled element
-  zeros its box dims), `page_patched_intrinsics::*` ×2 (#245, turbo-dom#396 —
-  bootstrap calls `WeakSet.prototype.add` on the unhandled-rejection path
-  after page JS runs, regressing the #87 / turbo-dom#172 contract) and
+- **Fixed (render, #246)**: `context_registry_diagnostics_for_testing` no
+  longer reports `cleared: 0` right after a retired-frame context was
+  collected. `collect_message_port_garbage_for_testing` was both forcing a
+  GC and pruning the dead weak-handle vec in the same call (added in
+  0f9f3efa for the #115 soak), so the host test boundary never got to
+  observe the dead entries before they were gone. The dedicated boundary
+  sweep inside `collect_message_port_garbage_for_testing` is dropped; dead
+  weak handles still get pruned at the regular `storage_gc::boundary` that
+  runs after every eval (and the #115 soak still returns to baseline since
+  it checks blob-URL / message-port / host-context tables, which this
+  change does not touch). The
   `frame_gc_contracts::collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents`
-  (#246, turbo-dom#397 — `collect_message_port_garbage_for_testing` no longer
-  prunes dead weak context handles). None of these affects the happy-path
-  crawl/render surface; the FIXMEs drop once the upstream fixes ship.
+  regression is un-ignored.
+- **Test (render, #244/#245 — turbo-dom#395/#396)**: two render tests remain
+  `#[ignore]`-d against turbo-dom 0.8.0 pending upstream fixes on turbo-dom
+  v0.8.1. `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute`
+  (#244, turbo-dom#395 — `Composition.inline_overrides` on a styled element
+  zeros its box dims) and `page_patched_intrinsics::*` ×2 (#245,
+  turbo-dom#396 — bootstrap calls `WeakSet.prototype.add` on the
+  unhandled-rejection path after page JS runs, regressing the #87 /
+  turbo-dom#172 contract). Neither affects the happy-path crawl/render
+  surface; the FIXMEs drop once the upstream fixes ship.
 - **Test (render, turbo-dom#376)**: three MathML-rejection assertions updated
   for turbo-dom-layout 0.8.0's `ca7e762d`, which now accepts MathML in live
   layout with placeholder metrics. The null namespace stays unimplemented and

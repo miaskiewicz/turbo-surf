@@ -32,9 +32,7 @@
           response.byteLength,
         );
       } else {
-        throw new TypeError(
-          "WebAssembly streaming source must be a Response or BufferSource",
-        );
+        throw new TypeError("WebAssembly streaming source must be a Response or BufferSource");
       }
       ops.op_wasm_streaming_feed(rid, bytes);
       core.close(rid);

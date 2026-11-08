@@ -668,9 +668,74 @@ class Locator {
     if (this._page._live) return void (await this._driveLive("setfiles", payload));
   }
 
+  // Drag source element to the target locator: resolve both in the live isolate,
+  // then drive a pointer+mouse+HTML5-drag sequence on source → target. No compositor,
+  // so there's no native drag image, but JS handlers (onDragStart/Over/Drop/End and
+  // pointer/mouse listeners) fire exactly as in a real browser (turbo-surf#227).
+  async dragTo(target, _opts) {
+    await this._page._ensureLive();
+    if (!this._page._live) return;
+    const src = await this._resolveLiveIdx();
+    const dst = await target._resolveLiveIdx();
+    if (src == null || dst == null) throw new Error("turbo-surf: locator matched no elements");
+    await this._page._sessionEval(dragScript(src, dst));
+  }
+
+  // Resolve this locator to the live `querySelectorAll('*')` index of its first match.
+  // Returns null when the locator matches nothing. Used by dragTo and page.dragAndDrop.
+  async _resolveLiveIdx() {
+    if (this._page._session == null) return null;
+    if (this._scope && this._scope.some((s) => s.idx != null || s.filter != null)) {
+      const leaf = this._selector
+        ? { selector: this._selector }
+        : this._getBy
+          ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
+          : null;
+      if (leaf) {
+        const raw = await native.liveEvalEngine(
+          this._page._session,
+          `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
+        );
+        let matches = [];
+        try {
+          matches = JSON.parse(raw);
+        } catch {
+          matches = [];
+        }
+        const i =
+          this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
+        return matches[i]?.idx ?? null;
+      }
+    }
+    if (this._selector) {
+      const raw = await native.liveEvalEngine(
+        this._page._session,
+        `(() => { const els = document.querySelectorAll(${JSON.stringify(this._selector)}); const n = ${this._index ?? 0}; const i = n < 0 ? els.length + n : n; const list = []; const all = document.querySelectorAll('*'); for (let k = 0; k < all.length; k++) if (all[k] === els[i]) { globalThis.__RESULT = String(k); return; } globalThis.__RESULT = ''; })();`,
+      );
+      const n = raw ? Number(raw) : NaN;
+      return Number.isFinite(n) ? n : null;
+    }
+    if (this._getBy) {
+      const g = this._getBy;
+      const raw = await native.liveEvalEngine(
+        this._page._session,
+        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
+      );
+      let matches = [];
+      try {
+        matches = JSON.parse(raw);
+      } catch {
+        matches = [];
+      }
+      const i =
+        this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
+      return matches[i]?.idx ?? null;
+    }
+    return null;
+  }
+
   // --- unsupported (no rendering surface / no input hardware) → honest throws ---
   screenshot = UNSUPPORTED("locator.screenshot", PIXEL);
-  dragTo = UNSUPPORTED("locator.dragTo", INPUT);
   selectText = UNSUPPORTED("locator.selectText", INPUT);
 }
 
@@ -1918,9 +1983,14 @@ class Page {
     return css;
   }
 
+  // Drag an element matched by `source` to one matched by `target`. Thin wrapper
+  // over Locator.dragTo so the same pointer/mouse/drag sequence fires (#227).
+  async dragAndDrop(source, target, _opts) {
+    return this.locator(source).dragTo(this.locator(target));
+  }
+
   // --- unsupported → honest throws ---
   pdf = UNSUPPORTED("page.pdf", PIXEL);
-  dragAndDrop = UNSUPPORTED("page.dragAndDrop", INPUT);
   // page.route(url, handler) — shim-side only, by monkey-patching `fetch` inside
   // the live isolate via an init script. The handler is invoked once at route
   // registration time against a stub route that captures the `fulfill` payload;
@@ -1976,26 +2046,161 @@ class Page {
     "no persistent JS<->host binding across renders",
   );
 
-  // pixel input devices
+  // Input devices: there's no compositor, but the live isolate runs the page's
+  // JS, so pointer/mouse/touch handlers are real. The shim dispatches synthetic
+  // events through the Mouse/Touchscreen state machines (turbo-surf#227).
   get mouse() {
-    return mouseStub;
+    return (this._mouse ??= makeMouse(this));
   }
   get keyboard() {
     return makeKeyboard(this);
   }
   get touchscreen() {
-    return touchStub;
+    return (this._touch ??= makeTouchscreen(this));
   }
 }
 
-const mouseStub = {
-  click: UNSUPPORTED("mouse.click", INPUT),
-  dblclick: UNSUPPORTED("mouse.dblclick", INPUT),
-  move: UNSUPPORTED("mouse.move", INPUT),
-  down: UNSUPPORTED("mouse.down", INPUT),
-  up: UNSUPPORTED("mouse.up", INPUT),
-  wheel: UNSUPPORTED("mouse.wheel", INPUT),
-};
+// page.mouse — minimal state (x, y, button) + event dispatch at
+// `document.elementFromPoint(x, y)`. No live session → every call no-ops cleanly
+// (same shape as the keyboard). `click` = move → down → up (+ click), `dblclick`
+// adds a second click and a `dblclick`. `wheel(dx, dy)` fires a `wheel` event at
+// the current cursor target.
+function makeMouse(page) {
+  const state = { x: 0, y: 0, button: 0, buttons: 0 };
+  const run = async (script) => {
+    if (!page._live) return;
+    await page._sessionEval(script);
+  };
+  const base = (extra = "") =>
+    `{ bubbles: true, cancelable: true, view: globalThis, clientX: ${state.x}, clientY: ${state.y}, screenX: ${state.x}, screenY: ${state.y}, button: ${state.button}, buttons: ${state.buttons}${extra} }`;
+  const targetExpr = `(document.elementFromPoint(${state.x}, ${state.y}) || document.documentElement || document.body)`;
+  const dispatch = (pointerType, mouseType) => `(() => {
+    const t = ${targetExpr};
+    if (!t) return;
+    const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+    t.dispatchEvent(new PE(${JSON.stringify(pointerType)}, ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
+    t.dispatchEvent(new MouseEvent(${JSON.stringify(mouseType)}, ${base()}));
+  })();`;
+  async function move(x, y) {
+    state.x = Math.round(x);
+    state.y = Math.round(y);
+    await run(dispatch("pointermove", "mousemove"));
+  }
+  async function down(opts) {
+    state.button = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
+    state.buttons = 1 << state.button;
+    await run(dispatch("pointerdown", "mousedown"));
+  }
+  async function up(opts) {
+    const btn = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
+    state.button = btn;
+    state.buttons = 0;
+    await run(`(() => {
+      const t = ${targetExpr};
+      if (!t) return;
+      const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+      t.dispatchEvent(new PE("pointerup", ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
+      t.dispatchEvent(new MouseEvent("mouseup", ${base()}));
+      t.dispatchEvent(new MouseEvent("click", ${base()}));
+    })();`);
+  }
+  async function click(x, y, opts) {
+    await move(x, y);
+    await down(opts);
+    await up(opts);
+  }
+  async function dblclick(x, y, opts) {
+    await click(x, y, opts);
+    await click(x, y, opts);
+    await run(`(() => {
+      const t = ${targetExpr};
+      if (!t) return;
+      t.dispatchEvent(new MouseEvent("dblclick", ${base(", detail: 2")}));
+    })();`);
+  }
+  async function wheel(dx, dy) {
+    if (!page._live) return;
+    await page._sessionEval(`(() => {
+      const t = ${targetExpr};
+      if (!t) return;
+      t.dispatchEvent(new (globalThis.WheelEvent || globalThis.MouseEvent)("wheel", ${base(`, deltaX: ${Number(dx) || 0}, deltaY: ${Number(dy) || 0}, deltaMode: 0`)}));
+    })();`);
+  }
+  return { move, down, up, click, dblclick, wheel };
+}
+
+// page.touchscreen — single-touch tap at (x, y): pointerdown/touchstart →
+// pointerup/touchend → click on elementFromPoint, so JS tap handlers fire (#227).
+function makeTouchscreen(page) {
+  return {
+    async tap(x, y) {
+      if (!page._live) return;
+      const xi = Math.round(x);
+      const yi = Math.round(y);
+      await page._sessionEval(`(() => {
+        const t = (document.elementFromPoint(${xi}, ${yi}) || document.documentElement || document.body);
+        if (!t) return;
+        const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+        const common = { bubbles: true, cancelable: true, view: globalThis, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi} };
+        t.dispatchEvent(new PE("pointerdown", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        try {
+          const touchInit = { identifier: 1, target: t, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi}, pageX: ${xi}, pageY: ${yi} };
+          const Touch = globalThis.Touch;
+          const TouchEvent = globalThis.TouchEvent;
+          if (Touch && TouchEvent) {
+            const touch = new Touch(touchInit);
+            t.dispatchEvent(new TouchEvent("touchstart", { ...common, touches: [touch], targetTouches: [touch], changedTouches: [touch] }));
+            t.dispatchEvent(new TouchEvent("touchend", { ...common, touches: [], targetTouches: [], changedTouches: [touch] }));
+          } else {
+            t.dispatchEvent(new Event("touchstart", common));
+            t.dispatchEvent(new Event("touchend", common));
+          }
+        } catch (_) {
+          t.dispatchEvent(new Event("touchstart", common));
+          t.dispatchEvent(new Event("touchend", common));
+        }
+        t.dispatchEvent(new PE("pointerup", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        t.dispatchEvent(new MouseEvent("click", common));
+      })();`);
+    },
+  };
+}
+
+// Drag `srcIdx` to `dstIdx` (live `querySelectorAll('*')` positions). Fires the
+// full pointer+mouse sequence on source then target, plus the HTML5 drag/drop
+// lifecycle (dragstart on source → dragenter/dragover on target → drop on target
+// → dragend on source), all sharing one DataTransfer so a real app's handlers
+// can set/read types and data. No compositor, so no OS drag image (#227).
+function dragScript(srcIdx, dstIdx) {
+  return `(() => {
+    const all = document.querySelectorAll('*');
+    const src = all[${srcIdx}];
+    const dst = all[${dstIdx}];
+    if (!src || !dst) { globalThis.__RESULT = "NO_MATCH"; return; }
+    const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+    const dt = (typeof globalThis.DataTransfer === "function") ? new globalThis.DataTransfer() : null;
+    const pointerOpts = (t) => ({ bubbles: true, cancelable: true, view: globalThis, pointerId: 1, isPrimary: true, pointerType: 'mouse', button: 0, buttons: t === "pointerup" ? 0 : 1 });
+    const mouseOpts = (buttons) => ({ bubbles: true, cancelable: true, view: globalThis, button: 0, buttons });
+    const dragOpts = () => {
+      const o = { bubbles: true, cancelable: true, view: globalThis, button: 0 };
+      if (dt) o.dataTransfer = dt;
+      return o;
+    };
+    src.dispatchEvent(new PE("pointerdown", pointerOpts("pointerdown")));
+    src.dispatchEvent(new MouseEvent("mousedown", mouseOpts(1)));
+    const DE = globalThis.DragEvent || globalThis.MouseEvent;
+    src.dispatchEvent(new DE("dragstart", dragOpts()));
+    dst.dispatchEvent(new PE("pointermove", pointerOpts("pointermove")));
+    dst.dispatchEvent(new MouseEvent("mousemove", mouseOpts(1)));
+    dst.dispatchEvent(new DE("dragenter", dragOpts()));
+    dst.dispatchEvent(new DE("dragover", dragOpts()));
+    dst.dispatchEvent(new DE("drop", dragOpts()));
+    src.dispatchEvent(new DE("dragend", dragOpts()));
+    dst.dispatchEvent(new PE("pointerup", pointerOpts("pointerup")));
+    dst.dispatchEvent(new MouseEvent("mouseup", mouseOpts(0)));
+    globalThis.__RESULT = "OK";
+  })();`;
+}
 // Keyboard: no hardware, but key events are real JS. Dispatch keydown/keyup (with a
 // keypress for printable keys) on the focused element (or document) in the live app —
 // covers Escape-to-close-popover, Enter-to-submit, etc. No-op without a live session.
@@ -2023,7 +2228,6 @@ function makeKeyboard(page) {
     insertText: async (text) => dispatch(String(text)),
   };
 }
-const touchStub = { tap: UNSUPPORTED("touchscreen.tap", INPUT) };
 
 function makeResponse(r) {
   return {

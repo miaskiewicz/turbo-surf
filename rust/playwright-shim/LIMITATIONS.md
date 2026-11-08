@@ -36,10 +36,15 @@ surfaces remain unavailable or approximate:
   supports `{fullPage:true}`. It does **not** run JS-driven visuals (a `<canvas>`
   gradient background is absent) or crop to an element — `locator.screenshot()`
   still throws.
-- **Input devices** — `mouse`, `touchscreen`, `hover`, `dragTo` lack hardware-backed
-  behavior. DOM actions dispatch events in a live session or use a static navigation/
-  submit intent. `keyboard` dispatches key events when a live session exists; it is
-  a no-op without one and does not provide browser text-editing defaults.
+- **Input devices** — `mouse`, `touchscreen`, `hover`, `dragTo`, `dragAndDrop`
+  lack hardware-backed behavior. In a live session the shim dispatches synthetic
+  pointer / mouse / touch / HTML5-drag events at the matched element (or
+  `elementFromPoint(x, y)` for the coord-based `mouse` / `touchscreen` entries),
+  so JS handlers fire exactly as in a real browser. No compositor means no native
+  scroll, no drag image, no hit-testing beyond what native layout provides.
+  Without a live session every input call is a clean no-op. `keyboard` dispatches
+  key events when a live session exists and is a no-op otherwise; it does not
+  provide browser text-editing defaults.
 - **In-process network interception** — `route`/`unroute`/`routeFromHAR`. The
   engine fetches over Rust+wreq (the default impersonate build) or reqwest; there
   is no shim request-interception bus.
@@ -129,7 +134,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `screenshot` | ⚠️ | Synthetic native render (PNG, or SVG via `{type:"svg"}`) — representative, not browser-faithful. `path` and `fullPage` work; `clip` is ignored. |
 | `pdf` | ❌ | Throws — no PDF implementation in the shim. |
 | `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate so JS hover handlers (menu-open) fire. Static snapshot: no-op. Not hardware input. |
-| `dragAndDrop`, `mouse.*`, `touchscreen.*` | ❌ | Throws — no input hardware. |
+| `dragAndDrop`, `mouse.*`, `touchscreen.*` | ✅ | Live app only: dispatches pointer / mouse / touch / HTML5-drag events into the isolate at element centers (or at `(x, y)` for coord-based entries). Static snapshot: no-op. Not hardware input. |
 | `keyboard.*` | ⚠️ | Key-event dispatch in a live session; no-op without one, incomplete text-editing defaults. |
 | `route`, `unroute` | ⚠️ | Shim-side only: the handler runs once at register-time against a stub route; only `route.fulfill(...)` is captured (`continue` / `abort` / `fallback` are no-ops, no per-request dynamic responses). The fulfilled fixture is injected into the live isolate via an init script that monkey-patches `fetch` and `XMLHttpRequest` — call `page.route(...)` BEFORE the next live session opens. |
 | `routeFromHAR` | ❌ | Throws — no HAR replay. |
@@ -156,7 +161,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no viewport, no layout — nothing to scroll into). |
 | `boundingBox` | ⚠️ | Returns `null` (there genuinely is no browser-faithful box). Geometry-conditional helpers (smooth-scroll, visibility-by-rect) no-op cleanly instead of throwing. |
 | `screenshot` | ❌ | Throws — pixels. |
-| `dragTo`, `selectText` | ❌ | Throws — input hardware. |
+| `dragTo` | ✅ | Live app only: dispatches a full pointer+mouse+HTML5-drag sequence on source → target. Static snapshot: no-op. Not hardware input. |
+| `selectText` | ❌ | Throws — input hardware. |
 
 ## expect (5 assertion classes)
 

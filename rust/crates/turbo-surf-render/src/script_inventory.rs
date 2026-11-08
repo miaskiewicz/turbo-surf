@@ -46,74 +46,104 @@ fn record(message: InspectorMsg, records: &RefCell<Records>, directory: &Path) {
         return;
     };
     let mut records = records.borrow_mut();
-    if matches!(
+    if is_script_event(&value) {
+        record_script_event(&mut records, &value);
+    } else if let Some(id) = value["id"].as_i64() {
+        record_response(&mut records, id as i32, &value, directory);
+    }
+}
+
+fn is_script_event(value: &Value) -> bool {
+    matches!(
         value["method"].as_str(),
         Some("Debugger.scriptParsed" | "Debugger.scriptFailedToParse")
-    ) {
-        let params = &value["params"];
-        if let Some(id) = params["scriptId"].as_str() {
-            if records.scripts.len() < SCRIPT_LIMIT {
-                records.scripts.insert(id.to_owned(), params.clone());
-            } else {
-                records.dropped += 1;
-            }
+    )
+}
+
+fn record_script_event(records: &mut Records, value: &Value) {
+    let params = &value["params"];
+    let Some(id) = params["scriptId"].as_str() else {
+        return;
+    };
+    if records.scripts.len() < SCRIPT_LIMIT {
+        records.scripts.insert(id.to_owned(), params.clone());
+    } else {
+        records.dropped += 1;
+    }
+}
+
+fn record_response(records: &mut Records, id: i32, value: &Value, directory: &Path) {
+    if apply_profile_setup_ack(records, id, value) {
+        return;
+    }
+    if apply_profile_result(records, id, value, directory) {
+        return;
+    }
+    if let Some(script_id) = records.requests.remove(&id) {
+        apply_script_source(records, script_id, value, directory);
+    }
+}
+
+fn apply_profile_setup_ack(records: &mut Records, id: i32, value: &Value) -> bool {
+    let Some((method, acknowledged)) = records.profile_setup.get_mut(&id) else {
+        return false;
+    };
+    *acknowledged = value.get("result").is_some();
+    if !*acknowledged {
+        let method = method.clone();
+        records
+            .failures
+            .push(format!("{method} failed: {}", value["error"]));
+    }
+    true
+}
+
+fn apply_profile_result(records: &mut Records, id: i32, value: &Value, directory: &Path) -> bool {
+    if records.profile_request != Some(id) {
+        return false;
+    }
+    records.profile_request = None;
+    if !value["result"]["profile"].is_object() {
+        records
+            .failures
+            .push(format!("CPU profile failed: {}", value["error"]));
+        return true;
+    }
+    let bytes = serde_json::to_vec(&value["result"]["profile"]).unwrap();
+    if bytes.len() > SOURCE_LIMIT {
+        records
+            .failures
+            .push("CPU profile byte budget exceeded".into());
+    } else if let Err(error) = save(&directory.join("cpu-profile.json"), &bytes) {
+        records.failures.push(error.to_string());
+    } else {
+        records.profile_saved = true;
+    }
+    true
+}
+
+fn apply_script_source(records: &mut Records, script_id: String, value: &Value, directory: &Path) {
+    let Some(source) = value["result"]["scriptSource"].as_str() else {
+        records.scripts.get_mut(&script_id).unwrap()["sourceError"] = value["error"].clone();
+        return;
+    };
+    let hash = format!("{:x}", Sha256::digest(source.as_bytes()));
+    if records.bytes + source.len() > SOURCE_LIMIT {
+        records.dropped += 1;
+        records.scripts.get_mut(&script_id).unwrap()["sourceError"] =
+            json!("source byte budget exceeded");
+        return;
+    }
+    let name = format!("script-{hash}.js");
+    match save(&directory.join(&name), source.as_bytes()) {
+        Ok(()) => {
+            records.bytes += source.len();
+            let row = records.scripts.get_mut(&script_id).unwrap();
+            row["sourceFile"] = json!(name);
+            row["sourceHash"] = json!(hash);
+            row["sourceBytes"] = json!(source.len());
         }
-    } else if let Some(id) = value["id"].as_i64() {
-        if let Some((method, acknowledged)) = records.profile_setup.get_mut(&(id as i32)) {
-            *acknowledged = value.get("result").is_some();
-            if !*acknowledged {
-                let method = method.clone();
-                records
-                    .failures
-                    .push(format!("{method} failed: {}", value["error"]));
-            }
-            return;
-        }
-        if records.profile_request == Some(id as i32) {
-            records.profile_request = None;
-            if value["result"]["profile"].is_object() {
-                let bytes = serde_json::to_vec(&value["result"]["profile"]).unwrap();
-                if bytes.len() > SOURCE_LIMIT {
-                    records
-                        .failures
-                        .push("CPU profile byte budget exceeded".into());
-                } else if let Err(error) = save(&directory.join("cpu-profile.json"), &bytes) {
-                    records.failures.push(error.to_string());
-                } else {
-                    records.profile_saved = true;
-                }
-            } else {
-                records
-                    .failures
-                    .push(format!("CPU profile failed: {}", value["error"]));
-            }
-            return;
-        }
-        let Some(script_id) = records.requests.remove(&(id as i32)) else {
-            return;
-        };
-        if let Some(source) = value["result"]["scriptSource"].as_str() {
-            let hash = format!("{:x}", Sha256::digest(source.as_bytes()));
-            if records.bytes + source.len() > SOURCE_LIMIT {
-                records.dropped += 1;
-                records.scripts.get_mut(&script_id).unwrap()["sourceError"] =
-                    json!("source byte budget exceeded");
-            } else {
-                let name = format!("script-{hash}.js");
-                match save(&directory.join(&name), source.as_bytes()) {
-                    Ok(()) => {
-                        records.bytes += source.len();
-                        let row = records.scripts.get_mut(&script_id).unwrap();
-                        row["sourceFile"] = json!(name);
-                        row["sourceHash"] = json!(hash);
-                        row["sourceBytes"] = json!(source.len());
-                    }
-                    Err(error) => records.failures.push(error.to_string()),
-                }
-            }
-        } else {
-            records.scripts.get_mut(&script_id).unwrap()["sourceError"] = value["error"].clone();
-        }
+        Err(error) => records.failures.push(error.to_string()),
     }
 }
 

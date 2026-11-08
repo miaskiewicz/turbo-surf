@@ -1288,7 +1288,21 @@ class Page {
       }
       return out;
     }
-    return native.evaluate(this._html, evalSource(script, arg));
+    // Static path: `native.evaluate` returns the trailing expression as a
+    // string, so an `{a:1}` return comes back as "[object Object]". Mirror the
+    // live path — wrap so the trailing expression is a JSON-prefixed string,
+    // then parse back on the shim side.
+    const body = evalSource(script, arg);
+    const wrapped = `(() => { try { var __r = (${body}); if (__r === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(__r); } catch { return String(__r); } } catch { return ""; } })()`;
+    const out = native.evaluate(this._html, wrapped);
+    if (typeof out === "string" && out.startsWith("__ts_json__:")) {
+      try {
+        return JSON.parse(out.slice("__ts_json__:".length));
+      } catch {
+        /* malformed payload — fall through to raw string */
+      }
+    }
+    return out;
   }
   async evaluateHandle(script, arg) {
     return this.evaluate(script, arg);
@@ -1608,11 +1622,10 @@ class Page {
           resolve(payload);
         };
         this.on(event, onEvt);
-        const poll = this._live
-          ? setInterval(() => {
-              this._drainNetworkEvents().catch(() => {});
-            }, 50)
-          : null;
+        // Same as waitForResponse / waitForRequest: poll unconditionally.
+        const poll = setInterval(() => {
+          this._drainNetworkEvents().catch(() => {});
+        }, 50);
       });
     }
     if (event !== "download") return undefined;
@@ -1682,11 +1695,13 @@ class Page {
       // No action is driving `_drainNetworkEvents` here, so poll the native log
       // ourselves — otherwise a response that landed in a few ms sits in the log
       // until the caller's next step and this wait eats its full timeout.
-      const poll = this._live
-        ? setInterval(() => {
-            this._drainNetworkEvents().catch(() => {});
-          }, 50)
-        : null;
+      // Unconditional: `Promise.all([waitForResponse(...), goto(...)])` races
+      // the goto that creates the live session, so `_live` is false AT CALL
+      // TIME — poll anyway; `_drainNetworkEvents` is a cheap no-op without a
+      // session and starts firing emits as soon as goto establishes one.
+      const poll = setInterval(() => {
+        this._drainNetworkEvents().catch(() => {});
+      }, 50);
     });
   }
   async waitForRequest(matcher, opts = {}) {
@@ -1723,11 +1738,11 @@ class Page {
         resolve(req);
       };
       this.on("request", onReq);
-      const poll = this._live
-        ? setInterval(() => {
-            this._drainNetworkEvents().catch(() => {});
-          }, 50)
-        : null;
+      // See waitForResponse: poll unconditionally so a request produced after
+      // a concurrent goto establishes the live session still short-circuits.
+      const poll = setInterval(() => {
+        this._drainNetworkEvents().catch(() => {});
+      }, 50);
     });
   }
 

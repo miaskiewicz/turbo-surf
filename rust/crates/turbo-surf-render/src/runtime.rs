@@ -17395,7 +17395,6 @@ impl PageSession {
             deno_core::scope!(scope, &mut self.rt);
             crate::message_ports::sweep(scope);
             crate::web_streams_backend::sweep(scope);
-            crate::context_ownership::sweep_collected(scope);
         }
         crate::browser_env::sweep_collected_documents();
     }

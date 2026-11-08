@@ -154,11 +154,7 @@ async fn nested_frame_documents_and_functions_retain_only_their_actual_retired_r
     );
 }
 
-// FIXME(#246, turbo-dom#397): turbo-dom 0.8.0's
-// collect_message_port_garbage_for_testing no longer prunes dead weak context
-// handles. Re-enable when turbo-dom ships the fix.
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
 async fn collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents() {
     let mut page = PageSession::open("<body>", "https://ownership.test/", "", "", 60_000)
         .await

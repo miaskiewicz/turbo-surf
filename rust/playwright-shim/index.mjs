@@ -968,6 +968,216 @@ function pathOf(url) {
 }
 
 // ---------------------------------------------------------------------------
+// Frame / FrameLocator — engine iframe contexts over the shim's static path.
+// A Frame carries its own `_html` (the iframe's child document) and runs the
+// Locator / getBy* surface over that document, so queries scoped to the frame
+// never bleed into the host page (turbo-surf#225). The host Page implements the
+// same surface, so `mainFrame()` returns the page itself. srcdoc iframes expose
+// their inner markup; src-loaded iframes list with empty content (live-session
+// hydration populates them in the engine, but this snapshot-oriented shim does
+// not fetch iframe src here — call `page.content()` after hydration if needed).
+// ---------------------------------------------------------------------------
+function _collectIframes(parent, selector = "iframe") {
+  const html = parent._html ?? "";
+  if (!html) return [];
+  let matches;
+  try {
+    matches = JSON.parse(native.query(html, selector, "css"));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const m of matches) {
+    if (m == null || m.node == null) continue;
+    // The selector may be broader than "iframe" (e.g. a user passed "main") — restrict
+    // to iframe elements by sniffing the serialized outer-HTML opening tag. Match
+    // records don't carry a tag field, so this is the cheapest fidelity check.
+    const outer = String(m.html ?? "")
+      .trimStart()
+      .toLowerCase();
+    if (!outer.startsWith("<iframe")) continue;
+    const name = native.attrOf(html, m.node, "name") ?? "";
+    const id = native.attrOf(html, m.node, "id") ?? "";
+    const src = native.attrOf(html, m.node, "src") ?? "";
+    const srcdoc = native.attrOf(html, m.node, "srcdoc");
+    out.push({
+      node: m.node,
+      name,
+      id,
+      src,
+      html: srcdoc ?? "",
+      url: src || (srcdoc ? "about:srcdoc" : "about:blank"),
+    });
+  }
+  return out;
+}
+
+function _matchUrl(url, spec) {
+  if (spec == null) return true;
+  if (spec instanceof RegExp) return spec.test(url);
+  if (typeof spec === "function") {
+    try {
+      return !!spec(new URL(url));
+    } catch {
+      return false;
+    }
+  }
+  const s = String(spec);
+  return url.includes(s.replace(/\*\*/g, "").replace(/\*/g, ""));
+}
+
+class Frame {
+  constructor(parentPage, parentFrame, meta) {
+    this._parentPage = parentPage;
+    this._parentFrame = parentFrame ?? null;
+    this._name = meta.name ?? "";
+    this._src = meta.src ?? "";
+    this._url = meta.url ?? "about:blank";
+    this._html = meta.html ?? "";
+  }
+  get _context() {
+    return this._parentPage._context;
+  }
+  name() {
+    return this._name;
+  }
+  url() {
+    return this._url;
+  }
+  page() {
+    return this._parentPage;
+  }
+  parentFrame() {
+    return this._parentFrame;
+  }
+  childFrames() {
+    return _collectIframes(this).map((meta) => new Frame(this._parentPage, this, meta));
+  }
+  async content() {
+    return this._html;
+  }
+  async title() {
+    const m = JSON.parse(native.query(this._html, "title", "css"));
+    return m.length ? (m[0].text ?? "") : "";
+  }
+  async innerText(selector) {
+    return this.locator(selector).innerText();
+  }
+  async innerHTML(selector) {
+    return this.locator(selector).innerHTML();
+  }
+  async textContent(selector) {
+    return this.locator(selector).textContent();
+  }
+  isDetached() {
+    return false;
+  }
+  // The locator surface mirrors Page's — the Locator reads from THIS frame's `_html`.
+  _locFromSelector(selector, mode = "auto") {
+    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)));
+    loc._selector = selector;
+    return loc;
+  }
+  locator(selector) {
+    return this._locFromSelector(selector);
+  }
+  getByRole(role, opts = {}) {
+    const name = opts.name != null ? String(opts.name) : null;
+    return new Locator(this, (h) => JSON.parse(native.getBy(h, "role", role, name)), {
+      getBy: { kind: "role", value: role, name },
+    });
+  }
+  getByText(text) {
+    return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
+      getBy: { kind: "text", value: String(text), name: null },
+    });
+  }
+  getByLabel(text) {
+    return new Locator(this, (h) => JSON.parse(native.getBy(h, "label", String(text))), {
+      getBy: { kind: "label", value: String(text), name: null },
+    });
+  }
+  getByPlaceholder(text) {
+    return this._locFromSelector(`[placeholder*=${cssAttrValue(text)}]`);
+  }
+  getByAltText(text) {
+    return this._locFromSelector(`[alt*=${cssAttrValue(text)}]`);
+  }
+  getByTitle(text) {
+    return this._locFromSelector(`[title*=${cssAttrValue(text)}]`);
+  }
+  getByTestId(id) {
+    return this._locFromSelector(`[${this._context._testIdAttribute}="${id}"]`);
+  }
+  frameLocator(selector) {
+    return new FrameLocator(this, selector);
+  }
+}
+
+// FrameLocator defers iframe lookup to the moment a query actually runs, so a
+// `page.setContent(...)` between construction and use is reflected.
+class FrameLocator {
+  constructor(parent, selector) {
+    this._parent = parent; // a Page or a Frame
+    this._selector = selector;
+    this._index = 0;
+  }
+  _resolveFrame() {
+    const list = _collectIframes(this._parent, this._selector);
+    const i = this._index < 0 ? list.length + this._index : this._index;
+    const entry = list[i];
+    if (!entry) throw new Error(`turbo-surf: frameLocator(${this._selector}) matched no iframe`);
+    const topPage = this._parent instanceof Frame ? this._parent._parentPage : this._parent;
+    const parentFrame = this._parent instanceof Frame ? this._parent : null;
+    return new Frame(topPage, parentFrame, entry);
+  }
+  _withIndex(i) {
+    const fl = new FrameLocator(this._parent, this._selector);
+    fl._index = i;
+    return fl;
+  }
+  first() {
+    return this._withIndex(0);
+  }
+  last() {
+    return this._withIndex(-1);
+  }
+  nth(i) {
+    return this._withIndex(i);
+  }
+  locator(selector) {
+    return this._resolveFrame().locator(selector);
+  }
+  getByRole(role, opts) {
+    return this._resolveFrame().getByRole(role, opts);
+  }
+  getByText(t) {
+    return this._resolveFrame().getByText(t);
+  }
+  getByLabel(t) {
+    return this._resolveFrame().getByLabel(t);
+  }
+  getByPlaceholder(t) {
+    return this._resolveFrame().getByPlaceholder(t);
+  }
+  getByAltText(t) {
+    return this._resolveFrame().getByAltText(t);
+  }
+  getByTitle(t) {
+    return this._resolveFrame().getByTitle(t);
+  }
+  getByTestId(id) {
+    return this._resolveFrame().getByTestId(id);
+  }
+  frameLocator(selector) {
+    return new FrameLocator(this._resolveFrame(), selector);
+  }
+  owner() {
+    return this._resolveFrame();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 class Page {
@@ -1537,18 +1747,33 @@ class Page {
     return this._locFromSelector(`[${this._context._testIdAttribute}="${id}"]`);
   }
 
-  // --- frames (no real frames → the page is its own main frame) ---
+  // --- frames ---
+  // The host page implements the Frame surface too, so `mainFrame()` keeps returning
+  // `this` — Playwright code that does `page.mainFrame().locator(...)` works unchanged.
+  // Child `<iframe>` elements are surfaced through Frame objects: `page.frame({name})`
+  // and `page.frameLocator('iframe[...]')` scope queries to the child document, not
+  // the host (turbo-surf#225). srcdoc iframes carry the child HTML directly;
+  // src-loaded iframes are listed with empty content (the shim does not fetch
+  // iframe src here — a live session hydrates them in the engine).
   mainFrame() {
     return this;
   }
   frames() {
-    return [this];
+    return [this, ..._collectIframes(this).map((meta) => new Frame(this, null, meta))];
   }
-  frame() {
-    return this;
+  frame(opts) {
+    if (opts == null) return this;
+    const name = typeof opts === "string" ? opts : opts?.name;
+    const urlSpec = typeof opts === "object" && opts ? opts.url : null;
+    const match = _collectIframes(this).find(
+      (f) =>
+        (name == null || f.name === name) &&
+        (urlSpec == null || _matchUrl(f.src || f.url, urlSpec)),
+    );
+    return match ? new Frame(this, null, match) : null;
   }
   frameLocator(selector) {
-    return this.locator(selector);
+    return new FrameLocator(this, selector);
   }
 
   // --- waiters (static engine: resolve immediately / poll evaluate) ---

@@ -871,8 +871,7 @@ mod tests {
     #[tokio::test]
     async fn shared_robots_gate_delegates_allowed_and_crawl_delay() {
         use crate::robots::RobotsCache;
-        let gate: Box<dyn RobotsGate> =
-            Box::new(SharedRobots::new(RobotsCache::new(RobotsStub)));
+        let gate: Box<dyn RobotsGate> = Box::new(SharedRobots::new(RobotsCache::new(RobotsStub)));
         assert!(gate.allowed("https://x.test/ok", "ua", 0).await);
         assert!(!gate.allowed("https://x.test/private/p", "ua", 0).await);
         let _ = gate.crawl_delay("https://x.test", "ua", 0).await;

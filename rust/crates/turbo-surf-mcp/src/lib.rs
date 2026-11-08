@@ -6158,6 +6158,40 @@ mod tests {
         assert_eq!(suite["ok"], true, "{suite}");
         assert_eq!(suite["ran"][0], "h1 ok", "{suite}");
     }
+
+    // A src list with an unresolvable ref ("" → url::resolve None) and a reachable
+    // URL whose connection refuses (port 1) exercises both `continue` arms of
+    // fetch_font_face and the all-URLs-failed `None` return — paths the
+    // screenshot_web_fonts fixture never hits because its 404 misses return Ok(empty).
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_font_face_skips_unresolvable_and_refused_urls() {
+        let mut session = Session::new();
+        session.url = "https://font-test.local/".into();
+        let source = turbo_surf_render::WebFontSource {
+            family: "Ghost".into(),
+            weight: 400,
+            italic: false,
+            urls: vec!["".into(), "http://127.0.0.1:1/dead.woff2".into()],
+        };
+        let face = session
+            .fetch_font_face("https://font-test.local/", &source)
+            .await;
+        assert!(face.is_none());
+    }
+
+    // Driving a text-measuring layout through the installed render hook executes
+    // the measure_fn closure body ensure_render_hooks installs (the raster-backed
+    // measure call); other mcp tests load pages but don't force text metrics.
+    #[test]
+    fn installed_measure_fn_closure_runs_on_a_text_measuring_layout() {
+        initialize_render_hooks();
+        let width = turbo_surf_render::run_with_dom(
+            "<body><p id=t style='font:20px sans-serif'>probe</p></body>",
+            "document.getElementById('t').offsetWidth",
+        )
+        .unwrap();
+        let _ = width;
+    }
 }
 
 #[cfg(test)]

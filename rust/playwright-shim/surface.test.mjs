@@ -1256,6 +1256,93 @@ test("Page.evaluate returns typed values (object, array, number) from live sessi
   }
 });
 
+// Playwright's addInitScript runs in EVERY frame of the live context — the main
+// page plus every child frame — before that frame's own scripts execute. The
+// engine wires the context's init script into FrameContexts and runs it in each
+// new frame realm after environment install and before authored <script>s. This
+// regression covers #231: the LIMITATIONS note used to flag this as ⚠️. Four
+// frame flavors (child via <iframe src>, srcdoc, nested, dynamically created,
+// blob URL) each stamp a top-frame body attribute based on whether the init
+// global is visible — "true" everywhere means the init script reached that
+// frame before its own scripts ran.
+test("addInitScript applies to every child frame (src, srcdoc, nested, dynamic, blob)", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    if (url.pathname === "/parent") {
+      res.writeHead(200, { "content-type": "text/html" });
+      // One parent page with every frame flavor embedded. Each frame's inline
+      // script writes an attribute on the TOP document; the parent waits until
+      // every expected attribute shows up (so dynamic/blob mounts have run).
+      return res.end(
+        `<body>
+          <iframe name="plain" src="/child?mark=plain"></iframe>
+          <iframe name="srcframe" srcdoc="<script>try{window.top.document.body.setAttribute('data-srcframe', String(globalThis.trustedInit));}catch(e){}</script>"></iframe>
+          <iframe name="middle" src="/middle"></iframe>
+          <script>
+            setTimeout(() => {
+              const d = document.createElement('iframe');
+              d.name = 'dyn'; d.src = '/child?mark=dyn';
+              document.body.appendChild(d);
+              const b = new Blob(
+                ["<script>try{window.top.document.body.setAttribute('data-blobframe', String(globalThis.trustedInit));}catch(e){}</scr"+"ipt>"],
+                { type: "text/html" },
+              );
+              const u = URL.createObjectURL(b);
+              const f = document.createElement('iframe');
+              f.src = u;
+              document.body.appendChild(f);
+            }, 0);
+          </script>
+        </body>`,
+      );
+    }
+    if (url.pathname === "/child") {
+      const mark = url.searchParams.get("mark") ?? "child";
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<body><script>try{window.top.document.body.setAttribute('data-${mark}', String(globalThis.trustedInit));}catch(e){}</script></body>`,
+      );
+    }
+    if (url.pathname === "/middle") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(`<body><iframe name="grand" src="/grandchild"></iframe></body>`);
+    }
+    if (url.pathname === "/grandchild") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<body><script>try{window.top.document.body.setAttribute('data-grand', String(globalThis.trustedInit));}catch(e){}</script></body>`,
+      );
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.addInitScript(() => {
+      globalThis.trustedInit = true;
+    });
+    await page.goto(`${base}/parent`, { waitUntil: "networkidle" });
+    const read = async () =>
+      page.evaluate(() => {
+        const out = {};
+        for (const attr of document.body.attributes) out[attr.name] = attr.value;
+        return out;
+      });
+    const attrs = await read();
+    // Every frame flavor saw the init script's global before its own <script>.
+    assert.equal(attrs["data-plain"], "true", "static <iframe src> child");
+    assert.equal(attrs["data-srcframe"], "true", "srcdoc child");
+    assert.equal(attrs["data-grand"], "true", "nested grandchild");
+    assert.equal(attrs["data-dyn"], "true", "dynamically created child");
+    assert.equal(attrs["data-blobframe"], "true", "blob URL child");
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // A getBy handle passed to the static waitForFunction resolves through the engine
 // namespace (turbo-dom#222): no live session, the handle is still the element.
 test("static waitForFunction resolves a getBy element handle", async () => {

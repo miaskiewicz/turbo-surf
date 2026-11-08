@@ -401,3 +401,26 @@ async fn wss_non_switching_responses_fail() {
     }
     assert_eq!(server.await.unwrap(), 2);
 }
+
+// A server that accepts the TCP but hangs up before writing any bytes of the response head
+// surfaces the handshake read-loop's EOF branch: read() returns 0 → `connection closed
+// during handshake`. Chrome fails the open with a protocol error; the native client must
+// too, and must do it without hanging.
+#[tokio::test]
+async fn ws_open_reports_failed_when_server_closes_without_response() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        // Read + drop the request head so the client's write doesn't RST, then close.
+        let mut buffer = [0u8; 4096];
+        let _ = socket.read(&mut buffer).await.unwrap();
+        socket.shutdown().await.unwrap();
+    });
+    let request = WsRequest {
+        url: format!("ws://127.0.0.1:{port}/"),
+        ..WsRequest::default()
+    };
+    assert_eq!(open(request).1.recv().await, Some(WsEvent::Failed));
+    server.await.unwrap();
+}

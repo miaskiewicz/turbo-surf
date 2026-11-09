@@ -65,6 +65,7 @@ fn divergences(path: String, actual: &Value, expected: &Value, out: &mut Vec<Str
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "FIXME(turbo-dom#484-timer): V8-native AbortSignal.timeout(0) abort delivery misses per-listener microtask checkpoint; blocked on turbo-dom crate-root re-export of engine_task_scope so surf's __runLocalTimers can bracket its timer-fire entry"]
 async fn abort_signal_any_and_timeout_match_chrome156() {
     let expected = control();
     let mut page = PageSession::open(

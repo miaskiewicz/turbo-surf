@@ -511,6 +511,24 @@ test("Page.frames / frame({name}) / frameLocator: iframe srcdoc", async () => {
   assert.equal(await p.locator("p.lead").count(), 0);
 });
 
+// Regression for #283: FrameLocator.locator().fill() mutates were being discarded
+// because _resolveFrame() returned a throwaway Frame each call. Cache keyed on
+// parent HTML identity keeps the mutated Frame alive across successive queries.
+test("frameLocator.locator().fill: iframe DOM reflects the write (#283)", async () => {
+  const p = newPage();
+  await p.setContent(`<body>
+    <iframe name="form" srcdoc="<input id='name' value='' /><input id='other' value='' />"></iframe>
+  </body>`);
+  const fl = p.frameLocator("iframe[name=form]");
+  await fl.locator("#name").fill("Alice");
+  assert.equal(await fl.locator("#name").inputValue(), "Alice");
+  // A fresh FrameLocator over the same parent must also see the write.
+  const fl2 = p.frameLocator("iframe[name=form]");
+  assert.equal(await fl2.locator("#name").inputValue(), "Alice");
+  // Independent field stays empty — the cache holds the WHOLE frame, not just one node.
+  assert.equal(await fl.locator("#other").inputValue(), "");
+});
+
 test("Page.frame by string name", async () => {
   const p = newPage();
   await p.setContent(

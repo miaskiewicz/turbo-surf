@@ -113,7 +113,9 @@ Direct ports of the JS modules, same behavior and edge cases:
   cookie = `f64::INFINITY`). Script-visible cookie access excludes HttpOnly cookies
   and rejects script overwrites of them. Self-contained HTTP-date parser (no chrono).
 - `net` — `fetch_html` over wreq/BoringSSL by default (`impersonate`), or reqwest/rustls
-  with that feature disabled. Charset sniff, byte
+  with that feature disabled. `websocket` upgrades `wss:` over the same transport
+  (Chrome's https ClientHello with ALPN `http/1.1` only, #179); the rustls build dials it
+  with tokio-rustls and writes the head raw (#189). Charset sniff, byte
   cap, content-type gate, CookieJar round-trip, manual per-hop redirect follow, and a
   **shared pooled `build_client()`** passed via `FetchOptions::client` so connections
   + TLS sessions are reused across pages. `request_context` derives destination/mode,
@@ -166,7 +168,8 @@ place, and the render returns the hydrated HTML (the Lane B contract).
   that binding onto deno_core's context, then layers the non-DOM `window` env a real
   page needs (`navigator`, `location`, virtual timers + real microtasks, `fetch`/XHR
   **over the tier-1 net stack**, `URL`, `crypto`(+`subtle`), `MessageChannel`,
-  `ReadableStream`, `AbortController`, `BroadcastChannel`, `WebSocket`,
+  `ReadableStream`, `AbortController`, `BroadcastChannel`, `WebSocket`/`WebSocketStream`/
+  `EventSource` over native transports (#144),
   `document.cookie` bridged to the shared `CookieJar`, observers, history) + the
   hydration pump (executes injected `<script>` chunks, drains to quiescence).
   Host-owned hydration diagnostics retain the last lifecycle phase and completed

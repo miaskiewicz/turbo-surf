@@ -99,9 +99,10 @@ module/fetch/XHR requests and screenshot assets. This preserves per-origin `Acce
 negotiation and HTTP-client state when a live runtime is replaced. Navigation/resource
 headers, referrer/Origin and credentials use explicit request contexts. This is not
 complete CORS enforcement or browser redirect/permissions-policy behavior.
-`APIRequestContext` calls, including the page/context request facade, currently do
-not retain this browser-context hint state or share its cookie jar. Concurrent live
-resource requests merge cookie writes/deletions rather than replacing the whole jar.
+`page.request()` and `BrowserContext.request()` share the parent context's cookie jar
+(reads + `Set-Cookie` writeback, #230) but still don't retain the `Accept-CH` hint state,
+and concurrent live resource requests merge cookie writes/deletions rather than replacing
+the whole jar. A bare `request.newContext()` (unbound) keeps its empty-jar behavior.
 HttpOnly cookies remain available to HTTP and storage state,
 while page JS cannot read, create or overwrite them through `document.cookie`.
 
@@ -119,7 +120,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `addInitScript` | ⚠️ | Stored for injection before page scripts when a live session opens; page-level calls also render it over the current HTML. Not complete child-frame init-script coverage. |
 | `setExtraHTTPHeaders` | ✅ | **Real** — extra headers are sent on page navigation and linked-CSS fetches; not a global override of every live fetch/XHR request. |
 | `setContent`, `storageState`, `addCookies`, `context`, `request` | ✅ | |
-| `waitForLoadState`, `waitForTimeout`, `waitForURL`, `waitForSelector`, `waitForFunction`, `waitForResponse`, `waitForRequest`, `waitForNavigation`, `waitForEvent` | ⚠️ | `waitForSelector` checks the current snapshot; `waitForURL` and `waitForFunction` can drain/poll a live session. Other waiters have limited compatibility behavior; no browser event loop. |
+| `waitForLoadState`, `waitForTimeout`, `waitForURL`, `waitForSelector`, `waitForFunction`, `waitForResponse`, `waitForRequest`, `waitForNavigation`, `waitForEvent` | ⚠️ | `waitForLoadState('load'\|'domcontentloaded'\|'networkidle')` all hydrate the SPA (one "settled" tier). `waitForResponse` / `waitForRequest` short-circuit on the native-log drain (#218/#222). `waitForNavigation` polls for a URL change. `waitForEvent` handles `'response'/'request'/'requestfinished'/'download'`. `waitForSelector` checks the current snapshot. `waitForURL` and `waitForFunction` drain/poll a live session. No browser event loop. |
 | `on`, `once`, `off`, `addListener`, `removeListener` | ⚠️ | Registry; lifecycle events fire, and captured live fetch/XHR request/response events are emitted when drained. No complete browser network/console/dialog event bus. |
 | `mainFrame`, `frame`, `frames`, `frameLocator` | ⚠️ | Return the page or a top-level locator. Engine iframe contexts exist, but these APIs do not expose them. |
 | `viewportSize`, `setViewportSize` | ✅ | Stored, and the viewport now drives `page.screenshot()` layout width/height. |
@@ -127,9 +128,11 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `isClosed`, `close`, `video` (→ null), `workers` (→ []) | ✅ | |
 | `screenshot` | ⚠️ | Synthetic native render (PNG, or SVG via `{type:"svg"}`) — representative, not browser-faithful. `path` and `fullPage` work; `clip` is ignored. |
 | `pdf` | ❌ | Throws — no PDF implementation in the shim. |
-| `hover`, `dragAndDrop`, `mouse.*`, `touchscreen.*` | ❌ | Throws — no input hardware. |
+| `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate so JS hover handlers (menu-open) fire. Static snapshot: no-op. Not hardware input. |
+| `dragAndDrop`, `mouse.*`, `touchscreen.*` | ❌ | Throws — no input hardware. |
 | `keyboard.*` | ⚠️ | Key-event dispatch in a live session; no-op without one, incomplete text-editing defaults. |
-| `route`, `routeFromHAR`, `unroute` | ❌ | Throws — no in-process interception. |
+| `route`, `unroute` | ⚠️ | Shim-side only: the handler runs once at register-time against a stub route; only `route.fulfill(...)` is captured (`continue` / `abort` / `fallback` are no-ops, no per-request dynamic responses). The fulfilled fixture is injected into the live isolate via an init script that monkey-patches `fetch` and `XMLHttpRequest` — call `page.route(...)` BEFORE the next live session opens. |
+| `routeFromHAR` | ❌ | Throws — no HAR replay. |
 | `exposeBinding`, `exposeFunction` | ❌ | Throws — no persistent JS↔host binding across renders. |
 | `pause`, `addLocatorHandler`, `pickLocator` | ❌ | Throws / n/a — no inspector UI. |
 | `clock`, `coverage`, `tracing`, `requestGC` | ❌ | n/a — no devtools protocol. |
@@ -147,9 +150,13 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `fill`, `clear`, `type`, `pressSequentially`, `check`, `uncheck`, `setChecked`, `selectOption`, `click`, `dblclick`, `tap`, `press` | ✅ | DOM-level (same intent model as Page). |
 | `evaluate` | ⚠️ | Needs a CSS-selector-backed locator (element passed by `document.querySelector`). |
 | `ariaSnapshot` | ✅ | |
-| `focus`, `blur`, `dispatchEvent`, `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no focus model, no layout, static DOM). |
-| `screenshot`, `boundingBox` | ❌ | Throws — pixels. |
-| `hover`, `dragTo`, `selectText` | ❌ | Throws — input hardware. |
+| `dispatchEvent` | ✅ | Live app only: fires the named DOM event into the isolate (e.g. a row's `click`). Static snapshot: no-op. |
+| `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate. Static snapshot: no-op. Not hardware input. |
+| `focus`, `blur` | ✅ | Live app only: calls `el.focus()` / `el.blur()` in the isolate so `document.activeElement` updates (and the app's focus/blur handlers fire). Static snapshot: no-op. A page made via `setContent(...)` stays static until a goto with `waitUntil:'networkidle'` or a `waitForLoadState` / explicit `_openLiveSession` opens the isolate — `.focus()` + `toBeFocused` on a pure `setContent` page will not work. |
+| `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no viewport, no layout — nothing to scroll into). |
+| `boundingBox` | ⚠️ | Returns `null` (there genuinely is no browser-faithful box). Geometry-conditional helpers (smooth-scroll, visibility-by-rect) no-op cleanly instead of throwing. |
+| `screenshot` | ❌ | Throws — pixels. |
+| `dragTo`, `selectText` | ❌ | Throws — input hardware. |
 
 ## expect (5 assertion classes)
 
@@ -159,7 +166,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | **PageAssertions** | ✅ | `toHaveURL`, `toHaveTitle` (string / RegExp / `.not`). |
 | **GenericAssertions** | ✅ | jest-shaped: `toBe/toEqual/toStrictEqual/toContain/toContainEqual/toMatch/toMatchObject/toBeNull/Undefined/Defined/Truthy/Falsy/NaN/toBeGreaterThan(OrEqual)/toBeLessThan(OrEqual)/toBeCloseTo/toBeInstanceOf/toHaveLength/toHaveProperty/toThrow(Error)`, the `toHaveBeenCalled*` mock matchers, and `.resolves`/`.rejects`. |
 | **APIResponseAssertions** | ✅ | `toBeOK` (via the response's `ok()`). |
-| `toBeFocused` | ⚠️ | No focus model on a static DOM — treated as not-focused. |
+| `toBeFocused` | ⚠️ | Live app only: probes `document.activeElement` in the isolate. Static snapshot: treated as not-focused. |
 | `toHaveScreenshot`, `toMatchSnapshot` (**SnapshotAssertions**) | ❌ | Throws — pixels. |
 
 ## BrowserContext
@@ -168,7 +175,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 |---|---|---|
 | `newPage`, `pages`, `cookies`, `addCookies`, `clearCookies`, `storageState`, `addInitScript`, `setExtraHTTPHeaders`, `browser`, `request`, `close` | ✅ | |
 | `grantPermissions`, `clearPermissions`, `setGeolocation`, `setOffline`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
-| `route`, `routeFromHAR`, `unroute`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. |
+| `route`, `unroute`, `routeFromHAR`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
 
 ## test runner & fixtures
 

@@ -39,6 +39,129 @@ function cssAttrValue(text) {
   return `"${String(text).replace(/"/g, '\\"')}"`;
 }
 
+// --- page.route helpers (shim-side, fulfill-only) --------------------------
+// Normalize a route pattern + fulfill payload into a JSON-serializable record.
+// `patternKey` is the original user pattern as a string so `unroute` can match.
+function normalizeRoute(pattern, fulfill) {
+  const isRegex = pattern instanceof RegExp;
+  return {
+    kind: isRegex ? "regex" : "glob",
+    pattern: isRegex ? pattern.source : String(pattern),
+    flags: isRegex ? pattern.flags : "",
+    patternKey: isRegex ? pattern.source : String(pattern),
+    status: fulfill.status ?? 200,
+    headers: fulfill.headers ?? {},
+    contentType: fulfill.contentType ?? null,
+    body: fulfill.body == null ? "" : String(fulfill.body),
+  };
+}
+
+// Build an init script that monkey-patches `fetch` (and XMLHttpRequest for the
+// common open+send path) inside the live isolate. Routes are matched in the
+// order they were registered; a RegExp source uses `new RegExp(...)`, a glob
+// supports `**` (any chars) and `*` (any non-slash chars), with substring as a
+// final fallback.
+function buildRouteInitScript(routes) {
+  if (!routes || !routes.length) return "";
+  const table = JSON.stringify(
+    routes.map((r) => ({
+      kind: r.kind,
+      pattern: r.pattern,
+      flags: r.flags,
+      status: r.status,
+      headers: r.headers,
+      contentType: r.contentType,
+      body: r.body,
+    })),
+  );
+  return `(() => {
+    const routes = ${table};
+    const globToRegex = (p) => {
+      const esc = p.replace(/[.+^\${}()|\\[\\]\\\\]/g, "\\\\$&");
+      const re = "^" + esc.replace(/\\\\\\*\\\\\\*/g, ".*").replace(/\\\\\\*/g, "[^/]*") + "$";
+      return new RegExp(re);
+    };
+    const find = (url) => {
+      for (const r of routes) {
+        try {
+          if (r.kind === "regex") {
+            if (new RegExp(r.pattern, r.flags).test(url)) return r;
+          } else {
+            if (globToRegex(r.pattern).test(url)) return r;
+            if (url.indexOf(r.pattern) !== -1) return r;
+          }
+        } catch (_e) { /* skip malformed pattern */ }
+      }
+      return null;
+    };
+    const synth = (r) => {
+      const h = Object.assign({}, r.headers || {});
+      if (r.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
+        h["content-type"] = r.contentType;
+      return new Response(r.body, { status: r.status, headers: h });
+    };
+    if (typeof globalThis.fetch === "function") {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = function (input, init) {
+        const url = typeof input === "string" ? input : (input && input.url) || "";
+        const r = find(url);
+        if (r) return Promise.resolve(synth(r));
+        return origFetch(input, init);
+      };
+    }
+    if (typeof globalThis.XMLHttpRequest === "function") {
+      const OrigXHR = globalThis.XMLHttpRequest;
+      function MockXHR() {
+        this._mocked = null;
+        this._real = null;
+        this._url = "";
+        this._method = "GET";
+      }
+      MockXHR.prototype.open = function (method, url) {
+        this._method = method;
+        this._url = url;
+        this._mocked = find(url);
+        if (!this._mocked) {
+          this._real = new OrigXHR();
+          this._real.open(method, url);
+        }
+      };
+      MockXHR.prototype.setRequestHeader = function (name, value) {
+        if (this._real) this._real.setRequestHeader(name, value);
+      };
+      MockXHR.prototype.send = function (body) {
+        if (this._mocked) {
+          const r = this._mocked;
+          this.readyState = 4;
+          this.status = r.status;
+          this.responseText = r.body;
+          this.response = r.body;
+          try { if (typeof this.onreadystatechange === "function") this.onreadystatechange(); } catch (_e) {}
+          try { if (typeof this.onload === "function") this.onload(); } catch (_e) {}
+        } else if (this._real) {
+          const self = this;
+          this._real.onreadystatechange = function () {
+            self.readyState = self._real.readyState;
+            self.status = self._real.status;
+            self.responseText = self._real.responseText;
+            self.response = self._real.response;
+            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
+            if (self.readyState === 4) {
+              try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
+            }
+          };
+          this._real.send(body);
+        }
+      };
+      MockXHR.prototype.addEventListener = function (name, fn) {
+        if (name === "load") this.onload = fn;
+        else if (name === "readystatechange") this.onreadystatechange = fn;
+      };
+      globalThis.XMLHttpRequest = MockXHR;
+    }
+  })();`;
+}
+
 // ---------------------------------------------------------------------------
 // Locator — a lazy query over the page's current HTML. `_resolve(html)` returns
 // the match array (each `{ node, text, html }`) in ONE napi call; composition
@@ -457,10 +580,27 @@ class Locator {
     if (key === "Enter") return this.click();
     return undefined;
   }
-  async focus() {}
-  async blur() {}
-  async scrollIntoViewIfNeeded() {}
+  async focus() {
+    if (this._canDriveLive) return void (await this._driveLive("focus"));
+  }
+  async blur() {
+    if (this._canDriveLive) return void (await this._driveLive("blur"));
+  }
+  async scrollIntoViewIfNeeded() {
+    // No viewport, but a real page scrolls the element into view and also fires
+    // focus for a programmatic scroll on a focusable control — keep it a no-op
+    // today since the live engine has no viewport geometry.
+  }
   async highlight() {}
+  async _isFocused() {
+    if (!this._canDriveLive) return false;
+    try {
+      const r = await this._driveLive("isfocused");
+      return r === "true";
+    } catch {
+      return false;
+    }
+  }
   async waitFor(opts = {}) {
     // "Wait for this element" — for an SPA the element only exists after the app runs, so
     // ensure the page is hydrated (a live session). This covers the bare `goto(/login)` +
@@ -667,6 +807,23 @@ function interactionScript(selector, index, kind, value) {
       globalThis.__RESULT = "OK";
     } })();`;
   }
+  if (kind === "focus") {
+    return `(() => { ${pick} else {
+      if (typeof el.focus === "function") el.focus();
+      globalThis.__RESULT = "OK";
+    } })();`;
+  }
+  if (kind === "blur") {
+    return `(() => { ${pick} else {
+      if (typeof el.blur === "function") el.blur();
+      globalThis.__RESULT = "OK";
+    } })();`;
+  }
+  if (kind === "isfocused") {
+    return `(() => { ${pick} else {
+      globalThis.__RESULT = document.activeElement === el ? "true" : "false";
+    } })();`;
+  }
   if (kind === "hover") {
     // No cursor, but the app's hover handlers (MUI menus open on mouseenter/over)
     // are real JS — fire the events they listen for so the menu actually opens.
@@ -779,9 +936,9 @@ class Page {
   // Init scripts use the native trusted entry point before authored scripts;
   // inserting a script tag would change parser locations and subject it to CSP.
   _initScriptSource() {
-    return [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])]
-      .map((source) => `try{ ${source} }catch(e){}`)
-      .join("\n");
+    const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
+    if (this._routeInitScript) all.unshift(this._routeInitScript);
+    return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
   }
 
   async _openLiveSession() {
@@ -869,7 +1026,12 @@ class Page {
   // period, employments lists). Each entry → a minimal Response (url/status/json/text).
   async _drainNetworkEvents() {
     if (this._session == null) return;
-    if (!this._listeners.has("response") && !this._listeners.has("requestfinished")) return;
+    if (
+      !this._listeners.has("response") &&
+      !this._listeners.has("requestfinished") &&
+      !this._listeners.has("request")
+    )
+      return;
     let raw;
     try {
       raw = await native.liveNetworkLog(this._session);
@@ -888,6 +1050,7 @@ class Page {
       const resp = makeNetResponse(e);
       resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
       this._recentResponses.push(resp);
+      this._emit("request", resp.request());
       this._emit("response", resp);
       this._emit("requestfinished", resp.request());
     }
@@ -917,8 +1080,9 @@ class Page {
   // re-render), then refresh the Page snapshot. `kind` is "click" | "fill".
   async _sessionDispatch(selector, index, kind, value) {
     // A new user interaction: responses produced by THIS action (and after) are "fresh"
-    // for any waitForResponse paired with it; responses from before are stale.
-    this._actionSeq++;
+    // for any waitForResponse paired with it; responses from before are stale. The
+    // "isfocused" probe is a read, not an interaction — don't tag responses off it.
+    if (kind !== "isfocused") this._actionSeq++;
     const r = await native.liveEvalEngine(
       this._session,
       interactionScript(selector, index ?? 0, kind, value),
@@ -1022,6 +1186,21 @@ class Page {
     // the running app. Default/'load'/'commit' stay raw (cheap fetch) — hydrating EVERY
     // goto is both slow and unnecessary for static pages.
     if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    // If a `waitForResponse` / `waitForRequest` is already subscribed when the
+    // caller does `Promise.all([waitForResponse(...), goto(url)])` without
+    // `waitUntil:'networkidle'`, the inline-script fetches that the predicate
+    // wants to observe only run inside a live session. Auto-hydrate so the
+    // wait short-circuits on a real response instead of timing out with
+    // the synthetic 200 fallback. Harmless when nothing is waiting.
+    else if (
+      !this._live &&
+      this._autoHydrate !== false &&
+      (this._listeners.has("response") ||
+        this._listeners.has("request") ||
+        this._listeners.has("requestfinished"))
+    ) {
+      await this._openLiveSession();
+    }
     return resp;
   }
   async reload(opts) {
@@ -1107,14 +1286,38 @@ class Page {
     if (this._closed) throw new Error("page is closed");
     if (this._live) {
       const body = evalSource(script, arg);
+      // The native bridge returns a UTF-8 string, so round-trip structured values
+      // through JSON with a sentinel prefix: primitives / arrays / plain objects
+      // ride the JSON path; non-serializable results fall back to String(result).
       const out = await native.liveEvalExpression(
         this._session,
-        `(async () => { try { const result = await (${body}); return result === undefined ? "" : result; } catch { return ""; } })()`,
+        `(async () => { try { const result = await (${body}); if (result === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(result); } catch { return String(result); } } catch { return ""; } })()`,
       );
       await this._refreshFromSession();
+      if (typeof out === "string" && out.startsWith("__ts_json__:")) {
+        try {
+          return JSON.parse(out.slice("__ts_json__:".length));
+        } catch {
+          /* malformed payload — fall through to raw string */
+        }
+      }
       return out;
     }
-    return native.evaluate(this._html, evalSource(script, arg));
+    // Static path: `native.evaluate` returns the trailing expression as a
+    // string, so an `{a:1}` return comes back as "[object Object]". Mirror the
+    // live path — wrap so the trailing expression is a JSON-prefixed string,
+    // then parse back on the shim side.
+    const body = evalSource(script, arg);
+    const wrapped = `(() => { try { var __r = (${body}); if (__r === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(__r); } catch { return String(__r); } } catch { return ""; } })()`;
+    const out = native.evaluate(this._html, wrapped);
+    if (typeof out === "string" && out.startsWith("__ts_json__:")) {
+      try {
+        return JSON.parse(out.slice("__ts_json__:".length));
+      } catch {
+        /* malformed payload — fall through to raw string */
+      }
+    }
+    return out;
   }
   async evaluateHandle(script, arg) {
     return this.evaluate(script, arg);
@@ -1193,7 +1396,9 @@ class Page {
   async press(selector, key) {
     return this.locator(selector).press(key);
   }
-  async focus() {}
+  async focus(selector) {
+    return this.locator(selector).focus();
+  }
   async dispatchEvent() {}
 
   async _followIntent(intent) {
@@ -1279,10 +1484,13 @@ class Page {
   }
 
   // --- waiters (static engine: resolve immediately / poll evaluate) ---
-  // `waitForLoadState('networkidle')` is the other "page has settled" signal — treat
-  // it like the networkidle goto and hydrate the SPA if it hasn't been already.
-  async waitForLoadState(state) {
-    if (state === "networkidle" && !this._live) await this._openLiveSession();
+  // `waitForLoadState(...)` is the other "page has settled" signal. In Playwright
+  // all three states ('load' / 'domcontentloaded' / 'networkidle') end with the
+  // SPA's own scripts having run; the shim has one "settled" tier (a live
+  // session with the authored scripts drained), so treat them the same and
+  // hydrate if we aren't live yet.
+  async waitForLoadState(_state) {
+    if (!this._live) await this._openLiveSession();
   }
   async waitForTimeout(ms) {
     await new Promise((r) => setTimeout(r, Math.min(ms ?? 0, 50)));
@@ -1379,16 +1587,63 @@ class Page {
     }
     throw new Error("turbo-surf: waitForFunction timed out");
   }
-  async waitForNavigation() {
+  // `waitForNavigation` resolves when the URL changes from the one at call time.
+  // In a live session the change comes from a client redirect pumped by the next
+  // drain; outside one it's the paired `goto`/click's synchronous nav. Poll url.
+  async waitForNavigation(opts = {}) {
+    const startUrl = this._url;
+    const timeout = opts.timeout ?? 15000;
+    const deadline = Date.now() + timeout;
+    while (this._url === startUrl && Date.now() < deadline) {
+      if (this._live) {
+        try {
+          await native.liveEvalEngine(this._session, "globalThis.__RESULT = location.href;");
+        } catch {
+          /* session gone — fall through */
+        }
+        await this._refreshFromSession();
+      }
+      if (this._url !== startUrl) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
     return makeResponse({ status: 200, finalUrl: this._url });
   }
-  // waitForEvent('download') — resolve when a client-side export fires (the env captures
-  // `<a download>` clicks into __downloads). Used as `Promise.all([waitForEvent('download'),
-  // …click()])`: the click drives the session (running the anchor click → __downloads push)
-  // while this polls + drains __downloads from the live isolate.
+  // waitForEvent dispatches on name: 'download' drains the live isolate's
+  // __downloads buffer; 'response' / 'request' / 'requestfinished' resolve from
+  // the same listener bus the native-log drain feeds (#218/#222). Unknown names
+  // resolve to undefined — matches the pre-fix no-op for off-spec names.
   async waitForEvent(event, opts) {
-    if (event !== "download") return undefined;
     const timeout = (opts && typeof opts === "object" && opts.timeout) || 30000;
+    if (event === "response" || event === "request" || event === "requestfinished") {
+      const predicate =
+        opts && typeof opts === "object" && typeof opts.predicate === "function"
+          ? opts.predicate
+          : () => true;
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          this.off(event, onEvt);
+          if (poll) clearInterval(poll);
+          resolve(undefined);
+        }, timeout);
+        const onEvt = (payload) => {
+          try {
+            if (!predicate(payload)) return;
+          } catch {
+            return;
+          }
+          clearTimeout(timer);
+          if (poll) clearInterval(poll);
+          this.off(event, onEvt);
+          resolve(payload);
+        };
+        this.on(event, onEvt);
+        // Same as waitForResponse / waitForRequest: poll unconditionally.
+        const poll = setInterval(() => {
+          this._drainNetworkEvents().catch(() => {});
+        }, 50);
+      });
+    }
+    if (event !== "download") return undefined;
     await this._ensureLive();
     if (this._session == null) return undefined;
     const start = Date.now();
@@ -1430,6 +1685,9 @@ class Page {
     // url.includes('/bulk-upload') grabs the template GET from a prior step instead of
     // waiting for this step's POST. (_seq is the action that produced the response.)
     const callSeq = this._actionSeq;
+    // Drain once before the buffered check — the matching entry may already be
+    // sitting in the native log from the action that produced it.
+    if (this._live) await this._drainNetworkEvents();
     const buffered = (this._recentResponses ?? []).find((r) => (r._seq ?? 0) >= callSeq && test(r));
     if (buffered) return buffered;
     return new Promise((resolve) => {
@@ -1438,19 +1696,69 @@ class Page {
       // to run — a hard reject there would fail otherwise-passing flows.
       const timer = setTimeout(() => {
         this.off("response", onResp);
+        if (poll) clearInterval(poll);
         resolve(makeResponse({ status: 200, finalUrl: this._url }));
       }, opts.timeout ?? 15000);
       const onResp = (resp) => {
         if (!test(resp)) return;
         clearTimeout(timer);
+        if (poll) clearInterval(poll);
         this.off("response", onResp);
         resolve(resp);
       };
       this.on("response", onResp);
+      // No action is driving `_drainNetworkEvents` here, so poll the native log
+      // ourselves — otherwise a response that landed in a few ms sits in the log
+      // until the caller's next step and this wait eats its full timeout.
+      // Unconditional: `Promise.all([waitForResponse(...), goto(...)])` races
+      // the goto that creates the live session, so `_live` is false AT CALL
+      // TIME — poll anyway; `_drainNetworkEvents` is a cheap no-op without a
+      // session and starts firing emits as soon as goto establishes one.
+      const poll = setInterval(() => {
+        this._drainNetworkEvents().catch(() => {});
+      }, 50);
     });
   }
-  async waitForRequest() {
-    return { url: () => this._url, method: () => "GET" };
+  async waitForRequest(matcher, opts = {}) {
+    const test = (req) => {
+      try {
+        if (matcher == null) return true;
+        if (typeof matcher === "function") return !!matcher(req);
+        if (matcher instanceof RegExp) return matcher.test(req.url());
+        return req.url().includes(String(matcher));
+      } catch {
+        return false;
+      }
+    };
+    const callSeq = this._actionSeq;
+    // Drain once up front — the matching entry may already be in the native log.
+    if (this._live) await this._drainNetworkEvents();
+    const bufferedResp = (this._recentResponses ?? []).find(
+      (r) => (r._seq ?? 0) >= callSeq && test(r.request()),
+    );
+    if (bufferedResp) return bufferedResp.request();
+    return new Promise((resolve) => {
+      // Timeout returns the historical synthetic stub — some callers chain
+      // Promise.all([waitForRequest(...), action()]) and only need the action.
+      const timer = setTimeout(() => {
+        this.off("request", onReq);
+        if (poll) clearInterval(poll);
+        resolve({ url: () => this._url, method: () => "GET" });
+      }, opts.timeout ?? 15000);
+      const onReq = (req) => {
+        if (!test(req)) return;
+        clearTimeout(timer);
+        if (poll) clearInterval(poll);
+        this.off("request", onReq);
+        resolve(req);
+      };
+      this.on("request", onReq);
+      // See waitForResponse: poll unconditionally so a request produced after
+      // a concurrent goto establishes the live session still short-circuits.
+      const poll = setInterval(() => {
+        this._drainNetworkEvents().catch(() => {});
+      }, 50);
+    });
   }
 
   // --- events (registry; we fire load/domcontentloaded; others are inert) ---
@@ -1487,7 +1795,7 @@ class Page {
     return this._context;
   }
   request() {
-    return request;
+    return this._context.request();
   }
   viewportSize() {
     return this._context._viewport;
@@ -1613,9 +1921,51 @@ class Page {
   // --- unsupported → honest throws ---
   pdf = UNSUPPORTED("page.pdf", PIXEL);
   dragAndDrop = UNSUPPORTED("page.dragAndDrop", INPUT);
-  route = UNSUPPORTED("page.route", NETIO);
+  // page.route(url, handler) — shim-side only, by monkey-patching `fetch` inside
+  // the live isolate via an init script. The handler is invoked once at route
+  // registration time against a stub route that captures the `fulfill` payload;
+  // `continue`/`abort`/`fallback` and per-request dynamic responses are NOT
+  // supported. Pattern: string (substring OR glob with `*`/`**`) or RegExp.
+  // XHR goes through this same wrapper for the common xhr.open+send path.
+  async route(urlPattern, handler) {
+    let fulfilled = null;
+    const req = {
+      url: () => (typeof urlPattern === "string" ? urlPattern : ""),
+      method: () => "GET",
+      postData: () => null,
+      postDataJSON: () => null,
+      headers: () => ({}),
+      resourceType: () => "xhr",
+    };
+    const stub = {
+      request: () => req,
+      fulfill: async (opts) => {
+        fulfilled = opts ?? {};
+      },
+      continue: async () => {},
+      abort: async () => {},
+      fallback: async () => {},
+    };
+    try {
+      await handler(stub, req);
+    } catch {
+      /* handler threw — leave fulfilled null, route is a no-op */
+    }
+    if (!fulfilled) return;
+    this._routes = this._routes ?? [];
+    this._routes.push(normalizeRoute(urlPattern, fulfilled));
+    // Refresh the init-script snapshot so the next live session sees the route.
+    this._routeInitScript = buildRouteInitScript(this._routes);
+  }
+  // Drop a previously-registered route by its original pattern (handler ignored
+  // here because the shim collapses each route to its fulfilled payload).
+  async unroute(urlPattern) {
+    if (!this._routes) return;
+    const key = urlPattern instanceof RegExp ? urlPattern.source : String(urlPattern);
+    this._routes = this._routes.filter((r) => r.patternKey !== key);
+    this._routeInitScript = buildRouteInitScript(this._routes);
+  }
   routeFromHAR = UNSUPPORTED("page.routeFromHAR", NETIO);
-  unroute = UNSUPPORTED("page.unroute", NETIO);
   pause = UNSUPPORTED("page.pause", "no inspector UI");
   exposeBinding = UNSUPPORTED(
     "page.exposeBinding",
@@ -1857,7 +2207,12 @@ class BrowserContext {
     return this.on(event, fn);
   }
   request() {
-    return request;
+    // Lazy: build one APIRequestContext per BrowserContext, bound to its
+    // cookie jar (reads + Set-Cookie writeback).
+    if (!this._requestCtx) {
+      this._requestCtx = request.newContext({ _browserContext: this });
+    }
+    return this._requestCtx;
   }
   browser() {
     return browserStub;
@@ -1996,8 +2351,15 @@ class LocatorExpect extends BaseExpect {
   async toBeEmpty(opts) {
     this._ok(await this._retry(() => this._snap().empty, opts), "expected element to be empty");
   }
-  async toBeFocused() {
-    this._ok(false === this._neg ? false : true, "focus state unavailable on a static DOM");
+  async toBeFocused(opts) {
+    // Static DOMs have no focus — the pre-fix behavior kept `.not.toBeFocused`
+    // passing and `.toBeFocused` failing. In a live session probe
+    // `document.activeElement` via the isolate.
+    if (!this._v._page._live) {
+      this._ok(this._neg, "focus state unavailable on a static DOM");
+      return;
+    }
+    this._ok(await this._retry(() => this._v._isFocused(), opts), "expected element to be focused");
   }
   async toBeInViewport(opts) {
     this._ok(
@@ -2550,9 +2912,19 @@ export const defineConfig = (config) => config;
 /** Device descriptors are no-ops (no real viewport/UA emulation). */
 export const devices = new Proxy({}, { get: () => ({}) });
 /** APIRequestContext: fetch over the shared Rust client. The response carries
- * the RAW body (makeResponse.text/json), not a re-serialized DOM. */
+ * the RAW body (makeResponse.text/json), not a re-serialized DOM.
+ *
+ * When bound to a parent BrowserContext (via the internal `_browserContext`
+ * option, which `page.request()` / `context.request()` pass in), reads/writes
+ * share the context's cookie jar: outbound requests carry the current cookies,
+ * `Set-Cookie` writes merge back in, so a login via `page.goto` is reflected
+ * in a later `ctx.request.get('/api/...')`. */
 export const request = {
-  async newContext(opts = {}) {
+  // Synchronous (no await needed) — tests chain `request.newContext({...}).fetch(...)`.
+  // Real Playwright returns a Promise here; the synchronous form also works at
+  // call-site (`(await request.newContext()).fetch(...)` resolves fine because
+  // awaiting a non-thenable returns the value unchanged).
+  newContext(opts = {}) {
     const headers = opts.extraHTTPHeaders ? JSON.stringify(opts.extraHTTPHeaders) : null;
     // Honor the context `baseURL` like real Playwright: a relative request path
     // (e.g. `ctx.get('/api/backend/...')`) resolves against it. Without this the
@@ -2566,6 +2938,7 @@ export const request = {
         return url;
       }
     };
+    const bc = opts._browserContext ?? null;
     const ctxHeaders = opts.extraHTTPHeaders ?? {};
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
@@ -2588,9 +2961,13 @@ export const request = {
     };
     const call = async (url, method, o = {}) => {
       const { body, hdr } = encode(o);
-      return makeResponse(
-        JSON.parse(await native.fetchWithCookies(resolve(url), "[]", method ?? null, body, hdr)),
-      );
+      const inCookies = bc && bc._cookies ? bc._cookies : "[]";
+      const raw = await native.fetchWithCookies(resolve(url), inCookies, method ?? null, body, hdr);
+      const parsed = JSON.parse(raw);
+      // Merge Set-Cookie writes back into the parent BrowserContext's jar so
+      // the next page.goto / page.request / context.request sees them.
+      if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;
+      return makeResponse(parsed);
     };
     return {
       get: (url, o = {}) => call(url, null, o),

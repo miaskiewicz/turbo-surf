@@ -51,15 +51,38 @@
         };
       }
   }
-  for (const kind of [
-    "cancel",
-    "holdLinear",
-    "holdCurve",
-    "holdTarget",
-    "kRateGain",
-    "negativeRate",
-    "scheduledRate",
-  ]) {
+  const linearThen = (cancel) => (g) => {
+    g.gain.setValueAtTime(0, 0);
+    g.gain.linearRampToValueAtTime(1, 0.04);
+    g.gain[cancel](0.012);
+  };
+  // Each graph's automation, applied after the source -> gain -> destination wiring.
+  const graphs = {
+    cancel: linearThen("cancelScheduledValues"),
+    holdLinear: linearThen("cancelAndHoldAtTime"),
+    holdCurve: (g) => {
+      g.gain.setValueCurveAtTime(new Float32Array([0, 0.6, 0.2, 1]), 0, 0.03);
+      g.gain.cancelAndHoldAtTime(0.012);
+    },
+    holdTarget: (g) => {
+      g.gain.setValueAtTime(0.2, 0);
+      g.gain.setTargetAtTime(0.9, 0.004, 0.005);
+      g.gain.cancelAndHoldAtTime(0.012);
+    },
+    kRateGain: (g) => {
+      g.gain.automationRate = "k-rate";
+      g.gain.setValueAtTime(0, 0);
+      g.gain.linearRampToValueAtTime(1, 0.03);
+    },
+    negativeRate: (_g, s) => {
+      s.playbackRate.value = -0.5;
+    },
+    scheduledRate: (_g, s) => {
+      s.playbackRate.setValueAtTime(0.5, 0);
+      s.playbackRate.linearRampToValueAtTime(2, 0.03);
+    },
+  };
+  for (const [kind, automate] of Object.entries(graphs)) {
     const c = new OfflineAudioContext(1, 2048, 44100),
       b = c.createBuffer(1, 1024, 44100),
       d = b.getChannelData(0);
@@ -69,30 +92,7 @@
     const g = c.createGain();
     s.connect(g);
     g.connect(c.destination);
-    if (kind === "cancel" || kind === "holdLinear") {
-      g.gain.setValueAtTime(0, 0);
-      g.gain.linearRampToValueAtTime(1, 0.04);
-      g.gain[kind === "cancel" ? "cancelScheduledValues" : "cancelAndHoldAtTime"](0.012);
-    }
-    if (kind === "holdCurve") {
-      g.gain.setValueCurveAtTime(new Float32Array([0, 0.6, 0.2, 1]), 0, 0.03);
-      g.gain.cancelAndHoldAtTime(0.012);
-    }
-    if (kind === "holdTarget") {
-      g.gain.setValueAtTime(0.2, 0);
-      g.gain.setTargetAtTime(0.9, 0.004, 0.005);
-      g.gain.cancelAndHoldAtTime(0.012);
-    }
-    if (kind === "kRateGain") {
-      g.gain.automationRate = "k-rate";
-      g.gain.setValueAtTime(0, 0);
-      g.gain.linearRampToValueAtTime(1, 0.03);
-    }
-    if (kind === "negativeRate") s.playbackRate.value = -0.5;
-    if (kind === "scheduledRate") {
-      s.playbackRate.setValueAtTime(0.5, 0);
-      s.playbackRate.linearRampToValueAtTime(2, 0.03);
-    }
+    automate(g, s);
     try {
       s.start(0, kind === "negativeRate" ? 0.02 : 0);
       const out = await c.startRendering();

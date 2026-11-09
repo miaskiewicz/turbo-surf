@@ -34,6 +34,8 @@ pub mod robots;
 pub mod sorry;
 pub mod upload;
 pub mod url;
+pub mod websocket;
+mod websocket_frame;
 
 /// The active HTTP backend, re-exported so this crate's `net` module and every
 /// downstream crate type against one alias instead of an extern crate — the

@@ -254,18 +254,28 @@ pub struct Session {
     /// Session default engine for `web_search` when a call omits `engine` — set via
     /// `web_search_set_engine`. `None` (the default) falls through to `"duckduckgo"`.
     default_search_engine: Option<String>,
+    /// Tree-order indices (over `document.querySelectorAll('input')`) whose IDL
+    /// `indeterminate` flag a script has set to `true`, captured from the last render.
+    /// A static screenshot forwards them as [`raster::IdlStates::indeterminate_inputs`]
+    /// (turbo-dom#371) so an indeterminate checkbox paints the Chrome glyph the
+    /// serialized HTML does not express. Empty when no render ran or no input was set.
+    pub indeterminate_input_indices: Vec<usize>,
 }
 
 /// Install process-global render hooks once: a raster-backed text measurer (system fonts on) that
 /// backs the render isolate's offsetWidth/offsetHeight, so a font-detection probe sees per-family
 /// metrics. The render crate has no font stack, so the host (this crate, which owns raster) injects it.
+// Named so tarpaulin can instrument the body (the equivalent closure stored in
+// Box<dyn Fn> does not get line-level coverage attributed through the dyn dispatch).
+fn measure_text_hook(text: &str, family: &str, size: f64) -> (f64, f64) {
+    let (w, h) = raster::measure_text(text, family, size as f32, true);
+    (w as f64, h as f64)
+}
+
 fn ensure_render_hooks() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        turbo_surf_render::set_measure_fn(Box::new(|text, family, size| {
-            let (w, h) = raster::measure_text(text, family, size as f32, true);
-            (w as f64, h as f64)
-        }));
+        turbo_surf_render::set_measure_fn(Box::new(measure_text_hook));
         // Raster-backed canvas toDataURL: replay the isolate's 2D display list into a real PNG
         // so canvas readback isn't an implausible ~94-byte stub (a fingerprint tell).
         turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
@@ -344,6 +354,26 @@ impl Session {
         self.response_headers.clear();
         self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
         self.last_render_navigation_count = 0;
+        self.indeterminate_input_indices.clear();
+    }
+
+    // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
+    // inputs whose IDL `indeterminate` flag is `true`. Best-effort: a parse / JSON
+    // failure in the one-shot probe leaves the list empty (no IDL overlay). The probe
+    // itself cannot throw, so `eval_json_expression` only errors on execution-budget
+    // termination the host side couldn't recover from.
+    async fn snapshot_indeterminate_inputs(
+        page: &mut turbo_surf_render::PageSession,
+    ) -> Vec<usize> {
+        // `eval_json_expression` already JSON-stringifies the expression's result;
+        // the inner `.reduce` is the array itself, not a pre-serialized string.
+        const PROBE: &str = "Array.prototype.reduce.call(\
+             document.querySelectorAll('input'),\
+             (acc,el,i)=>{if(el.indeterminate)acc.push(i);return acc;},[])";
+        let Ok(json) = page.eval_json_expression(PROBE).await else {
+            return Vec::new();
+        };
+        serde_json::from_str::<Vec<usize>>(&json).unwrap_or_default()
     }
 
     fn load_response(
@@ -686,6 +716,11 @@ impl Session {
         let headers = page.response_headers_snapshot();
         let html = page.serialize();
         let cookies = page.cookies();
+        // Snapshot the live IDL `indeterminate` flag on `<input>` elements (tree-order
+        // over `document.querySelectorAll('input')`); the serialized HTML does not
+        // carry it, so a later screenshot forwards it via ScreenshotOptions.idl_states
+        // (turbo-dom#371).
+        self.indeterminate_input_indices = Self::snapshot_indeterminate_inputs(&mut page).await;
         page.close();
         self.jar = CookieJar::from_storage_state(&cookies);
         self.last_render_navigation_count = count;
@@ -1111,11 +1146,12 @@ impl Session {
             .get("external_css")
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let css = if want_css {
-            self.fetch_linked_css(&html).await
+        let sheets = if want_css {
+            self.fetch_linked_sheets(&html).await
         } else {
-            String::new()
+            Vec::new()
         };
+        let css: String = sheets.iter().map(|(_, body)| format!("{body}\n")).collect();
         // `<img>` + `background-image` bytes, fetched over the session client
         // (impersonation + cookies apply), unless `{ images: false }`.
         let want_images = args.get("images").and_then(Value::as_bool).unwrap_or(true);
@@ -1130,16 +1166,35 @@ impl Session {
             .get("full_page")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        // The page's `@font-face` faces, fetched over the session client, unless
+        // `{ fonts: false }` (turbo-surf#142).
+        let want_fonts = args.get("fonts").and_then(Value::as_bool).unwrap_or(true);
+        let fonts = if want_fonts {
+            self.fetch_page_fonts(&html, &sheets).await
+        } else {
+            None
+        };
+        // IDL `indeterminate` flags captured from the last render (turbo-dom#371):
+        // the serialized HTML does not express them, so a static screenshot paints
+        // plain checkboxes without this overlay.
+        let idl_states =
+            (!self.indeterminate_input_indices.is_empty()).then(|| raster::IdlStates {
+                indeterminate_inputs: self.indeterminate_input_indices.iter().copied().collect(),
+            });
+        let mut options = raster::ScreenshotOptions::default();
+        options.full_page = full_page;
+        options.fonts = fonts.as_ref();
+        options.idl_states = idl_states.as_ref();
         match arg_str(args, "format").unwrap_or("png") {
             "svg" => {
-                let svg = raster::screenshot_svg_with_assets(&html, &css, vp, &images, full_page)?;
+                let svg = raster::screenshot_svg_with_options(&html, &css, vp, &images, &options)?;
                 Ok(json!({
                     "format": "svg", "mimeType": "image/svg+xml",
                     "width": vp.width, "height": svg_height(&svg).unwrap_or(vp.height), "svg": svg,
                 }))
             }
             "png" => {
-                let png = raster::screenshot_png_with_assets(&html, &css, vp, &images, full_page)?;
+                let png = raster::screenshot_png_with_options(&html, &css, vp, &images, &options)?;
                 let (w, h) = png_dims(&png).unwrap_or((vp.width, vp.height));
                 Ok(json!({
                     "format": "png", "mimeType": "image/png",
@@ -1154,20 +1209,80 @@ impl Session {
     // bodies in source order, resolving each href against the current page URL
     // via the session client (impersonation + cookies apply). Failures + non-URL
     // hrefs are skipped; the count is capped so a hostile page can't fan out.
-    async fn fetch_linked_css(&mut self, html: &str) -> String {
+    // Each fetched sheet is kept with its URL: its `@font-face` sources resolve against it.
+    async fn fetch_linked_sheets(&mut self, html: &str) -> Vec<(String, String)> {
         const MAX_SHEETS: usize = 40;
         let base = self.url.clone();
-        let mut css = String::new();
+        let mut sheets = Vec::new();
         for href in raster::stylesheet_hrefs(html).into_iter().take(MAX_SHEETS) {
             let Some(url) = turbo_surf_core::url::resolve(&base, &href) else {
                 continue;
             };
             if let Ok(body) = self.fetch_resource_body(&url, Destination::Style).await {
-                css.push_str(&body);
-                css.push('\n');
+                sheets.push((url, body));
             }
         }
-        css
+        sheets
+    }
+
+    // The page's `@font-face` faces for the static screenshot (turbo-surf#142): the rules
+    // of its `<style>` blocks (resolved against the page URL) and of its fetched sheets
+    // (against each sheet's URL), each face's first `url()` source that fetches and parses
+    // (WOFF / WOFF2 unwrapped), registered over the bundled faces the screenshot otherwise
+    // uses. `None` when the page declares no face. Capped so a hostile page can't fan out.
+    async fn fetch_page_fonts(
+        &mut self,
+        html: &str,
+        sheets: &[(String, String)],
+    ) -> Option<turbo_dom_layout::FontRegistry> {
+        const MAX_FACES: usize = 20;
+        let tree = Tree::parse(html);
+        let inline = tree
+            .query_selector_all("style")
+            .iter()
+            .map(|&style| tree.text_content(style))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let page = (self.url.clone(), inline);
+        let sources: Vec<_> = std::iter::once(&page)
+            .chain(sheets)
+            .flat_map(|(base, css)| {
+                turbo_surf_render::font_face_sources(css)
+                    .into_iter()
+                    .map(move |source| (base.clone(), source))
+            })
+            .take(MAX_FACES)
+            .collect();
+        if sources.is_empty() {
+            return None;
+        }
+        let mut registry = turbo_dom_layout::FontRegistry::new();
+        for (base, source) in sources {
+            if let Some(face) = self.fetch_font_face(&base, &source).await {
+                registry.add(face);
+            }
+        }
+        Some(registry)
+    }
+
+    // A face's first `url()` source that fetches and parses, as Chrome tries them in order.
+    async fn fetch_font_face(
+        &mut self,
+        base: &str,
+        source: &turbo_surf_render::WebFontSource,
+    ) -> Option<turbo_dom_layout::text::FontFace> {
+        for reference in &source.urls {
+            let Some(url) = turbo_surf_core::url::resolve(base, reference) else {
+                continue;
+            };
+            let Ok(bytes) = self.fetch_asset_bytes(&url, Destination::Font).await else {
+                continue;
+            };
+            if let Some(face) = turbo_surf_render::web_font_face(&bytes, source) {
+                return Some(face);
+            }
+        }
+        None
     }
 
     // Fetch the page's `<img>` + `background-image` bytes, keyed by their raw
@@ -1203,6 +1318,16 @@ impl Session {
     // Fetch a single resource as raw bytes (no charset decode — image data must
     // survive verbatim) over the session client/jar/profile.
     async fn fetch_image_bytes(&mut self, url: &str) -> Result<Vec<u8>, String> {
+        self.fetch_asset_bytes(url, Destination::Image).await
+    }
+
+    // An image or font subresource's raw bytes: a no-cors image request, or the CORS-mode
+    // request Chrome makes for a font.
+    async fn fetch_asset_bytes(
+        &mut self,
+        url: &str,
+        destination: Destination,
+    ) -> Result<Vec<u8>, String> {
         self.requests.push(url.to_string());
         let profile = self.profile_for(url);
         let storage_effects = self.browsing_storage.response_storage_effects();
@@ -1211,8 +1336,12 @@ impl Session {
             allow_non_html: true,
             context: Some(RequestContext::resource(
                 &self.url,
-                Destination::Image,
-                RequestMode::NoCors,
+                destination,
+                if destination == Destination::Font {
+                    RequestMode::Cors
+                } else {
+                    RequestMode::NoCors
+                },
             )),
             client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
@@ -3041,9 +3170,11 @@ pub fn tools() -> Value {
              position/z-index stacking. Fetches the page's external <link> \
              stylesheets and its <img>/background-image bytes (via the session \
              client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG/BMP/ICO/AVIF/JPEG XL \
-             images are painted, others fall back to a placeholder. Args: format (png|svg), \
+             images are painted, others fall back to a placeholder; @font-face faces (TTF/OTF/WOFF/WOFF2) \
+             lay out and paint the text. Args: format (png|svg), \
              snapshot? (dom_history index), width?/height? (override viewport; \
              at most 16384x16384 px in all), external_css? (default true), images? (default true), \
+             fonts? (default true), \
              full_page? (default false — true grows height to full content). \
              PNG returns base64; SVG returns the document string.",
         ),
@@ -3131,9 +3262,54 @@ fn arg_u32(args: &Value, key: &str) -> Option<u32> {
         .map(|n| n.min(u32::MAX as u64) as u32)
 }
 
+/// Handle the small synchronous session-state setters (user agent / mode /
+/// consent flags / fingerprint / history mirrors / in-memory snapshots). Returns
+/// `None` when `name` is not one of them.
+fn call_sync_session_tool(
+    session: &mut Session,
+    name: &str,
+    args: &Value,
+) -> Option<Result<Value, String>> {
+    let out = match name {
+        "set_user_agent" => {
+            session.ua = Some(arg_str(args, "value").unwrap_or("").to_string());
+            json!({ "ok": true })
+        }
+        "set_mode" => {
+            session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
+            json!({ "mode": session.mode })
+        }
+        "set_bypass_consent" => {
+            // Toggle consent-wall cookie seeding (google/youtube interstitial).
+            // Default is on; pass `{ "enabled": false }` to fetch the raw response.
+            let on = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            session.bypass_consent = Some(on);
+            json!({ "bypassConsent": on })
+        }
+        "set_consent_socs" => {
+            // Param-driven SOCS override. Omitted/null → built-in default; a string
+            // (incl. "") is used verbatim ("" = seed no SOCS, raw consent-gated page).
+            session.consent_socs = arg_str(args, "socs").map(str::to_string);
+            json!({ "consentSocs": session.consent_socs })
+        }
+        "stealth_status" => session.stealth_status(),
+        "set_fingerprint" => {
+            return Some(session.set_fingerprint(args.get("overrides").unwrap_or(args)));
+        }
+        "latest_dom" => json!(session.dom_history.last()),
+        "dom_history" => json!(session.dom_history),
+        "requests" => json!(session.requests),
+        _ => return None,
+    };
+    Some(Ok(out))
+}
+
 /// Run a tool by name, returning its result value (the caller wraps it in the
 /// MCP `content` envelope).
 pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Result<Value, String> {
+    if let Some(res) = call_sync_session_tool(session, name, args) {
+        return res;
+    }
     let sel = || arg_str(args, "selector").ok_or_else(|| format!("{name}: missing 'selector'"));
     let val = || arg_str(args, "value").unwrap_or("").to_string();
     let script = || arg_str(args, "script").ok_or_else(|| format!("{name}: missing 'script'"));
@@ -3155,10 +3331,6 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         "reload" => session.reload().await,
         "go_back" => session.go_back().await,
         "go_forward" => session.go_forward().await,
-        "set_user_agent" => {
-            session.ua = Some(val());
-            Ok(json!({ "ok": true }))
-        }
         // --- interaction ---
         "click" | "click_selector" => session.click(sel()?).await,
         "submit" => session.submit(arg_str(args, "selector")).await,
@@ -3182,23 +3354,6 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             })
         }
         // --- render / JS tier ---
-        "set_mode" => {
-            session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
-            Ok(json!({ "mode": session.mode }))
-        }
-        "set_bypass_consent" => {
-            // Toggle consent-wall cookie seeding (google/youtube interstitial).
-            // Default is on; pass `{ "enabled": false }` to fetch the raw response.
-            let on = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-            session.bypass_consent = Some(on);
-            Ok(json!({ "bypassConsent": on }))
-        }
-        "set_consent_socs" => {
-            // Param-driven SOCS override. Omitted/null → built-in default; a string
-            // (incl. "") is used verbatim ("" = seed no SOCS, raw consent-gated page).
-            session.consent_socs = arg_str(args, "socs").map(str::to_string);
-            Ok(json!({ "consentSocs": session.consent_socs }))
-        }
         "eval_js" | "evaluate" => session.eval_js(script()?),
         "inject_js" => session.inject_js(script()?).await,
         "render" => match arg_str(args, "script") {
@@ -3229,15 +3384,22 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             probe_mint(url).await
         }
         "human_interact" => session.human_interact(args).await,
-        "stealth_status" => Ok(session.stealth_status()),
-        "set_fingerprint" => session.set_fingerprint(args.get("overrides").unwrap_or(args)),
-        "latest_dom" => Ok(json!(session.dom_history.last())),
-        "dom_history" => Ok(json!(session.dom_history)),
         "screenshot" => session.screenshot(args).await,
         "set_viewport" => session.set_viewport(args),
         "run_playwright" => tool_run_playwright(session, args).await,
-        "requests" => Ok(json!(session.requests)),
-        // --- session / network ---
+        // --- session / network / bulk ---
+        _ => call_network_or_read_tool(session, name, args).await,
+    }
+}
+
+/// Session/network and bulk tools, plus the DOM-read fallback. Split out of
+/// [`call_tool`] to keep each dispatch under the complexity gate.
+async fn call_network_or_read_tool(
+    session: &mut Session,
+    name: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    match name {
         "set_extra_headers" => tool_set_headers(session, args),
         "get_cookies" => {
             serde_json::from_str(&session.jar.storage_state()).map_err(|e| e.to_string())
@@ -3254,7 +3416,6 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             serde_json::from_str(&body).map_err(|e| format!("invalid JSON: {e}"))
         }
         "robots_check" => tool_robots_check(session, args).await,
-        // --- bulk ---
         "crawl" => tool_crawl(args).await,
         "batch" => tool_batch(args).await,
         _ => call_read_tool(session, name, args),
@@ -4228,9 +4389,8 @@ mod tests {
     }
 
     // Canvas 2D surface fidelity: the context class-tags as CanvasRenderingContext2D (was
-    // "[object DOMImplementation]"), exposes getContextAttributes, and measureText routes width
-    // through the real system-font measurer (matches a real browser; the vendored width was a
-    // synthetic approximation — a font-detection tell).
+    // "[object DOMImplementation]"), exposes getContextAttributes, and measureText measures the
+    // real system face (the binding's TextMetrics over the registered fonts, turbo-surf#133).
     #[tokio::test]
     async fn canvas2d_surface_matches_browser() {
         let _s = Session::new(); // installs set_measure_fn
@@ -6001,6 +6161,50 @@ mod tests {
         .unwrap();
         assert_eq!(suite["ok"], true, "{suite}");
         assert_eq!(suite["ran"][0], "h1 ok", "{suite}");
+    }
+
+    // A src list with an unresolvable ref ("" → url::resolve None) and a reachable
+    // URL whose connection refuses (port 1) exercises both `continue` arms of
+    // fetch_font_face and the all-URLs-failed `None` return — paths the
+    // screenshot_web_fonts fixture never hits because its 404 misses return Ok(empty).
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_font_face_skips_unresolvable_and_refused_urls() {
+        let mut session = Session::new();
+        session.url = "https://font-test.local/".into();
+        let source = turbo_surf_render::WebFontSource {
+            family: "Ghost".into(),
+            weight: 400,
+            italic: false,
+            urls: vec!["".into(), "http://127.0.0.1:1/dead.woff2".into()],
+        };
+        let face = session
+            .fetch_font_face("https://font-test.local/", &source)
+            .await;
+        assert!(face.is_none());
+    }
+
+    // Driving a text-measuring layout through the installed render hook executes
+    // the measure_fn closure body ensure_render_hooks installs (the raster-backed
+    // measure call); other mcp tests load pages but don't force text metrics.
+    #[test]
+    fn installed_measure_fn_closure_runs_on_a_text_measuring_layout() {
+        initialize_render_hooks();
+        let width = turbo_surf_render::run_with_dom(
+            "<body><p id=t style='font:20px sans-serif'>probe</p></body>",
+            "document.getElementById('t').offsetWidth",
+        )
+        .unwrap();
+        let _ = width;
+    }
+
+    // Lock the measure_text_hook contract directly (the render isolate's measure
+    // path goes through a Box<dyn Fn> indirection tarpaulin can't attribute, so a
+    // pure-function call keeps the two lines of this hook on a test path).
+    #[test]
+    fn measure_text_hook_returns_raster_measurements_as_f64() {
+        initialize_render_hooks();
+        let (w, h) = measure_text_hook("probe", "sans-serif", 20.0);
+        assert!(w > 0.0 && h > 0.0, "measure {w}x{h} should be non-zero");
     }
 }
 

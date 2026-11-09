@@ -275,26 +275,17 @@ impl Reporter {
         let ReportJob {
             endpoint,
             mut context,
-            mut jar,
+            jar,
             target,
             client_hints,
             body,
             response_effects: override_effects,
         } = job;
-        let bytes = body.len().saturating_mul(2) + endpoint.url.len() + jar.storage_state().len();
-        {
-            let mut jobs = self.0.jobs.lock().unwrap();
-            if jobs.count >= 4096 || jobs.bytes.saturating_add(bytes) > 64 * 1024 * 1024 {
-                return;
-            }
-            jobs.count += 1;
-            jobs.bytes += bytes;
-        }
-        let permit = Permit {
-            jobs: self.0.jobs.clone(),
-            bytes,
+        let Some(permit) = self
+            .admit(body.len().saturating_mul(2) + endpoint.url.len() + jar.storage_state().len())
+        else {
+            return;
         };
-        let client = self.0.client.clone();
         // Capture only native backing: retaining a profile here would keep the
         // cancellation sender alive throughout stalled IO.
         let profile_effects = if target == 0 {
@@ -316,191 +307,260 @@ impl Reporter {
         } else {
             turbo_surf_core::request_context::Credentials::Omit
         };
+        let delivery = Delivery {
+            endpoint,
+            context,
+            jar,
+            target,
+            client: self.0.client.clone(),
+            client_hints,
+            response_effects,
+            permit,
+        };
         tokio::spawn(async move {
-            let request = async {
-                let mut target_url = endpoint.url;
-                let mut method = "POST";
-                let mut body = body;
-                for hop in 0.. {
-                    let credentials = context.sends_credentials(&target_url);
-                    let origin = if context.opaque_origin || context.origin_tainted {
-                        "null".into()
-                    } else {
-                        context
-                            .source
-                            .as_deref()
-                            .and_then(|source| url::Url::parse(source).ok())
-                            .map(|url| url.origin().ascii_serialization())
-                            .unwrap_or_else(|| "null".into())
-                    };
-                    let cross_origin = !context
-                        .source
-                        .as_deref()
-                        .is_some_and(|source| same_origin(source, &target_url));
-                    let mut headers = if endpoint.modern {
-                        BTreeMap::new()
-                    } else {
-                        context.headers(&target_url, method)
-                    };
-                    let profile = turbo_surf_core::fingerprint::default_profile();
-                    headers.insert("accept-language".into(), profile.accept_language.into());
-                    headers.insert("accept-encoding".into(), "gzip, deflate, br, zstd".into());
-                    if !endpoint.modern {
-                        headers.remove("priority");
-                        headers.extend(client_hints.headers(&target_url, &context, &profile));
-                    }
-                    headers.insert(
-                        "user-agent".into(),
-                        turbo_surf_core::fingerprint::default_profile().user_agent,
-                    );
-                    if method == "POST" {
-                        headers.insert(
-                            "content-type".into(),
-                            if endpoint.modern {
-                                "application/reports+json"
-                            } else {
-                                "application/csp-report"
-                            }
-                            .into(),
-                        );
-                    }
-                    if method == "POST" || cross_origin {
-                        headers.insert("origin".into(), origin.clone());
-                    }
-                    if credentials {
-                        let cookie = jar.cookie_header_for_request(
-                            &target_url,
-                            crate::runtime::cookie_now(),
-                            &context,
-                            method,
-                        );
-                        if !cookie.is_empty() {
-                            headers.insert("cookie".into(), cookie);
-                        }
-                    }
-                    if endpoint.modern && cross_origin && method == "POST" {
-                        let mut preflight = BTreeMap::from([
-                            ("origin".into(), origin.clone()),
-                            ("access-control-request-method".into(), "POST".into()),
-                            (
-                                "access-control-request-headers".into(),
-                                "content-type".into(),
-                            ),
-                        ]);
-                        preflight.insert("user-agent".into(), profile.user_agent.clone());
-                        preflight.insert("accept-language".into(), profile.accept_language.into());
-                        preflight
-                            .insert("accept-encoding".into(), "gzip, deflate, br, zstd".into());
-                        let response = turbo_surf_core::net::send_report_request(
-                            &client,
-                            "OPTIONS",
-                            &target_url,
-                            &preflight,
-                            Vec::new(),
-                            true,
-                        )
-                        .await
-                        .ok()?;
-                        if !(200..300).contains(&response.status)
-                            || !crate::fetch_cors::preflight_allowed(
-                                &context,
-                                "POST",
-                                &["content-type".into()],
-                                &response.headers,
-                            )
-                        {
-                            return None;
-                        }
-                    }
-                    let response = turbo_surf_core::net::send_report_request(
-                        &client,
-                        method,
-                        &target_url,
-                        &headers,
-                        body.clone(),
-                        endpoint.modern,
-                    )
-                    .await
-                    .ok()?;
-                    if credentials {
-                        let clear_hints = response
-                            .headers
-                            .iter()
-                            .filter(|(name, _)| name.eq_ignore_ascii_case("clear-site-data"))
-                            .flat_map(|(_, value)| value.split(','))
-                            .any(|token| {
-                                matches!(token.trim(), "\"clientHints\"" | "\"cache\"" | "\"*\"")
-                            });
-                        if clear_hints {
-                            client_hints.observe(&target_url, None, true);
-                        }
-                        if let Some(effects) = &response_effects {
-                            effects(&context, &target_url, &response.headers);
-                        }
-                        let lines = response
-                            .headers
-                            .iter()
-                            .filter(|(key, _)| key.eq_ignore_ascii_case("set-cookie"))
-                            .map(|(_, value)| value.clone())
-                            .collect::<Vec<_>>();
-                        if !lines.is_empty() {
-                            jar.set_from_response(
-                                &target_url,
-                                &lines,
-                                crate::runtime::cookie_now(),
-                            );
-                            let mut jobs = permit.jobs.lock().unwrap();
-                            let bytes =
-                                target_url.len() + lines.iter().map(String::len).sum::<usize>();
-                            if jobs.cookies.len() < 4096
-                                && jobs.cookie_bytes.saturating_add(bytes) <= 64 * 1024 * 1024
-                            {
-                                jobs.cookie_bytes += bytes;
-                                jobs.cookies.push((target, target_url.clone(), lines));
-                            }
-                        }
-                    }
-                    if endpoint.modern
-                        && cross_origin
-                        && !crate::fetch_cors::allowed(&context, &response.headers)
-                    {
-                        return None;
-                    }
-                    if !endpoint.modern || !matches!(response.status, 301 | 302 | 303 | 307 | 308) {
-                        return Some(());
-                    }
-                    if hop == 20 {
-                        return None;
-                    }
-                    let location = response
-                        .headers
-                        .iter()
-                        .find(|(key, _)| key.eq_ignore_ascii_case("location"))?
-                        .1
-                        .as_str();
-                    let next = url::Url::parse(&target_url).ok()?.join(location).ok()?;
-                    if !matches!(next.scheme(), "http" | "https")
-                        || !next.username().is_empty()
-                        || next.password().is_some()
-                    {
-                        return None;
-                    }
-                    context.follow_redirect(&target_url, next.as_str());
-                    target_url = next.into();
-                    if response.status == 303
-                        || matches!(response.status, 301 | 302) && method == "POST"
-                    {
-                        method = "GET";
-                        body.clear();
-                    }
-                }
-                // Every hop returns; hop 20 stops redirects before the range ends.
-                unreachable!("report redirect loop is bounded by hop 20")
-            };
-            tokio::select! {_ = request=>{},_ = canceled.changed()=>{}}
-            drop(permit);
+            tokio::select! {_ = delivery.run(body)=>{},_ = canceled.changed()=>{}}
         });
     }
+    /// Reserves queue capacity (4096 jobs, 64MiB) for a job of `bytes`.
+    fn admit(&self, bytes: usize) -> Option<Permit> {
+        let mut jobs = self.0.jobs.lock().unwrap();
+        if jobs.count >= 4096 || jobs.bytes.saturating_add(bytes) > 64 * 1024 * 1024 {
+            return None;
+        }
+        jobs.count += 1;
+        jobs.bytes += bytes;
+        Some(Permit {
+            jobs: self.0.jobs.clone(),
+            bytes,
+        })
+    }
+}
+
+/// One report upload's native state, owned by its task; dropping it releases the
+/// queue permit.
+struct Delivery {
+    endpoint: Endpoint,
+    context: RequestContext,
+    jar: turbo_surf_core::cookies::CookieJar,
+    target: u64,
+    client: Client,
+    client_hints: turbo_surf_core::request_context::ClientHints,
+    response_effects: Option<Arc<turbo_surf_core::net::ResponseSideEffects<'static>>>,
+    permit: Permit,
+}
+
+/// One hop's request: where it goes and how.
+struct Hop<'a> {
+    url: &'a str,
+    method: &'a str,
+    origin: &'a str,
+    cross_origin: bool,
+    credentials: bool,
+}
+
+impl Delivery {
+    async fn run(mut self, mut body: Vec<u8>) -> Option<()> {
+        let mut target_url = self.endpoint.url.clone();
+        let mut method = "POST";
+        for hop in 0.. {
+            let origin = self.origin();
+            let request = Hop {
+                url: &target_url,
+                method,
+                origin: &origin,
+                cross_origin: !self
+                    .context
+                    .source
+                    .as_deref()
+                    .is_some_and(|source| same_origin(source, &target_url)),
+                credentials: self.context.sends_credentials(&target_url),
+            };
+            let response = self.exchange(&request, body.clone()).await?;
+            if !self.endpoint.modern || !matches!(response.status, 301 | 302 | 303 | 307 | 308) {
+                return Some(());
+            }
+            if hop == 20 {
+                return None;
+            }
+            let next = redirect_target(&target_url, &response.headers)?;
+            self.context.follow_redirect(&target_url, next.as_str());
+            target_url = next.into();
+            if response.status == 303 || matches!(response.status, 301 | 302) && method == "POST" {
+                method = "GET";
+                body.clear();
+            }
+        }
+        // Every hop returns; hop 20 stops redirects before the range ends.
+        unreachable!("report redirect loop is bounded by hop 20")
+    }
+    /// One hop: its preflight when needed, the request, and the response's credentialed
+    /// side effects. `None` stops delivery (network failure or refused CORS).
+    async fn exchange(
+        &mut self,
+        hop: &Hop<'_>,
+        body: Vec<u8>,
+    ) -> Option<turbo_surf_core::net::ReportResponse> {
+        let headers = self.headers(hop);
+        if self.endpoint.modern && hop.cross_origin && hop.method == "POST" {
+            self.preflight(hop).await?;
+        }
+        let response = turbo_surf_core::net::send_report_request(
+            &self.client,
+            hop.method,
+            hop.url,
+            &headers,
+            body,
+            self.endpoint.modern,
+        )
+        .await
+        .ok()?;
+        if hop.credentials {
+            self.observe_credentialed(hop.url, &response.headers);
+        }
+        if self.endpoint.modern
+            && hop.cross_origin
+            && !crate::fetch_cors::allowed(&self.context, &response.headers)
+        {
+            return None;
+        }
+        Some(response)
+    }
+    fn origin(&self) -> String {
+        if self.context.opaque_origin || self.context.origin_tainted {
+            return "null".into();
+        }
+        self.context
+            .source
+            .as_deref()
+            .and_then(|source| url::Url::parse(source).ok())
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_else(|| "null".into())
+    }
+    fn headers(&self, hop: &Hop) -> BTreeMap<String, String> {
+        let modern = self.endpoint.modern;
+        let mut headers = if modern {
+            BTreeMap::new()
+        } else {
+            self.context.headers(hop.url, hop.method)
+        };
+        let profile = turbo_surf_core::fingerprint::default_profile();
+        headers.insert("accept-language".into(), profile.accept_language.into());
+        headers.insert("accept-encoding".into(), "gzip, deflate, br, zstd".into());
+        if !modern {
+            headers.remove("priority");
+            headers.extend(self.client_hints.headers(hop.url, &self.context, &profile));
+        }
+        headers.insert(
+            "user-agent".into(),
+            turbo_surf_core::fingerprint::default_profile().user_agent,
+        );
+        if hop.method == "POST" {
+            let content_type = if modern {
+                "application/reports+json"
+            } else {
+                "application/csp-report"
+            };
+            headers.insert("content-type".into(), content_type.into());
+        }
+        if hop.method == "POST" || hop.cross_origin {
+            headers.insert("origin".into(), hop.origin.to_owned());
+        }
+        if hop.credentials {
+            let cookie = self.jar.cookie_header_for_request(
+                hop.url,
+                crate::runtime::cookie_now(),
+                &self.context,
+                hop.method,
+            );
+            if !cookie.is_empty() {
+                headers.insert("cookie".into(), cookie);
+            }
+        }
+        headers
+    }
+    /// The CORS preflight of a cross-origin modern report; `None` refuses the upload.
+    async fn preflight(&self, hop: &Hop<'_>) -> Option<()> {
+        let profile = turbo_surf_core::fingerprint::default_profile();
+        let mut preflight = BTreeMap::from([
+            ("origin".into(), hop.origin.to_owned()),
+            ("access-control-request-method".into(), "POST".into()),
+            (
+                "access-control-request-headers".into(),
+                "content-type".into(),
+            ),
+        ]);
+        preflight.insert("user-agent".into(), profile.user_agent.clone());
+        preflight.insert("accept-language".into(), profile.accept_language.into());
+        preflight.insert("accept-encoding".into(), "gzip, deflate, br, zstd".into());
+        let response = turbo_surf_core::net::send_report_request(
+            &self.client,
+            "OPTIONS",
+            hop.url,
+            &preflight,
+            Vec::new(),
+            true,
+        )
+        .await
+        .ok()?;
+        ((200..300).contains(&response.status)
+            && crate::fetch_cors::preflight_allowed(
+                &self.context,
+                "POST",
+                &["content-type".into()],
+                &response.headers,
+            ))
+        .then_some(())
+    }
+    /// A credentialed response's Clear-Site-Data hints, observer effects and cookies.
+    fn observe_credentialed(&mut self, target_url: &str, headers: &[(String, String)]) {
+        let clear_hints = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("clear-site-data"))
+            .flat_map(|(_, value)| value.split(','))
+            .any(|token| matches!(token.trim(), "\"clientHints\"" | "\"cache\"" | "\"*\""));
+        if clear_hints {
+            self.client_hints.observe(target_url, None, true);
+        }
+        if let Some(effects) = &self.response_effects {
+            effects(&self.context, target_url, headers);
+        }
+        let lines = headers
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case("set-cookie"))
+            .map(|(_, value)| value.clone())
+            .collect::<Vec<_>>();
+        if !lines.is_empty() {
+            self.store_cookies(target_url, lines);
+        }
+    }
+    /// Applies Set-Cookie lines to the job's jar and queues them for the profile,
+    /// bounded like the jobs (4096 entries, 64MiB).
+    fn store_cookies(&mut self, target_url: &str, lines: Vec<String>) {
+        self.jar
+            .set_from_response(target_url, &lines, crate::runtime::cookie_now());
+        let mut jobs = self.permit.jobs.lock().unwrap();
+        let bytes = target_url.len() + lines.iter().map(String::len).sum::<usize>();
+        if jobs.cookies.len() < 4096 && jobs.cookie_bytes.saturating_add(bytes) <= 64 * 1024 * 1024
+        {
+            jobs.cookie_bytes += bytes;
+            jobs.cookies
+                .push((self.target, target_url.to_owned(), lines));
+        }
+    }
+}
+
+/// A modern report's redirect hop: http(s) only, never with credentials in the URL.
+fn redirect_target(target_url: &str, headers: &[(String, String)]) -> Option<url::Url> {
+    let location = headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("location"))?
+        .1
+        .as_str();
+    let next = url::Url::parse(target_url).ok()?.join(location).ok()?;
+    (matches!(next.scheme(), "http" | "https")
+        && next.username().is_empty()
+        && next.password().is_none())
+    .then_some(next)
 }
 
 #[cfg(test)]

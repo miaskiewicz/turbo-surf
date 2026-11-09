@@ -116,6 +116,37 @@ test("response events drain host records while opaque bodies stay hidden in page
   }
 });
 
+test("request events drain host records alongside responses", async () => {
+  const target = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("host-only-response");
+  });
+  await new Promise((done) => target.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${target.address().port}/private`;
+  const source = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(
+      `<body><script>fetch(${JSON.stringify(endpoint)},{mode:'no-cors'}).then(r=>r.text());</script></body>`,
+    );
+  });
+  await new Promise((done) => source.listen(0, "127.0.0.1", done));
+  const page = newPage();
+  const requests = [];
+  page.on("request", (request) => {
+    if (request.url() === endpoint) requests.push(request);
+  });
+  try {
+    await page.goto(`http://127.0.0.1:${source.address().port}/`, { waitUntil: "networkidle" });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url(), endpoint);
+  } finally {
+    await page.close();
+    source.closeAllConnections();
+    target.closeAllConnections();
+    await Promise.all([source, target].map((server) => new Promise((done) => server.close(done))));
+  }
+});
+
 // --- Locator: composition (pure JS) ---------------------------------------
 test("Locator composition: count/first/last/nth/all", async () => {
   const p = await fresh();
@@ -708,7 +739,8 @@ test("honest throws: pixel / input / network-interception", async () => {
   await assert.rejects(() => p.mouse.click(0, 0), /input/);
   // keyboard.press is implemented (key-event dispatch via the live session) — not a throw.
   await assert.rejects(() => p.touchscreen.tap(0, 0), /input/);
-  await assert.rejects(() => p.route("**"), /interception/);
+  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
+  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
   await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
 });
 
@@ -732,6 +764,307 @@ test("waitForResponse ignores a response that drained in an earlier step", async
   p._emit("response", fresh);
   const got = await pending;
   assert.equal(got.status(), 201, "should resolve to the fresh POST, not the stale GET");
+});
+
+// Rest of #229: non-'networkidle' load states, waitForNavigation, generic
+// waitForEvent('response'|'request'). The old shim returned a synthetic 200
+// for waitForNavigation without ever waiting, and only 'networkidle' did
+// anything in waitForLoadState — anything else was a silent no-op.
+test("waitForLoadState('load') / 'domcontentloaded' hydrates the page like 'networkidle'", async () => {
+  const server = site();
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/spa`, { waitUntil: "commit" });
+    assert.equal(p._session, null, "commit must NOT open a live session on its own");
+    await p.waitForLoadState("load");
+    assert.ok(p._session != null, "'load' must hydrate like 'networkidle'");
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("waitForNavigation resolves when the URL actually changes", async () => {
+  const p = newPage();
+  p._url = "http://x/start";
+  const pending = p.waitForNavigation({ timeout: 500 });
+  setTimeout(() => {
+    p._url = "http://x/next";
+  }, 20);
+  const r = await pending;
+  assert.equal(r.url(), "http://x/next", "must return a response pointing at the new URL");
+});
+
+test("waitForEvent('response') / ('request') resolve from the listener bus", async () => {
+  const p = newPage();
+  const fakeResp = {
+    url: () => "https://x/api/a",
+    status: () => 200,
+    request: () => ({ url: () => "https://x/api/a", method: () => "GET" }),
+  };
+  const pending = p.waitForEvent("response", { timeout: 500 });
+  setTimeout(() => p._emit("response", fakeResp), 10);
+  const r = await pending;
+  assert.equal(r.status(), 200);
+  const pendingReq = p.waitForEvent("request", { timeout: 500 });
+  setTimeout(() => p._emit("request", fakeResp.request()), 10);
+  const req = await pendingReq;
+  assert.equal(req.method(), "GET");
+});
+
+// Payroll parity v3: real integration still timed out at 15 s even after the
+// unit-level drain-polling fix. Root cause: a default `goto(url)` (no
+// `waitUntil:'networkidle'`) doesn't open a live session, so an inline
+// `<script>fetch('/api/...')</script>` inside the document never runs —
+// there's no real response to short-circuit on, and waitForResponse falls
+// through to the synthetic timeout. Auto-hydrate when the listener bus is
+// already subscribed so the inline-script fetches actually fire.
+test("Promise.all([waitForResponse(...), goto(url)]) short-circuits on the real response", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/page") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>p</title><div id="out"></div><script>
+           fetch('/api/data').then(r => r.json()).then(j => {
+             document.getElementById('out').textContent = j.v;
+           });
+         </script>`,
+      );
+    }
+    if (req.url === "/api/data") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end('{"v":"ok"}');
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    const started = Date.now();
+    const [resp] = await Promise.all([
+      p.waitForResponse((r) => r.url().includes("/api/data"), { timeout: 3000 }),
+      p.goto(`${base}/page`),
+    ]);
+    const elapsed = Date.now() - started;
+    assert.equal(resp.status(), 200);
+    assert.ok(
+      resp.url().includes("/api/data"),
+      "must resolve the REAL /api/data response, not the synthetic 200",
+    );
+    assert.ok(elapsed < 2000, `waitForResponse must short-circuit, took ${elapsed}ms`);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Payroll parity v2 found that `Promise.all([waitForResponse(...), goto(...)])`
+// still took the full 15s timeout. Root cause: `waitForResponse` gated its
+// drain-poll on `this._live` at CALL time, but when the call races with the
+// goto that will later establish the live session, `_live` is false then —
+// so poll was null and the drain never ran. Must keep polling once live.
+test("waitForResponse short-circuits even when _live comes up AFTER the call", async () => {
+  const p = newPage();
+  p._session = null; // not live yet (as if called before goto resolves)
+  p._actionSeq = 1;
+  p._recentResponses = [];
+  let drainCalls = 0;
+  p._drainNetworkEvents = async () => {
+    if (p._session == null) return; // the real drain early-returns too
+    drainCalls++;
+    if (drainCalls >= 2) {
+      const resp = { url: () => "https://x/api/ready", status: () => 200, _seq: 1 };
+      p._recentResponses.push(resp);
+      p._emit("response", resp);
+    }
+  };
+  const pending = p.waitForResponse((r) => r.url().includes("/api/ready"), { timeout: 500 });
+  // Simulate goto establishing the live session a moment later.
+  setTimeout(() => {
+    p._session = 1;
+  }, 30);
+  const got = await pending;
+  assert.equal(got.status(), 200, "must resolve the drained response, not the timeout synthetic");
+  assert.ok(drainCalls >= 2, `drain must run once live (got ${drainCalls})`);
+});
+
+// Gap C from payroll parity v2: static `page.evaluate` still returned
+// "[object Object]" because the JSON round-trip was only wired for the live
+// path. The static engine returns the trailing expression as a string, so
+// wrap the user script similarly.
+test("Page.evaluate returns typed values from a STATIC page too", async () => {
+  const p = newPage();
+  await p.setContent("<title>Home</title><h1>Welcome</h1>");
+  assert.deepEqual(
+    await p.evaluate(() => ({
+      title: document.title,
+      h1: document.querySelector("h1").textContent,
+    })),
+    { title: "Home", h1: "Welcome" },
+  );
+  assert.equal(await p.evaluate(() => 42), 42);
+  assert.deepEqual(await p.evaluate(() => [1, 2, 3]), [1, 2, 3]);
+});
+
+// APIRequestContext (page.request / context.request) used to use an empty
+// cookie jar, so specs that logged in via page.goto + session cookie and then
+// hit an API with `context.request.get(...)` sent no cookies at all.
+test("page.request / context.request share the BrowserContext cookie jar (#230)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/login") {
+      res.writeHead(200, { "set-cookie": "sid=abc123; Path=/", "content-type": "text/html" });
+      return res.end("<title>in</title>");
+    }
+    if (req.url === "/api/me") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ cookie: req.headers.cookie ?? "" }));
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  const base = await listen(server);
+  const ctx = new BrowserContext();
+  try {
+    const p = await ctx.newPage();
+    await p.goto(`${base}/login`);
+    const r = await p.request().fetch(`${base}/api/me`);
+    const body = await r.json();
+    assert.equal(body.cookie, "sid=abc123", "page.request must send the login cookie");
+    // context.request() mirrors page.request().
+    const r2 = await ctx.request().fetch(`${base}/api/me`);
+    const body2 = await r2.json();
+    assert.equal(body2.cookie, "sid=abc123", "context.request must send the login cookie");
+  } finally {
+    await ctx.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Focus model: `.focus()`, `.blur()`, `toBeFocused` were static no-ops or
+// always-fail assertions. The live isolate already tracks `document.activeElement`
+// per DOM spec; drive focus/blur into it and read activeElement back for the
+// matcher so keyboard-navigation specs don't get false negatives.
+test("locator.focus() + expect.toBeFocused() reflect document.activeElement in the live app", async () => {
+  const server = site();
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/spa`, { waitUntil: "networkidle" });
+    await p.setContent("<input id='a'><input id='b'><button id='go'>Go</button>");
+    await p._openLiveSession();
+    await p.locator("#a").focus();
+    await expect(p.locator("#a")).toBeFocused();
+    await expect(p.locator("#b")).not.toBeFocused();
+    await p.locator("#b").focus();
+    await expect(p.locator("#b")).toBeFocused();
+    await expect(p.locator("#a")).not.toBeFocused();
+    await p.locator("#b").blur();
+    await expect(p.locator("#b")).not.toBeFocused();
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.route(fulfill) is the single most-used interception shape in payroll-app
+// specs: stub /api/foo with a fixture so the SPA hydrates with known data.
+// With no native request-interception hook, do it shim-side by monkey-patching
+// `fetch` in the live isolate (via an init script, before the app runs) and
+// route that single call to the collected fulfill response.
+test("page.route(url, fulfill) returns a fixture to the live app's fetch", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.hello; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    } else {
+      // The real server MUST NOT be hit on /api/foo — the route must intercept.
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end('{"hello":"real-server"}');
+    }
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("/api/foo", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked" }),
+      });
+    });
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "mocked",
+      "route.fulfill fixture must win over the real server response",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Mirror of the waitForResponse drain-polling guard: payroll-style flows attach
+// `waitForRequest(/api\/x/)` to the step that fires the request, and the stub
+// used to resolve immediately with a synthetic page-URL GET — never seeing the
+// real request. waitForRequest must drain the native log and return the actual
+// matching request (not the synthetic placeholder) when one is produced.
+test("waitForRequest polls the native drain and returns the matching request", async () => {
+  const p = newPage();
+  p._session = 1;
+  p._actionSeq = 1;
+  p._recentResponses = [];
+  let drainCalls = 0;
+  const fakeReq = () => ({ url: () => "https://x/api/widgets", method: () => "POST" });
+  p._drainNetworkEvents = async () => {
+    drainCalls++;
+    if (drainCalls >= 2) {
+      const req = fakeReq();
+      p._emit("request", req);
+    }
+  };
+  const got = await p.waitForRequest((r) => r.url().includes("/api/widgets"), { timeout: 500 });
+  assert.equal(got.method(), "POST");
+  assert.equal(got.url(), "https://x/api/widgets");
+  assert.ok(drainCalls >= 2, `drain must be polled while waiting (got ${drainCalls})`);
+});
+
+// Without an action to drive `_drainNetworkEvents`, the native network log keeps
+// sitting on the matching entry while waitForResponse burns its full timeout —
+// payroll-app saw ~15 s for a response that landed in ~5 ms. In a live session
+// waitForResponse must poll the drain itself, not just wait for someone else to
+// push into the listener bus.
+test("waitForResponse polls the native drain while waiting (live session)", async () => {
+  const p = newPage();
+  p._session = 1; // pretend a live session is open
+  p._actionSeq = 1;
+  p._recentResponses = [];
+  let drainCalls = 0;
+  p._drainNetworkEvents = async () => {
+    drainCalls++;
+    if (drainCalls >= 2) {
+      const resp = { url: () => "https://x/api/data", status: () => 418, _seq: 1 };
+      p._recentResponses.push(resp);
+      p._emit("response", resp);
+    }
+  };
+  const got = await p.waitForResponse((r) => r.url().includes("/api/data"), { timeout: 500 });
+  assert.equal(got.status(), 418, "must resolve the drained response, not the synthetic timeout");
+  assert.ok(drainCalls >= 2, `drain must be polled while waiting (got ${drainCalls})`);
 });
 
 test("waitForResponse returns a buffered response from the current action", async () => {
@@ -891,6 +1224,33 @@ test("live hydration retains native response policy, status and selected referre
     assert.equal(await page.locator("body").getAttribute("data-init"), "true");
   } finally {
     await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.evaluate in a live session used to stringify the returned value, so an
+// object came back as "[object Object]" and tests had to JSON.stringify inside
+// the expression + JSON.parse outside. The payroll-app parity probe surfaced it
+// on observer-style specs that read page state as objects. Returns must now be
+// structured values: primitives as themselves, arrays/plain objects deep-equal.
+test("Page.evaluate returns typed values (object, array, number) from live session", async () => {
+  const server = site();
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/spa`, { waitUntil: "networkidle" });
+    assert.deepEqual(await p.evaluate(() => ({ count: 3, items: ["a", "b"], nested: { x: 1 } })), {
+      count: 3,
+      items: ["a", "b"],
+      nested: { x: 1 },
+    });
+    assert.equal(await p.evaluate(() => 42), 42);
+    assert.deepEqual(await p.evaluate(() => [1, 2, 3]), [1, 2, 3]);
+    assert.equal(await p.evaluate(() => true), true);
+    assert.equal(await p.evaluate(() => "hello"), "hello");
+  } finally {
+    await p.close();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }

@@ -79,60 +79,36 @@ async fn render(
     .await
 }
 
-async fn run(config: &Value, report: &mut Value) -> Result<(), String> {
-    let der = std::fs::read(
-        config["certificate"]
-            .as_str()
-            .ok_or("certificate required")?,
-    )
-    .map_err(|error| error.to_string())?;
-    let probe = std::fs::read_to_string(config["probe"].as_str().ok_or("probe required")?)
-        .map_err(|error| error.to_string())?;
-    let done = config["done"].as_str().ok_or("done expression required")?;
-    let errors = config["errors"]
-        .as_str()
-        .ok_or("errors expression required")?;
-    let builder_der = der.clone();
-    // Only the loopback fixture certificate is added; identity stays the default.
-    let trusted = move || client_builder_with_trust(&builder_der);
+fn config_str<'a>(config: &'a Value, key: &str, missing: &str) -> Result<&'a str, String> {
+    config[key].as_str().ok_or_else(|| missing.to_owned())
+}
 
-    // Tier 1: the no-JS fetch path, one fresh session for the whole sequence so
-    // Accept-CH opt-ins persist exactly as a browser profile's would.
-    let hints = ClientHints::with_client_builder(trusted.clone());
+// Tier 1: the no-JS fetch path, one fresh session for the whole sequence so
+// Accept-CH opt-ins persist exactly as a browser profile's would.
+async fn run_nojs(config: &Value, hints: &ClientHints) -> Result<Value, String> {
     let mut jar = CookieJar::new();
     let mut nojs = Vec::new();
     for url in config["nojs"].as_array().ok_or("nojs urls required")? {
         let url = url.as_str().ok_or("nojs url must be a string")?;
-        let status = navigate(url, &hints, &mut jar).await.map(|r| r.status);
+        let status = navigate(url, hints, &mut jar).await.map(|r| r.status);
         nojs.push(json!({"url": url, "status": status.as_ref().ok(), "error": status.err()}));
     }
-    report["nojs"] = json!(nojs);
+    Ok(json!(nojs))
+}
 
-    // Tier 2: the JS render tier, a separate fresh session.
-    let wait = Duration::from_millis(config["render"]["waitMs"].as_u64().unwrap_or(8000));
-    let hints = ClientHints::with_client_builder(trusted);
-    let mut jar = CookieJar::new();
-    let page_url = config["render"]["page"]
-        .as_str()
-        .ok_or("render.page required")?;
-    let mut page = render(page_url, &hints, &mut jar, wait).await?;
-    let finished = settle(&mut page, done, wait).await?;
-    let js: Value = serde_json::from_str(
-        &page
-            .eval_json_expression(probe.trim().trim_end_matches(';'))
-            .await?,
-    )
-    .map_err(|error| error.to_string())?;
-    let page_errors: Value = serde_json::from_str(&page.eval_json_expression(errors).await?)
-        .map_err(|error| error.to_string())?;
-    let click = page
-        .input(&json!([{ "move": { "selector": "#nav-link" } }, { "click": "#nav-link" }]))
-        .await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    // Top-level navigation is the embedder's job (as in detection_trace and the
-    // MCP server): fetch the admitted target with the activation captured at
-    // admission time.
-    let followed = match page.script_nav_activation_snapshot() {
+async fn eval_value(page: &mut PageSession, expression: &str) -> Result<Value, String> {
+    serde_json::from_str(&page.eval_json_expression(expression).await?)
+        .map_err(|error| error.to_string())
+}
+
+// Top-level navigation is the embedder's job (as in detection_trace and the
+// MCP server): fetch the admitted target with the activation captured at
+// admission time.
+async fn follow_click_navigation(
+    page: &mut PageSession,
+    hints: &ClientHints,
+) -> Result<Value, String> {
+    match page.script_nav_activation_snapshot() {
         Some((target, active)) if target.ends_with("/k/click-nav") => {
             let installed = page.navigation_snapshot().1;
             let mut navigation_jar = CookieJar::from_storage_state(&page.cookies());
@@ -142,7 +118,7 @@ async fn run(config: &Value, report: &mut Value) -> Result<(), String> {
                     allow_non_html: true,
                     max_redirects: Some(10),
                     jar: Some(&mut navigation_jar),
-                    client_hints: Some(&hints),
+                    client_hints: Some(hints),
                     context: Some(RequestContext::navigation(Some(installed), active)),
                     ..Default::default()
                 },
@@ -154,20 +130,62 @@ async fn run(config: &Value, report: &mut Value) -> Result<(), String> {
         other => Err(format!(
             "the trusted click admitted no navigation: {other:?}"
         )),
-    };
+    }
+}
+
+async fn run(config: &Value, report: &mut Value) -> Result<(), String> {
+    let der = std::fs::read(config_str(config, "certificate", "certificate required")?)
+        .map_err(|error| error.to_string())?;
+    let probe = std::fs::read_to_string(config_str(config, "probe", "probe required")?)
+        .map_err(|error| error.to_string())?;
+    let done = config_str(config, "done", "done expression required")?;
+    let errors = config_str(config, "errors", "errors expression required")?;
+    let builder_der = der.clone();
+    // Only the loopback fixture certificate is added; identity stays the default.
+    let trusted = move || client_builder_with_trust(&builder_der);
+
+    report["nojs"] = run_nojs(config, &ClientHints::with_client_builder(trusted.clone())).await?;
+    report["render"] = run_render(
+        config,
+        &ClientHints::with_client_builder(trusted),
+        &probe,
+        done,
+        errors,
+    )
+    .await?;
+    Ok(())
+}
+
+// Tier 2: the JS render tier, a separate fresh session.
+async fn run_render(
+    config: &Value,
+    hints: &ClientHints,
+    probe: &str,
+    done: &str,
+    errors: &str,
+) -> Result<Value, String> {
+    let wait = Duration::from_millis(config["render"]["waitMs"].as_u64().unwrap_or(8000));
+    let mut jar = CookieJar::new();
+    let page_url = config_str(&config["render"], "page", "render.page required")?;
+    let mut page = render(page_url, hints, &mut jar, wait).await?;
+    let finished = settle(&mut page, done, wait).await?;
+    let js = eval_value(&mut page, probe.trim().trim_end_matches(';')).await?;
+    let page_errors = eval_value(&mut page, errors).await?;
+    let click = page
+        .input(&json!([{ "move": { "selector": "#nav-link" } }, { "click": "#nav-link" }]))
+        .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let followed = follow_click_navigation(&mut page, hints).await;
     page.close();
-    let hints_url = config["render"]["hints"]
-        .as_str()
-        .ok_or("render.hints required")?;
-    let mut hinted = render(hints_url, &hints, &mut jar, wait).await?;
+    let hints_url = config_str(&config["render"], "hints", "render.hints required")?;
+    let mut hinted = render(hints_url, hints, &mut jar, wait).await?;
     let hinted_done = settle(&mut hinted, done, wait).await?;
     hinted.close();
-    report["render"] = json!({
+    Ok(json!({
         "finished": finished, "hintsFinished": hinted_done,
         "click": click.err(), "followed": followed.unwrap_or_else(|error| json!({"error": error})),
         "js": js, "pageErrors": page_errors,
-    });
-    Ok(())
+    }))
 }
 
 #[tokio::main(flavor = "current_thread")]

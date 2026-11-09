@@ -689,6 +689,7 @@ fn every_destination_has_its_fetch_dest_name() {
         Destination::Script,
         Destination::Style,
         Destination::Image,
+        Destination::Font,
         Destination::Empty,
         Destination::Report,
     ]
@@ -701,6 +702,6 @@ fn every_destination_has_its_fetch_dest_name() {
     .collect();
     assert_eq!(
         names,
-        ["document", "iframe", "script", "style", "image", "", "report"]
+        ["document", "iframe", "script", "style", "image", "font", "", "report"]
     );
 }

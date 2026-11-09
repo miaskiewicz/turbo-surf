@@ -66,6 +66,15 @@ jobs:
       - name: Test
         run: npm test
 
+      # The rustls backend (`--no-default-features`, README) is a documented build; the
+      # default build never compiles its cfg paths (#189). The two Chrome-HTTP/1
+      # wire-identity tests in transport_identity are gated on `impersonate` (#199).
+      - name: rustls backend (turbo-surf-core --no-default-features)
+        working-directory: rust
+        run: |
+          cargo clippy -p turbo-surf-core --no-default-features --all-targets -- -D warnings
+          cargo test -p turbo-surf-core --no-default-features
+
   # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine) ----
   # Sharded: one instrumented link of every workspace test binary exhausts the ubuntu runner
   # (rust-lld bus error, run 40788261228), so each shard runs tarpaulin over its crates' tests
@@ -167,19 +176,14 @@ jobs:
           if-no-files-found: ignore
 
   # ---- Complexity: cyclomatic complexity <= 15 per function, no allow-list, no baseline ----
-  # EXPECTED RED until the post-coverage refactor: the functions above 15 when the gate landed
-  # are the refactor backlog (docs/QUALITY-GATES.md); refactoring waits until unit-test coverage
-  # is complete so it cannot break behaviour silently. Never raise the limit or skip a file to
-  # turn it green. Rust: turbo-html2pdf's tools/cc-check installed from its home at a pinned
-  # rev (not copied here) over every tracked .rs file; JS: oxlint's `complexity` rule
-  # (.oxlintrc.complexity.json) over cli.js, index.js and harness/.
-  # `continue-on-error` keeps the red jobs from failing the workflow while the backlog exists;
-  # the failing job and its step summary list every function over the limit. Drop
-  # `continue-on-error` (and make both checks required) once the backlog is cleared.
+  # Blocking cc 15 gate. Every tracked function must stay at or below cyclomatic complexity 15:
+  # no allow-list, no file skips, no raising the limit. Rust: turbo-html2pdf's tools/cc-check
+  # installed from its home at a pinned rev (not copied here) over every tracked .rs file; JS:
+  # oxlint's `complexity` rule (.oxlintrc.complexity.json) over cli.js, index.js and harness/.
+  # A failing job's step summary lists every function over the limit so the fix is obvious.
   complexity-rust:
     name: complexity / rust (cc <= 15)
     runs-on: ubuntu-latest
-    continue-on-error: true
     env:
       CC_CHECK_REV: 923c89f791f3a89cb089a59626a25cef0a9cbd5f
     steps:
@@ -199,7 +203,7 @@ jobs:
       - name: cc-check --max 15 (every tracked .rs file)
         shell: bash  # -eo pipefail: tee must not mask the gate's exit code
         run: npm run -s complexity:rust 2>&1 | tee complexity.txt
-      - name: List the functions over the limit (refactor backlog)
+      - name: List the functions over the limit
         if: failure()
         run: |
           { echo '### Rust functions above cc 15'; echo '```'; grep 'cyclomatic complexity' complexity.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -207,7 +211,6 @@ jobs:
   complexity-js:
     name: complexity / js (cc <= 15)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -216,7 +219,7 @@ jobs:
       - name: oxlint complexity max 15 (cli.js, index.js, harness/)
         shell: bash  # -eo pipefail: tee must not mask the gate's exit code
         run: npm run -s complexity:js 2>&1 | tee complexity.txt
-      - name: List the functions over the limit (refactor backlog)
+      - name: List the functions over the limit
         if: failure()
         run: |
           { echo '### JS functions above cc 15'; echo '```'; grep 'complexity of' complexity.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

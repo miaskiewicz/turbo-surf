@@ -361,6 +361,15 @@ and `createdContextVerified` in its trace. Native uses a fresh independent jar. 
 ENID cache or import Chrome cookies; the wrapper also clears sidecar commands for every subprocess. Do not add cookie/profile
 imports or reuse a signed-in UI session. Consent dispatch is conditional; verify its204/cookie effects before search.
 
+**IP contamination between paired captures.** google.com rate-limits per source IP across cookie jars: an earlier Chrome SERP
+for the same query taints the native half of the same paired run and every subsequent paired run from the same IP, so a native
+/sorry429 inside a paired matrix does not prove a native rejection. Run **one** Chrome baseline on a fresh IP state (or cached
+oracle) to validate the control, then capture native with `--repeat N` on its own — do not loop paired captures as a quick
+probe. Record the Chrome baseline timestamp and IP state separately from the native captures; a paired run is only valid when
+Chrome's final capture also preserves its SERP (no /sorry, no throttle). The same holds for ambient user actions in the Chrome
+window during capture: any manual input into google.com from the host machine during the matrix contaminates both halves of
+later pairs — avoid interacting with the live Chrome window until the run exits.
+
 | Actual CLI option | Meaning/default |
 | --- | --- |
 | `--live`, `--binary`, `--out` | Explicit live opt-in, native executable, private capture directory. |

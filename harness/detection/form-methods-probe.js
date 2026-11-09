@@ -20,15 +20,9 @@
       button: host.querySelector("button"),
     };
   }
-  for (const [owner, method] of [
-    ["HTMLFormElement", "requestSubmit"],
-    ["HTMLFormElement", "submit"],
-    ["HTMLFormElement", "checkValidity"],
-    ["HTMLFormElement", "reportValidity"],
-    ["HTMLInputElement", "setCustomValidity"],
-  ]) {
+  const descriptorRow = (owner, method) => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis[owner].prototype, method);
-    result[owner + "." + method] = descriptor
+    return descriptor
       ? {
           length: descriptor.value.length,
           name: descriptor.value.name,
@@ -37,17 +31,27 @@
           configurable: descriptor.configurable,
         }
       : null;
-  }
-  for (const tag of ["input", "textarea", "select", "button", "fieldset", "object", "output"]) {
+  };
+  const controlRow = (tag) => {
     const control = document.createElement(tag);
-    result[tag] = [
+    return [
       control.willValidate,
       control.validationMessage,
       control.validity?.valid,
       control.checkValidity(),
       control.reportValidity(),
     ];
-  }
+  };
+  for (const [owner, method] of [
+    ["HTMLFormElement", "requestSubmit"],
+    ["HTMLFormElement", "submit"],
+    ["HTMLFormElement", "checkValidity"],
+    ["HTMLFormElement", "reportValidity"],
+    ["HTMLInputElement", "setCustomValidity"],
+  ])
+    result[owner + "." + method] = descriptorRow(owner, method);
+  for (const tag of ["input", "textarea", "select", "button", "fieldset", "object", "output"])
+    result[tag] = controlRow(tag);
   {
     const { form, input, host } = fixture("<input required><button>Send</button>");
     const events = [];
@@ -98,24 +102,13 @@
     ];
     host.remove();
   }
-  for (const kind of [
-    "omitted",
-    "undefined",
-    "null",
-    "button",
-    "input",
-    "foreign",
-    "non-submit",
-    "required",
-    "novalidate",
-    "formnovalidate",
-  ]) {
-    const f = fixture(
+  const requestFixture = (kind) =>
+    fixture(
       kind === "input"
         ? '<input type="submit" id="send">'
         : '<input required><button id="send">Send</button>',
     );
-    const log = [];
+  const listenRequest = (f, log) => {
     f.form.addEventListener("submit", (event) => {
       log.push({
         type: event.type,
@@ -133,6 +126,8 @@
         log.push({ type: "invalid", trusted: event.isTrusted });
         event.preventDefault();
       });
+  };
+  const configureRequest = (kind, f) => {
     if (f.input && kind !== "required" && kind !== "novalidate" && kind !== "formnovalidate")
       f.input.value = "ok";
     if (kind === "novalidate") f.form.noValidate = true;
@@ -143,21 +138,43 @@
       foreign.button.id = "foreign";
     }
     if (kind === "non-submit") f.button.type = "button";
-    result["request-" + kind] = [
-      attempt(() => {
-        if (kind === "omitted" || kind === "required" || kind === "novalidate")
-          return f.form.requestSubmit();
-        if (kind === "undefined") return f.form.requestSubmit(undefined);
-        if (kind === "null") return f.form.requestSubmit(null);
-        return f.form.requestSubmit(
-          kind === "input" ? f.input : kind === "foreign" ? foreign.button : f.button,
-        );
-      }),
-      log,
-    ];
+    return foreign;
+  };
+  const omittedSubmit = (f) => f.form.requestSubmit();
+  const requestSubmits = {
+    omitted: omittedSubmit,
+    required: omittedSubmit,
+    novalidate: omittedSubmit,
+    undefined: (f) => f.form.requestSubmit(undefined),
+    null: (f) => f.form.requestSubmit(null),
+    input: (f) => f.form.requestSubmit(f.input),
+    foreign: (f, foreign) => f.form.requestSubmit(foreign.button),
+  };
+  const buttonSubmit = (f) => f.form.requestSubmit(f.button);
+  const requestRow = (kind) => {
+    const f = requestFixture(kind);
+    const log = [];
+    listenRequest(f, log);
+    const foreign = configureRequest(kind, f);
+    const submit = requestSubmits[kind] ?? buttonSubmit;
+    const row = [attempt(() => submit(f, foreign)), log];
     f.host.remove();
     foreign?.host.remove();
-  }
+    return row;
+  };
+  for (const kind of [
+    "omitted",
+    "undefined",
+    "null",
+    "button",
+    "input",
+    "foreign",
+    "non-submit",
+    "required",
+    "novalidate",
+    "formnovalidate",
+  ])
+    result["request-" + kind] = requestRow(kind);
   const validityKeys = [
     "valueMissing",
     "typeMismatch",

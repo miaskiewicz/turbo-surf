@@ -367,6 +367,14 @@
       object("DOMRectReadOnly", prototypes.DOMRectReadOnly, x, y, width, height),
     configurable: true,
   });
+  // The binding's used-value hook (turbo-dom#316, #353): getComputedStyle's width / height
+  // and resolved `%` / `em` translates read live layout's box, [border-box width / height,
+  // content-box width / height, font size] in unzoomed CSS px, or null without a box.
+  define(ns, "layoutUsedSize", {
+    __proto__: null,
+    value: (element) => ops.op_live_element_used_size(element),
+    configurable: true,
+  });
   function rectList(rects) {
     const result = ops.op_geometry_object(rectListPrototype),
       items = [];

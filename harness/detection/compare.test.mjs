@@ -14,7 +14,47 @@ import {
   chromeSearchOutcome,
   interactionSummary,
   observationSummary,
+  compare,
 } from "./compare.mjs";
+
+test("comparison groups endpoints, nested frames and configured plan/policy agreement", () => {
+  const observation = {
+    policy: "fixed-deadline-before-enter",
+    triggerStepIndex: 1,
+    requestedMs: 5,
+  };
+  const steps = [{ focus: "#q" }];
+  const chrome = {
+    config: { steps },
+    observation,
+    pages: [{ phase: "search", childFrames: [{ interfaces: {} }], workers: [] }],
+  };
+  const native = { config: { steps }, observation: { ...observation }, pages: [{}] };
+  const result = compare(chrome, native, [{ url: "https://a.test/x?q=1", method: "GET" }], []);
+  assert.deepEqual(
+    result.network.map((row) => [row.chrome, row.native]),
+    [[1, 0]],
+  );
+  assert.equal(result.interaction.configuredPlansMatch, true);
+  assert.equal(result.observation.configuredPoliciesMatch, true);
+  const differing = compare(
+    { ...chrome, config: { steps: [] }, observation: { ...observation, requestedMs: 6 } },
+    native,
+  );
+  assert.equal(differing.interaction.configuredPlansMatch, false);
+  assert.equal(differing.observation.configuredPoliciesMatch, false);
+  const unconfigured = compare({}, {});
+  assert.equal(unconfigured.interaction.configuredPlansMatch, null);
+  assert.equal(unconfigured.observation.configuredPoliciesMatch, null);
+  assert.deepEqual(unconfigured.network, []);
+  assert.equal(
+    chromeSearchOutcome({
+      captureComplete: true,
+      pages: [{ status: 404, readyState: "complete", url: "https://a.test/search" }],
+    }).classification,
+    "not-accepted",
+  );
+});
 
 test("interaction evidence requires actual completed actions and type snapshots", () => {
   const trace = {

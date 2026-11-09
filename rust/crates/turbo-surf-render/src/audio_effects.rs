@@ -5,6 +5,63 @@ const QUANTUM: usize = 128;
 const MAX_CURVE: usize = 262_144;
 const MAX_DELAY_FRAMES: f64 = 1_000_000.0;
 
+const BIQUAD_SHAPES: [&str; 8] = [
+    "lowpass",
+    "highpass",
+    "bandpass",
+    "lowshelf",
+    "highshelf",
+    "peaking",
+    "notch",
+    "allpass",
+];
+
+/// The native kernel code, biquad shape and parameter count for an effect kind.
+fn effect_kind(kind: &str) -> Result<(u32, u32, usize), String> {
+    if let Some(shape) = kind.strip_prefix("biquad:") {
+        let shape = BIQUAD_SHAPES
+            .iter()
+            .position(|name| *name == shape)
+            .ok_or("Unsupported native biquad type")?;
+        return Ok((0, shape as u32, 4));
+    }
+    match kind {
+        "delay" => Ok((1, 0, 1)),
+        "panner" | "stereopanner" => Ok((2, 0, 1)),
+        "waveshaper" => Ok((3, 0, 0)),
+        _ => Err("Unsupported native audio effect".into()),
+    }
+}
+
+/// Validate parameters and curve; returns the delay maximum (1.0 for non-delays).
+fn validated_maximum(
+    code: u32,
+    count: usize,
+    sample_rate: f32,
+    params: &[f32],
+    curve: &[f32],
+) -> Result<f32, String> {
+    let valid_count = if code == 1 {
+        (1..=2).contains(&params.len())
+    } else {
+        params.len() == count
+    };
+    if !valid_count || params.iter().any(|value| !value.is_finite()) {
+        return Err("Invalid native effect parameters".into());
+    }
+    if curve.len() == 1 || curve.len() > MAX_CURVE {
+        return Err("Invalid or oversized native shaping curve".into());
+    }
+    if code != 1 {
+        return Ok(1.0);
+    }
+    let maximum = params.get(1).copied().unwrap_or(1.0);
+    if maximum <= 0.0 || f64::from(maximum) * f64::from(sample_rate) > MAX_DELAY_FRAMES {
+        return Err("Native delay allocation exceeds its resource budget".into());
+    }
+    Ok(maximum)
+}
+
 unsafe extern "C" {
     fn surf_audio_effect_new(
         kind: u32,
@@ -86,50 +143,8 @@ impl Effect {
         if !sample_rate.is_finite() || !(3000.0..=384_000.0).contains(&sample_rate) {
             return Err("Invalid native effect sample rate".into());
         }
-        let (code, shape, count) = if let Some(shape) = kind.strip_prefix("biquad:") {
-            let shape = [
-                "lowpass",
-                "highpass",
-                "bandpass",
-                "lowshelf",
-                "highshelf",
-                "peaking",
-                "notch",
-                "allpass",
-            ]
-            .iter()
-            .position(|name| *name == shape)
-            .ok_or("Unsupported native biquad type")?;
-            (0, shape as u32, 4)
-        } else {
-            match kind {
-                "delay" => (1, 0, 1),
-                "panner" | "stereopanner" => (2, 0, 1),
-                "waveshaper" => (3, 0, 0),
-                _ => return Err("Unsupported native audio effect".into()),
-            }
-        };
-        let valid_count = if code == 1 {
-            (1..=2).contains(&params.len())
-        } else {
-            params.len() == count
-        };
-        if !valid_count || params.iter().any(|value| !value.is_finite()) {
-            return Err("Invalid native effect parameters".into());
-        }
-        if curve.len() == 1 || curve.len() > MAX_CURVE {
-            return Err("Invalid or oversized native shaping curve".into());
-        }
-        let maximum = if code == 1 {
-            params.get(1).copied().unwrap_or(1.0)
-        } else {
-            1.0
-        };
-        if code == 1
-            && (maximum <= 0.0 || f64::from(maximum) * f64::from(sample_rate) > MAX_DELAY_FRAMES)
-        {
-            return Err("Native delay allocation exceeds its resource budget".into());
-        }
+        let (code, shape, count) = effect_kind(kind)?;
+        let maximum = validated_maximum(code, count, sample_rate, params, curve)?;
         // The kernel's constructor copies the curve before this borrow ends.
         let native = NonNull::new(unsafe {
             surf_audio_effect_new(

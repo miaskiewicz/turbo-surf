@@ -21,9 +21,16 @@ async fn expression_waits_for_native_crypto_and_virtual_timers_without_a_global_
     page.close();
 }
 
+// A plain `Promise.reject(...)` settles on the microtask queue; the awaiter
+// sees the rejection once that queue drains. The eval-expression budget bounds
+// how long we wait for that drain, so the budget must be long enough that a
+// loaded CI runner cannot exhaust it before the rejection surfaces. The
+// matching "budget is enforced" case is covered by the deterministic runaway
+// microtask test below — kept separate so one test asserts "rejection reported"
+// and the other "budget enforced", with no shared timing between them.
 #[tokio::test(flavor = "current_thread")]
-async fn expression_rejection_and_runaway_microtasks_are_bounded_and_leave_the_session_usable() {
-    let mut page = PageSession::open("<body></body>", "https://budget.test/", "", "", 100)
+async fn expression_rejection_surfaces_the_underlying_error() {
+    let mut page = PageSession::open("<body></body>", "https://budget.test/", "", "", 5000)
         .await
         .unwrap();
     assert!(page
@@ -31,6 +38,14 @@ async fn expression_rejection_and_runaway_microtasks_are_bounded_and_leave_the_s
         .await
         .unwrap_err()
         .contains("collector failed"));
+    assert_eq!(page.eval_expression("'alive'").await.unwrap(), "alive");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn expression_runaway_microtasks_hit_the_budget_and_leave_the_session_usable() {
+    let mut page = PageSession::open("<body></body>", "https://budget.test/", "", "", 100)
+        .await
+        .unwrap();
     let failure = page
         .eval_expression(
             "Promise.resolve().then(function repeat(){return Promise.resolve().then(repeat)})",

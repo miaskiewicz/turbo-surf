@@ -13036,33 +13036,16 @@ __G.domSig = (() => {
   };
   wrapSrcSetter(Media);
   wrapSrcSetter(Source);
-  const Element = globalThis.Element;
-  const nativeSetAttribute = Element && Element.prototype && Element.prototype.setAttribute;
-  const nativeSetAttributeNS = Element && Element.prototype && Element.prototype.setAttributeNS;
-  const needsCheck = (receiver) =>
-    receiver instanceof Media || (Source && receiver instanceof Source);
-  if (typeof nativeSetAttribute === "function") {
-    try {
-      Object.defineProperty(Element.prototype, "setAttribute", {
-        configurable: true, writable: true,
-        value: function setAttribute(name, value) {
-          if (needsCheck(this) && typeof name === "string" && name.toLowerCase() === "src") check(value);
-          return nativeSetAttribute.call(this, name, value);
-        },
-      });
-    } catch (_e) {}
-  }
-  if (typeof nativeSetAttributeNS === "function") {
-    try {
-      Object.defineProperty(Element.prototype, "setAttributeNS", {
-        configurable: true, writable: true,
-        value: function setAttributeNS(ns, name, value) {
-          if (needsCheck(this) && typeof name === "string" && name.toLowerCase() === "src") check(value);
-          return nativeSetAttributeNS.call(this, ns, name, value);
-        },
-      });
-    } catch (_e) {}
-  }
+  // NOTE: Element.prototype.setAttribute / setAttributeNS used to be wrapped
+  // here too (R3) to cover `elem.setAttribute("src", ...)` on media/source
+  // receivers. The wrap routed every DOM attribute mutation across every
+  // element through a JS trampoline, which both perturbed script integrity
+  // error ordering in resource_integrity.rs and blew the session budget in
+  // child_frame_form_targets.rs. Dropped for v0.8.1; the reflected-src setter
+  // wrap above still covers `elem.src = "..."` assignments, which is Chrome
+  // 156's resource-selection trigger. Follow-up (v0.8.2): specialize a wrap
+  // per HTMLMediaElement / HTMLSourceElement subclass so only those receivers
+  // pay the per-call cost and the global attribute path stays untouched.
 })();
 
 // Web-IDL functions are embedded through V8 FunctionTemplates. Keep the

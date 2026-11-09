@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2669,7 +2669,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4056,7 +4056,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4427,7 +4427,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5820,7 +5820,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom"
 version = "0.8.1"
-source = "git+https://github.com/miaskiewicz/turbo-dom?branch=release%2F0.8.1#322286f9c8553834e55f3554ba9f0d29e2ff8977"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a85b07a24b0fc737d71f3222b2a44142633a2f8f4e496247fc86f20600e91b"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5835,7 +5836,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom-browser-env"
 version = "0.8.1"
-source = "git+https://github.com/miaskiewicz/turbo-dom?branch=release%2F0.8.1#322286f9c8553834e55f3554ba9f0d29e2ff8977"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84aebc98dac9d156c4d40dd65993b73b375a4e2318b38bcf21e8bac2d09492c5"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5853,7 +5855,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom-layout"
 version = "0.8.1"
-source = "git+https://github.com/miaskiewicz/turbo-dom?branch=release%2F0.8.1#322286f9c8553834e55f3554ba9f0d29e2ff8977"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d385b1084483136b82b326a9e687ff984c454ab45267d49b431903c64a7ea52"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5875,7 +5878,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom-raster"
 version = "0.8.1"
-source = "git+https://github.com/miaskiewicz/turbo-dom?branch=release%2F0.8.1#322286f9c8553834e55f3554ba9f0d29e2ff8977"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3727314fdbb98c4bdc662cc295044e39d8c9a71a8a3508f2d9e8d91f4caec2c"
 dependencies = [
  "base64",
  "core-foundation",
@@ -6851,7 +6855,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

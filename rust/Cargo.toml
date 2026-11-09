@@ -25,16 +25,5 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 opt-level = 3
 lto = "thin"
 
-# turbo-dom 0.8.0 (and turbo-dom-v8 150.4.1) are on crates.io — the member
-# crates depend on `"0.8.0"` / `"150.4"` directly.
-#
-# v0.8.1 prep: pin the four turbo-dom crates to the public release/0.8.1
-# branch so the 0.8.1 fix set (incl. #395 / #417) is exercised before
-# turbo-dom 0.8.1 is cut on crates.io. Replace this block with the
-# crates.io "0.8.1" bump once turbo-dom publishes. turbo-dom-v8 150.4.x
-# stays on crates.io.
-[patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.1" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.1" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.1" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.1" }
+# turbo-dom 0.8.1 is on crates.io — the member crates depend on `"0.8.1"`
+# (parser alias on `"0.8"`) / `"150.4"` directly, no patch bridge needed.

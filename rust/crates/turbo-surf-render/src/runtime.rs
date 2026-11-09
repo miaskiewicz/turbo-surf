@@ -788,32 +788,44 @@ fn queue_csp_report<'s>(
     if records.is_empty() || scope.is_execution_terminating() {
         return;
     }
-    let (mut source, mut line, mut column) = (String::new(), 0, 0);
-    if parser.is_none() {
-        if let Some(trace) = v8::StackTrace::current_stack_trace(scope, 32) {
-            for index in 0..trace.get_frame_count() {
-                let Some(frame) = trace.get_frame(scope, index) else {
-                    continue;
-                };
-                let Some(name) = frame.get_script_name_or_source_url(scope) else {
-                    continue;
-                };
-                let name = name.to_rust_string_lossy(scope);
-                if name.starts_with("<") || name.is_empty() {
-                    continue;
-                }
-                source = name;
-                line = frame.get_line_number();
-                column = frame.get_column();
-                break;
-            }
+    let url = csp_document_url(scope, context);
+    let (source, line, column) = csp_callsite(scope, parser, kind, &url);
+    let response_metadata = csp_response_metadata(context);
+    let ctx = CspEmitContext {
+        kind,
+        blocked,
+        disposition,
+        source: &source,
+        line,
+        column,
+        url: &url,
+        response_metadata: &response_metadata,
+        sample,
+        parser,
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    for record in records {
+        if !emit_csp_record(scope, context, element, &ctx, &record) {
+            return;
         }
     }
-    if let Some(position) = parser.and_then(|metadata| metadata.position) {
-        line = position.line;
-        column = position.column;
-    }
-    let url = context.get_slot::<FrameDocumentLocation>().map_or_else(
+}
+
+struct CspEmitContext<'a> {
+    kind: &'a str,
+    blocked: &'a str,
+    disposition: &'a str,
+    source: &'a str,
+    line: usize,
+    column: usize,
+    url: &'a str,
+    response_metadata: &'a crate::DocumentResponseMetadata,
+    sample: Option<&'a [u16]>,
+    parser: Option<CspParserLocation>,
+}
+
+fn csp_document_url(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) -> String {
+    context.get_slot::<FrameDocumentLocation>().map_or_else(
         || {
             JsRuntime::op_state_from(scope)
                 .borrow()
@@ -822,87 +834,131 @@ fn queue_csp_report<'s>(
                 .clone()
         },
         |value| value.0.clone(),
-    );
+    )
+}
+
+fn csp_response_metadata(context: v8::Local<v8::Context>) -> crate::DocumentResponseMetadata {
+    context
+        .get_slot::<CspHandle>()
+        .map_or_else(crate::DocumentResponseMetadata::default, |handle| {
+            handle.response_metadata.borrow().clone()
+        })
+}
+
+fn csp_callsite(
+    scope: &mut v8::PinScope,
+    parser: Option<CspParserLocation>,
+    kind: &str,
+    url: &str,
+) -> (String, usize, usize) {
+    let (mut source, mut line, mut column) = if parser.is_none() {
+        stack_trace_callsite(scope).unwrap_or_default()
+    } else {
+        (String::new(), 0, 0)
+    };
+    if let Some(position) = parser.and_then(|metadata| metadata.position) {
+        line = position.line;
+        column = position.column;
+    }
     if source.is_empty() {
-        source = url::Url::parse(&url)
+        source = url::Url::parse(url)
             .map(|mut url| {
                 url.set_query(None);
                 url.set_fragment(None);
                 url.to_string()
             })
-            .unwrap_or_else(|_| url.clone());
+            .unwrap_or_else(|_| url.to_string());
     }
     if parser.is_some_and(|metadata| !metadata.owner_window) || kind == "img-src" {
         source.clear();
         line = 0;
         column = 0;
     }
-    let response_metadata = context
-        .get_slot::<CspHandle>()
-        .map_or_else(crate::DocumentResponseMetadata::default, |handle| {
-            handle.response_metadata.borrow().clone()
-        });
-    let scope = &mut v8::ContextScope::new(scope, context);
-    for record in records {
-        let original = &record.original;
-        let report_sample = record.sample;
-        let sample_units = if report_sample {
-            sample.unwrap_or_default()
-        } else {
-            &[]
+    (source, line, column)
+}
+
+fn stack_trace_callsite(scope: &mut v8::PinScope) -> Option<(String, usize, usize)> {
+    let trace = v8::StackTrace::current_stack_trace(scope, 32)?;
+    for index in 0..trace.get_frame_count() {
+        let Some(frame) = trace.get_frame(scope, index) else {
+            continue;
         };
-        let metadata = serde_json::json!({"documentURI":crate::document_response::report_url(&url),"referrer":response_metadata.referrer,"blockedURI":blocked,"violatedDirective":kind,"effectiveDirective":kind,"originalPolicy":original,"disposition":disposition,"sourceFile":source,"statusCode":response_metadata.status,"lineNumber":line,"columnNumber":column,"sample":""});
-        let report_payload = metadata.clone();
-        let bytes = metadata
-            .to_string()
-            .len()
-            .saturating_mul(2)
-            .saturating_add(sample_units.len().saturating_mul(2))
-            .saturating_add(104);
-        let Some(json) = v8::String::new(scope, &metadata.to_string()) else {
-            return;
+        let Some(name) = frame.get_script_name_or_source_url(scope) else {
+            continue;
         };
-        let Some(metadata) = v8::json::parse(scope, json) else {
-            return;
-        };
-        let Some(sample) =
-            v8::String::new_from_two_byte(scope, sample_units, v8::NewStringType::Normal)
-        else {
-            return;
-        };
-        let key = v8::String::new(scope, "sample").unwrap();
-        let metadata = v8::Local::<v8::Object>::try_from(metadata).unwrap();
-        metadata.set(scope, key.into(), sample.into());
-        let metadata: v8::Local<v8::Value> = metadata.into();
-        let accepted = call_frame_helper(scope, "queueCspViolation", &[element.into(), metadata])
-            .map_or_else(
-                || {
-                    enqueue_csp_bootstrap(
-                        scope,
-                        context,
-                        element,
-                        metadata,
-                        bytes,
-                        parser
-                            .and_then(|metadata| metadata.position)
-                            .map(|position| position.utf16_offset),
-                    )
-                },
-                |value| !value.is_false(),
-            );
-        if !accepted {
-            scope.terminate_execution();
-            return;
+        let name = name.to_rust_string_lossy(scope);
+        if name.starts_with("<") || name.is_empty() {
+            continue;
         }
-        send_csp_report(
-            scope,
-            context,
-            &url,
-            &record.destination,
-            &report_payload,
-            sample_units,
-        );
+        return Some((name, frame.get_line_number(), frame.get_column()));
     }
+    None
+}
+
+fn emit_csp_record<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    element: v8::Local<'s, v8::Object>,
+    ctx: &CspEmitContext<'_>,
+    record: &crate::csp::ReportRecord,
+) -> bool {
+    let sample_units: &[u16] = if record.sample {
+        ctx.sample.unwrap_or_default()
+    } else {
+        &[]
+    };
+    let metadata_value = serde_json::json!({"documentURI":crate::document_response::report_url(ctx.url),"referrer":ctx.response_metadata.referrer,"blockedURI":ctx.blocked,"violatedDirective":ctx.kind,"effectiveDirective":ctx.kind,"originalPolicy":record.original,"disposition":ctx.disposition,"sourceFile":ctx.source,"statusCode":ctx.response_metadata.status,"lineNumber":ctx.line,"columnNumber":ctx.column,"sample":""});
+    let report_payload = metadata_value.clone();
+    let bytes = metadata_value
+        .to_string()
+        .len()
+        .saturating_mul(2)
+        .saturating_add(sample_units.len().saturating_mul(2))
+        .saturating_add(104);
+    let Some(metadata) = build_csp_metadata_value(scope, &metadata_value, sample_units) else {
+        return false;
+    };
+    let accepted = call_frame_helper(scope, "queueCspViolation", &[element.into(), metadata])
+        .map_or_else(
+            || {
+                enqueue_csp_bootstrap(
+                    scope,
+                    context,
+                    element,
+                    metadata,
+                    bytes,
+                    ctx.parser.and_then(|m| m.position).map(|p| p.utf16_offset),
+                )
+            },
+            |value| !value.is_false(),
+        );
+    if !accepted {
+        scope.terminate_execution();
+        return false;
+    }
+    send_csp_report(
+        scope,
+        context,
+        ctx.url,
+        &record.destination,
+        &report_payload,
+        sample_units,
+    );
+    true
+}
+
+fn build_csp_metadata_value<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    metadata: &serde_json::Value,
+    sample_units: &[u16],
+) -> Option<v8::Local<'s, v8::Value>> {
+    let json = v8::String::new(scope, &metadata.to_string())?;
+    let parsed = v8::json::parse(scope, json)?;
+    let sample = v8::String::new_from_two_byte(scope, sample_units, v8::NewStringType::Normal)?;
+    let key = v8::String::new(scope, "sample").unwrap();
+    let obj = v8::Local::<v8::Object>::try_from(parsed).unwrap();
+    obj.set(scope, key.into(), sample.into());
+    Some(obj.into())
 }
 
 fn send_csp_report<'s>(

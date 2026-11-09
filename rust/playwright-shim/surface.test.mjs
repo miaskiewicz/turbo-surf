@@ -801,12 +801,9 @@ test("honest throws: pixel / input / network-interception", async () => {
   // honest throws.
   assert.equal(await p.locator("#go").boundingBox(), null);
   await assert.rejects(() => p.locator("#name").selectText(), /input/);
-  // page.route(fulfill) + page.routeFromHAR (HAR playback) are supported (#220);
-  // context.route still isn't.
-  await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
-  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
-  // exposeFunction / exposeBinding became real features in #226 — covered below.
-  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
+  // page.route(fulfill) + page.routeFromHAR (HAR playback) became real in #220;
+  // exposeFunction / exposeBinding became real in #226. context.route still
+  // isn't — covered elsewhere. Nothing left to assert as an honest throw here.
 });
 
 // --- waitForResponse staleness (Playwright semantics) ---------------------

@@ -91,48 +91,23 @@ async fn indexeddb_matches_chrome156() {
 /// Measured Chrome behavior the engine does not reproduce yet, as `path = engine value`
 /// (#193, split from #148; pinned exactly so a fix or a new divergence fails here).
 ///
-/// `/path`: Chrome builds one event path request -> transaction -> database, with capture
-/// listeners on the database and transaction first (phase 1), and one event object. The
-/// binding's dispatch has no "get the parent" for non-node targets, so surf fires a fresh
-/// event at each target in turn and capture listeners there run in the bubbling phase.
-/// `/microtasks`: Chrome checkpoints microtasks after every listener; the binding's
-/// dispatcher has no per-listener host checkpoint (the same gap as #136, tracked
-/// in the binding as turbo-dom#382), so surf checkpoints after each target. `/deactivation`: Chrome deactivates a new transaction
-/// at the end of its task; surf does so in a 0 ms timer, after timers queued earlier.
+/// Items 1 (`/path/full` + `/microtasks`) and 2 (per-listener checkpoint) landed with
+/// turbo-dom#381/#382 and surf's indexeddb.js switch to the engine-walked event path
+/// (parent hook on request -> transaction -> database; one event; per-listener
+/// microtask checkpoint from the binding).
+///
+/// `/deactivation`: Chrome deactivates a new transaction at the end of its task, so a
+/// timer queued earlier in that task sees `TransactionInactiveError`; surf still does
+/// so in a 0 ms timer. Blocked on turbo-dom#383 (end-of-task / microtasks-completed
+/// callback; needs a new rusty_v8 binding, deferred to v0.9.0).
+/// `/path/stopped/log`, `/path/stopped/settled`: when a capture listener on an ancestor
+/// calls `stopPropagation()`, Chrome stops before entering AT_TARGET on the target;
+/// `dispatchMulti` in turbo-dom#381 only short-circuits AT_TARGET on `stopImmediate`,
+/// so the request's `error` listeners still run and `preventDefault()` keeps the
+/// transaction from aborting. Filed as turbo-dom#433.
 const EVENTS_KNOWN_GAPS: &[&str] = &[
     "/deactivation/1/1 = \"ok\"",
-    "/microtasks/1 = \"s2\"",
-    "/microtasks/2 = [\"s1-micro\",\"ok\"]",
-    "/microtasks/5 = \"e2\"",
-    "/microtasks/6 = [\"e1-micro\",\"ok\"]",
-    "/path/full/events = 3",
-    "/path/full/log/0/0 = \"req\"",
-    "/path/full/log/0/1 = \"bubble\"",
-    "/path/full/log/0/2 = 2",
-    "/path/full/log/0/3 = \"req\"",
-    "/path/full/log/0/6/0 = \"req\"",
-    "/path/full/log/1/0 = \"req\"",
-    "/path/full/log/1/2 = 2",
-    "/path/full/log/1/3 = \"req\"",
-    "/path/full/log/1/6/0 = \"req\"",
-    "/path/full/log/2/0 = \"tx\"",
-    "/path/full/log/2/2 = 3",
-    "/path/full/log/2/3 = \"tx\"",
-    "/path/full/log/2/5 = 1",
-    "/path/full/log/2/6/0 = \"tx\"",
-    "/path/full/log/3/0 = \"tx\"",
-    "/path/full/log/3/2 = 3",
-    "/path/full/log/3/3 = \"tx\"",
-    "/path/full/log/3/5 = 1",
-    "/path/full/log/3/6/0 = \"tx\"",
-    "/path/full/log/4/0 = \"db\"",
-    "/path/full/log/4/3 = \"db\"",
-    "/path/full/log/4/5 = 2",
-    "/path/full/log/4/6/0 = \"db\"",
-    "/path/full/log/5/1 = \"capture\"",
-    "/path/full/log/5/5 = 2",
-    "/path/stopped/events = 3",
-    "/path/stopped/log = [[\"req\",\"bubble\",2,\"req\",\"req\",0,[\"req\"]],[\"req\",\"capture\",2,\"req\",\"req\",0,[\"req\"]],[\"tx\",\"bubble\",3,\"tx\",\"req\",1,[\"tx\"]],[\"tx\",\"capture\",3,\"tx\",\"req\",1,[\"tx\"]],[\"db\",\"bubble\",3,\"db\",\"req\",2,[\"db\"]],[\"db\",\"capture\",3,\"db\",\"req\",2,[\"db\"]]]",
+    "/path/stopped/log = [[\"db\",\"capture\",1,\"db\",\"req\",0,[\"db\"]],[\"tx\",\"capture\",1,\"tx\",\"req\",0,[\"tx\"]],[\"req\",\"bubble\",2,\"req\",\"req\",0,[\"req\"]],[\"req\",\"capture\",2,\"req\",\"req\",0,[\"req\"]]]",
     "/path/stopped/settled = \"complete\"",
 ];
 

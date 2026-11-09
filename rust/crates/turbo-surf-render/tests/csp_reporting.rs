@@ -96,58 +96,16 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
 ) {
     let mut raw = Vec::new();
     let mut byte = [0u8; 1024];
-    let end = loop {
-        let Ok(n) = stream.read(&mut byte).await else {
-            return;
-        };
-        if n == 0 {
-            return;
-        }
-        raw.extend(&byte[..n]);
-        if raw.len() > 1024 * 1024 {
-            return;
-        }
-        if let Some(end) = raw.windows(4).position(|v| v == b"\r\n\r\n") {
-            break end + 4;
-        }
+    let Some(end) = read_request_headers(&mut stream, &mut byte, &mut raw).await else {
+        return;
     };
-    let text = String::from_utf8_lossy(&raw[..end]);
-    let mut lines = text.split("\r\n");
-    let mut first = lines.next().unwrap().split_whitespace();
-    let method = first.next().unwrap().to_string();
-    let path = first.next().unwrap().to_string();
-    let fields: BTreeMap<String, String> = lines
-        .filter_map(|line| line.split_once(':'))
-        .map(|(key, value)| (key.to_ascii_lowercase(), value.trim().to_string()))
-        .collect();
-    let length = fields
-        .get("content-length")
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(0);
-    while raw.len() < end + length {
-        let Ok(n) = stream.read(&mut byte).await else {
-            return;
-        };
-        if n == 0 {
-            return;
-        }
-        raw.extend(&byte[..n]);
+    let (method, path, fields, length) = parse_request_head(&raw[..end]);
+    if !fill_body(&mut stream, &mut byte, &mut raw, end + length).await {
+        return;
     }
     let url = url::Url::parse(&format!("http://localhost{path}")).unwrap();
-    let id = url
-        .query_pairs()
-        .find(|(key, _)| key == "case")
-        .and_then(|(_, value)| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let is_report = [
-        "/report",
-        "/fallback",
-        "/hold-report",
-        "/redirect302",
-        "/redirect307",
-        "/redirect-target",
-    ]
-    .contains(&url.path());
+    let id = case_id(&url);
+    let is_report = REPORT_PATHS.contains(&url.path());
     if is_report {
         rows.lock().unwrap().push(Wire {
             path: path.clone(),
@@ -161,39 +119,131 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
         closed.lock().unwrap().push(path);
         return;
     }
-    let mut extra = String::new();
-    let status;
-    let body;
-    if method == "OPTIONS" {
-        status = 204;
-        body = String::new();
-        extra.push_str("Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST\r\nAccess-Control-Allow-Headers: content-type\r\n");
-    } else if url.path() == "/redirect302" || url.path() == "/redirect307" {
-        status = if url.path() == "/redirect302" {
-            302
-        } else {
-            307
-        };
-        body = String::new();
-        extra.push_str(&format!("Location: /redirect-target?case={id}\r\n"));
-    } else if is_report {
-        status = 204;
-        body = String::new();
-        extra.push_str(&format!("Access-Control-Allow-Origin: *\r\nSet-Cookie: report_response={id}; Path=/; SameSite=Lax\r\n"));
-    } else {
-        status = 200;
-        body = html(&cases[id], id, port, tls);
-        extra.push_str("Content-Type: text/html\r\n");
-        for (name, value) in headers(&cases[id], id, port, tls) {
-            extra.push_str(&format!("{name}: {value}\r\n"));
-        }
-    }
+    let (status, body, extra) =
+        build_response(&method, &url, is_report, id, &cases, port, tls);
     let response = format!(
         "HTTP/1.1 {status} Result\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
         body.len()
     );
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
+}
+
+const REPORT_PATHS: [&str; 6] = [
+    "/report",
+    "/fallback",
+    "/hold-report",
+    "/redirect302",
+    "/redirect307",
+    "/redirect-target",
+];
+
+async fn read_request_headers<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    byte: &mut [u8; 1024],
+    raw: &mut Vec<u8>,
+) -> Option<usize> {
+    loop {
+        let n = stream.read(byte).await.ok()?;
+        if n == 0 {
+            return None;
+        }
+        raw.extend(&byte[..n]);
+        if raw.len() > 1024 * 1024 {
+            return None;
+        }
+        if let Some(end) = raw.windows(4).position(|v| v == b"\r\n\r\n") {
+            return Some(end + 4);
+        }
+    }
+}
+
+fn parse_request_head(head: &[u8]) -> (String, String, BTreeMap<String, String>, usize) {
+    let text = String::from_utf8_lossy(head);
+    let mut lines = text.split("\r\n");
+    let mut first = lines.next().unwrap().split_whitespace();
+    let method = first.next().unwrap().to_string();
+    let path = first.next().unwrap().to_string();
+    let fields: BTreeMap<String, String> = lines
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.trim().to_string()))
+        .collect();
+    let length = fields
+        .get("content-length")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    (method, path, fields, length)
+}
+
+async fn fill_body<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    byte: &mut [u8; 1024],
+    raw: &mut Vec<u8>,
+    target: usize,
+) -> bool {
+    while raw.len() < target {
+        let Ok(n) = stream.read(byte).await else {
+            return false;
+        };
+        if n == 0 {
+            return false;
+        }
+        raw.extend(&byte[..n]);
+    }
+    true
+}
+
+fn case_id(url: &url::Url) -> usize {
+    url.query_pairs()
+        .find(|(key, _)| key == "case")
+        .and_then(|(_, value)| value.parse::<usize>().ok())
+        .unwrap_or(0)
+}
+
+fn build_response(
+    method: &str,
+    url: &url::Url,
+    is_report: bool,
+    id: usize,
+    cases: &[Value],
+    port: u16,
+    tls: bool,
+) -> (u16, String, String) {
+    if method == "OPTIONS" {
+        return (
+            204,
+            String::new(),
+            "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST\r\nAccess-Control-Allow-Headers: content-type\r\n".into(),
+        );
+    }
+    if let Some(status) = redirect_status(url.path()) {
+        return (
+            status,
+            String::new(),
+            format!("Location: /redirect-target?case={id}\r\n"),
+        );
+    }
+    if is_report {
+        return (
+            204,
+            String::new(),
+            format!("Access-Control-Allow-Origin: *\r\nSet-Cookie: report_response={id}; Path=/; SameSite=Lax\r\n"),
+        );
+    }
+    let body = html(&cases[id], id, port, tls);
+    let mut extra = String::from("Content-Type: text/html\r\n");
+    for (name, value) in headers(&cases[id], id, port, tls) {
+        extra.push_str(&format!("{name}: {value}\r\n"));
+    }
+    (200, body, extra)
+}
+
+fn redirect_status(path: &str) -> Option<u16> {
+    match path {
+        "/redirect302" => Some(302),
+        "/redirect307" => Some(307),
+        _ => None,
+    }
 }
 impl Server {
     async fn start(tls: bool) -> Self {

@@ -20,7 +20,13 @@
     "THIRD_PARTY_NOTICES.md",
     "README.md",
     "CHANGELOG.md",
-    "rust/playwright-shim"
+    "rust/playwright-shim",
+    "rust/crates/turbo-surf-napi/index.js",
+    "rust/crates/turbo-surf-napi/index.d.ts",
+    "rust/crates/turbo-surf-napi/package.json",
+    "rust/crates/turbo-surf-napi/LICENSE",
+    "rust/crates/turbo-surf-napi/README.md",
+    "rust/crates/turbo-surf-napi/turbo-surf.*.node"
   ],
   "scripts": {
     "lint": "oxlint",

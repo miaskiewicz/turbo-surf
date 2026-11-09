@@ -14,8 +14,10 @@ The `v*` tag fires npm + crates; the **PyPI wheel ships on a SEPARATE `pyv*` tag
 (e.g. `pyv0.6.0`) so it never fires on the npm/crates release. A tagged PyPI
 release fails if `PYPI_TOKEN` is absent; manual dispatch builds and tests without
 publishing. Cut BOTH tags at the same version for a full release.
-(The `turbo-surf-napi` cdylib + `turbo-surf-transform` crate are not published — napi
-is dev/harness-only now.)
+(The `turbo-surf-napi` + `turbo-surf-transform` crates are not published to
+crates.io. The napi addon ships as a prebuilt `.node` per platform **inside the
+same `turbo-surf` npm tarball** — see "napi addon in the npm tarball" below —
+so the playwright-shim works out of the box after `npm install turbo-surf`.)
 
 ## The one rule: every version string must match the tag
 
@@ -213,10 +215,28 @@ can't be reused) — only cut a tag when a release is intended.
 
 ## Notes
 
-- The launcher's `files` allowlist ships `bin/` (the per-platform binaries CI
-  builds), `cli.js`, `index.js`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`,
-  `CHANGELOG.md`. Platform binary artifacts also carry both license files. `rust/`,
-  `harness/`, `docs/` are excluded. Verify with `npm pack --dry-run`.
+- The launcher's `files` allowlist ships `bin/` (the per-platform MCP binaries
+  CI builds), `cli.js`, `index.js`, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+  `README.md`, `CHANGELOG.md`, the `rust/playwright-shim/` tree, and the napi
+  loader + its per-platform `.node` addons under `rust/crates/turbo-surf-napi/`
+  (`index.js`, `index.d.ts`, `package.json`, `LICENSE`, `README.md`,
+  `turbo-surf.*.node`). Platform binary artifacts also carry both license files.
+  `rust/` (other than those two subtrees), `harness/`, `docs/` are excluded.
+  Verify with `npm pack --dry-run`.
+
+### napi addon in the npm tarball (turbo-surf#288)
+
+Each `build` matrix host compiles the `turbo-surf-napi` cdylib alongside the
+MCP binary (`cargo build -p turbo-surf-mcp -p turbo-surf-napi`) and stages it as
+`turbo-surf.<napi-triple>.node` (darwin-arm64, linux-x64-gnu, linux-arm64-gnu,
+win32-x64-msvc — matching the suffix map in
+`rust/crates/turbo-surf-napi/index.js`). The `publish` job collects those four
+`.node` files into `rust/crates/turbo-surf-napi/` before `npm pack`, and the
+pack-time verification requires all four to be present in the tarball (exactly,
+no extras). This means `npm install turbo-surf@X.Y.Z` on any shipped platform
+gives a working playwright-shim without a local turbo-surf checkout and without
+`TURBO_SURF_NAPI_PATH` — the shim's `require("../crates/turbo-surf-napi/index.js")`
+resolves inside the installed package and the loader picks the matching `.node`.
 - `cli.js`/`index.js` resolve `bin/turbo-surf-mcp-<platform>-<arch>` at runtime
   (musl-detected on Linux), with a dev fallback to a local
   `rust/target/release/turbo-surf-mcp` build.

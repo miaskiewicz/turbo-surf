@@ -1630,6 +1630,35 @@ test("page.exposeBinding receives a source record with the page + context", asyn
   }
 });
 
+// turbo-surf#285: init scripts run per-frame, so an iframe realm keeps its
+// own __tsExpose.q. The drain must walk the frame tree or iframe-scoped
+// binding calls are lost.
+test("page.exposeBinding fires when called from inside an iframe", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    res.writeHead(200, { "content-type": "text/html" });
+    if (url.pathname === "/child") {
+      res.end(`<body><script>globalThis.__childBind("from-iframe", 42);</script></body>`);
+      return;
+    }
+    res.end(`<body><iframe src="/child"></iframe></body>`);
+  });
+  const base = await listen(server);
+  const p = newPage();
+  const seen = [];
+  await p.exposeBinding("__childBind", (_source, label, n) => {
+    seen.push({ label, n });
+  });
+  try {
+    await p.goto(`${base}/`, { waitUntil: "networkidle" });
+    assert.deepEqual(seen, [{ label: "from-iframe", n: 42 }]);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // Wiring an expose AFTER the live session is up: the shim re-defines the
 // binding in the running isolate so the current page can call it without a
 // reload. Covers the "spec adds instrumentation between goto and the action"

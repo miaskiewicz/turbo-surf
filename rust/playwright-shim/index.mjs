@@ -1329,9 +1329,34 @@ class Page {
     if (handlers.size === 0) return;
     this._draining = true;
     try {
+      // Init scripts run per-frame, so each iframe realm keeps its own
+      // __tsExpose.q. Walk the frame tree and splice every realm's queue so
+      // iframe-scoped binding calls aren't lost (turbo-surf#285).
       const raw = await native.liveEvalEngine(
         this._session,
-        "globalThis.__RESULT = JSON.stringify((globalThis.__tsExpose && globalThis.__tsExpose.q.splice(0)) || []);",
+        `(() => {
+          const out = [];
+          const seen = new Set();
+          const walk = (w) => {
+            if (!w || seen.has(w)) return;
+            seen.add(w);
+            try {
+              const bag = w.__tsExpose;
+              if (bag && bag.q && bag.q.length) {
+                for (const c of bag.q.splice(0)) out.push(c);
+              }
+            } catch (_e) {}
+            let n = 0;
+            try { n = w.frames ? w.frames.length : 0; } catch (_e) { n = 0; }
+            for (let i = 0; i < n; i++) {
+              let child = null;
+              try { child = w.frames[i]; } catch (_e) { child = null; }
+              if (child) walk(child);
+            }
+          };
+          walk(globalThis);
+          globalThis.__RESULT = JSON.stringify(out);
+        })();`,
       );
       if (!raw) return;
       let calls;

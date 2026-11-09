@@ -100,16 +100,10 @@ async fn indexeddb_matches_chrome156() {
 /// timer queued earlier in that task sees `TransactionInactiveError`; surf still does
 /// so in a 0 ms timer. Blocked on turbo-dom#383 (end-of-task / microtasks-completed
 /// callback; needs a new rusty_v8 binding, deferred to v0.9.0).
-/// `/path/stopped/log`, `/path/stopped/settled`: when a capture listener on an ancestor
-/// calls `stopPropagation()`, Chrome stops before entering AT_TARGET on the target;
-/// `dispatchMulti` in turbo-dom#381 only short-circuits AT_TARGET on `stopImmediate`,
-/// so the request's `error` listeners still run and `preventDefault()` keeps the
-/// transaction from aborting. Filed as turbo-dom#433.
-const EVENTS_KNOWN_GAPS: &[&str] = &[
-    "/deactivation/1/1 = \"ok\"",
-    "/path/stopped/log = [[\"db\",\"capture\",1,\"db\",\"req\",0,[\"db\"]],[\"tx\",\"capture\",1,\"tx\",\"req\",0,[\"tx\"]],[\"req\",\"bubble\",2,\"req\",\"req\",0,[\"req\"]],[\"req\",\"capture\",2,\"req\",\"req\",0,[\"req\"]]]",
-    "/path/stopped/settled = \"complete\"",
-];
+/// `/path/stopped/log` + `/path/stopped/settled` closed by turbo-dom#433 on
+/// release/0.8.2 (dispatchMulti now short-circuits AT_TARGET on stopPropagation too,
+/// not just stopImmediate). `/deactivation` remains blocked on turbo-dom#383.
+const EVENTS_KNOWN_GAPS: &[&str] = &["/deactivation/1/1 = \"ok\""];
 
 /// Listener exceptions abort the transaction like Chrome 156 (#148), whichever
 /// listener of the request's event path threw, and only for that dispatch's own

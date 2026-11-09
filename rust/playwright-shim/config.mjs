@@ -66,9 +66,7 @@ function normalizeReporter(r) {
   if (!r) return [["list"]];
   if (typeof r === "string") return [[r]];
   if (Array.isArray(r)) {
-    return r.map((e) =>
-      typeof e === "string" ? [e] : Array.isArray(e) ? e : [String(e)],
-    );
+    return r.map((e) => (typeof e === "string" ? [e] : Array.isArray(e) ? e : [String(e)]));
   }
   return [[String(r)]];
 }
@@ -193,8 +191,7 @@ async function startWebServer(s, log) {
   });
   const deadline = Date.now() + s.timeout;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null)
-      throw new Error(`webServer exited early (code ${child.exitCode})`);
+    if (child.exitCode !== null) throw new Error(`webServer exited early (code ${child.exitCode})`);
     if (await probe(s)) {
       log?.(`ready at ${probeURL(s)}`);
       return { child, server: s };

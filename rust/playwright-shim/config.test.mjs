@@ -60,10 +60,7 @@ test("normalizeConfig: projects inherit top-level use + are overridable", () => 
   assert.equal(c.projects[1].use.baseURL, "http://top");
   assert.equal(c.projects[1].testDir, "/root/other");
   assert.deepEqual(c.projects[1].testMatch, ["**/*.foo.mjs"]);
-  assert.deepEqual(c.reporter, [
-    ["html", { outputFile: "r.html" }],
-    ["list"],
-  ]);
+  assert.deepEqual(c.reporter, [["html", { outputFile: "r.html" }], ["list"]]);
 });
 
 test("globToRegex: *, **, ?, @(a|b), {a,b}", () => {
@@ -174,10 +171,7 @@ test("CLI: --list-only prints the discovered files and exits 0", async () => {
   const root = tmp();
   await mkdir(join(root, "t"), { recursive: true });
   writeFileSync(join(root, "t/a.spec.mjs"), "import 'node:test';");
-  writeFileSync(
-    join(root, "playwright.config.mjs"),
-    `export default { testDir: './t' };`,
-  );
+  writeFileSync(join(root, "playwright.config.mjs"), `export default { testDir: './t' };`);
   const { code, stdout } = await runCli(
     ["--config", join(root, "playwright.config.mjs"), "--list-only"],
     root,
@@ -189,18 +183,12 @@ test("CLI: --list-only prints the discovered files and exits 0", async () => {
 test("CLI: html reporter writes a playwright-report.html", async () => {
   const root = tmp();
   await mkdir(join(root, "t"), { recursive: true });
-  writeFileSync(
-    join(root, "t/a.spec.mjs"),
-    `import test from 'node:test'; test('one', () => {});`,
-  );
+  writeFileSync(join(root, "t/a.spec.mjs"), `import test from 'node:test'; test('one', () => {});`);
   writeFileSync(
     join(root, "playwright.config.mjs"),
     `export default { testDir: './t', reporter: 'html' };`,
   );
-  const { code } = await runCli(
-    ["--config", join(root, "playwright.config.mjs")],
-    root,
-  );
+  const { code } = await runCli(["--config", join(root, "playwright.config.mjs")], root);
   assert.equal(code, 0);
   const html = readFileSync(join(root, "playwright-report.html"), "utf8");
   assert.match(html, /turbo-surf test report/);

@@ -20,10 +20,14 @@
 globalThis.__installTtEvalShim = () => {
   if (globalThis.__ttEvalShimInstalled) return;
   Object.defineProperty(globalThis, "__ttEvalShimInstalled", {
-    value: true, writable: false, configurable: false, enumerable: false,
+    value: true,
+    writable: false,
+    configurable: false,
+    enumerable: false,
   });
-  const message = "Evaluating a string as JavaScript violates this document's "
-    + "Trusted Type assignment requirements.";
+  const message =
+    "Evaluating a string as JavaScript violates this document's " +
+    "Trusted Type assignment requirements.";
   const EvalErrorClass = globalThis.EvalError;
   const FunctionClass = globalThis.Function;
   const document = globalThis.document;
@@ -43,24 +47,26 @@ globalThis.__installTtEvalShim = () => {
   }
   Object.defineProperty(evalShim, "name", { value: "eval", configurable: true });
   Object.defineProperty(globalThis, "eval", {
-    value: evalShim, writable: true, configurable: true,
+    value: evalShim,
+    writable: true,
+    configurable: true,
   });
   function FunctionShim(...args) {
     const body = args.length > 0 ? String(args[args.length - 1]) : "";
     const paramParts = [];
     for (let i = 0; i < args.length - 1; i++) paramParts.push(String(args[i]));
-    const wrapped = "(function anonymous(" + paramParts.join(",") + "\n) {\n"
-      + body + "\n})";
+    const wrapped = "(function anonymous(" + paramParts.join(",") + "\n) {\n" + body + "\n})";
     return ops.op_run_timer_code(convertScript(wrapped, "Function"));
   }
   FunctionShim.prototype = FunctionClass.prototype;
   Object.defineProperty(FunctionShim, "name", { value: "Function", configurable: true });
   Object.defineProperty(globalThis, "Function", {
-    value: FunctionShim, writable: true, configurable: true,
+    value: FunctionShim,
+    writable: true,
+    configurable: true,
   });
 };
 // Response-header CSPs are known before any guest script runs — if this
 // realm already requires Trusted Types at bootstrap, patch now so the first
 // inline <script> picks up the shim.
-if (ops.op_tt_eval_shim_required(globalThis.document))
-  globalThis.__installTtEvalShim();
+if (ops.op_tt_eval_shim_required(globalThis.document)) globalThis.__installTtEvalShim();

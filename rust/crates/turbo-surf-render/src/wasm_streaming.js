@@ -26,11 +26,7 @@
       } else if (response instanceof ArrayBuffer) {
         bytes = new Uint8Array(response);
       } else if (ArrayBuffer.isView(response)) {
-        bytes = new Uint8Array(
-          response.buffer,
-          response.byteOffset,
-          response.byteLength,
-        );
+        bytes = new Uint8Array(response.buffer, response.byteOffset, response.byteLength);
       } else {
         throw new TypeError("WebAssembly streaming source must be a Response or BufferSource");
       }

@@ -166,10 +166,7 @@ table{border-collapse:collapse}td{padding:4px 10px;border-bottom:1px solid #eee}
 }
 
 function escapeHtml(s) {
-  return String(s).replace(
-    /[&<>]/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c],
-  );
+  return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
 }
 
 function printHelp() {

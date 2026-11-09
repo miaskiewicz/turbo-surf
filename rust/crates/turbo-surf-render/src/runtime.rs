@@ -908,9 +908,7 @@ fn emit_csp_record<'s>(
                     element,
                     metadata,
                     bytes,
-                    ctx.parser
-                        .and_then(|m| m.position)
-                        .map(|p| p.utf16_offset),
+                    ctx.parser.and_then(|m| m.position).map(|p| p.utf16_offset),
                 )
             },
             |value| !value.is_false(),

@@ -119,8 +119,7 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
         closed.lock().unwrap().push(path);
         return;
     }
-    let (status, body, extra) =
-        build_response(&method, &url, is_report, id, &cases, port, tls);
+    let (status, body, extra) = build_response(&method, &url, is_report, id, &cases, port, tls);
     let response = format!(
         "HTTP/1.1 {status} Result\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
         body.len()

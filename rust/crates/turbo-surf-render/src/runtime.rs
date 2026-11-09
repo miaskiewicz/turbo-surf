@@ -7490,13 +7490,6 @@ fn op_idb_registry<'s>(
     registries.0.insert(id, v8::Global::new(scope, registry));
     Ok(registry)
 }
-/// IndexedDB fires each request's events as their own task: the microtasks a
-/// listener queues run before the transaction goes inactive again.
-#[op2(nofast, reentrant)]
-fn op_idb_checkpoint(scope: &mut v8::PinScope) {
-    scope.perform_microtask_checkpoint();
-}
-
 struct StorageFactory(v8::Weak<v8::Function>);
 #[op2(fast)]
 fn op_storage_factory(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
@@ -8204,7 +8197,6 @@ deno_core::extension!(
         op_form_navigation_blocked,
         op_storage_area,
         op_idb_registry,
-        op_idb_checkpoint,
         crate::indexed_db::op_idb_dispatch,
         op_storage_factory,
         op_storage_object,

@@ -14,6 +14,7 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -3442,9 +3443,17 @@ function wireFixtureHooks(open) {
 // `(title, body)`, so a `skip(false, "reason")` (the common conditional form)
 // registered a bogus skipped test. These helpers disambiguate.
 const SKIP_SIGNAL = Symbol("turbo-shim-skip");
-let skipStack = []; // one frame per active describe; `.skip` set by a conditional skip
-let activeT = null; // node:test context of the running test (for a runtime skip())
-const describeSkipped = () => skipStack.some((f) => f.skip);
+// Per-test-context storage keyed by the enclosing node:test frame — module-level
+// mutables (an `activeT` ref, a plain skip-stack array) would race between
+// concurrent tests, since node:test's runner interleaves their callbacks. The
+// skip-stack store holds a shared array for the current describe chain (nested
+// describes layer their own frame on top and restore on exit); the activeT
+// store binds the node:test context to just the body of the running test.
+const skipStackStore = new AsyncLocalStorage();
+const activeTStore = new AsyncLocalStorage();
+const getSkipStack = () => skipStackStore.getStore() ?? [];
+const getActiveT = () => activeTStore.getStore() ?? null;
+const describeSkipped = () => getSkipStack().some((f) => f.skip);
 const isDeclareForm = (args) => typeof args[0] === "string" && typeof args[1] === "function";
 function skipConditionMet(args) {
   if (args.length === 0) return true; // bare test.skip() → always skip
@@ -3467,31 +3476,30 @@ function makeTestFn(baseDefs, extDefs = {}) {
       nodeTest.skip(name, () => {});
       return;
     }
-    nodeTest(name, async (t) => {
-      activeT = t;
-      const testInfo = makeTestInfo(name);
-      try {
-        // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
-        // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
-        // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
-        // open its OWN fixtures, else custom fixtures resolve to undefined.
-        if (_current && Object.keys(extDefs).length === 0) {
-          await fn(_current.arg, testInfo);
-          return;
-        }
-        const { arg, teardown } = await open(testInfo);
+    nodeTest(name, async (t) =>
+      activeTStore.run(t, async () => {
+        const testInfo = makeTestInfo(name);
         try {
-          await fn(arg, testInfo);
-        } finally {
-          await teardown();
+          // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
+          // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
+          // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
+          // open its OWN fixtures, else custom fixtures resolve to undefined.
+          if (_current && Object.keys(extDefs).length === 0) {
+            await fn(_current.arg, testInfo);
+            return;
+          }
+          const { arg, teardown } = await open(testInfo);
+          try {
+            await fn(arg, testInfo);
+          } finally {
+            await teardown();
+          }
+        } catch (e) {
+          if (e === SKIP_SIGNAL) return; // runtime test.skip() — already marked on `t`
+          throw e;
         }
-      } catch (e) {
-        if (e === SKIP_SIGNAL) return; // runtime test.skip() — already marked on `t`
-        throw e;
-      } finally {
-        activeT = null;
-      }
-    });
+      }),
+    );
   };
   run.describe = makeDescribe();
   run.skip = (...args) => {
@@ -3503,11 +3511,13 @@ function makeTestFn(baseDefs, extDefs = {}) {
     // Conditional / runtime form `skip(condition?, description?)`.
     if (!skipConditionMet(args)) return; // condition false → no-op
     const reason = typeof args[args.length - 1] === "string" ? args[args.length - 1] : undefined;
-    if (activeT) {
-      activeT.skip(reason); // inside a running test body → skip at runtime
+    const t = getActiveT();
+    if (t) {
+      t.skip(reason); // inside a running test body → skip at runtime
       throw SKIP_SIGNAL;
     }
-    if (skipStack.length) skipStack[skipStack.length - 1].skip = true; // describe scope
+    const stack = getSkipStack();
+    if (stack.length) stack[stack.length - 1].skip = true; // describe scope
   };
   run.only = (name, fn) => nodeTest.only(name, async () => runWith(open, name, fn));
   run.fixme = run.skip;
@@ -3554,14 +3564,12 @@ function makeDescribe() {
   // async test (holding a live-session V8 isolate) was torn down at process exit,
   // which faulted (SIGBUS) on Linux. The Playwright describe body takes no args.
   const d = (name, fn) =>
-    nodeDescribe(name, async () => {
-      skipStack.push({ skip: false });
-      try {
-        return await fn();
-      } finally {
-        skipStack.pop();
-      }
-    });
+    nodeDescribe(name, async () =>
+      // Each describe runs in its own stack store — nested describes layer on
+      // top via a fresh array, and sibling describes never see each other's
+      // frames even when node:test interleaves their bodies.
+      skipStackStore.run([...getSkipStack(), { skip: false }], async () => fn()),
+    );
   d.skip = (name, fn) => nodeDescribe.skip(name, fn ?? (() => {}));
   d.only = (name, fn) => d(name, fn);
   d.serial = d;

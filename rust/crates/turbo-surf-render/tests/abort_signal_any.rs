@@ -20,10 +20,7 @@ const CONTROL: &str =
 /// microtask between the two synchronous steps. Tracked as a v0.9.0 turbo-dom
 /// follow-up; indices 1 and 2 of `/timeoutNestedAbort` are swapped against
 /// Chrome.
-const KNOWN_GAPS: &[&str] = &[
-    "/timeoutNestedAbort/1 = \"inner-microtask\"",
-    "/timeoutNestedAbort/2 = \"after-inner\"",
-];
+const KNOWN_GAPS: &[&str] = &[];
 
 fn control() -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();

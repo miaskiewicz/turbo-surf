@@ -107,19 +107,12 @@ fn assert_chrome(got: &Value) {
     assert_eq!(got, &chrome);
 }
 
-// FIXME(#245, turbo-dom#449): the rejection-realm WeakSet leak closed via
-// surf PR #277 + turbo-dom#396 (captured WeakSet.{add,has,delete}); the
-// remaining headIframe blocker is turbo-dom#449 (Promise[Symbol.species]
-// consulted on iframe-contentWindow creation after page JS patches). The
-// species snapshot captured at bootstrap doesn't reach that path.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#245, turbo-dom#449): headIframe path still consults page-replaced Promise[Symbol.species]"]
 async fn page_patched_intrinsics_do_not_break_loading_or_append_child() {
     assert_chrome(&load_patched(TURBO_DOM_MEMBERS).await);
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#245, turbo-dom#449): headIframe path still consults page-replaced Promise[Symbol.species]"]
 async fn page_patched_intrinsics_full_set_like_chrome156() {
     assert_chrome(&load_patched("").await);
 }

@@ -1832,11 +1832,13 @@ fn prepare_caret<'s>(
         .iter()
         .any(|text| text.source_id == source)
     {
-        // Pre-#184 behaviour: a missing text source for a connected node is an
-        // engine-level error (the capture missed the node, or the id doesn't
-        // match the snapshot). Returning Ok(None) silently collapsed to a 0×0
-        // rect at viewport origin. Restore the Err contract.
-        return Err("native caret source text is unavailable".to_string());
+        // Pre-#184 behaviour returned Err here, but round-2 review caught
+        // that CaretPosition.getClientRect() is spec'd never to throw — a
+        // missing text source for a connected node is observationally a 0×0
+        // caret. Keep Ok(None) so the top-level op returns [0.0; 4] and the
+        // JS DOMRect is 0×0 at (0,0) rather than propagating an exception
+        // that spec-compliant page JS doesn't expect.
+        return Ok(None);
     }
     Ok(Some(CaretPrep {
         input,

@@ -1510,11 +1510,17 @@ class Page {
       interactionScript(selector, index ?? 0, kind, value),
     );
     await this._refreshFromSession();
+    // Surface the NO_MATCH signal before draining so a binding-handler
+    // rejection that happens to be in the queue can't shadow the original
+    // locator failure. Drain is best-effort; a throwing binding writes to
+    // console (same shape as _sessionEval → drain errors).
+    if (r === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
     // Drain exposed-binding calls queued by handlers that ran during this
     // interaction so a subsequent assert sees them without waiting for the next
     // evaluate — matches `_sessionEval`'s contract.
-    await this._drainBindings();
-    if (r === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    try { await this._drainBindings(); } catch (e) {
+      console.error("turbo-surf: _drainBindings threw during _sessionDispatch:", e);
+    }
     return r;
   }
   // Run arbitrary JS in the live isolate, then refresh the Page snapshot. Backs the
@@ -3612,7 +3618,12 @@ export const request = {
     // after `request()` is cached takes effect on the next request — without
     // this, the cache snapshotted an empty header set at newContext time and
     // every request from the live context silently sent no custom headers.
-    const ctxHeaders = () => (bc ? { ...optHeaders, ...bc._headers } : optHeaders);
+    // Precedence: parent BrowserContext's live headers are the default layer,
+    // and the newContext({extraHTTPHeaders}) call overrides them. This way a
+    // caller who passes an explicit header at newContext time wins, while a
+    // later `context.setExtraHTTPHeaders(...)` (which mutates bc._headers) is
+    // picked up because we read it live on every request.
+    const ctxHeaders = () => (bc ? { ...bc._headers, ...optHeaders } : optHeaders);
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
     // as-is. Per-request `headers` merge over the context's `extraHTTPHeaders`.

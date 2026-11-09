@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle */
 // Base URLs freeze when the relevant native tree mutation is processed. Later
 // policies cannot retroactively change an accepted base, but later href writes can.
 const __baseApply = Reflect.apply;
@@ -116,6 +117,15 @@ function __documentBaseMutation(event, script) {
         event.attributeName === "http-equiv")
     )
       ops.op_csp_meta(doc, node);
+    // A mid-parse meta-CSP that newly requires Trusted Types flips V8's
+    // allow_generation_from_strings on via configure_csp_code_generation.
+    // The guest-side __installTtEvalShim was only installed at bootstrap and
+    // at op_csp_finish_parser, so the window between this meta-CSP and
+    // parser-done let raw `eval(...)` / `new Function(...)` run unmediated.
+    // Install the shim synchronously here if the policy now requires TT —
+    // __installTtEvalShim is idempotent (guards on __ttEvalShimInstalled).
+    // (surf#286)
+    if (ops.op_tt_eval_shim_required(doc)) globalThis.__installTtEvalShim();
     for (let candidate = 0; candidate < candidates.length; candidate++)
       if (candidates[candidate] === node) {
         handled[candidate] = true;

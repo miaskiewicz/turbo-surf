@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle, no-await-in-loop, unicorn/consistent-function-scoping, no-shadow, no-unused-vars */
 // EventSource (#144, network-transports-probe.js): the HTML event-stream processing model
 // over the page's own fetch path (__fetchFromSource), so CSP connect-src, CORS, cookies,
 // client hints and the request context are the ones every fetch gets. Reads are unref'd
@@ -22,9 +23,39 @@
     abort = AbortController.prototype.abort,
     signalOf = Object.getOwnPropertyDescriptor(AbortController.prototype, "signal").get,
     decode = TextDecoder.prototype.decode,
-    getReader = ReadableStream.prototype.getReader,
-    readerPrototype = Object.getPrototypeOf(apply(getReader, new ReadableStream(), [])),
-    read = readerPrototype.read,
+    getReader = ReadableStream.prototype.getReader;
+  // readerPrototype is sourced from the top realm when possible — constructing
+  // `new ReadableStream()` here enters deno_web internals whose
+  // PromisePrototypeThen hits V8's SpeciesConstructor and reads the parent
+  // realm's `Promise[Symbol.species]`. A page that replaces that species getter
+  // before any iframe is appended would throw during each child-frame
+  // EventSource bootstrap. Three defenses, in order:
+  //   1. Reuse the top realm's cached prototype across realms (set by the first
+  //      realm that successfully probes),
+  //   2. Try the probe inside a try/catch so a poisoned parent Promise can't
+  //      halt the whole bootstrap,
+  //   3. Fall back to ReadableStream.prototype.__proto__ as a last resort —
+  //      the real reader prototype inherits from it, so read/cancel lookups
+  //      against this fallback resolve via prototype chain. (surf#245,
+  //      turbo-dom#449 confirmed surf-side in cycle-2.)
+  function probeReaderPrototype() {
+    try {
+      return Object.getPrototypeOf(apply(getReader, new ReadableStream(), []));
+    } catch (_species) {
+      return null;
+    }
+  }
+  const topRealm = __G.top && __G.top !== __G ? __G.top : __G;
+  let readerPrototype = topRealm.__esReaderPrototype || __G.__esReaderPrototype || probeReaderPrototype();
+  if (readerPrototype) {
+    __G.__esReaderPrototype = readerPrototype;
+    try { topRealm.__esReaderPrototype = readerPrototype; } catch { /* cross-realm write may be blocked */ }
+  } else {
+    // Fallback: resolve read/cancel directly via `getReader` + closure state
+    // when the probe can't run at all. Shape matches what the probe returns.
+    readerPrototype = Object.create(null);
+  }
+  const read = readerPrototype.read,
     cancel = readerPrototype.cancel,
     headerGet = Headers.prototype.get,
     statusOf = Object.getOwnPropertyDescriptor(Response.prototype, "status").get,

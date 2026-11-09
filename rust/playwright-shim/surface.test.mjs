@@ -786,6 +786,9 @@ test("honest throws: pixel / input / network-interception", async () => {
   // page.route(fulfill) + page.routeFromHAR (HAR playback) are supported (#220);
   // context.route still isn't.
   await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
+  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
+  // exposeFunction / exposeBinding became real features in #226 — covered below.
+  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
 });
 
 // --- waitForResponse staleness (Playwright semantics) ---------------------
@@ -1549,6 +1552,101 @@ test("static waitForFunction resolves a getBy element handle", async () => {
     const handle = await p.getByRole("button", { name: "Save" }).elementHandle();
     assert.equal(await p.waitForFunction((el) => el && el.id, handle), "go");
     assert.equal(p._session, null);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// turbo-surf#226: page.exposeFunction installs a persistent JS→host binding
+// the page can call. The host handler fires with the serialized arguments.
+// Fire-and-forget by design (host return values are NOT surfaced back to the
+// page in this release — the queue drains after each live interaction).
+test("page.exposeFunction routes page calls to the host and survives navigation", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    res.writeHead(200, { "content-type": "text/html" });
+    if (url.pathname === "/second") {
+      res.end(
+        `<title>t2</title><body><script>globalThis.__telemetry({ step: "second", at: 2 });</script></body>`,
+      );
+      return;
+    }
+    res.end(
+      `<title>t1</title><body><script>globalThis.__telemetry({ step: "first", at: 1 });</script></body>`,
+    );
+  });
+  const base = await listen(server);
+  const context = new BrowserContext();
+  const captured = [];
+  await context.exposeFunction("__telemetry", (payload) => {
+    captured.push(payload);
+  });
+  const p = await context.newPage();
+  try {
+    await p.goto(`${base}/first`, { waitUntil: "networkidle" });
+    // The inline script called the binding on the first page.
+    assert.deepEqual(captured, [{ step: "first", at: 1 }]);
+    // The second navigation re-runs the init script in the fresh isolate, so
+    // the binding is there again — proving it persists across navigations.
+    await p.goto(`${base}/second`, { waitUntil: "networkidle" });
+    assert.deepEqual(captured, [
+      { step: "first", at: 1 },
+      { step: "second", at: 2 },
+    ]);
+    // The page can also call the binding from evaluate directly.
+    await p.evaluate(() => globalThis.__telemetry({ step: "evaluate", at: 3 }));
+    assert.deepEqual(captured[2], { step: "evaluate", at: 3 });
+  } finally {
+    await p.close();
+    await context.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.exposeBinding passes a { page, context, frame } source record as the
+// first arg to the host handler. The shim's frame is null (single-frame page
+// model), but page + context are the live objects the test spec drives.
+test("page.exposeBinding receives a source record with the page + context", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<body><script>globalThis.__bind("hi", 7);</script></body>`);
+  });
+  const base = await listen(server);
+  const p = newPage();
+  const seen = [];
+  await p.exposeBinding("__bind", (source, label, n) => {
+    seen.push({ label, n, hasPage: source.page === p, hasContext: !!source.context });
+  });
+  try {
+    await p.goto(`${base}/`, { waitUntil: "networkidle" });
+    assert.deepEqual(seen, [{ label: "hi", n: 7, hasPage: true, hasContext: true }]);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Wiring an expose AFTER the live session is up: the shim re-defines the
+// binding in the running isolate so the current page can call it without a
+// reload. Covers the "spec adds instrumentation between goto and the action"
+// shape.
+test("page.exposeFunction after goto is callable in the current session", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<body><button id="go">go</button></body>`);
+  });
+  const base = await listen(server);
+  const p = newPage();
+  const beats = [];
+  try {
+    await p.goto(`${base}/`, { waitUntil: "networkidle" });
+    await p.exposeFunction("__beat", (tag) => beats.push(tag));
+    await p.evaluate(() => globalThis.__beat("after-goto"));
+    assert.deepEqual(beats, ["after-goto"]);
   } finally {
     await p.close();
     server.closeAllConnections();

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.8.2-rc.1] - 2026-11-09
+
+Pinned at turbo-dom 0.8.2 release branch (`release/0.8.2`, tip `08c29cbb`) via `[patch.crates-io]`; drops to `"0.8.2"` crates.io pin once turbo-dom 0.8.2 publishes.
+
+### Added / Fixed
+
+- **render #289**: child-error counter fixed by turbo-dom 0.8.2 — `integrity_controls_script_module_stylesheet_and_child_execution` un-ignored, `childErrors == 1`.
+- **render #287 (partial)**: turbo-dom#478 (iframe inline `on*` handlers compile against element's own realm) fixes 3 of 8 Chrome-156 parity oracles (`error_event_preserves_native_error_and_branded_readonly_fields`, `main_and_child_classic_errors_preserve_identity_realm_and_resource_success`, `cross_origin_no_cors_errors_are_muted_while_cors_errors_keep_the_exception`). 5 still diverge (abort-bridge reaction order, port-handler registration, CSS.supports grammar, two @font-face unicode-range oracles) and stay `#[ignore]`-d with per-test FIXMEs.
+- **shim #280**: `Frame` now forwards `_session`/`_live`/`_ensureLive`/`_followIntent`/`_sessionDispatch`/`_sessionEval`/`_redrain` to its parent `Page` so iframe-scoped `Locator.click/hover/waitFor/dispatchEvent/setInputFiles/dragTo` no longer crashes with `TypeError`.
+- **shim #281**: `page.route` handler now runs per-request inside the isolate with a live `Request` wrapper (url/method/headers/body) instead of once at registration against a stub whose `url()` was the raw pattern. Handlers that branch on `route.request().url()` work correctly.
+- **shim #282**: `page.route` / `unroute` / `routeFromHAR` after `page.goto` now inject into the current live isolate via `liveEvalEngine`, mirroring `exposeBinding`, so late-registered routes intercept subsequent fetches.
+- **shim #283**: `FrameLocator._resolveFrame` caches the resolved `Frame` on the parent keyed by selector so `frameLocator('iframe').locator('input').fill('x')` persists instead of writing to a throwaway Frame.
+- **shim #284**: module-level `activeT` / `skipStack` moved to `AsyncLocalStorage` so concurrent `node:test` runs don't share per-test context.
+- **shim #285**: `_drainBindings` walks the frame tree (recursive `window.frames[i]`, seen-set, try/catch) and splices every realm's `__tsExpose.q`, so `page.exposeBinding` invoked from inside an iframe fires the host-side callback.
+- **packaging #288**: compiled `turbo-surf-napi` `.node` ships in the npm tarball (option A: bundled). Release workflow builds the napi addon per platform; `files:` now ships `rust/crates/turbo-surf-napi/{index.js,index.d.ts,package.json,LICENSE,README.md,turbo-surf.*.node}`. Downstream consumers install the bundled napi — no `TURBO_SURF_NAPI_PATH` needed.
+- **pkg**: `package.json` `exports` now exposes `./rust/playwright-shim/register.mjs`, `./rust/playwright-shim/*`, and `./rust/crates/turbo-surf-napi/*` so `require.resolve("turbo-surf/rust/playwright-shim/register.mjs")` works directly for Playwright drop-in consumers.
+- **pkg**: `rust/.npmignore` + `rust/crates/turbo-surf-napi/.npmignore` (both empty) override `rust/.gitignore`'s `*.node` exclusion for `npm pack` only, so the 133 MB prebuilt still stays out of git.
+
 ## [0.8.1] - 2026-11-09
 
 ### Added / Fixed (v0.8.1 scope — consolidated across 19 feature branches)

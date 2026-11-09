@@ -35,10 +35,10 @@ coretext = ["turbo-dom-raster/coretext"]
 native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 
 [dependencies]
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.8.1" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.8.2-rc.1" }
 turbo-dom-raster = "0.8.1"
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.8.1" }
-turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.8.1" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.8.2-rc.1" }
+turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.8.2-rc.1" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.8" }
 serde = "1"
 serde_json = "1"

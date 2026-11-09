@@ -230,8 +230,9 @@ async fn page(port: u16) -> PageSession {
         &format!("http://127.0.0.1:{port}/"),
         "",
         "",
-        // ~20 frame loads and navigations over localhost; headroom for a loaded host.
-        60000,
+        // ~20 frame loads and navigations over localhost; headroom for a loaded host
+        // and the #204 media-src Element.prototype.setAttribute wrap's per-op cost.
+        90000,
     )
     .await
     .unwrap()

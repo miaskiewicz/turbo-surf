@@ -13021,12 +13021,16 @@ __G.domSig = (() => {
     if (!descriptor || !descriptor.configurable || typeof descriptor.set !== "function") return;
     const originalSet = descriptor.set;
     const originalGet = descriptor.get;
+    const wrappedSet = function (value) { check(value); return originalSet.call(this, value); };
+    // Preserve the IDL setter's function name ("set src") so Chrome 156 shape
+    // oracles still see `{set:["set src",1]}` through Reflect.ownKeys.
+    try { Object.defineProperty(wrappedSet, "name", { value: originalSet.name || "set src" }); } catch (_e) {}
     try {
       Object.defineProperty(Ctor.prototype, "src", {
         configurable: true,
         enumerable: descriptor.enumerable,
         get: originalGet,
-        set: function (value) { check(value); return originalSet.call(this, value); },
+        set: wrappedSet,
       });
     } catch (_e) {}
   };

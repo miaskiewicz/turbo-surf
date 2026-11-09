@@ -207,7 +207,6 @@ fn error_event_preserves_native_error_and_branded_readonly_fields() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#287, turbo-dom#478): iframe inline onload compiles against parent realm; fix in turbo-dom 0.8.2 + surf 0.8.2"]
 async fn official_abort_bridge_keeps_chrome_state_and_unadapted_reaction_order() {
     use sha2::{Digest, Sha256};
     let probe = include_str!("../../../../harness/detection/abort-bridge-order-probe.js");

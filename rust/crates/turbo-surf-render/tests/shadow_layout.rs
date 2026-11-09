@@ -263,7 +263,6 @@ fn real_supports_declarations_boolean_groups_and_live_source_order_match_chrome(
 }
 
 #[test]
-#[ignore = "FIXME(#287, turbo-dom#478): iframe inline onload compiles against parent realm; fix in turbo-dom 0.8.2 + surf 0.8.2"]
 fn genuine_css_supports_overloads_native_grammar_selectors_and_private_coercion_match_chrome() {
     // The CSS.supports wrapper routes to the engine's grammar
     // (`__tsNs.cssSupports` / `cssSupportsProperty`, turbo-dom#322) with its private

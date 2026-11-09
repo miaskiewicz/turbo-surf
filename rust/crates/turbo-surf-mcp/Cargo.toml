@@ -51,10 +51,10 @@ native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.8.1" }
 turbo-surf-view = { path = "../turbo-surf-view", version = "0.8.1" }
 turbo-surf-page = { path = "../turbo-surf-page", version = "0.8.1" }
-turbo-dom-raster = "0.8.0"
+turbo-dom-raster = "0.8.1"
 # The static screenshot's `@font-face` registry (turbo-surf#142); the raster's own feature
 # set, nothing more.
-turbo-dom-layout = { version = "0.8.0", default-features = false }
+turbo-dom-layout = { version = "0.8.1", default-features = false }
 turbo-surf-render = { path = "../turbo-surf-render", version = "0.8.1" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.8" }
 async-trait = "0.1"
@@ -70,5 +70,5 @@ url = "2"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util", "sync"] }
 # tests/screenshot_image_formats.rs: decode the screenshot PNG and pin its Chrome control.
-turbo-dom-layout = "0.8.0"
+turbo-dom-layout = "0.8.1"
 sha2 = "0.10"

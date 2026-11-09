@@ -1518,7 +1518,9 @@ class Page {
     // Drain exposed-binding calls queued by handlers that ran during this
     // interaction so a subsequent assert sees them without waiting for the next
     // evaluate — matches `_sessionEval`'s contract.
-    try { await this._drainBindings(); } catch (e) {
+    try {
+      await this._drainBindings();
+    } catch (e) {
       console.error("turbo-surf: _drainBindings threw during _sessionDispatch:", e);
     }
     return r;
@@ -3618,12 +3620,15 @@ export const request = {
     // after `request()` is cached takes effect on the next request — without
     // this, the cache snapshotted an empty header set at newContext time and
     // every request from the live context silently sent no custom headers.
-    // Precedence: parent BrowserContext's live headers are the default layer,
-    // and the newContext({extraHTTPHeaders}) call overrides them. This way a
-    // caller who passes an explicit header at newContext time wins, while a
-    // later `context.setExtraHTTPHeaders(...)` (which mutates bc._headers) is
-    // picked up because we read it live on every request.
-    const ctxHeaders = () => (bc ? { ...bc._headers, ...optHeaders } : optHeaders);
+    // Precedence: newContext({extraHTTPHeaders}) is the opt-in baseline,
+    // overridden by the parent BrowserContext's LIVE headers so a later
+    // `context.setExtraHTTPHeaders(...)` call (which mutates bc._headers) is
+    // picked up on the next request — the headline fix for the cached
+    // _requestCtx path. Per-call `o.headers` still overrides both below.
+    // Note: the explicit `request.newContext({_browserContext: bc,
+    // extraHTTPHeaders: X})` double-opt case lets bc win for overlapping keys,
+    // which is a shim-private surface; direct callers don't hit it.
+    const ctxHeaders = () => (bc ? { ...optHeaders, ...bc._headers } : optHeaders);
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
     // as-is. Per-request `headers` merge over the context's `extraHTTPHeaders`.

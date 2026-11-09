@@ -13000,6 +13000,7 @@ __G.domSig = (() => {
 (() => {
   "use strict";
   const Media = globalThis.HTMLMediaElement;
+  const Source = globalThis.HTMLSourceElement;
   if (typeof Media !== "function" || !Media.prototype) return;
   const resolveURL = globalThis.URL;
   const baseHref = () => { try { return ops.op_document_request_url(); } catch (_e) { return ""; } };
@@ -13010,28 +13011,38 @@ __G.domSig = (() => {
     try { resolved = new resolveURL(raw, baseHref()).href; } catch (_e) { return; }
     try { ops.op_csp_request(__document, resolved, "media-src", ""); } catch (_e) {}
   };
-  const descriptor = Object.getOwnPropertyDescriptor(Media.prototype, "src");
-  if (descriptor && descriptor.configurable && typeof descriptor.set === "function") {
+  // Wrap the reflected `src` setter on both HTMLMediaElement AND
+  // HTMLSourceElement — Chrome 156 runs media-src against every <source>
+  // considered by the HTMLMediaElement resource-selection algorithm, not just
+  // the <audio src>/<video src> direct attr. (surf#204 R3 security finding.)
+  const wrapSrcSetter = (Ctor) => {
+    if (typeof Ctor !== "function" || !Ctor.prototype) return;
+    const descriptor = Object.getOwnPropertyDescriptor(Ctor.prototype, "src");
+    if (!descriptor || !descriptor.configurable || typeof descriptor.set !== "function") return;
     const originalSet = descriptor.set;
     const originalGet = descriptor.get;
     try {
-      Object.defineProperty(Media.prototype, "src", {
+      Object.defineProperty(Ctor.prototype, "src", {
         configurable: true,
         enumerable: descriptor.enumerable,
         get: originalGet,
         set: function (value) { check(value); return originalSet.call(this, value); },
       });
     } catch (_e) {}
-  }
+  };
+  wrapSrcSetter(Media);
+  wrapSrcSetter(Source);
   const Element = globalThis.Element;
   const nativeSetAttribute = Element && Element.prototype && Element.prototype.setAttribute;
   const nativeSetAttributeNS = Element && Element.prototype && Element.prototype.setAttributeNS;
+  const needsCheck = (receiver) =>
+    receiver instanceof Media || (Source && receiver instanceof Source);
   if (typeof nativeSetAttribute === "function") {
     try {
       Object.defineProperty(Element.prototype, "setAttribute", {
         configurable: true, writable: true,
         value: function setAttribute(name, value) {
-          if (this instanceof Media && typeof name === "string" && name.toLowerCase() === "src") check(value);
+          if (needsCheck(this) && typeof name === "string" && name.toLowerCase() === "src") check(value);
           return nativeSetAttribute.call(this, name, value);
         },
       });
@@ -13042,7 +13053,7 @@ __G.domSig = (() => {
       Object.defineProperty(Element.prototype, "setAttributeNS", {
         configurable: true, writable: true,
         value: function setAttributeNS(ns, name, value) {
-          if (this instanceof Media && typeof name === "string" && name.toLowerCase() === "src") check(value);
+          if (needsCheck(this) && typeof name === "string" && name.toLowerCase() === "src") check(value);
           return nativeSetAttributeNS.call(this, ns, name, value);
         },
       });

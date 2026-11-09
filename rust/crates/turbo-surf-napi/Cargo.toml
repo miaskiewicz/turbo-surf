@@ -38,7 +38,7 @@ napi-derive = "2"
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.8.1" }
 turbo-surf-page = { path = "../turbo-surf-page", version = "0.8.1" }
 turbo-surf-view = { path = "../turbo-surf-view", version = "0.8.1" }
-turbo-dom-raster = "0.8.0"
+turbo-dom-raster = "0.8.1"
 turbo-surf-render = { path = "../turbo-surf-render", version = "0.8.1" }
 turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.8.1" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.8" }

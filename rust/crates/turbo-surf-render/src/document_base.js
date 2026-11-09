@@ -100,6 +100,11 @@ function __documentBaseMutation(event, script) {
     (event.type === "attributes" && event.target === current && event.attributeName === "href")
   )
     __setFrozenBase(doc, current, false);
+  // Two-pass order (surf#286 security): apply every meta tag's referrer/CSP
+  // effects first, then dispatch script candidates. A batch whose order is
+  // `[<script>eval(...)</script>, <meta http-equiv='CSP'>]` must not run the
+  // script before the meta-CSP has installed the TT eval shim.
+  let cspMetaRan = false;
   for (let index = 0; index < nodes.length; index++) {
     const node = nodes[index];
     if (
@@ -115,17 +120,17 @@ function __documentBaseMutation(event, script) {
       (event.type === "childList" ||
         event.attributeName === "content" ||
         event.attributeName === "http-equiv")
-    )
+    ) {
       ops.op_csp_meta(doc, node);
-    // A mid-parse meta-CSP that newly requires Trusted Types flips V8's
-    // allow_generation_from_strings on via configure_csp_code_generation.
-    // The guest-side __installTtEvalShim was only installed at bootstrap and
-    // at op_csp_finish_parser, so the window between this meta-CSP and
-    // parser-done let raw `eval(...)` / `new Function(...)` run unmediated.
-    // Install the shim synchronously here if the policy now requires TT —
-    // __installTtEvalShim is idempotent (guards on __ttEvalShimInstalled).
-    // (surf#286)
-    if (ops.op_tt_eval_shim_required(doc)) globalThis.__installTtEvalShim();
+      cspMetaRan = true;
+    }
+  }
+  // Install the TT eval shim once per batch IF a meta-CSP ran AND the policy
+  // now requires it. Guest-side shim is idempotent. (surf#286)
+  if (cspMetaRan && ops.op_tt_eval_shim_required(doc)) globalThis.__installTtEvalShim();
+  // Second pass: dispatch script candidates matching any node in this batch.
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index];
     for (let candidate = 0; candidate < candidates.length; candidate++)
       if (candidates[candidate] === node) {
         handled[candidate] = true;

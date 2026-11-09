@@ -76,7 +76,7 @@ Event state is private; script dispatch is untrusted and engine events use host 
 Element property handlers retain private state and participate in the native listener registry,
 including assignment order and cancellation. Inline handler attributes, event propagation,
 listener options and subclass coverage remain incomplete.
-Playwright `Frame`/`FrameLocator` objects are still not implemented by this shim.
+Playwright `Frame` and `FrameLocator` objects expose engine iframe contexts: `page.frame({name})`, `page.frame('name')`, `page.frames()` and `page.frameLocator('iframe[...]')` scope queries to the child document, not the host (turbo-surf#225). srcdoc iframes carry their inner markup; src-loaded iframes list with empty content (live hydration populates them in the engine, but the snapshot shim does not fetch iframe src here). Frame-level mutations (fill/check through a frame locator) write to the Frame's own cached HTML and do not propagate back to the host page's `<iframe>`.
 Classic page/frame scripts run through the Rust host pump with source locations rather
 than indirect eval. Parsed hidden inputs expose their token values; input/textarea dirty
 values, defaults, cloning and select selection state work in the live runtime. Input-type
@@ -130,7 +130,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `setContent`, `storageState`, `addCookies`, `context`, `request` | ✅ | |
 | `waitForLoadState`, `waitForTimeout`, `waitForURL`, `waitForSelector`, `waitForFunction`, `waitForResponse`, `waitForRequest`, `waitForNavigation`, `waitForEvent` | ⚠️ | `waitForLoadState('load'\|'domcontentloaded'\|'networkidle')` all hydrate the SPA (one "settled" tier). `waitForResponse` / `waitForRequest` short-circuit on the native-log drain (#218/#222). `waitForNavigation` polls for a URL change. `waitForEvent` handles `'response'/'request'/'requestfinished'/'download'`. `waitForSelector` checks the current snapshot. `waitForURL` and `waitForFunction` drain/poll a live session. No browser event loop. |
 | `on`, `once`, `off`, `addListener`, `removeListener` | ⚠️ | Registry; lifecycle events fire, and captured live fetch/XHR request/response events are emitted when drained. No complete browser network/console/dialog event bus. |
-| `mainFrame`, `frame`, `frames`, `frameLocator` | ⚠️ | Return the page or a top-level locator. Engine iframe contexts exist, but these APIs do not expose them. |
+| `mainFrame`, `frame`, `frames`, `frameLocator` | ✅ | `mainFrame` returns the host page (the page implements the Frame surface). `frames()` lists the page + each `<iframe>`; `frame(name)` / `frame({name,url})` find a child; `frameLocator('iframe[...]')` scopes the locator chain to the child document. srcdoc iframes carry their inner markup; src-loaded iframes list with empty content until the engine hydrates them. |
 | `viewportSize`, `setViewportSize` | ✅ | Stored, and the viewport now drives `page.screenshot()` layout width/height. |
 | `setDefaultTimeout`, `setDefaultNavigationTimeout`, `emulateMedia`, `bringToFront` | ⚠️ | Stored / no-op (no live layout to affect). |
 | `isClosed`, `close`, `video` (→ null), `workers` (→ []) | ✅ | |

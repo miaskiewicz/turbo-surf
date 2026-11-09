@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle, eqeqeq, prefer-const, no-await-in-loop, unicorn/consistent-function-scoping, no-unused-vars, no-array-reverse, no-shadow */
 // Exhaustive surface coverage of the napi-backed Playwright shim — one assertion
 // cluster per Locator method, per expect matcher (all 5 assertion classes), per
 // Page method, plus BrowserContext, fixtures, waiters, events, and the honest
@@ -468,12 +469,57 @@ test("Page click submits a GET form to the server", async () => {
 });
 
 // --- Page: frames + waiters ------------------------------------------------
-test("Page frames collapse to self", async () => {
+test("Page without iframes: mainFrame + frames() + frameLocator over host", async () => {
   const p = await fresh();
   assert.equal(p.mainFrame(), p);
   assert.deepEqual(p.frames(), [p]);
   assert.equal(p.frame(), p);
   assert.ok(p.frameLocator("main"));
+});
+
+// Engine iframe contexts exposed as Frame/FrameLocator. The host-vs-frame scope is
+// the whole point: a `#inside` button inside an iframe MUST NOT match on the host
+// page, and `frameLocator('iframe')` queries must land in the child document.
+test("Page.frames / frame({name}) / frameLocator: iframe srcdoc", async () => {
+  const p = newPage();
+  await p.setContent(`<html><body>
+    <h1>Host</h1>
+    <iframe name="child" srcdoc="<html><body><button id='inside'>Pay</button><p class='lead'>child lead</p></body></html>"></iframe>
+  </body></html>`);
+  // frames() lists the page + each iframe with content
+  const frames = p.frames();
+  assert.equal(frames.length, 2);
+  assert.equal(frames[0], p);
+  assert.notEqual(frames[1], p);
+  // frame({name}) finds the child
+  const child = p.frame({ name: "child" });
+  assert.ok(child, "frame({name}) resolves");
+  assert.equal(child.name(), "child");
+  assert.notEqual(child, p);
+  // child-scoped queries see the iframe content, not the host
+  assert.equal(await child.locator("#inside").count(), 1);
+  assert.equal(await child.locator("#inside").textContent(), "Pay");
+  assert.equal(await child.locator(".lead").textContent(), "child lead");
+  // host doesn't see the frame's content
+  assert.equal(await p.locator("#inside").count(), 0);
+  // frameLocator resolves inside the iframe
+  const fl = p.frameLocator("iframe[name=child]");
+  assert.equal(await fl.locator("#inside").count(), 1);
+  assert.equal(await fl.locator("#inside").textContent(), "Pay");
+  assert.equal(await fl.getByRole("button").count(), 1);
+  // host's p.locator('.lead') is the host's own lead if any (none here), not the frame's
+  assert.equal(await p.locator("p.lead").count(), 0);
+});
+
+test("Page.frame by string name", async () => {
+  const p = newPage();
+  await p.setContent(
+    `<body><iframe name="payment" srcdoc="<button id='b'>Go</button>"></iframe></body>`,
+  );
+  const f = p.frame("payment");
+  assert.ok(f);
+  assert.equal(f.name(), "payment");
+  assert.equal(await f.locator("#b").textContent(), "Go");
 });
 
 test("Page waiters resolve on the static DOM", async () => {

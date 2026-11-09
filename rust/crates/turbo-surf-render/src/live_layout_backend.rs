@@ -1771,9 +1771,54 @@ fn caret_geometry<'s>(
     node: v8::Local<'s, v8::Object>,
     offset: usize,
 ) -> Result<[f32; 4], String> {
+    match extract_caret_rect(scope, node, offset)? {
+        Some(rect) => Ok(rect),
+        None => Ok([0.0; 4]),
+    }
+}
+
+fn extract_caret_rect<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+    offset: usize,
+) -> Result<Option<[f32; 4]>, String> {
+    let Some(prep) = prepare_caret(scope, node)? else {
+        return Ok(None);
+    };
+    let units = prep
+        .input
+        .tree
+        .capture
+        .original_text
+        .get(&prep.source)
+        .ok_or("native caret original text is unavailable")?;
+    if caret_offset_outside(&prep.view, prep.source, offset, units) {
+        return Ok(None);
+    }
+    let rect = caret_edge_rect(&prep.view, prep.source, offset)?;
+    let translation = caret_scroll_translation(prep.context, &prep.view, prep.source)?;
+    Ok(Some([
+        rect.x - translation[0],
+        rect.y - translation[1],
+        rect.width,
+        rect.height,
+    ]))
+}
+
+struct CaretPrep<'s> {
+    input: crate::live_layout_dom::NativeLayoutInput<'s>,
+    view: std::rc::Rc<LayoutView>,
+    context: v8::Local<'s, v8::Context>,
+    source: turbo_dom_layout::layout_snapshot::SourceId,
+}
+
+fn prepare_caret<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> Result<Option<CaretPrep<'s>>, String> {
     let mut input = crate::live_layout_dom::capture(scope, node)?;
     if !input.connected || !input.browsing_context {
-        return Ok([0.0; 4]);
+        return Ok(None);
     }
     let context = input
         .owner_context
@@ -1781,48 +1826,64 @@ fn caret_geometry<'s>(
     let viewport = viewport(scope, context)?;
     let view = resolve(scope, &mut input, viewport.as_ref())?;
     let source = crate::live_layout::source_id(input.tree.document_id(), input.handle);
-    let _current = view
+    if !view
         .snapshot
         .text_sources()
         .iter()
-        .find(|text| text.source_id == source)
-        .ok_or("native caret source text is unavailable")?;
-    let units = input
-        .tree
-        .capture
-        .original_text
-        .get(&source)
-        .ok_or("native caret original text is unavailable")?;
-    if offset > units.len()
+        .any(|text| text.source_id == source)
+    {
+        return Ok(None);
+    }
+    Ok(Some(CaretPrep {
+        input,
+        view,
+        context,
+        source,
+    }))
+}
+
+fn caret_offset_outside(
+    view: &LayoutView,
+    source: turbo_dom_layout::layout_snapshot::SourceId,
+    offset: usize,
+    units: &[u16],
+) -> bool {
+    offset > units.len()
         || units.is_empty()
         || view
             .snapshot
             .source(source)
-            .is_some_and(|source| source.excluded_from_layout)
-    {
-        return Ok([0.0; 4]);
-    }
+            .is_some_and(|value| value.excluded_from_layout)
+}
+
+fn caret_edge_rect(
+    view: &LayoutView,
+    source: turbo_dom_layout::layout_snapshot::SourceId,
+    offset: usize,
+) -> Result<turbo_dom_layout::layout_snapshot::Rect, String> {
     let boxes = view
         .snapshot
         .text_range_boxes(source, offset, offset)
         .map_err(|error| error.to_string())?;
-    let rect = boxes
+    Ok(boxes
         .first()
         .ok_or("native caret source edge is unplaced")?
-        .transformed_bounds;
+        .transformed_bounds)
+}
+
+fn caret_scroll_translation(
+    context: v8::Local<v8::Context>,
+    view: &LayoutView,
+    source: turbo_dom_layout::layout_snapshot::SourceId,
+) -> Result<[f32; 2], String> {
     let state = scroll_state(context);
-    let translation = turbo_dom_layout::cssom_view::scroll::scroll_translation(
+    let offsets = state.values.borrow();
+    turbo_dom_layout::cssom_view::scroll::scroll_translation(
         &view.snapshot,
         &view.styles,
         source,
-        &state.values.borrow(),
-    )?;
-    Ok([
-        rect.x - translation[0],
-        rect.y - translation[1],
-        rect.width,
-        rect.height,
-    ])
+        &offsets,
+    )
 }
 
 #[op2(nofast, reentrant)]

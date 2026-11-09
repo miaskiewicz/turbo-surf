@@ -6,7 +6,10 @@
   "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./rust/playwright-shim/register.mjs": "./rust/playwright-shim/register.mjs",
+    "./rust/playwright-shim/*": "./rust/playwright-shim/*",
+    "./rust/crates/turbo-surf-napi/*": "./rust/crates/turbo-surf-napi/*"
   },
   "bin": {
     "turbo-surf-mcp": "cli.js",

@@ -146,7 +146,7 @@ fn known_gaps(_id: &str, result: &mut Value) {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
+#[ignore = "FIXME(#287): still diverges from Chrome 156 against turbo-dom release/0.8.1 (event double-dispatch pattern); v0.9.0 follow-up"]
 async fn csp_directives_match_chrome() {
     let differences = compare(known_gaps).await;
     assert!(differences.is_empty(), "{}", differences.join("\n"));

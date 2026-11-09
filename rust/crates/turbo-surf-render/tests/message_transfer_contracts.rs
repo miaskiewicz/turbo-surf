@@ -159,7 +159,7 @@ async fn foreign_window_and_transferred_port_use_receiver_realm_and_strong_brand
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
+#[ignore = "FIXME(#287): still diverges from Chrome 156 against turbo-dom release/0.8.1 (event double-dispatch pattern); v0.9.0 follow-up"]
 async fn port_handler_registration_order_signal_once_and_cleanup_are_native() {
     let value = evaluate(r#"
       const channel=new MessageChannel(), port=channel.port2, abort=new AbortController(), rows=[];

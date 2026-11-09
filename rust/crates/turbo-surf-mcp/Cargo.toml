@@ -48,14 +48,14 @@ coretext = ["turbo-dom-raster/coretext"]
 native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 
 [dependencies]
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.8.0" }
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.8.0" }
-turbo-surf-page = { path = "../turbo-surf-page", version = "0.8.0" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.8.1" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.8.1" }
+turbo-surf-page = { path = "../turbo-surf-page", version = "0.8.1" }
 turbo-dom-raster = "0.8.0"
 # The static screenshot's `@font-face` registry (turbo-surf#142); the raster's own feature
 # set, nothing more.
 turbo-dom-layout = { version = "0.8.0", default-features = false }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.8.0" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.8.1" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.8" }
 async-trait = "0.1"
 base64 = "0.22"

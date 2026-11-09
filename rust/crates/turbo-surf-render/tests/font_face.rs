@@ -229,13 +229,13 @@ async fn font_face_csp_font_src_matches_chrome156() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
+#[ignore = "FIXME(#287): still diverges from Chrome 156 against turbo-dom release/0.8.1 (event double-dispatch pattern); v0.9.0 follow-up"]
 async fn embedded_web_font_block_range_matches_chrome156() {
     assert_case("range-block-only", RANGE_BLOCK_HEIGHT).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
+#[ignore = "FIXME(#287): still diverges from Chrome 156 against turbo-dom release/0.8.1 (event double-dispatch pattern); v0.9.0 follow-up"]
 async fn embedded_web_font_mixed_range_matches_chrome156() {
     assert_case("range-mixed", RANGE_MIXED_HEIGHT).await;
 }

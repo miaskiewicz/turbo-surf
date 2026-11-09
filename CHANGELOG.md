@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.8.1] - 2026-11-09
+
+### Added / Fixed (v0.8.1 scope — consolidated across 19 feature branches)
+
+- **render #245**: `page_patched_intrinsics_*` headIframe `Promise[Symbol.species]` blocker closed surf-side. `rust/crates/turbo-surf-render/src/event_source.js` hoists `readerPrototype` on the top realm with a try/catch probe + null-prototype fallback so a page that poisons `Promise[@@species]` before any iframe is appended no longer halts each child-frame EventSource bootstrap (deno_web's `PromisePrototypeThen` crosses to parent-realm Promise through V8's `SpeciesConstructor`). Un-ignored both tests.
+- **render #286 (security)**: mid-parse meta-CSP that newly requires Trusted Types no longer opens a raw-eval window. `document_base.js` now calls `__installTtEvalShim()` right after `ops.op_csp_meta(doc, node)` when `op_tt_eval_shim_required(doc)` returns true — shim is idempotent, so repeat meta-CSPs are safe.
+- **render #246**: `context_ownership::sweep_collected` inside `collect_message_port_garbage_for_testing` was both forcing a GC and pruning the dead weak-handle vec in the same call, so the diagnostics snapshot read 0. The dedicated boundary sweep is dropped from that helper; dead weak handles still prune at the regular `storage_gc::boundary` after every eval. Un-ignored `frame_gc_contracts::collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents`.
+- **render #250 / #244 (turbo-dom#417 / #395)**: `session_isolation::canceling_pending_session_work_restores_the_peer_and_its_own_runtime` and `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute` pass against turbo-dom release/0.8.1. Un-ignored.
+- **render #278**: `abort_signal_any_and_timeout_match_chrome156` reports `found == []` against Chrome 156 after turbo-dom#456 lands the per-listener microtask checkpoint `listenerDepth` gate. `KNOWN_GAPS` is empty.
+
+### Playwright shim (consolidated)
+
+- **#220**: `page.route(...)` / `page.routeFromHAR(har)` / `page.unroute(...)` interception via the in-process fetch interceptor.
+- **#223**: `playwright.config` projects / reporters / `webServer` / `use` per-project overrides interpreted; CLI (`turbo-surf-test`) forwards the full per-project `use` block via `TURBO_PW_USE` for `viewport`, `extraHTTPHeaders`, `httpCredentials`, `storageState`, `ignoreHTTPSErrors`, `colorScheme`, `permissions`, `geolocation`, `timezoneId`, `offline`, `screen`.
+- **#225**: `Frame` / `FrameLocator` scoped to engine iframe contexts (basic locator surface — see follow-up #280 for interaction methods).
+- **#226**: `exposeBinding` / `exposeFunction` fire-and-forget host bindings survive navigation.
+- **#227**: `page.mouse` / `page.touchscreen` / `locator.dragTo` / `page.dragAndDrop` wire to the live isolate.
+- **#231**: `addInitScript` applies across child frames (verified by regression test; shim already honored the issue).
+- **#240**: `page.route` glob translator escapes `*` outside alternation + routes init-script fires before the parser's first inline `<script>`.
+- **#247**: `page.goto(..., {waitUntil:'networkidle'})` against WASM-loading sites no longer panics; `wasm_streaming.js` installs the handler before `WebAssembly.instantiateStreaming` can race.
+
+### Render (consolidated)
+
+- **#27**: Web Audio parity (DOMException brands + types for `OscillatorNode.type='custom'`, `setPeriodicWave`, WaveShaper `oversample`); further parity items tracked for v0.9.0.
+- **#106**: `canvas.captureStream()`, `canvas.transferControlToOffscreen()`, `video.requestPictureInPicture()` presence-stubs with Chrome-156-matching typed returns for feature detection.
+- **#121**: Trusted Types default policy applies to `eval` and `new Function`; EvalError message matches Chrome.
+- **#122**: Trusted Types enforcement on script-child-text sinks + `<form action="javascript:...">`.
+- **#136**: abort-reactions and dependent-signal listeners run under the per-listener microtask checkpoint; `op_web_abort_dispatch(host=true)` in place.
+- **#178**: WebSocket close handshake times out at 5s when the server never replies (matches Chrome).
+- **#193**: IndexedDB event path capture phase + per-listener microtasks via `setEventTargetParent` (turbo-dom#381) + `#382`'s checkpoint; items 3/4 (end-of-task deactivation, registry lifetime) tracked for v0.9.0.
+- **#204**: CSP `media-src` enforcement for `<audio>` / `<video>` src assignments with Chrome-shape report.
+
+### Refactor
+
+- **#184**: 5 top-10 cc=15 functions refactored under cc=9 (`script_inventory::record`, `csp_reporting::json_wtf8`, `csp_reporting::serve`, `runtime::queue_csp_report`, `live_layout_backend::caret_geometry`). CC gate stays at 15 for v0.8.1; the remaining ~225 fns tracked per-crate in follow-ups [#272-#276](https://github.com/miaskiewicz/turbo-surf/issues/272) targeted at v0.9.0.
+
+### Adversarial review fixes (rounds 1 + 2)
+
+- **shim `_matchUrl` glob-strip**: a bare `*`/`**` spec still match-all; a mixed `foo**` no longer collapses to the empty string.
+- **shim `page.mouse`**: `targetExpr` re-reads `state.x`/`state.y` on every dispatch — previously every `click`/`down`/`up`/`wheel` after `move(x, y)` hit `elementFromPoint(0,0)`.
+- **shim `page.route` iteration**: reverse registration order so the latest handler wins, matching Playwright.
+- **shim `_sessionDispatch`**: drains exposed-binding calls queued by handlers that ran during the interaction (surfaces the NO_MATCH signal before the drain so a bad binding handler can't shadow the locator failure).
+- **shim `BrowserContext.request()` / `request.newContext`**: reads `extraHTTPHeaders` live from the parent BrowserContext — `context.setExtraHTTPHeaders(...)` after the cached `_requestCtx` was built still flows into requests.
+- **shim `BrowserContext` ctor**: parses `TURBO_PW_USE` and merges per-project `use` keys under in-suite opts.
+
+### Known ignored (tracked for v0.9.0)
+
+- 8 Chrome-156 parity oracles diverge against turbo-dom release/0.8.1 with an event double-dispatch pattern (classic_script_errors x2, csp_directives, event_contracts abort bridge, font_face embedded-range x2, message_transfer_contracts port handler, shadow_layout css supports). Tracked in [#287](https://github.com/miaskiewicz/turbo-surf/issues/287).
+- `#193 item 4` (registry roots the first-opener realm) + `#253` (compression-dictionary publish on body-reader resolve) + `#278 /timeoutNestedAbort` carry-over + the shim Frame-missing-methods / page.route handler-at-registration / FrameLocator fill revert / module-level activeT race / iframe binding drain / #184 remaining cc backlog cards: [#280-#285](https://github.com/miaskiewicz/turbo-surf/issues/280).
+
 ## Unreleased
 
 - **Test (render, #278)**: `abort_signal_any_and_timeout_match_chrome156` is

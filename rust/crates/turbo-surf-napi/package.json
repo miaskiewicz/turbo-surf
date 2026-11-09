@@ -1,12 +1,16 @@
 {
   "name": "turbo-surf-native",
-  "version": "0.8.0",
-  "description": "Native (Rust) engine for turbo-surf — napi-rs addon",
+  "version": "0.8.1",
+  "description": "Native (Rust) engine for turbo-surf \u2014 napi-rs addon",
   "main": "index.js",
   "types": "index.d.ts",
   "license": "MIT",
   "repository": "github:miaskiewicz/turbo-surf",
-  "files": ["index.js", "index.d.ts", "turbo-surf.*.node"],
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "turbo-surf.*.node"
+  ],
   "napi": {
     "name": "turbo-surf",
     "triples": {

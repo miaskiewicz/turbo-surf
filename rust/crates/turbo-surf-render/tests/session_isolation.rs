@@ -162,7 +162,6 @@ async fn concurrent_open_polls_preserve_document_observers_and_timers() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
 async fn canceling_pending_session_work_restores_the_peer_and_its_own_runtime() {
     let mut first = PageSession::open("<body>one", "https://first.test/", "", "", 5000)
         .await

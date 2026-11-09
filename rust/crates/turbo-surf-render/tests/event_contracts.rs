@@ -207,7 +207,7 @@ fn error_event_preserves_native_error_and_branded_readonly_fields() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
+#[ignore = "FIXME(#287): still diverges from Chrome 156 against turbo-dom release/0.8.1 (event double-dispatch pattern); v0.9.0 follow-up"]
 async fn official_abort_bridge_keeps_chrome_state_and_unadapted_reaction_order() {
     use sha2::{Digest, Sha256};
     let probe = include_str!("../../../../harness/detection/abort-bridge-order-probe.js");

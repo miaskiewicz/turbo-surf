@@ -146,7 +146,6 @@ fn known_gaps(_id: &str, result: &mut Value) {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#287): inline script-src-attr CSP violation double-reported (surf emits one extra entry per inline handler); turbo-dom#478 fixed the iframe realm half, this reporter dedup is separate"]
 async fn csp_directives_match_chrome() {
     let differences = compare(known_gaps).await;
     assert!(differences.is_empty(), "{}", differences.join("\n"));

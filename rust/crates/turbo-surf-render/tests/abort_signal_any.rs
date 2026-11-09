@@ -11,19 +11,18 @@ const CONTROL: &str =
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`.
 ///
-/// A timed-out abort now dispatches each signal (the source, then each
-/// dependent) from the host with a microtask checkpoint after it (#136). Blink
-/// also checkpoints between two listeners of the same signal; those listeners
-/// run inside turbo-dom's private EventTarget dispatcher, which has no
-/// per-listener host checkpoint yet (tracked as turbo-dom#382), so a signal's
-/// second listener still runs before its first listener's microtask.
+/// The per-listener microtask checkpoint (turbo-dom#382) now lands for the
+/// `/timeoutListeners/*` matrix, closing the six gaps that cycle-1 tracked.
+/// A new nested-abort ordering gap appeared in its wake: on a timed-out abort
+/// whose first listener synchronously aborts an inner controller, Blink runs
+/// the caller's "after-inner" synchronous tail before the inner signal's
+/// listener-microtask, whereas the per-listener checkpoint flushes the inner
+/// microtask between the two synchronous steps. Tracked as a v0.9.0 turbo-dom
+/// follow-up; indices 1 and 2 of `/timeoutNestedAbort` are swapped against
+/// Chrome.
 const KNOWN_GAPS: &[&str] = &[
-    "/timeoutListeners/1 = [\"timed\",1]",
-    "/timeoutListeners/2 = [\"timed\",0,\"microtask\"]",
-    "/timeoutListeners/5 = [\"first\",1]",
-    "/timeoutListeners/6 = [\"first\",0,\"microtask\"]",
-    "/timeoutListeners/9 = [\"second\",1]",
-    "/timeoutListeners/10 = [\"second\",0,\"microtask\"]",
+    "/timeoutNestedAbort/1 = \"inner-microtask\"",
+    "/timeoutNestedAbort/2 = \"after-inner\"",
 ];
 
 fn control() -> Value {
@@ -68,9 +67,7 @@ fn divergences(path: String, actual: &Value, expected: &Value, out: &mut Vec<Str
     }
 }
 
-// FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at the final repin once turbo-dom 0.8.1 is published.
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
 async fn abort_signal_any_and_timeout_match_chrome156() {
     let expected = control();
     let mut page = PageSession::open(

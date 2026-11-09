@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Test (render, #278)**: `abort_signal_any_and_timeout_match_chrome156` is
+  un-ignored. The per-listener microtask checkpoint from turbo-dom#382 lands
+  all six `/timeoutListeners/*` gaps, leaving two new
+  `/timeoutNestedAbort/{1,2}` divergences where the inner-abort microtask
+  checkpoint flushes before the outer caller's synchronous "after-inner"
+  step. `KNOWN_GAPS` moves to that 2-entry shape; the nested-abort ordering
+  stays tracked as a turbo-dom follow-up for v0.9.0. No engine change.
 - **Fixed (render, #246)**: `context_registry_diagnostics_for_testing` no
   longer reports `cleared: 0` right after a retired-frame context was
   collected. `collect_message_port_garbage_for_testing` was both forcing a

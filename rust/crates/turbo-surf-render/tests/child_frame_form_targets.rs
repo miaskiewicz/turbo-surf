@@ -269,9 +269,8 @@ async fn child_frame_form_redirects_match_chrome156() {
 }
 
 /// turbo-surf#140: target names over the whole frame tree.
-// FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at the final repin once turbo-dom 0.8.1 is published.
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
+#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
 async fn child_frame_form_targets_match_chrome156() {
     matches_chrome156("child-frame-form-targets-probe.js", TARGETS).await;
 }

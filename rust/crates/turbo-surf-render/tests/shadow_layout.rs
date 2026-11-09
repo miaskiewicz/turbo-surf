@@ -262,9 +262,8 @@ fn real_supports_declarations_boolean_groups_and_live_source_order_match_chrome(
     );
 }
 
-// FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at the final repin once turbo-dom 0.8.1 is published.
 #[test]
-#[ignore]
+#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
 fn genuine_css_supports_overloads_native_grammar_selectors_and_private_coercion_match_chrome() {
     // The CSS.supports wrapper routes to the engine's grammar
     // (`__tsNs.cssSupports` / `cssSupportsProperty`, turbo-dom#322) with its private

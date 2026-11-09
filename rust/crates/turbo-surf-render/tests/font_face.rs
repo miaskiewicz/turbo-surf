@@ -228,16 +228,14 @@ async fn font_face_csp_font_src_matches_chrome156() {
     assert_case("csp", WEB_FONT_HEIGHT).await;
 }
 
-// FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at the final repin once turbo-dom 0.8.1 is published.
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
+#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
 async fn embedded_web_font_block_range_matches_chrome156() {
     assert_case("range-block-only", RANGE_BLOCK_HEIGHT).await;
 }
 
-// FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at the final repin once turbo-dom 0.8.1 is published.
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
+#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
 async fn embedded_web_font_mixed_range_matches_chrome156() {
     assert_case("range-mixed", RANGE_MIXED_HEIGHT).await;
 }

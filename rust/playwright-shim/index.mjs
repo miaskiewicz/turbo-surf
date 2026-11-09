@@ -127,7 +127,11 @@ function buildRouteInitScript(routes) {
     };
     const find = (url) => {
       const urls = candidates(url);
-      for (const r of routes) {
+      // Playwright runs the LATEST handler first (reverse registration order) so
+      // a per-test override can shadow a globally registered mock. Iterate the
+      // route table from the end.
+      for (let i = routes.length - 1; i >= 0; i--) {
+        const r = routes[i];
         for (const u of urls) {
           try {
             if (r.kind === "regex") {
@@ -1103,7 +1107,13 @@ function _matchUrl(url, spec) {
     }
   }
   const s = String(spec);
-  return url.includes(s.replace(/\*\*/g, "").replace(/\*/g, ""));
+  // A bare `*` or `**` spec means "match everything". Stripping all stars from a
+  // mixed glob like `foo**` must NOT fall into that case — `url.includes("")`
+  // would silently match every URL, which was the bug. Only treat
+  // stripped-to-empty as match-all when the input was itself pure wildcards.
+  const stripped = s.replace(/\*\*/g, "").replace(/\*/g, "");
+  if (stripped.length === 0) return /^\*+$/.test(s);
+  return url.includes(stripped);
 }
 
 class Frame {
@@ -1500,6 +1510,10 @@ class Page {
       interactionScript(selector, index ?? 0, kind, value),
     );
     await this._refreshFromSession();
+    // Drain exposed-binding calls queued by handlers that ran during this
+    // interaction so a subsequent assert sees them without waiting for the next
+    // evaluate — matches `_sessionEval`'s contract.
+    await this._drainBindings();
     if (r === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
     return r;
   }
@@ -2474,9 +2488,13 @@ function makeMouse(page) {
   };
   const base = (extra = "") =>
     `{ bubbles: true, cancelable: true, view: globalThis, clientX: ${state.x}, clientY: ${state.y}, screenX: ${state.x}, screenY: ${state.y}, button: ${state.button}, buttons: ${state.buttons}${extra} }`;
-  const targetExpr = `(document.elementFromPoint(${state.x}, ${state.y}) || document.documentElement || document.body)`;
+  // Re-read state.x/state.y on every dispatch — baking them at definition time
+  // sent every click/down/up/wheel to document.elementFromPoint(0,0) regardless
+  // of the preceding move(x, y).
+  const targetExpr = () =>
+    `(document.elementFromPoint(${state.x}, ${state.y}) || document.documentElement || document.body)`;
   const dispatch = (pointerType, mouseType) => `(() => {
-    const t = ${targetExpr};
+    const t = ${targetExpr()};
     if (!t) return;
     const PE = globalThis.PointerEvent || globalThis.MouseEvent;
     t.dispatchEvent(new PE(${JSON.stringify(pointerType)}, ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
@@ -2497,7 +2515,7 @@ function makeMouse(page) {
     state.button = btn;
     state.buttons = 0;
     await run(`(() => {
-      const t = ${targetExpr};
+      const t = ${targetExpr()};
       if (!t) return;
       const PE = globalThis.PointerEvent || globalThis.MouseEvent;
       t.dispatchEvent(new PE("pointerup", ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
@@ -2514,7 +2532,7 @@ function makeMouse(page) {
     await click(x, y, opts);
     await click(x, y, opts);
     await run(`(() => {
-      const t = ${targetExpr};
+      const t = ${targetExpr()};
       if (!t) return;
       t.dispatchEvent(new MouseEvent("dblclick", ${base(", detail: 2")}));
     })();`);
@@ -2522,7 +2540,7 @@ function makeMouse(page) {
   async function wheel(dx, dy) {
     if (!page._live) return;
     await page._sessionEval(`(() => {
-      const t = ${targetExpr};
+      const t = ${targetExpr()};
       if (!t) return;
       t.dispatchEvent(new (globalThis.WheelEvent || globalThis.MouseEvent)("wheel", ${base(`, deltaX: ${Number(dx) || 0}, deltaY: ${Number(dy) || 0}, deltaMode: 0`)}));
     })();`);
@@ -2718,17 +2736,28 @@ function makeDownload(entry) {
 class BrowserContext {
   constructor(opts = {}) {
     this._closed = false;
-    const cookies = opts.storageState?.cookies ?? [];
+    // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
+    // so every supported key can reach fixture-constructed contexts without
+    // the test code having to pass it explicitly. In-suite `opts` still wins
+    // over the project block.
+    let projectUse = {};
+    try {
+      projectUse = process.env.TURBO_PW_USE ? JSON.parse(process.env.TURBO_PW_USE) : {};
+    } catch {
+      /* ignore malformed env — a project without a use block is the common case */
+    }
+    const merged = { ...projectUse, ...opts };
+    const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
-    this._baseURL = opts.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
+    this._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
     // Locale: real Playwright runs `devices['Desktop Chrome']` (locale en-US), and the
     // app picks UI language from the `NEXT_LOCALE` cookie (next-intl) — with none it
     // defaults to es-MX, so English text/role-name assertions miss. Seed NEXT_LOCALE to
     // match the browser locale (default en-US) unless the caller already provided one.
     // NOTE: the settings suite expects the es-MX default (Chrome shows es-MX there) — a known
     // parity gap; the post-login NEXT_LOCALE=en-US source is not yet pinned. See memory.
-    this._locale = opts.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
+    this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
     if (this._locale && !cookies.some((c) => c.name === "NEXT_LOCALE")) {
       let host = "localhost";
       try {
@@ -2750,11 +2779,23 @@ class BrowserContext {
     this._cookies = JSON.stringify(cookies);
     this._requestState = native.requestStateNew?.();
     // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
-    this._userAgent = opts.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
-    this._headers = opts.extraHTTPHeaders ?? {};
-    this._viewport = opts.viewport ?? { width: 1280, height: 720 };
+    this._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
+    this._headers = merged.extraHTTPHeaders ?? {};
+    this._viewport = merged.viewport ?? { width: 1280, height: 720 };
     this._testIdAttribute =
-      opts.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
+      merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
+    // Capture-only remaining per-project `use` keys so a suite that reads them
+    // from the context (via a getter or in-suite introspection) sees the real
+    // project value. The engine doesn't act on HTTPS/permissions/geolocation
+    // today — these are present so a project's config doesn't silently vanish.
+    this._httpCredentials = merged.httpCredentials ?? null;
+    this._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
+    this._colorScheme = merged.colorScheme ?? null;
+    this._permissions = merged.permissions ?? [];
+    this._geolocation = merged.geolocation ?? null;
+    this._timezoneId = merged.timezoneId ?? null;
+    this._offline = merged.offline ?? false;
+    this._screen = merged.screen ?? null;
     this._initScripts = [];
     this._bindings = new Map();
     this._pages = [];
@@ -3565,12 +3606,18 @@ export const request = {
     };
     // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
-    const ctxHeaders = opts.extraHTTPHeaders ?? {};
+    const optHeaders = opts.extraHTTPHeaders ?? {};
+    // Resolve the context's `extraHTTPHeaders` live from the parent
+    // BrowserContext (if bound) so a `context.setExtraHTTPHeaders(...)` call
+    // after `request()` is cached takes effect on the next request — without
+    // this, the cache snapshotted an empty header set at newContext time and
+    // every request from the live context silently sent no custom headers.
+    const ctxHeaders = () => (bc ? { ...optHeaders, ...bc._headers } : optHeaders);
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
     // as-is. Per-request `headers` merge over the context's `extraHTTPHeaders`.
     const encode = (o = {}) => {
-      const h = { ...ctxHeaders, ...o.headers };
+      const h = { ...ctxHeaders(), ...o.headers };
       let body = null;
       if (o.data !== null && o.data !== undefined) {
         if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {

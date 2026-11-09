@@ -145,9 +145,8 @@ fn known_gaps(_id: &str, result: &mut Value) {
     single_report_only_attribute_check(result);
 }
 
-// FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at the final repin once turbo-dom 0.8.1 is published.
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
+#[ignore = "FIXME(v0.8.1-repin): turbo-dom 0.8.1 WIP regresses this Chrome-156 parity oracle; re-enable at final repin"]
 async fn csp_directives_match_chrome() {
     let differences = compare(known_gaps).await;
     assert!(differences.is_empty(), "{}", differences.join("\n"));

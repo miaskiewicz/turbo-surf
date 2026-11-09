@@ -1162,6 +1162,32 @@ class Frame {
   isDetached() {
     return false;
   }
+  // Live-interaction surface a Locator bound to this Frame expects on `_page` —
+  // iframes share the parent Page's V8 isolate (one session per Page), so forward
+  // to the parent rather than re-implementing session handling on Frame. Without
+  // these the first non-inert Frame-locator interaction (click / waitFor / hover /
+  // dispatchEvent / setInputFiles / dragTo) throws TypeError (#280).
+  get _session() {
+    return this._parentPage._session;
+  }
+  get _live() {
+    return this._parentPage._live;
+  }
+  _ensureLive() {
+    return this._parentPage._ensureLive();
+  }
+  _followIntent(intent) {
+    return this._parentPage._followIntent(intent);
+  }
+  _sessionDispatch(selector, index, kind, value) {
+    return this._parentPage._sessionDispatch(selector, index, kind, value);
+  }
+  _sessionEval(script) {
+    return this._parentPage._sessionEval(script);
+  }
+  _redrain() {
+    return this._parentPage._redrain();
+  }
   // The locator surface mirrors Page's — the Locator reads from THIS frame's `_html`.
   _locFromSelector(selector, mode = "auto") {
     const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)));

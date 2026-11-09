@@ -58,6 +58,33 @@ test("page views", async () => {
   assert.ok((await page.innerText()).includes("Widget"));
 });
 
+// #280 regression: a Frame-produced Locator used to crash with TypeError on the
+// first non-inert interaction because _followIntent / _ensureLive / _redrain /
+// _sessionDispatch / _sessionEval / _session lived only on Page. Frame now
+// forwards them to its parent Page.
+test("frame locator interactions do not crash (#280)", async () => {
+  const page = newPage();
+  await page.setContent(`<body>
+    <iframe name="pay" srcdoc="<body><a id='ok' href='#x'>OK</a></body>"></iframe>
+  </body>`);
+  const child = page.frame({ name: "pay" });
+  assert.ok(child, "child frame resolves");
+  // The surface a Locator reaches through `._page` must exist on a Frame too.
+  for (const m of [
+    "_followIntent",
+    "_ensureLive",
+    "_sessionDispatch",
+    "_sessionEval",
+    "_redrain",
+  ]) {
+    assert.equal(typeof child[m], "function", `Frame.${m} is callable`);
+  }
+  assert.equal("_session" in child, true, "Frame exposes _session");
+  // And an actual static click (which used to throw TypeError on _followIntent)
+  // now completes.
+  await child.locator("#ok").click();
+});
+
 test("evaluate + render (JS execution, no browser)", async () => {
   const page = newPage();
   await page.setContent("<body><h1 id='t'>Hi</h1><div id='app'></div></body>");

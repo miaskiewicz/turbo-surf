@@ -253,9 +253,6 @@ fn attribute_budget_measures_the_original_style_before_the_inline_override() {
     capture_with(&tree, &[(b, "width:1px")]).unwrap();
 }
 
-// FIXME(#244, turbo-dom#395): inline_overrides on a styled element zeros box
-// dims in turbo-dom-layout 0.8.0. Re-enable when turbo-dom 0.8.0.1 / 0.8.1
-// ships the fix.
 #[test]
 #[ignore]
 fn inline_override_replaces_only_an_existing_style_attribute() {

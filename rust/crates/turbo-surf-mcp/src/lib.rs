@@ -6196,6 +6196,16 @@ mod tests {
         .unwrap();
         let _ = width;
     }
+
+    // Lock the measure_text_hook contract directly (the render isolate's measure
+    // path goes through a Box<dyn Fn> indirection tarpaulin can't attribute, so a
+    // pure-function call keeps the two lines of this hook on a test path).
+    #[test]
+    fn measure_text_hook_returns_raster_measurements_as_f64() {
+        initialize_render_hooks();
+        let (w, h) = measure_text_hook("probe", "sans-serif", 20.0);
+        assert!(w > 0.0 && h > 0.0, "measure {w}x{h} should be non-zero");
+    }
 }
 
 #[cfg(test)]

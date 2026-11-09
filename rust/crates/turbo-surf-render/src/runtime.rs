@@ -1602,6 +1602,19 @@ fn op_timer_code_allowed<'s>(
     }
     policy.allows_eval()
 }
+/// Bracket a timer-fire callback with turbo-dom's engine-task scope so
+/// V8-native dispatches (e.g. `AbortSignal.timeout(0)`) inside the timer
+/// get the per-listener microtask checkpoint Chrome runs there. See
+/// turbo-dom#484 and surf oracle `abort_signal_any_and_timeout_match_chrome156`.
+#[op2(reentrant)]
+fn op_engine_task_scope<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    callback: v8::Local<v8::Function>,
+) -> v8::Local<'s, v8::Value> {
+    turbo_dom_browser_env::engine_task_scope(scope, callback)
+        .unwrap_or_else(|| v8::undefined(scope).into())
+}
+
 #[op2(reentrant)]
 fn op_run_timer_code<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -8283,6 +8296,7 @@ deno_core::extension!(
         op_timer_agent_task_base,
         op_run_local_timers,
         op_run_frame_timers,
+        op_engine_task_scope,
         op_frame_pending,
         op_queue_frame_script,
         op_frame_module,
@@ -9391,7 +9405,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);
     try{
-      try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+      try{ops.op_engine_task_scope(()=>{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);});}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){
         if(timer.nesting<7)timer.nesting++;
         timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);timer.sequence=ops.op_task_sequence();__timerPush(timer);

@@ -552,6 +552,25 @@ fn op_csp_finish_parser(scope: &mut v8::PinScope, document: v8::Local<v8::Object
     configure_csp_code_generation(scope, context, policy.current());
 }
 
+/// turbo-surf#121: whether the guest-side eval/Function shim should be
+/// installed for this document's current effective CSP. The shim lives only
+/// in the published (non-proxy) SDK; the exact-engine path uses V8's native
+/// source-conversion callback instead.
+#[op2(fast)]
+fn op_tt_eval_shim_required(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    if cfg!(turbo_surf_native_proxy) {
+        return false;
+    }
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return false;
+    };
+    let required = handle.policy.borrow().current().requires_trusted_types();
+    required
+}
+
 #[op2(fast)]
 fn op_csp_meta(
     scope: &mut v8::PinScope,
@@ -1318,11 +1337,18 @@ fn configure_csp_code_generation(
                 .get_private(scope, key)
                 .is_some_and(|callback| callback.is_function())
     };
+    // Published SDKs lack the private native source-conversion callback, so an
+    // eval-visible Trusted Types gate (turbo-surf#121) is approximated in guest JS:
+    // when the effective CSP requires Trusted Types, a bootstrap-installed shim
+    // patches globalThis.eval / globalThis.Function to route the source through
+    // the realm's TT converter (applying the `default` policy when one exists)
+    // and compile+run the admitted source on the host. Direct-eval semantics are
+    // lost, but the common cases match Chrome and the EvalError message matches
+    // too. V8's own eval gate is left open under TT enforcement so the shim's
+    // host compile and any late direct eval route through the shim.
     #[cfg(not(turbo_surf_native_proxy))]
-    // Published SDKs lack the private native source-conversion callback.
-    // Enforced Trusted Types must fail closed rather than admit raw eval.
     let allowed =
-        policy.bypasses_trusted_types_eval() || allowed && !policy.requires_trusted_types();
+        allowed || policy.requires_trusted_types() || policy.bypasses_trusted_types_eval();
     #[cfg(not(turbo_surf_native_proxy))]
     let _ = scope;
     context.set_allow_generation_from_strings(allowed);
@@ -8304,6 +8330,7 @@ deno_core::extension!(
         op_document_origin_opaque,
         op_iframe_permissions_policy,
         op_csp_meta,
+        op_tt_eval_shim_required,
         op_referrer_meta,
         op_csp_finish_parser,
         op_csp_request,
@@ -12546,6 +12573,7 @@ __G.domSig = (() => {
   };
   const frameParsingDone = () => {
     ops.op_csp_finish_parser(__document);
+    if (ops.op_tt_eval_shim_required(__document)) globalThis.__installTtEvalShim();
     __G.performancePhase("domInteractive");
     __G.setDocumentReadyState("interactive");
     fireFrameEvent(document, "readystatechange");
@@ -13118,6 +13146,7 @@ __G.domSig = (() => {
     if (!__G.initialLoading) return;
     __G.initialLoading = false;
     ops.op_csp_finish_parser(__document);
+    if (ops.op_tt_eval_shim_required(__document)) globalThis.__installTtEvalShim();
     __G.performancePhase("domInteractive");
     __G.setDocumentReadyState("interactive");
     lifecycleEvent(document, "readystatechange");
@@ -14250,6 +14279,7 @@ __G.domSig = (() => {
     include_str!("user_activation.js"),
     include_str!("host_input.js"),
     include_str!("window_named_properties.js"),
+    include_str!("trusted_types_eval.js"),
     r##"
 __hostErrorEvent=globalThis.ErrorEvent;
 })"##

@@ -1109,6 +1109,54 @@ test("page.route glob with ** matches an inline-script fetch carrying a query st
   }
 });
 
+// Regression for turbo-surf#281: a handler that branches on `req.url()` must
+// see the LIVE request URL, not the registration-time pattern. The pre-fix
+// shim ran the handler once at registration with `req.url()` returning `**/*`,
+// so `includes('/api')` was false, the fulfill branch never ran, and the route
+// became a silent no-op for real requests.
+test("page.route handler branches on live req.url() instead of the registration-time pattern (#281)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.who; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end('{"who":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("**/*", async (route, req) => {
+      if (req.url().includes("/api")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ who: "mocked" }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "mocked",
+      "branching handler must see the live URL and fulfill /api requests",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // page.unroute(url) must remove a previously-registered route so the next live
 // session sees the real server again (turbo-surf#220). Regression guard: without
 // a refreshed init-script snapshot, the fixture would keep winning after unroute.
@@ -1623,6 +1671,35 @@ test("page.exposeBinding receives a source record with the page + context", asyn
   try {
     await p.goto(`${base}/`, { waitUntil: "networkidle" });
     assert.deepEqual(seen, [{ label: "hi", n: 7, hasPage: true, hasContext: true }]);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// turbo-surf#285: init scripts run per-frame, so an iframe realm keeps its
+// own __tsExpose.q. The drain must walk the frame tree or iframe-scoped
+// binding calls are lost.
+test("page.exposeBinding fires when called from inside an iframe", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    res.writeHead(200, { "content-type": "text/html" });
+    if (url.pathname === "/child") {
+      res.end(`<body><script>globalThis.__childBind("from-iframe", 42);</script></body>`);
+      return;
+    }
+    res.end(`<body><iframe src="/child"></iframe></body>`);
+  });
+  const base = await listen(server);
+  const p = newPage();
+  const seen = [];
+  await p.exposeBinding("__childBind", (_source, label, n) => {
+    seen.push({ label, n });
+  });
+  try {
+    await p.goto(`${base}/`, { waitUntil: "networkidle" });
+    assert.deepEqual(seen, [{ label: "from-iframe", n: 42 }]);
   } finally {
     await p.close();
     server.closeAllConnections();

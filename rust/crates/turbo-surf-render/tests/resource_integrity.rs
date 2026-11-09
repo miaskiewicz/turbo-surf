@@ -105,7 +105,6 @@ async fn fetch_checks_raw_bytes_strongest_hashes_and_opaque_eligibility() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#289): iframe childErrors==0 on turbo-dom 0.8.1 crates.io; fix in v0.8.2"]
 async fn integrity_controls_script_module_stylesheet_and_child_execution() {
     let (origin, server) = server().await;
     let html = format!(

@@ -185,27 +185,28 @@ const WEB_FONT_HEIGHT: &[&str] = &[
     "/ready/heights/TTF = 26 (chrome 25)",
     "/ready/heights/WOFF2 = 26 (chrome 25)",
 ];
-// turbo-dom#377 (release/0.8.0 d1237332) aligned the live-layout content heights for
-// the embedded web face: the heading / contentsRange rects now match Chrome at 25px.
-// The inline content box's y-position still trails by 0.5 px (11.5 / 7.5 / 43.5 / 79.5
-// vs Chrome's 11 / 7 / 43 / 79): a separate, still-open live-layout gap owned by
-// turbo-dom. `rows/link/rects/*/3 = 26` in RANGE_MIXED is the plain-font row (the
-// mixed-range case paints one row in Plex, another in the default serif), which the
-// web-font metric policy does not reach.
+// turbo-surf#294: the embedded web face's inline content box height trails Chrome 156
+// by 1 CSS px at DPR 2 (26 vs 25) — the same `WEB_FONT_HEIGHT` drift, now reaching
+// the live-layout range rects too. turbo-dom's `WebMetrics::px` returns 25 at DPR 1
+// and 26 at DPR 2 (both inside Chrome's half-CSS-px grain) across its web-font
+// matrix (miaskiewicz/turbo-dom#485); the live-layout range's y-positions landed on
+// the integer grid after turbo-dom#377 / #386, leaving only this 1-px height drift.
+// In RANGE_MIXED, `rows/link/bounds/3 = 98` (chrome 97) is the <a> element's
+// 4-line border box inheriting the same +1 drift.
 const RANGE_BLOCK_HEIGHT: &[&str] = &[
-    "/rows/heading/contentsRange/bounds/1 = 11.5 (chrome 11)",
-    "/rows/heading/contentsRange/rects/0/1 = 11.5 (chrome 11)",
-    "/rows/link/contentsRange/bounds/1 = 11.5 (chrome 11)",
-    "/rows/link/contentsRange/rects/1/1 = 11.5 (chrome 11)",
+    "/rows/heading/contentsRange/bounds/3 = 26 (chrome 25)",
+    "/rows/heading/contentsRange/rects/0/3 = 26 (chrome 25)",
+    "/rows/link/contentsRange/bounds/3 = 26 (chrome 25)",
+    "/rows/link/contentsRange/rects/1/3 = 26 (chrome 25)",
 ];
 const RANGE_MIXED_HEIGHT: &[&str] = &[
-    "/rows/heading/contentsRange/bounds/1 = 43.5 (chrome 43)",
-    "/rows/heading/contentsRange/rects/0/1 = 43.5 (chrome 43)",
+    "/rows/heading/contentsRange/bounds/3 = 26 (chrome 25)",
+    "/rows/heading/contentsRange/rects/0/3 = 26 (chrome 25)",
     "/rows/link/bounds/3 = 98 (chrome 97)",
-    "/rows/link/contentsRange/bounds/1 = 7.5 (chrome 7)",
-    "/rows/link/contentsRange/rects/0/1 = 7.5 (chrome 7)",
-    "/rows/link/contentsRange/rects/2/1 = 43.5 (chrome 43)",
-    "/rows/link/contentsRange/rects/3/1 = 79.5 (chrome 79)",
+    "/rows/link/contentsRange/bounds/3 = 98 (chrome 97)",
+    "/rows/link/contentsRange/rects/0/3 = 26 (chrome 25)",
+    "/rows/link/contentsRange/rects/2/3 = 26 (chrome 25)",
+    "/rows/link/contentsRange/rects/3/3 = 26 (chrome 25)",
     "/rows/link/rects/0/3 = 26 (chrome 25)",
     "/rows/link/rects/2/3 = 26 (chrome 25)",
 ];
@@ -229,13 +230,11 @@ async fn font_face_csp_font_src_matches_chrome156() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#287): still diverges on turbo-dom 0.8.2 — @font-face unicode-range metrics not addressed by turbo-dom#478 iframe realm fix"]
 async fn embedded_web_font_block_range_matches_chrome156() {
     assert_case("range-block-only", RANGE_BLOCK_HEIGHT).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#287): still diverges on turbo-dom 0.8.2 — @font-face mixed unicode-range metrics not addressed by turbo-dom#478 iframe realm fix"]
 async fn embedded_web_font_mixed_range_matches_chrome156() {
     assert_case("range-mixed", RANGE_MIXED_HEIGHT).await;
 }

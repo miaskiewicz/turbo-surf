@@ -57,29 +57,30 @@ function harEntryToRoute(entry) {
     if (h && h.name) headers[String(h.name).toLowerCase()] = h.value == null ? "" : String(h.value);
   }
   const content = resp.content ?? {};
-  return {
-    kind: "glob",
-    pattern: url,
-    flags: "",
-    patternKey: url,
+  const payload = {
     status: resp.status ?? 200,
     headers,
     contentType: content.mimeType ?? null,
     body: content.text == null ? "" : String(content.text),
   };
+  // Replay a HAR entry as a fulfill-only handler so the init script can treat
+  // every route uniformly (handlerSource eval'd in the isolate, see #281).
+  const handlerSource = `(async (route) => { await route.fulfill(${JSON.stringify(payload)}); })`;
+  return { kind: "glob", pattern: url, flags: "", patternKey: url, handlerSource };
 }
 
-function normalizeRoute(pattern, fulfill) {
+function normalizeRoute(pattern, handler) {
   const isRegex = pattern instanceof RegExp;
+  // Serialize the handler so the init script can re-create it inside the live
+  // isolate and invoke it PER request with a live Request wrapper (#281). We
+  // wrap in parens so a `function` / `async function` declaration-form source
+  // evaluates to the function expression rather than a statement.
   return {
     kind: isRegex ? "regex" : "glob",
     pattern: isRegex ? pattern.source : String(pattern),
     flags: isRegex ? pattern.flags : "",
     patternKey: isRegex ? pattern.source : String(pattern),
-    status: fulfill.status ?? 200,
-    headers: fulfill.headers ?? {},
-    contentType: fulfill.contentType ?? null,
-    body: fulfill.body == null ? "" : String(fulfill.body),
+    handlerSource: `(${String(handler)})`,
   };
 }
 
@@ -95,14 +96,15 @@ function buildRouteInitScript(routes) {
       kind: r.kind,
       pattern: r.pattern,
       flags: r.flags,
-      status: r.status,
-      headers: r.headers,
-      contentType: r.contentType,
-      body: r.body,
+      handlerSource: r.handlerSource,
     })),
   );
   return `(() => {
-    const routes = ${table};
+    const routes = (${table}).map((r) => {
+      let fn = null;
+      try { fn = (0, eval)(r.handlerSource); } catch (_e) { /* malformed handler — route is a no-op */ }
+      return { kind: r.kind, pattern: r.pattern, flags: r.flags, fn };
+    });
     const globToRegex = (p) => {
       // Escape * and ? too, so the two translation passes below can locate
       // every star — a bare * in the source would otherwise skip the escape
@@ -145,18 +147,55 @@ function buildRouteInitScript(routes) {
       }
       return null;
     };
-    const synth = (r) => {
-      const h = Object.assign({}, r.headers || {});
-      if (r.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
-        h["content-type"] = r.contentType;
-      return new Response(r.body, { status: r.status, headers: h });
+    const synth = (opts) => {
+      const o = opts || {};
+      const h = Object.assign({}, o.headers || {});
+      if (o.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
+        h["content-type"] = o.contentType;
+      return new Response(o.body == null ? "" : String(o.body), { status: o.status == null ? 200 : o.status, headers: h });
+    };
+    // Invoke a route handler per request (#281): build a Request wrapper
+    // carrying the LIVE url/method/headers, run handler(route, req), and
+    // return a {fulfill?, action?} decision the caller turns into a Response.
+    const runHandler = async (r, url, method, init, headers) => {
+      let fulfilled = null;
+      let action = null;
+      const body = init && init.body != null ? init.body : null;
+      const req = {
+        url: () => url,
+        method: () => String(method || "GET").toUpperCase(),
+        postData: () => (typeof body === "string" ? body : null),
+        postDataJSON: () => { try { return typeof body === "string" ? JSON.parse(body) : null; } catch (_e) { return null; } },
+        headers: () => headers || {},
+        resourceType: () => "xhr",
+      };
+      const route = {
+        request: () => req,
+        fulfill: async (opts) => { fulfilled = opts == null ? {} : opts; },
+        continue: async () => { action = "continue"; },
+        abort: async () => { action = "abort"; },
+        fallback: async () => { action = "fallback"; },
+      };
+      try { if (typeof r.fn === "function") await r.fn(route, req); } catch (_e) { /* handler threw — leave inert */ }
+      return { fulfilled, action };
+    };
+    const collectHeaders = (init) => {
+      const h = init && init.headers;
+      if (!h) return {};
+      if (typeof h.forEach === "function") { const out = {}; h.forEach((v, k) => { out[k] = v; }); return out; }
+      if (typeof h === "object") return Object.assign({}, h);
+      return {};
     };
     if (typeof globalThis.fetch === "function") {
       const origFetch = globalThis.fetch;
-      globalThis.fetch = function (input, init) {
+      globalThis.fetch = async function (input, init) {
         const url = typeof input === "string" ? input : (input && input.url) || "";
+        const method = (init && init.method) || (typeof input === "object" && input && input.method) || "GET";
         const r = find(url);
-        if (r) return Promise.resolve(synth(r));
+        if (!r) return origFetch(input, init);
+        const { fulfilled, action } = await runHandler(r, url, method, init || {}, collectHeaders(init));
+        if (fulfilled) return synth(fulfilled);
+        if (action === "abort") throw new TypeError("net::ERR_ABORTED");
         return origFetch(input, init);
       };
     }
@@ -167,6 +206,7 @@ function buildRouteInitScript(routes) {
         this._real = null;
         this._url = "";
         this._method = "GET";
+        this._reqHeaders = {};
       }
       MockXHR.prototype.open = function (method, url) {
         this._method = method;
@@ -178,17 +218,22 @@ function buildRouteInitScript(routes) {
         }
       };
       MockXHR.prototype.setRequestHeader = function (name, value) {
+        this._reqHeaders[name] = value;
         if (this._real) this._real.setRequestHeader(name, value);
       };
       MockXHR.prototype.send = function (body) {
         if (this._mocked) {
-          const r = this._mocked;
-          this.readyState = 4;
-          this.status = r.status;
-          this.responseText = r.body;
-          this.response = r.body;
-          try { if (typeof this.onreadystatechange === "function") this.onreadystatechange(); } catch (_e) {}
-          try { if (typeof this.onload === "function") this.onload(); } catch (_e) {}
+          const self = this;
+          runHandler(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled }) => {
+            const o = fulfilled || { status: 200, body: "" };
+            self.readyState = 4;
+            self.status = o.status == null ? 200 : o.status;
+            const b = o.body == null ? "" : String(o.body);
+            self.responseText = b;
+            self.response = b;
+            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
+            try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
+          });
         } else if (this._real) {
           const self = this;
           this._real.onreadystatechange = function () {
@@ -2378,39 +2423,17 @@ class Page {
   // --- unsupported → honest throws ---
   pdf = UNSUPPORTED("page.pdf", PIXEL);
   // page.route(url, handler) — shim-side only, by monkey-patching `fetch` inside
-  // the live isolate via an init script. The handler is invoked once at route
-  // registration time against a stub route that captures the `fulfill` payload;
-  // `continue`/`abort`/`fallback` and per-request dynamic responses are NOT
-  // supported. Pattern: string (substring OR glob with `*`/`**`) or RegExp.
+  // the live isolate via an init script. The handler is serialized and re-run
+  // PER request inside the isolate against a real Request wrapper (live
+  // url/method/headers), so handlers that branch on `req.url()` work (#281).
+  // Caveat: the serialized handler loses outer-scope closures — captured host
+  // identifiers and host-side `await` on Node helpers don't cross into V8.
+  // Pattern: string (substring OR glob with `*`/`**`) or RegExp. `continue` and
+  // `fallback` let the real network through; `abort` rejects the fetch.
   // XHR goes through this same wrapper for the common xhr.open+send path.
   async route(urlPattern, handler) {
-    let fulfilled = null;
-    const req = {
-      url: () => (typeof urlPattern === "string" ? urlPattern : ""),
-      method: () => "GET",
-      postData: () => null,
-      postDataJSON: () => null,
-      headers: () => ({}),
-      resourceType: () => "xhr",
-    };
-    const stub = {
-      request: () => req,
-      fulfill: async (opts) => {
-        fulfilled = opts ?? {};
-      },
-      continue: async () => {},
-      abort: async () => {},
-      fallback: async () => {},
-    };
-    try {
-      await handler(stub, req);
-    } catch {
-      /* handler threw — leave fulfilled null, route is a no-op */
-    }
-    if (!fulfilled) return;
     this._routes = this._routes ?? [];
-    this._routes.push(normalizeRoute(urlPattern, fulfilled));
-    // Refresh the init-script snapshot so the next live session sees the route.
+    this._routes.push(normalizeRoute(urlPattern, handler));
     this._routeInitScript = buildRouteInitScript(this._routes);
   }
   // Drop a previously-registered route by its original pattern (handler ignored

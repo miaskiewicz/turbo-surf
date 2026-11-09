@@ -2461,6 +2461,13 @@ class Page {
     this._routes = this._routes ?? [];
     this._routes.push(normalizeRoute(urlPattern, handler));
     this._routeInitScript = buildRouteInitScript(this._routes);
+    // Inject into the CURRENT live isolate too, so a route registered after
+    // goto intercepts subsequent fetches without requiring a re-navigation
+    // (turbo-surf#282). The wrapper falls through to the previously-wrapped
+    // fetch for non-matches, so stacking is safe.
+    if (this._live && this._routeInitScript) {
+      await native.liveEvalEngine(this._session, this._routeInitScript);
+    }
   }
   // Drop a previously-registered route by its original pattern (handler ignored
   // here because the shim collapses each route to its fulfilled payload).
@@ -2469,6 +2476,9 @@ class Page {
     const key = urlPattern instanceof RegExp ? urlPattern.source : String(urlPattern);
     this._routes = this._routes.filter((r) => r.patternKey !== key);
     this._routeInitScript = buildRouteInitScript(this._routes);
+    if (this._live && this._routeInitScript) {
+      await native.liveEvalEngine(this._session, this._routeInitScript);
+    }
   }
   // page.routeFromHAR(har, options?) — read a Playwright/Chrome HAR file and
   // register each `log.entries[].request.url` as a route returning that entry's
@@ -2495,6 +2505,9 @@ class Page {
       this._routes.push(route);
     }
     this._routeInitScript = buildRouteInitScript(this._routes);
+    if (this._live && this._routeInitScript) {
+      await native.liveEvalEngine(this._session, this._routeInitScript);
+    }
   }
   pause = UNSUPPORTED("page.pause", "no inspector UI");
   // Persistent JS→host binding. The init-script path re-defines

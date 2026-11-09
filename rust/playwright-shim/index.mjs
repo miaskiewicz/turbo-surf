@@ -1213,13 +1213,29 @@ class FrameLocator {
     this._index = 0;
   }
   _resolveFrame() {
-    const list = _collectIframes(this._parent, this._selector);
+    // Cache the Frame on the parent so writes through fl.locator().fill() survive:
+    // the Frame carries the mutated _html, and a later read via a fresh FrameLocator
+    // over the same parent HTML reuses it. Invalidates when parent._html changes
+    // (e.g. page.setContent) — the key includes the parent-HTML identity.
+    const parent = this._parent;
+    const parentHtml = parent._html ?? "";
+    const cacheKey = `${this._selector}\x00${this._index}`;
+    let cache = parent._frameLocatorCache;
+    if (!cache || cache.html !== parentHtml) {
+      cache = { html: parentHtml, frames: new Map() };
+      parent._frameLocatorCache = cache;
+    }
+    const hit = cache.frames.get(cacheKey);
+    if (hit) return hit;
+    const list = _collectIframes(parent, this._selector);
     const i = this._index < 0 ? list.length + this._index : this._index;
     const entry = list[i];
     if (!entry) throw new Error(`turbo-surf: frameLocator(${this._selector}) matched no iframe`);
-    const topPage = this._parent instanceof Frame ? this._parent._parentPage : this._parent;
-    const parentFrame = this._parent instanceof Frame ? this._parent : null;
-    return new Frame(topPage, parentFrame, entry);
+    const topPage = parent instanceof Frame ? parent._parentPage : parent;
+    const parentFrame = parent instanceof Frame ? parent : null;
+    const frame = new Frame(topPage, parentFrame, entry);
+    cache.frames.set(cacheKey, frame);
+    return frame;
   }
   _withIndex(i) {
     const fl = new FrameLocator(this._parent, this._selector);

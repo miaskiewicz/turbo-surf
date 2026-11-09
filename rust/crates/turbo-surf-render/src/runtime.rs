@@ -226,6 +226,12 @@ struct CspHandle {
     policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
     response_metadata: Rc<RefCell<crate::DocumentResponseMetadata>>,
     dictionaries: Rc<RefCell<compression_dictionary::Discovery>>,
+    /// Keyed by `(element identity hash, directive kind)`; stores the last-reported
+    /// handler source for that slot. turbo-dom-browser-env fires `script-src-attr` at
+    /// both the attribute set phase and the lazy compile phase (turbo-dom#380) — Chrome
+    /// 156 reports once per effective disposition, so a second call with unchanged
+    /// text skips emission.
+    inline_attr_reported: Rc<RefCell<std::collections::HashMap<(i32, String), String>>>,
 }
 impl CspHandle {
     fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
@@ -241,6 +247,7 @@ impl CspHandle {
             policy: Rc::new(RefCell::new(crate::csp::DocumentPolicy::new(
                 base, headers, html,
             ))),
+            inline_attr_reported: Rc::new(RefCell::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -1347,33 +1354,54 @@ fn authorize_css(
     } else {
         element
     };
-    queue_csp_report(
-        scope,
-        context,
-        target,
-        CspViolationReport {
-            kind: &kind,
-            blocked: "inline",
-            disposition: "enforce",
-            records: policy.inline_violations(&kind, &text, &nonce),
-            parser,
-            sample: Some(&sample),
-        },
-    );
-    let report_only = handle.policy.borrow().report_only.clone();
-    queue_csp_report(
-        scope,
-        context,
-        target,
-        CspViolationReport {
-            kind: &kind,
-            blocked: "inline",
-            disposition: "report",
-            records: report_only.inline_violations(&kind, &text, &nonce),
-            parser,
-            sample: Some(&sample),
-        },
-    );
+    // turbo-dom-browser-env fires `script-src-attr` twice per content-attribute write
+    // (set phase then lazy compile; turbo-dom#380); Chrome 156 emits the violation once
+    // per effective disposition, so skip the second emission when the handler text is
+    // unchanged for this element/kind pair.
+    let dedup_key =
+        (kind == "script-src-attr").then(|| (i32::from(element.get_identity_hash()), kind.clone()));
+    let suppressed = dedup_key.as_ref().is_some_and(|key| {
+        handle
+            .inline_attr_reported
+            .borrow()
+            .get(key)
+            .is_some_and(|previous| previous == &text)
+    });
+    if let Some(key) = dedup_key {
+        handle
+            .inline_attr_reported
+            .borrow_mut()
+            .insert(key, text.clone());
+    }
+    if !suppressed {
+        queue_csp_report(
+            scope,
+            context,
+            target,
+            CspViolationReport {
+                kind: &kind,
+                blocked: "inline",
+                disposition: "enforce",
+                records: policy.inline_violations(&kind, &text, &nonce),
+                parser,
+                sample: Some(&sample),
+            },
+        );
+        let report_only = handle.policy.borrow().report_only.clone();
+        queue_csp_report(
+            scope,
+            context,
+            target,
+            CspViolationReport {
+                kind: &kind,
+                blocked: "inline",
+                disposition: "report",
+                records: report_only.inline_violations(&kind, &text, &nonce),
+                parser,
+                sample: Some(&sample),
+            },
+        );
+    }
     result.set_bool(allowed);
 }
 

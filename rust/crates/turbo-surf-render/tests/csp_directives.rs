@@ -146,7 +146,7 @@ fn known_gaps(_id: &str, result: &mut Value) {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#287): still diverges from Chrome 156 against turbo-dom release/0.8.1 (event double-dispatch pattern); v0.9.0 follow-up"]
+#[ignore = "FIXME(#287, turbo-dom#478): iframe inline onload compiles against parent realm; fix in turbo-dom 0.8.2 + surf 0.8.2"]
 async fn csp_directives_match_chrome() {
     let differences = compare(known_gaps).await;
     assert!(differences.is_empty(), "{}", differences.join("\n"));

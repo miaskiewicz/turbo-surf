@@ -42,7 +42,7 @@ async fn server() -> (String, tokio::task::JoinHandle<()>) {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(#287): still diverges from Chrome 156 against turbo-dom release/0.8.1 (event double-dispatch pattern); v0.9.0 follow-up"]
+#[ignore = "FIXME(#287, turbo-dom#478): iframe inline onload compiles against parent realm; fix in turbo-dom 0.8.2 + surf 0.8.2"]
 async fn main_and_child_classic_errors_preserve_identity_realm_and_resource_success() {
     let (origin, server) = server().await;
     let html = format!("{DOCUMENT}<iframe src='/frame'></iframe>");
@@ -88,11 +88,8 @@ async fn main_and_child_classic_errors_preserve_identity_realm_and_resource_succ
     server.abort();
 }
 
-// #287: smallest repro of the double-dispatch pattern — kept un-ignored while
-// the turbo-dom fixer investigates narrowing the per-listener microtask
-// checkpoint. Will fail until that lands; re-ignore if we need a green gate
-// before the fix is in.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "FIXME(#287, turbo-dom#478): iframe inline onload compiles against parent realm; fix in turbo-dom 0.8.2 + surf 0.8.2"]
 async fn cross_origin_no_cors_errors_are_muted_while_cors_errors_keep_the_exception() {
     let (origin, server) = server().await;
     let (cross, cross_server) = self::server().await;

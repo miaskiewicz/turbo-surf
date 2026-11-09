@@ -1152,6 +1152,45 @@ test("page.unroute drops a previously-registered route and lets the real server 
   }
 });
 
+// page.route() registered AFTER goto must inject into the CURRENT live isolate
+// so a subsequent fetch is intercepted — without re-navigation (turbo-surf#282).
+// Regression guard: pre-#282, buildRouteInitScript only landed on the NEXT live
+// session, so the post-goto fetch reached the real server.
+test("page.route after goto intercepts a subsequent fetch in the current session", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(`<title>app</title><div id="root">init</div>`);
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"hello":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    await p.route("**/api/orders", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked-post-goto" }),
+      });
+    });
+    const got = await p.evaluate(
+      async () => (await fetch("/api/orders").then((r) => r.json())).hello,
+    );
+    assert.equal(
+      got,
+      "mocked-post-goto",
+      "route registered after goto must inject into the live isolate (turbo-surf#282)",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // page.routeFromHAR(path) replays a Playwright/Chrome HAR file as a set of
 // fixtures: for every entry in `log.entries`, the request URL is registered as
 // a route returning that entry's response body/status/content-type — the live

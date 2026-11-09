@@ -6,11 +6,7 @@
   "types": "index.d.ts",
   "license": "MIT",
   "repository": "github:miaskiewicz/turbo-surf",
-  "files": [
-    "index.js",
-    "index.d.ts",
-    "turbo-surf.*.node"
-  ],
+  "files": ["index.js", "index.d.ts", "turbo-surf.*.node"],
   "napi": {
     "name": "turbo-surf",
     "triples": {

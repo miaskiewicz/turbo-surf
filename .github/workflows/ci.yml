@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22]
+        node: [22]
     steps:
       # The workspace test build (render tests + the PyO3/napi crates) outgrows the
       # runner's free disk; drop the preinstalled toolchains this job never uses.

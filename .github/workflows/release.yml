@@ -85,6 +85,9 @@ jobs:
         # The napi cdylib (turbo-surf-napi) is bundled in the same tarball so
         # `npm install turbo-surf` gives a working playwright-shim out of the
         # box (turbo-surf#288) — same build-and-stage model as the MCP binary.
+        # `shell: bash` so the backslash line-continuation works on Windows too
+        # (default shell there is pwsh, which reads `\` as a unary operator).
+        shell: bash
         run: |
           cargo build --locked --release -p turbo-surf-mcp -p turbo-surf-napi \
             --target ${{ matrix.target }} --manifest-path rust/Cargo.toml

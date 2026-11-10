@@ -19,11 +19,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::Notify;
 
 const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_RESPONSE_HEAD: usize = 64 * 1024;
 /// How long a clean close waits for the server to drop TCP after the close frames.
 const CLOSE_LINGER: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long the client waits for the server's close frame after sending its own
+/// (Chrome 156's closing-handshake timeout: #178). On elapse the connection is
+/// forced closed abnormally (code 1006, wasClean=false).
+const CLOSE_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The opening handshake inputs the embedder resolves (cookies, identity, origin).
 #[derive(Clone, Debug, Default)]
@@ -133,15 +138,18 @@ async fn run(
     let (read, write) = tokio::io::split(stream);
     let reader = std::io::Cursor::new(leftover).chain(read);
     let closing = Arc::new(AtomicBool::new(false));
+    let close_sent = Arc::new(Notify::new());
     let session = Session {
         events: events.clone(),
         loopback,
         closing: closing.clone(),
+        close_sent: close_sent.clone(),
     };
     let writer = Writer {
         deflater: deflate.and_then(Deflater::new),
         events,
         closing,
+        close_sent,
     };
     tokio::select! {
         _ = session.read(reader, Assembler::new(deflate)) => {}
@@ -477,12 +485,26 @@ struct Session {
     events: UnboundedSender<WsEvent>,
     loopback: UnboundedSender<Outbound>,
     closing: Arc<AtomicBool>,
+    close_sent: Arc<Notify>,
 }
 
 impl Session {
     async fn read<R: AsyncRead + Unpin>(self, mut reader: R, mut assembler: Assembler) {
+        // Arm the closing-handshake timer once the writer has put our close frame on
+        // the wire (#178): the server has CLOSE_HANDSHAKE_TIMEOUT to answer before we
+        // force the socket closed abnormally.
+        let close_sent = self.close_sent.clone();
+        let close_deadline = async move {
+            close_sent.notified().await;
+            tokio::time::sleep(CLOSE_HANDSHAKE_TIMEOUT).await;
+        };
+        tokio::pin!(close_deadline);
         loop {
-            let unit = match read_frame(&mut reader).await {
+            let frame = tokio::select! {
+                result = read_frame(&mut reader) => result,
+                _ = &mut close_deadline => return self.abnormal(),
+            };
+            let unit = match frame {
                 Ok(raw) => assembler.accept(raw),
                 Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
                     Err(ProtocolError("invalid frame"))
@@ -553,6 +575,7 @@ struct Writer {
     deflater: Option<Deflater>,
     events: UnboundedSender<WsEvent>,
     closing: Arc<AtomicBool>,
+    close_sent: Arc<Notify>,
 }
 
 impl Writer {
@@ -592,6 +615,7 @@ impl Writer {
             Outbound::Pong(payload) => (frame::encode(PONG, &payload, false, mask), None),
             Outbound::Close(payload) => {
                 self.closing.store(true, Ordering::SeqCst);
+                self.close_sent.notify_one();
                 (frame::encode(CLOSE, &payload, false, mask), None)
             }
         }

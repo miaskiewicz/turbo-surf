@@ -91,50 +91,19 @@ async fn indexeddb_matches_chrome156() {
 /// Measured Chrome behavior the engine does not reproduce yet, as `path = engine value`
 /// (#193, split from #148; pinned exactly so a fix or a new divergence fails here).
 ///
-/// `/path`: Chrome builds one event path request -> transaction -> database, with capture
-/// listeners on the database and transaction first (phase 1), and one event object. The
-/// binding's dispatch has no "get the parent" for non-node targets, so surf fires a fresh
-/// event at each target in turn and capture listeners there run in the bubbling phase.
-/// `/microtasks`: Chrome checkpoints microtasks after every listener; the binding's
-/// dispatcher has no per-listener host checkpoint (the same gap as #136), so surf
-/// checkpoints after each target. `/deactivation`: Chrome deactivates a new transaction
-/// at the end of its task; surf does so in a 0 ms timer, after timers queued earlier.
-const EVENTS_KNOWN_GAPS: &[&str] = &[
-    "/deactivation/1/1 = \"ok\"",
-    "/microtasks/1 = \"s2\"",
-    "/microtasks/2 = [\"s1-micro\",\"ok\"]",
-    "/microtasks/5 = \"e2\"",
-    "/microtasks/6 = [\"e1-micro\",\"ok\"]",
-    "/path/full/events = 3",
-    "/path/full/log/0/0 = \"req\"",
-    "/path/full/log/0/1 = \"bubble\"",
-    "/path/full/log/0/2 = 2",
-    "/path/full/log/0/3 = \"req\"",
-    "/path/full/log/0/6/0 = \"req\"",
-    "/path/full/log/1/0 = \"req\"",
-    "/path/full/log/1/2 = 2",
-    "/path/full/log/1/3 = \"req\"",
-    "/path/full/log/1/6/0 = \"req\"",
-    "/path/full/log/2/0 = \"tx\"",
-    "/path/full/log/2/2 = 3",
-    "/path/full/log/2/3 = \"tx\"",
-    "/path/full/log/2/5 = 1",
-    "/path/full/log/2/6/0 = \"tx\"",
-    "/path/full/log/3/0 = \"tx\"",
-    "/path/full/log/3/2 = 3",
-    "/path/full/log/3/3 = \"tx\"",
-    "/path/full/log/3/5 = 1",
-    "/path/full/log/3/6/0 = \"tx\"",
-    "/path/full/log/4/0 = \"db\"",
-    "/path/full/log/4/3 = \"db\"",
-    "/path/full/log/4/5 = 2",
-    "/path/full/log/4/6/0 = \"db\"",
-    "/path/full/log/5/1 = \"capture\"",
-    "/path/full/log/5/5 = 2",
-    "/path/stopped/events = 3",
-    "/path/stopped/log = [[\"req\",\"bubble\",2,\"req\",\"req\",0,[\"req\"]],[\"req\",\"capture\",2,\"req\",\"req\",0,[\"req\"]],[\"tx\",\"bubble\",3,\"tx\",\"req\",1,[\"tx\"]],[\"tx\",\"capture\",3,\"tx\",\"req\",1,[\"tx\"]],[\"db\",\"bubble\",3,\"db\",\"req\",2,[\"db\"]],[\"db\",\"capture\",3,\"db\",\"req\",2,[\"db\"]]]",
-    "/path/stopped/settled = \"complete\"",
-];
+/// Items 1 (`/path/full` + `/microtasks`) and 2 (per-listener checkpoint) landed with
+/// turbo-dom#381/#382 and surf's indexeddb.js switch to the engine-walked event path
+/// (parent hook on request -> transaction -> database; one event; per-listener
+/// microtask checkpoint from the binding).
+///
+/// `/deactivation`: Chrome deactivates a new transaction at the end of its task, so a
+/// timer queued earlier in that task sees `TransactionInactiveError`; surf still does
+/// so in a 0 ms timer. Blocked on turbo-dom#383 (end-of-task / microtasks-completed
+/// callback; needs a new rusty_v8 binding, deferred to v0.9.0).
+/// `/path/stopped/log` + `/path/stopped/settled` closed by turbo-dom#433 on
+/// release/0.8.2 (dispatchMulti now short-circuits AT_TARGET on stopPropagation too,
+/// not just stopImmediate). `/deactivation` remains blocked on turbo-dom#383.
+const EVENTS_KNOWN_GAPS: &[&str] = &["/deactivation/1/1 = \"ok\""];
 
 /// Listener exceptions abort the transaction like Chrome 156 (#148), whichever
 /// listener of the request's event path threw, and only for that dispatch's own
@@ -269,4 +238,53 @@ async fn indexeddb_partitions_match_chrome156() {
     }
     server.abort();
     assert_eq!(Value::Array(actual), control["result"]);
+}
+
+/// #193 item 4 (split from #148, unchanged by that PR). When the first realm in
+/// a storage partition to touch `indexedDB` is a child frame, `IdbRegistries`
+/// stores a `v8::Global<v8::Object>` whose creation context is that child's
+/// realm; removing the frame then leaves the child's context alive because
+/// `OpState` keeps that strong handle. The inner records on `registry.dbs`,
+/// `registry.queues` and each per-DB `{connections, ...}` object are also
+/// created in the realm that touches them, so even once the top-level object
+/// moves to a neutral context the inner graph still roots the first-opener.
+///
+/// This test is `#[ignore]` so the release gate stays green; remove the ignore
+/// and the trailing `// #193 item 4` pin on the asserted count once the data
+/// model is realm-independent and the child frame collects. The partition
+/// control (`indexeddb_partitions_match_chrome156`) covers Chrome's partition
+/// semantics on the same backing store.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "#193 item 4: registry roots the first-opener realm; needs realm-independent IDB state"]
+async fn removed_first_opener_frame_releases_its_realm() {
+    let mut page = PageSession::open(
+        "<!doctype html><body><iframe id=f></iframe>",
+        "https://idb-lifetime.test/",
+        "",
+        "",
+        20_000,
+    )
+    .await
+    .unwrap();
+    // Child frame opens IDB first, making its realm the registry creator.
+    page.eval_json_expression(
+        r#"(async()=>{
+          const child=document.getElementById('f').contentWindow;
+          await new Promise(resolve=>{const request=child.indexedDB.open('leaked',1);
+            request.onupgradeneeded=()=>request.result.createObjectStore('s');
+            request.onsuccess=()=>{request.result.close();resolve();};});
+          document.getElementById('f').remove();
+          return 'removed';
+        })()"#,
+    )
+    .await
+    .unwrap();
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    let contexts = page.context_registry_diagnostics_for_testing();
+    // Expected after a fix: live == 1 (top realm only). Current engine: 2
+    // (top + the removed child, rooted by IdbRegistries). Flip to 1 and drop
+    // the ignore when #193 item 4 lands. // #193 item 4
+    assert_eq!(contexts["live"], 1, "{contexts}");
 }

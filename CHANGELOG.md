@@ -1,104 +1,80 @@
 # Changelog
 
+## [0.8.2] - 2026-11-10
+
+Pinned at `turbo-dom = "0.8.2"` on crates.io (all four turbo-dom crates: `turbo-dom`, `turbo-dom-browser-env`, `turbo-dom-layout`, `turbo-dom-raster`; `turbo-dom-v8` 150.4.1 unchanged). `[patch.crates-io]` git bridge dropped.
+
+### Added / Fixed
+
+- **render #289**: child-error counter fixed by turbo-dom 0.8.2 — `integrity_controls_script_module_stylesheet_and_child_execution` un-ignored, `childErrors == 1`.
+- **render #287**: all 8 Chrome-156 parity oracles un-ignored on release/0.8.2.
+  - 3 pass on the initial turbo-dom 0.8.2 repin via turbo-dom#478 (iframe inline `on*` handlers compile against the element's own realm): `error_event_preserves_native_error_and_branded_readonly_fields`, `main_and_child_classic_errors_preserve_identity_realm_and_resource_success`, `cross_origin_no_cors_errors_are_muted_while_cors_errors_keep_the_exception`.
+  - `genuine_css_supports_overloads_native_grammar_selectors_and_private_coercion_match_chrome` passes after retiring the 4-row pin list (turbo-dom 0.8.2 tightens all four).
+  - `csp_directives_match_chrome` passes after surf-side dedup of inline `script-src-attr` CSP violation emission in `runtime.rs::authorize_css` (new `inline_attr_reported` map on `CspHandle` keyed by `(element identity hash, kind)`).
+  - `official_abort_bridge_keeps_chrome_state_and_unadapted_reaction_order` and `port_handler_registration_order_signal_once_and_cleanup_are_native` pass via turbo-dom#484 (per-listener drain gated on `hostDispatchDepth > 0 || engineTaskDepth > 0`) + turbo-dom#483 (drain clears `currentTarget`/`eventPhase`/`composedPath` across the microtask checkpoint).
+  - The two `embedded_web_font_*_range_matches_chrome156` oracles run with the DPR-2 1-CSS-px height drift (26 vs 25) pinned in `KNOWN_GAPS`; turbo-dom repro cleared turbo-dom-layout (miaskiewicz/turbo-dom#485 closed as not-planned), the drift originates in surf's live-layout plumbing and is tracked as follow-up under miaskiewicz/turbo-surf#294 (closed for v0.8.2 ship).
+- **render engine-task bracket**: new `op_engine_task_scope` forwards to `turbo_dom_browser_env::engine_task_scope`; `__runLocalTimers` wraps each `__timerApply` call so dispatches inside a surf-scheduled timer run with `engineTaskDepth > 0`, enabling turbo-dom's per-listener microtask drain. `abort_signal_any_and_timeout_match_chrome156` stays `#[ignore]`-d with FIXME pointing at miaskiewicz/turbo-dom#488 — turbo-dom's companion polyfill that would re-route V8-native `AbortSignal.timeout`/`.any` through surf's wrapped `setTimeout` doesn't install under surf's `install_with_html` bootstrap (IIFE in `turbo-dom-browser-env/event_listeners.js` reaches `__engineTaskScope` at line 346 but not the `defineProperty` at line 386). Deferred to turbo-dom v0.8.3.
+- **shim #280**: `Frame` now forwards `_session`/`_live`/`_ensureLive`/`_followIntent`/`_sessionDispatch`/`_sessionEval`/`_redrain` to its parent `Page` so iframe-scoped `Locator.click/hover/waitFor/dispatchEvent/setInputFiles/dragTo` no longer crashes with `TypeError`.
+- **shim #281**: `page.route` handler now runs per-request inside the isolate with a live `Request` wrapper (url/method/headers/body) instead of once at registration against a stub whose `url()` was the raw pattern. Handlers that branch on `route.request().url()` work correctly.
+- **shim #282**: `page.route` / `unroute` / `routeFromHAR` after `page.goto` now inject into the current live isolate via `liveEvalEngine`, mirroring `exposeBinding`, so late-registered routes intercept subsequent fetches.
+- **shim #283**: `FrameLocator._resolveFrame` caches the resolved `Frame` on the parent keyed by selector so `frameLocator('iframe').locator('input').fill('x')` persists instead of writing to a throwaway Frame.
+- **shim #284**: module-level `activeT` / `skipStack` moved to `AsyncLocalStorage` so concurrent `node:test` runs don't share per-test context.
+- **shim #285**: `_drainBindings` walks the frame tree (recursive `window.frames[i]`, seen-set, try/catch) and splices every realm's `__tsExpose.q`, so `page.exposeBinding` invoked from inside an iframe fires the host-side callback.
+- **packaging #288**: compiled `turbo-surf-napi` `.node` ships in the npm tarball (option A: bundled). Release workflow builds the napi addon per platform; `files:` now ships `rust/crates/turbo-surf-napi/{index.js,index.d.ts,package.json,LICENSE,README.md,turbo-surf.*.node}`. Downstream consumers install the bundled napi — no `TURBO_SURF_NAPI_PATH` needed.
+- **pkg**: `package.json` `exports` now exposes `./rust/playwright-shim/register.mjs`, `./rust/playwright-shim/*`, and `./rust/crates/turbo-surf-napi/*` so `require.resolve("turbo-surf/rust/playwright-shim/register.mjs")` works directly for Playwright drop-in consumers.
+- **pkg**: `rust/.npmignore` + `rust/crates/turbo-surf-napi/.npmignore` (both empty) override `rust/.gitignore`'s `*.node` exclusion for `npm pack` only, so the 133 MB prebuilt still stays out of git.
+
+## [0.8.1] - 2026-11-09
+
+### Added / Fixed (v0.8.1 scope — consolidated across 19 feature branches)
+
+- **render #245**: `page_patched_intrinsics_*` headIframe `Promise[Symbol.species]` blocker closed surf-side. `rust/crates/turbo-surf-render/src/event_source.js` hoists `readerPrototype` on the top realm with a try/catch probe + null-prototype fallback so a page that poisons `Promise[@@species]` before any iframe is appended no longer halts each child-frame EventSource bootstrap (deno_web's `PromisePrototypeThen` crosses to parent-realm Promise through V8's `SpeciesConstructor`). Un-ignored both tests.
+- **render #286 (security)**: mid-parse meta-CSP that newly requires Trusted Types no longer opens a raw-eval window. `document_base.js` now calls `__installTtEvalShim()` right after `ops.op_csp_meta(doc, node)` when `op_tt_eval_shim_required(doc)` returns true — shim is idempotent, so repeat meta-CSPs are safe.
+- **render #246**: `context_ownership::sweep_collected` inside `collect_message_port_garbage_for_testing` was both forcing a GC and pruning the dead weak-handle vec in the same call, so the diagnostics snapshot read 0. The dedicated boundary sweep is dropped from that helper; dead weak handles still prune at the regular `storage_gc::boundary` after every eval. Un-ignored `frame_gc_contracts::collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents`.
+- **render #250 / #244 (turbo-dom#417 / #395)**: `session_isolation::canceling_pending_session_work_restores_the_peer_and_its_own_runtime` and `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute` pass against turbo-dom release/0.8.1. Un-ignored.
+- **render #278**: `abort_signal_any_and_timeout_match_chrome156` reports `found == []` against Chrome 156 after turbo-dom#456 lands the per-listener microtask checkpoint `listenerDepth` gate. `KNOWN_GAPS` is empty.
+
+### Playwright shim (consolidated)
+
+- **#220**: `page.route(...)` / `page.routeFromHAR(har)` / `page.unroute(...)` interception via the in-process fetch interceptor.
+- **#223**: `playwright.config` projects / reporters / `webServer` / `use` per-project overrides interpreted; CLI (`turbo-surf-test`) forwards the full per-project `use` block via `TURBO_PW_USE` for `viewport`, `extraHTTPHeaders`, `httpCredentials`, `storageState`, `ignoreHTTPSErrors`, `colorScheme`, `permissions`, `geolocation`, `timezoneId`, `offline`, `screen`.
+- **#225**: `Frame` / `FrameLocator` scoped to engine iframe contexts (basic locator surface — see follow-up #280 for interaction methods).
+- **#226**: `exposeBinding` / `exposeFunction` fire-and-forget host bindings survive navigation.
+- **#227**: `page.mouse` / `page.touchscreen` / `locator.dragTo` / `page.dragAndDrop` wire to the live isolate.
+- **#231**: `addInitScript` applies across child frames (verified by regression test; shim already honored the issue).
+- **#240**: `page.route` glob translator escapes `*` outside alternation + routes init-script fires before the parser's first inline `<script>`.
+- **#247**: `page.goto(..., {waitUntil:'networkidle'})` against WASM-loading sites no longer panics; `wasm_streaming.js` installs the handler before `WebAssembly.instantiateStreaming` can race.
+
+### Render (consolidated)
+
+- **#27**: Web Audio parity (DOMException brands + types for `OscillatorNode.type='custom'`, `setPeriodicWave`, WaveShaper `oversample`); further parity items tracked for v0.9.0.
+- **#106**: `canvas.captureStream()`, `canvas.transferControlToOffscreen()`, `video.requestPictureInPicture()` presence-stubs with Chrome-156-matching typed returns for feature detection.
+- **#121**: Trusted Types default policy applies to `eval` and `new Function`; EvalError message matches Chrome.
+- **#122**: Trusted Types enforcement on script-child-text sinks + `<form action="javascript:...">`.
+- **#136**: abort-reactions and dependent-signal listeners run under the per-listener microtask checkpoint; `op_web_abort_dispatch(host=true)` in place.
+- **#178**: WebSocket close handshake times out at 5s when the server never replies (matches Chrome).
+- **#193**: IndexedDB event path capture phase + per-listener microtasks via `setEventTargetParent` (turbo-dom#381) + `#382`'s checkpoint; items 3/4 (end-of-task deactivation, registry lifetime) tracked for v0.9.0.
+- **#204**: CSP `media-src` enforcement for `<audio>` / `<video>` src assignments with Chrome-shape report.
+
+### Refactor
+
+- **#184**: 5 top-10 cc=15 functions refactored under cc=9 (`script_inventory::record`, `csp_reporting::json_wtf8`, `csp_reporting::serve`, `runtime::queue_csp_report`, `live_layout_backend::caret_geometry`). CC gate stays at 15 for v0.8.1; the remaining ~225 fns tracked per-crate in follow-ups [#272-#276](https://github.com/miaskiewicz/turbo-surf/issues/272) targeted at v0.9.0.
+
+### Adversarial review fixes (rounds 1 + 2)
+
+- **shim `_matchUrl` glob-strip**: a bare `*`/`**` spec still match-all; a mixed `foo**` no longer collapses to the empty string.
+- **shim `page.mouse`**: `targetExpr` re-reads `state.x`/`state.y` on every dispatch — previously every `click`/`down`/`up`/`wheel` after `move(x, y)` hit `elementFromPoint(0,0)`.
+- **shim `page.route` iteration**: reverse registration order so the latest handler wins, matching Playwright.
+- **shim `_sessionDispatch`**: drains exposed-binding calls queued by handlers that ran during the interaction (surfaces the NO_MATCH signal before the drain so a bad binding handler can't shadow the locator failure).
+- **shim `BrowserContext.request()` / `request.newContext`**: reads `extraHTTPHeaders` live from the parent BrowserContext — `context.setExtraHTTPHeaders(...)` after the cached `_requestCtx` was built still flows into requests.
+- **shim `BrowserContext` ctor**: parses `TURBO_PW_USE` and merges per-project `use` keys under in-suite opts.
+
+### Known ignored (tracked for v0.9.0)
+
+- 8 Chrome-156 parity oracles diverge against turbo-dom release/0.8.1 with an event double-dispatch pattern (classic_script_errors x2, csp_directives, event_contracts abort bridge, font_face embedded-range x2, message_transfer_contracts port handler, shadow_layout css supports). Tracked in [#287](https://github.com/miaskiewicz/turbo-surf/issues/287).
+- `#193 item 4` (registry roots the first-opener realm) + `#253` (compression-dictionary publish on body-reader resolve) + `#278 /timeoutNestedAbort` carry-over + the shim Frame-missing-methods / page.route handler-at-registration / FrameLocator fill revert / module-level activeT race / iframe binding drain / #184 remaining cc backlog cards: [#280-#285](https://github.com/miaskiewicz/turbo-surf/issues/280).
+
 ## Unreleased
-
-- **Test (render, #244/#245/#246 — turbo-dom#395/#396/#397)**: three render
-  tests are `#[ignore]`-d against turbo-dom 0.8.0 pending upstream fixes on
-  turbo-dom v0.8.1. `live_layout_budget_tests::inline_override_replaces_only_an_existing_style_attribute`
-  (#244, turbo-dom#395 — `Composition.inline_overrides` on a styled element
-  zeros its box dims), `page_patched_intrinsics::*` ×2 (#245, turbo-dom#396 —
-  bootstrap calls `WeakSet.prototype.add` on the unhandled-rejection path
-  after page JS runs, regressing the #87 / turbo-dom#172 contract) and
-  `frame_gc_contracts::collected_frame_context_metadata_is_reclaimed_without_dropping_live_retired_documents`
-  (#246, turbo-dom#397 — `collect_message_port_garbage_for_testing` no longer
-  prunes dead weak context handles). None of these affects the happy-path
-  crawl/render surface; the FIXMEs drop once the upstream fixes ship.
-- **Test (render, turbo-dom#376)**: three MathML-rejection assertions updated
-  for turbo-dom-layout 0.8.0's `ca7e762d`, which now accepts MathML in live
-  layout with placeholder metrics. The null namespace stays unimplemented and
-  stands in for the "rejected namespace" cases. Affected:
-  `live_layout::tests::source_capture_refuses_unimplemented_namespace_and_excess_depth_or_text`,
-  `live_layout_budget_tests::namespace_rejection_covers_null_namespace_elements_but_not_svg_or_mathml`
-  (renamed), `live_layout_budget_tests::errors_report_the_first_violation_in_composed_document_order`.
-- **Chore (biome)**: `rust/crates/turbo-surf-mcp/tests/fixtures/web_fonts/fonts.css`
-  added to biome's ignore list — the minified CSS fixture is hash-pinned in
-  `screenshot_web_fonts_chrome156.json` (#142), so biome's formatter rewriting
-  it would break the SHA256 the control checks. Fixes the `Format check` CI
-  step on release/0.8.0.
-
-- **Fixed (playwright-shim, #222 integration)**: `Promise.all([page.waitForResponse(predicate), page.goto(url)])` with no `waitUntil:'networkidle'` was still eating the full 15 s timeout — a default goto stays static, so an inline-script `fetch('/api/...')` inside the document never runs and the predicate matches only the synthetic timeout fallback. `goto` now auto-hydrates when a `response`/`request`/`requestfinished` listener is already subscribed, so the inline-script fetches actually fire and the wait resolves on the real response in the next drain tick.
-- **Docs (playwright-shim, #228 note)**: LIMITATIONS calls out that `setContent(...)` stays static — `.focus()` + `toBeFocused` need a live session (either hydrate or use a `networkidle` goto).
-
-- **Fixed (playwright-shim, follow-ups to #221 / #222)**: payroll parity probe
-  v2 surfaced two residuals from the first pass. `Page.evaluate` on a
-  STATIC page (no live session) also round-trips through the JSON sentinel
-  now, so `page.evaluate(() => ({...}))` without a prior `networkidle` goto
-  returns the actual object. `waitForResponse` / `waitForRequest` /
-  `waitForEvent` poll `_drainNetworkEvents` UNCONDITIONALLY (previously
-  gated on `_live` at call time) — so a
-  `Promise.all([waitForResponse(...), goto(...)])` where the live session
-  only exists partway through the wait still short-circuits once the
-  response lands, instead of burning the full 15 s timeout.
-
-- **Fixed (playwright-shim, #230)**: `page.request()` and
-  `BrowserContext.request()` now return an `APIRequestContext` bound to the
-  parent `BrowserContext`'s cookie jar — outbound requests carry its current
-  cookies, `Set-Cookie` writes merge back in, and both facades share the same
-  cached instance per context. A spec that logs in via `page.goto` and then
-  hits an API via `ctx.request.get(...)` now sends the session cookie.
-  `request.newContext(opts)` also accepts an internal `_browserContext` to
-  opt into the binding; the bare `request.newContext()` (unbound) keeps its
-  empty-jar behavior.
-
-- **Fixed (playwright-shim, #228)**: `locator.focus()` / `.blur()` and
-  `page.focus(selector)` now drive `el.focus()` / `el.blur()` into the live
-  isolate (so `document.activeElement` updates and the app's focus/blur
-  handlers fire). `expect(locator).toBeFocused()` probes
-  `document.activeElement` via a read-only live dispatch — keyboard-navigation
-  and focus-trap specs stop getting false negatives. Static snapshots stay
-  focus-less (`.not.toBeFocused` still passes there). `scrollIntoViewIfNeeded`
-  keeps the no-op behavior for now (no viewport geometry).
-
-- **Fixed (playwright-shim, #229 rest)**: `waitForLoadState('load')` and
-  `'domcontentloaded'` now hydrate the SPA like `'networkidle'` (one "settled"
-  tier in the shim). `waitForNavigation` polls for an actual URL change instead
-  of returning a synthetic 200 straight away. `waitForEvent('response')`,
-  `('request')` and `('requestfinished')` resolve from the native-log drain
-  bus (drain polled while waiting, same as #222/#218); `('download')` keeps
-  its prior behavior.
-
-- **Fixed (playwright-shim, #220 partial)**: `page.route(url, handler)` is now
-  supported in a fulfill-only form — the handler runs once at register-time
-  against a stub route, the captured `route.fulfill({status, body,
-  contentType, headers})` payload is baked into an init script that
-  monkey-patches `fetch` and `XMLHttpRequest` inside the live isolate, and the
-  real server is never hit for matched URLs. Pattern can be a string
-  (substring or glob with `*`/`**`) or RegExp. `route.continue` / `abort` /
-  `fallback` and per-request dynamic responses stay unsupported; call
-  `page.route(...)` before the next live session opens. `page.unroute(...)`
-  drops a previously-registered pattern.
-
-- **Fixed (playwright-shim, #221)**: `page.evaluate` in a live session now
-  returns structured values (primitives, arrays, plain objects) instead of a
-  stringified `"[object Object]"`. The native bridge is still UTF-8-string
-  only, so the shim round-trips the result through `JSON.stringify` with a
-  sentinel prefix and parses it back; non-serializable values fall back to
-  `String(result)`. Payroll-app observer-style specs that read page state as
-  objects no longer have to `JSON.stringify` inside the expression and
-  `JSON.parse` on the test side.
-- **Fixed (playwright-shim, #222)**: `page.waitForResponse(predicate)` no longer
-  burns its full timeout on a response that already landed. The native network
-  log only drains on actions, so a bare `waitForResponse` after `goto` had no
-  one to push the matching entry onto the listener bus — payroll-app parity
-  saw ~15 s on a response that arrived in ~5 ms. The shim now drains once up
-  front and polls the native log every 50 ms while waiting; short-lived
-  requests resolve in the next tick.
-- **Fixed (playwright-shim, #229 partial)**: `page.waitForRequest(matcher)` is
-  now event-driven instead of returning a synthetic page-URL GET straight away.
-  Mirrors the `waitForResponse` fix from #222: drain the native log once up
-  front, poll it every 50 ms while waiting, and resolve from the `request`
-  listener bus (joined per #218). The rest of #229 (navigation / load-state
-  semantics) stays on v0.8.1.
 
 ## [0.8.0] — 2026-11-07
 

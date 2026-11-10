@@ -526,3 +526,59 @@ fn structured_clone_preserves_native_types_and_rejects_uncloneable_values() {
         serde_json::json!({"cycle":true,"buffer":true,"date":true,"map":true,"integer":true,"function":"DataCloneError","proxy":"DataCloneError","node":"DataCloneError","transfer":"","attached":false})
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn canvas_media_presence_stubs_match_chrome_156_shape() {
+    // turbo-surf#106: feature-detection paths for captureStream, transferControlToOffscreen
+    // and requestPictureInPicture succeed and return the typed shapes Chrome returns. Real
+    // media behaviour (frames, PiP window) is a turbo-dom-browser-env follow-up.
+    let mut page = turbo_surf_render::PageSession::open(
+        "<body></body>",
+        "https://canvas-media.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval(
+            r#"(async () => {
+      const c = document.createElement('canvas'); c.width = 320; c.height = 240;
+      const v = document.createElement('video');
+      const kinds = {
+        capture: typeof HTMLCanvasElement.prototype.captureStream,
+        transfer: typeof HTMLCanvasElement.prototype.transferControlToOffscreen,
+        pip: typeof HTMLVideoElement.prototype.requestPictureInPicture,
+      };
+      const stream = c.captureStream();
+      const off = c.transferControlToOffscreen();
+      let pipName = ''; let pipType = '';
+      try { await v.requestPictureInPicture(); } catch (error) {
+        pipType = typeof error;
+        pipName = error && error.name;
+      }
+      globalThis.__RESULT=JSON.stringify({
+        kinds,
+        streamType: typeof stream,
+        offType: typeof off,
+        streamNotNull: stream !== null && stream !== undefined,
+        offNotNull: off !== null && off !== undefined,
+        pipType, pipName,
+      });
+    })()"#,
+        )
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        value["kinds"],
+        serde_json::json!({"capture":"function","transfer":"function","pip":"function"})
+    );
+    assert_eq!(value["streamType"], "object");
+    assert_eq!(value["offType"], "object");
+    assert_eq!(value["streamNotNull"], true);
+    assert_eq!(value["offNotNull"], true);
+    assert_eq!(value["pipType"], "object");
+    assert_eq!(value["pipName"], "InvalidStateError");
+}

@@ -58,6 +58,33 @@ test("page views", async () => {
   assert.ok((await page.innerText()).includes("Widget"));
 });
 
+// #280 regression: a Frame-produced Locator used to crash with TypeError on the
+// first non-inert interaction because _followIntent / _ensureLive / _redrain /
+// _sessionDispatch / _sessionEval / _session lived only on Page. Frame now
+// forwards them to its parent Page.
+test("frame locator interactions do not crash (#280)", async () => {
+  const page = newPage();
+  await page.setContent(`<body>
+    <iframe name="pay" srcdoc="<body><a id='ok' href='#x'>OK</a></body>"></iframe>
+  </body>`);
+  const child = page.frame({ name: "pay" });
+  assert.ok(child, "child frame resolves");
+  // The surface a Locator reaches through `._page` must exist on a Frame too.
+  for (const m of [
+    "_followIntent",
+    "_ensureLive",
+    "_sessionDispatch",
+    "_sessionEval",
+    "_redrain",
+  ]) {
+    assert.equal(typeof child[m], "function", `Frame.${m} is callable`);
+  }
+  assert.equal("_session" in child, true, "Frame exposes _session");
+  // And an actual static click (which used to throw TypeError on _followIntent)
+  // now completes.
+  await child.locator("#ok").click();
+});
+
 test("evaluate + render (JS execution, no browser)", async () => {
   const page = newPage();
   await page.setContent("<body><h1 id='t'>Hi</h1><div id='app'></div></body>");
@@ -339,12 +366,12 @@ test("event registry: on('load') fires", async () => {
 test("honest throws for network/input/pixel", async () => {
   const page = newPage();
   await page.setContent("<a>x</a>");
-  // page.route(fulfill) is now supported (#220); routeFromHAR still throws.
-  await assert.rejects(() => page.routeFromHAR("x.har"), /interception/);
-  // No synthetic pointer device → raw mouse coords stay an honest throw. (hover() and
-  // keyboard.press are real features now — key-event dispatch via the live session —
-  // covered in surface.test.mjs, so they're NOT asserted to throw here.)
-  await assert.rejects(() => page.mouse.click(0, 0), /input/);
+  // page.route(fulfill) + page.routeFromHAR (HAR playback) are now supported (#220).
+  // hover/keyboard.press/mouse.*/touchscreen.*/dragTo/dragAndDrop are real
+  // features now (event-dispatch into the live isolate, #227) — on a static
+  // setContent page with no live session they clean no-op instead of throwing.
+  // Their live behavior is covered in input-hardware.test.mjs.
+  await page.mouse.click(0, 0);
 });
 
 pwTest("@playwright/test fixture: { page } is injected", async ({ page }) => {

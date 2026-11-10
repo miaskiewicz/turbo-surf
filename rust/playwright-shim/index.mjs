@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle, eqeqeq, prefer-const, no-await-in-loop, unicorn/consistent-function-scoping, no-unused-vars, no-array-reverse */
 // A Playwright-shaped façade backed by the turbo-surf native (Rust) addon.
 // No browser, no Chromium: `goto` fetches over Rust+reqwest, the read/locator/
 // expect surface runs over the cached HTML through the napi addon (turbo-dom +
@@ -13,7 +14,8 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
-import { writeFile } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -42,17 +44,44 @@ function cssAttrValue(text) {
 // --- page.route helpers (shim-side, fulfill-only) --------------------------
 // Normalize a route pattern + fulfill payload into a JSON-serializable record.
 // `patternKey` is the original user pattern as a string so `unroute` can match.
-function normalizeRoute(pattern, fulfill) {
+// Convert one HAR entry (Playwright / Chrome DevTools format) into the same
+// route record normalizeRoute produces. Matches the entry's URL exactly: the
+// init-script's globToRegex anchors non-wildcard patterns, so the request URL
+// must equal the recorded one (modulo the substring fallback). Entries missing
+// a URL or response body are skipped by the caller.
+function harEntryToRoute(entry) {
+  const url = entry?.request?.url;
+  if (!url) return null;
+  const resp = entry.response ?? {};
+  const headers = {};
+  for (const h of resp.headers || []) {
+    if (h && h.name) headers[String(h.name).toLowerCase()] = h.value == null ? "" : String(h.value);
+  }
+  const content = resp.content ?? {};
+  const payload = {
+    status: resp.status ?? 200,
+    headers,
+    contentType: content.mimeType ?? null,
+    body: content.text == null ? "" : String(content.text),
+  };
+  // Replay a HAR entry as a fulfill-only handler so the init script can treat
+  // every route uniformly (handlerSource eval'd in the isolate, see #281).
+  const handlerSource = `(async (route) => { await route.fulfill(${JSON.stringify(payload)}); })`;
+  return { kind: "glob", pattern: url, flags: "", patternKey: url, handlerSource };
+}
+
+function normalizeRoute(pattern, handler) {
   const isRegex = pattern instanceof RegExp;
+  // Serialize the handler so the init script can re-create it inside the live
+  // isolate and invoke it PER request with a live Request wrapper (#281). We
+  // wrap in parens so a `function` / `async function` declaration-form source
+  // evaluates to the function expression rather than a statement.
   return {
     kind: isRegex ? "regex" : "glob",
     pattern: isRegex ? pattern.source : String(pattern),
     flags: isRegex ? pattern.flags : "",
     patternKey: isRegex ? pattern.source : String(pattern),
-    status: fulfill.status ?? 200,
-    headers: fulfill.headers ?? {},
-    contentType: fulfill.contentType ?? null,
-    body: fulfill.body == null ? "" : String(fulfill.body),
+    handlerSource: `(${String(handler)})`,
   };
 }
 
@@ -68,44 +97,106 @@ function buildRouteInitScript(routes) {
       kind: r.kind,
       pattern: r.pattern,
       flags: r.flags,
-      status: r.status,
-      headers: r.headers,
-      contentType: r.contentType,
-      body: r.body,
+      handlerSource: r.handlerSource,
     })),
   );
   return `(() => {
-    const routes = ${table};
+    const routes = (${table}).map((r) => {
+      let fn = null;
+      try { fn = (0, eval)(r.handlerSource); } catch (_e) { /* malformed handler — route is a no-op */ }
+      return { kind: r.kind, pattern: r.pattern, flags: r.flags, fn };
+    });
     const globToRegex = (p) => {
-      const esc = p.replace(/[.+^\${}()|\\[\\]\\\\]/g, "\\\\$&");
+      // Escape * and ? too, so the two translation passes below can locate
+      // every star — a bare * in the source would otherwise skip the escape
+      // step, leave ** unchanged, and produce an invalid regex (turbo-surf#240).
+      const esc = p.replace(/[.+^\${}()|\\[\\]\\\\*?]/g, "\\\\$&");
       const re = "^" + esc.replace(/\\\\\\*\\\\\\*/g, ".*").replace(/\\\\\\*/g, "[^/]*") + "$";
       return new RegExp(re);
     };
+    const candidates = (url) => {
+      // Match against the URL as-given AND its absolute/path forms, so a HAR
+      // entry's absolute URL matches a page fetch issued with a relative URL
+      // (and vice versa). Falls back to the raw input on any URL-parse error.
+      const out = [url];
+      try {
+        const base = typeof location !== "undefined" && location.href ? location.href : "about:blank";
+        const u = new URL(url, base);
+        if (out.indexOf(u.href) === -1) out.push(u.href);
+        const pq = u.pathname + u.search;
+        if (out.indexOf(pq) === -1) out.push(pq);
+      } catch (_e) { /* non-URL input — raw-only matching */ }
+      return out;
+    };
     const find = (url) => {
-      for (const r of routes) {
-        try {
-          if (r.kind === "regex") {
-            if (new RegExp(r.pattern, r.flags).test(url)) return r;
-          } else {
-            if (globToRegex(r.pattern).test(url)) return r;
-            if (url.indexOf(r.pattern) !== -1) return r;
-          }
-        } catch (_e) { /* skip malformed pattern */ }
+      const urls = candidates(url);
+      // Playwright runs the LATEST handler first (reverse registration order) so
+      // a per-test override can shadow a globally registered mock. Iterate the
+      // route table from the end.
+      for (let i = routes.length - 1; i >= 0; i--) {
+        const r = routes[i];
+        for (const u of urls) {
+          try {
+            if (r.kind === "regex") {
+              if (new RegExp(r.pattern, r.flags).test(u)) return r;
+            } else {
+              if (globToRegex(r.pattern).test(u)) return r;
+              if (u.indexOf(r.pattern) !== -1) return r;
+            }
+          } catch (_e) { /* skip malformed pattern */ }
+        }
       }
       return null;
     };
-    const synth = (r) => {
-      const h = Object.assign({}, r.headers || {});
-      if (r.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
-        h["content-type"] = r.contentType;
-      return new Response(r.body, { status: r.status, headers: h });
+    const synth = (opts) => {
+      const o = opts || {};
+      const h = Object.assign({}, o.headers || {});
+      if (o.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
+        h["content-type"] = o.contentType;
+      return new Response(o.body == null ? "" : String(o.body), { status: o.status == null ? 200 : o.status, headers: h });
+    };
+    // Invoke a route handler per request (#281): build a Request wrapper
+    // carrying the LIVE url/method/headers, run handler(route, req), and
+    // return a {fulfill?, action?} decision the caller turns into a Response.
+    const runHandler = async (r, url, method, init, headers) => {
+      let fulfilled = null;
+      let action = null;
+      const body = init && init.body != null ? init.body : null;
+      const req = {
+        url: () => url,
+        method: () => String(method || "GET").toUpperCase(),
+        postData: () => (typeof body === "string" ? body : null),
+        postDataJSON: () => { try { return typeof body === "string" ? JSON.parse(body) : null; } catch (_e) { return null; } },
+        headers: () => headers || {},
+        resourceType: () => "xhr",
+      };
+      const route = {
+        request: () => req,
+        fulfill: async (opts) => { fulfilled = opts == null ? {} : opts; },
+        continue: async () => { action = "continue"; },
+        abort: async () => { action = "abort"; },
+        fallback: async () => { action = "fallback"; },
+      };
+      try { if (typeof r.fn === "function") await r.fn(route, req); } catch (_e) { /* handler threw — leave inert */ }
+      return { fulfilled, action };
+    };
+    const collectHeaders = (init) => {
+      const h = init && init.headers;
+      if (!h) return {};
+      if (typeof h.forEach === "function") { const out = {}; h.forEach((v, k) => { out[k] = v; }); return out; }
+      if (typeof h === "object") return Object.assign({}, h);
+      return {};
     };
     if (typeof globalThis.fetch === "function") {
       const origFetch = globalThis.fetch;
-      globalThis.fetch = function (input, init) {
+      globalThis.fetch = async function (input, init) {
         const url = typeof input === "string" ? input : (input && input.url) || "";
+        const method = (init && init.method) || (typeof input === "object" && input && input.method) || "GET";
         const r = find(url);
-        if (r) return Promise.resolve(synth(r));
+        if (!r) return origFetch(input, init);
+        const { fulfilled, action } = await runHandler(r, url, method, init || {}, collectHeaders(init));
+        if (fulfilled) return synth(fulfilled);
+        if (action === "abort") throw new TypeError("net::ERR_ABORTED");
         return origFetch(input, init);
       };
     }
@@ -116,6 +207,7 @@ function buildRouteInitScript(routes) {
         this._real = null;
         this._url = "";
         this._method = "GET";
+        this._reqHeaders = {};
       }
       MockXHR.prototype.open = function (method, url) {
         this._method = method;
@@ -127,17 +219,22 @@ function buildRouteInitScript(routes) {
         }
       };
       MockXHR.prototype.setRequestHeader = function (name, value) {
+        this._reqHeaders[name] = value;
         if (this._real) this._real.setRequestHeader(name, value);
       };
       MockXHR.prototype.send = function (body) {
         if (this._mocked) {
-          const r = this._mocked;
-          this.readyState = 4;
-          this.status = r.status;
-          this.responseText = r.body;
-          this.response = r.body;
-          try { if (typeof this.onreadystatechange === "function") this.onreadystatechange(); } catch (_e) {}
-          try { if (typeof this.onload === "function") this.onload(); } catch (_e) {}
+          const self = this;
+          runHandler(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled }) => {
+            const o = fulfilled || { status: 200, body: "" };
+            self.readyState = 4;
+            self.status = o.status == null ? 200 : o.status;
+            const b = o.body == null ? "" : String(o.body);
+            self.responseText = b;
+            self.response = b;
+            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
+            try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
+          });
         } else if (this._real) {
           const self = this;
           this._real.onreadystatechange = function () {
@@ -159,6 +256,42 @@ function buildRouteInitScript(routes) {
       };
       globalThis.XMLHttpRequest = MockXHR;
     }
+  })();`;
+}
+
+// --- page.exposeFunction / exposeBinding (fire-and-forget) ------------------
+// Install a persistent JS→host binding that survives navigation. Since the
+// deno_core isolate runs page JS synchronously inside one `liveEvalEngine`
+// call (no mid-eval callback into Node), the injected stub records each call
+// in a page-global queue and returns `Promise.resolve()`. The shim drains the
+// queue after every live interaction (`_sessionEval` / `evaluate` return,
+// session open) and invokes the Node host handlers then. This covers the
+// common instrumentation case (`captured.push(payload)` from a stubbed
+// telemetry sink, a progress counter, a test-only RPC). Host return values
+// are NOT surfaced back to in-page JS in this release — the page sees
+// `undefined` — because resolving an in-flight promise mid-eval would need a
+// napi hook into Node, tracked in the turbo-dom-browser-env roadmap.
+function buildExposeInitScript(names) {
+  if (!names || !names.length) return "";
+  const list = JSON.stringify(names);
+  return `(() => {
+    const bag = (globalThis.__tsExpose = globalThis.__tsExpose || { q: [], n: 0 });
+    const define = (name) => {
+      if (typeof globalThis[name] === "function" && globalThis[name].__ts) return;
+      const fn = function (...args) {
+        const id = ++bag.n;
+        try { bag.q.push({ id, name, args }); } catch (_e) { /* queue full */ }
+        return Promise.resolve(undefined);
+      };
+      try { Object.defineProperty(fn, "__ts", { value: true }); } catch (_e) {}
+      try {
+        Object.defineProperty(globalThis, name, { value: fn, configurable: true, writable: true });
+      } catch (_e) {
+        try { globalThis[name] = fn; } catch (_e2) {}
+      }
+    };
+    globalThis.__tsExposeDefine = define;
+    for (const n of ${list}) define(n);
   })();`;
 }
 
@@ -668,9 +801,74 @@ class Locator {
     if (this._page._live) return void (await this._driveLive("setfiles", payload));
   }
 
+  // Drag source element to the target locator: resolve both in the live isolate,
+  // then drive a pointer+mouse+HTML5-drag sequence on source → target. No compositor,
+  // so there's no native drag image, but JS handlers (onDragStart/Over/Drop/End and
+  // pointer/mouse listeners) fire exactly as in a real browser (turbo-surf#227).
+  async dragTo(target, _opts) {
+    await this._page._ensureLive();
+    if (!this._page._live) return;
+    const src = await this._resolveLiveIdx();
+    const dst = await target._resolveLiveIdx();
+    if (src == null || dst == null) throw new Error("turbo-surf: locator matched no elements");
+    await this._page._sessionEval(dragScript(src, dst));
+  }
+
+  // Resolve this locator to the live `querySelectorAll('*')` index of its first match.
+  // Returns null when the locator matches nothing. Used by dragTo and page.dragAndDrop.
+  async _resolveLiveIdx() {
+    if (this._page._session == null) return null;
+    if (this._scope && this._scope.some((s) => s.idx != null || s.filter != null)) {
+      const leaf = this._selector
+        ? { selector: this._selector }
+        : this._getBy
+          ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
+          : null;
+      if (leaf) {
+        const raw = await native.liveEvalEngine(
+          this._page._session,
+          `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
+        );
+        let matches = [];
+        try {
+          matches = JSON.parse(raw);
+        } catch {
+          matches = [];
+        }
+        const i =
+          this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
+        return matches[i]?.idx ?? null;
+      }
+    }
+    if (this._selector) {
+      const raw = await native.liveEvalEngine(
+        this._page._session,
+        `(() => { const els = document.querySelectorAll(${JSON.stringify(this._selector)}); const n = ${this._index ?? 0}; const i = n < 0 ? els.length + n : n; const list = []; const all = document.querySelectorAll('*'); for (let k = 0; k < all.length; k++) if (all[k] === els[i]) { globalThis.__RESULT = String(k); return; } globalThis.__RESULT = ''; })();`,
+      );
+      const n = raw ? Number(raw) : NaN;
+      return Number.isFinite(n) ? n : null;
+    }
+    if (this._getBy) {
+      const g = this._getBy;
+      const raw = await native.liveEvalEngine(
+        this._page._session,
+        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
+      );
+      let matches = [];
+      try {
+        matches = JSON.parse(raw);
+      } catch {
+        matches = [];
+      }
+      const i =
+        this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
+      return matches[i]?.idx ?? null;
+    }
+    return null;
+  }
+
   // --- unsupported (no rendering surface / no input hardware) → honest throws ---
   screenshot = UNSUPPORTED("locator.screenshot", PIXEL);
-  dragTo = UNSUPPORTED("locator.dragTo", INPUT);
   selectText = UNSUPPORTED("locator.selectText", INPUT);
 }
 
@@ -900,6 +1098,264 @@ function pathOf(url) {
 }
 
 // ---------------------------------------------------------------------------
+// Frame / FrameLocator — engine iframe contexts over the shim's static path.
+// A Frame carries its own `_html` (the iframe's child document) and runs the
+// Locator / getBy* surface over that document, so queries scoped to the frame
+// never bleed into the host page (turbo-surf#225). The host Page implements the
+// same surface, so `mainFrame()` returns the page itself. srcdoc iframes expose
+// their inner markup; src-loaded iframes list with empty content (live-session
+// hydration populates them in the engine, but this snapshot-oriented shim does
+// not fetch iframe src here — call `page.content()` after hydration if needed).
+// ---------------------------------------------------------------------------
+function _collectIframes(parent, selector = "iframe") {
+  const html = parent._html ?? "";
+  if (!html) return [];
+  let matches;
+  try {
+    matches = JSON.parse(native.query(html, selector, "css"));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const m of matches) {
+    if (m == null || m.node == null) continue;
+    // The selector may be broader than "iframe" (e.g. a user passed "main") — restrict
+    // to iframe elements by sniffing the serialized outer-HTML opening tag. Match
+    // records don't carry a tag field, so this is the cheapest fidelity check.
+    const outer = String(m.html ?? "")
+      .trimStart()
+      .toLowerCase();
+    if (!outer.startsWith("<iframe")) continue;
+    const name = native.attrOf(html, m.node, "name") ?? "";
+    const id = native.attrOf(html, m.node, "id") ?? "";
+    const src = native.attrOf(html, m.node, "src") ?? "";
+    const srcdoc = native.attrOf(html, m.node, "srcdoc");
+    out.push({
+      node: m.node,
+      name,
+      id,
+      src,
+      html: srcdoc ?? "",
+      url: src || (srcdoc ? "about:srcdoc" : "about:blank"),
+    });
+  }
+  return out;
+}
+
+function _matchUrl(url, spec) {
+  if (spec == null) return true;
+  if (spec instanceof RegExp) return spec.test(url);
+  if (typeof spec === "function") {
+    try {
+      return !!spec(new URL(url));
+    } catch {
+      return false;
+    }
+  }
+  const s = String(spec);
+  // A bare `*` or `**` spec means "match everything". Stripping all stars from a
+  // mixed glob like `foo**` must NOT fall into that case — `url.includes("")`
+  // would silently match every URL, which was the bug. Only treat
+  // stripped-to-empty as match-all when the input was itself pure wildcards.
+  const stripped = s.replace(/\*\*/g, "").replace(/\*/g, "");
+  if (stripped.length === 0) return /^\*+$/.test(s);
+  return url.includes(stripped);
+}
+
+class Frame {
+  constructor(parentPage, parentFrame, meta) {
+    this._parentPage = parentPage;
+    this._parentFrame = parentFrame ?? null;
+    this._name = meta.name ?? "";
+    this._src = meta.src ?? "";
+    this._url = meta.url ?? "about:blank";
+    this._html = meta.html ?? "";
+  }
+  get _context() {
+    return this._parentPage._context;
+  }
+  name() {
+    return this._name;
+  }
+  url() {
+    return this._url;
+  }
+  page() {
+    return this._parentPage;
+  }
+  parentFrame() {
+    return this._parentFrame;
+  }
+  childFrames() {
+    return _collectIframes(this).map((meta) => new Frame(this._parentPage, this, meta));
+  }
+  async content() {
+    return this._html;
+  }
+  async title() {
+    const m = JSON.parse(native.query(this._html, "title", "css"));
+    return m.length ? (m[0].text ?? "") : "";
+  }
+  async innerText(selector) {
+    return this.locator(selector).innerText();
+  }
+  async innerHTML(selector) {
+    return this.locator(selector).innerHTML();
+  }
+  async textContent(selector) {
+    return this.locator(selector).textContent();
+  }
+  isDetached() {
+    return false;
+  }
+  // Live-interaction surface a Locator bound to this Frame expects on `_page` —
+  // iframes share the parent Page's V8 isolate (one session per Page), so forward
+  // to the parent rather than re-implementing session handling on Frame. Without
+  // these the first non-inert Frame-locator interaction (click / waitFor / hover /
+  // dispatchEvent / setInputFiles / dragTo) throws TypeError (#280).
+  get _session() {
+    return this._parentPage._session;
+  }
+  get _live() {
+    return this._parentPage._live;
+  }
+  _ensureLive() {
+    return this._parentPage._ensureLive();
+  }
+  _followIntent(intent) {
+    return this._parentPage._followIntent(intent);
+  }
+  _sessionDispatch(selector, index, kind, value) {
+    return this._parentPage._sessionDispatch(selector, index, kind, value);
+  }
+  _sessionEval(script) {
+    return this._parentPage._sessionEval(script);
+  }
+  _redrain() {
+    return this._parentPage._redrain();
+  }
+  // The locator surface mirrors Page's — the Locator reads from THIS frame's `_html`.
+  _locFromSelector(selector, mode = "auto") {
+    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)));
+    loc._selector = selector;
+    return loc;
+  }
+  locator(selector) {
+    return this._locFromSelector(selector);
+  }
+  getByRole(role, opts = {}) {
+    const name = opts.name != null ? String(opts.name) : null;
+    return new Locator(this, (h) => JSON.parse(native.getBy(h, "role", role, name)), {
+      getBy: { kind: "role", value: role, name },
+    });
+  }
+  getByText(text) {
+    return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
+      getBy: { kind: "text", value: String(text), name: null },
+    });
+  }
+  getByLabel(text) {
+    return new Locator(this, (h) => JSON.parse(native.getBy(h, "label", String(text))), {
+      getBy: { kind: "label", value: String(text), name: null },
+    });
+  }
+  getByPlaceholder(text) {
+    return this._locFromSelector(`[placeholder*=${cssAttrValue(text)}]`);
+  }
+  getByAltText(text) {
+    return this._locFromSelector(`[alt*=${cssAttrValue(text)}]`);
+  }
+  getByTitle(text) {
+    return this._locFromSelector(`[title*=${cssAttrValue(text)}]`);
+  }
+  getByTestId(id) {
+    return this._locFromSelector(`[${this._context._testIdAttribute}="${id}"]`);
+  }
+  frameLocator(selector) {
+    return new FrameLocator(this, selector);
+  }
+}
+
+// FrameLocator defers iframe lookup to the moment a query actually runs, so a
+// `page.setContent(...)` between construction and use is reflected.
+class FrameLocator {
+  constructor(parent, selector) {
+    this._parent = parent; // a Page or a Frame
+    this._selector = selector;
+    this._index = 0;
+  }
+  _resolveFrame() {
+    // Cache the Frame on the parent so writes through fl.locator().fill() survive:
+    // the Frame carries the mutated _html, and a later read via a fresh FrameLocator
+    // over the same parent HTML reuses it. Invalidates when parent._html changes
+    // (e.g. page.setContent) — the key includes the parent-HTML identity.
+    const parent = this._parent;
+    const parentHtml = parent._html ?? "";
+    const cacheKey = `${this._selector}\x00${this._index}`;
+    let cache = parent._frameLocatorCache;
+    if (!cache || cache.html !== parentHtml) {
+      cache = { html: parentHtml, frames: new Map() };
+      parent._frameLocatorCache = cache;
+    }
+    const hit = cache.frames.get(cacheKey);
+    if (hit) return hit;
+    const list = _collectIframes(parent, this._selector);
+    const i = this._index < 0 ? list.length + this._index : this._index;
+    const entry = list[i];
+    if (!entry) throw new Error(`turbo-surf: frameLocator(${this._selector}) matched no iframe`);
+    const topPage = parent instanceof Frame ? parent._parentPage : parent;
+    const parentFrame = parent instanceof Frame ? parent : null;
+    const frame = new Frame(topPage, parentFrame, entry);
+    cache.frames.set(cacheKey, frame);
+    return frame;
+  }
+  _withIndex(i) {
+    const fl = new FrameLocator(this._parent, this._selector);
+    fl._index = i;
+    return fl;
+  }
+  first() {
+    return this._withIndex(0);
+  }
+  last() {
+    return this._withIndex(-1);
+  }
+  nth(i) {
+    return this._withIndex(i);
+  }
+  locator(selector) {
+    return this._resolveFrame().locator(selector);
+  }
+  getByRole(role, opts) {
+    return this._resolveFrame().getByRole(role, opts);
+  }
+  getByText(t) {
+    return this._resolveFrame().getByText(t);
+  }
+  getByLabel(t) {
+    return this._resolveFrame().getByLabel(t);
+  }
+  getByPlaceholder(t) {
+    return this._resolveFrame().getByPlaceholder(t);
+  }
+  getByAltText(t) {
+    return this._resolveFrame().getByAltText(t);
+  }
+  getByTitle(t) {
+    return this._resolveFrame().getByTitle(t);
+  }
+  getByTestId(id) {
+    return this._resolveFrame().getByTestId(id);
+  }
+  frameLocator(selector) {
+    return new FrameLocator(this._resolveFrame(), selector);
+  }
+  owner() {
+    return this._resolveFrame();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 class Page {
@@ -938,7 +1394,85 @@ class Page {
   _initScriptSource() {
     const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
     if (this._routeInitScript) all.unshift(this._routeInitScript);
+    const exposeNames = [...this._mergedBindings().keys()];
+    const exposeScript = buildExposeInitScript(exposeNames);
+    if (exposeScript) all.unshift(exposeScript);
     return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
+  }
+
+  // Merge context-level and page-level exposed bindings; page wins on name clash.
+  _mergedBindings() {
+    const out = new Map();
+    for (const [k, v] of this._context._bindings ?? []) out.set(k, v);
+    for (const [k, v] of this._bindings ?? []) out.set(k, v);
+    return out;
+  }
+
+  // Drain queued binding calls from the isolate and dispatch to Node handlers.
+  // Called after every live interaction. Fire-and-forget: a host-side throw
+  // is swallowed with a warning so one bad handler can't break the page.
+  async _drainBindings() {
+    if (this._session == null || this._draining) return;
+    const handlers = this._mergedBindings();
+    if (handlers.size === 0) return;
+    this._draining = true;
+    try {
+      // Init scripts run per-frame, so each iframe realm keeps its own
+      // __tsExpose.q. Walk the frame tree and splice every realm's queue so
+      // iframe-scoped binding calls aren't lost (turbo-surf#285).
+      const raw = await native.liveEvalEngine(
+        this._session,
+        `(() => {
+          const out = [];
+          const seen = new Set();
+          const walk = (w) => {
+            if (!w || seen.has(w)) return;
+            seen.add(w);
+            try {
+              const bag = w.__tsExpose;
+              if (bag && bag.q && bag.q.length) {
+                for (const c of bag.q.splice(0)) out.push(c);
+              }
+            } catch (_e) {}
+            let n = 0;
+            try { n = w.frames ? w.frames.length : 0; } catch (_e) { n = 0; }
+            for (let i = 0; i < n; i++) {
+              let child = null;
+              try { child = w.frames[i]; } catch (_e) { child = null; }
+              if (child) walk(child);
+            }
+          };
+          walk(globalThis);
+          globalThis.__RESULT = JSON.stringify(out);
+        })();`,
+      );
+      if (!raw) return;
+      let calls;
+      try {
+        calls = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      for (const call of calls) {
+        const entry = handlers.get(call.name);
+        if (!entry) continue;
+        const args = Array.isArray(call.args) ? call.args : [];
+        try {
+          if (entry.isBinding) {
+            await entry.fn({ page: this, context: this._context, frame: null }, ...args);
+          } else {
+            await entry.fn(...args);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`turbo-surf: exposed binding "${call.name}" threw —`, err?.message ?? err);
+        }
+      }
+    } catch {
+      /* isolate gone / eval failed — nothing to drain */
+    } finally {
+      this._draining = false;
+    }
   }
 
   async _openLiveSession() {
@@ -955,6 +1489,7 @@ class Page {
     this._hydrated = true;
     this._loadedPath = pathOf(this._url);
     await this._refreshFromSession();
+    await this._drainBindings();
   }
 
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
@@ -1088,7 +1623,19 @@ class Page {
       interactionScript(selector, index ?? 0, kind, value),
     );
     await this._refreshFromSession();
+    // Surface the NO_MATCH signal before draining so a binding-handler
+    // rejection that happens to be in the queue can't shadow the original
+    // locator failure. Drain is best-effort; a throwing binding writes to
+    // console (same shape as _sessionEval → drain errors).
     if (r === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    // Drain exposed-binding calls queued by handlers that ran during this
+    // interaction so a subsequent assert sees them without waiting for the next
+    // evaluate — matches `_sessionEval`'s contract.
+    try {
+      await this._drainBindings();
+    } catch (e) {
+      console.error("turbo-surf: _drainBindings threw during _sessionDispatch:", e);
+    }
     return r;
   }
   // Run arbitrary JS in the live isolate, then refresh the Page snapshot. Backs the
@@ -1097,6 +1644,7 @@ class Page {
     if (this._session == null) return undefined;
     const r = await native.liveEvalEngine(this._session, script);
     await this._refreshFromSession();
+    await this._drainBindings();
     return r;
   }
   get _cookies() {
@@ -1294,6 +1842,7 @@ class Page {
         `(async () => { try { const result = await (${body}); if (result === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(result); } catch { return String(result); } } catch { return ""; } })()`,
       );
       await this._refreshFromSession();
+      await this._drainBindings();
       if (typeof out === "string" && out.startsWith("__ts_json__:")) {
         try {
           return JSON.parse(out.slice("__ts_json__:".length));
@@ -1469,18 +2018,33 @@ class Page {
     return this._locFromSelector(`[${this._context._testIdAttribute}="${id}"]`);
   }
 
-  // --- frames (no real frames → the page is its own main frame) ---
+  // --- frames ---
+  // The host page implements the Frame surface too, so `mainFrame()` keeps returning
+  // `this` — Playwright code that does `page.mainFrame().locator(...)` works unchanged.
+  // Child `<iframe>` elements are surfaced through Frame objects: `page.frame({name})`
+  // and `page.frameLocator('iframe[...]')` scope queries to the child document, not
+  // the host (turbo-surf#225). srcdoc iframes carry the child HTML directly;
+  // src-loaded iframes are listed with empty content (the shim does not fetch
+  // iframe src here — a live session hydrates them in the engine).
   mainFrame() {
     return this;
   }
   frames() {
-    return [this];
+    return [this, ..._collectIframes(this).map((meta) => new Frame(this, null, meta))];
   }
-  frame() {
-    return this;
+  frame(opts) {
+    if (opts == null) return this;
+    const name = typeof opts === "string" ? opts : opts?.name;
+    const urlSpec = typeof opts === "object" && opts ? opts.url : null;
+    const match = _collectIframes(this).find(
+      (f) =>
+        (name == null || f.name === name) &&
+        (urlSpec == null || _matchUrl(f.src || f.url, urlSpec)),
+    );
+    return match ? new Frame(this, null, match) : null;
   }
   frameLocator(selector) {
-    return this.locator(selector);
+    return new FrameLocator(this, selector);
   }
 
   // --- waiters (static engine: resolve immediately / poll evaluate) ---
@@ -1918,44 +2482,34 @@ class Page {
     return css;
   }
 
+  // Drag an element matched by `source` to one matched by `target`. Thin wrapper
+  // over Locator.dragTo so the same pointer/mouse/drag sequence fires (#227).
+  async dragAndDrop(source, target, _opts) {
+    return this.locator(source).dragTo(this.locator(target));
+  }
+
   // --- unsupported → honest throws ---
   pdf = UNSUPPORTED("page.pdf", PIXEL);
-  dragAndDrop = UNSUPPORTED("page.dragAndDrop", INPUT);
   // page.route(url, handler) — shim-side only, by monkey-patching `fetch` inside
-  // the live isolate via an init script. The handler is invoked once at route
-  // registration time against a stub route that captures the `fulfill` payload;
-  // `continue`/`abort`/`fallback` and per-request dynamic responses are NOT
-  // supported. Pattern: string (substring OR glob with `*`/`**`) or RegExp.
+  // the live isolate via an init script. The handler is serialized and re-run
+  // PER request inside the isolate against a real Request wrapper (live
+  // url/method/headers), so handlers that branch on `req.url()` work (#281).
+  // Caveat: the serialized handler loses outer-scope closures — captured host
+  // identifiers and host-side `await` on Node helpers don't cross into V8.
+  // Pattern: string (substring OR glob with `*`/`**`) or RegExp. `continue` and
+  // `fallback` let the real network through; `abort` rejects the fetch.
   // XHR goes through this same wrapper for the common xhr.open+send path.
   async route(urlPattern, handler) {
-    let fulfilled = null;
-    const req = {
-      url: () => (typeof urlPattern === "string" ? urlPattern : ""),
-      method: () => "GET",
-      postData: () => null,
-      postDataJSON: () => null,
-      headers: () => ({}),
-      resourceType: () => "xhr",
-    };
-    const stub = {
-      request: () => req,
-      fulfill: async (opts) => {
-        fulfilled = opts ?? {};
-      },
-      continue: async () => {},
-      abort: async () => {},
-      fallback: async () => {},
-    };
-    try {
-      await handler(stub, req);
-    } catch {
-      /* handler threw — leave fulfilled null, route is a no-op */
-    }
-    if (!fulfilled) return;
     this._routes = this._routes ?? [];
-    this._routes.push(normalizeRoute(urlPattern, fulfilled));
-    // Refresh the init-script snapshot so the next live session sees the route.
+    this._routes.push(normalizeRoute(urlPattern, handler));
     this._routeInitScript = buildRouteInitScript(this._routes);
+    // Inject into the CURRENT live isolate too, so a route registered after
+    // goto intercepts subsequent fetches without requiring a re-navigation
+    // (turbo-surf#282). The wrapper falls through to the previously-wrapped
+    // fetch for non-matches, so stacking is safe.
+    if (this._live && this._routeInitScript) {
+      await native.liveEvalEngine(this._session, this._routeInitScript);
+    }
   }
   // Drop a previously-registered route by its original pattern (handler ignored
   // here because the shim collapses each route to its fulfilled payload).
@@ -1964,38 +2518,220 @@ class Page {
     const key = urlPattern instanceof RegExp ? urlPattern.source : String(urlPattern);
     this._routes = this._routes.filter((r) => r.patternKey !== key);
     this._routeInitScript = buildRouteInitScript(this._routes);
+    if (this._live && this._routeInitScript) {
+      await native.liveEvalEngine(this._session, this._routeInitScript);
+    }
   }
-  routeFromHAR = UNSUPPORTED("page.routeFromHAR", NETIO);
+  // page.routeFromHAR(har, options?) — read a Playwright/Chrome HAR file and
+  // register each `log.entries[].request.url` as a route returning that entry's
+  // response body/status/content-type via the same init-script fetch/XHR
+  // wrapper. Playback-only; record mode is a follow-up. `options.url`, when
+  // provided, filters entries by URL (RegExp test, or substring match for a
+  // string). Unmatched requests fall through to the real network (Playwright's
+  // `notFound: 'fallback'`); strict abort mode is not implemented yet.
+  async routeFromHAR(har, options = {}) {
+    const raw = await readFile(har, "utf8");
+    const parsed = JSON.parse(raw);
+    const entries = parsed?.log?.entries ?? [];
+    const filter = options?.url ?? null;
+    const matches = (url) => {
+      if (filter == null) return true;
+      if (filter instanceof RegExp) return filter.test(url);
+      return String(url).indexOf(String(filter)) !== -1;
+    };
+    this._routes = this._routes ?? [];
+    for (const entry of entries) {
+      const route = harEntryToRoute(entry);
+      if (!route) continue;
+      if (!matches(route.pattern)) continue;
+      this._routes.push(route);
+    }
+    this._routeInitScript = buildRouteInitScript(this._routes);
+    if (this._live && this._routeInitScript) {
+      await native.liveEvalEngine(this._session, this._routeInitScript);
+    }
+  }
   pause = UNSUPPORTED("page.pause", "no inspector UI");
-  exposeBinding = UNSUPPORTED(
-    "page.exposeBinding",
-    "no persistent JS<->host binding across renders",
-  );
-  exposeFunction = UNSUPPORTED(
-    "page.exposeFunction",
-    "no persistent JS<->host binding across renders",
-  );
+  // Persistent JS→host binding. The init-script path re-defines
+  // `globalThis[name]` on every live session open (so it survives page
+  // reloads + in-page navigations); when a session is already up we also
+  // define it now so the test can call it before the next navigation.
+  // Host return values are not surfaced to in-page JS — see
+  // buildExposeInitScript for the trade-off.
+  async exposeBinding(name, fn, _options) {
+    this._bindings = this._bindings ?? new Map();
+    this._bindings.set(String(name), { fn, isBinding: true });
+    if (this._live) {
+      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+    }
+  }
+  async exposeFunction(name, fn) {
+    this._bindings = this._bindings ?? new Map();
+    this._bindings.set(String(name), { fn, isBinding: false });
+    if (this._live) {
+      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+    }
+  }
 
-  // pixel input devices
+  // Input devices: there's no compositor, but the live isolate runs the page's
+  // JS, so pointer/mouse/touch handlers are real. The shim dispatches synthetic
+  // events through the Mouse/Touchscreen state machines (turbo-surf#227).
   get mouse() {
-    return mouseStub;
+    return (this._mouse ??= makeMouse(this));
   }
   get keyboard() {
     return makeKeyboard(this);
   }
   get touchscreen() {
-    return touchStub;
+    return (this._touch ??= makeTouchscreen(this));
   }
 }
 
-const mouseStub = {
-  click: UNSUPPORTED("mouse.click", INPUT),
-  dblclick: UNSUPPORTED("mouse.dblclick", INPUT),
-  move: UNSUPPORTED("mouse.move", INPUT),
-  down: UNSUPPORTED("mouse.down", INPUT),
-  up: UNSUPPORTED("mouse.up", INPUT),
-  wheel: UNSUPPORTED("mouse.wheel", INPUT),
-};
+// page.mouse — minimal state (x, y, button) + event dispatch at
+// `document.elementFromPoint(x, y)`. No live session → every call no-ops cleanly
+// (same shape as the keyboard). `click` = move → down → up (+ click), `dblclick`
+// adds a second click and a `dblclick`. `wheel(dx, dy)` fires a `wheel` event at
+// the current cursor target.
+function makeMouse(page) {
+  const state = { x: 0, y: 0, button: 0, buttons: 0 };
+  const run = async (script) => {
+    if (!page._live) return;
+    await page._sessionEval(script);
+  };
+  const base = (extra = "") =>
+    `{ bubbles: true, cancelable: true, view: globalThis, clientX: ${state.x}, clientY: ${state.y}, screenX: ${state.x}, screenY: ${state.y}, button: ${state.button}, buttons: ${state.buttons}${extra} }`;
+  // Re-read state.x/state.y on every dispatch — baking them at definition time
+  // sent every click/down/up/wheel to document.elementFromPoint(0,0) regardless
+  // of the preceding move(x, y).
+  const targetExpr = () =>
+    `(document.elementFromPoint(${state.x}, ${state.y}) || document.documentElement || document.body)`;
+  const dispatch = (pointerType, mouseType) => `(() => {
+    const t = ${targetExpr()};
+    if (!t) return;
+    const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+    t.dispatchEvent(new PE(${JSON.stringify(pointerType)}, ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
+    t.dispatchEvent(new MouseEvent(${JSON.stringify(mouseType)}, ${base()}));
+  })();`;
+  async function move(x, y) {
+    state.x = Math.round(x);
+    state.y = Math.round(y);
+    await run(dispatch("pointermove", "mousemove"));
+  }
+  async function down(opts) {
+    state.button = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
+    state.buttons = 1 << state.button;
+    await run(dispatch("pointerdown", "mousedown"));
+  }
+  async function up(opts) {
+    const btn = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
+    state.button = btn;
+    state.buttons = 0;
+    await run(`(() => {
+      const t = ${targetExpr()};
+      if (!t) return;
+      const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+      t.dispatchEvent(new PE("pointerup", ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
+      t.dispatchEvent(new MouseEvent("mouseup", ${base()}));
+      t.dispatchEvent(new MouseEvent("click", ${base()}));
+    })();`);
+  }
+  async function click(x, y, opts) {
+    await move(x, y);
+    await down(opts);
+    await up(opts);
+  }
+  async function dblclick(x, y, opts) {
+    await click(x, y, opts);
+    await click(x, y, opts);
+    await run(`(() => {
+      const t = ${targetExpr()};
+      if (!t) return;
+      t.dispatchEvent(new MouseEvent("dblclick", ${base(", detail: 2")}));
+    })();`);
+  }
+  async function wheel(dx, dy) {
+    if (!page._live) return;
+    await page._sessionEval(`(() => {
+      const t = ${targetExpr()};
+      if (!t) return;
+      t.dispatchEvent(new (globalThis.WheelEvent || globalThis.MouseEvent)("wheel", ${base(`, deltaX: ${Number(dx) || 0}, deltaY: ${Number(dy) || 0}, deltaMode: 0`)}));
+    })();`);
+  }
+  return { move, down, up, click, dblclick, wheel };
+}
+
+// page.touchscreen — single-touch tap at (x, y): pointerdown/touchstart →
+// pointerup/touchend → click on elementFromPoint, so JS tap handlers fire (#227).
+function makeTouchscreen(page) {
+  return {
+    async tap(x, y) {
+      if (!page._live) return;
+      const xi = Math.round(x);
+      const yi = Math.round(y);
+      await page._sessionEval(`(() => {
+        const t = (document.elementFromPoint(${xi}, ${yi}) || document.documentElement || document.body);
+        if (!t) return;
+        const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+        const common = { bubbles: true, cancelable: true, view: globalThis, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi} };
+        t.dispatchEvent(new PE("pointerdown", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        try {
+          const touchInit = { identifier: 1, target: t, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi}, pageX: ${xi}, pageY: ${yi} };
+          const Touch = globalThis.Touch;
+          const TouchEvent = globalThis.TouchEvent;
+          if (Touch && TouchEvent) {
+            const touch = new Touch(touchInit);
+            t.dispatchEvent(new TouchEvent("touchstart", { ...common, touches: [touch], targetTouches: [touch], changedTouches: [touch] }));
+            t.dispatchEvent(new TouchEvent("touchend", { ...common, touches: [], targetTouches: [], changedTouches: [touch] }));
+          } else {
+            t.dispatchEvent(new Event("touchstart", common));
+            t.dispatchEvent(new Event("touchend", common));
+          }
+        } catch (_) {
+          t.dispatchEvent(new Event("touchstart", common));
+          t.dispatchEvent(new Event("touchend", common));
+        }
+        t.dispatchEvent(new PE("pointerup", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        t.dispatchEvent(new MouseEvent("click", common));
+      })();`);
+    },
+  };
+}
+
+// Drag `srcIdx` to `dstIdx` (live `querySelectorAll('*')` positions). Fires the
+// full pointer+mouse sequence on source then target, plus the HTML5 drag/drop
+// lifecycle (dragstart on source → dragenter/dragover on target → drop on target
+// → dragend on source), all sharing one DataTransfer so a real app's handlers
+// can set/read types and data. No compositor, so no OS drag image (#227).
+function dragScript(srcIdx, dstIdx) {
+  return `(() => {
+    const all = document.querySelectorAll('*');
+    const src = all[${srcIdx}];
+    const dst = all[${dstIdx}];
+    if (!src || !dst) { globalThis.__RESULT = "NO_MATCH"; return; }
+    const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+    const dt = (typeof globalThis.DataTransfer === "function") ? new globalThis.DataTransfer() : null;
+    const pointerOpts = (t) => ({ bubbles: true, cancelable: true, view: globalThis, pointerId: 1, isPrimary: true, pointerType: 'mouse', button: 0, buttons: t === "pointerup" ? 0 : 1 });
+    const mouseOpts = (buttons) => ({ bubbles: true, cancelable: true, view: globalThis, button: 0, buttons });
+    const dragOpts = () => {
+      const o = { bubbles: true, cancelable: true, view: globalThis, button: 0 };
+      if (dt) o.dataTransfer = dt;
+      return o;
+    };
+    src.dispatchEvent(new PE("pointerdown", pointerOpts("pointerdown")));
+    src.dispatchEvent(new MouseEvent("mousedown", mouseOpts(1)));
+    const DE = globalThis.DragEvent || globalThis.MouseEvent;
+    src.dispatchEvent(new DE("dragstart", dragOpts()));
+    dst.dispatchEvent(new PE("pointermove", pointerOpts("pointermove")));
+    dst.dispatchEvent(new MouseEvent("mousemove", mouseOpts(1)));
+    dst.dispatchEvent(new DE("dragenter", dragOpts()));
+    dst.dispatchEvent(new DE("dragover", dragOpts()));
+    dst.dispatchEvent(new DE("drop", dragOpts()));
+    src.dispatchEvent(new DE("dragend", dragOpts()));
+    dst.dispatchEvent(new PE("pointerup", pointerOpts("pointerup")));
+    dst.dispatchEvent(new MouseEvent("mouseup", mouseOpts(0)));
+    globalThis.__RESULT = "OK";
+  })();`;
+}
 // Keyboard: no hardware, but key events are real JS. Dispatch keydown/keyup (with a
 // keypress for printable keys) on the focused element (or document) in the live app —
 // covers Escape-to-close-popover, Enter-to-submit, etc. No-op without a live session.
@@ -2023,7 +2759,6 @@ function makeKeyboard(page) {
     insertText: async (text) => dispatch(String(text)),
   };
 }
-const touchStub = { tap: UNSUPPORTED("touchscreen.tap", INPUT) };
 
 function makeResponse(r) {
   return {
@@ -2113,17 +2848,28 @@ function makeDownload(entry) {
 class BrowserContext {
   constructor(opts = {}) {
     this._closed = false;
-    const cookies = opts.storageState?.cookies ?? [];
+    // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
+    // so every supported key can reach fixture-constructed contexts without
+    // the test code having to pass it explicitly. In-suite `opts` still wins
+    // over the project block.
+    let projectUse = {};
+    try {
+      projectUse = process.env.TURBO_PW_USE ? JSON.parse(process.env.TURBO_PW_USE) : {};
+    } catch {
+      /* ignore malformed env — a project without a use block is the common case */
+    }
+    const merged = { ...projectUse, ...opts };
+    const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
-    this._baseURL = opts.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
+    this._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
     // Locale: real Playwright runs `devices['Desktop Chrome']` (locale en-US), and the
     // app picks UI language from the `NEXT_LOCALE` cookie (next-intl) — with none it
     // defaults to es-MX, so English text/role-name assertions miss. Seed NEXT_LOCALE to
     // match the browser locale (default en-US) unless the caller already provided one.
     // NOTE: the settings suite expects the es-MX default (Chrome shows es-MX there) — a known
     // parity gap; the post-login NEXT_LOCALE=en-US source is not yet pinned. See memory.
-    this._locale = opts.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
+    this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
     if (this._locale && !cookies.some((c) => c.name === "NEXT_LOCALE")) {
       let host = "localhost";
       try {
@@ -2145,12 +2891,25 @@ class BrowserContext {
     this._cookies = JSON.stringify(cookies);
     this._requestState = native.requestStateNew?.();
     // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
-    this._userAgent = opts.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
-    this._headers = opts.extraHTTPHeaders ?? {};
-    this._viewport = opts.viewport ?? { width: 1280, height: 720 };
+    this._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
+    this._headers = merged.extraHTTPHeaders ?? {};
+    this._viewport = merged.viewport ?? { width: 1280, height: 720 };
     this._testIdAttribute =
-      opts.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
+      merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
+    // Capture-only remaining per-project `use` keys so a suite that reads them
+    // from the context (via a getter or in-suite introspection) sees the real
+    // project value. The engine doesn't act on HTTPS/permissions/geolocation
+    // today — these are present so a project's config doesn't silently vanish.
+    this._httpCredentials = merged.httpCredentials ?? null;
+    this._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
+    this._colorScheme = merged.colorScheme ?? null;
+    this._permissions = merged.permissions ?? [];
+    this._geolocation = merged.geolocation ?? null;
+    this._timezoneId = merged.timezoneId ?? null;
+    this._offline = merged.offline ?? false;
+    this._screen = merged.screen ?? null;
     this._initScripts = [];
+    this._bindings = new Map();
     this._pages = [];
     this._listeners = new Map();
   }
@@ -2227,8 +2986,25 @@ class BrowserContext {
   route = UNSUPPORTED("context.route", NETIO);
   routeFromHAR = UNSUPPORTED("context.routeFromHAR", NETIO);
   unroute = UNSUPPORTED("context.unroute", NETIO);
-  exposeBinding = UNSUPPORTED("context.exposeBinding", "no persistent JS<->host binding");
-  exposeFunction = UNSUPPORTED("context.exposeFunction", "no persistent JS<->host binding");
+  // Context-level expose: every Page in this context (and future ones) sees
+  // the binding; live pages pick it up on the next navigation. On an open
+  // session we also define it now so the current Page can use it immediately.
+  async exposeBinding(name, fn, _options) {
+    this._bindings.set(String(name), { fn, isBinding: true });
+    for (const page of this._pages) {
+      if (page._live) {
+        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+      }
+    }
+  }
+  async exposeFunction(name, fn) {
+    this._bindings.set(String(name), { fn, isBinding: false });
+    for (const page of this._pages) {
+      if (page._live) {
+        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+      }
+    }
+  }
 }
 
 const browserStub = {
@@ -2722,9 +3498,17 @@ function wireFixtureHooks(open) {
 // `(title, body)`, so a `skip(false, "reason")` (the common conditional form)
 // registered a bogus skipped test. These helpers disambiguate.
 const SKIP_SIGNAL = Symbol("turbo-shim-skip");
-let _skipStack = []; // one frame per active describe; `.skip` set by a conditional skip
-let _activeT = null; // node:test context of the running test (for a runtime skip())
-const describeSkipped = () => _skipStack.some((f) => f.skip);
+// Per-test-context storage keyed by the enclosing node:test frame — module-level
+// mutables (an `activeT` ref, a plain skip-stack array) would race between
+// concurrent tests, since node:test's runner interleaves their callbacks. The
+// skip-stack store holds a shared array for the current describe chain (nested
+// describes layer their own frame on top and restore on exit); the activeT
+// store binds the node:test context to just the body of the running test.
+const skipStackStore = new AsyncLocalStorage();
+const activeTStore = new AsyncLocalStorage();
+const getSkipStack = () => skipStackStore.getStore() ?? [];
+const getActiveT = () => activeTStore.getStore() ?? null;
+const describeSkipped = () => getSkipStack().some((f) => f.skip);
 const isDeclareForm = (args) => typeof args[0] === "string" && typeof args[1] === "function";
 function skipConditionMet(args) {
   if (args.length === 0) return true; // bare test.skip() → always skip
@@ -2747,31 +3531,30 @@ function makeTestFn(baseDefs, extDefs = {}) {
       nodeTest.skip(name, () => {});
       return;
     }
-    nodeTest(name, async (t) => {
-      _activeT = t;
-      const testInfo = makeTestInfo(name);
-      try {
-        // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
-        // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
-        // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
-        // open its OWN fixtures, else custom fixtures resolve to undefined.
-        if (_current && Object.keys(extDefs).length === 0) {
-          await fn(_current.arg, testInfo);
-          return;
-        }
-        const { arg, teardown } = await open(testInfo);
+    nodeTest(name, async (t) =>
+      activeTStore.run(t, async () => {
+        const testInfo = makeTestInfo(name);
         try {
-          await fn(arg, testInfo);
-        } finally {
-          await teardown();
+          // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
+          // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
+          // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
+          // open its OWN fixtures, else custom fixtures resolve to undefined.
+          if (_current && Object.keys(extDefs).length === 0) {
+            await fn(_current.arg, testInfo);
+            return;
+          }
+          const { arg, teardown } = await open(testInfo);
+          try {
+            await fn(arg, testInfo);
+          } finally {
+            await teardown();
+          }
+        } catch (e) {
+          if (e === SKIP_SIGNAL) return; // runtime test.skip() — already marked on `t`
+          throw e;
         }
-      } catch (e) {
-        if (e === SKIP_SIGNAL) return; // runtime test.skip() — already marked on `t`
-        throw e;
-      } finally {
-        _activeT = null;
-      }
-    });
+      }),
+    );
   };
   run.describe = makeDescribe();
   run.skip = (...args) => {
@@ -2783,11 +3566,13 @@ function makeTestFn(baseDefs, extDefs = {}) {
     // Conditional / runtime form `skip(condition?, description?)`.
     if (!skipConditionMet(args)) return; // condition false → no-op
     const reason = typeof args[args.length - 1] === "string" ? args[args.length - 1] : undefined;
-    if (_activeT) {
-      _activeT.skip(reason); // inside a running test body → skip at runtime
+    const t = getActiveT();
+    if (t) {
+      t.skip(reason); // inside a running test body → skip at runtime
       throw SKIP_SIGNAL;
     }
-    if (_skipStack.length) _skipStack[_skipStack.length - 1].skip = true; // describe scope
+    const stack = getSkipStack();
+    if (stack.length) stack[stack.length - 1].skip = true; // describe scope
   };
   run.only = (name, fn) => nodeTest.only(name, async () => runWith(open, name, fn));
   run.fixme = run.skip;
@@ -2834,14 +3619,12 @@ function makeDescribe() {
   // async test (holding a live-session V8 isolate) was torn down at process exit,
   // which faulted (SIGBUS) on Linux. The Playwright describe body takes no args.
   const d = (name, fn) =>
-    nodeDescribe(name, async () => {
-      _skipStack.push({ skip: false });
-      try {
-        return await fn();
-      } finally {
-        _skipStack.pop();
-      }
-    });
+    nodeDescribe(name, async () =>
+      // Each describe runs in its own stack store — nested describes layer on
+      // top via a fresh array, and sibling describes never see each other's
+      // frames even when node:test interleaves their bodies.
+      skipStackStore.run([...getSkipStack(), { skip: false }], async () => fn()),
+    );
   d.skip = (name, fn) => nodeDescribe.skip(name, fn ?? (() => {}));
   d.only = (name, fn) => d(name, fn);
   d.serial = d;
@@ -2896,11 +3679,13 @@ async function openFixtures(baseDefs, extDefs, testInfo) {
       Promise.resolve(def(arg, used, testInfo)).then(() => settle(), reject);
     });
   };
+  // oxlint-disable no-await-in-loop
   for (const name of ["browser", "context", "page", "request", "baseURL"])
     await resolve(name, baseDefs[name]);
   for (const name of Object.keys(extDefs)) await resolve(name, extDefs[name]);
+  // oxlint-enable no-await-in-loop
   const teardown = async () => {
-    for (const release of teardowns.reverse()) release();
+    for (const release of teardowns.toReversed()) release();
   };
   return { arg, teardown };
 }
@@ -2938,15 +3723,30 @@ export const request = {
         return url;
       }
     };
+    // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
-    const ctxHeaders = opts.extraHTTPHeaders ?? {};
+    const optHeaders = opts.extraHTTPHeaders ?? {};
+    // Resolve the context's `extraHTTPHeaders` live from the parent
+    // BrowserContext (if bound) so a `context.setExtraHTTPHeaders(...)` call
+    // after `request()` is cached takes effect on the next request — without
+    // this, the cache snapshotted an empty header set at newContext time and
+    // every request from the live context silently sent no custom headers.
+    // Precedence: newContext({extraHTTPHeaders}) is the opt-in baseline,
+    // overridden by the parent BrowserContext's LIVE headers so a later
+    // `context.setExtraHTTPHeaders(...)` call (which mutates bc._headers) is
+    // picked up on the next request — the headline fix for the cached
+    // _requestCtx path. Per-call `o.headers` still overrides both below.
+    // Note: the explicit `request.newContext({_browserContext: bc,
+    // extraHTTPHeaders: X})` double-opt case lets bc win for overlapping keys,
+    // which is a shim-private surface; direct callers don't hit it.
+    const ctxHeaders = () => (bc ? { ...optHeaders, ...bc._headers } : optHeaders);
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
     // as-is. Per-request `headers` merge over the context's `extraHTTPHeaders`.
     const encode = (o = {}) => {
-      const h = { ...ctxHeaders, ...o.headers };
+      const h = { ...ctxHeaders(), ...o.headers };
       let body = null;
-      if (o.data != null) {
+      if (o.data !== null && o.data !== undefined) {
         if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {
           body = String(o.data);
         } else {
@@ -2967,6 +3767,7 @@ export const request = {
       // Merge Set-Cookie writes back into the parent BrowserContext's jar so
       // the next page.goto / page.request / context.request sees them.
       if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;
+      // oxlint-enable no-underscore-dangle
       return makeResponse(parsed);
     };
     return {

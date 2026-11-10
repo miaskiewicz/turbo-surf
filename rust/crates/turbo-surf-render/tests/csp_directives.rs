@@ -125,18 +125,6 @@ async fn compare(skip: impl Fn(&str, &mut Value)) -> Vec<String> {
     differences
 }
 
-/// `new Worker(url)` enforces worker-src on construction (#104/#190), but the worker's
-/// own script never runs yet (follow-up: separate V8 realm per worker). Media loads are
-/// still missing, so `<audio src>` never fetches and its media-src violation never fires;
-/// drop only those media-src rows. The worker-src/media-src policy resolution is
-/// unit-tested in csp.rs.
-fn without_media(_: &str, result: &mut Value) {
-    result["violations"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|row| row[1].as_str() != Some("media-src"));
-}
-
 /// Chrome 156 checks a report-only event-handler attribute twice: when it is set and
 /// again when the handler lazily compiles (measured: set, then first getter/dispatch).
 /// turbo-dom-browser-env compiles content-attribute handlers eagerly, so there is one
@@ -153,8 +141,7 @@ fn single_report_only_attribute_check(result: &mut Value) {
     });
 }
 
-fn known_gaps(id: &str, result: &mut Value) {
-    without_media(id, result);
+fn known_gaps(_id: &str, result: &mut Value) {
     single_report_only_attribute_check(result);
 }
 

@@ -117,6 +117,70 @@ async fn native_trusted_script_eval_and_timer_sources_match_chrome() {
     .await;
 }
 
+// turbo-surf#121 gap 1: with `require-trusted-types-for 'script'` enforced and
+// a `default` Trusted Types policy whose `createScript` returns the input as-is,
+// Chrome 156 runs the eval and returns its value; surf must not refuse it. The
+// probe was run against Chrome/156.0.8078.47 headless on localhost.
+#[tokio::test(flavor = "current_thread")]
+async fn default_policy_admits_eval_under_require_trusted_types() {
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body></body>",
+        "https://trusted.test/control",
+        "",
+        "",
+        15000,
+        "",
+        Default::default(),
+        &[(
+            "Content-Security-Policy".into(),
+            "require-trusted-types-for 'script'; trusted-types default".into(),
+        )],
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval_json_expression(
+            "(()=>{trustedTypes.createPolicy('default',{createHTML:s=>s,\
+             createScript:s=>s,createScriptURL:s=>s});return eval('3+3')})()",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "6");
+    page.close();
+}
+
+// turbo-surf#121 gap 2: when the Trusted Types gate rejects an `eval` string,
+// Chrome 156 throws an `EvalError` with its specific message. surf's generic
+// "Code generation from strings disallowed for this context" differs.
+#[tokio::test(flavor = "current_thread")]
+async fn eval_error_message_matches_chrome_under_require_trusted_types() {
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body></body>",
+        "https://trusted.test/control",
+        "",
+        "",
+        15000,
+        "",
+        Default::default(),
+        &[(
+            "Content-Security-Policy".into(),
+            "require-trusted-types-for 'script'".into(),
+        )],
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval_json_expression(
+            "(()=>{try{eval('1+1')}catch(error){return error instanceof EvalError\
+             && error.message===\"Evaluating a string as JavaScript violates \
+             this document's Trusted Type assignment requirements.\"}return false})()",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "true");
+    page.close();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn published_sdk_fails_closed_for_enforced_raw_eval_without_native_callback() {
     if cfg!(turbo_surf_native_proxy) {
@@ -139,6 +203,71 @@ async fn published_sdk_fails_closed_for_enforced_raw_eval_without_native_callbac
     .unwrap();
     let result=page.eval_json_expression("(()=>{try{eval('globalThis.rawScriptExecuted=true')}catch(error){return error.name==='EvalError'&&globalThis.rawScriptExecuted===undefined}return false})()").await.unwrap();
     assert_eq!(result, "true");
+    page.close();
+}
+
+// turbo-surf#122 case 1: appending untrusted text as a <script>'s child does
+// not produce a trusted child text content, so under
+// `require-trusted-types-for 'script'` (with no `default` policy) the script's
+// classic execution must be blocked just like Chrome 156 blocks it.
+#[tokio::test(flavor = "current_thread")]
+async fn script_child_text_appended_untrusted_is_blocked_under_require_trusted_types() {
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body></body>",
+        "https://trusted.test/control",
+        "",
+        "",
+        15000,
+        "",
+        Default::default(),
+        &[(
+            "Content-Security-Policy".into(),
+            "require-trusted-types-for 'script'; trusted-types a".into(),
+        )],
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval_json_expression(
+            "(()=>{const s=document.createElement('script');document.body.append(s);\
+             s.append('globalThis.q=1');return String(globalThis.q)})()",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "\"undefined\"");
+    page.close();
+}
+
+// turbo-surf#122 case 2: a `javascript:` form action must pass through the
+// Trusted Types gate just like a `javascript:` navigation; under
+// `require-trusted-types-for 'script'` with no default policy Chrome 156
+// blocks the submission.
+#[tokio::test(flavor = "current_thread")]
+async fn javascript_form_action_is_blocked_under_require_trusted_types() {
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body>\
+         <form id=f1 action=\"javascript:void(globalThis.r1=1)\"></form></body>",
+        "https://trusted.test/control",
+        "",
+        "",
+        15000,
+        "",
+        Default::default(),
+        &[(
+            "Content-Security-Policy".into(),
+            "require-trusted-types-for 'script'".into(),
+        )],
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval_json_expression(
+            "(async()=>{document.getElementById('f1').submit();\
+             await new Promise(r=>setTimeout(r,100));return String(globalThis.r1)})()",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "\"undefined\"");
     page.close();
 }
 

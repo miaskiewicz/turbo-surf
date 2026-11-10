@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle, eqeqeq, prefer-const, no-await-in-loop, unicorn/consistent-function-scoping, no-unused-vars, no-array-reverse, no-shadow */
 // Exhaustive surface coverage of the napi-backed Playwright shim — one assertion
 // cluster per Locator method, per expect matcher (all 5 assertion classes), per
 // Page method, plus BrowserContext, fixtures, waiters, events, and the honest
@@ -468,12 +469,75 @@ test("Page click submits a GET form to the server", async () => {
 });
 
 // --- Page: frames + waiters ------------------------------------------------
-test("Page frames collapse to self", async () => {
+test("Page without iframes: mainFrame + frames() + frameLocator over host", async () => {
   const p = await fresh();
   assert.equal(p.mainFrame(), p);
   assert.deepEqual(p.frames(), [p]);
   assert.equal(p.frame(), p);
   assert.ok(p.frameLocator("main"));
+});
+
+// Engine iframe contexts exposed as Frame/FrameLocator. The host-vs-frame scope is
+// the whole point: a `#inside` button inside an iframe MUST NOT match on the host
+// page, and `frameLocator('iframe')` queries must land in the child document.
+test("Page.frames / frame({name}) / frameLocator: iframe srcdoc", async () => {
+  const p = newPage();
+  await p.setContent(`<html><body>
+    <h1>Host</h1>
+    <iframe name="child" srcdoc="<html><body><button id='inside'>Pay</button><p class='lead'>child lead</p></body></html>"></iframe>
+  </body></html>`);
+  // frames() lists the page + each iframe with content
+  const frames = p.frames();
+  assert.equal(frames.length, 2);
+  assert.equal(frames[0], p);
+  assert.notEqual(frames[1], p);
+  // frame({name}) finds the child
+  const child = p.frame({ name: "child" });
+  assert.ok(child, "frame({name}) resolves");
+  assert.equal(child.name(), "child");
+  assert.notEqual(child, p);
+  // child-scoped queries see the iframe content, not the host
+  assert.equal(await child.locator("#inside").count(), 1);
+  assert.equal(await child.locator("#inside").textContent(), "Pay");
+  assert.equal(await child.locator(".lead").textContent(), "child lead");
+  // host doesn't see the frame's content
+  assert.equal(await p.locator("#inside").count(), 0);
+  // frameLocator resolves inside the iframe
+  const fl = p.frameLocator("iframe[name=child]");
+  assert.equal(await fl.locator("#inside").count(), 1);
+  assert.equal(await fl.locator("#inside").textContent(), "Pay");
+  assert.equal(await fl.getByRole("button").count(), 1);
+  // host's p.locator('.lead') is the host's own lead if any (none here), not the frame's
+  assert.equal(await p.locator("p.lead").count(), 0);
+});
+
+// Regression for #283: FrameLocator.locator().fill() mutates were being discarded
+// because _resolveFrame() returned a throwaway Frame each call. Cache keyed on
+// parent HTML identity keeps the mutated Frame alive across successive queries.
+test("frameLocator.locator().fill: iframe DOM reflects the write (#283)", async () => {
+  const p = newPage();
+  await p.setContent(`<body>
+    <iframe name="form" srcdoc="<input id='name' value='' /><input id='other' value='' />"></iframe>
+  </body>`);
+  const fl = p.frameLocator("iframe[name=form]");
+  await fl.locator("#name").fill("Alice");
+  assert.equal(await fl.locator("#name").inputValue(), "Alice");
+  // A fresh FrameLocator over the same parent must also see the write.
+  const fl2 = p.frameLocator("iframe[name=form]");
+  assert.equal(await fl2.locator("#name").inputValue(), "Alice");
+  // Independent field stays empty — the cache holds the WHOLE frame, not just one node.
+  assert.equal(await fl.locator("#other").inputValue(), "");
+});
+
+test("Page.frame by string name", async () => {
+  const p = newPage();
+  await p.setContent(
+    `<body><iframe name="payment" srcdoc="<button id='b'>Go</button>"></iframe></body>`,
+  );
+  const f = p.frame("payment");
+  assert.ok(f);
+  assert.equal(f.name(), "payment");
+  assert.equal(await f.locator("#b").textContent(), "Go");
 });
 
 test("Page waiters resolve on the static DOM", async () => {
@@ -730,18 +794,16 @@ test("honest throws: pixel / input / network-interception", async () => {
   await assert.rejects(() => p.pdf(), /unavailable/);
   await assert.rejects(() => p.locator("#go").screenshot(), /unavailable/);
   // boundingBox returns null (no layout engine → unmeasurable), matching Playwright's null for
-  // a non-laid-out element — not a throw. hover()/keyboard.press are now real features. page-level
-  // screenshot is now a real synthetic render; the rest (pdf/element-screenshot/dragTo/selectText/
-  // mouse/touchscreen/route/exposeFunction) stay honest throws.
+  // a non-laid-out element — not a throw. hover/keyboard.press/mouse/touchscreen/dragTo/
+  // dragAndDrop are now real features: event-dispatch into the live isolate (#227), and on a
+  // static snapshot (no live session) they clean no-op. page-level screenshot is a real synthetic
+  // render; the rest (pdf/element-screenshot/selectText/routeFromHAR/exposeFunction) stay
+  // honest throws.
   assert.equal(await p.locator("#go").boundingBox(), null);
-  await assert.rejects(() => p.locator("#go").dragTo(p.locator("h1")), /input/);
   await assert.rejects(() => p.locator("#name").selectText(), /input/);
-  await assert.rejects(() => p.mouse.click(0, 0), /input/);
-  // keyboard.press is implemented (key-event dispatch via the live session) — not a throw.
-  await assert.rejects(() => p.touchscreen.tap(0, 0), /input/);
-  // page.route(fulfill) is supported (#220); routeFromHAR / context.route still aren't.
-  await assert.rejects(() => p.routeFromHAR("x.har"), /interception/);
-  await assert.rejects(() => p.exposeFunction("f", () => {}), /binding/);
+  // page.route(fulfill) + page.routeFromHAR (HAR playback) became real in #220;
+  // exposeFunction / exposeBinding became real in #226. context.route still
+  // isn't — covered elsewhere. Nothing left to assert as an honest throw here.
 });
 
 // --- waitForResponse staleness (Playwright semantics) ---------------------
@@ -1018,6 +1080,241 @@ test("page.route(url, fulfill) returns a fixture to the live app's fetch", async
   }
 });
 
+// Payroll-style glob: `page.route("**/api/x**", ...)` with the fetch fired from
+// a parser-synchronous inline <script> and a URL that carries a query string.
+// The glob translator must escape `*` so the two-star prefix/suffix become `.*`
+// (matching origin + query), otherwise the init-script's matcher rejects every
+// URL and the real server wins (turbo-surf#240).
+test("page.route glob with ** matches an inline-script fetch carrying a query string", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/countries") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/tax-store-data?code=42&tenant=acme')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.earningCode; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end('{"earningCode":"REAL"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("**/api/tax-store-data**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ earningCode: "FAKE" }),
+      });
+    });
+    await p.goto(`${base}/countries`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "FAKE",
+      "** glob pattern must intercept the inline <script> fetch",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Regression for turbo-surf#281: a handler that branches on `req.url()` must
+// see the LIVE request URL, not the registration-time pattern. The pre-fix
+// shim ran the handler once at registration with `req.url()` returning `**/*`,
+// so `includes('/api')` was false, the fulfill branch never ran, and the route
+// became a silent no-op for real requests.
+test("page.route handler branches on live req.url() instead of the registration-time pattern (#281)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.who; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end('{"who":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("**/*", async (route, req) => {
+      if (req.url().includes("/api")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ who: "mocked" }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "mocked",
+      "branching handler must see the live URL and fulfill /api requests",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.unroute(url) must remove a previously-registered route so the next live
+// session sees the real server again (turbo-surf#220). Regression guard: without
+// a refreshed init-script snapshot, the fixture would keep winning after unroute.
+test("page.unroute drops a previously-registered route and lets the real server win", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/foo')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.hello; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"hello":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.route("/api/foo", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked" }),
+      });
+    });
+    await p.unroute("/api/foo");
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "real-server",
+      "unroute must drop the fixture so the next session reaches the real server",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.route() registered AFTER goto must inject into the CURRENT live isolate
+// so a subsequent fetch is intercepted — without re-navigation (turbo-surf#282).
+// Regression guard: pre-#282, buildRouteInitScript only landed on the NEXT live
+// session, so the post-goto fetch reached the real server.
+test("page.route after goto intercepts a subsequent fetch in the current session", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(`<title>app</title><div id="root">init</div>`);
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"hello":"real-server"}');
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    await p.route("**/api/orders", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ hello: "mocked-post-goto" }),
+      });
+    });
+    const got = await p.evaluate(
+      async () => (await fetch("/api/orders").then((r) => r.json())).hello,
+    );
+    assert.equal(
+      got,
+      "mocked-post-goto",
+      "route registered after goto must inject into the live isolate (turbo-surf#282)",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.routeFromHAR(path) replays a Playwright/Chrome HAR file as a set of
+// fixtures: for every entry in `log.entries`, the request URL is registered as
+// a route returning that entry's response body/status/content-type — the live
+// app's fetch/XHR resolves against those fixtures instead of the real server.
+test("page.routeFromHAR plays back HAR entries as route fulfillments", async () => {
+  const { writeFile: wf, mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const server = createServer((req, res) => {
+    if (req.url === "/app") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<title>app</title><div id="root"></div><script>
+           fetch('/api/countries')
+             .then((r) => r.json())
+             .then((j) => { document.getElementById('root').textContent = j.country; })
+             .catch((e) => { document.getElementById('root').textContent = 'ERR:' + e.message; });
+         </script>`,
+      );
+    }
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end('{"country":"real-server"}');
+  });
+  const base = await listen(server);
+  const dir = await mkdtemp(join(tmpdir(), "turbo-surf-har-"));
+  const harPath = join(dir, "replay.har");
+  const har = {
+    log: {
+      version: "1.2",
+      entries: [
+        {
+          request: { method: "GET", url: `${base}/api/countries` },
+          response: {
+            status: 200,
+            headers: [{ name: "Content-Type", value: "application/json" }],
+            content: {
+              mimeType: "application/json",
+              text: JSON.stringify({ country: "FROM-HAR" }),
+            },
+          },
+        },
+      ],
+    },
+  };
+  await wf(harPath, JSON.stringify(har));
+  const p = newPage();
+  try {
+    await p.routeFromHAR(harPath);
+    await p.goto(`${base}/app`, { waitUntil: "networkidle" });
+    assert.equal(
+      await p.locator("#root").textContent(),
+      "FROM-HAR",
+      "routeFromHAR must inject the HAR entry's response body",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // Mirror of the waitForResponse drain-polling guard: payroll-style flows attach
 // `waitForRequest(/api\/x/)` to the step that fires the request, and the stub
 // used to resolve immediately with a synthetic page-URL GET — never seeing the
@@ -1256,6 +1553,93 @@ test("Page.evaluate returns typed values (object, array, number) from live sessi
   }
 });
 
+// Playwright's addInitScript runs in EVERY frame of the live context — the main
+// page plus every child frame — before that frame's own scripts execute. The
+// engine wires the context's init script into FrameContexts and runs it in each
+// new frame realm after environment install and before authored <script>s. This
+// regression covers #231: the LIMITATIONS note used to flag this as ⚠️. Four
+// frame flavors (child via <iframe src>, srcdoc, nested, dynamically created,
+// blob URL) each stamp a top-frame body attribute based on whether the init
+// global is visible — "true" everywhere means the init script reached that
+// frame before its own scripts ran.
+test("addInitScript applies to every child frame (src, srcdoc, nested, dynamic, blob)", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    if (url.pathname === "/parent") {
+      res.writeHead(200, { "content-type": "text/html" });
+      // One parent page with every frame flavor embedded. Each frame's inline
+      // script writes an attribute on the TOP document; the parent waits until
+      // every expected attribute shows up (so dynamic/blob mounts have run).
+      return res.end(
+        `<body>
+          <iframe name="plain" src="/child?mark=plain"></iframe>
+          <iframe name="srcframe" srcdoc="<script>try{window.top.document.body.setAttribute('data-srcframe', String(globalThis.trustedInit));}catch(e){}</script>"></iframe>
+          <iframe name="middle" src="/middle"></iframe>
+          <script>
+            setTimeout(() => {
+              const d = document.createElement('iframe');
+              d.name = 'dyn'; d.src = '/child?mark=dyn';
+              document.body.appendChild(d);
+              const b = new Blob(
+                ["<script>try{window.top.document.body.setAttribute('data-blobframe', String(globalThis.trustedInit));}catch(e){}</scr"+"ipt>"],
+                { type: "text/html" },
+              );
+              const u = URL.createObjectURL(b);
+              const f = document.createElement('iframe');
+              f.src = u;
+              document.body.appendChild(f);
+            }, 0);
+          </script>
+        </body>`,
+      );
+    }
+    if (url.pathname === "/child") {
+      const mark = url.searchParams.get("mark") ?? "child";
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<body><script>try{window.top.document.body.setAttribute('data-${mark}', String(globalThis.trustedInit));}catch(e){}</script></body>`,
+      );
+    }
+    if (url.pathname === "/middle") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(`<body><iframe name="grand" src="/grandchild"></iframe></body>`);
+    }
+    if (url.pathname === "/grandchild") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(
+        `<body><script>try{window.top.document.body.setAttribute('data-grand', String(globalThis.trustedInit));}catch(e){}</script></body>`,
+      );
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.addInitScript(() => {
+      globalThis.trustedInit = true;
+    });
+    await page.goto(`${base}/parent`, { waitUntil: "networkidle" });
+    const read = async () =>
+      page.evaluate(() => {
+        const out = {};
+        for (const attr of document.body.attributes) out[attr.name] = attr.value;
+        return out;
+      });
+    const attrs = await read();
+    // Every frame flavor saw the init script's global before its own <script>.
+    assert.equal(attrs["data-plain"], "true", "static <iframe src> child");
+    assert.equal(attrs["data-srcframe"], "true", "srcdoc child");
+    assert.equal(attrs["data-grand"], "true", "nested grandchild");
+    assert.equal(attrs["data-dyn"], "true", "dynamically created child");
+    assert.equal(attrs["data-blobframe"], "true", "blob URL child");
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // A getBy handle passed to the static waitForFunction resolves through the engine
 // namespace (turbo-dom#222): no live session, the handle is still the element.
 test("static waitForFunction resolves a getBy element handle", async () => {
@@ -1270,6 +1654,130 @@ test("static waitForFunction resolves a getBy element handle", async () => {
     const handle = await p.getByRole("button", { name: "Save" }).elementHandle();
     assert.equal(await p.waitForFunction((el) => el && el.id, handle), "go");
     assert.equal(p._session, null);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// turbo-surf#226: page.exposeFunction installs a persistent JS→host binding
+// the page can call. The host handler fires with the serialized arguments.
+// Fire-and-forget by design (host return values are NOT surfaced back to the
+// page in this release — the queue drains after each live interaction).
+test("page.exposeFunction routes page calls to the host and survives navigation", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    res.writeHead(200, { "content-type": "text/html" });
+    if (url.pathname === "/second") {
+      res.end(
+        `<title>t2</title><body><script>globalThis.__telemetry({ step: "second", at: 2 });</script></body>`,
+      );
+      return;
+    }
+    res.end(
+      `<title>t1</title><body><script>globalThis.__telemetry({ step: "first", at: 1 });</script></body>`,
+    );
+  });
+  const base = await listen(server);
+  const context = new BrowserContext();
+  const captured = [];
+  await context.exposeFunction("__telemetry", (payload) => {
+    captured.push(payload);
+  });
+  const p = await context.newPage();
+  try {
+    await p.goto(`${base}/first`, { waitUntil: "networkidle" });
+    // The inline script called the binding on the first page.
+    assert.deepEqual(captured, [{ step: "first", at: 1 }]);
+    // The second navigation re-runs the init script in the fresh isolate, so
+    // the binding is there again — proving it persists across navigations.
+    await p.goto(`${base}/second`, { waitUntil: "networkidle" });
+    assert.deepEqual(captured, [
+      { step: "first", at: 1 },
+      { step: "second", at: 2 },
+    ]);
+    // The page can also call the binding from evaluate directly.
+    await p.evaluate(() => globalThis.__telemetry({ step: "evaluate", at: 3 }));
+    assert.deepEqual(captured[2], { step: "evaluate", at: 3 });
+  } finally {
+    await p.close();
+    await context.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// page.exposeBinding passes a { page, context, frame } source record as the
+// first arg to the host handler. The shim's frame is null (single-frame page
+// model), but page + context are the live objects the test spec drives.
+test("page.exposeBinding receives a source record with the page + context", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<body><script>globalThis.__bind("hi", 7);</script></body>`);
+  });
+  const base = await listen(server);
+  const p = newPage();
+  const seen = [];
+  await p.exposeBinding("__bind", (source, label, n) => {
+    seen.push({ label, n, hasPage: source.page === p, hasContext: !!source.context });
+  });
+  try {
+    await p.goto(`${base}/`, { waitUntil: "networkidle" });
+    assert.deepEqual(seen, [{ label: "hi", n: 7, hasPage: true, hasContext: true }]);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// turbo-surf#285: init scripts run per-frame, so an iframe realm keeps its
+// own __tsExpose.q. The drain must walk the frame tree or iframe-scoped
+// binding calls are lost.
+test("page.exposeBinding fires when called from inside an iframe", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    res.writeHead(200, { "content-type": "text/html" });
+    if (url.pathname === "/child") {
+      res.end(`<body><script>globalThis.__childBind("from-iframe", 42);</script></body>`);
+      return;
+    }
+    res.end(`<body><iframe src="/child"></iframe></body>`);
+  });
+  const base = await listen(server);
+  const p = newPage();
+  const seen = [];
+  await p.exposeBinding("__childBind", (_source, label, n) => {
+    seen.push({ label, n });
+  });
+  try {
+    await p.goto(`${base}/`, { waitUntil: "networkidle" });
+    assert.deepEqual(seen, [{ label: "from-iframe", n: 42 }]);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Wiring an expose AFTER the live session is up: the shim re-defines the
+// binding in the running isolate so the current page can call it without a
+// reload. Covers the "spec adds instrumentation between goto and the action"
+// shape.
+test("page.exposeFunction after goto is callable in the current session", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<body><button id="go">go</button></body>`);
+  });
+  const base = await listen(server);
+  const p = newPage();
+  const beats = [];
+  try {
+    await p.goto(`${base}/`, { waitUntil: "networkidle" });
+    await p.exposeFunction("__beat", (tag) => beats.push(tag));
+    await p.evaluate(() => globalThis.__beat("after-goto"));
+    assert.deepEqual(beats, ["after-goto"]);
   } finally {
     await p.close();
     server.closeAllConnections();

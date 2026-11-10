@@ -1,3 +1,4 @@
+/* eslint-disable eqeqeq, unicorn/consistent-function-scoping, no-shadow, no-underscore-dangle, prefer-const */
 // IndexedDB as Chrome 156 ships it (#107, harness/detection/indexeddb-probe.js): an in-memory
 // backing store per storage partition (op_idb_registry, the DOM storage key), shared by every
 // realm of that partition. Requests run one per task in placement order, each event dispatch is
@@ -22,7 +23,12 @@
     StringValue = String;
   const timeout = globalThis.setTimeout,
     clone = ops.op_surf_structured_clone,
-    realm = globalThis;
+    realm = globalThis,
+    // turbo-dom#381: embedder-settable parent hook so the binding walks
+    // request -> transaction -> database for us, running capture -> AT_TARGET ->
+    // bubble on one event object with per-listener microtask checkpoints
+    // (turbo-dom#382).
+    setParent = __G.setEventTargetParent;
   const getTime = DateType.prototype.getTime,
     isView = ArrayBuffer.isView,
     byteLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get,
@@ -40,9 +46,7 @@
     ).get,
     hasOwn = Object.hasOwn,
     sortStrings = Array.prototype.sort,
-    cancelBubble = Object.getOwnPropertyDescriptor(HostEvent.prototype, "cancelBubble").get,
-    prevented = Object.getOwnPropertyDescriptor(HostEvent.prototype, "defaultPrevented").get,
-    preventDefault = HostEvent.prototype.preventDefault;
+    prevented = Object.getOwnPropertyDescriptor(HostEvent.prototype, "defaultPrevented").get;
   const states = new WeakMap(),
     stateGet = WeakMap.prototype.get,
     stateSet = WeakMap.prototype.set;
@@ -84,7 +88,6 @@
       throw typeFail(iface, method, `Value is outside the '${type}' value range.`);
     return truncated;
   };
-  const checkpoint = () => ops.op_idb_checkpoint();
   // The engine's request results arrive after timers already queued by the placing task.
   const task = (callback) => timeout(callback, 0);
   const lateTask = (callback) => timeout(() => timeout(callback, 0), 0);
@@ -370,31 +373,19 @@
     ops.op_event_trust(event, -1);
     return event;
   };
-  // Fires at `target` and then, if it bubbles, at each parent (request -> transaction ->
-  // database) with a microtask checkpoint after every target. Returns [defaultPrevented,
-  // whether a listener threw]: the binding reports each listener's exception and flags it
-  // (turbo-dom#301), not counting listeners of events those listeners dispatch.
-  const fire = (target, type, options, parents) => {
+  // One event travels request -> transaction -> database. The parent chain is set on each
+  // target via `setParent` (turbo-dom#381), so the binding walks it: capture on the
+  // ancestors first (phase 1), AT_TARGET at `target` (phase 2, listeners in registration
+  // order across capture + bubble), then bubble back up (phase 3), running a microtask
+  // checkpoint after every listener (turbo-dom#382). Returns [defaultPrevented, whether a
+  // listener threw]: the binding reports each listener's exception and flags it
+  // (turbo-dom#301); listeners of events dispatched from inside the listeners do not count.
+  const fire = (target, type, options) => {
     const Ctor = options.Ctor || HostEvent,
       init = { bubbles: !!options.bubbles, cancelable: !!options.cancelable, ...options.init };
     const event = makeEvent(Ctor, type, init);
-    let exception = ops.op_idb_dispatch(event, target);
-    checkpoint();
-    let cancelled = apply(prevented, event, []),
-      stopped = apply(cancelBubble, event, []);
-    if (init.bubbles && parents)
-      for (let at = 0; at < parents.length && !stopped; at++) {
-        const hop = makeEvent(Ctor, type, init);
-        if (cancelled) apply(preventDefault, hop, []);
-        for (const name of ["target", "srcElement"])
-          define(hop, name, { __proto__: null, get: () => target, configurable: true });
-        define(hop, "eventPhase", { __proto__: null, get: () => 3, configurable: true });
-        exception = ops.op_idb_dispatch(hop, parents[at]) || exception;
-        checkpoint();
-        cancelled = cancelled || apply(prevented, hop, []);
-        stopped = apply(cancelBubble, hop, []);
-      }
-    return [cancelled, exception];
+    const exception = ops.op_idb_dispatch(event, target);
+    return [apply(prevented, event, []), exception];
   };
 
   // ---- interfaces ----------------------------------------------------------------------------
@@ -581,6 +572,10 @@
       public: null,
     };
     state.public = newTarget(prototype, state);
+    // Chain for the engine-walked event path (turbo-dom#381): request -> transaction.
+    // Resolved lazily so an open() request whose transaction is still null (no tx yet,
+    // the `blocked` event) terminates the walk at the request.
+    setParent(state.public, () => (state.transaction ? state.transaction.public : null));
     return state;
   };
 
@@ -1056,6 +1051,8 @@
       public: null,
     };
     transaction.public = newTarget(IDBTransaction.prototype, transaction);
+    // Chain for the engine-walked event path (turbo-dom#381): transaction -> database.
+    setParent(transaction.public, () => transaction.connection.public);
     connection.db.transactions[connection.db.transactions.length] = transaction;
     return transaction;
   };
@@ -1073,7 +1070,6 @@
     }
     return true;
   };
-  const parentsOf = (transaction) => [transaction.public, transaction.connection.public];
   const finishTransaction = (transaction, aborted) => {
     transaction.state = "finished";
     const db = transaction.db;
@@ -1123,12 +1119,11 @@
       outcome = ["error", error];
     }
     request.readyState = "done";
-    const parents = parentsOf(transaction);
     if (outcome[0] === "success") {
       request.result = outcome[1];
       request.error = null;
       if (!committing) transaction.state = "active";
-      const [, exception] = fire(request.public, "success", {}, parents);
+      const [, exception] = fire(request.public, "success", {});
       if (!committing && transaction.state === "active") transaction.state = "inactive";
       if (exception && transaction.state !== "finished")
         abortTransaction(
@@ -1139,12 +1134,10 @@
       request.result = undefined;
       request.error = outcome[1];
       if (!committing) transaction.state = "active";
-      const [cancelled, exception] = fire(
-        request.public,
-        "error",
-        { bubbles: true, cancelable: true },
-        parents,
-      );
+      const [cancelled, exception] = fire(request.public, "error", {
+        bubbles: true,
+        cancelable: true,
+      });
       if (!committing && transaction.state === "active") transaction.state = "inactive";
       if (transaction.state !== "finished") {
         if (exception)
@@ -1169,7 +1162,6 @@
     }
     const pending = transaction.requests;
     transaction.requests = [];
-    const parents = parentsOf(transaction);
     task(() => {
       for (const entry of pending) {
         const request = entry.request;
@@ -1179,9 +1171,9 @@
           "The transaction was aborted, so the request cannot be fulfilled.",
           "AbortError",
         );
-        fire(request.public, "error", { bubbles: true, cancelable: true }, parents);
+        fire(request.public, "error", { bubbles: true, cancelable: true });
       }
-      fire(transaction.public, "abort", { bubbles: true }, [transaction.connection.public]);
+      fire(transaction.public, "abort", { bubbles: true });
       finishTransaction(transaction, true);
     });
   };

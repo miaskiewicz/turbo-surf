@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle, no-await-in-loop, unicorn/consistent-function-scoping, no-shadow, no-unused-vars */
 // EventSource (#144, network-transports-probe.js): the HTML event-stream processing model
 // over the page's own fetch path (__fetchFromSource), so CSP connect-src, CORS, cookies,
 // client hints and the request context are the ones every fetch gets. Reads are unref'd
@@ -22,9 +23,35 @@
     abort = AbortController.prototype.abort,
     signalOf = Object.getOwnPropertyDescriptor(AbortController.prototype, "signal").get,
     decode = TextDecoder.prototype.decode,
-    getReader = ReadableStream.prototype.getReader,
-    readerPrototype = Object.getPrototypeOf(apply(getReader, new ReadableStream(), [])),
-    read = readerPrototype.read,
+    getReader = ReadableStream.prototype.getReader;
+  // readerPrototype must come from an in-realm probe — constructing
+  // `new ReadableStream()` enters deno_web internals whose PromisePrototypeThen
+  // hits V8's SpeciesConstructor against the extension-bound Promise. A page
+  // that poisons `Promise[Symbol.species]` before an iframe is appended throws
+  // during each child-frame EventSource bootstrap. We defend twice:
+  //   1. Probe inside try/catch so a poisoned Promise doesn't halt bootstrap.
+  //   2. If the probe throws, skip EventSource installation entirely — don't
+  //      install a broken stub. Page code that feature-detects
+  //      `'EventSource' in window` sees absence and handles it, whereas a
+  //      cross-realm cache would let a page plant a hostile object on the top
+  //      realm's `__esReaderPrototype` (plain enumerable global) and have the
+  //      child-frame bootstrap adopt `read`/`cancel` from it — host-side code
+  //      execution. (surf#245, turbo-dom#449 confirmed surf-side in cycle-2.)
+  //
+  // Important: we never read from a cross-realm cache slot. Each realm pays
+  // the one-time probe cost, which is cheap on a fresh (un-poisoned) Promise.
+  let readerPrototype = null;
+  try {
+    readerPrototype = Object.getPrototypeOf(apply(getReader, new ReadableStream(), []));
+  } catch (_species) {
+    /* fall through — EventSource won't be installed below */
+  }
+  if (!readerPrototype) {
+    // Bail: don't install any EventSource in this realm. Feature detection
+    // (`typeof EventSource === 'undefined'`) sees absence.
+    return;
+  }
+  const read = readerPrototype.read,
     cancel = readerPrototype.cancel,
     headerGet = Headers.prototype.get,
     statusOf = Object.getOwnPropertyDescriptor(Response.prototype, "status").get,

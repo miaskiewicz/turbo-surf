@@ -36,13 +36,21 @@ surfaces remain unavailable or approximate:
   supports `{fullPage:true}`. It does **not** run JS-driven visuals (a `<canvas>`
   gradient background is absent) or crop to an element — `locator.screenshot()`
   still throws.
-- **Input devices** — `mouse`, `touchscreen`, `hover`, `dragTo` lack hardware-backed
-  behavior. DOM actions dispatch events in a live session or use a static navigation/
-  submit intent. `keyboard` dispatches key events when a live session exists; it is
-  a no-op without one and does not provide browser text-editing defaults.
-- **In-process network interception** — `route`/`unroute`/`routeFromHAR`. The
-  engine fetches over Rust+wreq (the default impersonate build) or reqwest; there
-  is no shim request-interception bus.
+- **Input devices** — `mouse`, `touchscreen`, `hover`, `dragTo`, `dragAndDrop`
+  lack hardware-backed behavior. In a live session the shim dispatches synthetic
+  pointer / mouse / touch / HTML5-drag events at the matched element (or
+  `elementFromPoint(x, y)` for the coord-based `mouse` / `touchscreen` entries),
+  so JS handlers fire exactly as in a real browser. No compositor means no native
+  scroll, no drag image, no hit-testing beyond what native layout provides.
+  Without a live session every input call is a clean no-op. `keyboard` dispatches
+  key events when a live session exists and is a no-op otherwise; it does not
+  provide browser text-editing defaults.
+- **In-process network interception** — `page.route(fulfill)` and
+  `page.routeFromHAR` are wired via an init-script `fetch`/XHR wrapper (register
+  BEFORE the next live session opens). The engine still fetches over Rust+wreq
+  (the default impersonate build) or reqwest; there is no shim request-
+  interception bus for dynamic `continue`/`abort`/`fallback` or context-scoped
+  routes, and HAR record mode is a follow-up.
   (`setExtraHTTPHeaders` and cookies ARE wired through — those are real.)
 
 Live `PageSession` calls retain the app's V8 isolate and drain timers, microtasks and
@@ -68,7 +76,7 @@ Event state is private; script dispatch is untrusted and engine events use host 
 Element property handlers retain private state and participate in the native listener registry,
 including assignment order and cancellation. Inline handler attributes, event propagation,
 listener options and subclass coverage remain incomplete.
-Playwright `Frame`/`FrameLocator` objects are still not implemented by this shim.
+Playwright `Frame` and `FrameLocator` objects expose engine iframe contexts: `page.frame({name})`, `page.frame('name')`, `page.frames()` and `page.frameLocator('iframe[...]')` scope queries to the child document, not the host (turbo-surf#225). srcdoc iframes carry their inner markup; src-loaded iframes list with empty content (live hydration populates them in the engine, but the snapshot shim does not fetch iframe src here). Frame-level mutations (fill/check through a frame locator) write to the Frame's own cached HTML and do not propagate back to the host page's `<iframe>`.
 Classic page/frame scripts run through the Rust host pump with source locations rather
 than indirect eval. Parsed hidden inputs expose their token values; input/textarea dirty
 values, defaults, cloning and select selection state work in the live runtime. Input-type
@@ -117,23 +125,25 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `click`, `dblclick`, `tap`, `fill`, `type`, `press`, `check`, `uncheck`, `setChecked`, `selectOption` | ✅ | DOM-level events in live sessions; static paths resolve navigation/form intents. Not hardware input. |
 | `evaluate`, `evaluateHandle` | ⚠️ | String and `(fn, arg)` forms run in V8 over rtdom. The current bridge returns string values; typed result/handle serialization is incomplete. |
 | `render`, `addScriptTag({content})` | ✅ | Runs page JS and re-renders the DOM (hydration). |
-| `addInitScript` | ⚠️ | Stored for injection before page scripts when a live session opens; page-level calls also render it over the current HTML. Not complete child-frame init-script coverage. |
+| `addInitScript` | ✅ | Stored on the context and installed before authored scripts in every frame of the live session — the top page plus every child frame (static `<iframe src>`, srcdoc, nested, dynamically created, blob URL). Page-level calls also render over the current HTML. |
 | `setExtraHTTPHeaders` | ✅ | **Real** — extra headers are sent on page navigation and linked-CSS fetches; not a global override of every live fetch/XHR request. |
 | `setContent`, `storageState`, `addCookies`, `context`, `request` | ✅ | |
 | `waitForLoadState`, `waitForTimeout`, `waitForURL`, `waitForSelector`, `waitForFunction`, `waitForResponse`, `waitForRequest`, `waitForNavigation`, `waitForEvent` | ⚠️ | `waitForLoadState('load'\|'domcontentloaded'\|'networkidle')` all hydrate the SPA (one "settled" tier). `waitForResponse` / `waitForRequest` short-circuit on the native-log drain (#218/#222). `waitForNavigation` polls for a URL change. `waitForEvent` handles `'response'/'request'/'requestfinished'/'download'`. `waitForSelector` checks the current snapshot. `waitForURL` and `waitForFunction` drain/poll a live session. No browser event loop. |
 | `on`, `once`, `off`, `addListener`, `removeListener` | ⚠️ | Registry; lifecycle events fire, and captured live fetch/XHR request/response events are emitted when drained. No complete browser network/console/dialog event bus. |
-| `mainFrame`, `frame`, `frames`, `frameLocator` | ⚠️ | Return the page or a top-level locator. Engine iframe contexts exist, but these APIs do not expose them. |
+| `mainFrame`, `frame`, `frames`, `frameLocator` | ✅ | `mainFrame` returns the host page (the page implements the Frame surface). `frames()` lists the page + each `<iframe>`; `frame(name)` / `frame({name,url})` find a child; `frameLocator('iframe[...]')` scopes the locator chain to the child document. srcdoc iframes carry their inner markup; src-loaded iframes list with empty content until the engine hydrates them. |
 | `viewportSize`, `setViewportSize` | ✅ | Stored, and the viewport now drives `page.screenshot()` layout width/height. |
 | `setDefaultTimeout`, `setDefaultNavigationTimeout`, `emulateMedia`, `bringToFront` | ⚠️ | Stored / no-op (no live layout to affect). |
 | `isClosed`, `close`, `video` (→ null), `workers` (→ []) | ✅ | |
 | `screenshot` | ⚠️ | Synthetic native render (PNG, or SVG via `{type:"svg"}`) — representative, not browser-faithful. `path` and `fullPage` work; `clip` is ignored. |
 | `pdf` | ❌ | Throws — no PDF implementation in the shim. |
 | `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate so JS hover handlers (menu-open) fire. Static snapshot: no-op. Not hardware input. |
-| `dragAndDrop`, `mouse.*`, `touchscreen.*` | ❌ | Throws — no input hardware. |
+| `dragAndDrop`, `mouse.*`, `touchscreen.*` | ✅ | Live app only: dispatches pointer / mouse / touch / HTML5-drag events into the isolate at element centers (or at `(x, y)` for coord-based entries). Static snapshot: no-op. Not hardware input. |
 | `keyboard.*` | ⚠️ | Key-event dispatch in a live session; no-op without one, incomplete text-editing defaults. |
 | `route`, `unroute` | ⚠️ | Shim-side only: the handler runs once at register-time against a stub route; only `route.fulfill(...)` is captured (`continue` / `abort` / `fallback` are no-ops, no per-request dynamic responses). The fulfilled fixture is injected into the live isolate via an init script that monkey-patches `fetch` and `XMLHttpRequest` — call `page.route(...)` BEFORE the next live session opens. |
-| `routeFromHAR` | ❌ | Throws — no HAR replay. |
+| `routeFromHAR` | ⚠️ | Playback-only. Each `log.entries[].request.url` is registered as a shim-side route returning that entry's response body / status / content-type via the init-script `fetch`/XHR wrapper — call BEFORE the next live session opens. `options.url` filters entries (RegExp or substring). Record mode and strict `notFound: 'abort'` are not implemented. |
 | `exposeBinding`, `exposeFunction` | ❌ | Throws — no persistent JS↔host binding across renders. |
+| `routeFromHAR` | ❌ | Throws — no HAR replay. |
+| `exposeBinding`, `exposeFunction` | ⚠️ | Supported fire-and-forget: the binding persists across navigations (via init scripts) and page calls reach the Node handler with serialized arguments. The host's return value is NOT surfaced back to in-page JS — a page `await` on the binding resolves to `undefined`. |
 | `pause`, `addLocatorHandler`, `pickLocator` | ❌ | Throws / n/a — no inspector UI. |
 | `clock`, `coverage`, `tracing`, `requestGC` | ❌ | n/a — no devtools protocol. |
 
@@ -156,7 +166,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no viewport, no layout — nothing to scroll into). |
 | `boundingBox` | ⚠️ | Returns `null` (there genuinely is no browser-faithful box). Geometry-conditional helpers (smooth-scroll, visibility-by-rect) no-op cleanly instead of throwing. |
 | `screenshot` | ❌ | Throws — pixels. |
-| `dragTo`, `selectText` | ❌ | Throws — input hardware. |
+| `dragTo` | ✅ | Live app only: dispatches a full pointer+mouse+HTML5-drag sequence on source → target. Static snapshot: no-op. Not hardware input. |
+| `selectText` | ❌ | Throws — input hardware. |
 
 ## expect (5 assertion classes)
 
@@ -175,7 +186,9 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 |---|---|---|
 | `newPage`, `pages`, `cookies`, `addCookies`, `clearCookies`, `storageState`, `addInitScript`, `setExtraHTTPHeaders`, `browser`, `request`, `close` | ✅ | |
 | `grantPermissions`, `clearPermissions`, `setGeolocation`, `setOffline`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
-| `route`, `unroute`, `routeFromHAR`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
+| `route`, `unroute`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` and `page.routeFromHAR` work — see the Page table. |
+| `route`, `unroute`, `routeFromHAR`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
+| `exposeBinding`, `exposeFunction` | ⚠️ | Supported fire-and-forget at context scope: every page in the context (and future ones) sees the binding across navigations. Host return values are not surfaced to in-page JS. |
 
 ## test runner & fixtures
 
@@ -183,9 +196,39 @@ Runs on `node:test`. `test`, `test.describe(.skip/.only)`, `test.skip/only/fixme
 `test.step`, `test.beforeAll/afterAll/beforeEach/afterEach`, `test.extend`
 (custom fixtures), the built-in `{ page, context, browser, request, baseURL }`
 fixtures, and a `testInfo` (`outputPath`, `project`, `attach`, …) are supported.
-`defineConfig` is identity and `devices[...]` returns an empty descriptor — the
-Playwright CLI/`playwright.config` projects/reporters/`webServer` are **not**
-interpreted (you run specs with `node --test`, not `playwright test`).
+`defineConfig` is identity and `devices[...]` returns an empty descriptor.
+
+### `playwright.config` + CLI entry
+
+`bin/turbo-surf-test.mjs` (also installed as the `turbo-surf-test` bin by the
+npm launcher) reads a `playwright.config.{ts,mts,js,mjs,cjs}` and runs each
+project as its own `node --import register.mjs --test` sweep:
+
+```sh
+npx turbo-surf-test               # auto-detects playwright.config.*
+npx turbo-surf-test --config pw.config.mjs --project chrome --reporter list
+```
+
+- **`projects`** — each one runs serially; `project.use` is merged over the
+  top-level `use` and forwarded via `TURBO_PW_USE` + the existing
+  `TURBO_SHIM_*` env (so `baseURL`/`locale`/`userAgent`/`testIdAttribute`
+  land in `BrowserContext` and the `baseURL` fixture). `testInfo.project`
+  reports the project name + merged `use`.
+- **`reporter`** — `list`/`spec`/`tap`/`dot` map to node:test's built-ins;
+  `html` captures TAP and writes a minimal `playwright-report.html` (override
+  path with `[['html', { outputFile: … }]]`).
+- **`webServer`** — spawn, poll `url` (or `http://127.0.0.1:${port}`) until it
+  responds, tear down at the end. Arrays are supported;
+  `reuseExistingServer: true` skips the spawn if a server is already answering.
+- **`testDir` / `testMatch` / `testIgnore`** — resolved per project; the default
+  match is `**/*.@(spec|test).@(ts|mts|js|mjs|cjs)` and the default ignore is
+  `**/node_modules/**`.
+
+`.ts` configs/specs need a Node that strips types inline (Node 23+, or Node 22
+with `--experimental-strip-types`); the shim doesn't ship its own TS loader.
+Browser-only reporters (`junit`/the real Playwright HTML trace viewer),
+sharding, retries, and `testConfig.webServer.stdout` capture are not
+implemented.
 
 ## Optional future perf lever (documented, not built)
 

@@ -179,9 +179,9 @@ async fn unsupported_active_csp_is_reported_from_native_policy_state() {
         ),
     ];
     let mut page=PageSession::open_with_response_headers(r#"<head><meta http-equiv='Content-Security-Policy' content="media-src 'none'"></head><body><script nonce=good>globalThis.unsupported_csp=[];</script></body>"#,"http://policy.test/page","","",10000,"",ClientHints::default(),&headers).await.unwrap();
-    // 'strict-dynamic' (#110), form-action and worker-src are enforced; media loads
-    // are still missing (#190), so media-src stays reported as unsupported.
-    let expected = vec!["media-src"];
+    // 'strict-dynamic' (#110), form-action, worker-src and media-src (#204) are all
+    // enforced now, so no request directive is left reported as unsupported.
+    let expected: Vec<String> = vec![];
     assert_eq!(page.hydration_diagnostics().unsupported_csp, expected);
     page.eval("globalThis.hydration_diagnostics={unsupported_csp:[]};")
         .await
@@ -198,5 +198,38 @@ async fn inline_handler_csp_distinguishes_attributes_from_assigned_functions() {
     let mut page=PageSession::open_with_response_headers(r#"<body><button id='blocked' onclick="globalThis.blockedHandler=true"></button><script nonce=good>globalThis.handlerWasNull=document.getElementById('blocked').onclick===null;document.getElementById('blocked').click();document.getElementById('blocked').onclick=()=>{globalThis.assignedHandler=true};document.getElementById('blocked').click();</script></body>"#,"http://policy.test/page","","",10000,"",ClientHints::default(),&headers).await.unwrap();
     let result=page.eval("globalThis.__RESULT=JSON.stringify([handlerWasNull,globalThis.blockedHandler===undefined,assignedHandler]);").await.unwrap();
     assert_eq!(result, "[true,true,true]");
+    assert!(page.hydration_diagnostics().unsupported_csp.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn media_src_enforces_video_and_audio_src_loads() {
+    // turbo-surf#204: a `<video src>` / `<audio src>` under `media-src 'none'`
+    // fires a `securitypolicyviolation` whose effectiveDirective is `media-src`
+    // and whose blockedURI is the full URL (Chrome 156 shape).
+    let headers = vec![("Content-Security-Policy".into(), "media-src 'none'".into())];
+    let mut page = PageSession::open_with_response_headers(
+        r#"<body><script>globalThis.v=[];document.addEventListener("securitypolicyviolation",(e)=>v.push([e.blockedURI,e.effectiveDirective,e.disposition]));const a=document.createElement("video");a.src="/m/clip.mp4";document.body.append(a);const b=document.createElement("audio");b.src="/m/clip.mp3";document.body.append(b);</script></body>"#,
+        "http://media.test/page",
+        "",
+        "",
+        10000,
+        "",
+        ClientHints::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let result = page
+        .eval("globalThis.__RESULT=JSON.stringify(globalThis.v)")
+        .await
+        .unwrap();
+    let rows: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        rows,
+        serde_json::json!([
+            ["http://media.test/m/clip.mp4", "media-src", "enforce"],
+            ["http://media.test/m/clip.mp3", "media-src", "enforce"],
+        ])
+    );
     assert!(page.hydration_diagnostics().unsupported_csp.is_empty());
 }

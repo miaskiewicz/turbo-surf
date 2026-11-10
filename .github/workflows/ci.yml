@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22]
+        node: [22]
     steps:
       # The workspace test build (render tests + the PyO3/napi crates) outgrows the
       # runner's free disk; drop the preinstalled toolchains this job never uses.
@@ -43,6 +43,15 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@1.98.0
+
+      # Cache Rust target + registry across runs. `cargo test --workspace` + the
+      # extra `turbo-surf-core --no-default-features` step below rebuild every
+      # workspace crate from scratch on cold runs, which dominates this job's
+      # wall-clock. The coverage-shard jobs already use this; this mirrors that.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: lint-test-node-${{ matrix.node }}
 
       # `cargo test --workspace` (via `npm test`) builds the turbo-surf-py PyO3
       # crate, which links libpython. Provide a Python so pyo3 resolves it.

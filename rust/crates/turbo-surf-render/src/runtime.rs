@@ -226,6 +226,12 @@ struct CspHandle {
     policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
     response_metadata: Rc<RefCell<crate::DocumentResponseMetadata>>,
     dictionaries: Rc<RefCell<compression_dictionary::Discovery>>,
+    /// Keyed by `(element identity hash, directive kind)`; stores the last-reported
+    /// handler source for that slot. turbo-dom-browser-env fires `script-src-attr` at
+    /// both the attribute set phase and the lazy compile phase (turbo-dom#380) — Chrome
+    /// 156 reports once per effective disposition, so a second call with unchanged
+    /// text skips emission.
+    inline_attr_reported: Rc<RefCell<std::collections::HashMap<(i32, String), String>>>,
 }
 impl CspHandle {
     fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
@@ -241,6 +247,7 @@ impl CspHandle {
             policy: Rc::new(RefCell::new(crate::csp::DocumentPolicy::new(
                 base, headers, html,
             ))),
+            inline_attr_reported: Rc::new(RefCell::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -552,6 +559,25 @@ fn op_csp_finish_parser(scope: &mut v8::PinScope, document: v8::Local<v8::Object
     configure_csp_code_generation(scope, context, policy.current());
 }
 
+/// turbo-surf#121: whether the guest-side eval/Function shim should be
+/// installed for this document's current effective CSP. The shim lives only
+/// in the published (non-proxy) SDK; the exact-engine path uses V8's native
+/// source-conversion callback instead.
+#[op2(fast)]
+fn op_tt_eval_shim_required(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    if cfg!(turbo_surf_native_proxy) {
+        return false;
+    }
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return false;
+    };
+    let required = handle.policy.borrow().current().requires_trusted_types();
+    required
+}
+
 #[op2(fast)]
 fn op_csp_meta(
     scope: &mut v8::PinScope,
@@ -769,32 +795,44 @@ fn queue_csp_report<'s>(
     if records.is_empty() || scope.is_execution_terminating() {
         return;
     }
-    let (mut source, mut line, mut column) = (String::new(), 0, 0);
-    if parser.is_none() {
-        if let Some(trace) = v8::StackTrace::current_stack_trace(scope, 32) {
-            for index in 0..trace.get_frame_count() {
-                let Some(frame) = trace.get_frame(scope, index) else {
-                    continue;
-                };
-                let Some(name) = frame.get_script_name_or_source_url(scope) else {
-                    continue;
-                };
-                let name = name.to_rust_string_lossy(scope);
-                if name.starts_with("<") || name.is_empty() {
-                    continue;
-                }
-                source = name;
-                line = frame.get_line_number();
-                column = frame.get_column();
-                break;
-            }
+    let url = csp_document_url(scope, context);
+    let (source, line, column) = csp_callsite(scope, parser, kind, &url);
+    let response_metadata = csp_response_metadata(context);
+    let ctx = CspEmitContext {
+        kind,
+        blocked,
+        disposition,
+        source: &source,
+        line,
+        column,
+        url: &url,
+        response_metadata: &response_metadata,
+        sample,
+        parser,
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    for record in records {
+        if !emit_csp_record(scope, context, element, &ctx, &record) {
+            return;
         }
     }
-    if let Some(position) = parser.and_then(|metadata| metadata.position) {
-        line = position.line;
-        column = position.column;
-    }
-    let url = context.get_slot::<FrameDocumentLocation>().map_or_else(
+}
+
+struct CspEmitContext<'a> {
+    kind: &'a str,
+    blocked: &'a str,
+    disposition: &'a str,
+    source: &'a str,
+    line: usize,
+    column: usize,
+    url: &'a str,
+    response_metadata: &'a crate::DocumentResponseMetadata,
+    sample: Option<&'a [u16]>,
+    parser: Option<CspParserLocation>,
+}
+
+fn csp_document_url(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) -> String {
+    context.get_slot::<FrameDocumentLocation>().map_or_else(
         || {
             JsRuntime::op_state_from(scope)
                 .borrow()
@@ -803,87 +841,131 @@ fn queue_csp_report<'s>(
                 .clone()
         },
         |value| value.0.clone(),
-    );
+    )
+}
+
+fn csp_response_metadata(context: v8::Local<v8::Context>) -> crate::DocumentResponseMetadata {
+    context
+        .get_slot::<CspHandle>()
+        .map_or_else(crate::DocumentResponseMetadata::default, |handle| {
+            handle.response_metadata.borrow().clone()
+        })
+}
+
+fn csp_callsite(
+    scope: &mut v8::PinScope,
+    parser: Option<CspParserLocation>,
+    kind: &str,
+    url: &str,
+) -> (String, usize, usize) {
+    let (mut source, mut line, mut column) = if parser.is_none() {
+        stack_trace_callsite(scope).unwrap_or_default()
+    } else {
+        (String::new(), 0, 0)
+    };
+    if let Some(position) = parser.and_then(|metadata| metadata.position) {
+        line = position.line;
+        column = position.column;
+    }
     if source.is_empty() {
-        source = url::Url::parse(&url)
+        source = url::Url::parse(url)
             .map(|mut url| {
                 url.set_query(None);
                 url.set_fragment(None);
                 url.to_string()
             })
-            .unwrap_or_else(|_| url.clone());
+            .unwrap_or_else(|_| url.to_string());
     }
     if parser.is_some_and(|metadata| !metadata.owner_window) || kind == "img-src" {
         source.clear();
         line = 0;
         column = 0;
     }
-    let response_metadata = context
-        .get_slot::<CspHandle>()
-        .map_or_else(crate::DocumentResponseMetadata::default, |handle| {
-            handle.response_metadata.borrow().clone()
-        });
-    let scope = &mut v8::ContextScope::new(scope, context);
-    for record in records {
-        let original = &record.original;
-        let report_sample = record.sample;
-        let sample_units = if report_sample {
-            sample.unwrap_or_default()
-        } else {
-            &[]
+    (source, line, column)
+}
+
+fn stack_trace_callsite(scope: &mut v8::PinScope) -> Option<(String, usize, usize)> {
+    let trace = v8::StackTrace::current_stack_trace(scope, 32)?;
+    for index in 0..trace.get_frame_count() {
+        let Some(frame) = trace.get_frame(scope, index) else {
+            continue;
         };
-        let metadata = serde_json::json!({"documentURI":crate::document_response::report_url(&url),"referrer":response_metadata.referrer,"blockedURI":blocked,"violatedDirective":kind,"effectiveDirective":kind,"originalPolicy":original,"disposition":disposition,"sourceFile":source,"statusCode":response_metadata.status,"lineNumber":line,"columnNumber":column,"sample":""});
-        let report_payload = metadata.clone();
-        let bytes = metadata
-            .to_string()
-            .len()
-            .saturating_mul(2)
-            .saturating_add(sample_units.len().saturating_mul(2))
-            .saturating_add(104);
-        let Some(json) = v8::String::new(scope, &metadata.to_string()) else {
-            return;
+        let Some(name) = frame.get_script_name_or_source_url(scope) else {
+            continue;
         };
-        let Some(metadata) = v8::json::parse(scope, json) else {
-            return;
-        };
-        let Some(sample) =
-            v8::String::new_from_two_byte(scope, sample_units, v8::NewStringType::Normal)
-        else {
-            return;
-        };
-        let key = v8::String::new(scope, "sample").unwrap();
-        let metadata = v8::Local::<v8::Object>::try_from(metadata).unwrap();
-        metadata.set(scope, key.into(), sample.into());
-        let metadata: v8::Local<v8::Value> = metadata.into();
-        let accepted = call_frame_helper(scope, "queueCspViolation", &[element.into(), metadata])
-            .map_or_else(
-                || {
-                    enqueue_csp_bootstrap(
-                        scope,
-                        context,
-                        element,
-                        metadata,
-                        bytes,
-                        parser
-                            .and_then(|metadata| metadata.position)
-                            .map(|position| position.utf16_offset),
-                    )
-                },
-                |value| !value.is_false(),
-            );
-        if !accepted {
-            scope.terminate_execution();
-            return;
+        let name = name.to_rust_string_lossy(scope);
+        if name.starts_with("<") || name.is_empty() {
+            continue;
         }
-        send_csp_report(
-            scope,
-            context,
-            &url,
-            &record.destination,
-            &report_payload,
-            sample_units,
-        );
+        return Some((name, frame.get_line_number(), frame.get_column()));
     }
+    None
+}
+
+fn emit_csp_record<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    element: v8::Local<'s, v8::Object>,
+    ctx: &CspEmitContext<'_>,
+    record: &crate::csp::ReportRecord,
+) -> bool {
+    let sample_units: &[u16] = if record.sample {
+        ctx.sample.unwrap_or_default()
+    } else {
+        &[]
+    };
+    let metadata_value = serde_json::json!({"documentURI":crate::document_response::report_url(ctx.url),"referrer":ctx.response_metadata.referrer,"blockedURI":ctx.blocked,"violatedDirective":ctx.kind,"effectiveDirective":ctx.kind,"originalPolicy":record.original,"disposition":ctx.disposition,"sourceFile":ctx.source,"statusCode":ctx.response_metadata.status,"lineNumber":ctx.line,"columnNumber":ctx.column,"sample":""});
+    let report_payload = metadata_value.clone();
+    let bytes = metadata_value
+        .to_string()
+        .len()
+        .saturating_mul(2)
+        .saturating_add(sample_units.len().saturating_mul(2))
+        .saturating_add(104);
+    let Some(metadata) = build_csp_metadata_value(scope, &metadata_value, sample_units) else {
+        return false;
+    };
+    let accepted = call_frame_helper(scope, "queueCspViolation", &[element.into(), metadata])
+        .map_or_else(
+            || {
+                enqueue_csp_bootstrap(
+                    scope,
+                    context,
+                    element,
+                    metadata,
+                    bytes,
+                    ctx.parser.and_then(|m| m.position).map(|p| p.utf16_offset),
+                )
+            },
+            |value| !value.is_false(),
+        );
+    if !accepted {
+        scope.terminate_execution();
+        return false;
+    }
+    send_csp_report(
+        scope,
+        context,
+        ctx.url,
+        &record.destination,
+        &report_payload,
+        sample_units,
+    );
+    true
+}
+
+fn build_csp_metadata_value<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    metadata: &serde_json::Value,
+    sample_units: &[u16],
+) -> Option<v8::Local<'s, v8::Value>> {
+    let json = v8::String::new(scope, &metadata.to_string())?;
+    let parsed = v8::json::parse(scope, json)?;
+    let sample = v8::String::new_from_two_byte(scope, sample_units, v8::NewStringType::Normal)?;
+    let key = v8::String::new(scope, "sample").unwrap();
+    let obj = v8::Local::<v8::Object>::try_from(parsed).unwrap();
+    obj.set(scope, key.into(), sample.into());
+    Some(obj.into())
 }
 
 fn send_csp_report<'s>(
@@ -1010,6 +1092,7 @@ fn op_csp_script<'s>(
         return true;
     };
     let sample = csp_sample_units(scope, text);
+    let text_source = text;
     let text = text.to_rust_string_lossy(scope);
     let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
     let mut document_policy = handle.policy.borrow_mut();
@@ -1025,6 +1108,10 @@ fn op_csp_script<'s>(
     } else {
         crate::csp::ScriptInsertion::Script
     };
+    let trusted_types_required = url.is_empty()
+        && insertion == crate::csp::ScriptInsertion::Script
+        && (document_policy.current().requires_trusted_types()
+            || document_policy.report_only.requires_trusted_types());
     let script = crate::csp::Script {
         url,
         text: &text,
@@ -1035,7 +1122,29 @@ fn op_csp_script<'s>(
         let policy = document_policy.current().clone();
         let report_only = document_policy.report_only.clone();
         drop(document_policy);
-        let allowed = policy.allows_script(&script);
+        let mut allowed = policy.allows_script(&script);
+        if allowed && trusted_types_required {
+            // Under `require-trusted-types-for 'script'` an inline, non-parser-inserted
+            // script's child text content is a TrustedScript sink (sink
+            // "HTMLScriptElement text"). The IDL setters (`script.text`, `.textContent`,
+            // `.innerText`) are already enforced by the binding, but a `Node.append` /
+            // `appendChild` of a plain text node composes the body outside the setter
+            // and must still be gated at script preparation (Chrome 156; turbo-surf#122).
+            v8::tc_scope!(let tc, scope);
+            if crate::browser_env::trusted_type_string(
+                tc,
+                document,
+                text_source.into(),
+                "TrustedScript",
+                "HTMLScriptElement text",
+                "",
+            )
+            .is_none()
+            {
+                tc.reset();
+                allowed = false;
+            }
+        }
         queue_csp_report(
             scope,
             context,
@@ -1245,33 +1354,54 @@ fn authorize_css(
     } else {
         element
     };
-    queue_csp_report(
-        scope,
-        context,
-        target,
-        CspViolationReport {
-            kind: &kind,
-            blocked: "inline",
-            disposition: "enforce",
-            records: policy.inline_violations(&kind, &text, &nonce),
-            parser,
-            sample: Some(&sample),
-        },
-    );
-    let report_only = handle.policy.borrow().report_only.clone();
-    queue_csp_report(
-        scope,
-        context,
-        target,
-        CspViolationReport {
-            kind: &kind,
-            blocked: "inline",
-            disposition: "report",
-            records: report_only.inline_violations(&kind, &text, &nonce),
-            parser,
-            sample: Some(&sample),
-        },
-    );
+    // turbo-dom-browser-env fires `script-src-attr` twice per content-attribute write
+    // (set phase then lazy compile; turbo-dom#380); Chrome 156 emits the violation once
+    // per effective disposition, so skip the second emission when the handler text is
+    // unchanged for this element/kind pair.
+    let dedup_key =
+        (kind == "script-src-attr").then(|| (i32::from(element.get_identity_hash()), kind.clone()));
+    let suppressed = dedup_key.as_ref().is_some_and(|key| {
+        handle
+            .inline_attr_reported
+            .borrow()
+            .get(key)
+            .is_some_and(|previous| previous == &text)
+    });
+    if let Some(key) = dedup_key {
+        handle
+            .inline_attr_reported
+            .borrow_mut()
+            .insert(key, text.clone());
+    }
+    if !suppressed {
+        queue_csp_report(
+            scope,
+            context,
+            target,
+            CspViolationReport {
+                kind: &kind,
+                blocked: "inline",
+                disposition: "enforce",
+                records: policy.inline_violations(&kind, &text, &nonce),
+                parser,
+                sample: Some(&sample),
+            },
+        );
+        let report_only = handle.policy.borrow().report_only.clone();
+        queue_csp_report(
+            scope,
+            context,
+            target,
+            CspViolationReport {
+                kind: &kind,
+                blocked: "inline",
+                disposition: "report",
+                records: report_only.inline_violations(&kind, &text, &nonce),
+                parser,
+                sample: Some(&sample),
+            },
+        );
+    }
     result.set_bool(allowed);
 }
 
@@ -1291,11 +1421,18 @@ fn configure_csp_code_generation(
                 .get_private(scope, key)
                 .is_some_and(|callback| callback.is_function())
     };
+    // Published SDKs lack the private native source-conversion callback, so an
+    // eval-visible Trusted Types gate (turbo-surf#121) is approximated in guest JS:
+    // when the effective CSP requires Trusted Types, a bootstrap-installed shim
+    // patches globalThis.eval / globalThis.Function to route the source through
+    // the realm's TT converter (applying the `default` policy when one exists)
+    // and compile+run the admitted source on the host. Direct-eval semantics are
+    // lost, but the common cases match Chrome and the EvalError message matches
+    // too. V8's own eval gate is left open under TT enforcement so the shim's
+    // host compile and any late direct eval route through the shim.
     #[cfg(not(turbo_surf_native_proxy))]
-    // Published SDKs lack the private native source-conversion callback.
-    // Enforced Trusted Types must fail closed rather than admit raw eval.
     let allowed =
-        policy.bypasses_trusted_types_eval() || allowed && !policy.requires_trusted_types();
+        allowed || policy.requires_trusted_types() || policy.bypasses_trusted_types_eval();
     #[cfg(not(turbo_surf_native_proxy))]
     let _ = scope;
     context.set_allow_generation_from_strings(allowed);
@@ -1465,6 +1602,19 @@ fn op_timer_code_allowed<'s>(
     }
     policy.allows_eval()
 }
+/// Bracket a timer-fire callback with turbo-dom's engine-task scope so
+/// V8-native dispatches (e.g. `AbortSignal.timeout(0)`) inside the timer
+/// get the per-listener microtask checkpoint Chrome runs there. See
+/// turbo-dom#484 and surf oracle `abort_signal_any_and_timeout_match_chrome156`.
+#[op2(reentrant)]
+fn op_engine_task_scope<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    callback: v8::Local<v8::Function>,
+) -> v8::Local<'s, v8::Value> {
+    turbo_dom_browser_env::engine_task_scope(scope, callback)
+        .unwrap_or_else(|| v8::undefined(scope).into())
+}
+
 #[op2(reentrant)]
 fn op_run_timer_code<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -7463,13 +7613,6 @@ fn op_idb_registry<'s>(
     registries.0.insert(id, v8::Global::new(scope, registry));
     Ok(registry)
 }
-/// IndexedDB fires each request's events as their own task: the microtasks a
-/// listener queues run before the transaction goes inactive again.
-#[op2(nofast, reentrant)]
-fn op_idb_checkpoint(scope: &mut v8::PinScope) {
-    scope.perform_microtask_checkpoint();
-}
-
 struct StorageFactory(v8::Weak<v8::Function>);
 #[op2(fast)]
 fn op_storage_factory(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
@@ -8153,6 +8296,7 @@ deno_core::extension!(
         op_timer_agent_task_base,
         op_run_local_timers,
         op_run_frame_timers,
+        op_engine_task_scope,
         op_frame_pending,
         op_queue_frame_script,
         op_frame_module,
@@ -8177,7 +8321,6 @@ deno_core::extension!(
         op_form_navigation_blocked,
         op_storage_area,
         op_idb_registry,
-        op_idb_checkpoint,
         crate::indexed_db::op_idb_dispatch,
         op_storage_factory,
         op_storage_object,
@@ -8285,6 +8428,7 @@ deno_core::extension!(
         op_document_origin_opaque,
         op_iframe_permissions_policy,
         op_csp_meta,
+        op_tt_eval_shim_required,
         op_referrer_meta,
         op_csp_finish_parser,
         op_csp_request,
@@ -9261,7 +9405,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);
     try{
-      try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+      try{ops.op_engine_task_scope(()=>{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);});}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){
         if(timer.nesting<7)timer.nesting++;
         timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);timer.sequence=ops.op_task_sequence();__timerPush(timer);
@@ -10454,6 +10598,12 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   // Drained by deno_core but not yet dispatched: a handler attached meanwhile cancels it.
   const queued = new WeakSet();
   const handledBeforeReport = new WeakSet();
+  // Captured natives: this realm's handlers run AFTER page JS, which may have replaced
+  // WeakSet.prototype.{add,has,delete} with throwers (turbo-surf#87 / turbo-dom#172).
+  const weakSetAdd = WeakSet.prototype.add, weakSetHas = WeakSet.prototype.has, weakSetDelete = WeakSet.prototype.delete;
+  const wsAdd = (set, value) => __intrinsicApply(weakSetAdd, set, [value]);
+  const wsHas = (set, value) => __intrinsicApply(weakSetHas, set, [value]);
+  const wsDelete = (set, value) => __intrinsicApply(weakSetDelete, set, [value]);
   const fire = (type, promise, reason, cancelable) => {
     // A null-prototype init: page getters on Object.prototype never run here.
     const event = new hostRejectionEvent(type, {__proto__: null, promise, reason, cancelable, bubbles: false, composed: false});
@@ -10465,18 +10615,18 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   const realm = {
     __proto__: null,
     unhandled(promise, reason) {
-      queued.add(promise);
+      wsAdd(queued, promise);
       task(() => {
-        queued.delete(promise);
-        if (handledBeforeReport.has(promise)) {
-          handledBeforeReport.delete(promise);
+        wsDelete(queued, promise);
+        if (wsHas(handledBeforeReport, promise)) {
+          wsDelete(handledBeforeReport, promise);
           return;
         }
         const event = fire("unhandledrejection", promise, reason, true);
         // HTML: the promise joins the outstanding set either way (a later handler
         // still queues rejectionhandled, as in Chrome 156); preventDefault() only
         // suppresses the console report.
-        outstanding.add(promise);
+        wsAdd(outstanding, promise);
         if (event.defaultPrevented) return;
         if (typeof consoleError === "function") {
           try { Reflect.apply(consoleError, hostConsole, ["Uncaught (in promise)", reason]); } catch (_error) {}
@@ -10484,12 +10634,12 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
       });
     },
     handled(promise, reason) {
-      if (queued.has(promise)) {
-        handledBeforeReport.add(promise);
+      if (wsHas(queued, promise)) {
+        wsAdd(handledBeforeReport, promise);
         return;
       }
-      if (!outstanding.has(promise)) return;
-      outstanding.delete(promise);
+      if (!wsHas(outstanding, promise)) return;
+      wsDelete(outstanding, promise);
       task(() => fire("rejectionhandled", promise, reason, false));
     },
   };
@@ -12527,6 +12677,7 @@ __G.domSig = (() => {
   };
   const frameParsingDone = () => {
     ops.op_csp_finish_parser(__document);
+    if (ops.op_tt_eval_shim_required(__document)) globalThis.__installTtEvalShim();
     __G.performancePhase("domInteractive");
     __G.setDocumentReadyState("interactive");
     fireFrameEvent(document, "readystatechange");
@@ -12882,6 +13033,63 @@ __G.domSig = (() => {
   try { Object.defineProperty(globalThis, "Worker", { value: WorkerWrapper, writable: true, configurable: true }); } catch (_e) {}
 })();
 
+// Media loads (`<audio src>` / `<video src>`) enforce media-src on the resource
+// selection step (turbo-surf#204). The engine never fetches the media body, so
+// wrap the reflected `src` setter on HTMLMediaElement.prototype and the shared
+// setAttribute path: a non-empty src fires op_csp_request("media-src", resolved)
+// once per assignment, which queues the Chrome 156 violation shape (full URL as
+// blockedURI) through the same path as img-src / worker-src.
+(() => {
+  "use strict";
+  const Media = globalThis.HTMLMediaElement;
+  const Source = globalThis.HTMLSourceElement;
+  if (typeof Media !== "function" || !Media.prototype) return;
+  const resolveURL = globalThis.URL;
+  const baseHref = () => { try { return ops.op_document_request_url(); } catch (_e) { return ""; } };
+  const check = (url) => {
+    const raw = String(url);
+    if (!raw) return;
+    let resolved = raw;
+    try { resolved = new resolveURL(raw, baseHref()).href; } catch (_e) { return; }
+    try { ops.op_csp_request(__document, resolved, "media-src", ""); } catch (_e) {}
+  };
+  // Wrap the reflected `src` setter on both HTMLMediaElement AND
+  // HTMLSourceElement — Chrome 156 runs media-src against every <source>
+  // considered by the HTMLMediaElement resource-selection algorithm, not just
+  // the <audio src>/<video src> direct attr. (surf#204 R3 security finding.)
+  const wrapSrcSetter = (Ctor) => {
+    if (typeof Ctor !== "function" || !Ctor.prototype) return;
+    const descriptor = Object.getOwnPropertyDescriptor(Ctor.prototype, "src");
+    if (!descriptor || !descriptor.configurable || typeof descriptor.set !== "function") return;
+    const originalSet = descriptor.set;
+    const originalGet = descriptor.get;
+    const wrappedSet = function (value) { check(value); return originalSet.call(this, value); };
+    // Preserve the IDL setter's function name ("set src") so Chrome 156 shape
+    // oracles still see `{set:["set src",1]}` through Reflect.ownKeys.
+    try { Object.defineProperty(wrappedSet, "name", { value: originalSet.name || "set src" }); } catch (_e) {}
+    try {
+      Object.defineProperty(Ctor.prototype, "src", {
+        configurable: true,
+        enumerable: descriptor.enumerable,
+        get: originalGet,
+        set: wrappedSet,
+      });
+    } catch (_e) {}
+  };
+  wrapSrcSetter(Media);
+  wrapSrcSetter(Source);
+  // NOTE: Element.prototype.setAttribute / setAttributeNS used to be wrapped
+  // here too (R3) to cover `elem.setAttribute("src", ...)` on media/source
+  // receivers. The wrap routed every DOM attribute mutation across every
+  // element through a JS trampoline, which both perturbed script integrity
+  // error ordering in resource_integrity.rs and blew the session budget in
+  // child_frame_form_targets.rs. Dropped for v0.8.1; the reflected-src setter
+  // wrap above still covers `elem.src = "..."` assignments, which is Chrome
+  // 156's resource-selection trigger. Follow-up (v0.8.2): specialize a wrap
+  // per HTMLMediaElement / HTMLSourceElement subclass so only those receivers
+  // pay the per-call cost and the global attribute path stays untouched.
+})();
+
 // Web-IDL functions are embedded through V8 FunctionTemplates. Keep the
 // intrinsic Function.prototype.toString intact; guest delegates remain live.
 (() => {
@@ -13040,6 +13248,7 @@ __G.domSig = (() => {
     if (!__G.initialLoading) return;
     __G.initialLoading = false;
     ops.op_csp_finish_parser(__document);
+    if (ops.op_tt_eval_shim_required(__document)) globalThis.__installTtEvalShim();
     __G.performancePhase("domInteractive");
     __G.setDocumentReadyState("interactive");
     lifecycleEvent(document, "readystatechange");
@@ -14168,9 +14377,11 @@ __G.domSig = (() => {
     include_str!("font_loading.js"),
     include_str!("observers.js"),
     include_str!("interface_shapes.js"),
+    include_str!("canvas_media_stubs.js"),
     include_str!("user_activation.js"),
     include_str!("host_input.js"),
     include_str!("window_named_properties.js"),
+    include_str!("trusted_types_eval.js"),
     r##"
 __hostErrorEvent=globalThis.ErrorEvent;
 })"##
@@ -14357,6 +14568,14 @@ fn make_runtime_with_storage_and_options(
     #[cfg(turbo_surf_native_proxy)]
     rt.v8_isolate()
         .set_failed_access_check_callback(window_proxy::failed_access);
+    // Install the JS wasm-streaming handler before we delete `Deno` from the
+    // global. deno_core panics the process if a page triggers
+    // `WebAssembly.*Streaming` without a handler registered. See turbo-surf#247.
+    rt.execute_script(
+        "turbo-surf:wasm-streaming",
+        include_str!("wasm_streaming.js"),
+    )
+    .expect("wasm streaming bootstrap must install before page scripts run");
     {
         deno_core::scope!(scope, &mut rt);
         let context = scope.get_current_context();
@@ -17300,7 +17519,6 @@ impl PageSession {
             deno_core::scope!(scope, &mut self.rt);
             crate::message_ports::sweep(scope);
             crate::web_streams_backend::sweep(scope);
-            crate::context_ownership::sweep_collected(scope);
         }
         crate::browser_env::sweep_collected_documents();
     }

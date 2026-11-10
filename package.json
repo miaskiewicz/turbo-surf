@@ -1,15 +1,19 @@
 {
   "name": "turbo-surf",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "description": "Native-speed, browserless web crawler + MCP server for AI agents. A standalone Rust engine (turbo-dom + a V8 JS-render tier) \u2014 fetch + parse + extract + run page JS with no headless browser. This npm package is a thin launcher that spawns the native binary.",
   "license": "MIT",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./rust/playwright-shim/register.mjs": "./rust/playwright-shim/register.mjs",
+    "./rust/playwright-shim/*": "./rust/playwright-shim/*",
+    "./rust/crates/turbo-surf-napi/*": "./rust/crates/turbo-surf-napi/*"
   },
   "bin": {
-    "turbo-surf-mcp": "cli.js"
+    "turbo-surf-mcp": "cli.js",
+    "turbo-surf-test": "rust/playwright-shim/bin/turbo-surf-test.mjs"
   },
   "files": [
     "bin",
@@ -18,7 +22,14 @@
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "rust/playwright-shim",
+    "rust/crates/turbo-surf-napi/index.js",
+    "rust/crates/turbo-surf-napi/index.d.ts",
+    "rust/crates/turbo-surf-napi/package.json",
+    "rust/crates/turbo-surf-napi/LICENSE",
+    "rust/crates/turbo-surf-napi/README.md",
+    "rust/crates/turbo-surf-napi/turbo-surf.*.node"
   ],
   "scripts": {
     "lint": "oxlint",
@@ -27,9 +38,9 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "build:addon": "cd rust && cargo build --release -p turbo-surf-napi",
-    "test:shim": "node --test --test-concurrency=1 rust/playwright-shim/test.mjs rust/playwright-shim/surface.test.mjs rust/playwright-shim/native-profile.test.mjs rust/playwright-shim/native-peer-events.test.mjs",
-    "test:e2e": "node --import ./rust/playwright-shim/register.mjs --test --test-concurrency=1 rust/playwright-shim/dropin.spec.mjs rust/playwright-shim/e2e/*.spec.mjs",
-    "test:playwright": "npm run build:addon && npm run test:shim && npm run test:e2e",
+    "test:shim": "node --test --test-force-exit --test-timeout=300000 --test-concurrency=1 rust/playwright-shim/test.mjs rust/playwright-shim/surface.test.mjs rust/playwright-shim/native-profile.test.mjs rust/playwright-shim/native-peer-events.test.mjs rust/playwright-shim/input-hardware.test.mjs rust/playwright-shim/config.test.mjs rust/playwright-shim/skip-isolation.test.mjs",
+    "test:e2e": "node --import ./rust/playwright-shim/register.mjs --test --test-force-exit --test-timeout=300000 --test-concurrency=1 rust/playwright-shim/dropin.spec.mjs rust/playwright-shim/e2e/*.spec.mjs",
+    "test:playwright": "npm run build:addon && timeout --signal=KILL 600 npm run test:shim && timeout --signal=KILL 600 npm run test:e2e",
     "test": "python3 scripts/check-versions.py && bash scripts/check-single-v8.sh && python3 -B scripts/test_smoke_mcp_release.py && python3 -B scripts/test_check_coverage_floors.py && python3 -B scripts/test_coverage_shard.py && python3 -B -m unittest discover -s rust/release-deps -p 'test_*.py' && python3 -B -m unittest discover -s rust/release-deps/deno -p 'test_*.py' && python3 scripts/sync-third-party-notices.py --check && python3 harness/detection/verify-audio-sources.py && (cd rust && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check) && npm run test:playwright && npm run test:detection",
     "check": "npm run lint && npm run format:check && npm test",
     "prepare": "git config core.hooksPath .githooks || true",

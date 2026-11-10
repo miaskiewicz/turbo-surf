@@ -105,3 +105,15 @@ current PR #26 completion scope at the user's request. Retain the existing DSP
 and regression tests. Reprioritize a missing audio path if captured detector code
 or traces demonstrate its relevance to a target; current audio controls do not
 establish that Google's rejection is caused by audio.
+
+The deferred unsupported surface is pinned by
+`offline_audio_unsupported_paths_throw_or_reject_without_silent_no_op` in
+`audio_contracts.rs`. It asserts that `OscillatorNode.type = 'custom'` throws
+`InvalidStateError`, `OscillatorNode.setPeriodicWave` throws
+`NotSupportedError`, `WaveShaperNode.oversample = '2x'` / `'4x'` throws
+`NotSupportedError`, `OfflineAudioContext.suspend` and `resume` return a
+Promise that rejects with a `NotSupportedError` `DOMException`, and
+`new AudioContext()` throws `NotSupportedError`. `createPeriodicWave` is
+intentionally absent: a fingerprinting probe reading
+`typeof context.createPeriodicWave` sees `undefined` today, so any change to
+that surface is a conscious parity decision rather than a silent regression.

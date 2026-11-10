@@ -103,13 +103,49 @@ jobs:
         run: cargo clippy -p turbo-surf-core --no-default-features --all-targets -- -D warnings
 
   # --------------------------------------------------------------------------
-  # Stage 3: test (reuses cached build artifacts from the build job)
+  # Stage 3a: Rust tests (reuses cached build artifacts from the build job)
   # --------------------------------------------------------------------------
-  test:
-    name: test
+  test-rust:
+    name: test (rust)
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af
+          df -h
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install BoringSSL toolchain (nasm/cmake)
+        run: sudo apt-get update && sudo apt-get install -y nasm cmake
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: build
+          save-if: false
+      - name: Rust tests (workspace)
+        working-directory: rust
+        run: cargo test --workspace
+      - name: rustls backend tests
+        working-directory: rust
+        run: cargo test -p turbo-surf-core --no-default-features
+
+  # --------------------------------------------------------------------------
+  # Stage 3b: Playwright shim + E2E + detection (builds napi addon separately)
+  # --------------------------------------------------------------------------
+  test-playwright:
+    name: test (playwright)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
@@ -130,20 +166,14 @@ jobs:
           python-version: '3.12'
       - name: Install BoringSSL toolchain (nasm/cmake)
         run: sudo apt-get update && sudo apt-get install -y nasm cmake
-      # Same cache key as the build job — gets a warm target directory.
+      # Separate cache for the napi release build (different profile than the
+      # dev/test build the build job produces).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          key: build
-          save-if: false
+          key: napi
       - name: Install
         run: npm ci
-      - name: Rust tests (workspace)
-        working-directory: rust
-        run: cargo test --workspace
-      - name: rustls backend tests
-        working-directory: rust
-        run: cargo test -p turbo-surf-core --no-default-features
       - name: Playwright shim + E2E tests
         run: npm run test:playwright
       - name: Detection tests

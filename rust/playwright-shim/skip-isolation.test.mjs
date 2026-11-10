@@ -17,12 +17,12 @@ try {
 }
 const { test: pw } = shim;
 
-// FIXME(#284 follow-up): nesting `pw.describe()` / `pw()` inside a running
+// FIXME(turbo-surf#299): nesting `pw.describe()` / `pw()` inside a running
 // node:test parent deadlocks on the CI runner (300s --test-timeout kills
 // the parent test). The #284 fix (AsyncLocalStorage-backed activeT) is
-// shipped and covered by local runs; this regression needs to be rewritten
+// shipped and covered by local runs; this regression is rewritten in v0.8.3
 // to drive the ALS slots directly rather than through node:test's own
-// test registrar. Tracked for v0.8.3.
+// registrar. See miaskiewicz/turbo-surf#299.
 test.skip("shim describe skip-frames are per-context under concurrent registration", async () => {
   // Each body registers a describe. Inside the body, a conditional skip
   // either flips the local frame (a) or is a no-op (b). A shared module-level

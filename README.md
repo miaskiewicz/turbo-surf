@@ -82,7 +82,7 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-Status: **v0.8.2-rc.1 — on turbo-dom 0.8.2 release branch**
+Status: **v0.8.2 — on turbo-dom 0.8.2**
 ([npm](https://www.npmjs.com/package/turbo-surf)). The engine ships hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl

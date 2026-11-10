@@ -13,7 +13,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.8.2-rc.1"
+version = "0.8.2"
 license = "MIT"
 repository = "https://github.com/miaskiewicz/turbo-surf"
 
@@ -25,15 +25,5 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 opt-level = 3
 lto = "thin"
 
-# turbo-dom 0.8.1 is on crates.io — the member crates depend on `"0.8.1"`
+# turbo-dom 0.8.2 is on crates.io — the member crates depend on `"0.8.2"`
 # (parser alias on `"0.8"`) / `"150.4"` directly, no patch bridge needed.
-#
-# v0.8.2 RC validation: pin the four turbo-dom crates to the public
-# release/0.8.2 branch so the 0.8.2 fix set (incl. turbo-dom#478 iframe
-# inline-handler parent-realm) is exercised before turbo-dom 0.8.2 is cut
-# on crates.io. Remove this block once turbo-dom 0.8.2 is published.
-[patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.2" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.2" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.2" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "release/0.8.2" }

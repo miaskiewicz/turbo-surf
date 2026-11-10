@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.8.2-rc.1] - 2026-11-09
+## [0.8.2] - 2026-11-10
 
-Pinned at turbo-dom 0.8.2 release branch (`release/0.8.2`, tip `84dc93ac`) via `[patch.crates-io]`; drops to `"0.8.2"` crates.io pin once turbo-dom 0.8.2 publishes.
+Pinned at `turbo-dom = "0.8.2"` on crates.io (all four turbo-dom crates: `turbo-dom`, `turbo-dom-browser-env`, `turbo-dom-layout`, `turbo-dom-raster`; `turbo-dom-v8` 150.4.1 unchanged). `[patch.crates-io]` git bridge dropped.
 
 ### Added / Fixed
 

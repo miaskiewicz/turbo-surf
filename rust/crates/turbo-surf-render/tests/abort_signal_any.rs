@@ -65,7 +65,7 @@ fn divergences(path: String, actual: &Value, expected: &Value, out: &mut Vec<Str
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(turbo-dom#488): per-listener microtask checkpoint doesn't fire for V8-native AbortSignal.timeout; turbo-dom's polyfill install silently no-ops inside surf's install_with_html bootstrap (IIFE reaches __engineTaskScope at event_listeners.js:346 but not the defineProperty at :386). Surf-side engine_task_scope wrap + op_engine_task_scope stay in place; test un-ignores once turbo-dom#488's polyfill-install fix lands"]
+#[ignore = "FIXME(turbo-surf#298 / turbo-dom#488): per-listener microtask checkpoint doesn't fire for V8-native AbortSignal.timeout; turbo-dom's polyfill install silently no-ops inside surf's install_with_html bootstrap (IIFE reaches __engineTaskScope at event_listeners.js:346 but not the defineProperty at :386). Surf-side engine_task_scope wrap + op_engine_task_scope stay in place; test un-ignores once turbo-dom#488's polyfill-install fix lands"]
 async fn abort_signal_any_and_timeout_match_chrome156() {
     let expected = control();
     let mut page = PageSession::open(

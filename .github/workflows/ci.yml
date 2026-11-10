@@ -44,6 +44,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      # Cache Rust target + registry across runs. `cargo test --workspace` + the
+      # extra `turbo-surf-core --no-default-features` step below rebuild every
+      # workspace crate from scratch on cold runs, which dominates this job's
+      # wall-clock. The coverage-shard jobs already use this; this mirrors that.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: lint-test-node-${{ matrix.node }}
+
       # `cargo test --workspace` (via `npm test`) builds the turbo-surf-py PyO3
       # crate, which links libpython. Provide a Python so pyo3 resolves it.
       - uses: actions/setup-python@v5

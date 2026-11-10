@@ -40,8 +40,9 @@ class ShardTests(unittest.TestCase):
         self.assertEqual(SHARD.union_reports([])["coverage"], 100.0)
 
     def test_parse_reads_chunks_and_rejects_multi_crate_chunking(self):
-        self.assertEqual(SHARD.parse(["x", "render", "--chunks", "3", "c"]), ("render", 3, ["c"]))
-        self.assertEqual(SHARD.parse(["x", "rest", "a", "b"]), ("rest", 1, ["a", "b"]))
+        self.assertEqual(SHARD.parse(["x", "render", "--chunks", "3", "c"]), ("render", 3, 0, 1, ["c"]))
+        self.assertEqual(SHARD.parse(["x", "rest", "a", "b"]), ("rest", 1, 0, 1, ["a", "b"]))
+        self.assertEqual(SHARD.parse(["x", "r", "--chunks", "4", "--slice", "1/2", "c"]), ("r", 4, 1, 2, ["c"]))
         for bad in (["x", "s", "--chunks", "2", "a", "b"], ["x", "s", "--chunks", "0", "a"], ["x", "s"]):
             with self.assertRaises(SystemExit):
                 SHARD.parse(bad)

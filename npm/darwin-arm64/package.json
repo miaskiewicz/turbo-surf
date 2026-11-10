@@ -1,0 +1,13 @@
+{
+  "name": "@miaskiewicz/turbo-surf-darwin-arm64",
+  "version": "0.8.2",
+  "description": "turbo-surf platform binaries for macOS ARM64 (Apple Silicon)",
+  "license": "MIT",
+  "repository": "github:miaskiewicz/turbo-surf",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["turbo-surf-mcp", "turbo-surf.darwin-arm64.node", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, 'release/**']
   pull_request:
-    branches: [main, 'release/**']
+    branches: [main]
 
 permissions:
   contents: read
@@ -16,97 +16,187 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: lint + test (node ${{ matrix.node }})
+  # --------------------------------------------------------------------------
+  # Stage 1: lint (no Rust compilation — fast feedback in ~2 min)
+  # --------------------------------------------------------------------------
+  lint:
+    name: lint
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: npm ci
+      - name: JS lint
+        run: npm run lint
+      - name: JS format check
+        run: npm run format:check
+      - name: Rust format check
+        working-directory: rust
+        run: cargo fmt --check
+      - name: Version consistency
+        run: python3 scripts/check-versions.py
+      - name: Single V8 check
+        run: bash scripts/check-single-v8.sh
+      - name: Third-party notices
+        run: python3 scripts/sync-third-party-notices.py --check
+      - name: Audio source verification
+        run: python3 harness/detection/verify-audio-sources.py
+      - name: Release smoke supervisor tests
+        run: python3 -B scripts/test_smoke_mcp_release.py
+      - name: Coverage floor tests
+        run: python3 -B scripts/test_check_coverage_floors.py
+      - name: Coverage shard tests
+        run: python3 -B scripts/test_coverage_shard.py
+      - name: Release-deps Python tests
+        run: |
+          python3 -B -m unittest discover -s rust/release-deps -p 'test_*.py'
+          python3 -B -m unittest discover -s rust/release-deps/deno -p 'test_*.py'
+
+  # --------------------------------------------------------------------------
+  # Stage 2: build (one workspace compilation via clippy — shared cache key)
+  # --------------------------------------------------------------------------
+  build:
+    name: build + clippy
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [22]
     steps:
-      # The workspace test build (render tests + the PyO3/napi crates) outgrows the
-      # runner's free disk; drop the preinstalled toolchains this job never uses.
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
           sudo docker image prune -af
           df -h
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 22
           cache: npm
-
       - uses: dtolnay/rust-toolchain@1.98.0
-
-      # Cache Rust target + registry across runs. `cargo test --workspace` + the
-      # extra `turbo-surf-core --no-default-features` step below rebuild every
-      # workspace crate from scratch on cold runs, which dominates this job's
-      # wall-clock. The coverage-shard jobs already use this; this mirrors that.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust
-          key: lint-test-node-${{ matrix.node }}
-
-      # `cargo test --workspace` (via `npm test`) builds the turbo-surf-py PyO3
-      # crate, which links libpython. Provide a Python so pyo3 resolves it.
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
       - name: Install BoringSSL toolchain (nasm/cmake)
         run: sudo apt-get update && sudo apt-get install -y nasm cmake
-
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: build
       - name: Install
         run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-      - name: Test
-        run: npm test
-
-      # The rustls backend (`--no-default-features`, README) is a documented build; the
-      # default build never compiles its cfg paths (#189). The two Chrome-HTTP/1
-      # wire-identity tests in transport_identity are gated on `impersonate` (#199).
-      - name: rustls backend (turbo-surf-core --no-default-features)
+      - name: Clippy (workspace)
         working-directory: rust
-        run: |
-          cargo clippy -p turbo-surf-core --no-default-features --all-targets -- -D warnings
-          cargo test -p turbo-surf-core --no-default-features
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (rustls backend)
+        working-directory: rust
+        run: cargo clippy -p turbo-surf-core --no-default-features --all-targets -- -D warnings
 
-  # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine) ----
-  # Sharded: one instrumented link of every workspace test binary exhausts the ubuntu runner
-  # (rust-lld bus error, run 40788261228), so each shard runs tarpaulin over its crates' tests
-  # with rust/tarpaulin.toml's settings (scripts/coverage-shard.py) and uploads its JSON. The
-  # `coverage` job merges them (scripts/merge-coverage-reports.py: a line is covered when any
-  # shard hits it, so the union equals one whole-workspace run), fails below the workspace
-  # fail-under (rust/tarpaulin.toml), then every crate must meet its own floor
-  # (rust/coverage-floors.json). Floors are measured values (docs/QUALITY-GATES.md); never
-  # lower one to pass a change. Runs on ubuntu-latest (macOS runners unavailable); floors were
-  # first measured on macOS arm64.
+  # --------------------------------------------------------------------------
+  # Stage 3a: Rust tests (reuses cached build artifacts from the build job)
+  # --------------------------------------------------------------------------
+  test-rust:
+    name: test (rust)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af
+          df -h
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install BoringSSL toolchain (nasm/cmake)
+        run: sudo apt-get update && sudo apt-get install -y nasm cmake
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: build
+          save-if: false
+      - name: Rust tests (workspace)
+        working-directory: rust
+        run: cargo test --workspace
+      - name: rustls backend tests
+        working-directory: rust
+        run: cargo test -p turbo-surf-core --no-default-features
+
+  # --------------------------------------------------------------------------
+  # Stage 3b: Playwright shim + E2E + detection (builds napi addon separately)
+  # --------------------------------------------------------------------------
+  test-playwright:
+    name: test (playwright)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af
+          df -h
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install BoringSSL toolchain (nasm/cmake)
+        run: sudo apt-get update && sudo apt-get install -y nasm cmake
+      # Separate cache for the napi release build (different profile than the
+      # dev/test build the build job produces).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: napi
+      - name: Install
+        run: npm ci
+      - name: Playwright shim + E2E tests
+        run: npm run test:playwright
+      - name: Detection tests
+        run: npm run test:detection
+
+  # --------------------------------------------------------------------------
+  # Coverage shards (instrumented builds — must compile independently)
+  # Branch off lint in parallel with build+test.
+  # --------------------------------------------------------------------------
   coverage-shard:
     name: coverage shard (${{ matrix.shard }})
+    needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
         include:
-          # --chunks: render's ~190 test binaries' profraws alone fill the disk in one run
-          # (run 40899746815); scripts/coverage-shard.py runs them in 4 chunks, clearing
-          # the profraws between chunks, and unions the reports.
-          - shard: render
-            crates: --chunks 4 turbo-surf-render
+          # render is split across two runners (4 chunks, 2 per runner) to halve wall-clock.
+          - shard: render-a
+            crates: --chunks 4 --slice 0/2 turbo-surf-render
+          - shard: render-b
+            crates: --chunks 4 --slice 1/2 turbo-surf-render
           - shard: mcp
             crates: turbo-surf-mcp
           - shard: rest
@@ -115,11 +205,8 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
       CARGO_INCREMENTAL: 0
-      # Fewer concurrent rust-lld links of V8-sized test binaries (memory, not just disk).
       CARGO_BUILD_JOBS: 2
     steps:
-      # Drop the preinstalled toolchains this job never uses (Android, .NET, GHC, CodeQL,
-      # Boost, images) before the instrumented build.
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
@@ -169,6 +256,13 @@ jobs:
         with:
           pattern: coverage-shard-*
           path: shards
+      - name: Union render-a + render-b into one render report
+        run: |
+          mkdir -p shards/coverage-shard-render
+          python3 scripts/merge-render-slices.py \
+            shards/coverage-shard-render-a/tarpaulin-report.json \
+            shards/coverage-shard-render-b/tarpaulin-report.json \
+            shards/coverage-shard-render/tarpaulin-report.json
       - name: Merge shards (fails below rust/tarpaulin.toml fail-under)
         run: >
           python3 scripts/merge-coverage-reports.py rust/tarpaulin.toml coverage-merged.json
@@ -184,12 +278,9 @@ jobs:
           path: coverage-merged.json
           if-no-files-found: ignore
 
-  # ---- Complexity: cyclomatic complexity <= 15 per function, no allow-list, no baseline ----
-  # Blocking cc 15 gate. Every tracked function must stay at or below cyclomatic complexity 15:
-  # no allow-list, no file skips, no raising the limit. Rust: turbo-html2pdf's tools/cc-check
-  # installed from its home at a pinned rev (not copied here) over every tracked .rs file; JS:
-  # oxlint's `complexity` rule (.oxlintrc.complexity.json) over cli.js, index.js and harness/.
-  # A failing job's step summary lists every function over the limit so the fix is obvious.
+  # --------------------------------------------------------------------------
+  # Complexity: cyclomatic complexity <= 15 per function (no Rust build needed)
+  # --------------------------------------------------------------------------
   complexity-rust:
     name: complexity / rust (cc <= 15)
     runs-on: ubuntu-latest
@@ -210,7 +301,7 @@ jobs:
           fi
           echo "$HOME/.cc-check/bin" >> "$GITHUB_PATH"
       - name: cc-check --max 15 (every tracked .rs file)
-        shell: bash  # -eo pipefail: tee must not mask the gate's exit code
+        shell: bash
         run: npm run -s complexity:rust 2>&1 | tee complexity.txt
       - name: List the functions over the limit
         if: failure()
@@ -226,7 +317,7 @@ jobs:
         with:
           node-version: 22
       - name: oxlint complexity max 15 (cli.js, index.js, harness/)
-        shell: bash  # -eo pipefail: tee must not mask the gate's exit code
+        shell: bash
         run: npm run -s complexity:js 2>&1 | tee complexity.txt
       - name: List the functions over the limit
         if: failure()

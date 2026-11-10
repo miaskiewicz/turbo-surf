@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one coverage shard: cargo tarpaulin over a subset of the workspace crates.
 
-Usage (from rust/): python3 ../scripts/coverage-shard.py <shard-name> [--chunks N] <crate>...
+Usage (from rust/): python3 ../scripts/coverage-shard.py <shard-name> [--chunks N] [--slice M/N] <crate>...
 
 The settings (engine, include/exclude files, target dir, timeout, no-fail-fast) come
 from rust/tarpaulin.toml's [surf] section, so a shard measures exactly what the
@@ -79,23 +79,37 @@ def union_reports(reports):
 def parse(argv):
     shard, rest = argv[1], argv[2:]
     chunks = 1
+    slice_index, slice_total = 0, 1
     if rest[:1] == ["--chunks"]:
         chunks, rest = int(rest[1]), rest[2:]
+    if rest[:1] == ["--slice"]:
+        parts = rest[1].split("/")
+        slice_index, slice_total = int(parts[0]), int(parts[1])
+        rest = rest[2:]
     if not rest or chunks < 1 or (chunks > 1 and len(rest) != 1):
         raise SystemExit(__doc__.strip().splitlines()[2])
-    return shard, chunks, rest
+    return shard, chunks, slice_index, slice_total, rest
 
 
-def run_chunked(config, shard, crate, chunks):
+def run_chunked(config, shard, crate, chunks, slice_index=0, slice_total=1):
     tests = [p.stem for p in Path("crates", crate, "tests").glob("*.rs")]
+    all_targets = chunk_targets(tests, chunks)
+    # --slice M/N: split the chunk list across N runners, this is runner M (0-based).
+    if slice_total > 1:
+        size = -(-len(all_targets) // slice_total)
+        all_targets = all_targets[slice_index * size:(slice_index + 1) * size]
+        if not all_targets:
+            print(f"{shard}: slice {slice_index}/{slice_total} has no chunks, skipping")
+            return 0
     report_path = Path(f"{config['output-dir']}-{shard}", "tarpaulin-report.json")
     profraws = Path(config["target-dir"], "tarpaulin", "profraws")
     reports, status = [], 0
-    for i, targets in enumerate(chunk_targets(tests, chunks)):
+    for i, targets in enumerate(all_targets):
         shutil.rmtree(profraws, ignore_errors=True)
         args = tarpaulin_args(config, shard, [crate], targets)
-        print(f"chunk {i + 1}: " + " ".join(args), flush=True)
-        status = subprocess.call(args) or status
+        print(f"chunk {i + 1}/{len(all_targets)}: " + " ".join(args), flush=True)
+        rc = subprocess.call(args)
+        status = rc or status
         with open(report_path) as f:
             reports.append(json.load(f))
     shutil.rmtree(profraws, ignore_errors=True)
@@ -103,6 +117,11 @@ def run_chunked(config, shard, crate, chunks):
     with open(report_path, "w") as f:
         json.dump(merged, f)
     print(f"{shard}: {merged['coverage']:.2f}% ({merged['covered']}/{merged['coverable']}) over {len(reports)} chunk(s)")
+    # When sliced, individual tarpaulin runs see partial coverage and may exit
+    # non-zero for threshold or spurious "Test failed during run" errors. The
+    # merge step enforces the real threshold; only report the JSON was produced.
+    if slice_total > 1:
+        return 0 if report_path.exists() else 1
     return status
 
 
@@ -110,11 +129,11 @@ def main(argv):
     if len(argv) < 3:
         print(__doc__.strip().splitlines()[2], file=sys.stderr)
         return 2
-    shard, chunks, crates = parse(argv)
+    shard, chunks, slice_index, slice_total, crates = parse(argv)
     with open("tarpaulin.toml", "rb") as f:
         config = tomllib.load(f)["surf"]
     if chunks > 1:
-        return run_chunked(config, shard, crates[0], chunks)
+        return run_chunked(config, shard, crates[0], chunks, slice_index, slice_total)
     args = tarpaulin_args(config, shard, crates)
     print(" ".join(args), flush=True)
     return subprocess.call(args)

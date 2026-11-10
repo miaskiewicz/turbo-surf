@@ -162,8 +162,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - shard: render
-            crates: --chunks 4 turbo-surf-render
+          # render is split across two runners (4 chunks, 2 per runner) to halve wall-clock.
+          - shard: render-a
+            crates: --chunks 4 --slice 0/2 turbo-surf-render
+          - shard: render-b
+            crates: --chunks 4 --slice 1/2 turbo-surf-render
           - shard: mcp
             crates: turbo-surf-mcp
           - shard: rest
@@ -223,6 +226,13 @@ jobs:
         with:
           pattern: coverage-shard-*
           path: shards
+      - name: Union render-a + render-b into one render report
+        run: |
+          mkdir -p shards/coverage-shard-render
+          python3 scripts/merge-render-slices.py \
+            shards/coverage-shard-render-a/tarpaulin-report.json \
+            shards/coverage-shard-render-b/tarpaulin-report.json \
+            shards/coverage-shard-render/tarpaulin-report.json
       - name: Merge shards (fails below rust/tarpaulin.toml fail-under)
         run: >
           python3 scripts/merge-coverage-reports.py rust/tarpaulin.toml coverage-merged.json

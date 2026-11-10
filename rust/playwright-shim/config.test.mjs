@@ -116,7 +116,7 @@ test("loadConfig: imports an .mjs and normalizes it", async () => {
   assert.equal(findConfig(root), join(root, "playwright.config.mjs"));
 });
 
-test("webServer: spawn, wait until ready, teardown", async () => {
+test("webServer: spawn, wait until ready, teardown", { timeout: 30_000 }, async () => {
   const port = await freePort();
   const root = tmp();
   const script = join(root, "server.mjs");
@@ -137,12 +137,15 @@ test("webServer: spawn, wait until ready, teardown", async () => {
   await stopWebServers(handles);
 });
 
-test("CLI end-to-end: loads config, runs test files per project, reports exit", async () => {
-  const root = tmp();
-  await mkdir(join(root, "t"), { recursive: true });
-  writeFileSync(
-    join(root, "t/sample.spec.mjs"),
-    `
+test(
+  "CLI end-to-end: loads config, runs test files per project, reports exit",
+  { timeout: 30_000 },
+  async () => {
+    const root = tmp();
+    await mkdir(join(root, "t"), { recursive: true });
+    writeFileSync(
+      join(root, "t/sample.spec.mjs"),
+      `
     import test from 'node:test';
     import assert from 'node:assert/strict';
     test('runs in the configured project', () => {
@@ -151,23 +154,24 @@ test("CLI end-to-end: loads config, runs test files per project, reports exit", 
       assert.equal(use.baseURL, 'http://example.test');
     });
     `,
-  );
-  writeFileSync(
-    join(root, "playwright.config.mjs"),
-    `export default {
+    );
+    writeFileSync(
+      join(root, "playwright.config.mjs"),
+      `export default {
       testDir: './t',
       projects: [{ name: 'alpha', use: { baseURL: 'http://example.test' } }],
     };`,
-  );
-  const { code, stdout, stderr } = await runCli(
-    ["--config", join(root, "playwright.config.mjs")],
-    root,
-  );
-  assert.equal(code, 0, `cli failed: ${stdout}\n---stderr---\n${stderr}`);
-  assert.match(stdout, /runs in the configured project/, `stderr was: ${stderr}`);
-});
+    );
+    const { code, stdout, stderr } = await runCli(
+      ["--config", join(root, "playwright.config.mjs")],
+      root,
+    );
+    assert.equal(code, 0, `cli failed: ${stdout}\n---stderr---\n${stderr}`);
+    assert.match(stdout, /runs in the configured project/, `stderr was: ${stderr}`);
+  },
+);
 
-test("CLI: --list-only prints the discovered files and exits 0", async () => {
+test("CLI: --list-only prints the discovered files and exits 0", { timeout: 30_000 }, async () => {
   const root = tmp();
   await mkdir(join(root, "t"), { recursive: true });
   writeFileSync(join(root, "t/a.spec.mjs"), "import 'node:test';");
@@ -209,13 +213,27 @@ async function freePort() {
   });
 }
 
-function runCli(args, cwd) {
+function runCli(args, cwd, timeoutMs = 30_000) {
   return new Promise((res) => {
     const child = spawn(process.execPath, [CLI, ...args], { cwd });
     let stdout = "";
     let stderr = "";
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) {
+        child.kill("SIGKILL");
+        done = true;
+        res({ code: null, stdout, stderr: stderr + "\n[runCli killed after " + timeoutMs + "ms]" });
+      }
+    }, timeoutMs);
     child.stdout.on("data", (b) => (stdout += b.toString("utf8")));
     child.stderr.on("data", (b) => (stderr += b.toString("utf8")));
-    child.on("exit", (code) => res({ code, stdout, stderr }));
+    child.on("exit", (code) => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        res({ code, stdout, stderr });
+      }
+    });
   });
 }

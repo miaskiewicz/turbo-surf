@@ -52,7 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { host: macos-14, target: aarch64-apple-darwin, node: darwin-arm64, napi: darwin-arm64, cdylib: libturbo_surf_napi.dylib }
+          - { host: macos-latest, target: aarch64-apple-darwin, node: darwin-arm64, napi: darwin-arm64, cdylib: libturbo_surf_napi.dylib }
           # darwin-x64 (Intel Mac) dropped: GitHub's macos-13 runners are scarce/slow
           # and stall releases. Matches the sibling repos (turbo-dom/turbo-html2pdf).
           # Apple-Silicon (darwin-arm64) covers modern Macs; Intel falls back to a clear

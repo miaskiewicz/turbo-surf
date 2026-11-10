@@ -1,0 +1,18 @@
+{
+  "name": "@miaskiewicz/turbo-surf-win32-x64",
+  "version": "0.8.2",
+  "description": "turbo-surf platform binaries for Windows x64",
+  "license": "MIT",
+  "repository": "github:miaskiewicz/turbo-surf",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": [
+    "turbo-surf-mcp.exe",
+    "turbo-surf.win32-x64-msvc.node",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

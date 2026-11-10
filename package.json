@@ -16,7 +16,6 @@
     "turbo-surf-test": "rust/playwright-shim/bin/turbo-surf-test.mjs"
   },
   "files": [
-    "bin",
     "cli.js",
     "index.js",
     "LICENSE",
@@ -28,9 +27,14 @@
     "rust/crates/turbo-surf-napi/index.d.ts",
     "rust/crates/turbo-surf-napi/package.json",
     "rust/crates/turbo-surf-napi/LICENSE",
-    "rust/crates/turbo-surf-napi/README.md",
-    "rust/crates/turbo-surf-napi/turbo-surf.*.node"
+    "rust/crates/turbo-surf-napi/README.md"
   ],
+  "optionalDependencies": {
+    "@miaskiewicz/turbo-surf-darwin-arm64": "0.8.2",
+    "@miaskiewicz/turbo-surf-linux-x64": "0.8.2",
+    "@miaskiewicz/turbo-surf-linux-arm64": "0.8.2",
+    "@miaskiewicz/turbo-surf-win32-x64": "0.8.2"
+  },
   "scripts": {
     "lint": "oxlint",
     "complexity:rust": "git ls-files -z '*.rs' | xargs -0 cc-check --max 15",

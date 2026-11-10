@@ -63,6 +63,14 @@ def check_versions(root: Path) -> str:
         if len(locked) != 1:
             raise ValueError(f"Rust lockfile must contain exactly one {name}, found {locked}")
         check(requirement(dependency_name), f"Packaged consumer: {dependency_name}", "=" + locked[0])
+    for npm_dir in ("darwin-arm64", "linux-x64", "linux-arm64", "win32-x64"):
+        pkg_path = root / "npm" / npm_dir / "package.json"
+        if pkg_path.is_file():
+            check(json.loads(pkg_path.read_text())["version"], f"npm/{npm_dir} platform package")
+    opt_deps = package.get("optionalDependencies", {})
+    for dep_name, dep_ver in opt_deps.items():
+        if dep_name.startswith("@miaskiewicz/turbo-surf-"):
+            check(dep_ver, f"optionalDependencies[{dep_name}]")
     if f"Status: **v{version} " not in (root / "README.md").read_text():
         raise ValueError(f"README status must report v{version}")
     if f"## [{version}]" not in (root / "CHANGELOG.md").read_text():

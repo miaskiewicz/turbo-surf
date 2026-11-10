@@ -6,7 +6,7 @@
 // this hand-written loader covers the shipped targets + the dev build.)
 
 const { existsSync, copyFileSync, statSync } = require("node:fs");
-const { join } = require("node:path");
+const { join, dirname } = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 // node platform/arch → napi-rs binary suffix
@@ -17,6 +17,14 @@ const SUFFIX = {
   "linux-x64": "linux-x64-gnu",
   "linux-arm64": "linux-arm64-gnu",
   "win32-x64": "win32-x64-msvc",
+};
+
+// Per-platform optionalDependency packages that carry the .node addons.
+const PLATFORM_PACKAGES = {
+  "darwin-arm64": "@miaskiewicz/turbo-surf-darwin-arm64",
+  "linux-x64": "@miaskiewicz/turbo-surf-linux-x64",
+  "linux-arm64": "@miaskiewicz/turbo-surf-linux-arm64",
+  "win32-x64": "@miaskiewicz/turbo-surf-win32-x64",
 };
 
 function suffix() {
@@ -62,8 +70,22 @@ function requireDev(dev) {
 function load() {
   // Explicit dev/harness selection avoids silently loading an older release dylib.
   if (process.env.TURBO_SURF_NAPI_PATH) return require(process.env.TURBO_SURF_NAPI_PATH);
+
+  // Try the per-platform optionalDependency package first.
+  const key = `${process.platform}-${process.arch}`;
+  const pkg = PLATFORM_PACKAGES[key];
+  if (pkg) {
+    try {
+      const pkgDir = dirname(require.resolve(`${pkg}/package.json`));
+      const node = join(pkgDir, `turbo-surf.${suffix()}.node`);
+      if (existsSync(node)) return require(node);
+    } catch {}
+  }
+
+  // Legacy fallback: .node bundled alongside this loader (pre-0.9 tarballs).
   const packaged = join(__dirname, `turbo-surf.${suffix()}.node`);
   if (existsSync(packaged)) return require(packaged);
+
   for (const dev of devCandidates()) {
     if (existsSync(dev)) return requireDev(dev);
   }

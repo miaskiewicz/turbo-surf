@@ -6,7 +6,7 @@ napi, no Node hosting Rust — same model as turbo-test).
 
 | Workflow | Publishes | Where | Trigger tag | Auth secret |
 |---|---|---|---|---|
-| `release.yml` | `turbo-surf` — builds the `turbo-surf-mcp` binary for every platform, drops them in `bin/`, publishes the launcher (`cli.js`/`index.js` + `bin/`) | npm | `v*` | `NPM_TOKEN` |
+| `release.yml` | `@miaskiewicz/turbo-surf-<platform>` (per-platform binary + .node addon) then `turbo-surf` (thin launcher with `optionalDependencies`) | npm | `v*` | `NPM_TOKEN` |
 | `rust-crates-publish.yml` | the five Rust library crates, in dep order: `core → view → page → render → mcp` (the screenshot tier is turbo-dom's `turbo-dom-raster`), after a tag-only `release-guard` job | crates.io | `v*` | `CARGO_REGISTRY_TOKEN` |
 | `release-py.yml` | `turbo-surf` — maturin abi3 wheels (CPython 3.8+) per platform + sdist, built from `rust/crates/turbo-surf-py/` | PyPI | `pyv*` | `PYPI_TOKEN` |
 
@@ -28,6 +28,8 @@ or a workflow ships a mismatched version. Bump to the SAME `X.Y.Z`:
 - `rust/Cargo.toml` → `[workspace.package] version` **and** every crate's path-dep
   `version = "X.Y.Z"` across all eight member manifests
 - `rust/crates/turbo-surf-napi/package.json`
+- `npm/*/package.json` (all four per-platform packages)
+- `package.json` → `optionalDependencies` (all four `@miaskiewicz/turbo-surf-*` entries)
 - `rust/crates/turbo-surf-py/pyproject.toml` → `version` (**maturin builds the PyPI
   wheel from THIS, not the workspace version** — if it lags, the publish job
   `--skip-existing`s the old wheel and goes green without publishing anything)
@@ -215,31 +217,28 @@ can't be reused) — only cut a tag when a release is intended.
 
 ## Notes
 
-- The launcher's `files` allowlist ships `bin/` (the per-platform MCP binaries
-  CI builds), `cli.js`, `index.js`, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
-  `README.md`, `CHANGELOG.md`, the `rust/playwright-shim/` tree, and the napi
-  loader + its per-platform `.node` addons under `rust/crates/turbo-surf-napi/`
-  (`index.js`, `index.d.ts`, `package.json`, `LICENSE`, `README.md`,
-  `turbo-surf.*.node`). Platform binary artifacts also carry both license files.
-  `rust/` (other than those two subtrees), `harness/`, `docs/` are excluded.
-  Verify with `npm pack --dry-run`.
+- The launcher's `files` allowlist ships `cli.js`, `index.js`, `LICENSE`,
+  `THIRD_PARTY_NOTICES.md`, `README.md`, `CHANGELOG.md`, the
+  `rust/playwright-shim/` tree, and the napi loader metadata under
+  `rust/crates/turbo-surf-napi/` (`index.js`, `index.d.ts`, `package.json`,
+  `LICENSE`, `README.md` — but NOT `.node` addons). `rust/` (other subtrees),
+  `harness/`, `docs/` are excluded. Verify with `npm pack --dry-run`.
 
-### napi addon in the npm tarball (turbo-surf#288)
+### Per-platform packages (replaces turbo-surf#288 bundled model)
 
-Each `build` matrix host compiles the `turbo-surf-napi` cdylib alongside the
-MCP binary (`cargo build -p turbo-surf-mcp -p turbo-surf-napi`) and stages it as
-`turbo-surf.<napi-triple>.node` (darwin-arm64, linux-x64-gnu, linux-arm64-gnu,
-win32-x64-msvc — matching the suffix map in
-`rust/crates/turbo-surf-napi/index.js`). The `publish` job collects those four
-`.node` files into `rust/crates/turbo-surf-napi/` before `npm pack`, and the
-pack-time verification requires all four to be present in the tarball (exactly,
-no extras). This means `npm install turbo-surf@X.Y.Z` on any shipped platform
-gives a working playwright-shim without a local turbo-surf checkout and without
-`TURBO_SURF_NAPI_PATH` — the shim's `require("../crates/turbo-surf-napi/index.js")`
-resolves inside the installed package and the loader picks the matching `.node`.
-- `cli.js`/`index.js` resolve `bin/turbo-surf-mcp-<platform>-<arch>` at runtime
-  (musl-detected on Linux), with a dev fallback to a local
-  `rust/target/release/turbo-surf-mcp` build.
+Each `build` matrix host compiles the `turbo-surf-mcp` binary and
+`turbo-surf-napi` cdylib. The `publish-platform` job stages each platform's
+artifacts into `npm/<platform>/` and publishes them as scoped packages:
+`@miaskiewicz/turbo-surf-darwin-arm64`, `-linux-x64`, `-linux-arm64`, `-win32-x64`.
+Each carries one MCP binary + one `.node` addon + license files (<200 MB each).
+
+The main `turbo-surf` package lists these as `optionalDependencies`. npm
+automatically installs only the matching platform's package.
+- `cli.js`/`index.js` resolve the MCP binary from the platform package first
+  (via `require.resolve`), falling back to a legacy `bin/` directory and then a
+  local `rust/target/release/turbo-surf-mcp` dev build.
+- The napi loader (`rust/crates/turbo-surf-napi/index.js`) similarly resolves
+  the `.node` addon from the platform package first.
 - crates publish in dependency order so each dependent resolves its just-published
   dep; path deps carry an explicit `version` so crates.io accepts them.
 - `playwright` is a committed root dev dependency for the shim/tests; `patchright`

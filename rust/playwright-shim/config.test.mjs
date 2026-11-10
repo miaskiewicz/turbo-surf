@@ -25,6 +25,11 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, "bin/turbo-surf-test.mjs");
 
+// On CI the file hangs after all tests complete (open handles from spawned
+// subprocesses whose pipes survive SIGKILL on the runner). Force exit after a
+// generous grace period so the file-level 300s timeout never fires.
+test.after(() => setTimeout(() => process.exit(0), 2000).unref());
+
 function tmp() {
   return mkdtempSync(join(tmpdir(), "surf-cli-"));
 }
@@ -215,25 +220,27 @@ async function freePort() {
 
 function runCli(args, cwd, timeoutMs = 30_000) {
   return new Promise((res) => {
-    const child = spawn(process.execPath, [CLI, ...args], { cwd });
+    const child = spawn(process.execPath, [CLI, ...args], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     let done = false;
+    const finish = (code, extra) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      res({ code, stdout, stderr: stderr + (extra || "") });
+    };
     const timer = setTimeout(() => {
-      if (!done) {
-        child.kill("SIGKILL");
-        done = true;
-        res({ code: null, stdout, stderr: stderr + "\n[runCli killed after " + timeoutMs + "ms]" });
-      }
+      child.kill("SIGKILL");
+      finish(null, "\n[runCli killed after " + timeoutMs + "ms]");
     }, timeoutMs);
     child.stdout.on("data", (b) => (stdout += b.toString("utf8")));
     child.stderr.on("data", (b) => (stderr += b.toString("utf8")));
-    child.on("exit", (code) => {
-      if (!done) {
-        done = true;
-        clearTimeout(timer);
-        res({ code, stdout, stderr });
-      }
-    });
+    child.on("exit", (code) => finish(code));
   });
 }

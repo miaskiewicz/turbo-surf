@@ -4585,3 +4585,61 @@ test("Browser credentials answer Basic challenges and stay origin scoped (#394)"
     await new Promise((resolve) => other.close(resolve));
   }
 });
+
+test("detached frame handles cannot evaluate or edit a replacement frame (#447)", async () => {
+  const server = createServer((_request, response) =>
+    response.end('<iframe name="old" srcdoc="<input id=field value=OLD>"></iframe>'),
+  );
+  const base = await listen(server),
+    p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    const old = p.frame("old");
+    await p.evaluate(() => {
+      document.querySelector("iframe").remove();
+      const frame = document.createElement("iframe");
+      frame.name = "new";
+      frame.srcdoc = "<input id=field value=NEW>";
+      document.body.appendChild(frame);
+    });
+    assert.equal(old.isDetached(), true);
+    await assert.rejects(() => old.content(), /detached/);
+    await assert.rejects(() => old.title(), /detached/);
+    await assert.rejects(
+      () => old.evaluate(() => document.querySelector("#field").value),
+      /detached/,
+    );
+    await assert.rejects(() => old.locator("#field").fill("WRONG"), /detached/);
+    await assert.rejects(() => old.locator("#field").pressSequentially("WRONG"), /detached/);
+    assert.equal(
+      await p.frame("new").evaluate(() => document.querySelector("#field").value),
+      "NEW",
+    );
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("static frame identity survives promotion to the live native registry (#447)", async () => {
+  const p = newPage();
+  try {
+    await p.setContent(
+      '<iframe name="provisional" srcdoc="<input id=field value=STATIC>"></iframe>',
+    );
+    const frame = p.frame("provisional");
+    assert.equal(await frame.evaluate(() => document.querySelector("#field").value), "STATIC");
+    assert.ok(p.frame("provisional") === frame, "preserve frame wrapper identity");
+    assert.equal(frame.isDetached(), false);
+    await frame.evaluate(() => {
+      const field = document.querySelector("#field");
+      field.focus();
+      field.setSelectionRange(0, 0);
+    });
+    await frame.locator("#field").type("x");
+    assert.equal(await frame.evaluate(() => document.querySelector("#field").value), "xSTATIC");
+  } finally {
+    await p.close();
+  }
+});

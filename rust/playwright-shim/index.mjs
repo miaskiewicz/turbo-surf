@@ -1697,6 +1697,7 @@ class Frame {
     this._node = meta.node;
     this._path = meta.path;
     this._frameEntries = meta.children;
+    this._nativeIdentity = false;
     this._detached = false;
   }
   get _context() {
@@ -1717,7 +1718,11 @@ class Frame {
   childFrames() {
     return this._parentPage.frames().filter((frame) => frame._parentFrame === this);
   }
+  _assertAttached() {
+    if (this._detached) throw new Error("turbo-surf: frame is detached");
+  }
   _realmExpression(source, helpers = false) {
+    this._assertAttached();
     return `(() => {
       let child = globalThis;
       for (const index of ${JSON.stringify(this._path)}) {
@@ -1761,9 +1766,11 @@ class Frame {
     return decodeEvaluationValue(result.value);
   }
   async content() {
+    this._assertAttached();
     return this._html;
   }
   async title() {
+    this._assertAttached();
     return native.title(this._html);
   }
   async innerText(selector) {
@@ -1791,6 +1798,7 @@ class Frame {
     return this._parentPage._live;
   }
   _ensureLive() {
+    this._assertAttached();
     return this._parentPage._ensureLive();
   }
   _followIntent(intent) {
@@ -1814,6 +1822,7 @@ class Frame {
     return result;
   }
   async _typeWithCanonicalSelection(script) {
+    this._assertAttached();
     const result = await native.liveEvalEngine(
       this._session,
       `(() => {
@@ -2164,7 +2173,8 @@ class Page {
 
   async _openLiveSession(timeoutMs) {
     const started = Date.now();
-    this._closeSession();
+    // First hydration promotes the existing snapshot's provisional frame wrappers.
+    if (this._session != null) this._closeSession();
     try {
       this._session = await native.liveOpen(
         this._html,
@@ -2875,9 +2885,14 @@ class Page {
     const previous = this._frames ?? [];
     const next = [];
     const visit = (parent) => {
+      const nativeIdentity = parent._frameEntries != null;
       for (const [index, meta] of _collectIframes(parent).entries()) {
         let frame = previous.find(
-          (candidate) => candidate._parentFrame === parent && candidate._node === meta.node,
+          (candidate) =>
+            candidate._parentFrame === parent &&
+            (candidate._nativeIdentity === nativeIdentity
+              ? candidate._node === meta.node
+              : !candidate._nativeIdentity && nativeIdentity && candidate._path?.at(-1) === index),
         );
         if (!frame) {
           frame = new Frame(this, parent, meta);
@@ -2887,6 +2902,8 @@ class Page {
           frame._url = meta.url;
           this._emit("framenavigated", frame);
         }
+        frame._node = meta.node;
+        frame._nativeIdentity = nativeIdentity;
         if (meta.live) frame._html = meta.html;
         frame._name = meta.name;
         frame._path = meta.path ?? [...(parent._path ?? []), index];

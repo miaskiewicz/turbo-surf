@@ -1182,7 +1182,7 @@ function _collectIframes(parent, selector = "iframe") {
       id,
       src,
       html: srcdoc ?? "",
-      url: src || (srcdoc ? "about:srcdoc" : "about:blank"),
+      url: srcdoc != null ? "about:srcdoc" : src ? new URL(src, parent._url).href : "about:blank",
     });
   }
   return out;
@@ -2104,9 +2104,7 @@ class Page {
     const name = typeof opts === "string" ? opts : opts?.name;
     const urlSpec = typeof opts === "object" && opts ? opts.url : null;
     const match = _collectIframes(this).find(
-      (f) =>
-        (name == null || f.name === name) &&
-        (urlSpec == null || _matchUrl(f.src || f.url, urlSpec)),
+      (f) => (name == null || f.name === name) && (urlSpec == null || _matchUrl(f.url, urlSpec)),
     );
     return match ? new Frame(this, null, match) : null;
   }

@@ -2054,3 +2054,13 @@ test("screenshot encodes JPEG type, inferred paths, and quality (#467)", async (
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Frame URLs resolve relative src before URL lookup (#448)", async () => {
+  const p = newPage();
+  p._url = "https://example.test/parent/page";
+  await p.setContent('<iframe name="child" src="../remote"></iframe>');
+  assert.equal(p.frame("child").url(), "https://example.test/remote");
+  assert.equal(p.frame({ url: "https://example.test/remote" }).name(), "child");
+  assert.equal(p.frame({ url: (url) => url.pathname === "/remote" }).name(), "child");
+  await p.close();
+});

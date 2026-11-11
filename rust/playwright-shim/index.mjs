@@ -3095,10 +3095,13 @@ class LocatorExpect extends BaseExpect {
     return this._v._snapshot() ?? {};
   }
   async toBeVisible(opts) {
-    this._ok(await this._retry(() => this._snap().visible, opts), "expected element to be visible");
+    this._ok(await this._retry(() => this._v.isVisible(), opts), "expected element to be visible");
   }
   async toBeHidden(opts) {
-    this._ok(await this._retry(() => !this._snap().visible, opts), "expected element to be hidden");
+    this._ok(
+      await this._retry(async () => !(await this._v.isVisible()), opts),
+      "expected element to be hidden",
+    );
   }
   async toBeAttached(opts) {
     this._ok(

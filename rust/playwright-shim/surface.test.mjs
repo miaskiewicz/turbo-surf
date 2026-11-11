@@ -1832,3 +1832,28 @@ test("API context retains its connection pool across uncached requests (#485)", 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("visibility assertions request only the visibility predicate (#486)", async () => {
+  const page = await fresh();
+  for (const [selector, method, negate] of [
+    ["#go", "toBeVisible", false],
+    ["#hidden", "toBeHidden", false],
+    ["#hidden", "toBeVisible", true],
+    ["#go", "toBeHidden", true],
+    ["#missing", "toBeHidden", false],
+  ]) {
+    const loc = page.locator(selector);
+    loc._snapshot = () => {
+      throw new Error("visibility must not materialize a snapshot");
+    };
+    let calls = 0;
+    const original = loc.isVisible;
+    loc.isVisible = function (...args) {
+      calls++;
+      return original.apply(this, args);
+    };
+    await (negate ? expect(loc).not : expect(loc))[method]({ timeout: 0 });
+    assert.equal(calls, 1);
+  }
+  await page.close();
+});

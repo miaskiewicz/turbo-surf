@@ -196,11 +196,7 @@ test(
   },
 );
 
-// FIXME(turbo-surf#300): hangs on CI (node 22). CLI subprocess for the html
-// reporter never exits (open handle in the reporter path); runCli has no
-// timeout so the whole config.test.mjs hits node:test's 300000ms file-level
-// timeout. Skipped on CI; local coverage retained. Tracked for v0.8.3.
-test.skip("CLI: html reporter writes a playwright-report.html", async () => {
+test("CLI: html reporter writes a playwright-report.html", async () => {
   const root = tmp();
   await mkdir(join(root, "t"), { recursive: true });
   writeFileSync(join(root, "t/a.spec.mjs"), `import test from 'node:test'; test('one', () => {});`);
@@ -483,3 +479,21 @@ test("CLI honors inherited and project grep/grepInvert across suite titles", asy
   assert.equal(override.code, 0, override.stdout + override.stderr);
   assert.match(override.stdout, /SELECTED/);
 });
+
+test(
+  "CLI HTML report completes when a finished test leaves a timer open",
+  { timeout: 10000 },
+  async () => {
+    const root = tmp();
+    writeFileSync(
+      join(root, "timer.spec.mjs"),
+      `import test from 'node:test';
+    test('completed test',()=>{});setInterval(()=>{},1000);`,
+    );
+    const config = join(root, "html.config.mjs");
+    writeFileSync(config, "export default {reporter:'html'};");
+    const result = await runCli(["--config", config], root, 1500);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.match(readFileSync(join(root, "playwright-report.html"), "utf8"), /completed test/);
+  },
+);

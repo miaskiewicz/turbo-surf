@@ -122,6 +122,7 @@ function runProject(project, files, reporter) {
     "--import",
     REGISTER,
     "--test",
+    "--test-force-exit",
     `--test-reporter=${nodeReporter}`,
     "--test-reporter-destination=stdout",
     ...(project.grep ?? []).map((pattern) => `--test-name-pattern=${pattern}`),

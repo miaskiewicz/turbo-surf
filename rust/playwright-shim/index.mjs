@@ -2042,7 +2042,7 @@ class Page {
     return policy;
   }
 
-  async _navigate(url, method, body) {
+  async _navigate(url, method, body, opts) {
     if (this._closed) throw new Error("page is closed");
     // `about:blank` (and other about: URLs) are not network resources — a browser shows an
     // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
@@ -2060,8 +2060,9 @@ class Page {
       this._emit("domcontentloaded");
       return makeResponse({ status: 200, finalUrl: url, html: this._html });
     }
-    const r = JSON.parse(
-      await native.fetchWithCookies(
+    let raw;
+    try {
+      raw = await native.fetchWithCookies(
         url,
         this._cookies,
         method ?? null,
@@ -2074,8 +2075,16 @@ class Page {
           destination: "document",
           referrerPolicy: this._navigationReferrerPolicy(),
         }),
-      ),
-    );
+        null,
+        null,
+        null,
+        opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+      );
+    } catch (error) {
+      if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
+      throw error;
+    }
+    const r = JSON.parse(raw);
     if (r.status === 204 || r.status === 205) {
       this._cookies = r.cookies;
       throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
@@ -2101,7 +2110,7 @@ class Page {
     const previous = this._url;
     this._navHops = 0; // user navigation — reset the redirect-follow budget
     this._autoHydrate = opts?.waitUntil !== "commit"; // 'commit' = inspect raw shell
-    const resp = await this._navigate(this._resolveUrl(url));
+    const resp = await this._navigate(this._resolveUrl(url), undefined, undefined, opts);
     if (previous !== "about:blank") this._history.push(previous);
     this._fwd = []; // a committed navigation invalidates the forward stack
     // `waitUntil:'networkidle'` (or a later waitForLoadState('networkidle')) opens a LIVE
@@ -2133,7 +2142,7 @@ class Page {
     // re-appear); without this the reloaded doc stays the raw un-hydrated shell and reads
     // (e.g. a settings select's value) see an empty DOM.
     this._autoHydrate = opts?.waitUntil !== "commit";
-    const resp = await this._navigate(this._url);
+    const resp = await this._navigate(this._url, undefined, undefined, opts);
     if (opts?.waitUntil === "networkidle") await this._openLiveSession();
     return resp;
   }
@@ -2823,7 +2832,9 @@ class Page {
     this._context._viewport = size;
   }
   setDefaultTimeout() {}
-  setDefaultNavigationTimeout() {}
+  setDefaultNavigationTimeout(timeout) {
+    this._navigationTimeout = timeout;
+  }
   async setExtraHTTPHeaders(headers) {
     this._context._headers = { ...this._context._headers, ...headers };
   }
@@ -3526,7 +3537,9 @@ class BrowserContext {
     this._headers = { ...this._headers, ...headers };
   }
   async setDefaultTimeout() {}
-  async setDefaultNavigationTimeout() {}
+  async setDefaultNavigationTimeout(timeout) {
+    this._navigationTimeout = timeout;
+  }
   async grantPermissions() {}
   async clearPermissions() {}
   async setGeolocation() {}

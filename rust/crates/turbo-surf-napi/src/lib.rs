@@ -1140,8 +1140,9 @@ pub async fn fetch_with_cookies(
     body_bytes: Option<Buffer>,
     max_redirects: Option<u32>,
     no_cache: Option<bool>,
+    timeout_ms: Option<u32>,
 ) -> Result<String> {
-    do_fetch_headers(
+    let fetch = do_fetch_headers(
         &url,
         method,
         body,
@@ -1153,8 +1154,15 @@ pub async fn fetch_with_cookies(
         body_bytes,
         max_redirects,
         no_cache,
-    )
-    .await
+    );
+    match timeout_ms.filter(|timeout| *timeout > 0) {
+        Some(timeout) => {
+            tokio::time::timeout(std::time::Duration::from_millis(timeout as u64), fetch)
+                .await
+                .map_err(|_| Error::from_reason(format!("navigation timeout after {timeout}ms")))?
+        }
+        None => fetch.await,
+    }
 }
 
 fn record_json(r: &Record) -> Value {

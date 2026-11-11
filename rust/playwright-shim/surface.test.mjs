@@ -2967,3 +2967,32 @@ test("test.fail distinguishes expected failures from unexpected passes", async (
     if (!throws) assert.match(result.stdout, /Expected test to fail, but it passed/);
   }
 });
+
+test("navigation deadlines cancel slow goto and reload fetches (#427)", async () => {
+  let slow = false;
+  const server = createServer((_req, res) => {
+    const send = () => res.end('<p id="state">loaded</p>');
+    if (slow) setTimeout(send, 180);
+    else send();
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "commit" });
+    slow = true;
+    for (const navigate of [
+      () => page.goto(`${base}/slow`, { timeout: 30, waitUntil: "commit" }),
+      () => page.reload({ timeout: 30, waitUntil: "commit" }),
+    ]) {
+      await assert.rejects(navigate(), (error) => error.name === "TimeoutError");
+      await new Promise((done) => setTimeout(done, 220));
+      assert.equal(page.url(), `${base}/`);
+      assert.equal(await page.locator("#state").textContent(), "loaded");
+    }
+    await page.goto(`${base}/unlimited`, { timeout: 0, waitUntil: "commit" });
+    assert.equal(page.url(), `${base}/unlimited`);
+  } finally {
+    await page.close();
+    await new Promise((done) => server.close(done));
+  }
+});

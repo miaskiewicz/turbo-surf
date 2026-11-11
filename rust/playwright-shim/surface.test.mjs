@@ -3670,3 +3670,19 @@ test("tracing and enabled video options reject unsupported recording explicitly 
     await context.close();
   }
 });
+
+test("fixture teardown waits in dependency order and reports asynchronous failures", async () => {
+  const { runShimProbe } = await import("./runner-probes.mjs");
+  const result = await runShimProbe(`
+    const extended=base.extend({
+      inner:async(_f,use)=>{await use(true);await new Promise(r=>setTimeout(r,10));console.log('INNER_COMPLETE');},
+      outer:async({inner},use)=>{await use(inner);await new Promise(r=>setTimeout(r,20));console.log('OUTER_THROW');throw Error('intentional teardown failure');},
+    });
+    extended('passing body',({outer})=>assert.equal(outer,true));
+  `);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /OUTER_THROW[\s\S]*INNER_COMPLETE/);
+  assert.match(result.stdout, /intentional teardown failure/);
+  assert.equal((result.stdout.match(/OUTER_THROW/g) ?? []).length, 1);
+  assert.equal((result.stdout.match(/INNER_COMPLETE/g) ?? []).length, 1);
+});

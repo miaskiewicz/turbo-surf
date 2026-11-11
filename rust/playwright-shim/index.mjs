@@ -4365,14 +4365,8 @@ expect.any = (constructor) => {
 // ---------------------------------------------------------------------------
 // @playwright/test surface (drop-in over node:test) — fixtures, hooks, steps.
 // ---------------------------------------------------------------------------
-import {
-  after,
-  afterEach,
-  before,
-  beforeEach,
-  describe as nodeDescribe,
-  test as nodeTest,
-} from "node:test";
+import { after, before, describe as nodeDescribe, test as nodeTest } from "node:test";
+import { fixtureNames, openFixtures } from "./fixtures.mjs";
 
 // A fixture set: each value is either a plain default or [fn, opts] / async fn
 // of ({ ...fixtures }, use). We resolve them lazily and tear down after `use`.
@@ -4380,8 +4374,8 @@ function makeBaseFixtures() {
   return {
     browser: async (_f, use) => use(browserStub),
     context: async (_f, use) => use(new BrowserContext()),
-    page: async (f, use) => {
-      const ctx = f.context ?? new BrowserContext();
+    page: async ({ context }, use) => {
+      const ctx = context;
       const page = await ctx.newPage();
       try {
         await use(page);
@@ -4404,33 +4398,6 @@ function makeBaseFixtures() {
   };
 }
 
-// Playwright shares one fixture set (the same `page`/`context`) across a test's
-// beforeEach → body → afterEach. node:test runs those as separate callbacks, so
-// we stash the active set in `_current` (suite runs serially — workers:1) and
-// reuse it everywhere. Teardown is deferred to the *next* test's beforeEach (and
-// a final afterAll) so an afterEach hook still sees a live, logged-in page —
-// without this, cleanup hooks like `revokeActiveGrantIfAny({page})` get an
-// undefined page, crash, and leak server-side state into later tests.
-let _current = null;
-let _fixtureHooksWired = false;
-function wireFixtureHooks(open) {
-  if (_fixtureHooksWired) return;
-  _fixtureHooksWired = true;
-  const teardownCurrent = async () => {
-    if (!_current) return;
-    const c = _current;
-    _current = null;
-    await c.teardown();
-  };
-  // Registered before any user beforeEach (this fires on the first test/hook
-  // registration), so the set is open by the time user hooks and the body run.
-  beforeEach(async () => {
-    await teardownCurrent();
-    _current = await open(makeTestInfo("test"));
-  });
-  after(teardownCurrent);
-}
-
 // Playwright's `test.skip` is overloaded: `skip(title, body)` declares a skipped
 // test, but `skip(condition, description)` / `skip()` / `skip(fixturesCb, desc)`
 // conditionally skip the enclosing scope. The shim used to treat every call as
@@ -4445,6 +4412,8 @@ const SKIP_SIGNAL = Symbol("turbo-shim-skip");
 // store binds the node:test context to just the body of the running test.
 const skipStackStore = new AsyncLocalStorage();
 const activeTStore = new AsyncLocalStorage();
+const activeAttemptStore = new AsyncLocalStorage();
+const rootTestHooks = new Map();
 const getSkipStack = () => skipStackStore.getStore() ?? [];
 const getActiveT = () => activeTStore.getStore() ?? null;
 // Direct context access keeps regression tests out of node:test's registrar.
@@ -4470,16 +4439,9 @@ function skipConditionMet(args) {
 }
 
 let hasFocusedTests = false;
-const focusedTests = new Map();
-const focusedNames = new Set();
 function markFocused() {
   hasFocusedTests = true;
   for (const frame of getSkipStack()) frame.containsFocus = true;
-}
-function focusedTestAllowed(context) {
-  if (!hasFocusedTests) return true;
-  if (context.fullName) return focusedTests.get(context.fullName) === true;
-  return focusedNames.has(context.name);
 }
 function focusedScopeAllowed(scope) {
   return !hasFocusedTests || !scope || scope.only || scope.containsFocus;
@@ -4498,28 +4460,32 @@ async function runCleanupHooks(hooks, args) {
   if (errors.length) throw new AggregateError(errors, "Cleanup hooks failed");
 }
 
-function registerCleanupHook(kind, fn) {
+function registerTestHook(kind, fn) {
+  const scope = getSkipStack().at(-1);
+  const store = scope ? (scope.testHooks ??= new Map()) : rootTestHooks;
+  if (!store.has(kind)) store.set(kind, []);
+  store.get(kind).push(fn);
+}
+
+function registerCleanupHook(_kind, fn) {
   const scope = getSkipStack().at(-1);
   const store = scope ? (scope.cleanupHooks ??= new Map()) : rootCleanupHooks;
+  const kind = "afterAll";
   if (store.has(kind)) {
     store.get(kind).push(fn);
     return;
   }
   const hooks = [fn];
   store.set(kind, hooks);
-  const register = kind === "afterEach" ? afterEach : after;
-  register(async (context) => {
-    const allowed = kind === "afterEach" ? focusedTestAllowed(context) : focusedScopeAllowed(scope);
-    if (!allowed) return;
-    const arg = kind === "afterEach" ? (_current?.arg ?? {}) : { browser: browserStub };
-    await runCleanupHooks(hooks, arg);
+  after(async () => {
+    if (focusedScopeAllowed(scope)) await runCleanupHooks(hooks, { browser: browserStub });
   });
 }
 
 const rootFixtureUses = new Map();
-function fixtureUses(keys) {
+function fixtureUses(keys, frames = getSkipStack()) {
   const result = {};
-  for (const scope of [rootFixtureUses, ...getSkipStack().map((frame) => frame.fixtureUses)]) {
+  for (const scope of [rootFixtureUses, ...frames.map((frame) => frame.fixtureUses)]) {
     for (const key of keys) Object.assign(result, scope?.get(key));
   }
   return result;
@@ -4535,24 +4501,66 @@ async function invokeTestBody(fn, arg, info, expectedFailure) {
   if (expectedFailure) throw new Error("Expected test to fail, but it passed");
 }
 
+function planHooks(plan, kind, reverse = false) {
+  const scopes = [rootTestHooks, ...plan.frames.map((frame) => frame.testHooks)];
+  if (reverse) scopes.reverse();
+  return scopes.flatMap((scope) => scope?.get(kind) ?? []);
+}
+
+async function invokeFixtureFunction(fn, fixtures, info) {
+  await fixtures.resolve(fixtureNames(fn));
+  return fn(fixtures.arg, info);
+}
+
+async function finishAttempt(plan, fixtures, info, errors) {
+  for (const hook of planHooks(plan, "afterEach", true)) {
+    try {
+      await invokeFixtureFunction(hook, fixtures, info);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  try {
+    await fixtures.teardown();
+  } catch (error) {
+    errors.push(error);
+  }
+}
+
+async function executeAttempt(plan, t) {
+  const info = makeTestInfo(plan.name);
+  if (plan.expectedFailure) info.expectedStatus = "failed";
+  const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
+  const fixtures = await openFixtures(plan.baseDefs, defs, info);
+  return activeAttemptStore.run({ info, fixtures, plan }, async () => {
+    const errors = [];
+    try {
+      for (const hook of planHooks(plan, "beforeEach"))
+        await invokeFixtureFunction(hook, fixtures, info);
+      await fixtures.resolve(fixtureNames(plan.fn));
+      await invokeTestBody(plan.fn, fixtures.arg, info, plan.expectedFailure);
+    } catch (error) {
+      if (error !== SKIP_SIGNAL) errors.push(error);
+    } finally {
+      await finishAttempt(plan, fixtures, info, errors);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length) throw new AggregateError(errors, "Test and cleanup failed");
+  });
+}
+
 function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   const useKey = Symbol("fixture use");
   const useKeys = [...parentUseKeys, useKey];
-  const open = (testInfo) => openFixtures(baseDefs, extDefs, testInfo);
   const run = (name, fn, only = false, expectedFailure = false) => {
     const focused = only || getSkipStack().some((frame) => frame.only);
     if (only) markFocused();
-    const fullName = [...getSkipStack().map((frame) => frame.title), name].join(" > ");
-    focusedTests.set(fullName, focused);
-    if (focused) focusedNames.add(name);
-    const uses = fixtureUses(useKeys);
-    const testDefs = { ...extDefs, ...uses };
-    const openTest = (info) => openFixtures(baseDefs, testDefs, info, fixtureNames(fn));
-    wireFixtureHooks(open);
+    const frames = [...getSkipStack()];
     if (describeSkipped()) {
       nodeTest.skip(name, () => {});
       return;
     }
+    const plan = { name, fn, baseDefs, extDefs, useKeys, frames, expectedFailure };
     const register = only && process.execArgv.includes("--test-only") ? nodeTest.only : nodeTest;
     register(name, async (t) =>
       activeTStore.run(t, async () => {
@@ -4560,27 +4568,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
           t.skip("excluded by focused tests");
           return;
         }
-        const testInfo = makeTestInfo(name);
-        if (expectedFailure) testInfo.expectedStatus = "failed";
-        try {
-          // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
-          // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
-          // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
-          // open its OWN fixtures, else custom fixtures resolve to undefined.
-          if (_current && Object.keys(testDefs).length === 0) {
-            await invokeTestBody(fn, _current.arg, testInfo, expectedFailure);
-            return;
-          }
-          const { arg, teardown } = await openTest(testInfo);
-          try {
-            await invokeTestBody(fn, arg, testInfo, expectedFailure);
-          } finally {
-            await teardown();
-          }
-        } catch (e) {
-          if (e === SKIP_SIGNAL) return; // runtime test.skip() — already marked on `t`
-          throw e;
-        }
+        await executeAttempt(plan, t);
       }),
     );
   };
@@ -4627,16 +4615,8 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   };
   run.step.skip = async () => {};
   run.info = () => makeTestInfo("");
-  run.beforeEach = (fn) => {
-    wireFixtureHooks(open);
-    beforeEach(async (context) => {
-      if (focusedTestAllowed(context)) await fn(_current?.arg ?? {});
-    });
-  };
-  run.afterEach = (fn) => {
-    wireFixtureHooks(open);
-    registerCleanupHook("afterEach", fn);
-  };
+  run.beforeEach = (fn) => registerTestHook("beforeEach", fn);
+  run.afterEach = (fn) => registerTestHook("afterEach", fn);
   run.beforeAll = (fn) => {
     const scope = getSkipStack().at(-1);
     before(async () => {
@@ -4707,68 +4687,7 @@ function makeTestInfo(title) {
   };
 }
 
-// Destructuring identifies requested fixtures without running unrelated factories.
-function fixtureNames(fn) {
-  const match = /^[^(]*\(\s*\{([^}]*)\}/.exec(String(fn));
-  if (!match) return [];
-  return match[1]
-    .split(",")
-    .map((field) => field.trim().split(/[:=]/, 1)[0].trim())
-    .filter(Boolean);
-}
-
-async function startFixture(name, def, arg, testInfo, teardowns) {
-  if (typeof def !== "function") {
-    arg[name] = def;
-    return;
-  }
-  await new Promise((settle, reject) => {
-    const used = (value) =>
-      new Promise((release) => {
-        arg[name] = value;
-        teardowns.push(release);
-        settle();
-      });
-    Promise.resolve()
-      .then(() => def(arg, used, testInfo))
-      .then(settle, reject);
-  });
-}
-
-async function openFixtures(baseDefs, extDefs, testInfo, requested) {
-  const arg = {};
-  const teardowns = [];
-  const resolved = new Set();
-  const resolving = new Set();
-  const resolveFixture = async (name, baseOnly = false) => {
-    const key = `${baseOnly ? "base:" : ""}${name}`;
-    if (resolved.has(key)) return;
-    if (resolving.has(key)) throw new Error(`Fixture dependency cycle at ${name}`);
-    const overridden = !baseOnly && Object.hasOwn(extDefs, name);
-    const defs = overridden ? extDefs : baseDefs;
-    if (!Object.hasOwn(defs, name)) throw new Error(`Unknown fixture ${name}`);
-    resolving.add(key);
-    const def = defs[name];
-    const dependencies = def === baseDefs.page ? ["context"] : fixtureNames(def);
-    for (const dependency of dependencies) {
-      await resolveFixture(dependency, overridden && dependency === name);
-    }
-    await startFixture(name, def, arg, testInfo, teardowns);
-    resolving.delete(key);
-    resolved.add(key);
-  };
-  for (const name of requested ?? [...Object.keys(baseDefs), ...Object.keys(extDefs)]) {
-    await resolveFixture(name);
-  }
-  const teardown = async () => {
-    for (const release of teardowns.toReversed()) release();
-  };
-  return { arg, teardown };
-}
-
 export const test = makeTestFn(makeBaseFixtures());
-// Register in the module's root scope so every sibling suite inherits setup.
-wireFixtureHooks((info) => openFixtures(makeBaseFixtures(), {}, info));
 
 /** `defineConfig` is identity — the Playwright CLI/config is unused under node:test. */
 export const defineConfig = (config) => config;

@@ -614,7 +614,7 @@ test("BrowserContext: pages / cookies / storageState / addCookies / clearCookies
 test("BrowserContext: browser()/request() + no-op permission/geo/offline", async () => {
   const ctx = new BrowserContext();
   assert.equal(ctx.browser().version(), "turbo-surf");
-  assert.ok(ctx.request());
+  assert.ok(ctx.request);
   await ctx.grantPermissions(["clipboard-read"]);
   await ctx.clearPermissions();
   await ctx.setGeolocation({ latitude: 0, longitude: 0 });
@@ -874,7 +874,7 @@ test("waitForEvent('response') / ('request') resolve from the listener bus", asy
   const r = await pending;
   assert.equal(r.status(), 200);
   const pendingReq = p.waitForEvent("request", { timeout: 500 });
-  setTimeout(() => p._emit("request", fakeResp.request()), 10);
+  setTimeout(() => p._emit("request", fakeResp.request), 10);
   const req = await pendingReq;
   assert.equal(req.method(), "GET");
 });
@@ -996,11 +996,11 @@ test("page.request / context.request share the BrowserContext cookie jar (#230)"
   try {
     const p = await ctx.newPage();
     await p.goto(`${base}/login`);
-    const r = await p.request().fetch(`${base}/api/me`);
+    const r = await p.request.fetch(`${base}/api/me`);
     const body = await r.json();
     assert.equal(body.cookie, "sid=abc123", "page.request must send the login cookie");
     // context.request() mirrors page.request().
-    const r2 = await ctx.request().fetch(`${base}/api/me`);
+    const r2 = await ctx.request.fetch(`${base}/api/me`);
     const body2 = await r2.json();
     assert.equal(body2.cookie, "sid=abc123", "context.request must send the login cookie");
   } finally {
@@ -2334,4 +2334,26 @@ test("Standalone API contexts retain their own cookie jars and storage state (#3
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("Page and BrowserContext expose a shared request property with baseURL (#329)", async () => {
+  const server = createServer((req, res) => res.end(req.url));
+  const base = await listen(server);
+  const context = new BrowserContext({ baseURL: base });
+  const page = await context.newPage();
+  try {
+    assert.equal(typeof page.request.get, "function");
+    assert.equal(page.request, context.request);
+    assert.equal(await (await page.request.get("/echo")).text(), "/echo");
+  } finally {
+    await context.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+pw("Builtin request fixture supplies an API context (#329)", async ({ request: api }) => {
+  assert.equal(typeof api.get, "function");
+  assert.equal(typeof api.post, "function");
+  assert.equal(api.newContext, undefined);
 });

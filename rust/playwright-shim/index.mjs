@@ -2517,8 +2517,8 @@ class Page {
   context() {
     return this._context;
   }
-  request() {
-    return this._context.request();
+  get request() {
+    return this._context.request;
   }
   viewportSize() {
     return this._context._viewport;
@@ -3179,11 +3179,15 @@ class BrowserContext {
   once(event, fn) {
     return this.on(event, fn);
   }
-  request() {
+  get request() {
     // Lazy: build one APIRequestContext per BrowserContext, bound to its
     // cookie jar (reads + Set-Cookie writeback).
     if (!this._requestCtx) {
-      this._requestCtx = request.newContext({ _browserContext: this });
+      this._requestCtx = request.newContext({
+        _browserContext: this,
+        baseURL: this._baseURL,
+        userAgent: this._userAgent,
+      });
     }
     return this._requestCtx;
   }
@@ -3194,6 +3198,7 @@ class BrowserContext {
     if (this._closed) return;
     this._closed = true;
     for (const page of this._pages) await page.close();
+    await this._requestCtx?.dispose();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
   }
@@ -3679,7 +3684,14 @@ function makeBaseFixtures() {
         await page.close();
       }
     },
-    request: async (_f, use) => use(request),
+    request: async ({ baseURL }, use) => {
+      const api = request.newContext({ baseURL });
+      try {
+        await use(api);
+      } finally {
+        await api.dispose();
+      }
+    },
     baseURL: async (_f, use) => use(process.env.TURBO_SHIM_BASE_URL ?? undefined),
   };
 }

@@ -12165,6 +12165,8 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     const ordered = __list();
     for (let index = 0; index < all.length; index++) if (!isDeferred(all[index])) __listPush(ordered, all[index]);
     for (let index = 0; index < all.length; index++) if (isDeferred(all[index])) __listPush(ordered, all[index]);
+    let deferredExecution = null;
+    let deferredDownloads = 0;
     for (let position = 0; position < ordered.length; position++) {
       const element = ordered[position];
       const prepared = __prepareResourceScript(element);
@@ -12172,8 +12174,20 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
       ranScript = true;
       if (__G.initialLoading && prepared.parserInserted && isDeferred(element)) __markDocumentInteractive();
       if (prepared.asynchronous && (prepared.src || prepared.kind === "module")) __trackResource(__G.execScriptEl(element, prepared));
-      else await __G.execScriptEl(element, prepared);
+      else if (prepared.kind !== "module" && prepared.src && isDeferred(element)) {
+        // Download the next classic while its predecessor executes, retaining the
+        // same preparation, CSP, credentials and integrity path as other scripts.
+        deferredExecution = __G.execScriptEl(element, prepared, deferredExecution);
+        if (++deferredDownloads === 8) {
+          await deferredExecution;
+          deferredDownloads = 0;
+        }
+      } else {
+        if (deferredExecution) await deferredExecution;
+        await __G.execScriptEl(element, prepared);
+      }
     }
+    if (deferredExecution) await deferredExecution;
     __G.loadDocumentResources();
     if (__G.initialLoading) __markDocumentInteractive();
     const fired = fireTimers ? __G.runTimers(__intrinsicMin(timersLeft, 5000)) : 0;

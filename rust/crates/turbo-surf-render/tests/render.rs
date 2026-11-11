@@ -9,6 +9,62 @@ use turbo_surf_render::{
     DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
 };
 
+#[tokio::test]
+async fn deferred_classics_download_concurrently_and_execute_in_document_order() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let counters = (requests.clone(), active.clone(), peak.clone());
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let (requests, active, peak) = counters.clone();
+            tokio::spawn(async move {
+                let mut buffer = [0; 4096];
+                let count = stream.read(&mut buffer).await.unwrap();
+                let request = String::from_utf8_lossy(&buffer[..count]);
+                let path = request.split_whitespace().nth(1).unwrap();
+                let index: usize = path.trim_matches('/').parse().unwrap();
+                requests.fetch_add(1, Ordering::SeqCst);
+                peak.fetch_max(active.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                // A barrier measures overlap without asserting wall-clock performance.
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+                    while requests.load(Ordering::SeqCst) < 3 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await;
+                tokio::time::sleep(std::time::Duration::from_millis((2 - index) as u64 * 20)).await;
+                let body =
+                    format!("order.push({index});document.body.dataset.order=order.join(',');");
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).await.unwrap();
+                active.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    });
+    let html = render_hydrate(
+        "<head><script>window.order=[]</script><script defer src=/0></script><script defer src=/1></script><script defer src=/2></script></head><body></body>",
+        &format!("http://127.0.0.1:{port}/"),
+    )
+    .await
+    .unwrap();
+    server.abort();
+    assert!(html.contains("data-order=\"0,1,2\""), "{html}");
+    assert_eq!(requests.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        3,
+        "deferred downloads must overlap"
+    );
+}
+
 // The deno_core `Deno` global must NOT leak to page scope — `'Deno' in window` /
 // `typeof window.Deno` is the single most-checked browserless/electron tell. Bootstrap
 // captures the op table into closures then deletes the global. This also exercises the

@@ -4067,3 +4067,25 @@ test("XPath parent chains execute in an iframe realm (#365)", async () => {
     await new Promise((done) => server.close(done));
   }
 });
+
+test("Network waits exclude events already delivered before subscribing (#355)", async () => {
+  const page = newPage();
+  const response = {
+    url: () => "http://localhost/api",
+    request: () => ({ url: () => "http://localhost/api" }),
+  };
+  response._seq = page._actionSeq;
+  page._recentResponses = [response];
+  try {
+    for (const method of ["waitForResponse", "waitForRequest"]) {
+      await assert.rejects(page[method](/\/api$/, { timeout: 10 }), { name: "TimeoutError" });
+      const pending = page[method](/\/api$/, { timeout: 100 });
+      await new Promise((resolve) => setImmediate(resolve));
+      const item = method === "waitForResponse" ? response : response.request();
+      page._emit(method === "waitForResponse" ? "response" : "request", item);
+      assert.equal(await pending, item);
+    }
+  } finally {
+    await page.close();
+  }
+});

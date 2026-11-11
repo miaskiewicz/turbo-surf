@@ -2864,18 +2864,6 @@ class Page {
         return false;
       }
     };
-    // Real Playwright only matches responses received AFTER this call. Our live engine
-    // drains network in batches, so a matching response may already sit in the buffer —
-    // but ONLY accept one produced by the current interaction (or later). A response that
-    // drained in an EARLIER step is stale and must not match, else a loose predicate like
-    // url.includes('/bulk-upload') grabs the template GET from a prior step instead of
-    // waiting for this step's POST. (_seq is the action that produced the response.)
-    const callSeq = this._actionSeq;
-    // Drain once before the buffered check — the matching entry may already be
-    // sitting in the native log from the action that produced it.
-    if (this._live) await this._drainNetworkEvents();
-    const buffered = (this._recentResponses ?? []).find((r) => (r._seq ?? 0) >= callSeq && test(r));
-    if (buffered) return buffered;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.off("response", onResp);
@@ -2913,13 +2901,6 @@ class Page {
         return false;
       }
     };
-    const callSeq = this._actionSeq;
-    // Drain once up front — the matching entry may already be in the native log.
-    if (this._live) await this._drainNetworkEvents();
-    const bufferedResp = (this._recentResponses ?? []).find(
-      (r) => (r._seq ?? 0) >= callSeq && test(r.request()),
-    );
-    if (bufferedResp) return bufferedResp.request();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.off("request", onReq);

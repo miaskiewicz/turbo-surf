@@ -2349,6 +2349,7 @@ class Page {
   // it) and refresh the snapshot; otherwise run statelessly over the cached HTML.
   async evaluate(script, arg) {
     if (this._closed) throw new Error("page is closed");
+    await this._ensureLive();
     if (this._live) {
       const body = evalSource(script, arg);
       if (this._mergedBindings().size) return this._evaluateWithBindings(body);

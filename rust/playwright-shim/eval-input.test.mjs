@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
 import { newPage } from "./index.mjs";
 
 test("Locator.evaluate uses indexed live nodes and persists page effects", async () => {
@@ -48,5 +49,18 @@ test("Locator.evaluateAll receives the complete matched collection and optional 
     assert.equal(await page.locator(".absent").evaluateAll((nodes) => nodes.length), 0);
   } finally {
     await page.close();
+  }
+});
+
+test("Page.evaluate awaits async callbacks after ordinary load navigation", async () => {
+  const server = createServer((_request, response) => response.end("<!doctype html><p>page</p>"));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = newPage();
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "load" });
+    assert.equal(await page.evaluate(async () => 42), 42);
+  } finally {
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
   }
 });

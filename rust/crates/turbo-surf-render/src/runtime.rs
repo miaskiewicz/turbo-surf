@@ -11791,9 +11791,10 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     if(tag==="SCRIPT"||__intrinsicApply(__resourceLocalName,el,[])==="script")continue;
     if (tag==="IMG") {__loadImage(el,win,true);continue;}
     if(tag==="STYLE"){
-      const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
       const source=__intrinsicApply(__resourceText,el,[]);let state=__intrinsicApply(__intrinsicWeakGet,__resources,[el]);
-      if(!state||state.src!==source){state={__proto__:null,src:source,promise:null};__intrinsicApply(__intrinsicWeakSet,__resources,[el,state]);__intrinsicApply(__intrinsicWeakSet,__resourceStyleRequests,[sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true}]);state.promise=__trackResource(__loadSheetImports(sheet,__intrinsicApply(__resourceBaseURL,doc,[])||ops.op_document_request_url(),win));}
+      if(state&&state.src===source){__listPush(styles,state.promise);continue;}
+      const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
+      state={__proto__:null,src:source,promise:null};__intrinsicApply(__intrinsicWeakSet,__resources,[el,state]);__intrinsicApply(__intrinsicWeakSet,__resourceStyleRequests,[sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true}]);state.promise=__trackResource(__loadSheetImports(sheet,__intrinsicApply(__resourceBaseURL,doc,[])||ops.op_document_request_url(),win));
       __listPush(styles,state.promise);continue;
     }
     if (!(__resourceAttribute.call(el,"rel")||"").toLowerCase().split(/\s+/).includes("stylesheet") || el.disabled) continue;

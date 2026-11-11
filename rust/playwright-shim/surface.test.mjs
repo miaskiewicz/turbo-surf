@@ -4270,6 +4270,45 @@ test("Locator submit clicks perform one native form activation (#348)", async ()
   }
 });
 
+test("same-URL form navigation invalidates retained screenshot image bytes (#489)", async () => {
+  let images = 0,
+    documents = 0;
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB2kAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const html =
+    '<form method="post" action="/"><button>Submit</button></form><img src="/asset.png" width="1" height="1">';
+  const server = createServer((request, response) => {
+    response.setHeader("cache-control", "no-store");
+    if (request.url === "/asset.png") {
+      images++;
+      response.setHeader("content-type", "image/png");
+      response.end(png);
+    } else {
+      documents++;
+      response.setHeader("content-type", "text/html");
+      response.end(html);
+    }
+  });
+  const base = await listen(server),
+    p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "commit" });
+    await p.screenshot({ externalCss: false });
+    await p.screenshot({ externalCss: false });
+    assert.equal(images, 1, "retain image bytes within one document");
+    await p.locator("button").click();
+    assert.equal(documents, 2);
+    await p.screenshot({ externalCss: false });
+    assert.equal(images, 2, "new document reloads its image even when URL and HTML are identical");
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("Default locator actions wait for enabled editable visible controls (#346)", async () => {
   const server = createServer((req, res) =>
     res.end(

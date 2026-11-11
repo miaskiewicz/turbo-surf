@@ -2741,6 +2741,7 @@ class Page {
         }),
       ),
     );
+    this._imageCache = undefined;
     this._html = r.html;
     this._url = r.finalUrl;
     this._cookies = r.cookies;

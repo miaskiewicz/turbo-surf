@@ -3799,7 +3799,17 @@ export const request = {
     // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
     const requestState = native.requestStateNew?.(bc?._requestState);
-    const optHeaders = opts.extraHTTPHeaders ?? {};
+    const optHeaders = {
+      ...(opts.userAgent ? { "User-Agent": opts.userAgent } : {}),
+      ...opts.extraHTTPHeaders,
+    };
+    const credentials = opts.httpCredentials;
+    const authorization = credentials
+      ? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64")}`
+      : null;
+    const credentialAllowed = (url) =>
+      credentials &&
+      (!credentials.origin || new URL(url).origin === new URL(credentials.origin).origin);
     // Resolve the context's `extraHTTPHeaders` live from the parent
     // BrowserContext (if bound) so a `context.setExtraHTTPHeaders(...)` call
     // after `request()` is cached takes effect on the next request — without
@@ -3837,10 +3847,15 @@ export const request = {
       return { body, hdr };
     };
     const call = async (url, method, o = {}) => {
-      const { body, hdr } = encode(o);
+      const target = resolve(url);
+      const credentialHeaders =
+        credentialAllowed(target) && credentials.send === "always"
+          ? { Authorization: authorization, ...o.headers }
+          : o.headers;
+      const { body, hdr } = encode({ ...o, headers: credentialHeaders });
       const inCookies = bc && bc._cookies ? bc._cookies : "[]";
-      const raw = await native.fetchWithCookies(
-        resolve(url),
+      let raw = await native.fetchWithCookies(
+        target,
         inCookies,
         method ?? null,
         body,
@@ -3848,7 +3863,29 @@ export const request = {
         false,
         requestState,
       );
-      const parsed = JSON.parse(raw);
+      let parsed = JSON.parse(raw);
+      if (
+        parsed.status === 401 &&
+        credentialAllowed(parsed.finalUrl ?? target) &&
+        credentials.send !== "always" &&
+        parsed.headers?.some(
+          ([name, value]) =>
+            name.toLowerCase() === "www-authenticate" && /^Basic(?:\s|$)/i.test(value),
+        )
+      ) {
+        const authHeaders = JSON.parse(hdr ?? "{}");
+        authHeaders.Authorization = authorization;
+        raw = await native.fetchWithCookies(
+          target,
+          inCookies,
+          method ?? null,
+          body,
+          JSON.stringify(authHeaders),
+          false,
+          requestState,
+        );
+        parsed = JSON.parse(raw);
+      }
       // Merge Set-Cookie writes back into the parent BrowserContext's jar so
       // the next page.goto / page.request / context.request sees them.
       if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;

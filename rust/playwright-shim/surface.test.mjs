@@ -1912,3 +1912,42 @@ test("getByTestId regex preserves flags, scope and repeated global matching (#47
   assert.equal(await page.locator("body").getAttribute("data-clicked"), "yes");
   await page.close();
 });
+
+test("API contexts apply userAgent and scoped Basic credentials (#433)", async () => {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push(req.headers.authorization ?? null);
+    if (req.url === "/auth" && !req.headers.authorization) {
+      res.writeHead(401, { "www-authenticate": 'Basic realm="probe"' });
+    }
+    res.end(
+      JSON.stringify({ agent: req.headers["user-agent"], auth: req.headers.authorization ?? null }),
+    );
+  });
+  const base = await listen(server);
+  const credentials = { username: "alice", password: "secret", origin: base };
+  const auth = `Basic ${Buffer.from("alice:secret").toString("base64")}`;
+  const api = await request.newContext({ userAgent: "api-probe/1", httpCredentials: credentials });
+  const always = await request.newContext({ httpCredentials: { ...credentials, send: "always" } });
+  const outside = await request.newContext({
+    httpCredentials: { ...credentials, origin: "http://example.invalid", send: "always" },
+  });
+  try {
+    assert.deepEqual(await (await api.get(`${base}/agent`)).json(), {
+      agent: "api-probe/1",
+      auth: null,
+    });
+    seen.length = 0;
+    const response = await api.get(`${base}/auth`);
+    assert.equal(response.status(), 200);
+    assert.deepEqual(seen, [null, auth]);
+    assert.equal((await (await always.get(base)).json()).auth, auth);
+    assert.equal((await (await outside.get(base)).json()).auth, null);
+  } finally {
+    await api.dispose();
+    await always.dispose();
+    await outside.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

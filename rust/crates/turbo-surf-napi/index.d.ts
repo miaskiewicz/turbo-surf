@@ -56,6 +56,7 @@ export function liveOpen(
   requestStateId?: number,
   documentResponse?: string,
   initScript?: string,
+  timeoutMs?: number,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;

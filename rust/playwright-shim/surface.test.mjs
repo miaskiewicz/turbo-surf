@@ -3173,3 +3173,35 @@ test("Live checkbox actions execute one default and retain requested state (#351
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("navigation deadlines also cancel slow hydration (#427)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/slow.js") {
+      setTimeout(() => {
+        res.setHeader("content-type", "application/javascript");
+        res.end("document.body.dataset.loaded='yes'");
+      }, 180);
+      return;
+    }
+    res.end('<body><script src="/slow.js"></script></body>');
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await assert.rejects(
+      page.goto(base, { timeout: 30, waitUntil: "networkidle" }),
+      (error) => error.name === "TimeoutError",
+    );
+    assert.equal(page._session, null);
+    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
+    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
+    await assert.rejects(
+      page.reload({ timeout: 30, waitUntil: "networkidle" }),
+      (error) => error.name === "TimeoutError",
+    );
+    assert.equal(page._session, null);
+  } finally {
+    await page.close();
+    await new Promise((done) => server.close(done));
+  }
+});

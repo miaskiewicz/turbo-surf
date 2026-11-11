@@ -1834,21 +1834,34 @@ class Page {
     }
   }
 
-  async _openLiveSession() {
+  async _openLiveSession(timeoutMs) {
+    const started = Date.now();
     this._closeSession();
-    this._session = await native.liveOpen(
-      this._html,
-      this._url,
-      this._cookies,
-      this._context._userAgent ?? undefined,
-      this._requestState,
-      JSON.stringify(this._documentResponse),
-      this._initScriptSource(),
-    );
+    try {
+      this._session = await native.liveOpen(
+        this._html,
+        this._url,
+        this._cookies,
+        this._context._userAgent ?? undefined,
+        this._requestState,
+        JSON.stringify(this._documentResponse),
+        this._initScriptSource(),
+        timeoutMs,
+      );
+    } catch (error) {
+      if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
+      throw error;
+    }
     this._hydrated = true;
     this._loadedPath = pathOf(this._url);
     await this._refreshFromSession();
     await this._drainBindings();
+    if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
+      this._closeSession();
+      const error = new Error(`navigation timeout after ${timeoutMs}ms`);
+      error.name = "TimeoutError";
+      throw error;
+    }
   }
 
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
@@ -2134,7 +2147,18 @@ class Page {
     this._emit("domcontentloaded");
     return makeResponse(r);
   }
+  _remainingNavigationTimeout(opts, started) {
+    const timeout =
+      opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000;
+    if (timeout === 0) return undefined;
+    const remaining = timeout - (Date.now() - started);
+    if (remaining > 0) return remaining;
+    const error = new Error(`navigation timeout after ${timeout}ms`);
+    error.name = "TimeoutError";
+    throw error;
+  }
   async goto(url, opts) {
+    const started = Date.now();
     const previous = this._url;
     this._navHops = 0; // user navigation — reset the redirect-follow budget
     this._autoHydrate = opts?.waitUntil !== "commit"; // 'commit' = inspect raw shell
@@ -2149,7 +2173,8 @@ class Page {
     // dashboards) appears, and keep it mounted so clicks/fills dispatch real events into
     // the running app. Default/'load'/'commit' stay raw (cheap fetch) — hydrating EVERY
     // goto is both slow and unnecessary for static pages.
-    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    if (opts?.waitUntil === "networkidle")
+      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     // If a `waitForResponse` / `waitForRequest` is already subscribed when the
     // caller does `Promise.all([waitForResponse(...), goto(url)])` without
     // `waitUntil:'networkidle'`, the inline-script fetches that the predicate
@@ -2163,11 +2188,12 @@ class Page {
         this._listeners.has("request") ||
         this._listeners.has("requestfinished"))
     ) {
-      await this._openLiveSession();
+      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     }
     return resp;
   }
   async reload(opts) {
+    const started = Date.now();
     // Re-fetch in place — no history entry. Like goto, a `waitUntil:'networkidle'` reload
     // re-opens a LIVE session so a client-rendered SPA re-hydrates (its forms/dashboards
     // re-appear); without this the reloaded doc stays the raw un-hydrated shell and reads
@@ -2177,7 +2203,8 @@ class Page {
       ...opts,
       referer: opts?.referer ?? this._documentResponse?.referrer ?? null,
     });
-    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    if (opts?.waitUntil === "networkidle")
+      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     return resp;
   }
   async goBack(opts) {

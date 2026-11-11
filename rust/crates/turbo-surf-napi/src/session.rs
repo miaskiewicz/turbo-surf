@@ -213,7 +213,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc::UnboundedSender as MpscSender;
-use turbo_surf_render::{PageSession, DEFAULT_RENDER_BUDGET_MS};
+use turbo_surf_render::{PageSession, PageSessionOptions, DEFAULT_RENDER_BUDGET_MS};
 
 enum LiveJob {
     Eval(String, SyncSender<std::result::Result<String, String>>),
@@ -246,6 +246,7 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
 /// Async (hydration fetches chunks from a possibly same-process server, so Node's loop
 /// must stay free).
 pub struct LiveOpenTask {
+    initial_timeout_ms: Option<u32>,
     response: crate::document_response::DocumentResponse,
     init_script: String,
     html: String,
@@ -272,6 +273,7 @@ impl Task for LiveOpenTask {
         let storage = self.storage.clone();
         let response = self.response.clone();
         let init_script = std::mem::take(&mut self.init_script);
+        let initial_timeout_ms = self.initial_timeout_ms;
         thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -283,19 +285,33 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            let mut session = match rt.block_on(PageSession::open_with_document_response(
-                &html,
-                &base,
-                &cookies,
-                &ua,
-                DEFAULT_RENDER_BUDGET_MS,
-                &init_script,
-                client_hints,
-                &response.headers,
-                storage,
-                response.metadata,
-            )) {
+            let mut session = match rt.block_on(
+                PageSession::open_with_document_response_and_options(
+                    &html,
+                    &base,
+                    &cookies,
+                    &ua,
+                    DEFAULT_RENDER_BUDGET_MS,
+                    &init_script,
+                    client_hints,
+                    &response.headers,
+                    storage,
+                    response.metadata,
+                    None,
+                    PageSessionOptions {
+                        initial_hydration_budget_ms: initial_timeout_ms.map(u64::from),
+                        ..Default::default()
+                    },
+                ),
+            ) {
                 Ok(s) => {
+                    if let Some(timeout) =
+                        initial_timeout_ms.filter(|_| s.hydration_diagnostics().budget_exceeded)
+                    {
+                        s.close();
+                        let _ = open_tx.send(Err(format!("navigation timeout after {timeout}ms")));
+                        return;
+                    }
                     let _ = open_tx.send(Ok(()));
                     s
                 }
@@ -388,6 +404,7 @@ impl Task for LiveOpenTask {
 
 /// Open a live page session (hydrate + keep alive). Returns a session id.
 #[napi]
+#[allow(clippy::too_many_arguments)]
 pub fn live_open(
     html: String,
     base_url: String,
@@ -396,12 +413,14 @@ pub fn live_open(
     request_state_id: Option<u32>,
     document_response: Option<String>,
     init_script: Option<String>,
+    timeout_ms: Option<u32>,
 ) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
     crate::ensure_render_init();
     let state = crate::request_state(request_state_id)?;
     Ok(AsyncTask::new(LiveOpenTask {
+        initial_timeout_ms: timeout_ms.filter(|timeout| *timeout > 0),
         response: crate::document_response::parse(document_response)?,
         init_script: init_script.unwrap_or_default(),
         html,

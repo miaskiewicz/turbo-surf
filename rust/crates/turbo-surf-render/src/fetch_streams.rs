@@ -313,6 +313,7 @@ fn finish_log(state: &mut OpState, id: u32, job: &Job, incomplete: bool) {
     };
     if let Some(entry) = log.0.iter_mut().find(|entry| entry["streamId"] == id) {
         entry["body"] = String::from_utf8_lossy(&bytes).into_owned().into();
+        entry["bodyBytes"] = serde_json::json!(bytes);
         entry["bodyIncomplete"] = incomplete.into();
     }
 }
@@ -342,6 +343,7 @@ pub(super) fn refresh_logs(state: &mut OpState) {
         };
         if let Some(entry) = log.0.iter_mut().find(|entry| entry["streamId"] == id) {
             entry["body"] = String::from_utf8_lossy(&bytes).into_owned().into();
+            entry["bodyBytes"] = serde_json::json!(bytes);
             entry["bodyIncomplete"] = (!complete.unwrap_or(false)).into();
         }
         if complete.is_some() {

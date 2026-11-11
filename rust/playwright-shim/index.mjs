@@ -3189,6 +3189,10 @@ function makeResponse(r, ensureOpen = () => {}) {
     url: () => r.finalUrl,
     statusText: () => r.statusText ?? "",
     headers: () => ({ ...headers }),
+    async body() {
+      ensureOpen();
+      return Buffer.from(r.bodyBytes ?? r.html ?? "");
+    },
     async text() {
       ensureOpen();
       return r.html ?? "";
@@ -3216,6 +3220,10 @@ function makeNetResponse(e) {
     statusText: () => "",
     ok: () => !!e.ok,
     headers: () => (e.contentType ? { "content-type": e.contentType } : {}),
+    async body() {
+      if (e.bodyIncomplete) throw new Error("Response body is incomplete");
+      return Buffer.from(e.bodyBytes ?? e.body ?? "");
+    },
     async text() {
       return e.body ?? "";
     },
@@ -4503,7 +4511,10 @@ export const request = {
       async dispose() {
         if (disposed) return;
         disposed = true;
-        for (const response of responses) response.html = null;
+        for (const response of responses) {
+          response.html = null;
+          response.bodyBytes = null;
+        }
         responses.clear();
         cookies = "[]";
         if (requestState != null) native.requestStateClose(requestState);

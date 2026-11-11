@@ -1034,6 +1034,7 @@ async fn do_fetch_headers(
         .unwrap_or_else(|| "[]".to_string());
     Ok(json!({
         "html": res.html,
+        "bodyBytes": res.body_bytes,
         "finalUrl": res.final_url,
         "status": res.status,
         "statusText": res.status_text,

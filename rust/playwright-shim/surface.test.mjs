@@ -2572,6 +2572,37 @@ test("toHaveJSProperty reads typed properties in the live realm (#438)", async (
   }
 });
 
+test("API, captured fetch and navigation responses expose raw body bytes (#400)", async () => {
+  const bytes = Buffer.from([0, 255, 128, 10]);
+  const html =
+    '<script>fetch("/bytes").then(r => r.arrayBuffer()).then(() => globalThis.done = true)</script>';
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", req.url === "/bytes" ? "application/octet-stream" : "text/html");
+    res.end(req.url === "/bytes" ? bytes : html);
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  const page = newPage();
+  let captured;
+  page.on("response", (response) => {
+    if (response.url().endsWith("/bytes")) captured = response;
+  });
+  try {
+    const response = await api.get(`${base}/bytes`);
+    assert.deepEqual(await response.body(), bytes);
+    const navigation = await page.goto(base, { waitUntil: "networkidle" });
+    assert.deepEqual(await navigation.body(), Buffer.from(html));
+    assert.ok(captured);
+    assert.deepEqual(await captured.body(), bytes);
+    assert.equal(await response.text(), bytes.toString());
+  } finally {
+    await api.dispose();
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("fill rejects invalid number text before mutating the value (#411)", async () => {
   const server = createServer((_request, response) =>
     response.end('<input id="field" type="number" value="12">'),

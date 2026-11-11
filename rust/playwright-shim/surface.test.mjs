@@ -3326,3 +3326,41 @@ test("Asymmetric matchers compose recursively including negative forms (#389)", 
   assert.throws(() => expect({}).toEqual(expect.objectContaining({ missing: undefined })));
   expect(new Number(1)).toEqual(expect.any(Number));
 });
+
+test("Context media preferences reach native matching and stay isolated (#396)", async () => {
+  const dark = new BrowserContext({ colorScheme: "dark", reducedMotion: "reduce" });
+  const light = new BrowserContext({ colorScheme: "light", reducedMotion: "no-preference" });
+  const p = await dark.newPage();
+  const q = await light.newPage();
+  try {
+    await p.setContent("<p>media</p>");
+    await q.setContent("<p>media</p>");
+    await p._ensureLive();
+    await q._ensureLive();
+    assert.deepEqual(
+      await p.evaluate(() => [
+        matchMedia("(prefers-color-scheme: dark)").matches,
+        matchMedia("(prefers-reduced-motion: reduce)").matches,
+      ]),
+      [true, true],
+    );
+    assert.deepEqual(
+      await q.evaluate(() => [
+        matchMedia("(prefers-color-scheme: dark)").matches,
+        matchMedia("(prefers-reduced-motion: reduce)").matches,
+      ]),
+      [false, false],
+    );
+    await p.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
+    assert.deepEqual(
+      await p.evaluate(() => [
+        matchMedia("(prefers-color-scheme: dark)").matches,
+        matchMedia("(prefers-reduced-motion: reduce)").matches,
+      ]),
+      [false, false],
+    );
+  } finally {
+    await dark.close();
+    await light.close();
+  }
+});

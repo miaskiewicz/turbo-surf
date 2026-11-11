@@ -843,6 +843,14 @@ fn request_states() -> &'static std::sync::Mutex<std::collections::HashMap<u32, 
 }
 
 #[napi]
+pub fn request_state_configure(id: u32, options_json: String) -> Result<()> {
+    request_state(Some(id))?
+        .storage
+        .configure_emulation(&options_json)
+        .map_err(Error::from_reason)
+}
+
+#[napi]
 pub fn request_state_new(parent_context_id: Option<u32>) -> Result<u32> {
     let state = match parent_context_id {
         Some(parent) => {

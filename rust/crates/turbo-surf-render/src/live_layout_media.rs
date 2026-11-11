@@ -34,6 +34,15 @@ impl HostMedia {
             ..value
         }
     }
+    pub(crate) fn emulated(mut self, options: &crate::browser_emulation::BrowserEmulation) -> Self {
+        if let Some(scheme) = options.color_scheme.as_deref() {
+            self.dark_scheme = Some(scheme == "dark");
+        }
+        if let Some(motion) = options.reduced_motion.as_deref() {
+            self.reduced_motion = Some(motion == "reduce");
+        }
+        self
+    }
     fn keyword(self, feature: Feature) -> Result<Option<(&'static str, bool)>, String> {
         let (value, positive, negative) = match feature {
             Feature::ForcedColors => (self.forced_colors, "active", "none"),
@@ -390,6 +399,28 @@ fn compare(left: f64, right: f64, operator: Compare) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn emulation_overrides_native_media_preferences_without_changing_defaults() {
+        let base = HostMedia {
+            dark_scheme: Some(false),
+            reduced_motion: Some(false),
+            ..Default::default()
+        };
+        let options = crate::browser_emulation::BrowserEmulation {
+            color_scheme: Some("dark".into()),
+            reduced_motion: Some("reduce".into()),
+        };
+        let emulated = base.emulated(&options);
+        assert_eq!(
+            emulated.keyword(Feature::PrefersColorScheme).unwrap(),
+            Some(("dark", true))
+        );
+        assert_eq!(
+            emulated.keyword(Feature::PrefersReducedMotion).unwrap(),
+            Some(("reduce", true))
+        );
+        assert!(base.emulated(&Default::default()) == base);
+    }
     fn viewport() -> ViewportMedia {
         ViewportMedia {
             width: 800.0,

@@ -16,6 +16,7 @@ mod audio_dsp;
 mod audio_effects;
 mod audio_fft;
 mod audio_timeline;
+mod browser_emulation;
 mod compression_dictionary_dom;
 mod context_ownership;
 mod crypto_backend;

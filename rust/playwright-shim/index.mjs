@@ -2915,7 +2915,20 @@ class Page {
   async setExtraHTTPHeaders(headers) {
     this._context._headers = { ...headers };
   }
-  async emulateMedia() {}
+  _configureNative() {
+    native.requestStateConfigure(
+      this._requestState,
+      JSON.stringify({
+        colorScheme: this._media?.colorScheme ?? this._context._colorScheme,
+        reducedMotion: this._media?.reducedMotion ?? this._context._reducedMotion,
+      }),
+    );
+  }
+  async emulateMedia(options = {}) {
+    this._media = { ...this._media, ...options };
+    this._configureNative();
+    if (this._live) await this._redrain();
+  }
   async bringToFront() {}
   async addStyleTag() {}
   async addScriptTag(opts = {}) {
@@ -3570,6 +3583,7 @@ class BrowserContext {
     this._httpCredentials = merged.httpCredentials ?? null;
     this._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
     this._colorScheme = merged.colorScheme ?? null;
+    this._reducedMotion = merged.reducedMotion ?? null;
     this._permissions = merged.permissions ?? [];
     this._geolocation = merged.geolocation ?? null;
     this._timezoneId = merged.timezoneId ?? null;
@@ -3579,6 +3593,14 @@ class BrowserContext {
     this._bindings = new Map();
     this._pages = [];
     this._listeners = new Map();
+    if (this._colorScheme || this._reducedMotion) this._configureNative();
+  }
+  _configureNative() {
+    native.requestStateConfigure(
+      this._requestState,
+      JSON.stringify({ colorScheme: this._colorScheme, reducedMotion: this._reducedMotion }),
+    );
+    for (const page of this._pages) if (!page._closed) page._configureNative();
   }
   _headersJson() {
     // Merge the context User-Agent into the request headers (so goto/request fetches

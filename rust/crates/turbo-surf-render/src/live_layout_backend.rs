@@ -191,7 +191,23 @@ fn viewport<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
 ) -> Result<std::rc::Rc<Viewport>, String> {
-    viewport_at_depth(scope, context, 0)
+    let value = viewport_at_depth(scope, context, 0)?;
+    Ok(emulated_viewport(scope, value))
+}
+
+fn emulated_viewport(
+    scope: &mut v8::PinScope,
+    value: std::rc::Rc<Viewport>,
+) -> std::rc::Rc<Viewport> {
+    let state = deno_core::JsRuntime::op_state_from(scope);
+    let host = state
+        .borrow()
+        .borrow::<crate::runtime::BrowserStorage>()
+        .with_emulation(|options| value.host.emulated(options));
+    if host == value.host {
+        return value;
+    }
+    std::rc::Rc::new(Viewport { host, ..*value })
 }
 
 fn viewport_at_depth<'s>(
@@ -234,6 +250,7 @@ fn frame_content_size<'s>(
         .owner_context
         .ok_or("frame layout owner unavailable")?;
     let viewport = viewport_at_depth(scope, context, depth)?;
+    let viewport = emulated_viewport(scope, viewport);
     let view = resolve(scope, &mut input, viewport.as_ref())?;
     let id = crate::live_layout::source_id(input.tree.document_id(), input.handle);
     let source = view

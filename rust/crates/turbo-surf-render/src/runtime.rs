@@ -7297,6 +7297,7 @@ pub struct BrowserStorage(
     turbo_surf_core::http_cache::HttpCache,
     std::sync::Arc<StorageTab>,
     crate::csp_reporting::Reporter,
+    std::sync::Arc<std::sync::RwLock<crate::browser_emulation::BrowserEmulation>>,
 );
 impl Default for BrowserStorage {
     fn default() -> Self {
@@ -7306,10 +7307,36 @@ impl Default for BrowserStorage {
             turbo_surf_core::http_cache::HttpCache::default(),
             std::sync::Arc::new(StorageTab { areas, id: 0 }),
             crate::csp_reporting::Reporter::default(),
+            Default::default(),
         )
     }
 }
 impl BrowserStorage {
+    pub fn configure_emulation(&self, json: &str) -> Result<(), String> {
+        let options: crate::browser_emulation::BrowserEmulation =
+            serde_json::from_str(json).map_err(|e| e.to_string())?;
+        options.validate()?;
+        *self
+            .4
+            .write()
+            .map_err(|_| "Context preferences unavailable")? = options;
+        Ok(())
+    }
+    pub(crate) fn with_emulation<R>(
+        &self,
+        read: impl FnOnce(&crate::browser_emulation::BrowserEmulation) -> R,
+    ) -> R {
+        match self.4.read() {
+            Ok(options) => read(&options),
+            Err(_) => read(&Default::default()),
+        }
+    }
+    pub(crate) fn emulation(&self) -> crate::browser_emulation::BrowserEmulation {
+        self.4
+            .read()
+            .map(|options| options.clone())
+            .unwrap_or_default()
+    }
     /// Share the profile's native HTTP cache with host navigation/resource callers.
     pub fn http_cache(&self) -> turbo_surf_core::http_cache::HttpCache {
         self.1.clone()
@@ -7333,6 +7360,7 @@ impl BrowserStorage {
                 id,
             }),
             self.3.clone(),
+            std::sync::Arc::new(std::sync::RwLock::new(self.emulation())),
         ))
     }
     /// Storage side effects for actual native HTTP response headers. This

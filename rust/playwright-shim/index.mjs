@@ -3663,8 +3663,8 @@ function makeTestFn(baseDefs, extDefs = {}) {
     wireFixtureHooks(open);
     afterEach(async () => fn(_current?.arg ?? {}));
   };
-  run.beforeAll = (fn) => before(async () => fn({}));
-  run.afterAll = (fn) => after(async () => fn({}));
+  run.beforeAll = (fn) => before(async () => fn({ browser: browserStub }));
+  run.afterAll = (fn) => after(async () => fn({ browser: browserStub }));
   // A new fixture name extends; reusing a base/ext name OVERRIDES it but the
   // override still sees the prior value (Playwright's `page: ({page}) => …`).
   run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more });

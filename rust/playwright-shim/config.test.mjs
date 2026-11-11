@@ -425,3 +425,14 @@ test("project dependencies reject missing projects and cycles", () => {
   const other = { name: "other", dependencies: ["setup"] };
   assert.deepEqual(orderProjects([app, other, setup], ["app", "other"]), [setup, app, other]);
 });
+
+test("CLI rejects no matching tests unless pass-with-no-tests is explicit", async () => {
+  const root = tmp();
+  const config = join(root, "empty.config.mjs");
+  writeFileSync(config, "export default {testMatch:'missing.spec.mjs'};");
+  const empty = await runCli(["--config", config], root);
+  assert.equal(empty.code, 1, empty.stdout + empty.stderr);
+  assert.match(empty.stdout + empty.stderr, /No tests found/);
+  const allowed = await runCli(["--config", config, "--pass-with-no-tests"], root);
+  assert.equal(allowed.code, 0, allowed.stdout + allowed.stderr);
+});

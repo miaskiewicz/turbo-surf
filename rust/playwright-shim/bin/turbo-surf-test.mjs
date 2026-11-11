@@ -29,6 +29,7 @@ export async function run(argv) {
       project: { type: "string", multiple: true },
       reporter: { type: "string" },
       "list-only": { type: "boolean" },
+      "pass-with-no-tests": { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -52,6 +53,7 @@ export async function run(argv) {
     console.log(`[webServer] ${m}`),
   );
   let failed = 0;
+  let matchedFiles = 0;
   const failedProjects = new Set();
   try {
     for (const project of chosen) {
@@ -67,6 +69,7 @@ export async function run(argv) {
         console.log(`[${project.name}] no test files matched`);
         continue;
       }
+      matchedFiles += files.length;
       if (values["list-only"]) {
         for (const f of files) console.log(`[${project.name}] ${f}`);
         continue;
@@ -79,6 +82,10 @@ export async function run(argv) {
     }
   } finally {
     await stopWebServers(webHandles);
+  }
+  if (!matchedFiles && !values["pass-with-no-tests"]) {
+    console.error("turbo-surf-test: No tests found");
+    return 1;
   }
   return failed ? 1 : 0;
 }
@@ -186,6 +193,7 @@ usage: turbo-surf-test [options] [files...]
       --project <name>   run only projects with this name (repeatable)
       --reporter <name>  list | spec | tap | dot | html (overrides config)
       --list-only        print the files that would run, don't run them
+      --pass-with-no-tests  allow a successful run with no matching files
   -h, --help             show this help
 `);
 }

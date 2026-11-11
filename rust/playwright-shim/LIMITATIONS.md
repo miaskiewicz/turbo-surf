@@ -186,7 +186,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | Method | Status | Notes |
 |---|---|---|
 | `newPage`, `pages`, `cookies`, `addCookies`, `clearCookies`, `storageState`, `addInitScript`, `setExtraHTTPHeaders`, `browser`, `request`, `close` | ✅ | |
-| `grantPermissions`, `clearPermissions`, `setGeolocation`, `setOffline`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
+| `grantPermissions`, `clearPermissions`, `setGeolocation`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
+| `setOffline` | ❌ | Enabling offline emulation (including `newContext({ offline: true })`) rejects with a clear unsupported error; online mode is allowed. |
 | `tracing`, `recordVideo`, `use.trace`, `use.video` | ❌ | Tracing methods and enabled recording options reject with a clear no-browser engine error. Explicit trace/video `off` modes are accepted; `page.video()` returns null without recording. |
 | `route`, `unroute`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` and `page.routeFromHAR` work — see the Page table. |
 | `route`, `unroute`, `routeFromHAR`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |

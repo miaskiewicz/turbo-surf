@@ -148,3 +148,18 @@ test("a missed web-first assertion hydrates default navigation while commit stay
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("unsupported offline emulation rejects instead of silently leaving networking online", async () => {
+  const context = new shim.BrowserContext();
+  try {
+    await assert.rejects(context.setOffline(true), /offline emulation.*unavailable/i);
+    await context.setOffline(false);
+    assert.equal(context._offline, false);
+    assert.throws(
+      () => new shim.BrowserContext({ offline: true }),
+      /offline emulation.*unavailable/i,
+    );
+  } finally {
+    await context.close();
+  }
+});

@@ -656,14 +656,14 @@ test("BrowserContext: pages / cookies / storageState / addCookies / clearCookies
   assert.equal((await ctx.cookies()).length, 0);
 });
 
-test("BrowserContext: browser()/request() + no-op permission/geo/offline", async () => {
+test("BrowserContext: browser()/request() + permission/geo and honest offline rejection", async () => {
   const ctx = new BrowserContext();
   assert.equal(ctx.browser().version(), "turbo-surf");
   assert.ok(ctx.request);
   await ctx.grantPermissions(["clipboard-read"]);
   await ctx.clearPermissions();
   await ctx.setGeolocation({ latitude: 0, longitude: 0 });
-  await ctx.setOffline(true);
+  await assert.rejects(ctx.setOffline(true), /offline emulation.*unavailable/i);
   await ctx.close();
 });
 

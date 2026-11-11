@@ -42,6 +42,13 @@ const PIXEL = "no-browser engine (no rendering surface)";
 const INPUT = "no synthetic input devices (static DOM, no pointer/keyboard hardware)";
 const NETIO = "no in-process network interception";
 
+function requireOfflineSupport(offline) {
+  if (offline)
+    throw new Error(
+      "turbo-surf: offline emulation is unavailable in the native context network layer",
+    );
+}
+
 function cookieMatchesUrl(cookie, url) {
   const domain = String(cookie.domain ?? "")
     .toLowerCase()
@@ -3813,6 +3820,7 @@ class BrowserContext {
         UNSUPPORTED(`tracing.${method}`, "no-browser engine has no Playwright trace recorder"),
       ]),
     );
+    requireOfflineSupport(merged.offline);
     const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
@@ -3926,7 +3934,10 @@ class BrowserContext {
   async grantPermissions() {}
   async clearPermissions() {}
   async setGeolocation() {}
-  async setOffline() {}
+  async setOffline(offline) {
+    requireOfflineSupport(offline);
+    this._offline = false;
+  }
   on(event, fn) {
     const arr = this._listeners.get(event) ?? [];
     arr.push(fn);

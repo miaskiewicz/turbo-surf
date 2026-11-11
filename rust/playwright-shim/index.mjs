@@ -321,6 +321,7 @@ class Locator {
   constructor(page, resolve, opts = {}) {
     this._page = page;
     this._resolve = resolve;
+    this._count = opts.count ?? null;
     this._index = opts.index ?? null;
     this._filter = opts.filter ?? null; // (match) => boolean, applied in JS
     // getByRole/getByText/getByLabel carry {kind,value,name} so a LIVE dispatch can
@@ -384,6 +385,7 @@ class Locator {
     }
     const loc = new Locator(this._page, this._resolve, {
       ...opts,
+      count: this._count,
       getBy: this._getBy,
       testId: this._testId,
       scope: this._scope,
@@ -498,6 +500,12 @@ class Locator {
 
   // --- counts / text (from the single resolve payload) ---
   async count() {
+    if (this._count && !this._filter && this._scope.length === 0) {
+      const count = this._count(this._page._html);
+      if (this._index == null) return count;
+      const index = this._index < 0 ? count + this._index : this._index;
+      return Number.isInteger(index) && index >= 0 && index < count ? 1 : 0;
+    }
     return this._all().length;
   }
   async all() {
@@ -1274,7 +1282,9 @@ class Frame {
   }
   // The locator surface mirrors Page's — the Locator reads from THIS frame's `_html`.
   _locFromSelector(selector, mode = "auto") {
-    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)));
+    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)), {
+      count: (h) => native.queryCount(h, selector, mode),
+    });
     loc._selector = selector;
     return loc;
   }
@@ -2020,7 +2030,9 @@ class Page {
 
   // --- locators ---
   _locFromSelector(selector, mode = "auto") {
-    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)));
+    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)), {
+      count: (h) => native.queryCount(h, selector, mode),
+    });
     loc._selector = selector; // enables CSS-concat nesting
     return loc;
   }

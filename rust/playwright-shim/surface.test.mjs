@@ -2009,3 +2009,21 @@ test("successive first last and nth select the existing singleton (#473)", async
   assert.equal(await page.locator("body").getAttribute("data-clicked"), "two");
   await page.close();
 });
+
+test("selector counts avoid materializing match payloads (#461)", async () => {
+  const page = await fresh();
+  const loc = page.locator("li");
+  loc._resolve = () => {
+    throw new Error("count must not serialize match payloads");
+  };
+  assert.equal(await loc.count(), 3);
+  assert.equal(await loc.first().count(), 1);
+  assert.equal(await loc.last().count(), 1);
+  assert.equal(await loc.nth(3).count(), 0);
+  assert.equal(await loc.nth(-4).count(), 0);
+  assert.equal(await loc.nth(0.5).count(), 0);
+  assert.equal(await page._locFromSelector("//li", "xpath").count(), 3);
+  assert.equal(await page.locator("li").filter({ hasText: "one" }).count(), 1);
+  assert.equal(await page.locator("#missing").count(), 0);
+  await page.close();
+});

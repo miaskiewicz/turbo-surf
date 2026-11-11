@@ -303,6 +303,18 @@ pub fn query(html: String, selector: String, kind: Option<String>) -> String {
     to_json_string(&view::query(&tree, tree.root(), &selector, ty))
 }
 
+/// Match count without serialized node HTML or text.
+#[napi]
+pub fn query_count(html: String, selector: String, kind: Option<String>) -> u32 {
+    let tree = parsed(&html);
+    let ty = match kind.as_deref() {
+        Some("css") => QueryType::Css,
+        Some("xpath") => QueryType::Xpath,
+        _ => QueryType::Auto,
+    };
+    view::query::query_count(&tree, tree.root(), &selector, ty) as u32
+}
+
 /// Locate by `kind` ("role" | "text" | "label") → JSON `[{ node, text }]`.
 /// `name` filters a role match by accessible name (substring).
 #[napi]

@@ -88,6 +88,17 @@ pub fn query(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> Vec<Ma
     }
 }
 
+/// Count matches without materializing HTML or text payloads.
+pub fn query_count(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> usize {
+    match resolve_type(selector, ty) {
+        QueryType::Xpath => match evaluate(tree, root, selector) {
+            XPath::Values(values) => values.len(),
+            XPath::Nodes(nodes) => nodes.len(),
+        },
+        _ => tree.query_selector_all(selector).len(),
+    }
+}
+
 /// First match, or `None`.
 pub fn query_first(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> Option<Match> {
     query(tree, root, selector, ty).into_iter().next()
@@ -96,6 +107,22 @@ pub fn query_first(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_matches_queries_without_describing_results() {
+        let tree = Tree::parse("<a href='/x'>one</a><a href='/y'>two</a>");
+        for (selector, ty) in [
+            ("a", QueryType::Css),
+            ("//a", QueryType::Auto),
+            ("//a/@href", QueryType::Xpath),
+            (".absent", QueryType::Auto),
+        ] {
+            assert_eq!(
+                query_count(&tree, tree.root(), selector, ty),
+                query(&tree, tree.root(), selector, ty).len()
+            );
+        }
+    }
 
     #[test]
     fn auto_detects_css_vs_xpath() {

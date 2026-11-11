@@ -965,9 +965,9 @@ class Locator {
     return this.click();
   }
   async press(key) {
-    // Enter on a control submits its owning form (the only no-JS key effect).
-    if (key === "Enter") return this.click();
-    return undefined;
+    await this._page._ensureLive();
+    await this.focus();
+    return (this._page.keyboard ?? makeKeyboard(this._page)).press(key);
   }
   async focus() {
     if (this._canDriveLive) return void (await this._driveLive("focus"));

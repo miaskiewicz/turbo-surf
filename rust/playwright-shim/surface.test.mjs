@@ -4245,3 +4245,27 @@ test("Live locator CSS reads preserve rules inserted through CSSOM (#352)", asyn
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Locator submit clicks perform one native form activation (#348)", async () => {
+  let requests = 0;
+  const server = createServer((req, res) => {
+    requests++;
+    return res.end(
+      '<form><button id=submit>Submit</button><button id=canceled onclick="event.preventDefault()">Canceled</button></form><script>globalThis.submits=0;document.querySelector("form").addEventListener("submit",event=>{event.preventDefault();submits++})</script>',
+    );
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await page.locator("#submit").click();
+    assert.equal(await page.evaluate(() => globalThis.submits), 1);
+    assert.equal(requests, 1, "prevented submit must not make a fallback network request");
+    await page.locator("#canceled").click();
+    assert.equal(await page.evaluate(() => globalThis.submits), 1);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

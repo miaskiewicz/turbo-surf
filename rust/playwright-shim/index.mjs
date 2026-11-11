@@ -921,14 +921,15 @@ class Locator {
       if (opts.button && opts.button !== "left") return;
       // A JS handler that navigated changed the URL (SPA router / form POST + redirect).
       // If the URL is unchanged AND the app didn't preventDefault, the click hit a plain
-      // <a>/<form> whose browser default action our event dispatch doesn't perform —
-      // follow the static intent (anchor navigate / form POST). For a JS button (Inert
+      // anchor whose navigation still needs the static intent fallback —
+      // follow that anchor intent. Native form activation already owns submit
+      // events, validation and cancellation. For a JS button (Inert
       // intent) or a handled click (PREVENTED) the dispatch already did the work.
       if (this._page._url === urlBefore && r !== "PREVENTED") {
         const n = this._node();
         if (n != null) {
           const intent = JSON.parse(native.clickNode(this._page._html, n, this._page._url));
-          if (intent.action !== "inert") return this._page._followIntent(intent);
+          if (intent.action === "navigate") return this._page._followIntent(intent);
         }
       }
       return;
@@ -1405,17 +1406,6 @@ function interactionScript(selector, index, kind, value) {
     const clickEv = new MouseEvent(button === 0 ? "click" : "auxclick", o);
     tgt.dispatchEvent(clickEv);
     if (button === 0 && o.detail === 2) tgt.dispatchEvent(new MouseEvent("dblclick", o));
-    // Browser default action of clicking a submit control: fire the form's submit
-    // event (React's onSubmit is delegated). Our dispatch has no default action, so do
-    // it explicitly — unless the click was preventDefault'd.
-    if (button === 0 && !clickEv.defaultPrevented) {
-      let f = null;
-      for (let p = el; p; p = p.parentElement) { if (p.tagName === "FORM") { f = p; break; } }
-      const ty = (el.getAttribute && (el.getAttribute("type") || "")).toLowerCase();
-      const submits = el.tagName === "BUTTON" ? ty !== "button" && ty !== "reset"
-        : el.tagName === "INPUT" && (ty === "submit" || ty === "image");
-      if (f && submits) f.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    }
     // Report whether the app handled the click (preventDefault). If it did, the shim
     // must NOT also perform the browser default action (e.g. navigate an <a href="#">
     // whose React onClick toggles state) — that would reload and wipe the new state.

@@ -1784,12 +1784,12 @@ class Page {
 
   async _navigate(url, method, body) {
     if (this._closed) throw new Error("page is closed");
-    this._imageCache = undefined;
-    this._closeSession(); // a fresh document — discard the prior live app
     // `about:blank` (and other about: URLs) are not network resources — a browser shows an
     // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
     // blank page instead of a "builder error for url (about:blank)" from the net layer.
     if (/^about:/i.test(url)) {
+      this._imageCache = undefined;
+      this._closeSession();
       this._html = "<html><head></head><body></body></html>";
       this._url = url;
       this._documentResponse = { status: 0, referrer: "", headers: [] };
@@ -1816,6 +1816,12 @@ class Page {
         }),
       ),
     );
+    if (r.status === 204 || r.status === 205) {
+      this._cookies = r.cookies;
+      throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
+    }
+    this._imageCache = undefined;
+    this._closeSession(); // only a committed response replaces the active document
     this._html = r.html;
     this._documentResponse = {
       status: r.status,
@@ -1832,11 +1838,12 @@ class Page {
     return makeResponse(r);
   }
   async goto(url, opts) {
-    if (this._url !== "about:blank") this._history.push(this._url);
-    this._fwd = []; // a fresh navigation invalidates the forward stack
+    const previous = this._url;
     this._navHops = 0; // user navigation — reset the redirect-follow budget
     this._autoHydrate = opts?.waitUntil !== "commit"; // 'commit' = inspect raw shell
     const resp = await this._navigate(this._resolveUrl(url));
+    if (previous !== "about:blank") this._history.push(previous);
+    this._fwd = []; // a committed navigation invalidates the forward stack
     // `waitUntil:'networkidle'` (or a later waitForLoadState('networkidle')) opens a LIVE
     // session: hydrate the app to quiescence so an SPA's client-rendered content (forms,
     // dashboards) appears, and keep it mounted so clicks/fills dispatch real events into
@@ -1871,16 +1878,22 @@ class Page {
     return resp;
   }
   async goBack() {
-    const prev = this._history.pop();
+    const prev = this._history.at(-1);
     if (prev == null) return null;
-    this._fwd.push(this._url);
-    return this._navigate(prev);
+    const current = this._url;
+    const response = await this._navigate(prev);
+    this._history.pop();
+    this._fwd.push(current);
+    return response;
   }
   async goForward() {
-    const next = this._fwd.pop();
+    const next = this._fwd.at(-1);
     if (next == null) return null;
-    this._history.push(this._url);
-    return this._navigate(next);
+    const current = this._url;
+    const response = await this._navigate(next);
+    this._fwd.pop();
+    this._history.push(current);
+    return response;
   }
 
   url() {

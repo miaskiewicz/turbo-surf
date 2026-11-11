@@ -2357,3 +2357,31 @@ pw("Builtin request fixture supplies an API context (#329)", async ({ request: a
   assert.equal(typeof api.post, "function");
   assert.equal(api.newContext, undefined);
 });
+test("no-content navigation retains the active document and history (#428)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url.startsWith("/empty")) {
+      res.writeHead(Number(req.url.slice(6)));
+      res.end();
+      return;
+    }
+    res.end(
+      '<p id="state">original</p><script>document.querySelector("#state").textContent="hydrated"</script>',
+    );
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(`${base}/a`, { waitUntil: "networkidle" });
+    for (const status of [204, 205]) {
+      const session = page._session;
+      await assert.rejects(page.goto(`${base}/empty${status}`), /ERR_ABORTED/);
+      assert.equal(page.url(), `${base}/a`);
+      assert.equal(await page.locator("#state").textContent(), "hydrated");
+      assert.equal(page._session, session);
+      assert.equal(await page.goBack(), null);
+    }
+  } finally {
+    await page.close();
+    await new Promise((done) => server.close(done));
+  }
+});

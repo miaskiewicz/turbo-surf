@@ -3144,32 +3144,36 @@ class LocatorExpect extends BaseExpect {
     );
   }
   async toHaveCount(n, opts) {
-    const pass = await this._retry(async () => (await this._v.count()) === n, opts);
-    this._ok(pass, `expected count ${n}, got ${await this._v.count()}`);
+    let got;
+    const pass = await this._retry(async () => {
+      got = await this._v.count();
+      return got === n;
+    }, opts);
+    this._ok(pass, `expected count ${n}, got ${got}`);
   }
   async toHaveText(s, opts) {
+    let got;
     const test = () => {
-      const t = normWs(this._snap().text ?? "");
+      const t = (got = normWs(this._snap().text ?? ""));
       return s instanceof RegExp ? s.test(t) : t === normWs(s);
     };
-    this._ok(
-      await this._retry(test, opts),
-      `expected text ${s}, got "${normWs(this._snap().text ?? "")}"`,
-    );
+    this._ok(await this._retry(test, opts), `expected text ${s}, got "${got}"`);
   }
   async toContainText(s, opts) {
+    let got;
     const test = () => {
-      const t = normWs(this._snap().text ?? "");
+      const t = (got = normWs(this._snap().text ?? ""));
       return s instanceof RegExp ? s.test(t) : t.includes(normWs(s));
     };
-    this._ok(
-      await this._retry(test, opts),
-      `expected text to contain "${s}", got "${normWs(this._snap().text ?? "")}"`,
-    );
+    this._ok(await this._retry(test, opts), `expected text to contain "${s}", got "${got}"`);
   }
   async toHaveValue(value, opts) {
-    const pass = await this._retry(() => matchText(value, this._snap().value ?? ""), opts);
-    this._ok(pass, `expected value ${value}, got "${this._snap().value ?? ""}"`);
+    let got;
+    const pass = await this._retry(() => {
+      got = this._snap().value ?? "";
+      return matchText(value, got);
+    }, opts);
+    this._ok(pass, `expected value ${value}, got "${got}"`);
   }
   async toHaveValues(values) {
     const got = await this._v.selectedValues();
@@ -3191,15 +3195,13 @@ class LocatorExpect extends BaseExpect {
     this._ok(matchText(d, got), `expected accessible description ${d}, got "${got}"`);
   }
   async toHaveAttribute(name, value, opts) {
+    let got;
     const test = async () => {
-      const got = await this._v.getAttribute(name);
+      got = await this._v.getAttribute(name);
       if (value === undefined) return got !== null;
       return value instanceof RegExp ? value.test(got ?? "") : got === value;
     };
-    this._ok(
-      await this._retry(test, opts),
-      `expected attribute ${name}=${value}, got ${await this._v.getAttribute(name)}`,
-    );
+    this._ok(await this._retry(test, opts), `expected attribute ${name}=${value}, got ${got}`);
   }
   async toHaveClass(cls) {
     const got = (await this._v.getAttribute("class")) ?? "";

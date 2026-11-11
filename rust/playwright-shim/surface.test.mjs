@@ -1784,3 +1784,27 @@ test("page.exposeFunction after goto is callable in the current session", async 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("successful locator assertions read each observed value once (#487)", async () => {
+  const page = await fresh();
+  for (const [method, args, reader] of [
+    ["toHaveCount", [3], "count"],
+    ["toHaveText", ["one"], "_snapshot"],
+    ["toContainText", ["on"], "_snapshot"],
+    ["toHaveValue", ["init"], "_snapshot"],
+    ["toHaveAttribute", ["id", "name"], "getAttribute"],
+  ]) {
+    const loc = page.locator(
+      method === "toHaveCount" ? "li" : method.includes("Text") ? "li:first-child" : "#name",
+    );
+    let reads = 0;
+    const original = loc[reader];
+    loc[reader] = function (...args) {
+      reads++;
+      return original.apply(this, args);
+    };
+    await expect(loc)[method](...args);
+    assert.equal(reads, 1, method);
+  }
+  await page.close();
+});

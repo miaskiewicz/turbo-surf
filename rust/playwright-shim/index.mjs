@@ -278,29 +278,21 @@ function buildRouteInitScript(routes) {
   })();`;
 }
 
-// --- page.exposeFunction / exposeBinding (fire-and-forget) ------------------
-// Install a persistent JS→host binding that survives navigation. Since the
-// deno_core isolate runs page JS synchronously inside one `liveEvalEngine`
-// call (no mid-eval callback into Node), the injected stub records each call
-// in a page-global queue and returns `Promise.resolve()`. The shim drains the
-// queue after every live interaction (`_sessionEval` / `evaluate` return,
-// session open) and invokes the Node host handlers then. This covers the
-// common instrumentation case (`captured.push(payload)` from a stubbed
-// telemetry sink, a progress counter, a test-only RPC). Host return values
-// are NOT surfaced back to in-page JS in this release — the page sees
-// `undefined` — because resolving an in-flight promise mid-eval would need a
-// napi hook into Node, tracked in the turbo-dom-browser-env roadmap.
+// Persistent exposed functions queue serialized calls; Node settles the matching
+// guest promise after invoking the host handler between isolate evaluations.
 function buildExposeInitScript(names) {
   if (!names || !names.length) return "";
   const list = JSON.stringify(names);
   return `(() => {
-    const bag = (globalThis.__tsExpose = globalThis.__tsExpose || { q: [], n: 0 });
+    const bag = (globalThis.__tsExpose = globalThis.__tsExpose || { q: [], n: 0, pending: new Map() });
     const define = (name) => {
       if (typeof globalThis[name] === "function" && globalThis[name].__ts) return;
       const fn = function (...args) {
         const id = ++bag.n;
-        try { bag.q.push({ id, name, args }); } catch (_e) { /* queue full */ }
-        return Promise.resolve(undefined);
+        return new Promise((resolve, reject) => {
+          bag.pending.set(id, { resolve, reject });
+          bag.q.push({ id, name, args });
+        });
       };
       try { Object.defineProperty(fn, "__ts", { value: true }); } catch (_e) {}
       try {
@@ -1677,21 +1669,10 @@ class Page {
     return out;
   }
 
-  // Drain queued binding calls from the isolate and dispatch to Node handlers.
-  // Called after every live interaction. Fire-and-forget: a host-side throw
-  // is swallowed with a warning so one bad handler can't break the page.
-  async _drainBindings() {
-    if (this._session == null || this._draining) return;
-    const handlers = this._mergedBindings();
-    if (handlers.size === 0) return;
-    this._draining = true;
-    try {
-      // Init scripts run per-frame, so each iframe realm keeps its own
-      // __tsExpose.q. Walk the frame tree and splice every realm's queue so
-      // iframe-scoped binding calls aren't lost (turbo-surf#285).
-      const raw = await native.liveEvalEngine(
-        this._session,
-        `(() => {
+  async _takeBindingCalls() {
+    const raw = await native.liveEvalEngine(
+      this._session,
+      `(() => {
           const out = [];
           const seen = new Set();
           const walk = (w, framePath = []) => {
@@ -1714,42 +1695,118 @@ class Page {
           walk(globalThis);
           globalThis.__RESULT = JSON.stringify(out);
         })();`,
-      );
-      if (!raw) return;
-      let calls;
-      try {
-        calls = JSON.parse(raw);
-      } catch {
-        return;
-      }
-      for (const call of calls) {
-        const entry = handlers.get(call.name);
-        if (!entry) continue;
-        const args = Array.isArray(call.args) ? call.args : [];
-        try {
-          if (entry.isBinding) {
-            const path = call.framePath ?? [];
-            this._syncFrames();
-            const frame =
-              path.length === 0
-                ? this.mainFrame()
-                : this._frames.find(
-                    (candidate) => JSON.stringify(candidate._path) === JSON.stringify(path),
-                  );
-            if (!frame) throw new Error("Exposed binding caller frame is detached");
-            await entry.fn({ page: this, context: this._context, frame }, ...args);
-          } else {
-            await entry.fn(...args);
-          }
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn(`turbo-surf: exposed binding "${call.name}" threw —`, err?.message ?? err);
-        }
-      }
+    );
+    if (!raw) return [];
+    let calls;
+    try {
+      calls = JSON.parse(raw);
     } catch {
-      /* isolate gone / eval failed — nothing to drain */
+      return [];
+    }
+    return calls;
+  }
+  async _invokeBindingCall(call, entry) {
+    const args = Array.isArray(call.args) ? call.args : [];
+    if (!entry.isBinding) return entry.fn(...args);
+    const path = call.framePath ?? [];
+    this._syncFrames();
+    const frame =
+      path.length === 0
+        ? this.mainFrame()
+        : this._frames.find(
+            (candidate) => JSON.stringify(candidate._path) === JSON.stringify(path),
+          );
+    if (!frame) throw new Error("Exposed binding caller frame is detached");
+    return entry.fn({ page: this, context: this._context, frame }, ...args);
+  }
+  async _settleBindingCall(call, entry) {
+    let payload;
+    try {
+      const value = await this._invokeBindingCall(call, entry);
+      payload = JSON.stringify({ value });
+    } catch (error) {
+      payload = JSON.stringify({
+        error: { name: String(error?.name ?? "Error"), message: String(error?.message ?? error) },
+      });
+    }
+    await native.liveEvalEngine(
+      this._session,
+      `(() => {
+      let realm = globalThis;
+      for (const index of ${JSON.stringify(call.framePath ?? [])}) realm = realm.frames[index];
+      const bag = realm.__tsExpose, pending = bag?.pending?.get(${call.id});
+      if (!pending) return;
+      bag.pending.delete(${call.id});
+      const result = ${payload};
+      if (result.error) {
+        const error = new realm.Error(result.error.message); error.name = result.error.name;
+        pending.reject(error);
+      } else pending.resolve(result.value);
+    })()`,
+    );
+  }
+  async _drainBindings() {
+    if (this._session == null || this._draining) return;
+    const handlers = this._mergedBindings();
+    if (handlers.size === 0) return;
+    this._draining = true;
+    let changed = false;
+    try {
+      for (let round = 0; round < 100; round++) {
+        const calls = await this._takeBindingCalls();
+        if (!calls.length) break;
+        changed = true;
+        for (const call of calls) {
+          const entry = handlers.get(call.name);
+          if (entry) await this._settleBindingCall(call, entry);
+        }
+        if (round === 99) throw new Error("Exposed binding call budget exhausted");
+      }
+      if (changed) await this._refreshFromSession();
     } finally {
       this._draining = false;
+    }
+  }
+  async _evaluateWithBindings(body) {
+    const id = (this._bindingEvalId = (this._bindingEvalId ?? 0) + 1);
+    await native.liveEvalEngine(
+      this._session,
+      `(() => {
+      const bag = globalThis.__tsExpose;
+      bag.evaluations ??= new Map();
+      bag.evaluations.set(${id}, null);
+      Promise.resolve().then(() => (${body})).then(
+        value => {
+          try { bag.evaluations.set(${id}, JSON.stringify({value})); }
+          catch (error) { bag.evaluations.set(${id}, JSON.stringify({error: String(error.message)})); }
+        },
+        error => bag.evaluations.set(${id}, JSON.stringify({error: String(error.message)})));
+    })()`,
+    );
+    const deadline = Date.now() + 5000;
+    try {
+      while (Date.now() < deadline) {
+        await this._drainBindings();
+        const raw = await native.liveEvalEngine(
+          this._session,
+          `globalThis.__RESULT = globalThis.__tsExpose.evaluations.get(${id}) ?? '';`,
+        );
+        if (raw) {
+          const result = JSON.parse(raw);
+          if (result.error) throw new Error(result.error);
+          await this._refreshFromSession();
+          return result.value;
+        }
+        await this._redrain();
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      throw new Error("Evaluation waiting for exposed binding timed out");
+    } finally {
+      if (this._session != null)
+        await native.liveEvalEngine(
+          this._session,
+          `globalThis.__tsExpose?.evaluations?.delete(${id});`,
+        );
     }
   }
 
@@ -2159,6 +2216,7 @@ class Page {
     if (this._closed) throw new Error("page is closed");
     if (this._live) {
       const body = evalSource(script, arg);
+      if (this._mergedBindings().size) return this._evaluateWithBindings(body);
       // The native bridge returns a UTF-8 string, so round-trip structured values
       // through JSON with a sentinel prefix: primitives / arrays / plain objects
       // ride the JSON path; non-serializable results fall back to String(result).
@@ -2967,8 +3025,6 @@ class Page {
   // `globalThis[name]` on every live session open (so it survives page
   // reloads + in-page navigations); when a session is already up we also
   // define it now so the test can call it before the next navigation.
-  // Host return values are not surfaced to in-page JS — see
-  // buildExposeInitScript for the trade-off.
   async exposeBinding(name, fn, _options) {
     this._bindings = this._bindings ?? new Map();
     this._bindings.set(String(name), { fn, isBinding: true });

@@ -84,3 +84,28 @@ test("exposeBinding reports the originating main frame", async () => {
     await page.close();
   }
 });
+
+test("exposed functions settle guest promises with host values and errors", async () => {
+  const page = newPage();
+  try {
+    await page.exposeFunction("hostAdd", async (a, b) => a + b);
+    await page.exposeFunction("hostFail", () => {
+      throw new Error("host-marker");
+    });
+    await page.setContent('<p id="out">pending</p>');
+    await page._ensureLive();
+    await page._sessionEval(`(async () => {
+      const sum = await hostAdd(2, 3);
+      let failure;
+      try { await hostFail(); failure = 'resolved'; } catch (error) { failure = error.message; }
+      document.querySelector('#out').textContent = JSON.stringify({sum, failure});
+    })()`);
+    assert.deepEqual(JSON.parse(await page.locator("#out").textContent()), {
+      sum: 5,
+      failure: "host-marker",
+    });
+    assert.equal(await page.evaluate(async () => await hostAdd(7, 8)), 15);
+  } finally {
+    await page.close();
+  }
+});

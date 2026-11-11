@@ -66,3 +66,23 @@ test("live regex role names compile once and reset state for each candidate", ()
   assert.equal(JSON.parse(context.__RESULT).length, 101);
   assert.equal(context.compileCount, 1);
 });
+
+test("live role output does not linearly search all elements for every hit", () => {
+  const { context } = fixture();
+  vm.runInContext(
+    `
+    var indexSearches = 0;
+    var originalIndexOf = Array.prototype.indexOf;
+    Array.prototype.indexOf = function (...args) { indexSearches++; return originalIndexOf.apply(this, args); };
+    __G.tcGetBy('role', 'button');
+  `,
+    context,
+  );
+  const matches = JSON.parse(context.__RESULT);
+  assert.equal(matches.length, 101);
+  assert.deepEqual(
+    matches.map((hit) => hit.idx),
+    Array.from({ length: 101 }, (_, i) => i + 1),
+  );
+  assert.equal(context.indexSearches, 0);
+});

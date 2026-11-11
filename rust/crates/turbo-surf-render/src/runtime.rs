@@ -12256,7 +12256,8 @@ __G.tcGetBy = function (kind, value, name, root) {
   };
   const nameMatch = matcher(name);
   const valueMatch = matcher(value);
-  const idxOf = (el) => all.indexOf(el);
+  const indices = new Map(all.map((el, idx) => [el, idx]));
+  const idxOf = (el) => indices.get(el);
   let hits = [];
   if (kind === "role") {
     for (const el of all) if ((!inScope || inScope.has(el)) && roleOf(el) === value && nameMatch(accName(el))) hits.push(el);
@@ -12324,6 +12325,7 @@ __G.tcResolveScoped = function (scope, leaf) {
     cur = next;
   }
   const all = Array.prototype.slice.call(document.querySelectorAll("*"));
+  const indices = new Map(all.map((el, idx) => [el, idx]));
   if (leaf && leaf.selector) {
     let res = [];
     for (let ci = 0; ci < cur.length; ci++) {
@@ -12335,7 +12337,7 @@ __G.tcResolveScoped = function (scope, leaf) {
       }
       for (let mi = 0; mi < m.length; mi++) res.push(m[mi]);
     }
-    globalThis.__RESULT = JSON.stringify(res.map((el) => ({ idx: all.indexOf(el) })));
+    globalThis.__RESULT = JSON.stringify(res.map((el) => ({ idx: indices.get(el) })));
     return;
   }
   if (leaf && leaf.getBy) {

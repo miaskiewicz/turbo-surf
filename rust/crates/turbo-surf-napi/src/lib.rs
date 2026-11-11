@@ -354,11 +354,17 @@ pub fn get_by(
     // `idx` = the element's position in document order (querySelectorAll('*')), so the
     // Playwright shim can drive a getBy* match in the LIVE isolate by index (these
     // locators have no CSS selector to dispatch through).
-    let all: Vec<Handle> = tree.query_selector_all("*").iter().copied().collect();
+    let order: std::collections::HashMap<Handle, usize> = tree
+        .query_selector_all("*")
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, handle)| (handle, index))
+        .collect();
     let out: Vec<Value> = hits
         .iter()
         .map(|&h| {
-            json!({ "node": h.raw(), "text": view::text(&tree, h), "idx": all.iter().position(|&x| x == h) })
+            json!({ "node": h.raw(), "text": view::text(&tree, h), "idx": order.get(&h).copied() })
         })
         .collect();
     Value::Array(out).to_string()

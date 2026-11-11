@@ -5047,6 +5047,7 @@ fn op_frame_host_helper<'s>(
             | "prepareFrameAdoption"
             | "syncFrameConnections"
             | "frameSourceChanged"
+            | "replaceControlSelection"
     ) || arguments.length() > 2
     {
         return Err(JsErrorBox::type_error("Unknown private frame operation"));
@@ -12659,6 +12660,9 @@ __G.domSig = (() => {
     return frameApply(kind === 9 ? frameDocumentQuery : kind === 11 ? frameFragmentQuery : frameElementQuery, root, [selector]);
   };
   const frameDocument = node => frameApply(frameNodeType, node, []) === 9 ? node : frameApply(frameOwnerDocument, node, []);
+  // Keep the owning realm's native edit/range bookkeeping without exposing its namespace.
+  __G.replaceFrameControlSelection = (control, text) => ops.op_frame_host_helper(
+    frameDocument(control), "replaceControlSelection", [control, text]);
   const frameOwner = el => frameApply(frameDefaultView, frameApply(frameOwnerDocument, el, []), []);
   const frameConnected = el => frameApply(frameIsConnected, el, []);
   const visitFrameHosts = callback => frameApply(frameHostEach, frameHosts, [callback]);

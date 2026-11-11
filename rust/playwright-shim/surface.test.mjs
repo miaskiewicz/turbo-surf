@@ -4407,6 +4407,67 @@ test("Opacity-only sibling animations do not reject unrelated geometry (#345)", 
   }
 });
 
+test("frame locator typing uses canonical child selection and child event constructors", async () => {
+  const server = createServer((_request, response) =>
+    response.end(
+      `<input id="field" value="HOST"><iframe name="child" srcdoc='<input id="field" value="old">'></iframe>`,
+    ),
+  );
+  const base = await listen(server),
+    p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    const frame = p.frame("child");
+    await frame.evaluate(() => {
+      const field = document.querySelector("#field");
+      field.focus();
+      field.setSelectionRange(0, 0);
+      globalThis.range = field.createValueRange(1, 3);
+      globalThis.events = [];
+      globalThis.selects = 0;
+      field.addEventListener("select", () => selects++);
+      for (const type of ["keydown", "keypress", "beforeinput", "input", "keyup"])
+        field.addEventListener(type, (e) =>
+          events.push({
+            type,
+            data: e.data ?? null,
+            realm: e instanceof (type.endsWith("input") ? InputEvent : KeyboardEvent),
+          }),
+        );
+    });
+    await frame.locator("#field").pressSequentially("ab");
+    assert.deepEqual(
+      await frame.evaluate(() => ({
+        value: document.querySelector("#field").value,
+        caret: document.querySelector("#field").selectionStart,
+        start: range.startOffset,
+        end: range.endOffset,
+        events,
+        selects,
+      })),
+      {
+        value: "abold",
+        caret: 2,
+        start: 3,
+        end: 5,
+        selects: 0,
+        events: ["a", "b"].flatMap((data) => [
+          { type: "keydown", data: null, realm: true },
+          { type: "keypress", data: null, realm: true },
+          { type: "beforeinput", data, realm: true },
+          { type: "input", data, realm: true },
+          { type: "keyup", data: null, realm: true },
+        ]),
+      },
+    );
+    assert.equal(await p.evaluate(() => document.querySelector("#field").value), "HOST");
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("role locators resolve native headings table structure and image names (#377)", async () => {
   const page = newPage();
   await page.setContent(

@@ -1369,7 +1369,7 @@ function fillInteractionScript(pick, value) {
   } })();`;
 }
 
-function typingInteractionScript(pick, value) {
+function typingInteractionScript(pick, value, replaceSelection = "__tsNs.replaceControlSelection") {
   return `(() => { ${pick} else {
     el.focus();
     for (const char of ${value}) {
@@ -1379,7 +1379,7 @@ function typingInteractionScript(pick, value) {
           el.dispatchEvent(new KeyboardEvent('keypress', key))) {
         const edit = { data: char, inputType: 'insertText', bubbles: true, composed: true };
         if (el.dispatchEvent(new InputEvent('beforeinput', { ...edit, cancelable: true }))) {
-          if (!__tsNs.replaceControlSelection(el, char)) {
+          if (!${replaceSelection}(el, char)) {
             const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement : HTMLInputElement;
             const setter = Object.getOwnPropertyDescriptor(proto.prototype, 'value').set;
             setter.call(el, el.value + char);
@@ -1393,7 +1393,7 @@ function typingInteractionScript(pick, value) {
   } })();`;
 }
 
-function interactionScript(selector, index, kind, value) {
+function interactionScript(selector, index, kind, value, frameTyping = false) {
   const sel = JSON.stringify(selector);
   const idx = JSON.stringify(index);
   const val = JSON.stringify(value ?? "");
@@ -1401,7 +1401,12 @@ function interactionScript(selector, index, kind, value) {
     let __i = ${idx}; if (__i < 0) __i = els.length + __i;
     const el = els[__i];
     if (!el) { globalThis.__RESULT = "NO_MATCH"; }`;
-  if (kind === "type") return typingInteractionScript(pick, val);
+  if (kind === "type")
+    return typingInteractionScript(
+      pick,
+      val,
+      frameTyping ? "__tsNs.replaceFrameControlSelection" : undefined,
+    );
   if (kind === "fill") return fillInteractionScript(pick, val);
   if (kind === "check" || kind === "uncheck") {
     const on = kind === "check";
@@ -1800,8 +1805,34 @@ class Frame {
   }
   async _sessionDispatch(selector, index, kind, value) {
     if (kind !== "isfocused") this._parentPage._actionSeq++;
-    const result = await this._sessionEval(interactionScript(selector, index ?? 0, kind, value));
+    const script = interactionScript(selector, index ?? 0, kind, value, true);
+    const result =
+      kind === "type"
+        ? await this._typeWithCanonicalSelection(script)
+        : await this._sessionEval(script);
     if (result === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    return result;
+  }
+  async _typeWithCanonicalSelection(script) {
+    const result = await native.liveEvalEngine(
+      this._session,
+      `(() => {
+      'use strict';
+      let child = globalThis;
+      for (const index of ${JSON.stringify(this._path)}) {
+        const host = child.document.querySelectorAll('iframe')[index];
+        if (!host) throw new Error('turbo-surf: frame is detached');
+        child = host.contentWindow;
+      }
+      const result = ((globalThis, document, KeyboardEvent, InputEvent, HTMLInputElement, HTMLTextAreaElement) => {
+        ${script};
+        return globalThis.__RESULT;
+      })(child, child.document, child.KeyboardEvent, child.InputEvent, child.HTMLInputElement, child.HTMLTextAreaElement);
+      globalThis.__RESULT = result;
+    })();`,
+    );
+    await this._parentPage._refreshFromSession();
+    await this._parentPage._drainBindings();
     return result;
   }
   async _sessionEval(script) {

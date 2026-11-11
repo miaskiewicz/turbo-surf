@@ -327,6 +327,7 @@ pub fn get_by(
     value: String,
     name: Option<String>,
     root: Option<String>,
+    options: Option<String>,
 ) -> String {
     let tree = parsed(&html);
     let mode_for = |s: &str| {
@@ -348,6 +349,13 @@ pub fn get_by(
         "label" => view::by_label(&tree, &value, mode_for(&value)),
         _ => Vec::new(),
     };
+    if kind == "role" {
+        let options: view::locator::RoleOptions = options
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_default();
+        hits.retain(|&h| view::locator::matches_role_options(&tree, h, &options));
+    }
     // Scope to a parent locator's subtree: keep only hits that are a descendant (or self) of
     // some element matching `root`. Backs `parentLocator.getByRole/getByText/getByLabel(...)`.
     if let Some(root_sel) = root.as_deref().filter(|s| !s.is_empty()) {

@@ -3605,3 +3605,27 @@ test("placeholder alt and title locators retain parent and indexed scope (#380)"
   assert.equal(await page.evaluate(() => document.querySelector("#email-two").value), "second");
   await page.close();
 });
+
+test("role queries filter pressed state and accessibility-hidden ancestors (#379)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<div id="scope"><button id="pressed" aria-pressed="true">Toggle</button><button id="unpressed" aria-pressed="false">Toggle</button></div><button hidden>Hidden action</button><div aria-hidden="true"><button>Aria hidden</button></div><div style="display:none"><button>CSS hidden</button></div><button style="opacity:0">Transparent action</button>',
+  );
+  assert.equal(await page.getByRole("button", { name: "Toggle", pressed: true }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "Toggle", pressed: false }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "Hidden action" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Aria hidden" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "CSS hidden" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Transparent action" }).count(), 1);
+  assert.equal(
+    await page.getByRole("button", { name: "Hidden action", includeHidden: true }).count(),
+    1,
+  );
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('#unpressed').onclick = () => document.body.setAttribute('data-clicked','unpressed')",
+  );
+  await page.locator("#scope").getByRole("button", { name: "Toggle", pressed: false }).click();
+  assert.equal(await page.evaluate(() => document.body.getAttribute("data-clicked")), "unpressed");
+  await page.close();
+});

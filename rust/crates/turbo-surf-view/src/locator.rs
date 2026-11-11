@@ -11,6 +11,41 @@ use turbo_dom_parser::rtdom::Tree;
 
 const ELEMENT_NODE: u8 = 1;
 
+#[derive(Default, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RoleOptions {
+    pub include_hidden: bool,
+    pub pressed: Option<bool>,
+}
+
+fn accessibility_hidden(tree: &Tree, h: Handle) -> bool {
+    use turbo_dom_parser::rtdom::cascade::{computed_style, get_property_value};
+    let visibility = get_property_value(&computed_style(tree, h), "visibility");
+    if visibility == "hidden" || visibility == "collapse" {
+        return true;
+    }
+    let mut node = Some(h);
+    while let Some(current) = node {
+        if tree.get_attribute(current, "hidden").is_some()
+            || tree.get_attribute(current, "aria-hidden") == Some("true")
+            || get_property_value(&computed_style(tree, current), "display") == "none"
+        {
+            return true;
+        }
+        node = tree.parent(current);
+    }
+    false
+}
+
+pub fn matches_role_options(tree: &Tree, h: Handle, options: &RoleOptions) -> bool {
+    if !options.include_hidden && accessibility_hidden(tree, h) {
+        return false;
+    }
+    options.pressed.is_none_or(|pressed| {
+        tree.get_attribute(h, "aria-pressed") == Some(if pressed { "true" } else { "false" })
+    })
+}
+
 /// Text match mode. `Exact` compares trimmed strings; `Substring` is a
 /// case-insensitive `contains` (the Playwright default); `Regex` treats `want`
 /// as a `/source/flags` literal (Playwright passes `RegExp` names this way).
@@ -318,6 +353,42 @@ mod tests {
         let root = tree.query_selector_all("#a");
         assert_eq!(by_role_in(&tree, &root, "button", None), root.to_vec());
     }
+    #[test]
+    fn role_options_distinguish_accessibility_hidden_and_pressed_states() {
+        let tree = Tree::parse("<button id='yes' aria-pressed='true'>Toggle</button><button id='no' aria-pressed='false'>Toggle</button><button id='transparent' style='opacity:0'>visible</button><div aria-hidden='true'><button id='aria'>hidden</button></div><div style='display:none'><button id='css'>hidden</button></div><button id='hidden' hidden>hidden</button>");
+        let options = RoleOptions {
+            pressed: Some(true),
+            ..Default::default()
+        };
+        assert!(matches_role_options(
+            &tree,
+            tree.get_element_by_id("yes").unwrap(),
+            &options
+        ));
+        assert!(!matches_role_options(
+            &tree,
+            tree.get_element_by_id("no").unwrap(),
+            &options
+        ));
+        assert!(matches_role_options(
+            &tree,
+            tree.get_element_by_id("transparent").unwrap(),
+            &RoleOptions::default()
+        ));
+        for id in ["aria", "css", "hidden"] {
+            let node = tree.get_element_by_id(id).unwrap();
+            assert!(!matches_role_options(&tree, node, &RoleOptions::default()));
+            assert!(matches_role_options(
+                &tree,
+                node,
+                &RoleOptions {
+                    include_hidden: true,
+                    ..Default::default()
+                }
+            ));
+        }
+    }
+
     #[test]
     fn role_regex_compiles_once_per_query() {
         let tree = Tree::parse(&"<button>Hit</button>".repeat(100));

@@ -12232,7 +12232,8 @@ __G.takeModuleScript = function () {
 // options / dialogs), so the idx pointed at the WRONG live node (a wrapper, not the option),
 // and the click never reached the option's onClick. Resolving here over the live DOM keeps
 // the idx and the dispatch in one context. Mirrors the Rust matchers (aria.rs/locator.rs).
-__G.tcGetBy = function (kind, value, name, root) {
+__G.tcGetBy = function (kind, value, name, root, options) {
+  options = options || {};
   // `idx` is always the GLOBAL document-order position (so the shim dispatches on `*`[idx]).
   // `root` scopes matching to within elements matching that selector (descendant-or-self) —
   // backs `parentLocator.getByRole/getByText/getByLabel(...)`.
@@ -12302,6 +12303,16 @@ __G.tcGetBy = function (kind, value, name, root) {
       if (!childMatch) hits.push(el);
     }
   }
+  if (kind === "role") hits = hits.filter((el) => {
+    if (options.pressed != null && attr(el, 'aria-pressed') !== String(options.pressed)) return false;
+    if (options.includeHidden) return true;
+    const visibility = getComputedStyle(el).visibility;
+    if (visibility === 'hidden' || visibility === 'collapse') return false;
+    for (let current = el; current && current.nodeType === 1; current = current.parentElement) {
+      if (current.hasAttribute('hidden') || attr(current, 'aria-hidden') === 'true' || getComputedStyle(current).display === 'none') return false;
+    }
+    return true;
+  });
   if (inScope) hits = hits.filter((el) => inScope.has(el));
   globalThis.__RESULT = JSON.stringify(hits.map((el) => ({ idx: idxOf(el) })));
 };
@@ -12319,7 +12330,7 @@ __G.tcResolveScoped = function (scope, leaf) {
     let next = [];
     if (s.getBy) {
       const all = Array.prototype.slice.call(document.querySelectorAll("*"));
-      __G.tcGetBy(s.getBy.kind, s.getBy.value, s.getBy.name, s.getBy.root);
+      __G.tcGetBy(s.getBy.kind, s.getBy.value, s.getBy.name, s.getBy.root, s.getBy.options);
       const matches = JSON.parse(globalThis.__RESULT).map((hit) => all[hit.idx]);
       next = matches.filter((el) => cur.some((root) => root === document || (root !== el && root.contains(el))));
     } else for (let ci = 0; ci < cur.length; ci++) {
@@ -12368,7 +12379,7 @@ __G.tcResolveScoped = function (scope, leaf) {
     // Reuse __G.tcGetBy's role/text/label matcher by marking the resolved roots and scoping to
     // them (descendant-or-self via the [data-tc-scope] root selector).
     for (let ci = 0; ci < cur.length; ci++) if (cur[ci].setAttribute) cur[ci].setAttribute("data-tc-scope", "");
-    __G.tcGetBy(leaf.getBy.kind, leaf.getBy.value, leaf.getBy.name, "[data-tc-scope]");
+    __G.tcGetBy(leaf.getBy.kind, leaf.getBy.value, leaf.getBy.name, "[data-tc-scope]", leaf.getBy.options);
     const out = globalThis.__RESULT;
     for (let ci = 0; ci < cur.length; ci++) if (cur[ci].removeAttribute) cur[ci].removeAttribute("data-tc-scope");
     globalThis.__RESULT = out;

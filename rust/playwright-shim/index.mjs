@@ -495,23 +495,31 @@ class Locator {
   // Scope getBy* to this locator's subtree when it is selector-backed (descendant matching via
   // the `root` selector, or the nth-aware scope chain when an ancestor was `.nth(i)`). A
   // getBy-rooted parent isn't CSS-expressible → document-scoped.
-  _scopedGetBy(kind, value, name) {
+  _scopedGetBy(kind, value, name, options = null) {
     const scope = this._indexedScope();
     if (scope) {
-      return new Locator(this._page, (h) => JSON.parse(native.getBy(h, kind, value, name)), {
-        getBy: { kind, value, name },
-        scope,
-        parent: this,
-      });
+      return new Locator(
+        this._page,
+        (h) => JSON.parse(native.getBy(h, kind, value, name, null, JSON.stringify(options))),
+        {
+          getBy: { kind, value, name, options },
+          scope,
+          parent: this,
+        },
+      );
     }
     const root = this._selector;
-    return new Locator(this._page, (h) => JSON.parse(native.getBy(h, kind, value, name, root)), {
-      getBy: { kind, value, name, root },
-    });
+    return new Locator(
+      this._page,
+      (h) => JSON.parse(native.getBy(h, kind, value, name, root, JSON.stringify(options))),
+      {
+        getBy: { kind, value, name, root, options },
+      },
+    );
   }
   getByRole(role, o) {
     if (!this._selector && !this._indexedScope()) return this._page.getByRole(role, o);
-    return this._scopedGetBy("role", role, o?.name != null ? String(o.name) : null);
+    return this._scopedGetBy("role", role, o?.name != null ? String(o.name) : null, o);
   }
   getByText(t, o) {
     if (!this._selector && !this._indexedScope()) return this._page.getByText(t, o);
@@ -724,7 +732,7 @@ class Locator {
       const leaf = this._selector
         ? { selector: this._selector }
         : this._getBy
-          ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
+          ? { getBy: this._getBy }
           : null;
       if (leaf) {
         const raw = await this._page._evalEngine(
@@ -752,7 +760,7 @@ class Locator {
     if (this._getBy && this._page._session != null) {
       const g = this._getBy;
       const raw = await this._page._evalEngine(
-        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
+        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)},${JSON.stringify(g.options ?? {})});`,
       );
       let matches = [];
       try {
@@ -996,7 +1004,7 @@ class Locator {
       const leaf = this._selector
         ? { selector: this._selector }
         : this._getBy
-          ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
+          ? { getBy: this._getBy }
           : null;
       if (leaf) {
         const raw = await this._page._evalEngine(
@@ -1023,7 +1031,7 @@ class Locator {
     if (this._getBy) {
       const g = this._getBy;
       const raw = await this._page._evalEngine(
-        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
+        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)},${JSON.stringify(g.options ?? {})});`,
       );
       let matches = [];
       try {
@@ -1549,9 +1557,13 @@ class Frame {
   }
   getByRole(role, opts = {}) {
     const name = opts.name != null ? String(opts.name) : null;
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "role", role, name)), {
-      getBy: { kind: "role", value: role, name },
-    });
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "role", role, name, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "role", value: role, name, options: opts },
+      },
+    );
   }
   getByText(text) {
     return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
@@ -2469,9 +2481,13 @@ class Page {
   }
   getByRole(role, opts = {}) {
     const name = opts.name != null ? String(opts.name) : null;
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "role", role, name)), {
-      getBy: { kind: "role", value: role, name },
-    });
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "role", role, name, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "role", value: role, name, options: opts },
+      },
+    );
   }
   getByText(text, _o) {
     return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
@@ -2649,7 +2665,7 @@ class Page {
       } else if (arg.getBy) {
         const g = arg.getBy;
         argExpr =
-          `(function(){ __tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
+          `(function(){ __tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)},${JSON.stringify(g.options ?? {})}); ` +
           `var h=JSON.parse(globalThis.__RESULT||"[]"); var all=document.querySelectorAll("*"); return h[${arg.index}]?all[h[${arg.index}].idx]:undefined; })()`;
       } else {
         argExpr = "undefined";

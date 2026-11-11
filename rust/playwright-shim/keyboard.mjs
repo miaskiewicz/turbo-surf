@@ -1,3 +1,5 @@
+import { editKeyboardText, applyKeyboardDefault } from "./keyboard-defaults.mjs";
+
 const modifierCodes = {
   Shift: "ShiftLeft",
   Control: "ControlLeft",
@@ -40,6 +42,7 @@ function keyDefinition(input, pressed) {
 
 export function makeKeyboard(page) {
   const pressed = new Set();
+  const canceled = new Set();
   const dispatch = async (type, input) => {
     await page._ensureLive();
     const definition = keyDefinition(String(input), pressed);
@@ -55,18 +58,24 @@ export function makeKeyboard(page) {
       altKey: has("Alt"),
       metaKey: has("Meta"),
     };
-    await page._sessionEval(`(() => {
+    const result = await page._sessionEval(`(() => {
+      const editKeyboardText = (${editKeyboardText.toString()});
+      const applyKeyboardDefault = (${applyKeyboardDefault.toString()});
       const element = document.activeElement || document.body || document.documentElement;
       const options = {...${JSON.stringify(options)}, bubbles: true, cancelable: true, view: globalThis};
-      element.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, options));
-      if (${JSON.stringify(type)} === 'keydown' && options.key.length === 1)
-        element.dispatchEvent(new KeyboardEvent('keypress', options));
+      let allowed = element.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, options));
+      if (allowed && ${JSON.stringify(type)} === 'keydown' && options.key.length === 1)
+        allowed = element.dispatchEvent(new KeyboardEvent('keypress', options));
+      if (allowed && ${!canceled.has(definition.code) || type === "keydown"}) applyKeyboardDefault(element, options, ${JSON.stringify(type)}, __tsNs.replaceControlSelection);
+      globalThis.__RESULT = allowed ? 'OK' : 'CANCELED';
     })()`);
+    if (type === "keydown" && result === "CANCELED") canceled.add(definition.code);
+    else canceled.delete(definition.code);
   };
   const down = (key) => dispatch("keydown", key);
   const up = (key) => dispatch("keyup", key);
   const press = async (chord) => {
-    const parts = String(chord).split("+");
+    const parts = String(chord) === "+" ? ["+"] : String(chord).split("+");
     const key = parts.pop();
     const introduced = [];
     for (const modifier of parts) {
@@ -90,6 +99,11 @@ export function makeKeyboard(page) {
     async type(text) {
       for (const character of String(text)) await press(character);
     },
-    insertText: (text) => press(String(text)),
+    async insertText(text) {
+      await page._ensureLive();
+      await page._sessionEval(
+        `(${editKeyboardText.toString()})(document.activeElement, ${JSON.stringify(String(text))}, "insertText", __tsNs.replaceControlSelection)`,
+      );
+    },
   };
 }

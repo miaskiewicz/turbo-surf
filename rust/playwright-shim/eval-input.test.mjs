@@ -209,3 +209,81 @@ test("Page.evaluate rejects authored sync and async errors with their types", as
     await page.close();
   }
 });
+
+test("keyboard applies cancellable text editing and focused button activation defaults", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<input id="input" value="old"><button id="button">Activate</button><script>window.editLog=[];window.clicks=0;for(const type of ["beforeinput","input"]) document.querySelector("#input").addEventListener(type,e=>editLog.push(type));document.querySelector("#button").onclick=()=>clicks++;</script>',
+    );
+    await page._ensureLive();
+    await page.locator("#input").focus();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.evaluate(() => {
+      window.selectCount = 0;
+      document.querySelector("#input").addEventListener("select", () => selectCount++);
+    });
+    await page.keyboard.type("new");
+    assert.equal(await page.evaluate(() => selectCount), 0);
+    assert.equal(await page.evaluate(() => document.querySelector("#input").value), "new");
+    assert.deepEqual(await page.evaluate(() => editLog), [
+      "beforeinput",
+      "input",
+      "beforeinput",
+      "input",
+      "beforeinput",
+      "input",
+    ]);
+    await page.evaluate(() =>
+      document
+        .querySelector("#input")
+        .addEventListener("beforeinput", (event) => event.preventDefault(), { once: true }),
+    );
+    await page.keyboard.insertText("blocked");
+    assert.equal(await page.evaluate(() => document.querySelector("#input").value), "new");
+    await page.locator("#button").focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
+    assert.equal(await page.evaluate(() => clicks), 2);
+    await page.evaluate(() =>
+      document
+        .querySelector("#button")
+        .addEventListener("keydown", (event) => event.preventDefault(), { once: true }),
+    );
+    await page.keyboard.press("Enter");
+    assert.equal(await page.evaluate(() => clicks), 2);
+  } finally {
+    await page.close();
+  }
+});
+
+test("keyboard edits selections and Unicode text while respecting readonly controls", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<input id="input" value="old"><div id="editor" contenteditable="true"></div>',
+    );
+    await page._ensureLive();
+    await page.locator("#input").focus();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.insertText("😀+");
+    await page.keyboard.press("Backspace");
+    assert.equal(await page.evaluate(() => document.querySelector("#input").value), "😀");
+    await page.keyboard.press("Backspace");
+    assert.equal(await page.evaluate(() => document.querySelector("#input").value), "");
+    await page.evaluate(() => {
+      document.querySelector("#input").readOnly = true;
+    });
+    await page.keyboard.insertText("blocked");
+    assert.equal(await page.evaluate(() => document.querySelector("#input").value), "");
+    await page.locator("#editor").focus();
+    await page.keyboard.insertText("editable");
+    assert.equal(
+      await page.evaluate(() => document.querySelector("#editor").textContent),
+      "editable",
+    );
+  } finally {
+    await page.close();
+  }
+});

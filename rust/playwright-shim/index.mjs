@@ -2913,7 +2913,7 @@ class Page {
     this._navigationTimeout = timeout;
   }
   async setExtraHTTPHeaders(headers) {
-    this._context._headers = { ...this._context._headers, ...headers };
+    this._context._headers = { ...headers };
   }
   async emulateMedia() {}
   async bringToFront() {}
@@ -3627,7 +3627,7 @@ class BrowserContext {
     this._initScripts.push(evalSource(script, arg));
   }
   async setExtraHTTPHeaders(headers) {
-    this._headers = { ...this._headers, ...headers };
+    this._headers = { ...headers };
   }
   async setDefaultTimeout() {}
   async setDefaultNavigationTimeout(timeout) {

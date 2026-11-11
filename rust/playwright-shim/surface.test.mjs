@@ -3266,3 +3266,20 @@ test("socket failures emit requestfailed without response or requestfinished (#4
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("setExtraHTTPHeaders replaces and clears prior headers (#393)", async () => {
+  const ctx = new BrowserContext();
+  const p = await ctx.newPage();
+  try {
+    await ctx.setExtraHTTPHeaders({ "x-old": "old" });
+    await ctx.setExtraHTTPHeaders({ "x-probe": "new" });
+    assert.deepEqual(JSON.parse(ctx._headersJson()), { "x-probe": "new" });
+    await ctx.setExtraHTTPHeaders({});
+    assert.equal(ctx._headersJson(), null);
+    await p.setExtraHTTPHeaders({ "x-old": "old" });
+    await p.setExtraHTTPHeaders({ "x-probe": "new" });
+    assert.deepEqual(JSON.parse(ctx._headersJson()), { "x-probe": "new" });
+  } finally {
+    await ctx.close();
+  }
+});

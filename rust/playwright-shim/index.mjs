@@ -960,9 +960,10 @@ class Locator {
 
   // dispatchEvent(type) — fire a named DOM event into the live app (e.g. a row
   // checkbox's 'click'). Static snapshot has no JS handlers, so it needs the isolate.
-  async dispatchEvent(type) {
+  async dispatchEvent(type, eventInit = {}) {
     await this._page._ensureLive();
-    if (this._page._live) return void (await this._driveLive("dispatch", String(type)));
+    if (this._page._live)
+      return void (await this._driveLive("dispatch", { type: String(type), eventInit }));
   }
 
   // setInputFiles: read the file bytes in Node, build File objects in the isolate, and
@@ -1223,13 +1224,19 @@ function interactionScript(selector, index, kind, value) {
     // checkbox/radio also performs the browser default (toggle + change).
     return `(() => { ${pick} else {
       const t = el;
-      const type = ${val};
-      const mouse = /^(click|dblclick|mouse|pointer|contextmenu|auxclick)/.test(type);
+      const { type, eventInit } = ${val};
+      const constructors = [
+        [/^pointer/, "PointerEvent"], [/^wheel$/, "WheelEvent"],
+        [/^(click|dblclick|mouse|contextmenu|auxclick)/, "MouseEvent"],
+        [/^key/, "KeyboardEvent"], [/^(focus|blur)/, "FocusEvent"],
+        [/^(beforeinput|input)$/, "InputEvent"], [/^composition/, "CompositionEvent"],
+        [/^(drag|drop)/, "DragEvent"], [/^touch/, "TouchEvent"],
+      ];
+      const className = constructors.find(([pattern]) => pattern.test(type))?.[1] || "Event";
+      const EventClass = globalThis[className];
       const box = el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio");
       if (type === "click" && box) el.checked = el.type === "radio" ? true : !el.checked;
-      const ev = mouse
-        ? new MouseEvent(type, { bubbles: true, cancelable: true, view: globalThis })
-        : new Event(type, { bubbles: true, cancelable: true });
+      const ev = new EventClass(type, { bubbles: true, cancelable: true, composed: true, view: globalThis, ...eventInit });
       t.dispatchEvent(ev);
       if (type === "click" && box) {
         el.dispatchEvent(new Event("input", { bubbles: true }));

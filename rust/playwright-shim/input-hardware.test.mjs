@@ -449,3 +449,61 @@ test("dispatchEvent targets the matched node without descending (#372)", async (
     await teardown();
   }
 });
+
+test("dispatchEvent preserves initializer fields and propagation (#371)", async () => {
+  const { page, teardown } = await fixture();
+  try {
+    await page.evaluate(() => {
+      window.initializedEvents = [];
+      const target = document.getElementById("src");
+      for (const type of ["click", "keydown", "pointerdown"])
+        target.addEventListener(type, (event) =>
+          window.initializedEvents.push({
+            type: event.type,
+            button: event.button,
+            x: event.clientX,
+            detail: event.detail,
+            key: event.key,
+            pointerType: event.pointerType,
+            bubbles: event.bubbles,
+            cancelable: event.cancelable,
+            composed: event.composed,
+          }),
+        );
+      document.body.addEventListener("click", () =>
+        window.initializedEvents.push({ type: "parent-click" }),
+      );
+    });
+    await page.locator("#src").dispatchEvent("click", {
+      button: 2,
+      clientX: 37,
+      detail: 7,
+      bubbles: false,
+      cancelable: false,
+      composed: true,
+    });
+    assert.deepEqual(await page.evaluate(() => window.initializedEvents), [
+      {
+        type: "click",
+        button: 2,
+        x: 37,
+        detail: 7,
+        bubbles: false,
+        cancelable: false,
+        composed: true,
+      },
+    ]);
+    await page.evaluate(() => {
+      window.initializedEvents = [];
+    });
+    await page.locator("#src").dispatchEvent("keydown", { key: "Enter" });
+    await page.locator("#src").dispatchEvent("pointerdown", { pointerType: "pen", clientX: 13 });
+    const events = await page.evaluate(() => window.initializedEvents);
+    assert.equal(events[0].key, "Enter");
+    assert.equal(events[0].composed, true);
+    assert.equal(events[1].pointerType, "pen");
+    assert.equal(events[1].x, 13);
+  } finally {
+    await teardown();
+  }
+});

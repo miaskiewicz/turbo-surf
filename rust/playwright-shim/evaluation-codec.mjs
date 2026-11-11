@@ -54,3 +54,28 @@ export function evaluationArgument(value) {
   if (encoded[0] === "value") return JSON.stringify(encoded[1]);
   return `(${decodeEvaluationValue.toString()})(${JSON.stringify(encoded)})`;
 }
+
+export function encodeEvaluationError(error) {
+  return {
+    name: String(error?.name ?? "Error"),
+    message: String(error?.message ?? error),
+    stack: typeof error?.stack === "string" ? error.stack : undefined,
+  };
+}
+
+export function decodeEvaluationError(value) {
+  const constructors = {
+    Error,
+    TypeError,
+    RangeError,
+    ReferenceError,
+    SyntaxError,
+    EvalError,
+    URIError,
+  };
+  const Constructor = Object.hasOwn(constructors, value.name) ? constructors[value.name] : Error;
+  const error = new Constructor(value.message);
+  error.name = value.name;
+  if (value.stack) error.stack = value.stack;
+  return error;
+}

@@ -24,6 +24,8 @@ import { validateArtifactOptions } from "./artifact-options.mjs";
 import { makeKeyboard } from "./keyboard.mjs";
 import {
   encodeEvaluationValue,
+  encodeEvaluationError,
+  decodeEvaluationError,
   decodeEvaluationValue,
   evaluationArgument,
 } from "./evaluation-codec.mjs";
@@ -1525,13 +1527,13 @@ class Frame {
       try {
         const value = await (${expression});
         return JSON.stringify({ok:true, value: (${encodeEvaluationValue.toString()})(value)});
-      } catch(error) { return JSON.stringify({ok:false, message:String(error?.message ?? error)}); }
+      } catch(error) { return JSON.stringify({ok:false, error: (${encodeEvaluationError.toString()})(error)}); }
     })()`,
     );
     await this._parentPage._refreshFromSession();
     await this._parentPage._drainBindings();
     const result = JSON.parse(raw);
-    if (!result.ok) throw new Error(result.message);
+    if (!result.ok) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
   }
   async content() {
@@ -1869,9 +1871,9 @@ class Page {
       Promise.resolve().then(() => (${body})).then(
         value => {
           try { bag.evaluations.set(${id}, JSON.stringify({value: (${encodeEvaluationValue.toString()})(value)})); }
-          catch (error) { bag.evaluations.set(${id}, JSON.stringify({error: String(error.message)})); }
+          catch (error) { bag.evaluations.set(${id}, JSON.stringify({error: (${encodeEvaluationError.toString()})(error)})); }
         },
-        error => bag.evaluations.set(${id}, JSON.stringify({error: String(error.message)})));
+        error => bag.evaluations.set(${id}, JSON.stringify({error: (${encodeEvaluationError.toString()})(error)})));
     })()`,
     );
     const deadline = Date.now() + 5000;
@@ -1884,7 +1886,7 @@ class Page {
         );
         if (raw) {
           const result = JSON.parse(raw);
-          if (result.error) throw new Error(result.error);
+          if (result.error) throw decodeEvaluationError(result.error);
           await this._refreshFromSession();
           return decodeEvaluationValue(result.value);
         }
@@ -2377,11 +2379,13 @@ class Page {
       this._session,
       `(async () => { try {
         return JSON.stringify({value: (${encodeEvaluationValue.toString()})(await (${body}))});
-      } catch { return JSON.stringify({value: ["value", ""]}); } })()`,
+      } catch(error) { return JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); } })()`,
     );
     await this._refreshFromSession();
     await this._drainBindings();
-    return decodeEvaluationValue(JSON.parse(raw).value);
+    const result = JSON.parse(raw);
+    if (result.error) throw decodeEvaluationError(result.error);
+    return decodeEvaluationValue(result.value);
   }
   async evaluateHandle(script, arg) {
     return this.evaluate(script, arg);

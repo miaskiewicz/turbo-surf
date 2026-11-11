@@ -179,3 +179,33 @@ test("keyboard tracks held modifiers and separates down/up events", async () => 
     await page.close();
   }
 });
+
+test("Page.evaluate rejects authored sync and async errors with their types", async () => {
+  const page = newPage();
+  try {
+    await assert.rejects(
+      () =>
+        page.evaluate(() => {
+          throw new TypeError("sync-marker");
+        }),
+      (error) => error.name === "TypeError" && error.message.includes("sync-marker"),
+    );
+    await assert.rejects(
+      () =>
+        page.evaluate(async () => {
+          throw new RangeError("async-marker");
+        }),
+      (error) => error.name === "RangeError" && error.message.includes("async-marker"),
+    );
+    await page.exposeFunction("errorBindingPresent", () => 0);
+    await assert.rejects(
+      () =>
+        page.evaluate(() => {
+          throw new TypeError("binding-marker");
+        }),
+      (error) => error.name === "TypeError" && error.message.includes("binding-marker"),
+    );
+  } finally {
+    await page.close();
+  }
+});

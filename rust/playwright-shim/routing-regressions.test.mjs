@@ -117,3 +117,34 @@ test("route fallback visits older handlers and unroute updates one live wrapper"
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("a missed web-first assertion hydrates default navigation while commit stays static", async () => {
+  const server = createServer((_request, response) =>
+    response.end(
+      '<body><script>setTimeout(()=>{document.body.innerHTML="<input id=ready>"},100)</script></body>',
+    ),
+  );
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const endpoint = `http://127.0.0.1:${server.address().port}/`;
+  try {
+    for (const waitUntil of ["load", "commit"]) {
+      const page = shim.newPage();
+      try {
+        await page.goto(endpoint, { waitUntil });
+        assert.equal(page._live, false);
+        const assertion = shim.expect(page.locator("#ready")).toBeVisible({ timeout: 1000 });
+        if (waitUntil === "load") {
+          await assertion;
+          assert.equal(page._live, true);
+        } else {
+          await assert.rejects(assertion);
+          assert.equal(page._live, false);
+        }
+      } finally {
+        await page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

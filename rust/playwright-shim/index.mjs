@@ -4083,7 +4083,14 @@ class BaseExpect {
     };
     let pass = await run();
     while ((this._neg ? pass : !pass) && Date.now() - start < timeout) {
-      if (!page || !page._live) break;
+      if (!page) break;
+      if (!page._live) {
+        if (page._autoHydrate === false) break;
+        await page._ensureLive();
+        if (!page._live) break;
+        pass = await run();
+        continue;
+      }
       await page._redrain();
       pass = await run();
     }

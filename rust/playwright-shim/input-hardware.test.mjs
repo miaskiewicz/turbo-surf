@@ -219,3 +219,71 @@ test("mouse clickCount preserves incremental details and dblclick (#441)", async
     await teardown();
   }
 });
+
+test("mouse buttons retain chords and require a matching press (#440)", async () => {
+  const { page, teardown } = await fixture();
+  try {
+    await page.evaluate(() => {
+      window.buttonEvents = [];
+      for (const type of [
+        "pointerdown",
+        "pointermove",
+        "pointerup",
+        "mousedown",
+        "mouseup",
+        "click",
+        "contextmenu",
+        "auxclick",
+      ])
+        window.addEventListener(type, (event) =>
+          window.buttonEvents.push([type, event.button, event.buttons]),
+        );
+    });
+    await page.mouse.click(10, 20, { button: "right" });
+    const right = await page.evaluate(() =>
+      window.buttonEvents.filter(([type]) => type !== "pointermove"),
+    );
+    assert.deepEqual(right, [
+      ["pointerdown", 2, 2],
+      ["mousedown", 2, 2],
+      ["contextmenu", 2, 2],
+      ["pointerup", 2, 0],
+      ["mouseup", 2, 0],
+      ["auxclick", 2, 0],
+    ]);
+    await page.evaluate(() => {
+      window.buttonEvents = [];
+    });
+    await page.mouse.down({ button: "left" });
+    await page.mouse.down({ button: "right" });
+    await page.mouse.up({ button: "right" });
+    await page.mouse.up({ button: "left" });
+    const chord = await page.evaluate(() => window.buttonEvents);
+    assert.deepEqual(
+      chord.filter(([type]) => type === "mousedown").map(([, , buttons]) => buttons),
+      [1, 3],
+    );
+    assert.deepEqual(
+      chord.filter(([type]) => type === "mouseup").map(([, , buttons]) => buttons),
+      [1, 0],
+    );
+    assert.equal(chord.filter(([type]) => type === "pointerdown").length, 1);
+    assert.equal(chord.filter(([type]) => type === "pointerup").length, 1);
+    await page.evaluate(() => {
+      window.buttonEvents = [];
+    });
+    await page.mouse.up();
+    assert.equal(
+      await page.evaluate(() => window.buttonEvents.some(([type]) => type === "click")),
+      false,
+    );
+    await page.mouse.down({ button: "middle" });
+    assert.deepEqual(
+      await page.evaluate(() => window.buttonEvents.find(([type]) => type === "mousedown")),
+      ["mousedown", 1, 4],
+    );
+    await page.mouse.up({ button: "middle" });
+  } finally {
+    await teardown();
+  }
+});

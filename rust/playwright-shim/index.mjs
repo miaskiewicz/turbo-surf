@@ -2797,25 +2797,34 @@ function makeMouse(page) {
     state.y = Math.round(y);
     await run(dispatch("pointermove", "mousemove"));
   }
+  const buttonValue = (opts) => (opts?.button === "right" ? 2 : opts?.button === "middle" ? 1 : 0);
+  const buttonMask = (button) => [1, 4, 2][button];
   async function down(opts) {
     state.detail = opts?.clickCount ?? 1;
-    state.button = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
-    state.buttons = 1 << state.button;
-    await run(dispatch("pointerdown", "mousedown"));
+    state.button = buttonValue(opts);
+    const wasPressed = state.buttons !== 0;
+    state.buttons |= buttonMask(state.button);
+    await run(dispatch(wasPressed ? "pointermove" : "pointerdown", "mousedown"));
+    if (state.button === 2) {
+      await run(`(() => {
+        const t = ${targetExpr()};
+        if (t) t.dispatchEvent(new MouseEvent("contextmenu", ${base()}));
+      })();`);
+    }
   }
   async function up(opts) {
     state.detail = opts?.clickCount ?? 1;
-    const btn = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
-    state.button = btn;
-    state.buttons = 0;
-    await run(`(() => {
-      const t = ${targetExpr()};
-      if (!t) return;
-      const PE = globalThis.PointerEvent || globalThis.MouseEvent;
-      t.dispatchEvent(new PE("pointerup", ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
-      t.dispatchEvent(new MouseEvent("mouseup", ${base()}));
-      t.dispatchEvent(new MouseEvent("click", ${base()}));
-    })();`);
+    state.button = buttonValue(opts);
+    const mask = buttonMask(state.button);
+    const wasPressed = (state.buttons & mask) !== 0;
+    state.buttons &= ~mask;
+    await run(dispatch(state.buttons ? "pointermove" : "pointerup", "mouseup"));
+    if (wasPressed) {
+      await run(`(() => {
+        const t = ${targetExpr()};
+        if (t) t.dispatchEvent(new MouseEvent(${JSON.stringify(state.button === 0 ? "click" : "auxclick")}, ${base()}));
+      })();`);
+    }
   }
   async function click(x, y, opts) {
     await move(x, y);
@@ -2824,7 +2833,7 @@ function makeMouse(page) {
       await down(step);
       if (opts?.delay) await new Promise((resolve) => setTimeout(resolve, opts.delay));
       await up(step);
-      if (count === 2) {
+      if (count === 2 && state.button === 0) {
         await run(`(() => {
           const t = ${targetExpr()};
           if (t) t.dispatchEvent(new MouseEvent("dblclick", ${base()}));

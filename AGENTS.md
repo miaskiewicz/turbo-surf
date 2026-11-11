@@ -113,8 +113,6 @@ backlog). Never lower a floor or raise the limit to pass a change.
 
 - Conventional-commit style subject (`feat:`/`fix:`/`refactor:`/`docs:`/`chore:`).
 - Work on a branch off `main` unless told otherwise; commit/push only when asked.
-- Every commit message ends with:
-  `Co-Authored-By: Codex Opus 4.8 (1M context) <noreply@anthropic.com>`
 
 ## Releasing / publishing
 

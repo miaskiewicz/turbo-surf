@@ -276,37 +276,56 @@ function buildRouteInitScript(routes) {
         this._reqHeaders[name] = value;
         if (this._real) this._real.setRequestHeader(name, value);
       };
+      MockXHR.prototype._emit = function (name, event) {
+        const callback = this["on" + name];
+        if (typeof callback === "function") callback.call(this, event || new Event(name));
+      };
+      MockXHR.prototype._sendReal = function (body) {
+        if (!this._real) {
+          this._real = new OrigXHR();
+          this._real.open(this._method, this._url);
+          for (const name of Object.keys(this._reqHeaders)) this._real.setRequestHeader(name, this._reqHeaders[name]);
+        }
+        const self = this;
+        for (const name of ["readystatechange", "load", "error", "loadend", "timeout", "abort"]) {
+          this._real.addEventListener(name, (event) => {
+            self.readyState = self._real.readyState;
+            self.status = self._real.status;
+            self.responseText = self._real.responseText;
+            self.response = self._real.response;
+            self._emit(name, event);
+          });
+        }
+        this._real.send(body);
+      };
       MockXHR.prototype.send = function (body) {
         if (this._mocked) {
           const self = this;
-          runHandler(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled }) => {
-            const o = fulfilled || { status: 200, body: "" };
+          runHandler(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled, action }) => {
+            if (action === "abort") {
+              self.readyState = 4;
+              self.status = 0;
+              self.responseText = self.response = "";
+              self._emit("readystatechange");
+              self._emit("error");
+              self._emit("loadend");
+              return;
+            }
+            if (!fulfilled) { self._sendReal(body); return; }
+            const o = fulfilled;
             self.readyState = 4;
             self.status = o.status == null ? 200 : o.status;
             const b = o.body == null ? "" : String(o.body);
             self.responseText = b;
             self.response = b;
-            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
-            try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
+            self._emit("readystatechange");
+            self._emit("load");
+            self._emit("loadend");
           });
-        } else if (this._real) {
-          const self = this;
-          this._real.onreadystatechange = function () {
-            self.readyState = self._real.readyState;
-            self.status = self._real.status;
-            self.responseText = self._real.responseText;
-            self.response = self._real.response;
-            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
-            if (self.readyState === 4) {
-              try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
-            }
-          };
-          this._real.send(body);
-        }
+        } else this._sendReal(body);
       };
       MockXHR.prototype.addEventListener = function (name, fn) {
-        if (name === "load") this.onload = fn;
-        else if (name === "readystatechange") this.onreadystatechange = fn;
+        this["on" + name] = fn;
       };
       globalThis.XMLHttpRequest = MockXHR;
     }

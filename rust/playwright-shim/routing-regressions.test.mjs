@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
 
 let shim;
@@ -25,5 +26,50 @@ test("locator press dispatches key events on its focused element", async () => {
     assert.equal(await page.evaluate(() => document.activeElement.id), "field");
   } finally {
     await page.close();
+  }
+});
+
+test("XHR route abort emits an error and continue reaches the real response", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("access-control-allow-origin", "*");
+    response.end("upstream");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const endpoint = `http://127.0.0.1:${server.address().port}/api`;
+  try {
+    for (const action of ["abort", "continue"]) {
+      const page = shim.newPage();
+      try {
+        if (action === "abort")
+          await page.route("**/api", (route) => route.abort("connectionreset"));
+        else await page.route("**/api", (route) => route.continue());
+        await page.setContent("<body></body>");
+        await page._ensureLive();
+        const result = await page.evaluate(
+          (url) =>
+            new Promise((resolve) => {
+              const xhr = new XMLHttpRequest();
+              xhr.open("GET", url);
+              xhr.onload = () =>
+                resolve({ event: "load", status: xhr.status, body: xhr.responseText });
+              xhr.addEventListener("error", () =>
+                resolve({ event: "error", status: xhr.status, body: xhr.responseText }),
+              );
+              xhr.send();
+            }),
+          endpoint,
+        );
+        assert.deepEqual(
+          result,
+          action === "abort"
+            ? { event: "error", status: 0, body: "" }
+            : { event: "load", status: 200, body: "upstream" },
+        );
+      } finally {
+        await page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });

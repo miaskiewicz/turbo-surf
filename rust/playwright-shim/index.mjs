@@ -2555,7 +2555,7 @@ class Page {
       // session and starts firing emits as soon as goto establishes one.
       const poll = setInterval(() => {
         this._drainNetworkEvents().catch(() => {});
-      }, 50);
+      }, 10);
     });
   }
   async waitForRequest(matcher, opts = {}) {

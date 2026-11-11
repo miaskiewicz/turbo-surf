@@ -21,6 +21,29 @@ try {
 }
 const { BrowserContext, chromium, devices, expect, newPage, request, test: pw } = shim;
 
+test("response waits poll a newly available native log within ten milliseconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const page = newPage();
+  page._drainNetworkEvents = async () => {
+    page._emit("response", { url: () => "https://example.test/ready" });
+  };
+  let settled = false;
+  const waiting = page.waitForResponse("/ready").then(() => {
+    settled = true;
+  });
+  t.mock.timers.tick(10);
+  await new Promise((resolve) => setImmediate(resolve));
+  const settledWithinTen = settled;
+  t.mock.timers.tick(50);
+  await waiting;
+  await page.close();
+  assert.equal(
+    settledWithinTen,
+    true,
+    "ready responses must not wait for a fifty-millisecond poll",
+  );
+});
+
 // A tiny site so navigation/forms/headers/cookies are exercised end to end.
 function site() {
   const server = createServer((req, res) => {

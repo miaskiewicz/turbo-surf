@@ -3825,12 +3825,18 @@ export const request = {
     // Note: the explicit `request.newContext({_browserContext: bc,
     // extraHTTPHeaders: X})` double-opt case lets bc win for overlapping keys,
     // which is a shim-private surface; direct callers don't hit it.
-    const ctxHeaders = () => (bc ? { ...optHeaders, ...bc._headers } : optHeaders);
+    const mergeHeaders = (...sources) =>
+      Object.fromEntries(
+        sources.flatMap((source) =>
+          Object.entries(source ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+        ),
+      );
+    const ctxHeaders = () => mergeHeaders(optHeaders, bc?._headers);
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
     // as-is. Per-request `headers` merge over the context's `extraHTTPHeaders`.
     const encode = (o = {}) => {
-      const h = { ...ctxHeaders(), ...o.headers };
+      const h = mergeHeaders(ctxHeaders(), o.headers);
       let body = null;
       if (o.data !== null && o.data !== undefined) {
         if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {

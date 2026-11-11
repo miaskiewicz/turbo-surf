@@ -1951,3 +1951,20 @@ test("API contexts apply userAgent and scoped Basic credentials (#433)", async (
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("API per-request headers override context names case-insensitively (#432)", async () => {
+  const server = createServer((req, res) => res.end(req.headers["x-probe"]));
+  const base = await listen(server);
+  const api = await request.newContext({ extraHTTPHeaders: { "x-probe": "context" } });
+  try {
+    assert.equal(
+      await (await api.get(base, { headers: { "X-Probe": "request" } })).text(),
+      "request",
+    );
+    assert.equal(await (await api.get(base)).text(), "context");
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

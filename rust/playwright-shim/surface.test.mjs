@@ -2182,3 +2182,48 @@ test("API Buffer request data preserves invalid UTF-8 bytes (#341)", async () =>
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("API multipart encodes fields and binary files (#434)", async () => {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    res.end(
+      JSON.stringify({
+        type: req.headers["content-type"],
+        body: Buffer.concat(chunks).toString("base64"),
+      }),
+    );
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  try {
+    const response = await api.post(base, {
+      multipart: {
+        label: "value",
+        file: {
+          name: "probe.bin",
+          mimeType: "application/octet-stream",
+          buffer: Buffer.from([0, 255, 128, 10]),
+        },
+      },
+    });
+    const { type, body } = await response.json();
+    assert.match(type ?? "", /^multipart\/form-data; boundary=/);
+    const boundary = type.split("boundary=")[1];
+    const bytes = Buffer.from(body, "base64");
+    assert.ok(bytes.includes(Buffer.from('name="label"\r\n\r\nvalue\r\n')));
+    assert.ok(
+      bytes.includes(
+        Buffer.from(
+          'name="file"; filename="probe.bin"\r\nContent-Type: application/octet-stream\r\n\r\n',
+        ),
+      ),
+    );
+    assert.ok(bytes.includes(Buffer.from([0, 255, 128, 10])));
+    assert.ok(bytes.toString().endsWith(`--${boundary}--\r\n`));
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

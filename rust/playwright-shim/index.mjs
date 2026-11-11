@@ -15,6 +15,8 @@
 // or no-ops — see LIMITATIONS.md.
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -3927,6 +3929,46 @@ export const devices = new Proxy({}, { get: () => ({}) });
  * share the context's cookie jar: outbound requests carry the current cookies,
  * `Set-Cookie` writes merge back in, so a login via `page.goto` is reflected
  * in a later `ctx.request.get('/api/...')`. */
+async function encodeMultipart(fields) {
+  const boundary = `----turbo-surf-${randomUUID()}`;
+  const chunks = [];
+  const escape = (value) =>
+    String(value).replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/"/g, "%22");
+  const entries = fields instanceof FormData ? fields.entries() : Object.entries(fields);
+  for (const [name, value] of entries) {
+    let content = value;
+    let filename;
+    let type;
+    if (value && typeof value === "object") {
+      if (Buffer.isBuffer(value.buffer)) {
+        content = value.buffer;
+        filename = value.name;
+        type = value.mimeType;
+      } else if (typeof value.arrayBuffer === "function") {
+        content = Buffer.from(await value.arrayBuffer());
+        filename = value.name ?? "blob";
+        type = value.type;
+      } else if (value.path) {
+        content = await readFile(value.path);
+        filename = basename(String(value.path));
+      } else {
+        throw new Error("Unsupported multipart file value");
+      }
+    }
+    let header = `--${boundary}\r\nContent-Disposition: form-data; name="${escape(name)}"`;
+    if (filename !== undefined) {
+      header += `; filename="${escape(filename)}"\r\nContent-Type: ${type || "application/octet-stream"}`;
+    }
+    chunks.push(
+      Buffer.from(`${header}\r\n\r\n`),
+      Buffer.isBuffer(content) ? content : Buffer.from(String(content)),
+      Buffer.from("\r\n"),
+    );
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  return { body: Buffer.concat(chunks), type: `multipart/form-data; boundary=${boundary}` };
+}
+
 export const request = {
   // Synchronous (no await needed) — tests chain `request.newContext({...}).fetch(...)`.
   // Real Playwright returns a Promise here; the synchronous form also works at
@@ -3988,9 +4030,16 @@ export const request = {
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
     // as-is. Per-request `headers` merge over the context's `extraHTTPHeaders`.
-    const encode = (o = {}) => {
+    const encode = async (o = {}) => {
       const h = mergeHeaders(ctxHeaders(), o.headers);
       let body = null;
+      if (o.multipart !== undefined) {
+        const multipart = await encodeMultipart(o.multipart);
+        body = multipart.body;
+        if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
+          h["Content-Type"] = multipart.type;
+        }
+      }
       if (o.data !== null && o.data !== undefined) {
         if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {
           body = Buffer.isBuffer(o.data) ? o.data : String(o.data);
@@ -4014,7 +4063,7 @@ export const request = {
         credentialAllowed(target) && credentials.send === "always"
           ? { Authorization: authorization, ...o.headers }
           : o.headers;
-      const { body, hdr } = encode({ ...o, headers: credentialHeaders });
+      const { body, hdr } = await encode({ ...o, headers: credentialHeaders });
       const inCookies = bc && bc._cookies ? bc._cookies : "[]";
       let raw = await native.fetchWithCookies(
         target,

@@ -49,7 +49,7 @@ test("response waits poll a newly available native log within ten milliseconds",
     page._emit("response", { url: () => "https://example.test/ready" });
   };
   let settled = false;
-  const waiting = page.waitForResponse("/ready").then(() => {
+  const waiting = page.waitForResponse("**/ready").then(() => {
     settled = true;
   });
   t.mock.timers.tick(10);
@@ -4086,6 +4086,49 @@ test("Network waits exclude events already delivered before subscribing (#355)",
       const item = method === "waitForResponse" ? response : response.request();
       page._emit(method === "waitForResponse" ? "response" : "request", item);
       assert.equal(await pending, item);
+    }
+  } finally {
+    await page.close();
+  }
+});
+
+test("Network waits support URL globs and await predicate results (#354)", async () => {
+  const page = newPage();
+  const item = { url: () => "http://localhost/api" };
+  try {
+    for (const [method, event] of [
+      ["waitForResponse", "response"],
+      ["waitForRequest", "request"],
+    ]) {
+      const glob = page[method]("**/api", { timeout: 100 });
+      page._emit(event, item);
+      assert.equal(await glob, item);
+      const rejected = assert.rejects(
+        page[method](
+          async () => {
+            await Promise.resolve();
+            return false;
+          },
+          { timeout: 10 },
+        ),
+        { name: "TimeoutError" },
+      );
+      page._emit(event, item);
+      await rejected;
+      const accepted = page[method](
+        async (candidate) => {
+          await Promise.resolve();
+          return candidate === item;
+        },
+        { timeout: 100 },
+      );
+      page._emit(event, item);
+      assert.equal(await accepted, item);
+      const exact = assert.rejects(page[method]("http://localhost/ap", { timeout: 10 }), {
+        name: "TimeoutError",
+      });
+      page._emit(event, item);
+      await exact;
     }
   } finally {
     await page.close();

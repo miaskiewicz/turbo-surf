@@ -1462,6 +1462,38 @@ function _collectIframes(parent, selector = "iframe") {
   return out;
 }
 
+function networkWaitMatcher(matcher, baseURL) {
+  if (matcher == null) return async () => true;
+  if (typeof matcher === "function") return async (item) => !!(await matcher(item));
+  let pattern = matcher;
+  if (!(pattern instanceof RegExp)) {
+    let glob = String(pattern);
+    if (baseURL && !glob.startsWith("*")) {
+      try {
+        glob = new URL(glob, baseURL).href;
+      } catch {
+        /* retain invalid pattern */
+      }
+    }
+    let source = "";
+    for (let i = 0; i < glob.length; i++) {
+      const char = glob[i];
+      if (char === "*") {
+        const deep = glob[i + 1] === "*";
+        source += deep ? ".*" : "[^/]*";
+        if (deep) i++;
+      } else {
+        source += /[\\^$+?.()|[\]{}]/.test(char) ? `\\${char}` : char;
+      }
+    }
+    pattern = new RegExp(`^${source}$`);
+  }
+  return async (item) => {
+    pattern.lastIndex = 0;
+    return pattern.test(item.url());
+  };
+}
+
 function _matchUrl(url, spec) {
   if (spec == null) return true;
   if (spec instanceof RegExp) return spec.test(url);
@@ -2855,23 +2887,23 @@ class Page {
     return undefined;
   }
   async waitForResponse(matcher, opts = {}) {
-    const test = (resp) => {
-      try {
-        if (typeof matcher === "function") return !!matcher(resp);
-        if (matcher instanceof RegExp) return matcher.test(resp.url());
-        return resp.url().includes(String(matcher));
-      } catch {
-        return false;
-      }
-    };
+    const test = networkWaitMatcher(matcher, this._context._baseURL);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.off("response", onResp);
         if (poll) clearInterval(poll);
         reject(Object.assign(new Error("Timeout waiting for response"), { name: "TimeoutError" }));
       }, opts.timeout ?? 15000);
-      const onResp = (resp) => {
-        if (!test(resp)) return;
+      const onResp = async (resp) => {
+        try {
+          if (!(await test(resp))) return;
+        } catch (error) {
+          clearTimeout(timer);
+          clearInterval(poll);
+          this.off("response", onResp);
+          reject(error);
+          return;
+        }
         clearTimeout(timer);
         if (poll) clearInterval(poll);
         this.off("response", onResp);
@@ -2891,24 +2923,23 @@ class Page {
     });
   }
   async waitForRequest(matcher, opts = {}) {
-    const test = (req) => {
-      try {
-        if (matcher == null) return true;
-        if (typeof matcher === "function") return !!matcher(req);
-        if (matcher instanceof RegExp) return matcher.test(req.url());
-        return req.url().includes(String(matcher));
-      } catch {
-        return false;
-      }
-    };
+    const test = networkWaitMatcher(matcher, this._context._baseURL);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.off("request", onReq);
         if (poll) clearInterval(poll);
         reject(Object.assign(new Error("Timeout waiting for request"), { name: "TimeoutError" }));
       }, opts.timeout ?? 15000);
-      const onReq = (req) => {
-        if (!test(req)) return;
+      const onReq = async (req) => {
+        try {
+          if (!(await test(req))) return;
+        } catch (error) {
+          clearTimeout(timer);
+          clearInterval(poll);
+          this.off("request", onReq);
+          reject(error);
+          return;
+        }
         clearTimeout(timer);
         if (poll) clearInterval(poll);
         this.off("request", onReq);

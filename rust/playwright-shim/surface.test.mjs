@@ -290,7 +290,8 @@ test("Locator.evaluate runs page JS for a CSS-backed locator", async () => {
   const p = await fresh();
   const len = await p.locator("#list").evaluate((el) => el.querySelectorAll("li").length);
   assert.equal(Number(len), 3);
-  await assert.rejects(() => p.getByText("one").evaluate((el) => el), /selector-backed/);
+  assert.equal(await p.getByText("one").evaluate((el) => el.textContent), "one");
+  await p.close();
 });
 
 // --- Locator: getBy* -------------------------------------------------------

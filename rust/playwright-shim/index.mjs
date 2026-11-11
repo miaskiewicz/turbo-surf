@@ -4149,6 +4149,41 @@ function asyncMatchers(awaiter, neg) {
 }
 
 // jest-shaped generic-value matchers — pure JS, never cross the napi boundary.
+async function retryAssertion(callback, options = {}, defaultTimeout = 5000) {
+  const timeout = options.timeout ?? defaultTimeout;
+  const intervals = options.intervals ?? [100, 250, 500, 1000];
+  if (timeout < 0 || !Number.isFinite(timeout))
+    throw new Error("timeout must be finite and non-negative");
+  if (!intervals.length || intervals.some((value) => value < 0 || !Number.isFinite(value)))
+    throw new Error("intervals must contain non-negative finite values");
+  const deadline = timeout === 0 ? Infinity : Date.now() + timeout;
+  let attempt = 0;
+  for (;;) {
+    let timer;
+    try {
+      const pending = Promise.resolve().then(callback);
+      if (deadline === Infinity) return await pending;
+      return await Promise.race([
+        pending,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Assertion callback timed out")),
+            Math.max(0, deadline - Date.now()),
+          );
+        }),
+      ]);
+    } catch (error) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw error;
+      const interval = intervals[Math.min(attempt++, intervals.length - 1)];
+      await new Promise((resolve) => setTimeout(resolve, Math.min(interval, remaining)));
+      if (Date.now() >= deadline) throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 class ValueExpect extends BaseExpect {
   get not() {
     return new ValueExpect(this._v, !this._neg);
@@ -4170,6 +4205,10 @@ class ValueExpect extends BaseExpect {
   }
   _await() {
     return this._v;
+  }
+  async toPass(options) {
+    if (typeof this._v !== "function") throw new Error("toPass requires a callback");
+    await retryAssertion(this._v, options, 0);
   }
   toBe(x) {
     this._ok(Object.is(this._v, x), `expected ${this._v} to be ${x}`);

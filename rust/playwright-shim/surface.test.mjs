@@ -3929,3 +3929,27 @@ test("soft assertions keep running but fail their owning test (#368)", async () 
   assert.match(result.stdout, /soft assertion/i);
   await rm(root, { recursive: true, force: true });
 });
+
+test("toPass retries async callbacks and retains the final assertion error (#367)", async () => {
+  let calls = 0;
+  await expect(async () => {
+    calls++;
+    expect(calls).toBeGreaterThanOrEqual(3);
+  }).toPass({ timeout: 100, intervals: [1] });
+  assert.equal(calls, 3);
+  const failure = new Error("last callback assertion");
+  let failures = 0;
+  await assert.rejects(
+    () =>
+      expect(async () => {
+        failures++;
+        throw failure;
+      }).toPass({ timeout: 10, intervals: [1] }),
+    (error) => error === failure,
+  );
+  assert.ok(failures > 1);
+  await assert.rejects(
+    () => expect(() => new Promise(() => {})).toPass({ timeout: 5, intervals: [1] }),
+    /timed out/i,
+  );
+});

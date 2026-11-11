@@ -3724,3 +3724,20 @@ test("worker tuple fixtures are shared with suite hooks and torn down once", asy
   assert.equal((result.stdout.match(/WORKER_SETUP/g) ?? []).length, 1);
   assert.equal((result.stdout.match(/WORKER_TEARDOWN/g) ?? []).length, 1);
 });
+
+test("file, hook, fixture predicate and TestInfo skips abort guarded bodies", async () => {
+  const { runShimProbe } = await import("./runner-probes.mjs");
+  const cases = [
+    `test.skip(true,'file guard');test('guarded',()=>console.log('GUARDED_BODY_RAN'));`,
+    `test.beforeAll(()=>test.skip(true,'all guard'));test('guarded',()=>console.log('GUARDED_BODY_RAN'));`,
+    `test.beforeEach(()=>test.skip(true,'each guard'));test('guarded',()=>console.log('GUARDED_BODY_RAN'));`,
+    `test('guarded',(_f,info)=>{info.skip(true,'info guard');console.log('GUARDED_BODY_RAN');});`,
+    `const extended=base.extend({skipFlag:true});extended.skip(({skipFlag})=>skipFlag,'predicate guard');extended('guarded',()=>console.log('GUARDED_BODY_RAN'));`,
+  ];
+  for (const source of cases) {
+    const result = await runShimProbe(source);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /GUARDED_BODY_RAN/);
+    assert.match(result.stdout, /skipped 1/);
+  }
+});

@@ -4413,6 +4413,8 @@ const SKIP_SIGNAL = Symbol("turbo-shim-skip");
 const skipStackStore = new AsyncLocalStorage();
 const activeTStore = new AsyncLocalStorage();
 const activeAttemptStore = new AsyncLocalStorage();
+const activeWorkerHookStore = new AsyncLocalStorage();
+const rootSkipScope = { skip: false };
 const rootTestHooks = new Map();
 const getSkipStack = () => skipStackStore.getStore() ?? [];
 const getActiveT = () => activeTStore.getStore() ?? null;
@@ -4423,19 +4425,52 @@ export const __internals = Object.freeze({
   getSkipStack,
   getActiveT,
 });
-const describeSkipped = () => getSkipStack().some((f) => f.skip);
+const describeSkipped = () => rootSkipScope.skip || getSkipStack().some((f) => f.skip);
 const isDeclareForm = (args) => typeof args[0] === "string" && typeof args[1] === "function";
-function skipConditionMet(args) {
+function skipConditionMet(args, fixtures = {}) {
   if (args.length === 0) return true; // bare test.skip() → always skip
   const c = args[0];
   if (typeof c === "function") {
     try {
-      return !!c({});
+      return !!c(fixtures);
     } catch {
       return false;
     }
   }
   return !!c;
+}
+
+function applySkip(args) {
+  const attempt = activeAttemptStore.getStore();
+  const workerHook = activeWorkerHookStore.getStore();
+  const current = attempt ?? workerHook;
+  const scope = getSkipStack().at(-1) ?? rootSkipScope;
+  if (!current && typeof args[0] === "function") {
+    (scope.guards ??= []).push(args);
+    return;
+  }
+  if (!skipConditionMet(args, current?.fixtures.arg)) return;
+  const reason = typeof args.at(-1) === "string" ? args.at(-1) : undefined;
+  if (attempt) {
+    attempt.info.status = "skipped";
+    attempt.info.expectedStatus = "skipped";
+    attempt.info.annotations.push({ type: "skip", description: reason });
+    getActiveT()?.skip(reason);
+    throw SKIP_SIGNAL;
+  }
+  const target = workerHook?.scope ?? scope;
+  target.skip = true;
+  target.skipReason = reason;
+  if (workerHook) throw SKIP_SIGNAL;
+}
+
+async function applyPlanGuards(plan, fixtures) {
+  for (const scope of [rootSkipScope, ...plan.frames]) {
+    for (const args of scope.guards ?? []) {
+      await fixtures.resolve(fixtureNames(args[0]));
+      applySkip(args);
+    }
+  }
 }
 
 let hasFocusedTests = false;
@@ -4565,6 +4600,7 @@ async function executeAttempt(plan, t) {
   return activeAttemptStore.run({ info, fixtures, plan }, async () => {
     const errors = [];
     try {
+      await applyPlanGuards(plan, fixtures);
       await fixtures.resolveAutomatic();
       for (const hook of planHooks(plan, "beforeEach"))
         await invokeFixtureFunction(hook, fixtures, info);
@@ -4587,8 +4623,15 @@ async function invokeWorkerHook(fn, plan) {
   const info = makeTestInfo("worker hook");
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
   const fixtures = await openFixtures(plan.baseDefs, defs, info, undefined, true);
-  await fixtures.resolveAutomatic();
-  await invokeFixtureFunction(fn, fixtures, info);
+  const scope = plan.frames.at(-1) ?? rootSkipScope;
+  await activeWorkerHookStore.run({ scope, info, fixtures }, async () => {
+    try {
+      await fixtures.resolveAutomatic();
+      await invokeFixtureFunction(fn, fixtures, info);
+    } catch (error) {
+      if (error !== SKIP_SIGNAL) throw error;
+    }
+  });
 }
 
 function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
@@ -4610,6 +4653,11 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
           t.skip("excluded by focused tests");
           return;
         }
+        const skippedScope = [rootSkipScope, ...frames].find((scope) => scope.skip);
+        if (skippedScope) {
+          t.skip(skippedScope.skipReason);
+          return;
+        }
         await executeAttempt(plan, t);
       }),
     );
@@ -4621,16 +4669,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
       nodeTest.skip(args[0], () => {});
       return;
     }
-    // Conditional / runtime form `skip(condition?, description?)`.
-    if (!skipConditionMet(args)) return; // condition false → no-op
-    const reason = typeof args[args.length - 1] === "string" ? args[args.length - 1] : undefined;
-    const t = getActiveT();
-    if (t) {
-      t.skip(reason); // inside a running test body → skip at runtime
-      throw SKIP_SIGNAL;
-    }
-    const stack = getSkipStack();
-    if (stack.length) stack[stack.length - 1].skip = true; // describe scope
+    applySkip(args);
   };
   run.only = (name, fn) => run(name, fn, true);
   run.fixme = run.skip;
@@ -4656,7 +4695,10 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
     }
   };
   run.step.skip = async () => {};
-  run.info = () => activeAttemptStore.getStore()?.info ?? makeTestInfo("");
+  run.info = () =>
+    activeAttemptStore.getStore()?.info ??
+    activeWorkerHookStore.getStore()?.info ??
+    makeTestInfo("");
   run.beforeEach = (fn) => registerTestHook("beforeEach", fn);
   run.afterEach = (fn) => registerTestHook("afterEach", fn);
   run.beforeAll = (fn) => {
@@ -4732,8 +4774,8 @@ function makeTestInfo(title) {
       info.attachments.push(attachment);
     },
     attachments: [],
-    skip: () => {},
-    fixme: () => {},
+    skip: (...args) => applySkip(args),
+    fixme: (...args) => applySkip(args),
     fail: () => {},
     slow: () => {},
     setTimeout: () => {},

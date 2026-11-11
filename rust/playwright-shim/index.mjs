@@ -36,6 +36,23 @@ function evalSource(script, arg) {
   return String(script);
 }
 
+// Run `fn` over `items` with at most `limit` in flight, preserving input order
+// in the results. Backs screenshot asset preparation, whose fetches are
+// independent but must not stampede the network.
+async function mapBounded(items, limit, fn) {
+  const results = Array.from({ length: items.length });
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        results[i] = await fn(items[i], i);
+      }
+    }),
+  );
+  return results;
+}
+
 // Quote a value for a CSS attribute selector (backs getByPlaceholder/AltText/Title).
 function cssAttrValue(text) {
   return `"${String(text).replace(/"/g, '\\"')}"`;
@@ -2416,12 +2433,14 @@ class Page {
     const height = opts.height ?? vp.height;
     const asSvg =
       opts.type === "svg" || (typeof opts.path === "string" && opts.path.endsWith(".svg"));
-    // Fetch the page's external <link> stylesheets so the render is styled, not
-    // just inline-CSS. `{ externalCss: false }` skips it (offline/inline-only).
-    const css = opts.externalCss === false ? "" : await this._fetchLinkedCss();
-    // Fetch the page's <img>/background-image bytes so images paint (PNG/JPEG);
-    // `{ images: false }` skips it.
-    const images = opts.images === false ? {} : await this._fetchImages();
+    // Fetch the page's external <link> stylesheets and <img>/background-image
+    // bytes so the render is styled and images paint. The two preparations are
+    // independent, so they run concurrently; `{ externalCss: false }` /
+    // `{ images: false }` skip each.
+    const [css, images] = await Promise.all([
+      opts.externalCss === false ? Promise.resolve("") : this._fetchLinkedCss(),
+      opts.images === false ? Promise.resolve({}) : this._fetchImages(),
+    ]);
     // Playwright's `fullPage` grows the image to the full content height.
     const fullPage = opts.fullPage === true;
     const out = asSvg
@@ -2440,46 +2459,51 @@ class Page {
   // and failed/unresolvable refs are skipped; count capped to match the engine.
   async _fetchImages() {
     if (!/^https?:/.test(this._url ?? "")) return {};
-    const images = {};
-    for (const ref of native.imageUrls(this._html).slice(0, 60)) {
+    const entries = await mapBounded(native.imageUrls(this._html).slice(0, 60), 8, async (ref) => {
       try {
         const abs = new URL(ref, this._url).href;
         const buf = await native.fetchBytes(abs, this._requestState, this._url, this._cookies);
-        if (buf && buf.length) images[ref] = buf;
+        return buf && buf.length ? [ref, buf] : null;
       } catch {
-        /* skip an image that won't resolve/fetch */
+        return null; /* skip an image that won't resolve/fetch */
       }
-    }
+    });
+    const images = Object.fromEntries(entries.filter(Boolean));
     return images;
   }
 
   // Concatenate the page's `<link rel="stylesheet">` bodies, resolved against the
   // page URL and fetched over the engine's client (cookies apply). Best-effort:
-  // non-http pages and failed/relative-unresolvable sheets are skipped.
+  // non-http pages and failed/relative-unresolvable sheets are skipped. The
+  // fetches are independent and run concurrently; document order of the
+  // concatenation is preserved (cascade order matters).
   async _fetchLinkedCss() {
     if (!/^https?:/.test(this._url ?? "")) return "";
-    let css = "";
-    for (const href of native.stylesheetHrefs(this._html).slice(0, 40)) {
-      try {
-        const abs = new URL(href, this._url).href;
-        const r = JSON.parse(
-          await native.fetchWithCookies(
-            abs,
-            this._cookies,
-            null,
-            null,
-            this._context._headersJson(),
-            false,
-            this._requestState,
-            JSON.stringify({ source: this._url, destination: "style", mode: "no-cors" }),
-          ),
-        );
-        if (r.status >= 200 && r.status < 300 && r.html) css += `${r.html}\n`;
-      } catch {
-        /* skip a sheet that won't resolve/fetch */
-      }
-    }
-    return css;
+    const sheets = await mapBounded(
+      native.stylesheetHrefs(this._html).slice(0, 40),
+      8,
+      async (href) => {
+        try {
+          const abs = new URL(href, this._url).href;
+          const r = JSON.parse(
+            await native.fetchWithCookies(
+              abs,
+              this._cookies,
+              null,
+              null,
+              this._context._headersJson(),
+              false,
+              this._requestState,
+              JSON.stringify({ source: this._url, destination: "style", mode: "no-cors" }),
+            ),
+          );
+          return r.status >= 200 && r.status < 300 && r.html ? `${r.html}\n` : "";
+        } catch {
+          return ""; /* skip a sheet that won't resolve/fetch */
+        }
+      },
+    );
+    return sheets.join("");
   }
 
   // Drag an element matched by `source` to one matched by `target`. Thin wrapper

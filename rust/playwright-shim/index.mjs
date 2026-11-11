@@ -3576,12 +3576,14 @@ function makeDownload(entry) {
   const fs = require("node:fs");
   const os = require("node:os");
   const path = require("node:path");
+  const content =
+    entry.bodyBytes == null ? Buffer.from(entry.content ?? "") : Buffer.from(entry.bodyBytes);
   let cached = null;
   const writeTemp = () => {
     if (cached) return cached;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-surf-dl-"));
     const p = path.join(dir, entry.filename || "download");
-    fs.writeFileSync(p, entry.content ?? "");
+    fs.writeFileSync(p, content);
     cached = p;
     return p;
   };
@@ -3593,7 +3595,7 @@ function makeDownload(entry) {
     },
     async saveAs(dest) {
       const fs2 = require("node:fs");
-      fs2.writeFileSync(dest, entry.content ?? "");
+      fs2.writeFileSync(dest, content);
     },
     async failure() {
       return null;

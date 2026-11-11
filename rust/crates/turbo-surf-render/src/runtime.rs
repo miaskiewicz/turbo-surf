@@ -11363,7 +11363,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
 // can resolve `page.waitForEvent('download')` + `download.path()`. Runs after browser_env
 // installed the anchor prototype (ENV_BOOTSTRAP runs last).
 (() => {
-  const decodeBlobBytes = TextDecoder.prototype.decode.bind(new TextDecoder());
+  const blobByteArray = Array.from;
   // The native store keys each URL by the creating document's storage key
   // (blob_urls.rs); revocation and reads stay within that key.
   const overload = "Failed to execute 'createObjectURL' on 'URL': Overload resolution failed.";
@@ -11379,7 +11379,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
   }, "revokeObjectURL", 1);
   __G.readBlobUrl = (url) => {
     const bytes = ops.op_blob_url_read(__document, url);
-    return bytes == null ? null : decodeBlobBytes(bytes);
+    return bytes == null ? null : blobByteArray(bytes);
   };
   __G.downloads = __G.downloads || [];
   const record = (el) => {
@@ -11391,8 +11391,8 @@ __BodyParamsString=URLSearchParams.prototype.toString;
           if (dl == null && n.download) dl = n.download;
           if (dl != null) {
             const href = (n.getAttribute("href") || n.href || "");
-            const content = __G.readBlobUrl(String(href));
-            __G.downloads.push({ filename: dl || "download", url: String(href), content: content == null ? "" : content });
+            const bodyBytes = __G.readBlobUrl(String(href));
+            __G.downloads.push({ filename: dl || "download", url: String(href), bodyBytes: bodyBytes || [] });
             return true;
           }
         }

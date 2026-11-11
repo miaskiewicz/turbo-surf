@@ -154,7 +154,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 |---|---|---|
 | `first`, `last`, `nth`, `filter`, `and`, `or`, `all`, `count` | ✅ | Pure JS over the resolved match set. |
 | `locator` (nesting) | ✅ | CSS parents, indexed/filtered ancestors, `:scope`, and role/text/label parents retain their descendant scope for reads and live actions. |
-| `getByRole/Text/Label/TestId/Placeholder/AltText/Title` | ⚠️ | Role/text/label children preserve parent scope; regex test IDs support matching and live actions. Placeholder/alt/title nesting still delegates to the page (#380). |
+| `getByRole/Text/Label/TestId/Placeholder/AltText/Title` | ⚠️ | Role/text/label/placeholder/alt/title children preserve parent scope, including indexed ancestors. Regex test IDs support matching and live actions. Open-shadow-root piercing remains unsupported (#476). |
 | `textContent`, `innerText`, `innerHTML`, `allTextContents`, `allInnerTexts` | ✅ | |
 | `getAttribute`, `inputValue`, `selectedValues`, `cssValue`, `ariaRole`, `accessibleName`, `accessibleDescription` | ✅ | |
 | `is*` (`Visible/Hidden/Checked/Enabled/Disabled/Editable/Empty`) | ✅ | |

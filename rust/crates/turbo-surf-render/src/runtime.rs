@@ -11166,14 +11166,9 @@ if (typeof globalThis.ReadableStream === "undefined") {
     }
   };
 }
-// requestIdleCallback must invoke the callback with an IdleDeadline ({didTimeout, timeRemaining()});
-// the bare shim passed nothing, so `deadline.timeRemaining()` threw — a correctness bug + tell.
-globalThis.requestIdleCallback = (fn) => globalThis.setTimeout(() => {
-  const start = __perfNow();
-  fn({ didTimeout: false, timeRemaining: () => Math.max(0, 50 - (__perfNow() - start)) });
-}, 1);
-globalThis.cancelIdleCallback = (id) => globalThis.clearTimeout(id);
-
+"##,
+    include_str!("idle_callback.js"),
+    r##"
 // WHATWG URL + URLSearchParams — deno_core ships neither, but app bundles (Next.js,
 // the PropelAuth SDK, …) use `new URL(...)` while hydrating, so without these the
 // page crashes with "URL is not defined" before rendering. Native parsing handles

@@ -379,6 +379,7 @@ pub enum RedirectMode {
 
 #[derive(Default)]
 pub struct FetchOptions<'a> {
+    pub http_credentials: Option<&'a crate::http_auth::Credentials>,
     pub headers: BTreeMap<String, String>,
     /// Browser metadata for this request. Unspecified requests are top-level
     /// navigations; script/fetch/image callers should identify their context.
@@ -2014,6 +2015,63 @@ fn attach_pending_dictionary(
     }
 }
 
+fn challenge_authorization(
+    opts: &FetchOptions<'_>,
+    hop: &Hop,
+    response: &http::Response,
+) -> Option<String> {
+    if response.status().as_u16() != 401
+        || opts
+            .context
+            .as_ref()
+            .is_some_and(|context| !context.sends_credentials(&hop.url))
+    {
+        return None;
+    }
+    let basic = response_headers_pairs(response)
+        .iter()
+        .any(|(name, value)| {
+            name.eq_ignore_ascii_case("www-authenticate")
+                && crate::http_auth::basic_challenge(value)
+        });
+    if !basic {
+        return None;
+    }
+    opts.http_credentials?.authorization(&hop.url)
+}
+
+async fn request_with_auth(
+    opts: &mut FetchOptions<'_>,
+    hop: &Hop,
+    client: &http::Client,
+    streaming: bool,
+) -> Result<http::Response, HttpError> {
+    let response = cached_request(opts, hop, client).await?;
+    notify_response_effects(opts, &response);
+    check_response_policy(opts, hop, &response)?;
+    let Some(authorization) = challenge_authorization(opts, hop, &response) else {
+        return Ok(response);
+    };
+    if streaming {
+        return Err(HttpError::new(
+            "Cannot replay streaming body for HTTP authentication",
+            ErrorCode::Network,
+        ));
+    }
+    drop(response);
+    opts.headers
+        .retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
+    opts.headers.insert("authorization".into(), authorization);
+    let previous_mode = opts.cache_mode;
+    opts.cache_mode = CacheMode::Reload;
+    let response = cached_request(opts, hop, client).await;
+    opts.cache_mode = previous_mode;
+    let response = response?;
+    notify_response_effects(opts, &response);
+    check_response_policy(opts, hop, &response)?;
+    Ok(response)
+}
+
 async fn follow_manually_response(
     opts: &mut FetchOptions<'_>,
     start: &str,
@@ -2036,10 +2094,8 @@ async fn follow_manually_response(
     for redirects in 0.. {
         check_request_policy(opts, &hop, redirects)?;
         check_same_origin_mode(opts, &hop)?;
-        let mut res = cached_request(opts, &hop, &cl).await?;
+        let mut res = request_with_auth(opts, &hop, &cl, streaming_upload).await?;
         let final_url = final_url(&res);
-        notify_response_effects(opts, &res);
-        check_response_policy(opts, &hop, &res)?;
         if res.status().as_u16() == 204 {
             if let Some(pending) = res.extensions_mut().remove::<PendingStore>() {
                 pending.cache.store(pending.entry);
@@ -2350,7 +2406,8 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
             || opts.request_policy.is_some()
             || opts.response_policy.is_some()
             || opts.response_side_effects.is_some()
-            || opts.before_request.is_some() =>
+            || opts.before_request.is_some()
+            || opts.http_credentials.is_some() =>
         {
             follow_manually(&mut opts, url, 20, max_bytes).await
         }
@@ -2499,6 +2556,7 @@ fn needs_manual_redirect_path(opts: &FetchOptions<'_>) -> bool {
         || opts.response_policy.is_some()
         || opts.response_side_effects.is_some()
         || opts.before_request.is_some()
+        || opts.http_credentials.is_some()
 }
 
 /// Manual redirect / cache / policy branch of [`fetch_typed_bytes`]: drive
@@ -3938,5 +3996,100 @@ mod edge_tests {
         .await
         .unwrap();
         assert_eq!(cached.body.next_chunk().await.unwrap().unwrap(), b"hello");
+    }
+}
+
+#[cfg(test)]
+mod http_auth_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn browser_credentials_retry_basic_once_and_respect_scope_and_omission() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let requests = seen.clone();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let mut buffer = [0; 4096];
+                    let len = socket.read(&mut buffer).await.unwrap();
+                    if len == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..len]);
+                }
+                let request = String::from_utf8_lossy(&bytes).to_lowercase();
+                requests.lock().unwrap().push(request.clone());
+                let response = if request.contains("authorization: basic ywxpy2u6c2vjcmv0") {
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"
+                } else {
+                    "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=probe\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nNO"
+                };
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let credentials = crate::http_auth::Credentials {
+            username: "alice".into(),
+            password: "secret".into(),
+            origin: Some(origin.clone()),
+        };
+        let response = fetch_html(
+            &origin,
+            FetchOptions {
+                http_credentials: Some(&credentials),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.html, "OK");
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        assert!(!seen.lock().unwrap()[0].contains("authorization:"));
+        seen.lock().unwrap().clear();
+        let other = crate::http_auth::Credentials {
+            origin: Some("http://127.0.0.1:1".into()),
+            ..credentials.clone()
+        };
+        assert_eq!(
+            fetch_html(
+                &origin,
+                FetchOptions {
+                    http_credentials: Some(&other),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .status,
+            401
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        seen.lock().unwrap().clear();
+        let context = RequestContext {
+            credentials: crate::request_context::Credentials::Omit,
+            ..Default::default()
+        };
+        assert_eq!(
+            fetch_html(
+                &origin,
+                FetchOptions {
+                    http_credentials: Some(&credentials),
+                    context: Some(context),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .status,
+            401
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        server.abort();
     }
 }

@@ -4435,3 +4435,53 @@ test("accessible names resolve ordered ID references and associated native label
   assert.equal(await page.evaluate(() => document.body.getAttribute("data-named")), "yes");
   await page.close();
 });
+test("Browser credentials answer Basic challenges and stay origin scoped (#394)", async () => {
+  const expected = `Basic ${Buffer.from("alice:secret").toString("base64")}`;
+  const leaked = [];
+  const other = createServer((req, res) => {
+    leaked.push(req.headers.authorization);
+    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="other"' });
+    res.end("other");
+  });
+  const otherBase = await listen(other);
+  const attempts = [];
+  const server = createServer((req, res) => {
+    attempts.push(req.headers.authorization);
+    if (req.headers.authorization !== expected) {
+      res.writeHead(401, { "WWW-Authenticate": 'Basic realm="probe"' });
+      return res.end("credentials required");
+    }
+    if (req.url === "/redirect") {
+      res.writeHead(302, { location: `${otherBase}/leak` });
+      return res.end();
+    }
+    res.setHeader("content-type", "text/html");
+    res.end("authenticated");
+  });
+  const base = await listen(server);
+  const ctx = new BrowserContext({
+    httpCredentials: { username: "alice", password: "secret", origin: base },
+  });
+  const denied = new BrowserContext({
+    httpCredentials: { username: "alice", password: "secret", origin: otherBase },
+  });
+  try {
+    const p = await ctx.newPage();
+    assert.equal((await p.goto(base, { waitUntil: "networkidle" })).status(), 200);
+    assert.equal(attempts[0], undefined);
+    assert.equal(
+      await p.evaluate(() => fetch("/fetch").then((response) => response.text())),
+      "authenticated",
+    );
+    assert.equal((await p.goto(`${base}/redirect`)).status(), 401);
+    assert.ok(leaked.length > 0);
+    assert.ok(leaked.every((value) => value === undefined));
+    const q = await denied.newPage();
+    assert.equal((await q.goto(base)).status(), 401);
+  } finally {
+    await ctx.close();
+    await denied.close();
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => other.close(resolve));
+  }
+});

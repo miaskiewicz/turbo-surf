@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Host-owned context preferences; cloned for each new tab and updated through
 /// native request-state handles, never writable by guest page scripts.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserEmulation {
     pub(crate) color_scheme: Option<String>,
@@ -10,6 +10,7 @@ pub(crate) struct BrowserEmulation {
     pub(crate) locale: Option<String>,
     #[serde(default, rename = "extraHTTPHeaders")]
     pub(crate) extra_http_headers: std::collections::BTreeMap<String, String>,
+    pub(crate) http_credentials: Option<turbo_surf_core::http_auth::Credentials>,
 }
 
 impl BrowserEmulation {
@@ -55,6 +56,9 @@ impl BrowserEmulation {
             .is_some_and(|s| !["reduce", "no-preference"].contains(&s))
         {
             return Err("Invalid reducedMotion".into());
+        }
+        if let Some(credentials) = &self.http_credentials {
+            credentials.validate()?;
         }
         Ok(())
     }

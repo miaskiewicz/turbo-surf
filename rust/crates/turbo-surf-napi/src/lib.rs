@@ -1012,6 +1012,7 @@ async fn do_fetch_headers(
         storage,
     } = request_state(request_state_id)?;
     let headers = storage.request_headers(headers);
+    let auth_credentials = storage.http_credentials();
     let storage_effects = storage.response_storage_effects();
     let http_cache = storage.http_cache();
     // Network jobs need native backing, not the tab/profile owner.
@@ -1028,6 +1029,7 @@ async fn do_fetch_headers(
             true
         };
     let opts = FetchOptions {
+        http_credentials: auth_credentials.as_ref(),
         method,
         body,
         body_bytes: body_bytes.map(|bytes| bytes.to_vec()),
@@ -1114,6 +1116,7 @@ pub async fn fetch_bytes(
         storage,
     } = request_state(request_state_id)?;
     let headers = storage.request_headers(headers);
+    let auth_credentials = storage.http_credentials();
     let storage_effects = storage.response_storage_effects();
     let http_cache = storage.http_cache();
     drop(storage);
@@ -1128,6 +1131,7 @@ pub async fn fetch_bytes(
     context.source = source_url;
     let cache_partition = browsing_cache_partition(&context, &url);
     let opts = FetchOptions {
+        http_credentials: auth_credentials.as_ref(),
         allow_non_html: true,
         client: Some(shared_client()),
         headers,

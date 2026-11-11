@@ -7,6 +7,7 @@ use turbo_surf_core::request_context::{same_origin, ClientHints, RequestContext,
 
 #[derive(Default)]
 pub struct ScriptPolicies<'a> {
+    pub http_credentials: Option<&'a turbo_surf_core::http_auth::Credentials>,
     pub request: Option<ScriptPolicy<'a>>,
     pub response_side_effects: Option<&'a turbo_surf_core::net::ResponseSideEffects<'a>>,
     pub http_cache: Option<&'a turbo_surf_core::http_cache::HttpCache>,
@@ -150,6 +151,7 @@ async fn fetch_hop(
     fetch_html(
         target,
         FetchOptions {
+            http_credentials: policies.http_credentials,
             http_cache: policies.http_cache,
             response_policy: Some(&response_policy),
             response_side_effects: policies.response_side_effects,

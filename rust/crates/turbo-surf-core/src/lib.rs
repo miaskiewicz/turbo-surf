@@ -24,6 +24,7 @@ pub mod cookies;
 pub mod crawl;
 pub mod fingerprint;
 pub mod frontier;
+pub mod http_auth;
 mod http_trace;
 pub mod measure;
 pub mod net;

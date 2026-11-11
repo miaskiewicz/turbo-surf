@@ -3079,6 +3079,7 @@ class Page {
         reducedMotion: this._media?.reducedMotion ?? this._context._reducedMotion,
         locale: this._context._locale,
         extraHTTPHeaders: this._context._headers,
+        httpCredentials: this._context._httpCredentials,
       }),
     );
   }
@@ -3759,7 +3760,8 @@ class BrowserContext {
       this._colorScheme ||
       this._reducedMotion ||
       this._locale ||
-      Object.keys(this._headers).length
+      Object.keys(this._headers).length ||
+      this._httpCredentials
     )
       this._configureNative();
   }
@@ -3771,6 +3773,7 @@ class BrowserContext {
         reducedMotion: this._reducedMotion,
         locale: this._locale,
         extraHTTPHeaders: this._headers,
+        httpCredentials: this._httpCredentials,
       }),
     );
     for (const page of this._pages) if (!page._closed) page._configureNative();

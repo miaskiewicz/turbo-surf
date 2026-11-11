@@ -1932,6 +1932,11 @@ impl ModuleLoader for NetModuleLoader {
         let client_hints = self.client_hints.clone();
         let http_cache = self.http_cache.clone();
         let storage_effects = self.storage_effects.clone();
+        let auth_credentials = self
+            .emulation
+            .read()
+            .ok()
+            .and_then(|options| options.http_credentials.clone());
         let context_headers = self
             .emulation
             .read()
@@ -1975,6 +1980,7 @@ impl ModuleLoader for NetModuleLoader {
                 &client_hints,
                 &mut local,
                 crate::script_fetch::ScriptPolicies {
+                    http_credentials: auth_credentials.as_ref(),
                     http_cache: Some(&http_cache),
                     response_side_effects: Some(storage_effects.as_ref()),
                     cache_partition: &cache_partition,
@@ -3596,7 +3602,9 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         context.opaque_origin,
         opaque_cache_nonce,
     );
+    let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
     let mut opts = FetchOptions {
+        http_credentials: auth_credentials.as_ref(),
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_mode,
@@ -3652,6 +3660,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
                     &client_hints,
                     &mut local,
                     crate::script_fetch::ScriptPolicies {
+                        http_credentials: auth_credentials.as_ref(),
                         http_cache: Some(&http_cache),
                         response_side_effects: Some(storage_effects.as_ref()),
                         cache_partition: &cache_partition,
@@ -3847,7 +3856,9 @@ async fn op_load_image(
         .borrow()
         .borrow::<BrowserStorage>()
         .partition_response_effects(anonymous);
+    let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
     let opts = FetchOptions {
+        http_credentials: auth_credentials.as_ref(),
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_partition,
@@ -7349,6 +7360,9 @@ impl BrowserStorage {
             .write()
             .map_err(|_| "Context preferences unavailable")? = options;
         Ok(())
+    }
+    pub fn http_credentials(&self) -> Option<turbo_surf_core::http_auth::Credentials> {
+        self.with_emulation(|options| options.http_credentials.clone())
     }
     pub fn request_headers(
         &self,

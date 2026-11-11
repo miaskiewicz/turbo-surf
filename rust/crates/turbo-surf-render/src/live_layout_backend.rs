@@ -1371,6 +1371,30 @@ fn visibility<'s>(
     };
     turbo_dom_layout::cssom_view::visibility::check(&view.styles, current.id, flags, relevant)
 }
+pub(crate) struct InitialViewport(pub Option<[u32; 2]>);
+
+pub(crate) fn set_viewport(
+    scope: &mut v8::PinScope,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    if width == 0 || height == 0 {
+        return Err("native layout viewport must be positive".into());
+    }
+    let context = scope.get_current_context();
+    let current = context.get_slot::<Viewport>().ok_or(VIEWPORT_PENDING)?;
+    if current.width == width as f32 && current.height == height as f32 {
+        return Ok(());
+    }
+    let mut updated = *current;
+    updated.width = width as f32;
+    updated.height = height as f32;
+    context.set_slot(std::rc::Rc::new(updated));
+    let window = context.global(scope);
+    crate::geometry_backend::request_rendering(scope, window);
+    Ok(())
+}
+
 /// Capture trusted bootstrap values once, before authored page code can replace
 /// the Window dimensions. This is not a second arbitrary default viewport.
 pub(crate) fn capture_viewport(scope: &mut v8::PinScope) -> Result<(), String> {
@@ -1388,6 +1412,13 @@ pub(crate) fn capture_viewport(scope: &mut v8::PinScope) -> Result<(), String> {
         values[i] = value
             .number_value(scope)
             .ok_or("native layout viewport interrupted")? as f32;
+    }
+    let initial = deno_core::JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<InitialViewport>()
+        .0;
+    if let Some([width, height]) = initial {
+        values = [width as f32, height as f32];
     }
     // Frames can bootstrap while their owner's geometry capability is still
     // being installed. Actual content sizes are resolved by viewport() at every

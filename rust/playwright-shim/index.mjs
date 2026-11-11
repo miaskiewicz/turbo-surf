@@ -1721,6 +1721,7 @@ class Page {
     this._documentResponse = { status: 0, referrer: "", headers: [] };
     this._ownsContext = context == null;
     this._context = context ?? new BrowserContext();
+    this._viewport = { ...this._context._viewport };
     this._requestState = native.requestStateNew?.(this._context._requestState);
     this._history = [];
     this._fwd = [];
@@ -1915,7 +1916,10 @@ class Page {
         this._cookies,
         this._context._userAgent ?? undefined,
         this._requestState,
-        JSON.stringify(this._documentResponse),
+        JSON.stringify({
+          ...this._documentResponse,
+          viewport: [this._viewport.width, this._viewport.height],
+        }),
         this._initScriptSource(),
         timeoutMs,
       );
@@ -2965,10 +2969,17 @@ class Page {
     return this._context.request;
   }
   viewportSize() {
-    return this._context._viewport;
+    return { ...this._viewport };
   }
   async setViewportSize(size) {
-    this._context._viewport = size;
+    if (![size.width, size.height].every((value) => Number.isInteger(value) && value > 0))
+      throw new Error("viewport width and height must be positive integers");
+    if (this._live) {
+      await native.liveResize(this._session, size.width, size.height);
+      await this._refreshFromSession();
+      await this._drainBindings();
+    }
+    this._viewport = { ...size };
   }
   setDefaultTimeout() {}
   setDefaultNavigationTimeout(timeout) {
@@ -3075,7 +3086,7 @@ class Page {
   // the full content height; `clip` crops the rendered pixels while the context
   // viewport drives layout. Returns a Buffer; writes `path` if given.
   async screenshot(opts = {}) {
-    const vp = this._context._viewport ?? { width: 1280, height: 800 };
+    const vp = this._viewport;
     const width = opts.width ?? vp.width;
     const height = opts.height ?? vp.height;
     const type = screenshotEncoding(opts);

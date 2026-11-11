@@ -216,6 +216,7 @@ use tokio::sync::mpsc::UnboundedSender as MpscSender;
 use turbo_surf_render::{PageSession, PageSessionOptions, DEFAULT_RENDER_BUDGET_MS};
 
 enum LiveJob {
+    Resize(u32, u32, SyncSender<std::result::Result<String, String>>),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
     Expression(String, SyncSender<std::result::Result<String, String>>),
@@ -274,6 +275,7 @@ impl Task for LiveOpenTask {
         let response = self.response.clone();
         let init_script = std::mem::take(&mut self.init_script);
         let initial_timeout_ms = self.initial_timeout_ms;
+        let viewport = response.viewport;
         thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -300,6 +302,7 @@ impl Task for LiveOpenTask {
                     None,
                     PageSessionOptions {
                         initial_hydration_budget_ms: initial_timeout_ms.map(u64::from),
+                        viewport,
                         ..Default::default()
                     },
                 ),
@@ -355,6 +358,12 @@ impl Task for LiveOpenTask {
                     }
                 };
                 match job {
+                    LiveJob::Resize(width, height, reply) => {
+                        let result = rt
+                            .block_on(session.set_viewport(width, height))
+                            .map(|_| String::new());
+                        let _ = reply.send(result);
+                    }
                     LiveJob::Eval(script, reply) => {
                         let _ = reply.send(rt.block_on(session.eval(&script)));
                     }
@@ -430,6 +439,37 @@ pub fn live_open(
         client_hints: state.client_hints,
         storage: state.storage,
     }))
+}
+
+pub struct LiveResizeTask {
+    id: u32,
+    width: u32,
+    height: u32,
+}
+
+#[napi]
+impl Task for LiveResizeTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(self.id, LiveJob::Resize(self.width, self.height, reply))
+            .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live resize worker dropped reply"))?
+            .map_err(Error::from_reason)
+    }
+
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Update a live session's private host viewport and deliver rendering steps.
+#[napi]
+pub fn live_resize(id: u32, width: u32, height: u32) -> AsyncTask<LiveResizeTask> {
+    AsyncTask::new(LiveResizeTask { id, width, height })
 }
 
 /// Run `script` in the live isolate, drain to quiescence, return `String(__RESULT||'')`.

@@ -5248,3 +5248,25 @@ fn runaway_script_stops_when_budget_expires_during_setup() {
         );
     }
 }
+
+#[tokio::test]
+async fn host_viewport_resize_updates_geometry_media_and_events_without_guest_authority() {
+    let mut page = PageSession::open(
+        "<style>#target{width:220px;height:20px}@media(max-width:600px){#target{width:80px}}</style><div id=target></div><script>globalThis.resizeCount=0;addEventListener('resize',()=>resizeCount++);</script>",
+        "https://viewport.test/", "", "", 5000,
+    ).await.unwrap();
+    page.set_viewport(375, 812).await.unwrap();
+    let actual = page.eval_engine_expression("JSON.stringify([innerWidth,innerHeight,matchMedia('(max-width:600px)').matches,document.getElementById('target').getBoundingClientRect().width,resizeCount])").await.unwrap();
+    assert_eq!(actual, "[375,812,true,80,1]");
+    page.set_viewport(375, 812).await.unwrap();
+    assert_eq!(
+        page.eval_engine_expression("String(resizeCount)")
+            .await
+            .unwrap(),
+        "1"
+    );
+    assert!(page.set_viewport(0, 812).await.is_err());
+    page.set_viewport(1280, 800).await.unwrap();
+    assert_eq!(page.eval_engine_expression("JSON.stringify([innerWidth,matchMedia('(max-width:600px)').matches,document.getElementById('target').getBoundingClientRect().width,resizeCount])").await.unwrap(), "[1280,false,220,2]");
+    page.close();
+}

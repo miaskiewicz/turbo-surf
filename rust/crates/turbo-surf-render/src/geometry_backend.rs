@@ -62,6 +62,13 @@ fn op_request_frame_rendering<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
 ) {
+    request_rendering(scope, window);
+}
+
+pub(crate) fn request_rendering<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) {
     let Some(context) = window
         .get_creation_context(scope)
         .filter(|context| window.strict_equals(context.global(scope).into()))

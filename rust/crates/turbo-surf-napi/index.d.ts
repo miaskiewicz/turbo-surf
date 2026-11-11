@@ -46,7 +46,7 @@ export function hydrate(
   documentResponse?: string,
 ): Promise<string>;
 
-/** documentResponse is host JSON {status, referrer, headers: [[name, value], ...]}.
+/** documentResponse is host JSON {status, referrer, headers: [[name, value], ...], viewport?: [width, height]}.
  * initScript runs through the trusted native entry before authored scripts.
  * Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
  * real DOM events into the running app. Returns a session id. */
@@ -210,3 +210,6 @@ export function queryCount(html: string, selector: string, kind?: string): numbe
 export function query(html: string, selector: string, kind?: string, root?: number): string;
 export function getBy(html: string, kind: string, value: string, name?: string, root?: string, options?: string): string;
 export function extract(html: string, baseUrl: string, schemaJson: string): string;
+
+/** Resize trusted live geometry and deliver resize/media rendering updates. */
+export function liveResize(id: number, width: number, height: number): Promise<string>;

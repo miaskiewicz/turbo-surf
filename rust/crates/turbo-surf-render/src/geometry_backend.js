@@ -35,7 +35,7 @@
     return value;
   }
 
-  if (frameWindow) {
+  {
     for (const [name, height] of [
       ["innerWidth", false],
       ["innerHeight", true],
@@ -68,6 +68,8 @@
       });
     }
   }
+
+  if (typeof frameStep === "function") frameStep(() => {});
 
   function brand(receiver, kind) {
     if (!ops.op_live_geometry_brand(receiver, kind)) throw new LocalTypeError("Illegal invocation");

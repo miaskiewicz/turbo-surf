@@ -242,6 +242,7 @@ async fn initial_hydration_cap_does_not_shorten_later_operation_budgets() {
         PageSessionOptions {
             window_timer_mode: WindowTimerMode::RealTime,
             initial_hydration_budget_ms: Some(100),
+            ..Default::default()
         },
     )
     .await

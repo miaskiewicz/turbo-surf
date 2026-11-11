@@ -4198,6 +4198,8 @@ pub enum WindowTimerMode {
 /// Host-owned policy installed before any document or frame script executes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PageSessionOptions {
+    /// Initial host-owned layout viewport, installed before page scripts.
+    pub viewport: Option<[u32; 2]>,
     pub window_timer_mode: WindowTimerMode,
     /// Cap this initial hydration without shortening later operation budgets.
     /// Consumed on open; automatic form destinations inherit only the timer mode.
@@ -14677,6 +14679,9 @@ fn make_runtime_with_storage_and_options(
     state.put(ClassicScripts::default());
     state.put(FrameContexts::default());
     state.put(crate::document_facts::AgentClusters::default());
+    state.put(crate::live_layout_backend::InitialViewport(
+        options.viewport,
+    ));
     state.put(TimerClock {
         mode: options.window_timer_mode,
         ..TimerClock::default()
@@ -17365,6 +17370,20 @@ impl PageSession {
                 Err(e)
             }
         }
+    }
+
+    /// Resize the trusted layout viewport without replacing the active document.
+    pub async fn set_viewport(&mut self, width: u32, height: u32) -> Result<(), String> {
+        if self.closed {
+            return Err("page session is closed".into());
+        }
+        {
+            let _activation = self.rt.activation_key().enter();
+            deno_core::scope!(scope, self.rt);
+            crate::live_layout_backend::set_viewport(scope, width, height)?;
+        }
+        self.options.viewport = Some([width, height]);
+        self.eval_engine("").await.map(|_| ())
     }
 
     /// Run `script` in the LIVE isolate, then drain the event loop to quiescence so any

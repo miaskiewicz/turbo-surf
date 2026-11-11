@@ -3849,3 +3849,51 @@ test("Context headers reach authored and subsequent native page fetches (#392)",
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("viewport resize updates live layout media and only its own page (#369)", async () => {
+  const server = createServer((_req, res) =>
+    res.end(
+      '<style>#target{width:220px;height:20px}@media(max-width:600px){#target{width:80px}}</style><div id="target"></div><script>window.initialSize=[innerWidth,innerHeight];window.resizeCount=0;addEventListener("resize",()=>resizeCount++);</script>',
+    ),
+  );
+  const base = await listen(server);
+  const context = new BrowserContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  const sibling = await context.newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await sibling.setViewportSize({ width: 375, height: 600 });
+    await sibling.goto(base, { waitUntil: "networkidle" });
+    assert.deepEqual(await sibling.evaluate(() => initialSize), [375, 600]);
+    await sibling.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 375, height: 812 });
+    assert.deepEqual(page.viewportSize(), { width: 375, height: 812 });
+    assert.deepEqual(sibling.viewportSize(), { width: 1280, height: 800 });
+    assert.deepEqual(
+      await page.evaluate(() => [
+        innerWidth,
+        innerHeight,
+        matchMedia("(max-width:600px)").matches,
+        document.getElementById("target").getBoundingClientRect().width,
+        resizeCount,
+      ]),
+      [375, 812, true, 80, 1],
+    );
+    await page.setViewportSize({ width: 375, height: 812 });
+    assert.equal(await page.evaluate(() => resizeCount), 1);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    assert.deepEqual(
+      await page.evaluate(() => [
+        innerWidth,
+        matchMedia("(max-width:600px)").matches,
+        document.getElementById("target").getBoundingClientRect().width,
+        resizeCount,
+      ]),
+      [1280, false, 220, 2],
+    );
+  } finally {
+    await context.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -517,3 +517,30 @@ test("test runner capabilities report explicit supported Node versions", () => {
     "--test-skip-pattern=/excluded/",
   ]);
 });
+
+test("artifact configuration rejects enabled trace and video before running tests (#465)", () => {
+  for (const use of [
+    { trace: "on-first-retry" },
+    { trace: { mode: "retain-on-failure" } },
+    { video: "retain-on-failure" },
+    { recordVideo: { dir: "/tmp/surf-unused-video" } },
+  ])
+    assert.throws(() => testRunnerFlags({ use }), /trace|video|recordVideo/);
+  assert.doesNotThrow(() => testRunnerFlags({ use: { trace: { mode: "off" }, video: "off" } }));
+});
+
+test("CLI rejects requested recording before executing the test body (#465)", async () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, "artifact.spec.mjs"),
+    "import test from 'node:test'; test('body',()=>console.log('ARTIFACT_BODY_RAN'));\n",
+  );
+  writeFileSync(
+    join(root, "playwright.config.mjs"),
+    "export default { testDir:'.',testMatch:'artifact.spec.mjs',use:{video:'retain-on-failure'} };\n",
+  );
+  const result = await runCli(["--config", join(root, "playwright.config.mjs")], root);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /video unavailable/);
+  assert.doesNotMatch(result.stdout, /ARTIFACT_BODY_RAN/);
+});

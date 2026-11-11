@@ -3647,3 +3647,26 @@ test("innerText reads rendered text and excludes hidden descendants (#378)", asy
   assert.equal(await page.locator("#rendered").innerText(), "FirstSECRET\nSecond\nThird");
   await page.close();
 });
+test("tracing and enabled video options reject unsupported recording explicitly (#465)", async () => {
+  const browser = await chromium.launch();
+  await assert.rejects(
+    () => browser.newContext({ recordVideo: { dir: "/tmp/surf-unused-video" } }),
+    /recordVideo.*unavailable/,
+  );
+  for (const options of [
+    { video: "on" },
+    { video: { mode: "retain-on-failure" } },
+    { trace: "on-first-retry" },
+    { trace: { mode: "on" } },
+  ])
+    await assert.rejects(() => browser.newContext(options), /video|trace/);
+  const context = await browser.newContext({ video: "off", trace: { mode: "off" } });
+  try {
+    for (const method of ["start", "startChunk", "stopChunk", "stop"])
+      await assert.rejects(() => context.tracing[method](), /tracing.*unavailable/);
+    const p = await context.newPage();
+    assert.equal(p.video(), null);
+  } finally {
+    await context.close();
+  }
+});

@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validateArtifactOptions } from "./artifact-options.mjs";
 
 const DEFAULT_CONFIG_NAMES = [
   "playwright.config.ts",
@@ -320,6 +321,7 @@ export function orderProjects(projects, selectedNames) {
 }
 
 export function testRunnerFlags(project, version = process.versions.node) {
+  validateArtifactOptions(project.use);
   const [major, minor] = version.split(".").map(Number);
   const forceExit = major >= 22 || (major === 20 && minor >= 14);
   if (!forceExit) {

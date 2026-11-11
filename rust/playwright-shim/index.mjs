@@ -20,6 +20,7 @@ import { basename } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { equalValues } from "./equality.mjs";
+import { validateArtifactOptions } from "./artifact-options.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -3598,6 +3599,13 @@ class BrowserContext {
       /* ignore malformed env — a project without a use block is the common case */
     }
     const merged = { ...projectUse, ...opts };
+    validateArtifactOptions(merged);
+    this.tracing = Object.fromEntries(
+      ["start", "startChunk", "stopChunk", "stop", "group", "groupEnd"].map((method) => [
+        method,
+        UNSUPPORTED(`tracing.${method}`, "no-browser engine has no Playwright trace recorder"),
+      ]),
+    );
     const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).

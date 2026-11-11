@@ -27,13 +27,7 @@
       const bit = t === 1 ? 1 : t === 3 ? 4 : t === 8 ? 128 : 1 << (t - 1);
       if ((show & bit) === 0) return 3; // SKIP (wrong type)
       const fn = filter && (typeof filter === "function" ? filter : filter.acceptNode);
-      if (typeof fn === "function") {
-        try {
-          return fn.call(filter, n);
-        } catch {
-          return 1;
-        }
-      }
+      if (typeof fn === "function") return fn.call(filter, n);
       return 1;
     };
     const w = { root, whatToShow: show, filter, currentNode: root };

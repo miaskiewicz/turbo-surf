@@ -89,3 +89,26 @@ test("NodeIterator rejection skips a node without pruning its descendants", () =
   assert.equal(iterator.previousNode(), child);
   assert.equal(iterator.previousNode(), root);
 });
+
+test("TreeWalker propagates filter exceptions without advancing currentNode", () => {
+  const child = node("child");
+  const root = node("root", child);
+  const marker = new Error("filter-marker");
+  let fail = true;
+  const filter = {
+    acceptNode(value) {
+      assert.equal(this, filter);
+      assert.equal(value, child);
+      if (fail) throw marker;
+      return 1;
+    },
+  };
+  const walker = document().createTreeWalker(root, 1, filter);
+  assert.throws(
+    () => walker.nextNode(),
+    (error) => error === marker,
+  );
+  assert.equal(walker.currentNode, root);
+  fail = false;
+  assert.equal(walker.nextNode(), child);
+});

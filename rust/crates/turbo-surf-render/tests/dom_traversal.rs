@@ -33,3 +33,20 @@ fn node_iterator_root_and_reference_direction() {
     .unwrap();
     assert_eq!(out, r#"["root","child","child","root",true,true]"#);
 }
+
+#[test]
+fn tree_walker_propagates_filter_exception_and_retains_cursor() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"(() => {
+          const root = document.createElement('div');
+          root.append(document.createElement('span'));
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT,
+            () => {throw new Error('filter-marker');});
+          try { walker.nextNode(); return 'resolved'; }
+          catch (error) { return JSON.stringify([error.message, walker.currentNode === root]); }
+        })()"#,
+    )
+    .unwrap();
+    assert_eq!(out, r#"["filter-marker",true]"#);
+}

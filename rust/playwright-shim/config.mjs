@@ -68,7 +68,18 @@ export function normalizeConfig(raw, rootDir) {
           grepInvert: toArray(r.grepInvert),
         },
       ];
-  return { rootDir, testDir, testMatch, testIgnore, reporter, webServer, use, projects };
+  return {
+    rootDir,
+    testDir,
+    testMatch,
+    testIgnore,
+    reporter,
+    webServer,
+    use,
+    projects,
+    globalSetup: r.globalSetup,
+    globalTeardown: r.globalTeardown,
+  };
 }
 
 function toArray(v) {

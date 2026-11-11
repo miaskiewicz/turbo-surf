@@ -4,6 +4,7 @@
 // `node --import ../register.mjs --test …` sweep. See config.mjs for scope.
 
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -43,6 +44,7 @@ export async function run(argv) {
     console.error("turbo-surf-test: no playwright.config.* found (pass --config)");
     return 2;
   }
+  await import("../register.mjs");
   const config = await loadConfig(configPath);
   const reporter = values.reporter ? [[values.reporter]] : config.reporter;
   const supportedReporters = new Set(["list", "spec", "tap", "dot", "html"]);
@@ -59,13 +61,20 @@ export async function run(argv) {
     return 2;
   }
   for (const project of chosen) testRunnerFlags(project);
-  const webHandles = await startWebServers(config.webServer, (m) =>
-    console.log(`[webServer] ${m}`),
-  );
+  const webHandles = [];
+  let globalCleanup;
+  let hooksStarted = false;
   let failed = 0;
   let matchedFiles = 0;
   const failedProjects = new Set();
   try {
+    if (!values["list-only"]) {
+      webHandles.push(
+        ...(await startWebServers(config.webServer, (m) => console.log(`[webServer] ${m}`))),
+      );
+      hooksStarted = true;
+      globalCleanup = await runGlobalHook(config.globalSetup, config);
+    }
     for (const project of chosen) {
       if ((project.dependencies ?? []).some((name) => failedProjects.has(name))) {
         console.log(`[${project.name}] skipped because a dependency failed`);
@@ -91,13 +100,35 @@ export async function run(argv) {
       }
     }
   } finally {
-    await stopWebServers(webHandles);
+    await teardownRun(config, globalCleanup, webHandles, hooksStarted);
   }
   if (!matchedFiles && !values["pass-with-no-tests"]) {
     console.error("turbo-surf-test: No tests found");
     return 1;
   }
   return failed ? 1 : 0;
+}
+
+async function teardownRun(config, globalCleanup, webHandles, hooksStarted) {
+  try {
+    if (typeof globalCleanup === "function") await globalCleanup();
+  } finally {
+    try {
+      if (hooksStarted) await runGlobalHook(config.globalTeardown, config);
+    } finally {
+      await stopWebServers(webHandles);
+    }
+  }
+}
+
+async function runGlobalHook(hook, config) {
+  if (!hook) return;
+  const fn =
+    typeof hook === "function"
+      ? hook
+      : (await import(pathToFileURL(resolve(config.rootDir, hook)).href)).default;
+  if (typeof fn !== "function") throw new Error("Global setup/teardown must export a function");
+  return fn(config);
 }
 
 function runProject(project, files, reporter) {
@@ -210,7 +241,7 @@ usage: turbo-surf-test [options] [files...]
 }
 
 // Direct invocation entry (not when imported as a library).
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (e) => {

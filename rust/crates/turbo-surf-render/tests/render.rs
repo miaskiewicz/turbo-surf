@@ -9,6 +9,48 @@ use turbo_surf_render::{
     DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
 };
 
+#[test]
+fn page_diagnostics_use_stderr_and_preserve_stdio_protocol_output() {
+    const CHILD: &str = "TURBO_SURF_DIAGNOSTIC_STREAM_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(render_hydrate(
+                "<body><script>console.log('surf-console-stream-marker');setTimeout(()=>{throw Error('surf-timer-stream-marker')},0);throw Error('surf-script-stream-marker')</script></body>",
+                "https://example.test/",
+            ))
+            .unwrap();
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "page_diagnostics_use_stderr_and_preserve_stdio_protocol_output",
+        ])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for marker in [
+        "surf-console-stream-marker",
+        "surf-script-stream-marker",
+        "surf-timer-stream-marker",
+    ] {
+        assert!(
+            !stdout.contains(marker),
+            "page output corrupted stdout: {stdout}"
+        );
+        assert!(
+            stderr.contains(marker),
+            "missing stderr diagnostic {marker}: {stderr}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn deferred_classics_download_concurrently_and_execute_in_document_order() {
     use std::sync::atomic::{AtomicUsize, Ordering};

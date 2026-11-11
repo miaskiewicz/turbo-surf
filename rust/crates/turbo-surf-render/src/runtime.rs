@@ -8473,7 +8473,7 @@ const ENV_BOOTSTRAP: &str = concat!(
 "use strict";
 // Core is a private embedder argument; no page global temporarily exposes ops.
 const ops = __core.ops;
-const __print = __core.print;
+const __print = (message) => __core.print(message, true);
 let __web;
 ops.op_capture_runtime_core(__core);
 if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;

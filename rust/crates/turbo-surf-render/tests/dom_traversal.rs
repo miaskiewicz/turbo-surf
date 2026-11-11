@@ -16,3 +16,20 @@ fn tree_walker_backward_parent_and_skip_axes() {
     .unwrap();
     assert_eq!(out, r#"["inside","sibling","inside",true]"#);
 }
+
+#[test]
+fn node_iterator_root_and_reference_direction() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"(() => {
+          const root = document.createElement('div'); root.id = 'root';
+          root.innerHTML = '<span id="child"></span>';
+          const iterator = document.createNodeIterator(root, NodeFilter.SHOW_ELEMENT);
+          return JSON.stringify([iterator.nextNode().id, iterator.nextNode().id,
+            iterator.previousNode().id, iterator.previousNode().id,
+            iterator.referenceNode === root, iterator.pointerBeforeReferenceNode]);
+        })()"#,
+    )
+    .unwrap();
+    assert_eq!(out, r#"["root","child","child","root",true,true]"#);
+}

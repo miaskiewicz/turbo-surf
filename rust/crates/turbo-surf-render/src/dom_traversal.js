@@ -124,13 +124,59 @@
     };
     return w;
   };
-  // NodeIterator (same filter model, linear) — some libs use it instead of TreeWalker.
+  // NodeIterator's before/after reference pointer differs from TreeWalker.currentNode.
   if (typeof d.createNodeIterator !== "function") {
     d.createNodeIterator = function (root) {
-      const whatToShow = arguments[1],
-        filter = arguments[2];
-      const tw = d.createTreeWalker(root, whatToShow, filter);
-      return { nextNode: () => tw.nextNode(), previousNode: () => null, detach() {} };
+      const show = arguments[1] == null ? 0xffffffff : arguments[1] >>> 0;
+      const filter = arguments[2];
+      let reference = root;
+      let before = true;
+      const accepted = (candidate) => {
+        if (!(show & (1 << (candidate.nodeType - 1)))) return false;
+        const fn = filter && (typeof filter === "function" ? filter : filter.acceptNode);
+        return typeof fn !== "function" || fn.call(filter, candidate) === 1;
+      };
+      const next = (candidate) => {
+        if (candidate.firstChild) return candidate.firstChild;
+        while (candidate && candidate !== root && !candidate.nextSibling)
+          candidate = candidate.parentNode;
+        return !candidate || candidate === root ? null : candidate.nextSibling;
+      };
+      const previous = (candidate) => {
+        if (candidate === root) return null;
+        if (!candidate.previousSibling) return candidate.parentNode;
+        candidate = candidate.previousSibling;
+        while (candidate.lastChild) candidate = candidate.lastChild;
+        return candidate;
+      };
+      const traverse = (forward) => {
+        let candidate = reference;
+        let pointer = before;
+        while (candidate) {
+          if (forward === pointer) pointer = !pointer;
+          else candidate = forward ? next(candidate) : previous(candidate);
+          if (candidate && accepted(candidate)) {
+            reference = candidate;
+            before = pointer;
+            return candidate;
+          }
+        }
+        return null;
+      };
+      return {
+        root,
+        whatToShow: show,
+        filter,
+        get referenceNode() {
+          return reference;
+        },
+        get pointerBeforeReferenceNode() {
+          return before;
+        },
+        nextNode: () => traverse(true),
+        previousNode: () => traverse(false),
+        detach() {},
+      };
     };
   }
 })();

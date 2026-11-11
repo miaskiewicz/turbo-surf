@@ -65,3 +65,27 @@ test("TreeWalker child and sibling traversal descends skipped but prunes rejecte
   assert.equal(walker.lastChild().id, "sibling");
   assert.equal(walker.previousNode(), inside);
 });
+
+test("NodeIterator includes its root and reverses around its reference pointer", () => {
+  const root = node("root", node("child"));
+  const iterator = document().createNodeIterator(root, 1);
+  assert.equal(iterator.referenceNode, root);
+  assert.equal(iterator.pointerBeforeReferenceNode, true);
+  assert.equal(iterator.nextNode(), root);
+  assert.equal(iterator.pointerBeforeReferenceNode, false);
+  assert.equal(iterator.nextNode().id, "child");
+  assert.equal(iterator.nextNode(), null);
+  assert.equal(iterator.previousNode().id, "child");
+  assert.equal(iterator.previousNode(), root);
+  assert.equal(iterator.previousNode(), null);
+});
+
+test("NodeIterator rejection skips a node without pruning its descendants", () => {
+  const child = node("child");
+  const root = node("root", node("reject", child));
+  const iterator = document().createNodeIterator(root, 1, (n) => (n.id === "reject" ? 2 : 1));
+  assert.equal(iterator.nextNode(), root);
+  assert.equal(iterator.nextNode(), child);
+  assert.equal(iterator.previousNode(), child);
+  assert.equal(iterator.previousNode(), root);
+});

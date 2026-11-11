@@ -1836,7 +1836,7 @@ test("successful locator assertions read each observed value once (#487)", async
     ["toHaveCount", [3], "count"],
     ["toHaveText", ["one"], "_snapshot"],
     ["toContainText", ["on"], "_snapshot"],
-    ["toHaveValue", ["init"], "_snapshot"],
+    ["toHaveValue", ["init"], "inputValue"],
     ["toHaveAttribute", ["id", "name"], "getAttribute"],
   ]) {
     const loc = page.locator(

@@ -3953,3 +3953,31 @@ test("toPass retries async callbacks and retains the final assertion error (#367
     /timed out/i,
   );
 });
+
+test("expect.poll retries values awaits async callbacks and preserves not (#366)", async () => {
+  let calls = 0;
+  await expect.poll(() => ++calls, { timeout: 100, intervals: [1] }).toBe(3);
+  assert.equal(calls, 3);
+  let asynchronousCalls = 0;
+  await expect
+    .poll(
+      async () => {
+        asynchronousCalls++;
+        return 7;
+      },
+      { timeout: 100, intervals: [1] },
+    )
+    .toBe(7);
+  assert.equal(asynchronousCalls, 1);
+  let negativeCalls = 0;
+  await expect.poll(() => ++negativeCalls, { timeout: 100, intervals: [1] }).not.toBeLessThan(3);
+  assert.equal(negativeCalls, 3);
+  await assert.rejects(
+    () => expect.poll(() => 0, { timeout: 5, intervals: [1] }).toBe(1),
+    /expected 0 to be 1/,
+  );
+  await assert.rejects(
+    () => expect.poll(() => new Promise(() => {}), { timeout: 5, intervals: [1] }).toBe(1),
+    /timed out/i,
+  );
+});

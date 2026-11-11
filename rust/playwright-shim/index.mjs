@@ -4414,7 +4414,25 @@ function softAssertion(assertion) {
   });
 }
 expect.soft = (value) => softAssertion(expect(value));
-expect.poll = (fn, _o) => new ValueExpect(fn(), false);
+function pollAssertion(callback, options, negative = false) {
+  if (typeof callback !== "function") throw new Error("expect.poll requires a callback");
+  return new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (property === "not") return pollAssertion(callback, options, !negative);
+        const matcher = new ValueExpect(undefined, negative)[property];
+        if (typeof matcher !== "function") return undefined;
+        return (...args) =>
+          retryAssertion(async () => {
+            const assertion = new ValueExpect(await callback(), negative);
+            await assertion[property](...args);
+          }, options);
+      },
+    },
+  );
+}
+expect.poll = pollAssertion;
 expect.configure = () => expect;
 expect.extend = () => {};
 

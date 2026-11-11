@@ -534,13 +534,13 @@ class Locator {
     return this._page.locator(`${this._selector} ${childSel}`);
   }
   getByPlaceholder(t, o) {
-    return this._page.getByPlaceholder(t, o);
+    return this.locator(`[placeholder*=${cssAttrValue(t)}]`);
   }
   getByAltText(t, o) {
-    return this._page.getByAltText(t, o);
+    return this.locator(`[alt*=${cssAttrValue(t)}]`);
   }
   getByTitle(t, o) {
-    return this._page.getByTitle(t, o);
+    return this.locator(`[title*=${cssAttrValue(t)}]`);
   }
 
   // --- counts / text (from the single resolve payload) ---

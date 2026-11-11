@@ -3588,3 +3588,20 @@ test("addScriptTag executes content URL and path scripts in the live realm (#387
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("placeholder alt and title locators retain parent and indexed scope (#380)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<div class="card" id="one"><input id="email-one" placeholder="Email address"><img alt="Company logo"><span title="Payroll export">one</span></div><div class="card" id="two"><input id="email-two" placeholder="Email address"><img alt="Company logo"><span title="Payroll export">two</span></div>',
+  );
+  for (const parent of [page.locator("#one"), page.locator(".card").last()]) {
+    assert.equal(await parent.getByPlaceholder("Email").count(), 1);
+    assert.equal(await parent.getByAltText("Company").count(), 1);
+    assert.equal(await parent.getByTitle("Payroll").count(), 1);
+  }
+  await page._ensureLive();
+  await page.locator(".card").last().getByPlaceholder("Email").fill("second");
+  assert.equal(await page.evaluate(() => document.querySelector("#email-one").value), "");
+  assert.equal(await page.evaluate(() => document.querySelector("#email-two").value), "second");
+  await page.close();
+});

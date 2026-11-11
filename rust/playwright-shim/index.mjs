@@ -1027,20 +1027,35 @@ function fillInteractionScript(pick, value) {
     if (!el.dispatchEvent(new InputEvent('beforeinput', { ...edit, cancelable: true }))) {
       globalThis.__RESULT = 'OK'; return;
     }
-    const pending = __tsNs.playwrightEditingCommits ??= new WeakMap();
-    if (!pending.has(el)) {
-      const before = el.value;
-      pending.set(el, before);
-      el.addEventListener('blur', () => {
-        pending.delete(el);
-        if (el.value !== before) el.dispatchEvent(new Event('change', { bubbles: true }));
-      }, { once: true });
+    if (el.isContentEditable) {
+      const range = el.ownerDocument.createRange();
+      range.selectNodeContents(el);
+      range.deleteContents();
+      if (value !== '') {
+        const text = el.ownerDocument.createTextNode(value);
+        range.insertNode(text);
+        range.setStart(text, value.length);
+      }
+      range.collapse(true);
+      const selection = el.ownerDocument.defaultView.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else {
+      const pending = __tsNs.playwrightEditingCommits ??= new WeakMap();
+      if (!pending.has(el)) {
+        const before = el.value;
+        pending.set(el, before);
+        el.addEventListener('blur', () => {
+          pending.delete(el);
+          if (el.value !== before) el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, { once: true });
+      }
+      // The prototype setter bypasses React's instance value tracker before the input event.
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement
+        : el.tagName === 'SELECT' ? HTMLSelectElement : HTMLInputElement;
+      const desc = Object.getOwnPropertyDescriptor(proto.prototype, 'value');
+      if (desc?.set) desc.set.call(el, value); else el.value = value;
     }
-    // The prototype setter bypasses React's instance value tracker before the input event.
-    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement
-      : el.tagName === 'SELECT' ? HTMLSelectElement : HTMLInputElement;
-    const desc = Object.getOwnPropertyDescriptor(proto.prototype, 'value');
-    if (desc?.set) desc.set.call(el, value); else el.value = value;
     el.dispatchEvent(new InputEvent('input', edit));
     globalThis.__RESULT = 'OK';
   } })();`;

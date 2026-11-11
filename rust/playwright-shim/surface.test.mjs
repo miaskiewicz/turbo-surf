@@ -2764,3 +2764,46 @@ test("fill and clear respect beforeinput cancellation and commit on blur (#409)"
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("fill edits contenteditable text with input events and a collapsed caret (#408)", async () => {
+  const server = createServer((_request, response) =>
+    response.end(`<div id="field" contenteditable="true"><b>old</b> text</div><script>
+    globalThis.events=[];
+    for(const type of ['beforeinput','input','change'])document.querySelector('#field').addEventListener(type,e=>events.push({type,data:e.data??null,inputType:e.inputType??null}));
+    </script>`),
+  );
+  const base = await listen(server),
+    p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    await p.locator("#field").fill("new");
+    assert.deepEqual(
+      await p.evaluate(() => {
+        const selection = getSelection();
+        return {
+          text: document.querySelector("#field").textContent,
+          events,
+          collapsed: selection.isCollapsed,
+          offset: selection.anchorOffset,
+        };
+      }),
+      {
+        text: "new",
+        events: [
+          { type: "beforeinput", data: "new", inputType: "insertText" },
+          { type: "input", data: "new", inputType: "insertText" },
+        ],
+        collapsed: true,
+        offset: 3,
+      },
+    );
+    await p.locator("#field").clear();
+    assert.equal(await p.evaluate(() => document.querySelector("#field").textContent), "");
+    await p.evaluate(() => document.querySelector("#field").blur());
+    assert.equal(await p.evaluate(() => events.some((e) => e.type === "change")), false);
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

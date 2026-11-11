@@ -4160,14 +4160,16 @@ class ValueExpect extends BaseExpect {
     );
   }
   toThrow(expected) {
-    let threw = null;
+    if (typeof this._v !== "function") throw new TypeError("toThrow requires a function");
+    let threw = false;
+    let error;
     try {
       this._v();
-    } catch (e) {
-      threw = e;
+    } catch (caught) {
+      threw = true;
+      error = caught;
     }
-    const pass = threw != null && (expected == null || String(threw.message).includes(expected));
-    this._ok(pass, "expected function to throw");
+    this._ok(threw && matchesThrownError(error, expected), "expected function to throw");
   }
   toThrowError(expected) {
     return this.toThrow(expected);
@@ -4204,6 +4206,16 @@ const json = (x) => {
     return String(x);
   }
 };
+function matchesThrownError(error, expected) {
+  if (expected === undefined) return true;
+  const message = String(error?.message ?? error);
+  if (typeof expected === "string") return message.includes(expected);
+  if (expected instanceof RegExp) return expected.test(message);
+  if (expected instanceof Error) return error?.message === expected.message;
+  if (typeof expected === "function") return error instanceof expected;
+  throw new TypeError("toThrow expects a string, RegExp, Error or error constructor");
+}
+
 function deepEqual(a, b) {
   if (typeof b?.asymmetricMatch === "function") return b.asymmetricMatch(a);
   if (typeof a?.asymmetricMatch === "function") return a.asymmetricMatch(b);

@@ -3364,3 +3364,32 @@ test("Context media preferences reach native matching and stay isolated (#396)",
     await light.close();
   }
 });
+
+test("toThrow supports error expectations and rejects invalid received values (#385)", () => {
+  for (const expected of [/specific/, new Error("specific failure"), TypeError, "specific"]) {
+    assert.doesNotThrow(() =>
+      expect(() => {
+        throw new TypeError("specific failure");
+      }).toThrow(expected),
+    );
+    assert.throws(() =>
+      expect(() => {
+        throw new Error("different");
+      }).toThrow(expected),
+    );
+  }
+  assert.throws(() => expect(123).toThrow(), /function/);
+  assert.throws(() => expect(123).not.toThrow(), /function/);
+  assert.doesNotThrow(() =>
+    expect(() => {
+      throw undefined;
+    }).toThrow(),
+  );
+  assert.doesNotThrow(() => expect(() => {}).not.toThrow());
+  assert.throws(() => expect(() => {}).toThrow());
+  assert.doesNotThrow(() =>
+    expect(() => {
+      throw new TypeError("specific failure");
+    }).toThrowError(TypeError),
+  );
+});

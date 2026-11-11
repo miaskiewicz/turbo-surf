@@ -3993,7 +3993,7 @@ export const request = {
       let body = null;
       if (o.data !== null && o.data !== undefined) {
         if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {
-          body = String(o.data);
+          body = Buffer.isBuffer(o.data) ? o.data : String(o.data);
           if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
             h["Content-Type"] = "application/octet-stream";
           }
@@ -4020,10 +4020,12 @@ export const request = {
         target,
         inCookies,
         method ?? null,
-        body,
+        Buffer.isBuffer(body) ? null : body,
         hdr,
         false,
         requestState,
+        null,
+        Buffer.isBuffer(body) ? body : null,
       );
       let parsed = JSON.parse(raw);
       if (
@@ -4041,10 +4043,12 @@ export const request = {
           target,
           inCookies,
           method ?? null,
-          body,
+          Buffer.isBuffer(body) ? null : body,
           JSON.stringify(authHeaders),
           false,
           requestState,
+          null,
+          Buffer.isBuffer(body) ? body : null,
         );
         parsed = JSON.parse(raw);
       }

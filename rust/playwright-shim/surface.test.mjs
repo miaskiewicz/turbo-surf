@@ -2164,3 +2164,21 @@ test("Frame reads reflect source documents and later live mutations (#445)", asy
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("API Buffer request data preserves invalid UTF-8 bytes (#341)", async () => {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    res.end(JSON.stringify(Array.from(Buffer.concat(chunks))));
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  try {
+    const response = await api.post(base, { data: Buffer.from([0, 255, 128, 10]) });
+    assert.deepEqual(await response.json(), [0, 255, 128, 10]);
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

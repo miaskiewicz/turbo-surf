@@ -952,7 +952,7 @@ async fn do_fetch(
     body: Option<String>,
     cookies: Option<String>,
 ) -> Result<String> {
-    do_fetch_headers(url, method, body, cookies, None, false, None, None).await
+    do_fetch_headers(url, method, body, cookies, None, false, None, None, None).await
 }
 
 /// `do_fetch` plus extra request headers (JSON object) — backs the shim's
@@ -967,6 +967,7 @@ async fn do_fetch_headers(
     bypass_consent: bool,
     request_state_id: Option<u32>,
     context_json: Option<String>,
+    body_bytes: Option<Buffer>,
 ) -> Result<String> {
     let mut jar = cookies
         .as_deref()
@@ -997,6 +998,7 @@ async fn do_fetch_headers(
     let opts = FetchOptions {
         method,
         body,
+        body_bytes: body_bytes.map(|bytes| bytes.to_vec()),
         headers,
         context: Some(context),
         response_policy: Some(&response_policy),
@@ -1114,6 +1116,7 @@ pub async fn fetch_with_cookies(
     bypass_consent: Option<bool>,
     request_state_id: Option<u32>,
     context_json: Option<String>,
+    body_bytes: Option<Buffer>,
 ) -> Result<String> {
     do_fetch_headers(
         &url,
@@ -1124,6 +1127,7 @@ pub async fn fetch_with_cookies(
         bypass_consent.unwrap_or(false),
         request_state_id,
         context_json,
+        body_bytes,
     )
     .await
 }

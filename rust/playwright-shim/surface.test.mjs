@@ -3144,3 +3144,32 @@ test("Live locator inputValue and value assertions read dirty DOM properties (#3
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Live checkbox actions execute one default and retain requested state (#351)", async () => {
+  const server = createServer((req, res) =>
+    res.end(`<input id=off type=checkbox><input id=on type=checkbox checked>
+    <input id=canceled type=checkbox onclick="event.preventDefault()">
+    <script>globalThis.changes=[]; for(const el of document.querySelectorAll('input')) el.addEventListener('change',()=>changes.push(el.id));</script>`),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await page.locator("#off").check();
+    assert.equal(await page.evaluate(() => document.querySelector("#off").checked), true);
+    assert.equal(await page.locator("#off").isChecked(), true);
+    await expect(page.locator("#off")).toBeChecked({ timeout: 0 });
+    await page.locator("#off").check();
+    await page.locator("#on").uncheck();
+    assert.equal(await page.locator("#on").isChecked(), false);
+    await page.locator("#on").setChecked(true);
+    await page.locator("#on").setChecked(false);
+    assert.deepEqual(await page.evaluate(() => changes), ["off", "on", "on", "on"]);
+    await assert.rejects(page.locator("#canceled").check(), /checked state|did not change/);
+    assert.equal(await page.evaluate(() => document.querySelector("#canceled").checked), false);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

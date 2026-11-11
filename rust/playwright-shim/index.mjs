@@ -1167,10 +1167,8 @@ function interactionScript(selector, index, kind, value) {
     const on = kind === "check";
     return `(() => { ${pick} else {
       if (el.checked !== ${on}) {
-        el.checked = ${on};
         el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        if (el.checked !== ${on}) throw new Error("Click did not change checked state");
       }
       globalThis.__RESULT = "OK";
     } })();`;
@@ -3772,7 +3770,7 @@ class LocatorExpect extends BaseExpect {
   }
   async toBeChecked(opts) {
     this._ok(
-      await this._retry(() => this._snap().checked === (opts?.checked ?? true), opts),
+      await this._retry(async () => (await this._v.isChecked()) === (opts?.checked ?? true), opts),
       "expected element to be checked",
     );
   }

@@ -864,8 +864,8 @@ class Locator {
     const intent = JSON.parse(native.clickNode(this._html, this._requireNode(), this._page._url));
     return this._page._followIntent(intent);
   }
-  async dblclick() {
-    return this.click();
+  async dblclick(opts = {}) {
+    return this.click({ ...opts, clickCount: 2 });
   }
   async tap() {
     return this.click();
@@ -1294,7 +1294,7 @@ function interactionScript(selector, index, kind, value) {
     const position = options.position || { x: rect.width / 2, y: rect.height / 2 };
     const button = options.button === "right" ? 2 : options.button === "middle" ? 1 : 0;
     const modifiers = options.modifiers || [];
-    const o = { bubbles: true, cancelable: true, view: globalThis, button,
+    const o = { bubbles: true, cancelable: true, composed: true, view: globalThis, button,
       clientX: rect.left + position.x, clientY: rect.top + position.y,
       detail: options.clickCount || 1, shiftKey: modifiers.includes("Shift"),
       ctrlKey: modifiers.includes("Control"),

@@ -507,3 +507,25 @@ test("dispatchEvent preserves initializer fields and propagation (#371)", async 
     await teardown();
   }
 });
+
+test("locator dblclick emits both clicks and dblclick with options (#370)", async () => {
+  const { page, teardown } = await fixture();
+  try {
+    await page.evaluate(() => {
+      window.doubleEvents = [];
+      const target = document.getElementById("src");
+      for (const type of ["click", "dblclick"])
+        target.addEventListener(type, (event) =>
+          window.doubleEvents.push([event.type, event.detail, event.shiftKey, event.composed]),
+        );
+    });
+    await page.locator("#src").dblclick({ modifiers: ["Shift"] });
+    assert.deepEqual(await page.evaluate(() => window.doubleEvents), [
+      ["click", 1, true, true],
+      ["click", 2, true, true],
+      ["dblclick", 2, true, true],
+    ]);
+  } finally {
+    await teardown();
+  }
+});

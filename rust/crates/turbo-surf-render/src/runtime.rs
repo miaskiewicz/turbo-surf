@@ -2816,6 +2816,46 @@ struct ParsedFetchBody {
     headers: std::collections::BTreeMap<String, String>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchRequestMetadata {
+    headers: std::collections::BTreeMap<String, String>,
+    body_bytes: Option<Vec<u8>>,
+}
+
+impl FetchRequestMetadata {
+    fn from_options(options: &FetchOptions<'_>) -> Self {
+        Self {
+            headers: options.headers.clone(),
+            body_bytes: options
+                .body_bytes
+                .clone()
+                .or_else(|| options.body.as_ref().map(|body| body.as_bytes().to_vec())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod fetch_request_metadata_tests {
+    use super::{FetchOptions, FetchRequestMetadata};
+
+    #[test]
+    fn captured_request_metadata_keeps_headers_and_binary_body_precedence() {
+        let options = FetchOptions {
+            headers: [("x-probe".to_owned(), "request".to_owned())].into(),
+            body: Some("text fallback".to_owned()),
+            body_bytes: Some(vec![0, 255, 128, 10]),
+            ..Default::default()
+        };
+        let metadata = FetchRequestMetadata::from_options(&options);
+        assert_eq!(metadata.headers["x-probe"], "request");
+        assert_eq!(metadata.body_bytes, Some(vec![0, 255, 128, 10]));
+        assert!(FetchRequestMetadata::from_options(&FetchOptions::default())
+            .body_bytes
+            .is_none());
+    }
+}
+
 /// Parse the method / body / headers trio from the fetch init bag, stripping
 /// the browser-controlled headers the guest never gets to override (sec-*,
 /// cookie / origin / referer / host / user-agent / upgrade-insecure-requests).
@@ -2940,6 +2980,7 @@ async fn run_stream_fetch_branch(
     policy_blocked: &std::sync::atomic::AtomicBool,
     crossed_origin: &std::sync::atomic::AtomicBool,
 ) -> FetchOut {
+    let request_metadata = FetchRequestMetadata::from_options(&opts);
     let response = {
         opts.jar = Some(local);
         let request = turbo_surf_core::net::fetch_stream(target, opts);
@@ -2979,6 +3020,7 @@ async fn run_stream_fetch_branch(
         "status": out.status,
         "ok": out.ok,
         "method": method.unwrap_or("GET"),
+        "request": request_metadata,
         "contentType": out.content_type,
         "headers": out.raw_headers,
         "statusText": out.status_text,
@@ -3659,6 +3701,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         .await;
     }
     let mut script_errors_muted = false;
+    let request_metadata = FetchRequestMetadata::from_options(&opts);
     let response = {
         let request = async {
             if destination == Destination::Script {
@@ -3742,7 +3785,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     };
     jar_rc.borrow_mut().merge_request_changes(local);
     fetch_streams::release(&mut state.borrow_mut(), cancel_id);
-    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text,"error":failure_error});
+    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"request":request_metadata,"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text,"error":failure_error});
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
     if log.0.len() == 1000 {

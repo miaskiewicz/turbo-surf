@@ -3836,6 +3836,10 @@ function makeResponse(r, ensureOpen = () => {}) {
 // A Playwright-like Response built from a captured live-app fetch (net-log entry),
 // for `page.on('response')` subscribers.
 function makeNetResponse(e) {
+  const requestHeaders = Object.fromEntries(
+    Object.entries(e.request?.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  const postData = e.request?.bodyBytes == null ? null : Buffer.from(e.request.bodyBytes);
   const entries = e.headers ?? (e.contentType ? [["content-type", e.contentType]] : []);
   const all = {};
   for (const [key, value] of entries) {
@@ -3849,8 +3853,13 @@ function makeNetResponse(e) {
   const req = {
     url: () => e.url,
     method: () => e.method || "GET",
-    headers: () => (e.contentType ? { "content-type": e.contentType } : {}),
-    postData: () => null,
+    headers: () => ({ ...requestHeaders }),
+    async allHeaders() {
+      return { ...requestHeaders };
+    },
+    postData: () => postData?.toString("utf8") ?? null,
+    postDataBuffer: () => (postData == null ? null : Buffer.from(postData)),
+    postDataJSON: () => (postData == null ? null : JSON.parse(postData.toString("utf8"))),
     resourceType: () => "fetch",
     failure: () => (e.status === 0 ? { errorText: e.error || "net::ERR_FAILED" } : null),
     async response() {

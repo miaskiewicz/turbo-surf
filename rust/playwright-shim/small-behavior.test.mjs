@@ -109,3 +109,20 @@ test("exposed functions settle guest promises with host values and errors", asyn
     await page.close();
   }
 });
+
+test("exposed function registrations reject page and context name collisions", async () => {
+  const page = newPage();
+  try {
+    await page.exposeFunction("hostUnique", () => 1);
+    await assert.rejects(() => page.exposeFunction("hostUnique", () => 2), /already registered/);
+    await assert.rejects(() => page.exposeBinding("hostUnique", () => 2), /already registered/);
+    await page.context().exposeFunction("contextUnique", () => 1);
+    await assert.rejects(() => page.exposeFunction("contextUnique", () => 2), /already registered/);
+    await assert.rejects(
+      () => page.context().exposeFunction("contextUnique", () => 2),
+      /already registered/,
+    );
+  } finally {
+    await page.close();
+  }
+});

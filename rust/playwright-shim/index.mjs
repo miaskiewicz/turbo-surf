@@ -3025,7 +3025,19 @@ class Page {
   // `globalThis[name]` on every live session open (so it survives page
   // reloads + in-page navigations); when a session is already up we also
   // define it now so the test can call it before the next navigation.
+  async _assertBindingAvailable(name) {
+    if (this._mergedBindings().has(String(name)))
+      throw new Error(`Function "${name}" has been already registered`);
+    if (this._live) {
+      const exists = await native.liveEvalEngine(
+        this._session,
+        `globalThis.__RESULT = String(${JSON.stringify(String(name))} in globalThis);`,
+      );
+      if (exists === "true") throw new Error(`Function "${name}" has been already registered`);
+    }
+  }
   async exposeBinding(name, fn, _options) {
+    await this._assertBindingAvailable(name);
     this._bindings = this._bindings ?? new Map();
     this._bindings.set(String(name), { fn, isBinding: true });
     if (this._live) {
@@ -3033,6 +3045,7 @@ class Page {
     }
   }
   async exposeFunction(name, fn) {
+    await this._assertBindingAvailable(name);
     this._bindings = this._bindings ?? new Map();
     this._bindings.set(String(name), { fn, isBinding: false });
     if (this._live) {
@@ -3559,7 +3572,13 @@ class BrowserContext {
   // Context-level expose: every Page in this context (and future ones) sees
   // the binding; live pages pick it up on the next navigation. On an open
   // session we also define it now so the current Page can use it immediately.
+  async _assertBindingAvailable(name) {
+    if (this._bindings.has(String(name)))
+      throw new Error(`Function "${name}" has been already registered`);
+    for (const page of this._pages) await page._assertBindingAvailable(name);
+  }
   async exposeBinding(name, fn, _options) {
+    await this._assertBindingAvailable(name);
     this._bindings.set(String(name), { fn, isBinding: true });
     for (const page of this._pages) {
       if (page._live) {
@@ -3568,6 +3587,7 @@ class BrowserContext {
     }
   }
   async exposeFunction(name, fn) {
+    await this._assertBindingAvailable(name);
     this._bindings.set(String(name), { fn, isBinding: false });
     for (const page of this._pages) {
       if (page._live) {

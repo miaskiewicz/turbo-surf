@@ -2136,3 +2136,31 @@ test("FrameLocator.owner returns the indexed parent-scoped iframe locator (#446)
   );
   await p.close();
 });
+
+test("Frame reads reflect source documents and later live mutations (#445)", async () => {
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "text/html");
+    res.end(
+      req.url === "/child"
+        ? '<title>Child title</title><p id="label">original</p>'
+        : '<iframe id="child" name="child" src="/child"></iframe>',
+    );
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    const frame = p.frame("child");
+    assert.equal(await frame.title(), "Child title");
+    assert.equal(await frame.locator("#label").textContent(), "original");
+    await p.evaluate(() => {
+      document.querySelector("#child").contentDocument.querySelector("#label").textContent =
+        "changed";
+    });
+    assert.equal(await frame.locator("#label").textContent(), "changed");
+    assert.match(await frame.content(), /changed/);
+  } finally {
+    await p.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

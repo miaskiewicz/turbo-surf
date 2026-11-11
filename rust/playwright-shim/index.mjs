@@ -1257,8 +1257,7 @@ class Frame {
     return this._html;
   }
   async title() {
-    const m = JSON.parse(native.query(this._html, "title", "css"));
-    return m.length ? (m[0].text ?? "") : "";
+    return native.title(this._html);
   }
   async innerText(selector) {
     return this.locator(selector).innerText();
@@ -1591,7 +1590,7 @@ class Page {
         const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
           if (!ids.has(el)) ids.set(el, __tsNs.shimFrameNext++);
           const entry = { node: ids.get(el), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
-          try { entry.url = el.contentWindow.location.href; if (el.contentDocument) entry.children = walk(el.contentDocument, entry.path); } catch (_) {}
+          try { entry.url = el.contentWindow.location.href; if (el.contentDocument) { entry.html = el.contentDocument.documentElement?.outerHTML || ""; entry.live = true; entry.children = walk(el.contentDocument, entry.path); } } catch (_) {}
           return entry;
         });
         globalThis.__RESULT = JSON.stringify(walk(document, []));
@@ -2168,6 +2167,7 @@ class Page {
           frame._url = meta.url;
           this._emit("framenavigated", frame);
         }
+        if (meta.live) frame._html = meta.html;
         frame._name = meta.name;
         frame._path = meta.path ?? [...(parent._path ?? []), index];
         frame._frameEntries = meta.children;

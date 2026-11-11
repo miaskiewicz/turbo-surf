@@ -21,6 +21,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { equalValues } from "./equality.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
+import { makeKeyboard } from "./keyboard.mjs";
 import {
   encodeEvaluationValue,
   decodeEvaluationValue,
@@ -3260,7 +3261,7 @@ class Page {
     return (this._mouse ??= makeMouse(this));
   }
   get keyboard() {
-    return makeKeyboard(this);
+    return (this._keyboard ??= makeKeyboard(this));
   }
   get touchscreen() {
     return (this._touch ??= makeTouchscreen(this));
@@ -3470,34 +3471,6 @@ function dragScript(srcIdx, dstIdx) {
     globalThis.__RESULT = "OK";
   })();`;
 }
-// Keyboard: no hardware, but key events are real JS. Dispatch keydown/keyup (with a
-// keypress for printable keys) on the focused element (or document) in the live app —
-// covers Escape-to-close-popover, Enter-to-submit, etc. No-op without a live session.
-function makeKeyboard(page) {
-  const dispatch = async (key) => {
-    if (!page._live) return;
-    const k = JSON.stringify(String(key));
-    await page._sessionEval(`(() => {
-      const key = ${k};
-      const el = document.activeElement || document.body || document.documentElement;
-      if (!el) return;
-      const opt = { bubbles: true, cancelable: true, key, code: key, view: globalThis };
-      el.dispatchEvent(new KeyboardEvent("keydown", opt));
-      if (key.length === 1) el.dispatchEvent(new KeyboardEvent("keypress", opt));
-      el.dispatchEvent(new KeyboardEvent("keyup", opt));
-    })();`);
-  };
-  return {
-    press: (key) => dispatch(key),
-    down: (key) => dispatch(key),
-    up: async () => {},
-    type: async (text) => {
-      for (const ch of String(text)) await dispatch(ch);
-    },
-    insertText: async (text) => dispatch(String(text)),
-  };
-}
-
 function makeResponse(r, ensureOpen = () => {}) {
   const headers = {};
   const entries = Array.isArray(r.headers) ? r.headers : Object.entries(r.headers ?? {});

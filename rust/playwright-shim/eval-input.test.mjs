@@ -149,3 +149,33 @@ test("evaluation codec preserves cyclic objects and special callback arguments",
     await page.close();
   }
 });
+
+test("keyboard tracks held modifiers and separates down/up events", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<input id="input"><script>window.keyLog=[]; for(const type of ["keydown","keyup"]) document.querySelector("#input").addEventListener(type,e=>keyLog.push({type:e.type,key:e.key,code:e.code,shift:e.shiftKey,meta:e.metaKey,ctrl:e.ctrlKey}));</script>',
+    );
+    await page._ensureLive();
+    await page.locator("#input").focus();
+    await page.keyboard.down("Shift");
+    let events = await page.evaluate(() => keyLog);
+    assert.deepEqual(
+      events.map((event) => [event.type, event.key, event.shift]),
+      [["keydown", "Shift", true]],
+    );
+    await page.keyboard.press("A");
+    await page.keyboard.up("Shift");
+    events = await page.evaluate(() => keyLog);
+    assert.equal(events[1].code, "KeyA");
+    assert.equal(events[1].shift, true);
+    assert.equal(events.at(-1).type, "keyup");
+    assert.equal(events.at(-1).shift, false);
+    await page.keyboard.press("ControlOrMeta+a");
+    events = await page.evaluate(() => keyLog.slice(-4));
+    assert.equal(events[1].key.toLowerCase(), "a");
+    assert.equal(events[1][process.platform === "darwin" ? "meta" : "ctrl"], true);
+  } finally {
+    await page.close();
+  }
+});

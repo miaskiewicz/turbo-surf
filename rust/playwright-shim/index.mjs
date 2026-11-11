@@ -3581,9 +3581,23 @@ class LocatorExpect extends BaseExpect {
     const got = await this._v.cssValue(name);
     this._ok(got === value, `expected css ${name}:${value}, got "${got}"`);
   }
-  async toHaveJSProperty(name, value) {
-    const got = await this._v.getAttribute(name);
-    this._ok(String(got) === String(value), `expected ${name}=${value}, got ${got}`);
+  async toHaveJSProperty(name, value, opts) {
+    let got;
+    const pass = await this._retry(async () => {
+      const locator = this._v;
+      await locator._page._ensureLive();
+      const index = await locator._resolveLiveIdx();
+      if (index == null) return false;
+      got = await locator._page.evaluate(
+        ({ index, name }) => {
+          const value = document.querySelectorAll("*")[index][name];
+          return { type: typeof value, value };
+        },
+        { index, name },
+      );
+      return got?.type === typeof value && (value === undefined || deepEqual(got.value, value));
+    }, opts);
+    this._ok(pass, `expected property ${name} to equal ${json(value)}, got ${json(got)}`);
   }
   async toMatchAriaSnapshot(expected) {
     const node = this._v._node();

@@ -2547,3 +2547,27 @@ test("Frame locator interactions target the child and preserve nested frame scop
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("toHaveJSProperty reads typed properties in the live realm (#438)", async () => {
+  const server = createServer((_req, res) =>
+    res.end(
+      '<button id="target">target</button><input id="field" value="0"><script>document.getElementById("target").custom={count:1};</script>',
+    ),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await expect(page.locator("#target")).toHaveJSProperty("custom", { count: 1 }, { timeout: 20 });
+    await expect(page.locator("#field")).toHaveJSProperty("value", "0", { timeout: 20 });
+    await assert.rejects(() =>
+      expect(page.locator("#field")).toHaveJSProperty("value", 0, { timeout: 20 }),
+    );
+    await expect(page.locator("#field")).not.toHaveJSProperty("value", 0, { timeout: 20 });
+    await expect(page.locator("#target")).toHaveJSProperty("missing", undefined, { timeout: 20 });
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -210,11 +210,26 @@ async function probe(s) {
   const url = probeURL(s);
   if (!url) return false;
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
-    return r.status < 500;
+    const parsed = new URL(url);
+    const status = await probeStatus(parsed);
+    if (status === 404 && parsed.pathname === "/") {
+      parsed.pathname = "/index.html";
+      return readyStatus(await probeStatus(parsed));
+    }
+    return readyStatus(status);
   } catch {
     return false;
   }
+}
+
+async function probeStatus(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+  await response.body?.cancel();
+  return response.status;
+}
+
+function readyStatus(status) {
+  return status >= 200 && status <= 403;
 }
 
 function delay(ms) {

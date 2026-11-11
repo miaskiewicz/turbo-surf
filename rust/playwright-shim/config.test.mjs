@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
+import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -249,3 +250,43 @@ function runCli(args, cwd, timeoutMs = 30_000) {
     child.on("exit", (code) => finish(code));
   });
 }
+
+test("webServer readiness accepts 200..403 and root index fallback only", async () => {
+  let status = 200;
+  let indexStatus = 404;
+  const server = createServer((req, res) => {
+    res.writeHead(req.url === "/index.html" ? indexStatus : status);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (status of [200, 403, 404, 500]) {
+      const options = {
+        command: `"${process.execPath}" -e "process.exit(1)"`,
+        url: `${origin}/health`,
+        reuseExistingServer: true,
+        timeout: 1000,
+      };
+      if (status <= 403) {
+        const handles = await startWebServers([options]);
+        assert.equal(handles[0].child, null);
+      } else {
+        await assert.rejects(startWebServers([options]), /exited early|timed out/);
+      }
+    }
+    status = 404;
+    indexStatus = 200;
+    const handles = await startWebServers([
+      {
+        url: origin,
+        reuseExistingServer: true,
+        timeout: 1000,
+        command: `"${process.execPath}" -e "process.exit(1)"`,
+      },
+    ]);
+    assert.equal(handles[0].child, null);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

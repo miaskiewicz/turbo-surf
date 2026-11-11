@@ -16,13 +16,10 @@ async function startFixture(name, def, arg, testInfo, teardowns) {
   let supplied = false;
   await new Promise((settle, reject) => {
     let completion;
-    const used = (value) =>
-      new Promise((release) => {
-        if (supplied) {
-          reject(new Error(`Fixture ${name} called use more than once`));
-          return;
-        }
-        supplied = true;
+    const used = (value) => {
+      if (supplied) throw new Error(`Fixture ${name} called use more than once`);
+      supplied = true;
+      return new Promise((release) => {
         arg[name] = value;
         teardowns.push({
           release,
@@ -32,6 +29,7 @@ async function startFixture(name, def, arg, testInfo, teardowns) {
         });
         settle();
       });
+    };
     completion = Promise.resolve().then(() => def(arg, used, testInfo));
     completion.then(() => {
       if (!supplied) reject(new Error(`Fixture ${name} did not call use`));

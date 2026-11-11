@@ -3741,3 +3741,17 @@ test("file, hook, fixture predicate and TestInfo skips abort guarded bodies", as
     assert.match(result.stdout, /skipped 1/);
   }
 });
+
+test("calling fixture use twice fails promptly during teardown", async () => {
+  const { runShimProbe } = await import("./runner-probes.mjs");
+  const result = await runShimProbe(
+    `
+    const extended=base.extend({value:async(_f,use)=>{await use(1);await use(2);}});
+    extended('body',({value})=>assert.equal(value,1));
+  `,
+    { timeout: 2000 },
+  );
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, /Fixture value called use more than once/);
+});

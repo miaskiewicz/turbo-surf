@@ -2876,14 +2876,11 @@ class Page {
     if (this._live) await this._drainNetworkEvents();
     const buffered = (this._recentResponses ?? []).find((r) => (r._seq ?? 0) >= callSeq && test(r));
     if (buffered) return buffered;
-    return new Promise((resolve) => {
-      // On timeout resolve a synthetic response rather than rejecting: many callers
-      // use `Promise.all([waitForResponse(...), action()])` and only need the action
-      // to run — a hard reject there would fail otherwise-passing flows.
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.off("response", onResp);
         if (poll) clearInterval(poll);
-        resolve(makeResponse({ status: 200, finalUrl: this._url }));
+        reject(Object.assign(new Error("Timeout waiting for response"), { name: "TimeoutError" }));
       }, opts.timeout ?? 15000);
       const onResp = (resp) => {
         if (!test(resp)) return;
@@ -2923,13 +2920,11 @@ class Page {
       (r) => (r._seq ?? 0) >= callSeq && test(r.request()),
     );
     if (bufferedResp) return bufferedResp.request();
-    return new Promise((resolve) => {
-      // Timeout returns the historical synthetic stub — some callers chain
-      // Promise.all([waitForRequest(...), action()]) and only need the action.
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.off("request", onReq);
         if (poll) clearInterval(poll);
-        resolve({ url: () => this._url, method: () => "GET" });
+        reject(Object.assign(new Error("Timeout waiting for request"), { name: "TimeoutError" }));
       }, opts.timeout ?? 15000);
       const onReq = (req) => {
         if (!test(req)) return;

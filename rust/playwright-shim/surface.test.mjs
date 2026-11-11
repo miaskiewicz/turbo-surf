@@ -4006,6 +4006,24 @@ test("XPath engine prefixes and scoped parent locators retain their context (#36
   }
 });
 
+test("Network waits reject unmet predicates instead of inventing events (#308)", async () => {
+  const page = newPage();
+  try {
+    for (const method of ["waitForResponse", "waitForRequest"]) {
+      await assert.rejects(
+        page[method](() => false, { timeout: 10 }),
+        { name: "TimeoutError" },
+      );
+      assert.equal(
+        page._listeners.get(method === "waitForResponse" ? "response" : "request")?.length ?? 0,
+        0,
+      );
+    }
+  } finally {
+    await page.close();
+  }
+});
+
 test("scoped XPath parent actions dispatch only to the selected live target (#365)", async () => {
   const server = createServer((_req, res) =>
     res.end(

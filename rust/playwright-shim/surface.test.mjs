@@ -4693,3 +4693,47 @@ test("in-flight screenshot assets cannot repopulate a reloaded document cache (#
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Configured response budgets admit large scripts and API bodies (#342)", async () => {
+  assert.throws(() => request.newContext({ maxResponseBytes: 0 }), /positive 32-bit/);
+  const size = 8 * 1024 * 1024 + 1;
+  const tail = '*/document.body.dataset.ready="yes";';
+  const script = "/*" + "x".repeat(size - tail.length - 2) + tail;
+  const server = createServer((req, res) => {
+    if (req.url === "/slow") {
+      setTimeout(() => res.end("slow"), 100);
+      return;
+    }
+    if (req.url === "/bundle.js") {
+      res.setHeader("content-type", "application/javascript");
+      res.end(script);
+    } else res.end('<body><script src="/bundle.js"></script></body>');
+  });
+  const base = await listen(server);
+  const context = new BrowserContext({ maxResponseBytes: 16 * 1024 * 1024 });
+  const page = await context.newPage();
+  const api = await request.newContext({ maxResponseBytes: 16 * 1024 * 1024 });
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    assert.equal(await page.evaluate(() => document.body.dataset.ready), "yes");
+    assert.equal((await (await api.get(`${base}/bundle.js`)).body()).length, size);
+    await assert.rejects(api.get(`${base}/slow`, { timeout: 10 }), /timeout/i);
+    const defaults = await request.newContext();
+    try {
+      await assert.rejects(defaults.get(`${base}/bundle.js`), /BodyTooLarge|maxBytes/);
+    } finally {
+      await defaults.dispose();
+    }
+    const limited = await request.newContext({ maxResponseBytes: 1024 });
+    try {
+      await assert.rejects(limited.get(`${base}/bundle.js`), /BodyTooLarge|maxBytes/);
+    } finally {
+      await limited.dispose();
+    }
+  } finally {
+    await api.dispose();
+    await context.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

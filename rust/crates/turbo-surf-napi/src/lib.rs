@@ -979,7 +979,7 @@ async fn do_fetch(
     cookies: Option<String>,
 ) -> Result<String> {
     do_fetch_headers(
-        url, method, body, cookies, None, false, None, None, None, None, None,
+        url, method, body, cookies, None, false, None, None, None, None, None, None,
     )
     .await
 }
@@ -999,6 +999,7 @@ async fn do_fetch_headers(
     body_bytes: Option<Buffer>,
     max_redirects: Option<u32>,
     no_cache: Option<bool>,
+    max_bytes: Option<u32>,
 ) -> Result<String> {
     let mut jar = cookies
         .as_deref()
@@ -1030,6 +1031,7 @@ async fn do_fetch_headers(
         };
     let opts = FetchOptions {
         http_credentials: auth_credentials.as_ref(),
+        max_bytes: max_bytes.map(|bytes| bytes as usize),
         method,
         body,
         body_bytes: body_bytes.map(|bytes| bytes.to_vec()),
@@ -1172,6 +1174,7 @@ pub async fn fetch_with_cookies(
     max_redirects: Option<u32>,
     no_cache: Option<bool>,
     timeout_ms: Option<u32>,
+    max_bytes: Option<u32>,
 ) -> Result<String> {
     let fetch = do_fetch_headers(
         &url,
@@ -1185,6 +1188,7 @@ pub async fn fetch_with_cookies(
         body_bytes,
         max_redirects,
         no_cache,
+        max_bytes,
     );
     match timeout_ms.filter(|timeout| *timeout > 0) {
         Some(timeout) => {

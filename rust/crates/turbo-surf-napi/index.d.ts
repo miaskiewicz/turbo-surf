@@ -59,6 +59,7 @@ export function liveOpen(
   documentResponse?: string,
   initScript?: string,
   timeoutMs?: number,
+  maxResourceBytes?: number,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
@@ -103,6 +104,7 @@ export function fetchWithCookies(
   maxRedirects?: number,
   noCache?: boolean,
   timeoutMs?: number,
+  maxBytes?: number,
 ): Promise<string>;
 
 // Actions by selector — mutate the DOM and return the new HTML.

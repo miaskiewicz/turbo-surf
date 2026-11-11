@@ -247,6 +247,7 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
 /// Async (hydration fetches chunks from a possibly same-process server, so Node's loop
 /// must stay free).
 pub struct LiveOpenTask {
+    max_resource_bytes: Option<u32>,
     initial_timeout_ms: Option<u32>,
     response: crate::document_response::DocumentResponse,
     init_script: String,
@@ -276,6 +277,7 @@ impl Task for LiveOpenTask {
         let init_script = std::mem::take(&mut self.init_script);
         let initial_timeout_ms = self.initial_timeout_ms;
         let viewport = response.viewport;
+        let max_resource_bytes = self.max_resource_bytes;
         thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -301,6 +303,7 @@ impl Task for LiveOpenTask {
                     response.metadata,
                     None,
                     PageSessionOptions {
+                        max_resource_bytes: max_resource_bytes.map(|bytes| bytes as usize),
                         initial_hydration_budget_ms: initial_timeout_ms.map(u64::from),
                         viewport,
                         ..Default::default()
@@ -423,12 +426,14 @@ pub fn live_open(
     document_response: Option<String>,
     init_script: Option<String>,
     timeout_ms: Option<u32>,
+    max_resource_bytes: Option<u32>,
 ) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
     crate::ensure_render_init();
     let state = crate::request_state(request_state_id)?;
     Ok(AsyncTask::new(LiveOpenTask {
+        max_resource_bytes,
         initial_timeout_ms: timeout_ms.filter(|timeout| *timeout > 0),
         response: crate::document_response::parse(document_response)?,
         init_script: init_script.unwrap_or_default(),

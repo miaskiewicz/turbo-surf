@@ -16,6 +16,15 @@ is the authoritative map of what is **supported**, what is a **no-op**, and what
 faithfully emulated is described below; some compatibility surfaces are stored values
 or no-ops rather than complete browser implementations.
 
+## Response-size budget
+
+The default response-body limit remains 8 MiB. For development applications with
+larger JavaScript bundles, pass `maxResponseBytes: 16 * 1024 * 1024` to
+`browser.newContext()` (or `newPage()`) and to standalone `request.newContext()`.
+The byte cap applies to navigation responses, page resource fetches and module
+graphs; it stays finite and also accepts a smaller positive limit. Native resource
+size failures retain their `BodyTooLarge`/`maxBytes` diagnostic on stderr.
+
 ## Why some things can't work
 
 The engine has a real DOM (rtdom), V8, native layout/paint and an optional Metal

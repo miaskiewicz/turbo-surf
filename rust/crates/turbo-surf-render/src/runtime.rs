@@ -177,6 +177,7 @@ impl Drop for OwnedRuntime {
 /// ES modules) hydrates. Carries the page base + shared cookie jar so module fetches
 /// are same-origin + session-authenticated like page fetches.
 struct NetModuleLoader {
+    max_resource_bytes: Option<usize>,
     base: String,
     source: String,
     top_level_source: String,
@@ -1922,6 +1923,7 @@ impl ModuleLoader for NetModuleLoader {
             inherited.integrity.clear();
             options.entry(url.to_string()).or_insert(inherited).clone()
         };
+        let max_resource_bytes = self.max_resource_bytes;
         let module_credentials = self.credentials.clone();
         let jar = self.jar.clone();
         let ua = self.ua.clone();
@@ -1981,6 +1983,7 @@ impl ModuleLoader for NetModuleLoader {
                 &mut local,
                 crate::script_fetch::ScriptPolicies {
                     http_credentials: auth_credentials.as_ref(),
+                    max_bytes: max_resource_bytes,
                     http_cache: Some(&http_cache),
                     response_side_effects: Some(storage_effects.as_ref()),
                     cache_partition: &cache_partition,
@@ -3385,6 +3388,9 @@ fn fetch_error_to_out(args: FetchErrorOut<'_>) -> FetchOut {
         policy_blocked,
         crossed_origin,
     } = args;
+    if error.contains("BodyTooLarge") {
+        eprintln!("resource fetch {target}: {error}");
+    }
     FetchOut {
         raw_headers: Vec::new(),
         status_text: String::new(),
@@ -3605,6 +3611,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
     let mut opts = FetchOptions {
         http_credentials: auth_credentials.as_ref(),
+        max_bytes: state.borrow().borrow::<ResourceBudget>().0,
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_mode,
@@ -3661,6 +3668,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
                     &mut local,
                     crate::script_fetch::ScriptPolicies {
                         http_credentials: auth_credentials.as_ref(),
+                        max_bytes: opts.max_bytes,
                         http_cache: Some(&http_cache),
                         response_side_effects: Some(storage_effects.as_ref()),
                         cache_partition: &cache_partition,
@@ -3859,6 +3867,7 @@ async fn op_load_image(
     let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
     let opts = FetchOptions {
         http_credentials: auth_credentials.as_ref(),
+        max_bytes: state.borrow().borrow::<ResourceBudget>().0,
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_partition,
@@ -4211,11 +4220,15 @@ pub enum WindowTimerMode {
 pub struct PageSessionOptions {
     /// Initial host-owned layout viewport, installed before page scripts.
     pub viewport: Option<[u32; 2]>,
+    /// Optional response-body byte cap for page resources and module graphs.
+    pub max_resource_bytes: Option<usize>,
     pub window_timer_mode: WindowTimerMode,
     /// Cap this initial hydration without shortening later operation budgets.
     /// Consumed on open; automatic form destinations inherit only the timer mode.
     pub initial_hydration_budget_ms: Option<u64>,
 }
+
+struct ResourceBudget(Option<usize>);
 
 #[derive(Default)]
 struct WindowTimerNesting {
@@ -14664,6 +14677,7 @@ fn make_runtime_with_storage_and_options(
             }
         })),
         module_loader: Some(Rc::new(NetModuleLoader {
+            max_resource_bytes: options.max_resource_bytes,
             base: base.to_string(),
             source: base.to_string(),
             top_level_source: base.to_string(),
@@ -14728,6 +14742,7 @@ fn make_runtime_with_storage_and_options(
     }
     let state = rt.op_state();
     let mut state = state.borrow_mut();
+    state.put(ResourceBudget(options.max_resource_bytes));
     state.put(NetworkLog::default());
     state.put(blob_store);
     state.put(form_submission::Queue::default());

@@ -482,6 +482,14 @@ function buildExposeInitScript(names) {
 // the match array (each `{ node, text, html }`) in ONE napi call; composition
 // (first/last/nth/filter) and counts stay in JS over that array.
 // ---------------------------------------------------------------------------
+function responseBudget(value) {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 1 || value > 0xffffffff) {
+    throw new Error("maxResponseBytes must be a positive 32-bit byte count");
+  }
+  return value;
+}
+
 function renderedVisibility(element) {
   for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
     if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
@@ -2198,6 +2206,7 @@ class Page {
         }),
         this._initScriptSource(),
         timeoutMs,
+        this._context._maxResponseBytes,
       );
     } catch (error) {
       if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
@@ -2484,6 +2493,7 @@ class Page {
         null,
         null,
         opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+        this._context._maxResponseBytes,
       );
     } catch (error) {
       if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
@@ -2790,6 +2800,11 @@ class Page {
           source: /^https?:/.test(this._url) ? this._url : null,
           destination: "document",
         }),
+        null,
+        null,
+        false,
+        null,
+        this._context._maxResponseBytes,
       ),
     );
     this._imageCache = undefined;
@@ -3451,6 +3466,11 @@ class Page {
               false,
               this._requestState,
               JSON.stringify({ source: this._url, destination: "style", mode: "no-cors" }),
+              null,
+              null,
+              false,
+              null,
+              this._context._maxResponseBytes,
             ),
           );
           return r.status >= 200 && r.status < 300 && r.html ? `${r.html}\n` : "";
@@ -3939,6 +3959,7 @@ class BrowserContext {
       ]),
     );
     requireOfflineSupport(merged.offline);
+    this._maxResponseBytes = responseBudget(merged.maxResponseBytes);
     const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
@@ -5325,6 +5346,7 @@ export const request = {
     };
     // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
+    const maxBytes = responseBudget(opts.maxResponseBytes ?? bc?._maxResponseBytes);
     let cookies = JSON.stringify(opts.storageState?.cookies ?? []);
     const initialState =
       typeof opts.storageState === "string"
@@ -5440,6 +5462,8 @@ export const request = {
         Buffer.isBuffer(body) ? body : null,
         maxRedirects,
         true,
+        o.timeout ?? opts.timeout ?? null,
+        maxBytes,
       );
       let parsed = JSON.parse(raw);
       if (
@@ -5465,6 +5489,8 @@ export const request = {
           Buffer.isBuffer(body) ? body : null,
           maxRedirects,
           true,
+          o.timeout ?? opts.timeout ?? null,
+          maxBytes,
         );
         parsed = JSON.parse(raw);
       }

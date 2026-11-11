@@ -3764,6 +3764,8 @@ async function openFixtures(baseDefs, extDefs, testInfo) {
 }
 
 export const test = makeTestFn(makeBaseFixtures());
+// Register in the module's root scope so every sibling suite inherits setup.
+wireFixtureHooks((info) => openFixtures(makeBaseFixtures(), {}, info));
 
 /** `defineConfig` is identity — the Playwright CLI/config is unused under node:test. */
 export const defineConfig = (config) => config;

@@ -2054,6 +2054,8 @@ struct Ua(String);
 /// `fetch` result marshaled back to JS as a `Response`-like object.
 #[derive(Default, serde::Serialize)]
 struct FetchOut {
+    #[serde(skip_serializing)]
+    raw_headers: Vec<(String, String)>,
     status_text: String,
     stream_id: u32,
     aborted: bool,
@@ -2944,6 +2946,8 @@ async fn run_stream_fetch_branch(
         "ok": out.ok,
         "method": method.unwrap_or("GET"),
         "contentType": out.content_type,
+        "headers": out.raw_headers,
+        "statusText": out.status_text,
         "streamed": true,
         "streamId": cancel_id,
         "body": "",
@@ -3049,6 +3053,7 @@ async fn install_stream_fetch_out(
     let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
         || !turbo_surf_core::request_context::same_origin(source, &response.final_url);
     let out = FetchOut {
+        raw_headers: response.headers.clone(),
         status_text: response.status_text,
         stream_id: cancel_id,
         response_received: true,
@@ -3304,6 +3309,7 @@ fn fetch_response_to_out(args: FetchResponseOut<'_>) -> FetchOut {
     let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
         || !turbo_surf_core::request_context::same_origin(source, &r.final_url);
     FetchOut {
+        raw_headers: r.headers.clone(),
         status_text: r.status_text,
         stream_id: 0,
         aborted: false,
@@ -3350,6 +3356,7 @@ fn fetch_error_to_out(args: FetchErrorOut<'_>) -> FetchOut {
         crossed_origin,
     } = args;
     FetchOut {
+        raw_headers: Vec::new(),
         status_text: String::new(),
         stream_id: 0,
         aborted: false,
@@ -3687,7 +3694,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     };
     jar_rc.borrow_mut().merge_request_changes(local);
     fetch_streams::release(&mut state.borrow_mut(), cancel_id);
-    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes});
+    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text});
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
     if log.0.len() == 1000 {

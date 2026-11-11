@@ -3207,6 +3207,15 @@ function makeResponse(r, ensureOpen = () => {}) {
 // A Playwright-like Response built from a captured live-app fetch (net-log entry),
 // for `page.on('response')` subscribers.
 function makeNetResponse(e) {
+  const entries = e.headers ?? (e.contentType ? [["content-type", e.contentType]] : []);
+  const all = {};
+  for (const [key, value] of entries) {
+    const name = key.toLowerCase();
+    all[name] =
+      all[name] === undefined
+        ? value
+        : `${all[name]}${name === "set-cookie" ? "\n" : ", "}${value}`;
+  }
   const req = {
     url: () => e.url,
     method: () => e.method || "GET",
@@ -3217,9 +3226,21 @@ function makeNetResponse(e) {
   return {
     url: () => e.url,
     status: () => e.status,
-    statusText: () => "",
+    statusText: () => e.statusText ?? "",
     ok: () => !!e.ok,
-    headers: () => (e.contentType ? { "content-type": e.contentType } : {}),
+    headers: () =>
+      Object.fromEntries(
+        Object.entries(all).filter(([name]) => !["set-cookie", "set-cookie2"].includes(name)),
+      ),
+    async allHeaders() {
+      return { ...all };
+    },
+    async headerValue(name) {
+      return all[name.toLowerCase()] ?? null;
+    },
+    async headersArray() {
+      return entries.map(([name, value]) => ({ name, value }));
+    },
     async body() {
       if (e.bodyIncomplete) throw new Error("Response body is incomplete");
       return Buffer.from(e.bodyBytes ?? e.body ?? "");

@@ -2858,6 +2858,47 @@ test("fill edits contenteditable text with input events and a collapsed caret (#
   }
 });
 
+test("Captured responses retain complete host-only header metadata (#398)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/data") {
+      res.statusMessage = "Probe Status";
+      res.setHeader("content-type", "application/json");
+      res.setHeader("X-Probe", "present");
+      res.setHeader("Set-Cookie", ["a=one; Path=/", "b=two; Path=/"]);
+      res.end('{"ok":true}');
+    } else res.end('<script>fetch("/data").then(r=>r.json())</script>');
+  });
+  const base = await listen(server);
+  const page = newPage();
+  let response;
+  page.on("response", (candidate) => {
+    if (candidate.url().endsWith("/data")) response = candidate;
+  });
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    assert.equal(response.headers()["x-probe"], "present");
+    assert.equal(response.headers()["set-cookie"], undefined);
+    assert.equal(response.statusText(), "Probe Status");
+    assert.equal((await response.allHeaders())["set-cookie"], "a=one; Path=/\nb=two; Path=/");
+    assert.equal(await response.headerValue("X-PROBE"), "present");
+    assert.equal(await response.headerValue("missing"), null);
+    assert.deepEqual(
+      (await response.headersArray())
+        .filter((h) => h.name.toLowerCase() === "set-cookie")
+        .map((h) => h.value),
+      ["a=one; Path=/", "b=two; Path=/"],
+    );
+    assert.equal(
+      await page.evaluate(() => fetch("/data").then((r) => r.headers.get("set-cookie"))),
+      null,
+    );
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("getBy parents retain their scope for CSS and getBy children (#472)", async () => {
   const page = newPage();
   await page.setContent(

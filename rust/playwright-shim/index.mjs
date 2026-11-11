@@ -731,10 +731,11 @@ class Locator {
     return this.fill("");
   }
   async type(value) {
-    return this.fill(value);
+    await this._page._ensureLive();
+    return void (await this._driveLive("type", String(value)));
   }
   async pressSequentially(value) {
-    return this.fill(value);
+    return this.type(value);
   }
   async check() {
     if (this._canDriveLive) return void (await this._driveLive("check"));
@@ -1017,6 +1018,30 @@ function normalizeInputFiles(files) {
   });
 }
 
+function typingInteractionScript(pick, value) {
+  return `(() => { ${pick} else {
+    el.focus();
+    for (const char of ${value}) {
+      const code = /^[a-z]$/i.test(char) ? 'Key' + char.toUpperCase() : '';
+      const key = { key: char, code, bubbles: true, cancelable: true, composed: true };
+      if (el.dispatchEvent(new KeyboardEvent('keydown', key)) &&
+          el.dispatchEvent(new KeyboardEvent('keypress', key))) {
+        const edit = { data: char, inputType: 'insertText', bubbles: true, composed: true };
+        if (el.dispatchEvent(new InputEvent('beforeinput', { ...edit, cancelable: true }))) {
+          if (!__tsNs.replaceControlSelection(el, char)) {
+            const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement : HTMLInputElement;
+            const setter = Object.getOwnPropertyDescriptor(proto.prototype, 'value').set;
+            setter.call(el, el.value + char);
+          }
+          el.dispatchEvent(new InputEvent('input', edit));
+        }
+      }
+      el.dispatchEvent(new KeyboardEvent('keyup', key));
+    }
+    globalThis.__RESULT = 'OK';
+  } })();`;
+}
+
 function interactionScript(selector, index, kind, value) {
   const sel = JSON.stringify(selector);
   const idx = JSON.stringify(index);
@@ -1025,6 +1050,7 @@ function interactionScript(selector, index, kind, value) {
     let __i = ${idx}; if (__i < 0) __i = els.length + __i;
     const el = els[__i];
     if (!el) { globalThis.__RESULT = "NO_MATCH"; }`;
+  if (kind === "type") return typingInteractionScript(pick, val);
   if (kind === "fill") {
     return `(() => { ${pick} else {
       if (typeof el.focus === "function") el.focus();

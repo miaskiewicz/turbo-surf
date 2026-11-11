@@ -2660,6 +2660,50 @@ test("viewport assertions use intersection ratio rather than visibility (#430)",
   }
 });
 
+test("locator typing preserves caret text and emits cancelable character events (#410)", async () => {
+  const server = createServer((_request, response) =>
+    response.end(`<input id="field" value="old"><script>
+    globalThis.events=[];
+    const field=document.querySelector('#field');
+    for(const type of ['keydown','keypress','beforeinput','input','keyup','change'])
+      field.addEventListener(type,e=>events.push({type,data:e.data??null}));
+    field.addEventListener('keydown',e=>{if(e.key==='x')e.preventDefault()});
+    </script>`),
+  );
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    for (const method of ["type", "pressSequentially"]) {
+      await p.goto(base, { waitUntil: "networkidle" });
+      await p.evaluate(() => {
+        const field = document.querySelector("#field");
+        field.focus();
+        field.setSelectionRange(0, 0);
+      });
+      await p.locator("#field")[method]("ab");
+      assert.deepEqual(
+        await p.evaluate(() => ({ value: document.querySelector("#field").value, events })),
+        {
+          value: "abold",
+          events: ["a", "b"].flatMap((data) => [
+            { type: "keydown", data: null },
+            { type: "keypress", data: null },
+            { type: "beforeinput", data },
+            { type: "input", data },
+            { type: "keyup", data: null },
+          ]),
+        },
+      );
+      await p.locator("#field")[method]("x");
+      assert.equal(await p.evaluate(() => document.querySelector("#field").value), "abold");
+    }
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("boolean locator assertions honor expected-state options and negation (#429)", async () => {
   const page = newPage();
   await page.setContent(

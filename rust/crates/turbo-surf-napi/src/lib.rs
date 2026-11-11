@@ -5,6 +5,7 @@
 //! composes these; `goto` = `fetchHtml` then view calls on the cached HTML.
 
 mod document_response;
+mod parse_cache;
 mod session;
 // Re-export the live-session napi free functions so they're reachable from the crate
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
@@ -70,26 +71,14 @@ fn to_json_string<T: serde::Serialize>(v: &T) -> String {
 }
 
 thread_local! {
-    /// Memoize the most recent `html -> Tree` parse per thread. Reads are stateless
-    /// (Node passes the HTML each call), so a page that gets several view passes
-    /// (links + markdown + text + extract — the real crawl pattern, and the shim's
-    /// query-then-accessors) re-parsed the 250 KB document every call. Cache the last
-    /// one: a same-HTML follow-up call is a cheap string compare + `Rc` clone instead
-    /// of a ~5 ms re-parse. Mutating actions still own their own `Tree` (need `&mut`).
-    static PARSE_CACHE: std::cell::RefCell<Option<(String, std::rc::Rc<Tree>)>> =
-        const { std::cell::RefCell::new(None) };
+    // Retain immutable snapshots across interleaved pages, bounded by eight
+    // entries and 4 MiB of input HTML per thread. Mutating actions parse separately.
+    static PARSE_CACHE: std::cell::RefCell<parse_cache::ParseCache<Tree>> =
+        const { std::cell::RefCell::new(parse_cache::ParseCache::new()) };
 }
 
-/// Parsed `Tree` for `html`, reusing the thread's last parse when the HTML is
-/// unchanged. Returned as `Rc<Tree>`; `&tree` derefs to `&Tree` at call sites.
 fn parsed(html: &str) -> std::rc::Rc<Tree> {
-    PARSE_CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        if c.as_ref().map(|(k, _)| k.as_str()) != Some(html) {
-            *c = Some((html.to_string(), std::rc::Rc::new(Tree::parse(html))));
-        }
-        c.as_ref().expect("just set").1.clone()
-    })
+    PARSE_CACHE.with(|cache| cache.borrow_mut().get_or_insert_with(html, Tree::parse))
 }
 
 // --- view passes (parse cached per page; the shim caches the HTML) ----------

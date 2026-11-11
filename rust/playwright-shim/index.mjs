@@ -67,6 +67,18 @@ function hasSelectorEngine(selector) {
   return isXPathSelector(selector) || (selector?.trimStart() ?? "").startsWith("css=");
 }
 
+function cookieMatchesFilter(cookie, filters) {
+  return ["name", "domain", "path"].every((field) => {
+    const expected = filters[field];
+    if (expected === undefined) return true;
+    if (expected instanceof RegExp) {
+      expected.lastIndex = 0;
+      return expected.test(cookie[field]);
+    }
+    return cookie[field] === expected;
+  });
+}
+
 // Build an executable source string from page.evaluate's (fn|string, arg) form.
 function evalSource(script, arg) {
   if (typeof script === "function") return `(${script.toString()})(${evaluationArgument(arg)})`;
@@ -3857,8 +3869,12 @@ class BrowserContext {
       if (page._session != null) native.liveSetCookies(page._session, cookies);
     }
   }
-  async clearCookies() {
-    this._setCookies("[]");
+  async clearCookies(filters = {}) {
+    this._setCookies(
+      JSON.stringify(
+        JSON.parse(this._cookies).filter((cookie) => !cookieMatchesFilter(cookie, filters)),
+      ),
+    );
   }
   async addInitScript(script, arg) {
     this._initScripts.push(evalSource(script, arg));

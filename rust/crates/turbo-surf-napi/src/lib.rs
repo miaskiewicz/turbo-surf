@@ -952,7 +952,10 @@ async fn do_fetch(
     body: Option<String>,
     cookies: Option<String>,
 ) -> Result<String> {
-    do_fetch_headers(url, method, body, cookies, None, false, None, None, None).await
+    do_fetch_headers(
+        url, method, body, cookies, None, false, None, None, None, None,
+    )
+    .await
 }
 
 /// `do_fetch` plus extra request headers (JSON object) — backs the shim's
@@ -968,6 +971,7 @@ async fn do_fetch_headers(
     request_state_id: Option<u32>,
     context_json: Option<String>,
     body_bytes: Option<Buffer>,
+    max_redirects: Option<u32>,
 ) -> Result<String> {
     let mut jar = cookies
         .as_deref()
@@ -999,6 +1003,14 @@ async fn do_fetch_headers(
         method,
         body,
         body_bytes: body_bytes.map(|bytes| bytes.to_vec()),
+        max_redirects: max_redirects.map(|count| count as usize),
+        redirect: max_redirects.map(|count| {
+            if count == 0 {
+                turbo_surf_core::net::RedirectMode::Manual
+            } else {
+                turbo_surf_core::net::RedirectMode::Follow
+            }
+        }),
         headers,
         context: Some(context),
         response_policy: Some(&response_policy),
@@ -1118,6 +1130,7 @@ pub async fn fetch_with_cookies(
     request_state_id: Option<u32>,
     context_json: Option<String>,
     body_bytes: Option<Buffer>,
+    max_redirects: Option<u32>,
 ) -> Result<String> {
     do_fetch_headers(
         &url,
@@ -1129,6 +1142,7 @@ pub async fn fetch_with_cookies(
         request_state_id,
         context_json,
         body_bytes,
+        max_redirects,
     )
     .await
 }

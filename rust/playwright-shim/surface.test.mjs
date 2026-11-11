@@ -2249,3 +2249,27 @@ test("API response headers use lowercase names and preserve status text (#338)",
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("API request status and redirect policies are honored (#335)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/failure") res.statusCode = 500;
+    if (req.url.startsWith("/redirect")) {
+      res.statusCode = 302;
+      res.setHeader("location", req.url === "/redirect-twice" ? "/redirect" : "/end");
+    }
+    res.end("body");
+  });
+  const base = await listen(server);
+  const api = await request.newContext({ failOnStatusCode: true, maxRedirects: 1 });
+  try {
+    await assert.rejects(api.get(`${base}/failure`), /500/);
+    assert.equal((await api.get(`${base}/failure`, { failOnStatusCode: false })).status(), 500);
+    assert.equal((await api.get(`${base}/redirect`, { maxRedirects: 0 })).status(), 302);
+    assert.equal((await api.get(`${base}/redirect`)).status(), 200);
+    await assert.rejects(api.get(`${base}/redirect-twice`), /redirect/i);
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

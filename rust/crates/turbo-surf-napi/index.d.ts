@@ -96,6 +96,7 @@ export function fetchWithCookies(
   requestStateId?: number,
   contextJson?: string,
   bodyBytes?: Buffer,
+  maxRedirects?: number,
 ): Promise<string>;
 
 // Actions by selector — mutate the DOM and return the new HTML.

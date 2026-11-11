@@ -4068,6 +4068,10 @@ export const request = {
     const call = async (url, method, o = {}) => {
       ensureOpen();
       const target = resolve(url);
+      const maxRedirects = o.maxRedirects ?? opts.maxRedirects;
+      if (maxRedirects !== undefined && (!Number.isInteger(maxRedirects) || maxRedirects < 0)) {
+        throw new Error("maxRedirects must be a non-negative integer");
+      }
       const credentialHeaders =
         credentialAllowed(target) && credentials.send === "always"
           ? { Authorization: authorization, ...o.headers }
@@ -4084,6 +4088,7 @@ export const request = {
         requestState,
         null,
         Buffer.isBuffer(body) ? body : null,
+        maxRedirects,
       );
       let parsed = JSON.parse(raw);
       if (
@@ -4107,6 +4112,7 @@ export const request = {
           requestState,
           null,
           Buffer.isBuffer(body) ? body : null,
+          maxRedirects,
         );
         parsed = JSON.parse(raw);
       }
@@ -4115,6 +4121,12 @@ export const request = {
       if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;
       // oxlint-enable no-underscore-dangle
       ensureOpen();
+      if (
+        (o.failOnStatusCode ?? opts.failOnStatusCode) &&
+        (parsed.status < 200 || parsed.status >= 400)
+      ) {
+        throw new Error(`API request failed with status ${parsed.status}`);
+      }
       responses.add(parsed);
       return makeResponse(parsed, ensureOpen);
     };

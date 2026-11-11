@@ -2727,3 +2727,40 @@ test("boolean locator assertions honor expected-state options and negation (#429
   await expect(page.locator("#shown")).not.toBeVisible({ visible: false, timeout: 0 });
   await page.close();
 });
+
+test("fill and clear respect beforeinput cancellation and commit on blur (#409)", async () => {
+  const server = createServer((_request, response) =>
+    response.end(`<input id="field" value="old"><input id="blocked" value="old"><script>
+    globalThis.events=[];
+    for(const field of document.querySelectorAll('input')) for(const type of ['beforeinput','input','change'])
+      field.addEventListener(type,e=>events.push({id:field.id,type,data:e.data??null,inputType:e.inputType??null}));
+    document.querySelector('#blocked').addEventListener('beforeinput',e=>e.preventDefault());
+    </script>`),
+  );
+  const base = await listen(server),
+    p = newPage();
+  try {
+    for (const [id, value, inputType, data] of [
+      ["field", "new", "insertText", "new"],
+      ["field", "", "deleteContentForward", null],
+      ["blocked", "new", "insertText", "new"],
+    ]) {
+      await p.goto(base, { waitUntil: "networkidle" });
+      if (value) await p.locator("#" + id).fill(value);
+      else await p.locator("#" + id).clear();
+      const expected = [{ id, type: "beforeinput", data, inputType }];
+      if (id !== "blocked") expected.push({ id, type: "input", data, inputType });
+      assert.deepEqual(
+        await p.evaluate((id) => ({ value: document.getElementById(id).value, events }), id),
+        { value: id === "blocked" ? "old" : value, events: expected },
+      );
+      await p.evaluate((id) => document.getElementById(id).blur(), id);
+      if (id !== "blocked") expected.push({ id, type: "change", data: null, inputType: null });
+      assert.deepEqual(await p.evaluate(() => events), expected);
+    }
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

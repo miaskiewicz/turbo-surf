@@ -1018,6 +1018,34 @@ function normalizeInputFiles(files) {
   });
 }
 
+function fillInteractionScript(pick, value) {
+  return `(() => { ${pick} else {
+    el.focus();
+    const value = ${value};
+    const edit = { bubbles: true, composed: true, data: value === '' ? null : value,
+      inputType: value === '' ? 'deleteContentForward' : 'insertText' };
+    if (!el.dispatchEvent(new InputEvent('beforeinput', { ...edit, cancelable: true }))) {
+      globalThis.__RESULT = 'OK'; return;
+    }
+    const pending = __tsNs.playwrightEditingCommits ??= new WeakMap();
+    if (!pending.has(el)) {
+      const before = el.value;
+      pending.set(el, before);
+      el.addEventListener('blur', () => {
+        pending.delete(el);
+        if (el.value !== before) el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, { once: true });
+    }
+    // The prototype setter bypasses React's instance value tracker before the input event.
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement
+      : el.tagName === 'SELECT' ? HTMLSelectElement : HTMLInputElement;
+    const desc = Object.getOwnPropertyDescriptor(proto.prototype, 'value');
+    if (desc?.set) desc.set.call(el, value); else el.value = value;
+    el.dispatchEvent(new InputEvent('input', edit));
+    globalThis.__RESULT = 'OK';
+  } })();`;
+}
+
 function typingInteractionScript(pick, value) {
   return `(() => { ${pick} else {
     el.focus();
@@ -1051,22 +1079,7 @@ function interactionScript(selector, index, kind, value) {
     const el = els[__i];
     if (!el) { globalThis.__RESULT = "NO_MATCH"; }`;
   if (kind === "type") return typingInteractionScript(pick, val);
-  if (kind === "fill") {
-    return `(() => { ${pick} else {
-      if (typeof el.focus === "function") el.focus();
-      // Set the value through the PROTOTYPE setter, bypassing React's instance-level
-      // _valueTracker. If we used el.value=, React's tracker would record the new value
-      // and then see "no change" on the input event → onChange never fires → a
-      // controlled input stays empty in React state (and resets on the next render).
-      const proto = el.tagName === "TEXTAREA" ? globalThis.HTMLTextAreaElement
-        : el.tagName === "SELECT" ? globalThis.HTMLSelectElement : globalThis.HTMLInputElement;
-      const desc = proto && Object.getOwnPropertyDescriptor(proto.prototype, "value");
-      if (desc && desc.set) desc.set.call(el, ${val}); else el.value = ${val};
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, data: ${val} }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      globalThis.__RESULT = "OK";
-    } })();`;
-  }
+  if (kind === "fill") return fillInteractionScript(pick, val);
   if (kind === "check" || kind === "uncheck") {
     const on = kind === "check";
     return `(() => { ${pick} else {

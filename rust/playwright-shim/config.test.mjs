@@ -19,6 +19,7 @@ import {
   loadConfig,
   matchAny,
   normalizeConfig,
+  orderProjects,
   startWebServers,
   stopWebServers,
 } from "./config.mjs";
@@ -366,4 +367,61 @@ test("discoverTests honors RegExp selectors against absolute paths without state
   };
   assert.deepEqual(discoverTests(project), [join(root, "one.spec.mjs")]);
   assert.deepEqual(discoverTests(project), [join(root, "one.spec.mjs")]);
+});
+
+test(
+  "CLI runs selected project dependencies first and blocks dependents on failure",
+  { timeout: 20000 },
+  async () => {
+    const root = tmp();
+    const marker = join(root, "setup.marker");
+    const appMarker = join(root, "app.marker");
+    writeFileSync(
+      join(root, "setup.spec.mjs"),
+      `import test from 'node:test';import {writeFileSync} from 'node:fs';
+    test('setup dependency',()=>writeFileSync(${JSON.stringify(marker)},'ready'));`,
+    );
+    writeFileSync(
+      join(root, "app.spec.mjs"),
+      `import test from 'node:test';import assert from 'node:assert/strict';import {existsSync,writeFileSync} from 'node:fs';
+    test('dependent app',()=>{assert.ok(existsSync(${JSON.stringify(marker)}));writeFileSync(${JSON.stringify(appMarker)},'ran');});`,
+    );
+    const config = join(root, "projects.config.mjs");
+    writeFileSync(
+      config,
+      `export default {projects:[
+    {name:'app',testMatch:'app.spec.mjs',dependencies:['setup']},
+    {name:'setup',testMatch:'setup.spec.mjs'}]};`,
+    );
+    const result = await runCli(["--config", config, "--project", "app"], root);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(readFileSync(appMarker, "utf8"), "ran");
+    writeFileSync(
+      join(root, "setup.spec.mjs"),
+      `import test from 'node:test';test('failed setup',()=>{throw Error('setup failed');});`,
+    );
+    writeFileSync(appMarker, "not run");
+    const failed = await runCli(["--config", config, "--project", "app"], root);
+    assert.equal(failed.code, 1);
+    assert.equal(readFileSync(appMarker, "utf8"), "not run");
+  },
+);
+
+test("project dependencies reject missing projects and cycles", () => {
+  assert.throws(
+    () => orderProjects([{ name: "app", dependencies: ["missing"] }]),
+    /Unknown dependency/,
+  );
+  assert.throws(
+    () =>
+      orderProjects([
+        { name: "app", dependencies: ["setup"] },
+        { name: "setup", dependencies: ["app"] },
+      ]),
+    /dependency cycle/,
+  );
+  const setup = { name: "setup" };
+  const app = { name: "app", dependencies: ["setup"] };
+  const other = { name: "other", dependencies: ["setup"] };
+  assert.deepEqual(orderProjects([app, other, setup], ["app", "other"]), [setup, app, other]);
 });

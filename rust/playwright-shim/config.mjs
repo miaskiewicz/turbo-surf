@@ -48,6 +48,7 @@ export function normalizeConfig(raw, rootDir) {
   const projects = rawProjects.length
     ? rawProjects.map((p) => ({
         name: String(p.name ?? "default"),
+        dependencies: p.dependencies ?? [],
         use: { ...use, ...p.use },
         testDir: p.testDir ? resolve(rootDir, p.testDir) : testDir,
         testMatch: toArray(p.testMatch) ?? testMatch,
@@ -280,4 +281,28 @@ export async function stopWebServers(handles) {
     while (ownedServerAlive(h.child) && Date.now() < deadline) await delay(50);
     if (ownedServerAlive(h.child)) await signalOwnedServer(h.child, "SIGKILL");
   }
+}
+
+export function orderProjects(projects, selectedNames) {
+  const byName = new Map(projects.map((project) => [project.name, project]));
+  const ordered = [];
+  const visiting = new Set();
+  const visited = new Set();
+  const visit = (project) => {
+    if (visited.has(project.name)) return;
+    if (visiting.has(project.name)) throw new Error(`Project dependency cycle at ${project.name}`);
+    visiting.add(project.name);
+    for (const name of project.dependencies ?? []) {
+      const dependency = byName.get(name);
+      if (!dependency) throw new Error(`Unknown dependency ${name} for project ${project.name}`);
+      visit(dependency);
+    }
+    visiting.delete(project.name);
+    visited.add(project.name);
+    ordered.push(project);
+  };
+  for (const project of projects) {
+    if (!selectedNames || selectedNames.includes(project.name)) visit(project);
+  }
+  return ordered;
 }

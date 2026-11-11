@@ -12,6 +12,7 @@ import {
   discoverTests,
   findConfig,
   loadConfig,
+  orderProjects,
   startWebServers,
   stopWebServers,
 } from "../config.mjs";
@@ -42,9 +43,7 @@ export async function run(argv) {
   }
   const config = await loadConfig(configPath);
   const reporter = values.reporter ? [[values.reporter]] : config.reporter;
-  const chosen = values.project
-    ? config.projects.filter((p) => values.project.includes(p.name))
-    : config.projects;
+  const chosen = orderProjects(config.projects, values.project);
   if (!chosen.length) {
     console.error(`turbo-surf-test: no projects matched ${JSON.stringify(values.project)}`);
     return 2;
@@ -53,8 +52,14 @@ export async function run(argv) {
     console.log(`[webServer] ${m}`),
   );
   let failed = 0;
+  const failedProjects = new Set();
   try {
     for (const project of chosen) {
+      if ((project.dependencies ?? []).some((name) => failedProjects.has(name))) {
+        console.log(`[${project.name}] skipped because a dependency failed`);
+        failedProjects.add(project.name);
+        continue;
+      }
       const files = positionals.length
         ? positionals.map((p) => resolve(p))
         : discoverTests(project);
@@ -67,7 +72,10 @@ export async function run(argv) {
         continue;
       }
       const code = await runProject(project, files, reporter);
-      if (code !== 0) failed++;
+      if (code !== 0) {
+        failed++;
+        failedProjects.add(project.name);
+      }
     }
   } finally {
     await stopWebServers(webHandles);

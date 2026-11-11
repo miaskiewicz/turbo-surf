@@ -11362,84 +11362,9 @@ __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : st
   try { if (typeof d.close !== "function") d.close = () => {}; } catch (_) {}
 })();
 
-// document.createTreeWalker + NodeFilter — focus-management code (MUI's DataGrid / focus
-// trap, ARIA widgets) walks the tree with these; deno_core's binding has neither, so a
-// page with a data grid threw "createTreeWalker is not a function" and rendered blank.
-// A document-order DFS honoring whatToShow + the accept filter (REJECT skips the subtree,
-// SKIP skips the node but descends) — enough for focusable-element scans.
-(() => {
-  const d = globalThis.document;
-  if (!d || typeof d.createTreeWalker === "function") return;
-  globalThis.NodeFilter = globalThis.NodeFilter || {
-    SHOW_ALL: 0xffffffff, SHOW_ELEMENT: 1, SHOW_TEXT: 4, SHOW_COMMENT: 128,
-    FILTER_ACCEPT: 1, FILTER_REJECT: 2, FILTER_SKIP: 3,
-  };
-  const ACCEPT = 1, REJECT = 2;
-  // createTreeWalker(root, optional whatToShow, optional filter).length === 1.
-  d.createTreeWalker = function (root) {
-    const whatToShow = arguments[1], filter = arguments[2];
-    const show = whatToShow == null ? 0xffffffff : whatToShow >>> 0;
-    const accept = (n) => {
-      const t = n.nodeType || 1;
-      const bit = t === 1 ? 1 : t === 3 ? 4 : t === 8 ? 128 : 1 << (t - 1);
-      if ((show & bit) === 0) return 3; // SKIP (wrong type)
-      const fn = filter && (typeof filter === "function" ? filter : filter.acceptNode);
-      if (typeof fn === "function") {
-        try { return fn.call(filter, n); } catch (_e) { return 1; }
-      }
-      return 1;
-    };
-    const w = { root, whatToShow: show, filter, currentNode: root };
-    w.nextNode = function () {
-      let node = this.currentNode;
-      for (;;) {
-        let child = node.firstChild;
-        let descend = true;
-        while (descend && child) {
-          node = child;
-          const r = accept(node);
-          if (r === ACCEPT) { this.currentNode = node; return node; }
-          if (r === REJECT) { descend = false; } // don't descend; fall to sibling search
-          else child = node.firstChild; // SKIP → keep descending
-        }
-        let t = node;
-        while (t && t !== this.root) {
-          if (t.nextSibling) { node = t.nextSibling; break; }
-          t = t.parentNode;
-        }
-        if (!t || t === this.root) return null;
-        const r = accept(node);
-        if (r === ACCEPT) { this.currentNode = node; return node; }
-      }
-    };
-    w.firstChild = function () {
-      let c = this.currentNode.firstChild;
-      while (c) { const r = accept(c); if (r === ACCEPT) { this.currentNode = c; return c; } c = c.nextSibling; }
-      return null;
-    };
-    w.nextSibling = function () {
-      let s = this.currentNode.nextSibling;
-      while (s) { const r = accept(s); if (r === ACCEPT) { this.currentNode = s; return s; } s = s.nextSibling; }
-      return null;
-    };
-    w.parentNode = function () {
-      let p = this.currentNode.parentNode;
-      while (p && p !== this.root) { if (accept(p) === ACCEPT) { this.currentNode = p; return p; } p = p.parentNode; }
-      return null;
-    };
-    w.previousNode = function () { return null; }; // rarely used by focus scans
-    return w;
-  };
-  // NodeIterator (same filter model, linear) — some libs use it instead of TreeWalker.
-  if (typeof d.createNodeIterator !== "function") {
-    d.createNodeIterator = function (root) {
-      const whatToShow = arguments[1], filter = arguments[2];
-      const tw = d.createTreeWalker(root, whatToShow, filter);
-      return { nextNode: () => tw.nextNode(), previousNode: () => null, detach() {} };
-    };
-  }
-})();
-
+"##,
+    include_str!("dom_traversal.js"),
+    r##"
 // Viewport / screen globals — no real rendering surface here, but analytics and
 // responsive code read them (PostHog `.split`/`.height` on undefined throws → loops
 // forever). Sensible desktop defaults.

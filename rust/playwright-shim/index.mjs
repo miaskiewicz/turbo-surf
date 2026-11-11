@@ -4366,13 +4366,13 @@ expect.any = (constructor) => {
 // @playwright/test surface (drop-in over node:test) — fixtures, hooks, steps.
 // ---------------------------------------------------------------------------
 import { after, before, describe as nodeDescribe, test as nodeTest } from "node:test";
-import { fixtureNames, openFixtures } from "./fixtures.mjs";
+import { fixtureNames, openFixtures, teardownWorkerFixtures } from "./fixtures.mjs";
 
 // A fixture set: each value is either a plain default or [fn, opts] / async fn
 // of ({ ...fixtures }, use). We resolve them lazily and tear down after `use`.
 function makeBaseFixtures() {
   return {
-    browser: async (_f, use) => use(browserStub),
+    browser: [async (_f, use) => use(browserStub), { scope: "worker" }],
     context: async (_f, use) => use(new BrowserContext()),
     page: async ({ context }, use) => {
       const ctx = context;
@@ -4448,6 +4448,20 @@ function focusedScopeAllowed(scope) {
 }
 
 const rootCleanupHooks = new Map();
+after(async () => {
+  const errors = [];
+  try {
+    await runCleanupHooks(rootCleanupHooks.get("afterAll") ?? [], { browser: browserStub });
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    await teardownWorkerFixtures();
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length) throw new AggregateError(errors, "Worker cleanup failed");
+});
 async function runCleanupHooks(hooks, args) {
   const errors = [];
   for (const hook of hooks) {
@@ -4477,6 +4491,7 @@ function registerCleanupHook(_kind, fn) {
   }
   const hooks = [fn];
   store.set(kind, hooks);
+  if (!scope) return;
   after(async () => {
     if (focusedScopeAllowed(scope)) await runCleanupHooks(hooks, { browser: browserStub });
   });
@@ -4550,6 +4565,7 @@ async function executeAttempt(plan, t) {
   return activeAttemptStore.run({ info, fixtures, plan }, async () => {
     const errors = [];
     try {
+      await fixtures.resolveAutomatic();
       for (const hook of planHooks(plan, "beforeEach"))
         await invokeFixtureFunction(hook, fixtures, info);
       await fixtures.resolve(fixtureNames(plan.fn));
@@ -4565,6 +4581,14 @@ async function executeAttempt(plan, t) {
     if (errors.length === 1) throw errors[0];
     if (errors.length) throw new AggregateError(errors, "Test and cleanup failed");
   });
+}
+
+async function invokeWorkerHook(fn, plan) {
+  const info = makeTestInfo("worker hook");
+  const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
+  const fixtures = await openFixtures(plan.baseDefs, defs, info, undefined, true);
+  await fixtures.resolveAutomatic();
+  await invokeFixtureFunction(fn, fixtures, info);
 }
 
 function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
@@ -4636,12 +4660,19 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   run.beforeEach = (fn) => registerTestHook("beforeEach", fn);
   run.afterEach = (fn) => registerTestHook("afterEach", fn);
   run.beforeAll = (fn) => {
-    const scope = getSkipStack().at(-1);
+    const frames = [...getSkipStack()];
+    const scope = frames.at(-1);
     before(async () => {
-      if (focusedScopeAllowed(scope)) await fn({ browser: browserStub });
+      if (focusedScopeAllowed(scope))
+        await invokeWorkerHook(fn, { baseDefs, extDefs, useKeys, frames });
     });
   };
-  run.afterAll = (fn) => registerCleanupHook("afterAll", fn);
+  run.afterAll = (fn) => {
+    const frames = [...getSkipStack()];
+    registerCleanupHook("afterAll", () =>
+      invokeWorkerHook(fn, { baseDefs, extDefs, useKeys, frames }),
+    );
+  };
   // A new fixture name extends; reusing a base/ext name OVERRIDES it but the
   // override still sees the prior value (Playwright's `page: ({page}) => …`).
   run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more }, useKeys);

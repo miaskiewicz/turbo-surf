@@ -3707,3 +3707,20 @@ test("failed attempts share accurate TestInfo with hooks and fixture teardown", 
     /TEARDOWN_STATUS={"status":"failed","error":"intentional body failure","errors":1}/,
   );
 });
+
+test("worker tuple fixtures are shared with suite hooks and torn down once", async () => {
+  const { runShimProbe } = await import("./runner-probes.mjs");
+  const result = await runShimProbe(`
+    let workerValue;
+    const extended=base.extend({
+      worker:[async(_f,use)=>{console.log('WORKER_SETUP');await use({id:1});console.log('WORKER_TEARDOWN');},{scope:'worker'}],
+    });
+    extended.beforeAll(({worker})=>{workerValue=worker;});
+    extended.afterAll(({worker})=>assert.equal(worker,workerValue));
+    extended('first',({worker})=>assert.equal(worker,workerValue));
+    extended('second',({worker})=>assert.equal(worker,workerValue));
+  `);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal((result.stdout.match(/WORKER_SETUP/g) ?? []).length, 1);
+  assert.equal((result.stdout.match(/WORKER_TEARDOWN/g) ?? []).length, 1);
+});

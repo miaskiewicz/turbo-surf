@@ -4092,20 +4092,37 @@ class ValueExpect extends BaseExpect {
   toBeNaN() {
     this._ok(Number.isNaN(this._v), `expected ${this._v} to be NaN`);
   }
+  _numeric(expected, allowBigInt = true) {
+    const valid = (value) =>
+      typeof value === "number" || (allowBigInt && typeof value === "bigint");
+    if (!valid(this._v) || !valid(expected))
+      throw new Error(
+        "Numeric matcher requires number" + (allowBigInt ? " or bigint" : "") + " arguments",
+      );
+  }
   toBeGreaterThan(n) {
+    this._numeric(n);
     this._ok(this._v > n, `expected ${this._v} > ${n}`);
   }
   toBeGreaterThanOrEqual(n) {
+    this._numeric(n);
     this._ok(this._v >= n, `expected ${this._v} >= ${n}`);
   }
   toBeLessThan(n) {
+    this._numeric(n);
     this._ok(this._v < n, `expected ${this._v} < ${n}`);
   }
   toBeLessThanOrEqual(n) {
+    this._numeric(n);
     this._ok(this._v <= n, `expected ${this._v} <= ${n}`);
   }
   toBeCloseTo(n, digits = 2) {
-    this._ok(Math.abs(this._v - n) < 10 ** -digits / 2, `expected ${this._v} close to ${n}`);
+    this._numeric(n, false);
+    if (typeof digits !== "number") throw new Error("Precision must be a number");
+    this._ok(
+      (this._v === n && !Number.isFinite(n)) || Math.abs(this._v - n) < 10 ** -digits / 2,
+      `expected ${this._v} close to ${n}`,
+    );
   }
   toBeInstanceOf(c) {
     this._ok(this._v instanceof c, `expected instance of ${c?.name}`);

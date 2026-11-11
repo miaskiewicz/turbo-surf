@@ -3283,3 +3283,23 @@ test("setExtraHTTPHeaders replaces and clears prior headers (#393)", async () =>
     await ctx.close();
   }
 });
+
+test("Numeric assertions reject coercion and compare matching infinities (#390)", () => {
+  expect(Infinity).toBeCloseTo(Infinity);
+  expect(-Infinity).toBeCloseTo(-Infinity);
+  for (const name of [
+    "toBeGreaterThan",
+    "toBeGreaterThanOrEqual",
+    "toBeLessThan",
+    "toBeLessThanOrEqual",
+    "toBeCloseTo",
+  ]) {
+    assert.throws(() => expect("1")[name](1), /number|numeric/i);
+    assert.throws(() => expect(1)[name]("1"), /number|numeric/i);
+    assert.throws(() => expect("1").not[name](1), /number|numeric/i);
+  }
+  expect(2n).toBeGreaterThan(1n);
+  assert.throws(() => expect(NaN).toBeCloseTo(NaN));
+  expect(NaN).toBe(NaN);
+  assert.throws(() => expect(-0).toBe(0));
+});

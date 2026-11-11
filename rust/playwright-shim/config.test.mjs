@@ -290,3 +290,39 @@ test("webServer readiness accepts 200..403 and root index fallback only", async 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test(
+  "webServer shutdown terminates shell descendants",
+  { skip: process.platform === "win32", timeout: 10000 },
+  async () => {
+    const port = await freePort();
+    const root = tmp();
+    const script = join(root, "descendant.mjs");
+    const pidFile = join(root, "pid");
+    writeFileSync(
+      script,
+      `import {createServer} from 'node:http';
+    import {writeFileSync} from 'node:fs';
+    writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+    createServer((req,res)=>res.end('ok')).listen(${port}, '127.0.0.1');`,
+    );
+    const handles = await startWebServers([
+      {
+        command: `"${process.execPath}" "${script}" & wait`,
+        port,
+        timeout: 3000,
+        gracefulShutdown: { signal: "SIGTERM", timeout: 200 },
+      },
+    ]);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    try {
+      await stopWebServers(handles);
+      await assert.rejects(fetch(`http://127.0.0.1:${port}`));
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+      await stopWebServers(handles);
+    }
+  },
+);

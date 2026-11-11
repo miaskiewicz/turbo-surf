@@ -185,6 +185,7 @@ async function startWebServer(s, log) {
   }
   const child = spawn(s.command, {
     shell: true,
+    detached: process.platform !== "win32",
     cwd: s.cwd,
     env: { ...process.env, ...s.env },
     stdio: "inherit",
@@ -198,7 +199,7 @@ async function startWebServer(s, log) {
     }
     await delay(200);
   }
-  child.kill("SIGTERM");
+  await stopWebServers([{ child, server: s }]);
   throw new Error(`webServer timed out after ${s.timeout}ms waiting for ${probeURL(s)}`);
 }
 
@@ -236,14 +237,41 @@ function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function ownedServerAlive(child) {
+  if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+async function signalOwnedServer(child, signal) {
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    await new Promise((resolve) => {
+      killer.once("exit", resolve);
+      killer.once("error", resolve);
+    });
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
+
 export async function stopWebServers(handles) {
   for (const h of handles) {
     if (!h?.child) continue;
     const sig = h.server.gracefulShutdown?.signal ?? "SIGTERM";
     const tmo = h.server.gracefulShutdown?.timeout ?? 5000;
-    h.child.kill(sig);
+    await signalOwnedServer(h.child, sig);
     const deadline = Date.now() + tmo;
-    while (h.child.exitCode === null && Date.now() < deadline) await delay(50);
-    if (h.child.exitCode === null) h.child.kill("SIGKILL");
+    while (ownedServerAlive(h.child) && Date.now() < deadline) await delay(50);
+    if (ownedServerAlive(h.child)) await signalOwnedServer(h.child, "SIGKILL");
   }
 }

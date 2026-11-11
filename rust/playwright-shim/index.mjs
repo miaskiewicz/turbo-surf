@@ -4060,6 +4060,22 @@ function skipConditionMet(args) {
   return !!c;
 }
 
+let hasFocusedTests = false;
+const focusedTests = new Map();
+const focusedNames = new Set();
+function markFocused() {
+  hasFocusedTests = true;
+  for (const frame of getSkipStack()) frame.containsFocus = true;
+}
+function focusedTestAllowed(context) {
+  if (!hasFocusedTests) return true;
+  if (context.fullName) return focusedTests.get(context.fullName) === true;
+  return focusedNames.has(context.name);
+}
+function focusedScopeAllowed(scope) {
+  return !hasFocusedTests || !scope || scope.only || scope.containsFocus;
+}
+
 const rootFixtureUses = new Map();
 function fixtureUses(keys) {
   const result = {};
@@ -4073,7 +4089,12 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   const useKey = Symbol("fixture use");
   const useKeys = [...parentUseKeys, useKey];
   const open = (testInfo) => openFixtures(baseDefs, extDefs, testInfo);
-  const run = (name, fn) => {
+  const run = (name, fn, only = false) => {
+    const focused = only || getSkipStack().some((frame) => frame.only);
+    if (only) markFocused();
+    const fullName = [...getSkipStack().map((frame) => frame.title), name].join(" > ");
+    focusedTests.set(fullName, focused);
+    if (focused) focusedNames.add(name);
     const uses = fixtureUses(useKeys);
     const testDefs = { ...extDefs, ...uses };
     const openTest = (info) => openFixtures(baseDefs, testDefs, info, fixtureNames(fn));
@@ -4082,8 +4103,13 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
       nodeTest.skip(name, () => {});
       return;
     }
-    nodeTest(name, async (t) =>
+    const register = only && process.execArgv.includes("--test-only") ? nodeTest.only : nodeTest;
+    register(name, async (t) =>
       activeTStore.run(t, async () => {
+        if (hasFocusedTests && !focused) {
+          t.skip("excluded by focused tests");
+          return;
+        }
         const testInfo = makeTestInfo(name);
         try {
           // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
@@ -4125,7 +4151,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
     const stack = getSkipStack();
     if (stack.length) stack[stack.length - 1].skip = true; // describe scope
   };
-  run.only = (name, fn) => nodeTest.only(name, async () => runWith(open, name, fn));
+  run.only = (name, fn) => run(name, fn, true);
   run.fixme = run.skip;
   run.fail = run;
   run.slow = () => {};
@@ -4152,27 +4178,32 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   run.info = () => makeTestInfo("");
   run.beforeEach = (fn) => {
     wireFixtureHooks(open);
-    beforeEach(async () => fn(_current?.arg ?? {}));
+    beforeEach(async (context) => {
+      if (focusedTestAllowed(context)) await fn(_current?.arg ?? {});
+    });
   };
   run.afterEach = (fn) => {
     wireFixtureHooks(open);
-    afterEach(async () => fn(_current?.arg ?? {}));
+    afterEach(async (context) => {
+      if (focusedTestAllowed(context)) await fn(_current?.arg ?? {});
+    });
   };
-  run.beforeAll = (fn) => before(async () => fn({ browser: browserStub }));
-  run.afterAll = (fn) => after(async () => fn({ browser: browserStub }));
+  run.beforeAll = (fn) => {
+    const scope = getSkipStack().at(-1);
+    before(async () => {
+      if (focusedScopeAllowed(scope)) await fn({ browser: browserStub });
+    });
+  };
+  run.afterAll = (fn) => {
+    const scope = getSkipStack().at(-1);
+    after(async () => {
+      if (focusedScopeAllowed(scope)) await fn({ browser: browserStub });
+    });
+  };
   // A new fixture name extends; reusing a base/ext name OVERRIDES it but the
   // override still sees the prior value (Playwright's `page: ({page}) => …`).
   run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more }, useKeys);
   return run;
-}
-
-async function runWith(open, name, fn) {
-  const { arg, teardown } = await open(makeTestInfo(name));
-  try {
-    await fn(arg, makeTestInfo(name));
-  } finally {
-    await teardown();
-  }
 }
 
 function makeDescribe() {
@@ -4186,15 +4217,23 @@ function makeDescribe() {
   // ("test did not finish before its parent and was cancelled") — and the dangling
   // async test (holding a live-session V8 isolate) was torn down at process exit,
   // which faulted (SIGBUS) on Linux. The Playwright describe body takes no args.
-  const d = (name, fn) =>
-    nodeDescribe(name, async () =>
+  const d = (name, fn, only = false) => {
+    const focused = only || getSkipStack().some((frame) => frame.only);
+    if (only) markFocused();
+    const register =
+      only && process.execArgv.includes("--test-only") ? nodeDescribe.only : nodeDescribe;
+    return register(name, async () =>
       // Each describe runs in its own stack store — nested describes layer on
       // top via a fresh array, and sibling describes never see each other's
       // frames even when node:test interleaves their bodies.
-      skipStackStore.run([...getSkipStack(), { skip: false }], async () => fn()),
+      skipStackStore.run(
+        [...getSkipStack(), { title: name, skip: false, only: focused }],
+        async () => fn(),
+      ),
     );
+  };
   d.skip = (name, fn) => nodeDescribe.skip(name, fn ?? (() => {}));
-  d.only = (name, fn) => d(name, fn);
+  d.only = (name, fn) => d(name, fn, true);
   d.serial = d;
   d.parallel = d;
   d.configure = () => {};

@@ -3393,3 +3393,16 @@ test("toThrow supports error expectations and rejects invalid received values (#
     }).toThrowError(TypeError),
   );
 });
+
+test("toMatchObject preserves array length and typed value semantics (#384)", () => {
+  assert.throws(() => expect([{ id: 1 }, { id: 2 }]).toMatchObject([{ id: 1 }]));
+  assert.throws(() => expect({ at: new Date(1) }).toMatchObject({ at: new Date(2) }));
+  assert.doesNotThrow(() => expect([{ id: 1, extra: true }]).toMatchObject([{ id: 1 }]));
+  assert.doesNotThrow(() =>
+    expect({ at: new Date(1), extra: true }).toMatchObject({ at: new Date(1) }),
+  );
+  assert.throws(() =>
+    expect({ values: new Map([["a", 1]]) }).toMatchObject({ values: new Map([["a", 2]]) }),
+  );
+  assert.doesNotThrow(() => expect({ a: { b: 1, c: 2 } }).toMatchObject({ a: { b: 1 } }));
+});

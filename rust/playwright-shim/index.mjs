@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { isDeepStrictEqual } from "node:util";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -4226,8 +4227,17 @@ function deepEqual(a, b) {
   return ka.length === kb.length && ka.every((k) => deepEqual(a[k], b[k]));
 }
 function subset(want, got) {
+  if (typeof want?.asymmetricMatch === "function") return want.asymmetricMatch(got);
   if (typeof want !== "object" || want == null) return deepEqual(want, got);
-  return Object.keys(want).every((k) => subset(want[k], got?.[k]));
+  if (got == null || typeof got !== "object") return false;
+  if (Array.isArray(want)) {
+    if (!Array.isArray(got) || want.length !== got.length) return false;
+  } else if (Object.prototype.toString.call(want) !== "[object Object]") {
+    return isDeepStrictEqual(want, got);
+  }
+  return Reflect.ownKeys(want)
+    .filter((key) => Object.prototype.propertyIsEnumerable.call(want, key))
+    .every((key) => key in got && subset(want[key], got[key]));
 }
 
 export function expect(value) {

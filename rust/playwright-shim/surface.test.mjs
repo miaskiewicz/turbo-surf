@@ -874,7 +874,7 @@ test("waitForEvent('response') / ('request') resolve from the listener bus", asy
   const r = await pending;
   assert.equal(r.status(), 200);
   const pendingReq = p.waitForEvent("request", { timeout: 500 });
-  setTimeout(() => p._emit("request", fakeResp.request), 10);
+  setTimeout(() => p._emit("request", fakeResp.request()), 10);
   const req = await pendingReq;
   assert.equal(req.method(), "GET");
 });

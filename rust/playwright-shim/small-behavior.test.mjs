@@ -46,3 +46,23 @@ test("isChecked validates native and ARIA types and reads live checked state", a
     await page.close();
   }
 });
+
+test("boundingBox returns live positioned geometry and null for hidden elements", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<style>body{margin:0}#box{position:absolute;left:40px;top:120px;width:80px;height:30px}</style><div id="box"></div><div id="hidden" hidden></div>',
+    );
+    assert.deepEqual(await page.locator("#box").boundingBox(), {
+      x: 40,
+      y: 120,
+      width: 80,
+      height: 30,
+    });
+    assert.equal(await page.locator("#hidden").boundingBox(), null);
+    await page._sessionEval("document.querySelector('#box').style.left = '60px'");
+    assert.equal((await page.locator("#box").boundingBox()).x, 60);
+  } finally {
+    await page.close();
+  }
+});

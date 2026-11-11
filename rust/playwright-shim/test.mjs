@@ -204,9 +204,9 @@ test("honest-throws for pixel APIs (G5)", async () => {
   await page.setContent("<button>x</button>");
   await assert.rejects(() => page.pdf(), /unavailable/);
   await assert.rejects(() => page.locator("button").screenshot(), /unavailable/);
-  // boundingBox returns null (no layout engine → unmeasurable), matching Playwright's
-  // null for a non-laid-out element — not a throw.
-  assert.equal(await page.locator("button").boundingBox(), null);
+  const box = await page.locator("button").boundingBox();
+  assert.ok(box && box.width > 0 && box.height > 0);
+  await page.close();
 });
 
 test("mock SPA hydrates through the shim (G15)", async () => {

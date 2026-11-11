@@ -819,13 +819,8 @@ test("honest throws: pixel / input / network-interception", async () => {
   const p = await fresh();
   await assert.rejects(() => p.pdf(), /unavailable/);
   await assert.rejects(() => p.locator("#go").screenshot(), /unavailable/);
-  // boundingBox returns null (no layout engine → unmeasurable), matching Playwright's null for
-  // a non-laid-out element — not a throw. hover/keyboard.press/mouse/touchscreen/dragTo/
-  // dragAndDrop are now real features: event-dispatch into the live isolate (#227), and on a
-  // static snapshot (no live session) they clean no-op. page-level screenshot is a real synthetic
-  // render; the rest (pdf/element-screenshot/selectText/routeFromHAR/exposeFunction) stay
-  // honest throws.
-  assert.equal(await p.locator("#go").boundingBox(), null);
+  const box = await p.locator("#go").boundingBox();
+  assert.ok(box && box.width > 0 && box.height > 0);
   await assert.rejects(() => p.locator("#name").selectText(), /input/);
   // page.route(fulfill) + page.routeFromHAR (HAR playback) became real in #220;
   // exposeFunction / exposeBinding became real in #226. context.route still

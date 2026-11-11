@@ -884,12 +884,23 @@ class Locator {
     return undefined;
   }
 
-  // No layout engine → no geometry. Playwright returns `null` for an element
-  // with no bounding box, so we return null too (honest: there genuinely is no
-  // box) rather than throwing — geometry-conditional helpers (smooth-scroll,
-  // visibility-by-rect) then no-op cleanly instead of crashing the test.
   async boundingBox() {
-    return null;
+    await this._page._ensureLive();
+    return this._readElement((element) => {
+      for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
+          return null;
+      }
+      const style = getComputedStyle(element);
+      if (
+        style.visibility === "hidden" ||
+        style.visibility === "collapse" ||
+        !element.getClientRects().length
+      )
+        return null;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
   }
 
   // An ElementHandle stand-in: carries enough to re-resolve the element in the live

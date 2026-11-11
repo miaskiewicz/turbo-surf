@@ -2156,22 +2156,26 @@ class Page {
     if (opts?.waitUntil === "networkidle") await this._openLiveSession();
     return resp;
   }
-  async goBack() {
+  async goBack(opts) {
     const prev = this._history.at(-1);
     if (prev == null) return null;
     const current = this._url;
-    const response = await this._navigate(prev);
+    this._autoHydrate = opts?.waitUntil !== "commit";
+    const response = await this._navigate(prev, undefined, undefined, opts);
     this._history.pop();
     this._fwd.push(current);
+    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
     return response;
   }
-  async goForward() {
+  async goForward(opts) {
     const next = this._fwd.at(-1);
     if (next == null) return null;
     const current = this._url;
-    const response = await this._navigate(next);
+    this._autoHydrate = opts?.waitUntil !== "commit";
+    const response = await this._navigate(next, undefined, undefined, opts);
     this._fwd.pop();
     this._history.push(current);
+    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
     return response;
   }
 

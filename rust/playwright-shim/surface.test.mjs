@@ -3020,3 +3020,25 @@ test("direct navigation referrers are explicit and reload retains them (#426)", 
     await new Promise((done) => server.close(done));
   }
 });
+
+test("history navigation honors networkidle hydration (#425)", async () => {
+  const server = createServer((req, res) => {
+    res.setHeader("cache-control", "no-store");
+    res.end(
+      `<p id="state">server ${req.url}</p><script>document.querySelector('#state').textContent='hydrated ${req.url}'</script>`,
+    );
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(`${base}/a`, { waitUntil: "networkidle" });
+    await page.goto(`${base}/b`, { waitUntil: "networkidle" });
+    assert.equal((await page.goBack({ waitUntil: "networkidle" })).status(), 200);
+    assert.equal(await page.locator("#state").textContent(), "hydrated /a");
+    assert.equal((await page.goForward({ waitUntil: "networkidle" })).status(), 200);
+    assert.equal(await page.locator("#state").textContent(), "hydrated /b");
+  } finally {
+    await page.close();
+    await new Promise((done) => server.close(done));
+  }
+});

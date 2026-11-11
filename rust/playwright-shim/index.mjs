@@ -348,7 +348,8 @@ function buildExposeInitScript(names) {
 // ---------------------------------------------------------------------------
 function renderedVisibility(element) {
   for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
-    if (getComputedStyle(ancestor).display === "none") return false;
+    if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
+      return false;
   }
   const style = getComputedStyle(element);
   if (style.visibility === "hidden" || style.visibility === "collapse") return false;
@@ -854,7 +855,26 @@ class Locator {
     if (!m.length || m[0].idx == null) throw new Error("turbo-surf: locator matched no elements");
     return this._page._sessionDispatch("*", m[0].idx, kind, value);
   }
-  async fill(value) {
+  async _waitActionable(kind, options = {}) {
+    await this._page._ensureLive();
+    if (options.force) return;
+    const deadline = Date.now() + (options.timeout ?? 30000);
+    do {
+      const state = await this._liveRead((element) => ({
+        enabled: !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true",
+        editable: !element.readOnly,
+      }));
+      if (state?.enabled && (kind !== "fill" || state.editable) && (await this.isVisible())) return;
+      if (Date.now() >= deadline) break;
+      await this._page._redrain();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } while (Date.now() < deadline);
+    throw Object.assign(new Error(`Timeout waiting for locator to be actionable for ${kind}`), {
+      name: "TimeoutError",
+    });
+  }
+  async fill(value, options = {}) {
+    await this._waitActionable("fill", options);
     const text = String(value);
     const match = this._all()[0];
     if (
@@ -873,8 +893,8 @@ class Locator {
     if (this._canDriveLive) return void (await this._driveLive("fill", text));
     this._page._html = native.fillNode(this._html, this._requireNode(), text);
   }
-  async clear() {
-    return this.fill("");
+  async clear(options) {
+    return this.fill("", options);
   }
   async type(value) {
     await this._page._ensureLive();
@@ -905,6 +925,7 @@ class Locator {
     return [sval];
   }
   async click(opts = {}) {
+    await this._waitActionable("click", opts);
     const modifiers = opts.modifiers?.map((modifier) =>
       modifier === "ControlOrMeta"
         ? process.platform === "darwin"

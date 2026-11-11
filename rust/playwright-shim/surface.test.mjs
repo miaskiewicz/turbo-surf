@@ -4269,3 +4269,45 @@ test("Locator submit clicks perform one native form activation (#348)", async ()
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Default locator actions wait for enabled editable visible controls (#346)", async () => {
+  const server = createServer((req, res) =>
+    res.end(
+      '<button id=disabled disabled>disabled</button><button id=hidden hidden>hidden</button><input id=disabledinput disabled value=old><input id=readonly readonly value=old><input id=hiddeninput hidden value=old><script>globalThis.events=[];for(const element of document.querySelectorAll("input,button")) for(const type of ["click","input"]) element.addEventListener(type,()=>events.push(element.id+":"+type))</script>',
+    ),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    for (const [id, method] of [
+      ["disabled", "click"],
+      ["hidden", "click"],
+      ["disabledinput", "fill"],
+      ["readonly", "fill"],
+      ["hiddeninput", "fill"],
+    ]) {
+      const action =
+        method === "fill"
+          ? page.locator(`#${id}`).fill("new", { timeout: 30 })
+          : page.locator(`#${id}`).click({ timeout: 30 });
+      await assert.rejects(action, { name: "TimeoutError" }, id);
+    }
+    assert.deepEqual(await page.evaluate(() => events), []);
+    assert.deepEqual(
+      await page.evaluate(() => Array.from(document.querySelectorAll("input"), (el) => el.value)),
+      ["old", "old", "old"],
+    );
+    await page.evaluate(() =>
+      setTimeout(() => {
+        document.querySelector("#disabled").disabled = false;
+      }, 10),
+    );
+    await page.locator("#disabled").click({ timeout: 1000 });
+    assert.deepEqual(await page.evaluate(() => events), ["disabled:click"]);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

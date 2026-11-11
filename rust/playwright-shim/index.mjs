@@ -378,6 +378,10 @@ class Locator {
   // stays selector-backed (→ drivable in a live session). `filter` makes it
   // unindexable for live dispatch (a JS predicate over matches), so it's dropped there.
   _derive(opts) {
+    if (opts.index != null && this._index != null) {
+      // An earlier index has already reduced the set to at most one element.
+      opts.index = opts.index === 0 || opts.index === -1 ? this._index : Number.MAX_SAFE_INTEGER;
+    }
     const loc = new Locator(this._page, this._resolve, {
       ...opts,
       getBy: this._getBy,

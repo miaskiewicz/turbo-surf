@@ -1990,3 +1990,22 @@ test("API disposal rejects requests and retained response bodies (#431)", async 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("successive first last and nth select the existing singleton (#473)", async () => {
+  const page = newPage();
+  await page.setContent('<button id="one">one</button><button id="two">two</button>');
+  const buttons = page.locator("button");
+  assert.equal(await buttons.last().first().getAttribute("id"), "two");
+  assert.equal(await buttons.first().last().getAttribute("id"), "one");
+  assert.equal(await buttons.last().nth(-1).first().getAttribute("id"), "two");
+  assert.equal(await buttons.last().nth(1).first().count(), 0);
+  assert.equal(await buttons.first().nth(-2).last().count(), 0);
+  assert.equal(await page.locator(".missing").last().first().count(), 0);
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('#two').onclick = () => document.body.setAttribute('data-clicked','two')",
+  );
+  await buttons.last().first().click();
+  assert.equal(await page.locator("body").getAttribute("data-clicked"), "two");
+  await page.close();
+});

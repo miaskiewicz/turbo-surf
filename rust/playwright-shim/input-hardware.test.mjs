@@ -418,3 +418,34 @@ test("touch taps honor cancellation and genuine payload ordering (#442)", async 
   );
   page._session = null;
 });
+
+test("dispatchEvent targets the matched node without descending (#372)", async () => {
+  const { page, teardown } = await fixture();
+  try {
+    await page.evaluate(() => {
+      const parent = document.getElementById("src");
+      parent.innerHTML = '<span id="child">child</span>';
+      window.dispatchTargets = [];
+      parent.addEventListener("custom", (event) =>
+        window.dispatchTargets.push(["parent", event.target.id]),
+      );
+      document
+        .getElementById("child")
+        .addEventListener("custom", (event) =>
+          window.dispatchTargets.push(["child", event.target.id]),
+        );
+    });
+    await page.locator("#src").dispatchEvent("custom");
+    assert.deepEqual(await page.evaluate(() => window.dispatchTargets), [["parent", "src"]]);
+    await page.evaluate(() => {
+      window.dispatchTargets = [];
+    });
+    await page.locator("#child").dispatchEvent("custom");
+    assert.deepEqual(await page.evaluate(() => window.dispatchTargets), [
+      ["child", "child"],
+      ["parent", "child"],
+    ]);
+  } finally {
+    await teardown();
+  }
+});

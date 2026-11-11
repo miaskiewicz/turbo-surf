@@ -1219,10 +1219,10 @@ function interactionScript(selector, index, kind, value) {
     } })();`;
   }
   if (kind === "dispatch") {
-    // Fire a named event (value = type) on the deepest descendant. A click on a
+    // Synthetic dispatch targets the locator itself, without pointer hit testing. A click on a
     // checkbox/radio also performs the browser default (toggle + change).
     return `(() => { ${pick} else {
-      let t = el; while (t.firstElementChild) t = t.firstElementChild;
+      const t = el;
       const type = ${val};
       const mouse = /^(click|dblclick|mouse|pointer|contextmenu|auxclick)/.test(type);
       const box = el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio");

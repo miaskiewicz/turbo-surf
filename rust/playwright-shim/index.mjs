@@ -331,6 +331,7 @@ class Locator {
     // a re-serialized snapshot's index, which diverges for portal'd content (MUI options).
     this._getBy = opts.getBy ?? null;
     this._testId = opts.testId ?? null;
+    this._parent = opts.parent ?? null;
     // nth-aware scope chain ([{sel, idx, filter}, …]) for nested locators where a parent had
     // `.nth(i)` or `.filter(...)` — a CSS-concat selector can't express "the i-th (or
     // text-filtered) match's subtree", so the live drive walks this chain via
@@ -357,7 +358,21 @@ class Locator {
   }
 
   _all() {
-    let m = this._resolve(this._page._html);
+    let m;
+    if (this._parent && this._selector) {
+      const seen = new Set();
+      m = [];
+      for (const parent of this._parent._all()) {
+        for (const match of JSON.parse(
+          native.query(this._html, this._selector, "auto", parent.node),
+        )) {
+          if (!seen.has(match.node)) {
+            seen.add(match.node);
+            m.push(match);
+          }
+        }
+      }
+    } else m = this._resolve(this._page._html);
     if (this._filter) m = m.filter(this._filter);
     if (this._index == null) return m;
     const i = this._index < 0 ? m.length + this._index : this._index;
@@ -386,6 +401,7 @@ class Locator {
       count: this._count,
       getBy: this._getBy,
       testId: this._testId,
+      parent: this._parent,
       scope: this._scope,
       // The base selector survives composition (incl. `.filter()`); the serializable filter
       // spec carries unless this derivation sets its own (a `.filter()` call passes one).
@@ -433,9 +449,10 @@ class Locator {
     return sc.some((s) => s.idx != null || s.filter != null) ? sc : null;
   }
   // A selector-backed child carrying the nth-aware scope chain (live-driven via the chain).
-  _scopedSelectorChild(selector, scope) {
+  _scopedSelectorChild(selector, scope, parent = null) {
     const loc = this._page._locFromSelector(selector);
     loc._scope = scope;
+    loc._parent = parent;
     return loc;
   }
   // Nested locators: CSS-concat when this locator is selector-backed (the common
@@ -445,6 +462,8 @@ class Locator {
     // A `.nth()`/`.filter()` ancestor → walk the scope chain (it carries the index/filter a
     // CSS-concat can't express), even if `.filter()` dropped our own `_selector`.
     const scope = this._indexedScope();
+    if (selector.includes(":scope"))
+      return this._scopedSelectorChild(selector, scope ?? this._childScope(), this);
     if (scope) return this._scopedSelectorChild(selector, scope);
     if (!this._selector) return this._page.locator(selector);
     return this._page.locator(`${this._selector} ${selector}`);
@@ -630,7 +649,7 @@ class Locator {
     // the chain in the live isolate and dispatch on the matched element's global index.
     if (
       this._scope &&
-      this._scope.some((s) => s.idx != null || s.filter != null) &&
+      (this._scope.some((s) => s.idx != null || s.filter != null) || this._parent) &&
       this._page._session != null
     ) {
       const leaf = this._selector
@@ -876,7 +895,10 @@ class Locator {
       const idx = Number(raw);
       return Number.isInteger(idx) && idx >= 0 ? idx : null;
     }
-    if (this._scope && this._scope.some((s) => s.idx != null || s.filter != null)) {
+    if (
+      (this._scope && this._scope.some((s) => s.idx != null || s.filter != null)) ||
+      this._parent
+    ) {
       const leaf = this._selector
         ? { selector: this._selector }
         : this._getBy

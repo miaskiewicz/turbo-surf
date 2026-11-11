@@ -295,14 +295,15 @@ pub fn detect(html: String) -> String {
 }
 
 #[napi]
-pub fn query(html: String, selector: String, kind: Option<String>) -> String {
+pub fn query(html: String, selector: String, kind: Option<String>, root: Option<u32>) -> String {
     let tree = parsed(&html);
     let ty = match kind.as_deref() {
         Some("css") => QueryType::Css,
         Some("xpath") => QueryType::Xpath,
         _ => QueryType::Auto,
     };
-    to_json_string(&view::query(&tree, tree.root(), &selector, ty))
+    let root = root.map(Handle::from_raw).unwrap_or_else(|| tree.root());
+    to_json_string(&view::query(&tree, root, &selector, ty))
 }
 
 /// Match count without serialized node HTML or text.

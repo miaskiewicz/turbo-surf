@@ -58,10 +58,10 @@ fn describe(tree: &Tree, h: Handle) -> Match {
 }
 
 fn css_results(tree: &Tree, root: Handle, selector: &str) -> Vec<Match> {
-    let _ = root; // turbo-dom query is document-scoped (matches the JS default)
-    tree.query_selector_all(selector)
+    turbo_dom_parser::rtdom::NodeRef::new(tree, root)
+        .query_selector_all(selector)
         .iter()
-        .map(|&h| describe(tree, h))
+        .map(|node| describe(tree, node.handle()))
         .collect()
 }
 
@@ -142,6 +142,17 @@ mod tests {
         assert_eq!(r[0].text, "one");
         assert!(r[0].html.as_deref().unwrap().contains("<li"));
         assert!(r[0].node.is_some());
+    }
+
+    #[test]
+    fn css_scope_is_the_supplied_parent_and_keeps_global_handles() {
+        let tree = Tree::parse("<section id='one'><button class='child'>first</button><div><button class='child'>nested</button></div></section><section><button class='child'>outside</button></section>");
+        let parent = tree.query_selector("#one").unwrap();
+        let direct = query(&tree, parent, ":scope > .child", QueryType::Css);
+        assert_eq!(direct.len(), 1);
+        assert_eq!(direct[0].text, "first");
+        assert_eq!(direct[0].node, Some(tree.query_selector("button").unwrap()));
+        assert_eq!(query(&tree, parent, ".child", QueryType::Css).len(), 2);
     }
 
     #[test]

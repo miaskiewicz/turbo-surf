@@ -200,5 +200,5 @@ export function ariaSnapshot(html: string): string;
 export function hydrationState(html: string): string;
 export function detect(html: string): string;
 export function queryCount(html: string, selector: string, kind?: string): number;
-export function query(html: string, selector: string, kind?: string): string;
+export function query(html: string, selector: string, kind?: string, root?: number): string;
 export function extract(html: string, baseUrl: string, schemaJson: string): string;

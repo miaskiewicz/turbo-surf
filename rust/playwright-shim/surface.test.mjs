@@ -2414,3 +2414,18 @@ test("screenshot clip crops output without changing viewport layout (#466)", asy
     await p.close();
   }
 });
+test("nested scope selectors evaluate against each matched parent (#475)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<section id="one"><button class="child">first</button><div><button class="child">nested</button></div></section><section id="two"><button class="child">outside</button></section>',
+  );
+  assert.equal(await page.locator("#one").locator(".child").count(), 2);
+  assert.deepEqual(await page.locator("#one").locator(":scope > .child").allTextContents(), [
+    "first",
+  ]);
+  assert.deepEqual(await page.locator("section").locator(":scope > .child").allTextContents(), [
+    "first",
+    "outside",
+  ]);
+  await page.close();
+});

@@ -88,6 +88,8 @@ mod blob_urls;
 mod form_navigation;
 #[path = "privacy_sandbox.rs"]
 mod privacy_sandbox;
+#[path = "storage_state.rs"]
+mod storage_state;
 #[path = "sync_xhr.rs"]
 mod sync_xhr;
 use privacy_sandbox::{op_private_token_issuer, op_private_token_query};

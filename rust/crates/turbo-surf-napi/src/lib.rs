@@ -861,6 +861,22 @@ pub fn request_state_configure(id: u32, options_json: String) -> Result<()> {
 }
 
 #[napi]
+pub fn request_state_import_storage(id: u32, origins_json: String) -> Result<()> {
+    request_state(Some(id))?
+        .storage
+        .import_local_storage_state(&origins_json)
+        .map_err(Error::from_reason)
+}
+
+#[napi]
+pub fn request_state_storage(id: u32) -> Result<String> {
+    request_state(Some(id))?
+        .storage
+        .local_storage_state()
+        .map_err(Error::from_reason)
+}
+
+#[napi]
 pub fn request_state_new(parent_context_id: Option<u32>) -> Result<u32> {
     let state = match parent_context_id {
         Some(parent) => {

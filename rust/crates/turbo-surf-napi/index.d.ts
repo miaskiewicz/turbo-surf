@@ -22,6 +22,8 @@ export function requestStateNew(parentContextId?: number): number;
 export function requestStateClose(id: number): void;
 /** Replace host-owned per-tab browser emulation options. */
 export function requestStateConfigure(id: number, optionsJson: string): void;
+export function requestStateImportStorage(id: number, originsJson: string): void;
+export function requestStateStorage(id: number): string;
 
 /** Crawl from a JSON options string → JSON array of page records. */
 export function crawl(optsJson: string): Promise<string>;

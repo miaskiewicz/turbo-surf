@@ -22,6 +22,7 @@ import { createRequire } from "node:module";
 import { equalValues } from "./equality.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { makeKeyboard } from "./keyboard.mjs";
+import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
 import {
   encodeEvaluationValue,
   encodeEvaluationError,
@@ -3967,6 +3968,15 @@ class BrowserContext {
     this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
     this._cookies = JSON.stringify(cookies);
     this._requestState = native.requestStateNew?.();
+    const origins = merged.storageState?.origins ?? [];
+    if (origins.length) {
+      try {
+        native.requestStateImportStorage(this._requestState, encodeStorageOrigins(origins));
+      } catch (error) {
+        native.requestStateClose(this._requestState);
+        throw error;
+      }
+    }
     // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
     this._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
     this._headers = merged.extraHTTPHeaders ?? {};
@@ -4028,7 +4038,10 @@ class BrowserContext {
     return [...this._pages];
   }
   storageState() {
-    return { cookies: JSON.parse(this._cookies), origins: [] };
+    return {
+      cookies: JSON.parse(this._cookies),
+      origins: decodeStorageOrigins(native.requestStateStorage(this._requestState)),
+    };
   }
   addCookies(cookies) {
     const merged = new Map();

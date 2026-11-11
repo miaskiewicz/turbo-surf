@@ -4221,3 +4221,27 @@ test("Locator visibility follows rendered boxes while ignoring opacity (#353)", 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Live locator CSS reads preserve rules inserted through CSSOM (#352)", async () => {
+  const server = createServer((req, res) =>
+    res.end("<style id=sheet></style><button id=target class=hide>target</button>"),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await page.evaluate(() =>
+      document
+        .querySelector("#sheet")
+        .sheet.insertRule(".hide { display:none; color:rgb(1, 2, 3) }", 0),
+    );
+    assert.equal(await page.locator("#target").cssValue("display"), "none");
+    await expect(page.locator("#target")).toHaveCSS("color", "rgb(1, 2, 3)", { timeout: 0 });
+    assert.equal(await page.locator("#target").isVisible(), false);
+    await expect(page.locator("#target")).toBeHidden({ timeout: 0 });
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -726,6 +726,13 @@ class Locator {
     return n == null ? [] : native.selectedValuesOf(this._html, n);
   }
   async cssValue(name) {
+    if (this._page._live)
+      return (
+        (await this._liveRead(
+          (el, property) => getComputedStyle(el).getPropertyValue(property),
+          name,
+        )) ?? ""
+      );
     const n = this._node();
     return n == null ? "" : native.cssValueOf(this._html, n, name);
   }

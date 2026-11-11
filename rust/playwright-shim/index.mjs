@@ -379,10 +379,6 @@ class Locator {
   // stays selector-backed (→ drivable in a live session). `filter` makes it
   // unindexable for live dispatch (a JS predicate over matches), so it's dropped there.
   _derive(opts) {
-    if (opts.index != null && this._index != null) {
-      // An earlier index has already reduced the set to at most one element.
-      opts.index = opts.index === 0 || opts.index === -1 ? this._index : Number.MAX_SAFE_INTEGER;
-    }
     const loc = new Locator(this._page, this._resolve, {
       ...opts,
       count: this._count,
@@ -398,13 +394,16 @@ class Locator {
     return loc;
   }
   first() {
-    return this._derive({ index: 0, filter: this._filter });
+    return this.nth(0);
   }
   last() {
-    return this._derive({ index: -1, filter: this._filter });
+    return this.nth(-1);
   }
   nth(i) {
-    return this._derive({ index: i, filter: this._filter });
+    // An earlier index has already reduced the set to at most one element.
+    const index =
+      this._index == null ? i : i === 0 || i === -1 ? this._index : Number.MAX_SAFE_INTEGER;
+    return this._derive({ index, filter: this._filter });
   }
   filter(opts = {}) {
     const pred = buildFilter(this._page, opts);

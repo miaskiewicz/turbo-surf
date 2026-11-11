@@ -1998,6 +1998,7 @@ test("successive first last and nth select the existing singleton (#473)", async
   const page = newPage();
   await page.setContent('<button id="one">one</button><button id="two">two</button>');
   const buttons = page.locator("button");
+  assert.equal(await buttons.nth(1).filter({ hasText: "" }).count(), 1);
   assert.equal(await buttons.last().first().getAttribute("id"), "two");
   assert.equal(await buttons.first().last().getAttribute("id"), "one");
   assert.equal(await buttons.last().nth(-1).first().getAttribute("id"), "two");

@@ -1153,6 +1153,7 @@ function pathOf(url) {
 // not fetch iframe src here — call `page.content()` after hydration if needed).
 // ---------------------------------------------------------------------------
 function _collectIframes(parent, selector = "iframe") {
+  if (selector === "iframe" && parent._frameEntries) return parent._frameEntries;
   const html = parent._html ?? "";
   if (!html) return [];
   let matches;
@@ -1175,14 +1176,28 @@ function _collectIframes(parent, selector = "iframe") {
     const id = native.attrOf(html, m.node, "id") ?? "";
     const src = native.attrOf(html, m.node, "src") ?? "";
     const srcdoc = native.attrOf(html, m.node, "srcdoc");
+    let url = srcdoc != null ? "about:srcdoc" : "about:blank";
+    if (srcdoc == null && src) {
+      try {
+        url = new URL(src, parent._url).href;
+      } catch {
+        url = src;
+      }
+    }
     out.push({
       node: m.node,
       name,
       id,
       src,
       html: srcdoc ?? "",
-      url: srcdoc != null ? "about:srcdoc" : src ? new URL(src, parent._url).href : "about:blank",
+      url,
     });
+  }
+  if (parent._frameEntries) {
+    const all = JSON.parse(native.query(html, "iframe", "css"));
+    return out
+      .map((meta) => parent._frameEntries[all.findIndex((match) => match.node === meta.node)])
+      .filter(Boolean);
   }
   return out;
 }
@@ -1215,6 +1230,10 @@ class Frame {
     this._src = meta.src ?? "";
     this._url = meta.url ?? "about:blank";
     this._html = meta.html ?? "";
+    this._node = meta.node;
+    this._path = meta.path;
+    this._frameEntries = meta.children;
+    this._detached = false;
   }
   get _context() {
     return this._parentPage._context;
@@ -1232,7 +1251,7 @@ class Frame {
     return this._parentFrame;
   }
   childFrames() {
-    return _collectIframes(this).map((meta) => new Frame(this._parentPage, this, meta));
+    return this._parentPage.frames().filter((frame) => frame._parentFrame === this);
   }
   async content() {
     return this._html;
@@ -1251,7 +1270,8 @@ class Frame {
     return this.locator(selector).textContent();
   }
   isDetached() {
-    return false;
+    this._parentPage._syncFrames();
+    return this._detached;
   }
   // Live-interaction surface a Locator bound to this Frame expects on `_page` —
   // iframes share the parent Page's V8 isolate (one session per Page), so forward
@@ -1332,30 +1352,18 @@ class FrameLocator {
     this._index = 0;
   }
   _resolveFrame() {
-    // Cache the Frame on the parent so writes through fl.locator().fill() survive:
-    // the Frame carries the mutated _html, and a later read via a fresh FrameLocator
-    // over the same parent HTML reuses it. Invalidates when parent._html changes
-    // (e.g. page.setContent) — the key includes the parent-HTML identity.
     const parent = this._parent;
-    const parentHtml = parent._html ?? "";
-    const cacheKey = `${this._selector}\x00${this._index}`;
-    let cache = parent._frameLocatorCache;
-    if (!cache || cache.html !== parentHtml) {
-      cache = { html: parentHtml, frames: new Map() };
-      parent._frameLocatorCache = cache;
-    }
-    const hit = cache.frames.get(cacheKey);
-    if (hit) return hit;
-    const list = _collectIframes(parent, this._selector);
-    const i = this._index < 0 ? list.length + this._index : this._index;
-    const entry = list[i];
+    const page = parent instanceof Frame ? parent._parentPage : parent;
+    const matches = _collectIframes(parent, this._selector);
+    const index = this._index < 0 ? matches.length + this._index : this._index;
+    const entry = matches[index];
     if (!entry) throw new Error(`turbo-surf: frameLocator(${this._selector}) matched no iframe`);
-    const topPage = parent instanceof Frame ? parent._parentPage : parent;
-    const parentFrame = parent instanceof Frame ? parent : null;
-    const frame = new Frame(topPage, parentFrame, entry);
-    cache.frames.set(cacheKey, frame);
-    return frame;
+    page._syncFrames();
+    return page._frames.find(
+      (frame) => frame._parentFrame === parent && frame._node === entry.node,
+    );
   }
+
   _withIndex(i) {
     const fl = new FrameLocator(this._parent, this._selector);
     fl._index = i;
@@ -1543,6 +1551,7 @@ class Page {
   // over `this._html`) and a subsequent navigation see the post-interaction state.
   async _refreshFromSession() {
     if (this._session == null) return;
+    const previousUrl = this._url;
     this._html = native.liveSerialize(this._session);
     try {
       const href = await native.liveEvalEngine(
@@ -1572,6 +1581,25 @@ class Page {
     } catch {
       /* keep prior cookies */
     }
+    if (previousUrl !== this._url) this._emit("framenavigated", this);
+    if (this._html.includes("<iframe")) {
+      const frames = await native.liveEvalEngine(
+        this._session,
+        `(() => {
+        const ids = __tsNs.shimFrameIds ??= new WeakMap();
+        __tsNs.shimFrameNext ??= 1;
+        const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
+          if (!ids.has(el)) ids.set(el, __tsNs.shimFrameNext++);
+          const entry = { node: ids.get(el), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
+          try { entry.url = el.contentWindow.location.href; if (el.contentDocument) entry.children = walk(el.contentDocument, entry.path); } catch (_) {}
+          return entry;
+        });
+        globalThis.__RESULT = JSON.stringify(walk(document, []));
+      })();`,
+      );
+      this._frameEntries = JSON.parse(frames);
+    } else this._frameEntries = undefined;
+    this._syncFrames();
     await this._drainNetworkEvents();
     // The app navigated to a different route within the live session (a post-login
     // redirect, router.push/replace). Our engine doesn't do Next's in-place RSC
@@ -1648,6 +1676,12 @@ class Page {
   }
 
   _closeSession() {
+    for (const frame of (this._frames ?? []).toReversed()) {
+      frame._detached = true;
+      this._emit("framedetached", frame);
+    }
+    this._frames = [];
+    this._frameEntries = undefined;
     if (this._session != null) {
       try {
         native.liveClose(this._session);
@@ -1737,6 +1771,8 @@ class Page {
       this._url = url;
       this._documentResponse = { status: 0, referrer: "", headers: [] };
       this._hydrated = false;
+      this._syncFrames();
+      this._emit("framenavigated", this);
       this._emit("load");
       this._emit("domcontentloaded");
       return makeResponse({ status: 200, finalUrl: url, html: this._html });
@@ -1766,6 +1802,8 @@ class Page {
     this._url = r.finalUrl;
     this._cookies = r.cookies;
     this._hydrated = false; // fresh document — not yet run its own JS
+    this._syncFrames();
+    this._emit("framenavigated", this);
     this._emit("load");
     this._emit("domcontentloaded");
     return makeResponse(r);
@@ -1951,7 +1989,14 @@ class Page {
 
   async setContent(html) {
     this._imageCache = undefined;
+    for (const frame of (this._frames ?? []).toReversed()) {
+      frame._detached = true;
+      this._emit("framedetached", frame);
+    }
+    this._frames = [];
+    this._frameEntries = undefined;
     this._html = html;
+    this._syncFrames();
     this._emit("load");
   }
 
@@ -2095,17 +2140,65 @@ class Page {
   mainFrame() {
     return this;
   }
+  name() {
+    return "";
+  }
+  parentFrame() {
+    return null;
+  }
+  childFrames() {
+    return this.frames().filter((frame) => frame._parentFrame === this);
+  }
+  isDetached() {
+    return false;
+  }
+  _syncFrames() {
+    const previous = this._frames ?? [];
+    const next = [];
+    const visit = (parent) => {
+      for (const [index, meta] of _collectIframes(parent).entries()) {
+        let frame = previous.find(
+          (candidate) => candidate._parentFrame === parent && candidate._node === meta.node,
+        );
+        if (!frame) {
+          frame = new Frame(this, parent, meta);
+          this._emit("frameattached", frame);
+          this._emit("framenavigated", frame);
+        } else if (frame._url !== meta.url) {
+          frame._url = meta.url;
+          this._emit("framenavigated", frame);
+        }
+        frame._name = meta.name;
+        frame._path = meta.path ?? [...(parent._path ?? []), index];
+        frame._frameEntries = meta.children;
+        next.push(frame);
+        visit(frame);
+      }
+    };
+    visit(this);
+    for (const frame of previous.toReversed()) {
+      if (!next.includes(frame)) {
+        frame._detached = true;
+        this._emit("framedetached", frame);
+      }
+    }
+    this._frames = next;
+  }
   frames() {
-    return [this, ..._collectIframes(this).map((meta) => new Frame(this, null, meta))];
+    this._syncFrames();
+    return [this, ...this._frames];
   }
   frame(opts) {
     if (opts == null) return this;
     const name = typeof opts === "string" ? opts : opts?.name;
     const urlSpec = typeof opts === "object" && opts ? opts.url : null;
-    const match = _collectIframes(this).find(
-      (f) => (name == null || f.name === name) && (urlSpec == null || _matchUrl(f.url, urlSpec)),
+    return (
+      this.frames().find(
+        (frame) =>
+          (name == null || frame.name() === name) &&
+          (urlSpec == null || _matchUrl(frame.url(), urlSpec)),
+      ) ?? null
     );
-    return match ? new Frame(this, null, match) : null;
   }
   frameLocator(selector) {
     return new FrameLocator(this, selector);

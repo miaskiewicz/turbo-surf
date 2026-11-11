@@ -2065,3 +2065,59 @@ test("Frame URLs resolve relative src before URL lookup (#448)", async () => {
   assert.equal(p.frame({ url: (url) => url.pathname === "/remote" }).name(), "child");
   await p.close();
 });
+
+test("Frame registry preserves nested identity and detach events (#447)", async () => {
+  const p = newPage();
+  const events = [];
+  for (const event of ["frameattached", "framenavigated", "framedetached"])
+    p.on(event, (frame) => events.push([event, frame]));
+  await p.setContent(
+    '<iframe name="outer" srcdoc="&lt;iframe name=inner srcdoc=&quot;&amp;lt;p&amp;gt;child&amp;lt;/p&amp;gt;&quot;&gt;&lt;/iframe&gt;"></iframe>',
+  );
+  const outer = p.frame("outer");
+  assert.equal(p.frame("outer"), outer);
+  assert.equal(outer.parentFrame(), p.mainFrame());
+  assert.deepEqual(p.mainFrame().childFrames(), [outer]);
+  const inner = p.frame("inner");
+  assert.ok(inner);
+  assert.equal(inner.parentFrame(), outer);
+  assert.deepEqual(
+    p.frames().map((frame) => frame.name()),
+    ["", "outer", "inner"],
+  );
+  await p.setContent("<p>replacement</p>");
+  assert.equal(outer.isDetached(), true);
+  assert.equal(inner.isDetached(), true);
+  assert.ok(events.some(([event, frame]) => event === "frameattached" && frame === outer));
+  assert.ok(events.some(([event, frame]) => event === "framedetached" && frame === inner));
+  await p.close();
+});
+
+test("Live frame registry tracks nested frames and actual navigation URLs (#447)", async () => {
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "text/html");
+    res.end(
+      req.url === "/child"
+        ? '<iframe name="nested" src="/nested"></iframe>'
+        : req.url === "/nested"
+          ? "<p>nested</p>"
+          : '<iframe id="outer" name="outer" src="/child"></iframe>',
+    );
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    const outer = p.frame("outer");
+    assert.ok(p.frame("nested"));
+    assert.equal(outer, p.frame("outer"));
+    assert.equal(outer.parentFrame(), p);
+    assert.equal(outer.url(), `${base}/child`);
+    await p.evaluate(() => document.querySelector("#outer").remove());
+    assert.equal(outer.isDetached(), true);
+    assert.equal(p.frame("nested"), null);
+  } finally {
+    await p.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

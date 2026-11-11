@@ -79,6 +79,42 @@ function cookieMatchesFilter(cookie, filters) {
   });
 }
 
+function nativeCookieRecord(cookie) {
+  let domain = cookie.domain;
+  let path = cookie.path;
+  let secure = cookie.secure ?? false;
+  if (cookie.url !== undefined) {
+    if (domain !== undefined || path !== undefined)
+      throw new Error("Cookie must use either url or domain/path");
+    const url = new URL(cookie.url);
+    if (!["http:", "https:"].includes(url.protocol))
+      throw new Error("Cookie URL must use HTTP or HTTPS");
+    domain = url.hostname;
+    path = url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1);
+    secure = url.protocol === "https:";
+  }
+  if (!domain || !path) throw new Error("Cookie requires a url or domain/path pair");
+  return {
+    name: cookie.name,
+    value: cookie.value,
+    domain: domain.toLowerCase().replace(/^\./, ""),
+    path,
+    host_only: cookie.host_only ?? !domain.startsWith("."),
+    secure,
+    ...nativeCookieAttributes(cookie),
+  };
+}
+
+function nativeCookieAttributes(cookie) {
+  return {
+    http_only: cookie.http_only ?? cookie.httpOnly ?? false,
+    same_site: String(cookie.same_site ?? cookie.sameSite ?? "lax").toLowerCase(),
+    expires_at:
+      cookie.expires_at ??
+      (cookie.expires == null || cookie.expires === -1 ? null : cookie.expires * 1000),
+  };
+}
+
 // Build an executable source string from page.evaluate's (fn|string, arg) form.
 function evalSource(script, arg) {
   if (typeof script === "function") return `(${script.toString()})(${evaluationArgument(arg)})`;
@@ -3849,7 +3885,7 @@ class BrowserContext {
   }
   addCookies(cookies) {
     const merged = new Map();
-    for (const cookie of [...JSON.parse(this._cookies), ...cookies]) {
+    for (const cookie of [...JSON.parse(this._cookies), ...cookies.map(nativeCookieRecord)]) {
       const domain = String(cookie.domain ?? "")
         .toLowerCase()
         .replace(/^\./, "");

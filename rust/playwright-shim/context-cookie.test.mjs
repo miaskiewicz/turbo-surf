@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
 
 let shim;
@@ -32,5 +33,31 @@ test("clearCookies intersects name/domain/path filters and preserves unrelated i
     assert.deepEqual(await context.cookies(), []);
   } finally {
     await context.close();
+  }
+});
+
+test("URL-form cookies reach HTTP requests and the live document", async () => {
+  let sent;
+  const server = createServer((request, response) => {
+    sent = request.headers.cookie ?? "";
+    response.end("<title>Cookie fixture</title>");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const context = new shim.BrowserContext();
+  try {
+    await context.addCookies([{ name: "locale", value: "en-US", url: origin + "/account/page" }]);
+    const page = await context.newPage();
+    await page.goto(origin + "/account/home", { waitUntil: "networkidle" });
+    assert.equal(sent, "locale=en-US");
+    assert.equal(await page.evaluate(() => document.cookie), "locale=en-US");
+    assert.equal((await context.cookies(origin + "/outside")).length, 0);
+    const cookie = (await context.cookies())[0];
+    assert.equal(cookie.path, "/account/");
+    assert.equal(cookie.host_only, true);
+    assert.equal(cookie.http_only, false);
+  } finally {
+    await context.close();
+    await new Promise((resolve) => server.close(resolve));
   }
 });

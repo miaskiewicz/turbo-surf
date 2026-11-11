@@ -1521,6 +1521,8 @@ class Frame {
   async evaluate(script, arg) {
     await this._ensureLive();
     const expression = this._realmExpression(evalSource(script, arg));
+    if (this._parentPage._mergedBindings().size)
+      return this._parentPage._evaluateWithBindings(expression);
     const raw = await native.liveEvalExpression(
       this._session,
       `(async () => {

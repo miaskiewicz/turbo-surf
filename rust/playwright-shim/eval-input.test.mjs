@@ -287,3 +287,18 @@ test("keyboard edits selections and Unicode text while respecting readonly contr
     await page.close();
   }
 });
+
+test("frame evaluation awaits exposed host results without blocking the binding pump", async () => {
+  const page = newPage();
+  try {
+    await page.exposeFunction("frameHostAdd", async (a, b) => a + b);
+    await page.setContent('<iframe name="child" srcdoc="<p>child</p>"></iframe>');
+    await page._ensureLive();
+    assert.equal(
+      await page.frame({ name: "child" }).evaluate(async () => await frameHostAdd(3, 4)),
+      7,
+    );
+  } finally {
+    await page.close();
+  }
+});

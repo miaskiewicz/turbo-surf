@@ -3303,3 +3303,26 @@ test("Numeric assertions reject coercion and compare matching infinities (#390)"
   expect(NaN).toBe(NaN);
   assert.throws(() => expect(-0).toBe(0));
 });
+
+test("Asymmetric matchers compose recursively including negative forms (#389)", () => {
+  expect({ id: 1, name: "Alice" }).toEqual(expect.objectContaining({ id: 1 }));
+  expect([1, 2, 3]).toEqual(expect.arrayContaining([3, 1]));
+  expect("payroll saved").toEqual(expect.stringContaining("saved"));
+  expect("payroll saved").toEqual(expect.stringMatching(/saved$/));
+  expect({ id: 1 }).toEqual({ id: expect.any(Number) });
+  expect({ id: 1 }).toEqual({ id: expect.anything() });
+  expect({ users: [{ id: 1, name: "Alice" }] }).toEqual(
+    expect.objectContaining({
+      users: expect.arrayContaining([
+        expect.objectContaining({ name: expect.stringMatching(/^A/) }),
+      ]),
+    }),
+  );
+  expect({ id: 1 }).toEqual(expect.not.objectContaining({ id: 2 }));
+  expect([1, 2]).toEqual(expect.not.arrayContaining([3]));
+  assert.throws(() => expect({ id: "1" }).toEqual({ id: expect.any(Number) }));
+  assert.throws(() => expect(null).toEqual(expect.anything()));
+  assert.throws(() => expect("saved").toEqual(expect.not.stringContaining("saved")));
+  assert.throws(() => expect({}).toEqual(expect.objectContaining({ missing: undefined })));
+  expect(new Number(1)).toEqual(expect.any(Number));
+});

@@ -4183,6 +4183,8 @@ const json = (x) => {
   }
 };
 function deepEqual(a, b) {
+  if (typeof b?.asymmetricMatch === "function") return b.asymmetricMatch(a);
+  if (typeof a?.asymmetricMatch === "function") return a.asymmetricMatch(b);
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a == null || b == null) return false;
   const ka = Object.keys(a);
@@ -4203,6 +4205,70 @@ expect.soft = expect; // soft assertions behave as hard ones here
 expect.poll = (fn, _o) => new ValueExpect(fn(), false);
 expect.configure = () => expect;
 expect.extend = () => {};
+
+function asymmetricFactory(match, inverse = false) {
+  return { asymmetricMatch: (value) => Boolean(match(value)) !== inverse };
+}
+function asymmetricContaining(inverse) {
+  return {
+    objectContaining(sample) {
+      if (sample == null || typeof sample !== "object")
+        throw new TypeError("objectContaining requires an object");
+      return asymmetricFactory(
+        (value) =>
+          value != null &&
+          Reflect.ownKeys(sample).every(
+            (key) => key in Object(value) && deepEqual(value[key], sample[key]),
+          ),
+        inverse,
+      );
+    },
+    arrayContaining(sample) {
+      if (!Array.isArray(sample)) throw new TypeError("arrayContaining requires an array");
+      return asymmetricFactory(
+        (value) =>
+          Array.isArray(value) && sample.every((want) => value.some((got) => deepEqual(got, want))),
+        inverse,
+      );
+    },
+    stringContaining(sample) {
+      if (typeof sample !== "string") throw new TypeError("stringContaining requires a string");
+      return asymmetricFactory(
+        (value) => typeof value === "string" && value.includes(sample),
+        inverse,
+      );
+    },
+    stringMatching(sample) {
+      if (typeof sample !== "string" && !(sample instanceof RegExp))
+        throw new TypeError("stringMatching requires a string or RegExp");
+      const pattern = new RegExp(sample);
+      return asymmetricFactory((value) => {
+        pattern.lastIndex = 0;
+        return typeof value === "string" && pattern.test(value);
+      }, inverse);
+    },
+  };
+}
+Object.assign(expect, asymmetricContaining(false));
+expect.not = asymmetricContaining(true);
+expect.anything = () => asymmetricFactory((value) => value != null);
+expect.any = (constructor) => {
+  if (typeof constructor !== "function") throw new TypeError("any requires a constructor");
+  const primitive = new Map([
+    [String, "string"],
+    [Number, "number"],
+    [Boolean, "boolean"],
+    [BigInt, "bigint"],
+    [Symbol, "symbol"],
+    [Function, "function"],
+    [Object, "object"],
+  ]).get(constructor);
+  return asymmetricFactory(
+    (value) =>
+      (primitive && typeof value === primitive) ||
+      (constructor.prototype && value instanceof constructor),
+  );
+};
 
 // ---------------------------------------------------------------------------
 // @playwright/test surface (drop-in over node:test) — fixtures, hooks, steps.

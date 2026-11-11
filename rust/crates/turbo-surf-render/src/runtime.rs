@@ -12232,7 +12232,12 @@ __G.tcResolveScoped = function (scope, leaf) {
   for (let si = 0; si < (scope || []).length; si++) {
     const s = scope[si];
     let next = [];
-    for (let ci = 0; ci < cur.length; ci++) {
+    if (s.getBy) {
+      const all = Array.prototype.slice.call(document.querySelectorAll("*"));
+      __G.tcGetBy(s.getBy.kind, s.getBy.value, s.getBy.name, s.getBy.root);
+      const matches = JSON.parse(globalThis.__RESULT).map((hit) => all[hit.idx]);
+      next = matches.filter((el) => cur.some((root) => root === document || (root !== el && root.contains(el))));
+    } else for (let ci = 0; ci < cur.length; ci++) {
       let m;
       try {
         m = cur[ci].querySelectorAll(s.sel);

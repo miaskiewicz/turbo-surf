@@ -353,7 +353,12 @@ class Locator {
   _childScope() {
     return [
       ...this._scope,
-      { sel: this._scopeSel ?? this._selector, idx: this._index ?? null, filter: this._filterSpec },
+      {
+        sel: this._scopeSel ?? this._selector,
+        getBy: this._getBy,
+        idx: this._index ?? null,
+        filter: this._filterSpec,
+      },
     ];
   }
 
@@ -457,7 +462,7 @@ class Locator {
   // __tcResolveScoped. Null for the common non-indexed case (keep the simple CSS-concat path).
   _indexedScope() {
     const sc = this._childScope();
-    return sc.some((s) => s.idx != null || s.filter != null) ? sc : null;
+    return sc.some((s) => s.idx != null || s.filter != null || s.getBy != null) ? sc : null;
   }
   // A selector-backed child carrying the nth-aware scope chain (live-driven via the chain).
   _scopedSelectorChild(selector, scope, parent = this) {
@@ -468,7 +473,7 @@ class Locator {
   }
   // Nested locators: CSS-concat when this locator is selector-backed (the common
   // `.card`→`button` case); a scope chain when an ancestor was `.nth(i)`. getBy-rooted nesting
-  // is document-scoped — see LIMITATIONS.
+  // carries its matcher through the same scope chain.
   locator(selector) {
     // A `.nth()`/`.filter()` ancestor → walk the scope chain (it carries the index/filter a
     // CSS-concat can't express), even if `.filter()` dropped our own `_selector`.
@@ -661,7 +666,8 @@ class Locator {
     // the chain in the live isolate and dispatch on the matched element's global index.
     if (
       this._scope &&
-      (this._scope.some((s) => s.idx != null || s.filter != null) || this._parent) &&
+      (this._scope.some((s) => s.idx != null || s.filter != null || s.getBy != null) ||
+        this._parent) &&
       this._page._session != null
     ) {
       const leaf = this._selector
@@ -915,7 +921,8 @@ class Locator {
       return Number.isInteger(idx) && idx >= 0 ? idx : null;
     }
     if (
-      (this._scope && this._scope.some((s) => s.idx != null || s.filter != null)) ||
+      (this._scope &&
+        this._scope.some((s) => s.idx != null || s.filter != null || s.getBy != null)) ||
       this._parent
     ) {
       const leaf = this._selector

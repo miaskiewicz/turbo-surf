@@ -2807,3 +2807,21 @@ test("fill edits contenteditable text with input events and a collapsed caret (#
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("getBy parents retain their scope for CSS and getBy children (#472)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<section role="group" aria-label="One"><button id="one">first</button></section><section role="group" aria-label="Two"><button id="two">second</button></section>',
+  );
+  const group = page.getByRole("group", { name: "One" });
+  assert.deepEqual(await group.locator("button").allTextContents(), ["first"]);
+  assert.deepEqual(await group.getByRole("button").allTextContents(), ["first"]);
+  assert.equal(await page.getByRole("group", { name: "missing" }).locator("button").count(), 0);
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('#one').onclick = () => document.body.setAttribute('data-clicked','one')",
+  );
+  await group.getByRole("button").click();
+  assert.equal(await page.locator("body").getAttribute("data-clicked"), "one");
+  await page.close();
+});

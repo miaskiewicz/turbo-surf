@@ -152,8 +152,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | Method | Status | Notes |
 |---|---|---|
 | `first`, `last`, `nth`, `filter`, `and`, `or`, `all`, `count` | ✅ | Pure JS over the resolved match set. |
-| `locator` (nesting) | ⚠️ | CSS-concat when the parent is selector-backed (the common case). A `getBy*`-rooted parent resolves document-wide; scope it with a CSS parent or `filter`. |
-| `getByRole/Text/Label/TestId/Placeholder/AltText/Title` | ✅ | Delegate to the page (document-scoped). |
+| `locator` (nesting) | ✅ | CSS parents, indexed/filtered ancestors, `:scope`, and role/text/label parents retain their descendant scope for reads and live actions. |
+| `getByRole/Text/Label/TestId/Placeholder/AltText/Title` | ⚠️ | Role/text/label children preserve parent scope; regex test IDs support matching and live actions. Placeholder/alt/title nesting still delegates to the page (#380). |
 | `textContent`, `innerText`, `innerHTML`, `allTextContents`, `allInnerTexts` | ✅ | |
 | `getAttribute`, `inputValue`, `selectedValues`, `cssValue`, `ariaRole`, `accessibleName`, `accessibleDescription` | ✅ | |
 | `is*` (`Visible/Hidden/Checked/Enabled/Disabled/Editable/Empty`) | ✅ | |

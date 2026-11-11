@@ -1520,6 +1520,24 @@ test("Locator.getByRole scopes to the parent locator subtree", async () => {
   assert.equal(await scoped.textContent(), "in", "scoped resolves the descendant");
 });
 
+// Named scoped queries must match only inside the parent scope: outside
+// elements carrying overlapping names must not leak into the result, and the
+// per-match index must point at the right element in document order (nth).
+test("Locator.getByRole with a name honors the parent scope and match order", async () => {
+  const p = newPage();
+  const buttons = Array.from({ length: 2000 }, (_, i) => `<button>Inside ${i}</button>`).join("");
+  await p.setContent(`<div data-testid='scope'><button>Inside</button></div>${buttons}`);
+  const scoped = p.getByTestId("scope").getByRole("button", { name: "Inside" });
+  assert.equal(await scoped.count(), 1, "the name match must not leak past the scope");
+  assert.equal(await scoped.first().textContent(), "Inside");
+  // Global index correctness through a getBy* locator (nth resolves by idx);
+  // the scoped button takes position 0, then "Inside i" lands at idx i+1.
+  const ordered = p.getByRole("button");
+  assert.equal(await ordered.nth(0).textContent(), "Inside");
+  assert.equal(await ordered.nth(500).textContent(), "Inside 499");
+  assert.equal(await ordered.last().textContent(), "Inside 1999");
+});
+
 // about:blank (and other about: URLs) are not network resources — a browser shows an empty
 // document with no request. The shim used to `fetchWithCookies('about:blank')`, which hit the
 // net layer and errored ("builder error for url (about://blank)"); a reload of a blank page

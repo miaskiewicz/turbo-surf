@@ -4077,6 +4077,30 @@ async fn tcgetby_scopes_to_root() {
         .await
         .unwrap();
     assert_eq!(scoped, "1:A", "root='#a' scopes to the combobox inside #a");
+    // A NAME inside the scope must not match an outside element carrying the
+    // same text, and a regex literal name compiles once and still matches.
+    let named = session
+        .eval_engine(
+            r#"var root = document.createElement('div'); root.id = 'n';
+               root.innerHTML = '<button role="button">Hit</button>';
+               document.body.appendChild(root);
+               var outside = document.createElement('button');
+               outside.setAttribute('role', 'button');
+               outside.textContent = 'Hit';
+               document.body.appendChild(outside);
+               var named = JSON.parse((function(){ __tsNs.tcGetBy('role','button','Hit','#n'); return globalThis.__RESULT; })());
+               var re = JSON.parse((function(){ __tsNs.tcGetBy('role','button','/hi/i','#n'); return globalThis.__RESULT; })());
+               var all = Array.prototype.slice.call(document.querySelectorAll('*'));
+               var label = function(r) { return r.map(function(x) { return all[x.idx].textContent; }); };
+               globalThis.__RESULT = named.length + ':' + label(named).join(',') + ':' + re.length + ':' + label(re).join(',');
+               "#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        named, "1:Hit:1:Hit",
+        "named scoped matches stay inside the root, regex name included"
+    );
     session.close();
 }
 

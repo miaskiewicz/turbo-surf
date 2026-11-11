@@ -333,15 +333,35 @@ pub fn get_by(
         }
     };
     let nm = name.as_deref().map(|n| (n, mode_for(n)));
-    let mut hits = match kind.as_str() {
-        "role" => view::by_role(&tree, &value, nm),
-        "text" => view::by_text(&tree, &value, mode_for(&value)),
-        "label" => view::by_label(&tree, &value, mode_for(&value)),
-        _ => Vec::new(),
+    // A scoped role query resolves its parent scope first and walks only those
+    // subtrees — a global scan then post-hoc retain computes accessible names
+    // for thousands of candidates the scope can never match.
+    let scoped_roots: Option<Vec<Handle>> = root
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|root_sel| tree.query_selector_all(root_sel).to_vec())
+        .filter(|roots| !roots.is_empty());
+    let mut hits = if kind == "role" {
+        match scoped_roots.as_deref() {
+            Some(roots) => {
+                let matcher = nm
+                    .as_ref()
+                    .map(|(want, mode)| view::locator::TextMatcher::new(want, *mode));
+                view::locator::by_role_in(&tree, roots, &value, matcher.as_ref())
+            }
+            None => view::by_role(&tree, &value, nm),
+        }
+    } else {
+        match kind.as_str() {
+            "text" => view::by_text(&tree, &value, mode_for(&value)),
+            "label" => view::by_label(&tree, &value, mode_for(&value)),
+            _ => Vec::new(),
+        }
     };
-    // Scope to a parent locator's subtree: keep only hits that are a descendant (or self) of
-    // some element matching `root`. Backs `parentLocator.getByRole/getByText/getByLabel(...)`.
-    if let Some(root_sel) = root.as_deref().filter(|s| !s.is_empty()) {
+    // Non-role kinds scope post-hoc: keep only hits that are a descendant (or
+    // self) of some element matching `root`. Backs
+    // `parentLocator.getByText/getByLabel(...)`.
+    if let (false, Some(root_sel)) = (kind == "role", root.as_deref().filter(|s| !s.is_empty())) {
         let roots: std::collections::HashSet<Handle> =
             tree.query_selector_all(root_sel).iter().copied().collect();
         if !roots.is_empty() {
@@ -360,11 +380,17 @@ pub fn get_by(
     // `idx` = the element's position in document order (querySelectorAll('*')), so the
     // Playwright shim can drive a getBy* match in the LIVE isolate by index (these
     // locators have no CSS selector to dispatch through).
-    let all: Vec<Handle> = tree.query_selector_all("*").iter().copied().collect();
+    let order: std::collections::HashMap<Handle, usize> = tree
+        .query_selector_all("*")
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(i, h)| (h, i))
+        .collect();
     let out: Vec<Value> = hits
         .iter()
         .map(|&h| {
-            json!({ "node": h.raw(), "text": view::text(&tree, h), "idx": all.iter().position(|&x| x == h) })
+            json!({ "node": h.raw(), "text": view::text(&tree, h), "idx": order.get(&h).copied() })
         })
         .collect();
     Value::Array(out).to_string()

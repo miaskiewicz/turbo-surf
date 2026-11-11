@@ -598,9 +598,34 @@ class Locator {
     const n = this._node();
     return n != null && native.isEditable(this._html, n);
   }
+  async _readElement(fn) {
+    const live = this._page._session != null;
+    const match = live ? null : this._all()[0];
+    const index = live
+      ? await this._resolveLiveIdx()
+      : match == null
+        ? null
+        : JSON.parse(native.query(this._html, "*", "css")).findIndex(
+            (node) => node.node === match.node,
+          );
+    if (index == null) return null;
+    const script = `globalThis.__RESULT = (() => {
+      try { const element = document.querySelectorAll('*')[${index}];
+        return JSON.stringify({value: element ? (${fn.toString()})(element) : null});
+      } catch (error) { return JSON.stringify({error: String(error.message)}); }
+    })()`;
+    const raw = live
+      ? await native.liveEvalEngine(this._page._session, script)
+      : native.evaluate(this._html, script);
+    const result = JSON.parse(raw);
+    if (result.error) throw new Error(result.error);
+    return result.value;
+  }
   async isEmpty() {
-    const n = this._node();
-    return n != null && native.isEmpty(this._html, n);
+    return this._readElement((element) => {
+      const text = /^(INPUT|TEXTAREA)$/.test(element.tagName) ? element.value : element.textContent;
+      return String(text ?? "").trim().length === 0;
+    });
   }
   async ariaRole() {
     const n = this._node();
@@ -3599,7 +3624,7 @@ class LocatorExpect extends BaseExpect {
     );
   }
   async toBeEmpty(opts) {
-    this._ok(await this._retry(() => this._snap().empty, opts), "expected element to be empty");
+    this._ok(await this._retry(() => this._v.isEmpty(), opts), "expected element to be empty");
   }
   async toBeFocused(opts) {
     // Static DOMs have no focus — the pre-fix behavior kept `.not.toBeFocused`

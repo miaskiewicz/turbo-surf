@@ -11,7 +11,6 @@ use turbo_dom_parser::rtdom::cascade::{computed_style, get_property_value};
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::{DocumentExt, Tree};
 
-const ELEMENT_NODE: u8 = 1;
 const EDITABLE_TAGS: &[&str] = &["INPUT", "TEXTAREA", "SELECT"];
 
 /// Collapsed, trimmed text content.
@@ -56,13 +55,13 @@ pub fn is_editable(tree: &Tree, h: Handle) -> bool {
         && tree.get_attribute(h, "readonly").is_none()
 }
 
-/// `toBeEmpty`: no text and no element children.
+/// `toBeEmpty`: control value or descendant textual content is empty.
 pub fn is_empty(tree: &Tree, h: Handle) -> bool {
-    text_of(tree, h).is_empty()
-        && !tree
-            .children(h)
-            .into_iter()
-            .any(|c| tree.node_type_id(c) == ELEMENT_NODE)
+    match tree.tag_name(h).as_deref() {
+        Some("INPUT") => input_value_of(tree, h).trim().is_empty(),
+        Some("TEXTAREA") => tree.get_attribute(h, "value").map_or_else(|| tree.text_content(h), str::to_string).trim().is_empty(),
+        _ => text_of(tree, h).is_empty(),
+    }
 }
 
 // An <option>'s submitted value: `value` attr, else its label text.
@@ -160,7 +159,11 @@ mod tests {
         let t2 = Tree::parse("<div id='a'>text</div>");
         assert!(!is_empty(&t2, first(&t2, "#a")));
         let t3 = Tree::parse("<div id='a'><span></span></div>");
-        assert!(!is_empty(&t3, first(&t3, "#a")));
+        assert!(is_empty(&t3, first(&t3, "#a")));
+        let controls = Tree::parse("<input id='filled' value='present'><input id='blank'><textarea id='text'>present</textarea>");
+        assert!(!is_empty(&controls, first(&controls, "#filled")));
+        assert!(is_empty(&controls, first(&controls, "#blank")));
+        assert!(!is_empty(&controls, first(&controls, "#text")));
     }
 
     #[test]

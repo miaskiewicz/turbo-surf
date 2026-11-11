@@ -32,6 +32,21 @@ const PIXEL = "no-browser engine (no rendering surface)";
 const INPUT = "no synthetic input devices (static DOM, no pointer/keyboard hardware)";
 const NETIO = "no in-process network interception";
 
+function cookieMatchesUrl(cookie, url) {
+  const domain = String(cookie.domain ?? "")
+    .toLowerCase()
+    .replace(/^\./, "");
+  const hostOnly = cookie.host_only ?? !String(cookie.domain).startsWith(".");
+  const host = url.hostname.toLowerCase();
+  if (host !== domain && (hostOnly || !host.endsWith(`.${domain}`))) return false;
+  if (cookie.secure && url.protocol !== "https:") return false;
+  const path = cookie.path || "/";
+  return (
+    url.pathname === path ||
+    (url.pathname.startsWith(path) && (path.endsWith("/") || url.pathname[path.length] === "/"))
+  );
+}
+
 // Build an executable source string from page.evaluate's (fn|string, arg) form.
 function evalSource(script, arg) {
   if (typeof script === "function") return `(${script.toString()})(${JSON.stringify(arg ?? null)})`;
@@ -3538,8 +3553,11 @@ class BrowserContext {
     const existing = JSON.parse(this._cookies);
     this._cookies = JSON.stringify([...existing, ...cookies]);
   }
-  async cookies() {
-    return JSON.parse(this._cookies);
+  async cookies(urls) {
+    const cookies = JSON.parse(this._cookies);
+    if (urls == null || (Array.isArray(urls) && urls.length === 0)) return cookies;
+    const targets = (Array.isArray(urls) ? urls : [urls]).map((url) => new URL(url));
+    return cookies.filter((cookie) => targets.some((url) => cookieMatchesUrl(cookie, url)));
   }
   _setCookies(cookies) {
     this._cookies = cookies;

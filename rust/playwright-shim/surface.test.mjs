@@ -3062,3 +3062,26 @@ test("clearing context cookies updates every active page jar (#424)", async () =
     await new Promise((done) => server.close(done));
   }
 });
+
+test("context cookie URL filters honor host path and secure scope (#423)", async () => {
+  const context = new BrowserContext();
+  context.addCookies([
+    { name: "root", value: "a", domain: "example.test", path: "/", host_only: true },
+    { name: "scoped", value: "b", domain: "example.test", path: "/scoped", host_only: true },
+    { name: "domain", value: "c", domain: ".example.test", path: "/" },
+    { name: "secure", value: "d", domain: "example.test", path: "/", secure: true },
+  ]);
+  const names = async (urls) => (await context.cookies(urls)).map((cookie) => cookie.name).sort();
+  assert.deepEqual(await names("http://example.test/elsewhere"), ["domain", "root"]);
+  assert.deepEqual(await names("http://example.test/scoped/child"), ["domain", "root", "scoped"]);
+  assert.deepEqual(await names("http://example.test/scopedness"), ["domain", "root"]);
+  assert.deepEqual(await names("http://sub.example.test/"), ["domain"]);
+  assert.deepEqual(await names("http://other.test/"), []);
+  assert.deepEqual(await names(["https://example.test/", "http://other.test/"]), [
+    "domain",
+    "root",
+    "secure",
+  ]);
+  assert.equal((await context.cookies()).length, 4);
+  await context.close();
+});

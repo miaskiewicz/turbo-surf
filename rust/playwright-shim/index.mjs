@@ -3029,6 +3029,8 @@ class Page {
     this._requestState = undefined;
     this._imageCache = undefined;
     this._closed = true;
+    const position = this._context._pages.indexOf(this);
+    if (position >= 0) this._context._pages.splice(position, 1);
     this._emit("close");
     if (this._ownsContext) await this._context.close();
   }
@@ -3681,7 +3683,7 @@ class BrowserContext {
     return p;
   }
   pages() {
-    return this._pages;
+    return [...this._pages];
   }
   storageState() {
     return { cookies: JSON.parse(this._cookies), origins: [] };
@@ -3755,7 +3757,7 @@ class BrowserContext {
   async close() {
     if (this._closed) return;
     this._closed = true;
-    for (const page of this._pages) await page.close();
+    for (const page of this.pages()) await page.close();
     await this._requestCtx?.dispose();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;

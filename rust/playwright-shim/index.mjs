@@ -4154,11 +4154,20 @@ class ValueExpect extends BaseExpect {
     this._ok(this._v?.length === n, `expected length ${n}, got ${this._v?.length}`);
   }
   toHaveProperty(key, value) {
-    const got = key.split(".").reduce((o, k) => o?.[k], this._v);
-    this._ok(
-      value === undefined ? got !== undefined : deepEqual(got, value),
-      `expected property ${key}`,
-    );
+    if (typeof key !== "string" && !Array.isArray(key))
+      throw new TypeError("property path must be a string or array");
+    const path = Array.isArray(key) ? key : key.replace(/\[(\d+)\]/g, ".$1").split(".");
+    if (path.length === 0) throw new TypeError("property path must not be empty");
+    let got = this._v;
+    let exists = true;
+    for (const segment of path) {
+      if (got == null || !(segment in Object(got))) {
+        exists = false;
+        break;
+      }
+      got = got[segment];
+    }
+    this._ok(exists && (arguments.length < 2 || deepEqual(got, value)), `expected property ${key}`);
   }
   toThrow(expected) {
     if (typeof this._v !== "function") throw new TypeError("toThrow requires a function");

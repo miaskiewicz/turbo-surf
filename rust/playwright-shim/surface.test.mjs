@@ -3406,3 +3406,14 @@ test("toMatchObject preserves array length and typed value semantics (#384)", ()
   );
   assert.doesNotThrow(() => expect({ a: { b: 1, c: 2 } }).toMatchObject({ a: { b: 1 } }));
 });
+
+test("toHaveProperty distinguishes path existence and supports array paths (#383)", () => {
+  assert.doesNotThrow(() => expect({ "a.b": { c: 1 } }).toHaveProperty(["a.b", "c"], 1));
+  assert.doesNotThrow(() => expect({ a: undefined }).toHaveProperty("a"));
+  assert.doesNotThrow(() => expect({ a: undefined }).toHaveProperty("a", undefined));
+  assert.throws(() => expect({}).toHaveProperty("a", undefined));
+  assert.throws(() => expect({ a: undefined }).not.toHaveProperty("a"));
+  assert.doesNotThrow(() => expect({ a: [{ b: 2 }] }).toHaveProperty(["a", 0, "b"], 2));
+  assert.doesNotThrow(() => expect({ a: [{ b: 2 }] }).toHaveProperty("a[0].b", 2));
+  assert.doesNotThrow(() => expect({ a: null }).not.toHaveProperty("a.b"));
+});

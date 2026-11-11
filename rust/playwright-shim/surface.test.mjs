@@ -3897,3 +3897,35 @@ test("viewport resize updates live layout media and only its own page (#369)", a
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("soft assertions keep running but fail their owning test (#368)", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "surf-soft-"));
+  const file = join(root, "soft.mjs");
+  await writeFile(
+    file,
+    `import {test,expect} from ${JSON.stringify(new URL("./index.mjs", import.meta.url).href)};
+    test('soft failure continues',async(_args,info)=>{
+      expect.soft(1).toBe(2);
+      console.log('AFTER_SYNC_SOFT');
+      await expect.soft(Promise.resolve(3)).resolves.toBe(4);
+      console.log('AFTER_ASYNC_SOFT',info.errors.length);
+      expect(5).toBe(5);
+    });
+    test('following test is clean',()=>{console.log('NEXT_TEST');expect(1).toBe(1);});`,
+  );
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ["--test", "--test-force-exit", file], {
+    env,
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /AFTER_SYNC_SOFT/);
+  assert.match(result.stdout, /AFTER_ASYNC_SOFT 2/);
+  assert.match(result.stdout, /NEXT_TEST/);
+  assert.match(result.stdout, /soft assertion/i);
+  await rm(root, { recursive: true, force: true });
+});

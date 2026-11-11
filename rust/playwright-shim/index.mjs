@@ -4351,7 +4351,30 @@ export function expect(value) {
   if (value instanceof Page) return new PageExpect(value, false);
   return new ValueExpect(value, false);
 }
-expect.soft = expect; // soft assertions behave as hard ones here
+function softAssertion(assertion) {
+  const failed = (error) => {
+    const info = activeInfoStore.getStore();
+    if (!info) throw error;
+    info.errors.push(error);
+    info.status = "failed";
+  };
+  return new Proxy(assertion, {
+    get(target, property) {
+      const value = Reflect.get(target, property);
+      if (typeof value !== "function")
+        return value && typeof value === "object" ? softAssertion(value) : value;
+      return (...args) => {
+        try {
+          const result = value.apply(target, args);
+          return result?.then ? result.catch(failed) : result;
+        } catch (error) {
+          return failed(error);
+        }
+      };
+    },
+  });
+}
+expect.soft = (value) => softAssertion(expect(value));
 expect.poll = (fn, _o) => new ValueExpect(fn(), false);
 expect.configure = () => expect;
 expect.extend = () => {};
@@ -4474,6 +4497,7 @@ const activeAttemptStore = new AsyncLocalStorage();
 const activeWorkerHookStore = new AsyncLocalStorage();
 const rootSkipScope = { skip: false };
 const rootTestHooks = new Map();
+const activeInfoStore = new AsyncLocalStorage();
 const getSkipStack = () => skipStackStore.getStore() ?? [];
 const getActiveT = () => activeTStore.getStore() ?? null;
 // Direct context access keeps regression tests out of node:test's registrar.
@@ -4616,7 +4640,8 @@ function recordTestError(info, error) {
 
 async function invokeTestBody(fn, arg, info, expectedFailure) {
   try {
-    await fn(arg, info);
+    await activeInfoStore.run(info, () => fn(arg, info));
+    if (info.errors.length) throw new AggregateError(info.errors, "Soft assertions failed");
   } catch (error) {
     if (error !== SKIP_SIGNAL) recordTestError(info, error);
     if (error === SKIP_SIGNAL || !expectedFailure) throw error;

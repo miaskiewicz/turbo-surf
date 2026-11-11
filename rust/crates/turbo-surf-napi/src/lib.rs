@@ -1001,6 +1001,7 @@ async fn do_fetch_headers(
         client_hints,
         storage,
     } = request_state(request_state_id)?;
+    let headers = storage.request_headers(headers);
     let storage_effects = storage.response_storage_effects();
     let http_cache = storage.http_cache();
     // Network jobs need native backing, not the tab/profile owner.
@@ -1102,6 +1103,7 @@ pub async fn fetch_bytes(
         client_hints,
         storage,
     } = request_state(request_state_id)?;
+    let headers = storage.request_headers(headers);
     let storage_effects = storage.response_storage_effects();
     let http_cache = storage.http_cache();
     drop(storage);

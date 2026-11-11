@@ -3473,3 +3473,46 @@ test("deep equality handles typed values symbols cycles and strictness (#381)", 
   b.set("self", b);
   assert.doesNotThrow(() => expect(a).toEqual(b));
 });
+
+test("Context locale configures native language and Intl without site cookies (#395)", async () => {
+  const requests = [];
+  const server = createServer((req, res) => {
+    requests.push(req.headers);
+    res.setHeader("content-type", "text/html");
+    res.end("<p>locale</p><script>globalThis.observedLocale=navigator.language</script>");
+  });
+  const base = await listen(server);
+  const fr = new BrowserContext({ locale: "fr-FR" });
+  const en = new BrowserContext({ locale: "en-US" });
+  try {
+    const p = await fr.newPage();
+    const q = await en.newPage();
+    await p.goto(base, { waitUntil: "networkidle" });
+    await q.goto(base, { waitUntil: "networkidle" });
+    assert.deepEqual(
+      await p.evaluate(() => [
+        navigator.language,
+        ...navigator.languages,
+        new Intl.NumberFormat().resolvedOptions().locale,
+      ]),
+      ["fr-FR", "fr-FR", "fr-FR"],
+    );
+    assert.equal(await p.evaluate(() => globalThis.observedLocale), "fr-FR");
+    assert.equal(
+      await p.evaluate(() => new Intl.NumberFormat("en-US").resolvedOptions().locale),
+      "en-US",
+    );
+    assert.equal(await q.evaluate(() => navigator.language), "en-US");
+    assert.equal(await p.evaluate(() => (1234.5).toLocaleString()), "1\u202f234,5");
+    assert.equal(requests[0]["accept-language"], "fr-FR");
+    assert.equal(requests[0].cookie, undefined);
+    assert.deepEqual(
+      (await fr.cookies()).filter((cookie) => cookie.name === "NEXT_LOCALE"),
+      [],
+    );
+  } finally {
+    await fr.close();
+    await en.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

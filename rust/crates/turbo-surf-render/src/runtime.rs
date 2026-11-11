@@ -186,6 +186,7 @@ struct NetModuleLoader {
     client_hints: ClientHints,
     http_cache: turbo_surf_core::http_cache::HttpCache,
     storage_effects: std::sync::Arc<turbo_surf_core::net::ResponseSideEffects<'static>>,
+    emulation: std::sync::Arc<std::sync::RwLock<crate::browser_emulation::BrowserEmulation>>,
     inline_sources: InlineModules,
     credentials: ModuleCredentials,
     csp: CspHandle,
@@ -1931,6 +1932,11 @@ impl ModuleLoader for NetModuleLoader {
         let client_hints = self.client_hints.clone();
         let http_cache = self.http_cache.clone();
         let storage_effects = self.storage_effects.clone();
+        let context_headers = self
+            .emulation
+            .read()
+            .map(|options| options.request_headers(Default::default()))
+            .unwrap_or_default();
         let cache_partition = http_cache_partition(
             &self.top_level_source,
             &self.source,
@@ -1944,7 +1950,7 @@ impl ModuleLoader for NetModuleLoader {
         let blob_key = blob_urls::module_key(&self.source, opaque_origin, &self.csp);
         ModuleLoadResponse::Async(Box::pin(async move {
             let mut local = jar.borrow().fork_for_request();
-            let mut headers = std::collections::BTreeMap::new();
+            let mut headers = context_headers;
             if !ua.is_empty() {
                 headers.insert("user-agent".to_string(), ua);
             }
@@ -2225,7 +2231,7 @@ pub fn set_fingerprint(overrides_json: &str) {
 // The fingerprint-override JSON (or "{}" when unset) — ENV_BOOTSTRAP merges it.
 #[op2]
 #[string]
-fn op_fingerprint() -> String {
+fn op_fingerprint(state: &mut OpState) -> String {
     let profile = turbo_surf_core::fingerprint::default_profile();
     let mut defaults = serde_json::json!({
         "fullVersion": profile.full_version,
@@ -2240,6 +2246,10 @@ fn op_fingerprint() -> String {
         .and_then(|g| serde_json::from_str::<serde_json::Value>(&g).ok())
     {
         defaults.as_object_mut().unwrap().extend(overrides);
+    }
+    if let Some(locale) = state.borrow::<BrowserStorage>().emulation().locale {
+        defaults["languages"] = serde_json::json!([locale]);
+        defaults["locale"] = serde_json::json!(locale);
     }
     defaults.to_string()
 }
@@ -3420,6 +3430,10 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         body_bytes,
         mut headers,
     } = parse_fetch_body(&init);
+    headers = state
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .request_headers(headers);
     let source = init.get("source").and_then(|s| s.as_str()).unwrap_or(&base);
     let destination = parse_fetch_destination(&init);
     let csp = init.get("csp").and_then(|id| id.as_u64()).and_then(|id| {
@@ -3781,7 +3795,10 @@ async fn op_load_image(
         };
     }
     let mut local = jar.borrow().fork_for_request();
-    let mut headers = std::collections::BTreeMap::new();
+    let mut headers = state
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .request_headers(Default::default());
     if !ua.is_empty() {
         headers.insert("user-agent".to_string(), ua);
     }
@@ -7322,6 +7339,12 @@ impl BrowserStorage {
             .map_err(|_| "Context preferences unavailable")? = options;
         Ok(())
     }
+    pub fn request_headers(
+        &self,
+        authored: std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        self.with_emulation(|options| options.request_headers(authored))
+    }
     pub(crate) fn with_emulation<R>(
         &self,
         read: impl FnOnce(&crate::browser_emulation::BrowserEmulation) -> R,
@@ -8713,6 +8736,27 @@ if (!__G.isFrame) {
 // settable per process via `set_fingerprint` (MCP `set_fingerprint` tool).
 const __fp = (() => { try { return JSON.parse(ops.op_fingerprint()); } catch (e) { return {}; } })();
 const __pick = (k, d) => (__fp[k] !== undefined ? __fp[k] : d);
+// Locale is a per-context default; leave ICU's process-global locale untouched.
+// Proxies retain the real Intl constructors, native formatting and receiver brands.
+if (__fp.locale) {
+  const locale = Intl.getCanonicalLocales(__fp.locale)[0];
+  const defaultArgs = (args, index = 0) => { if (args[index] === undefined) args[index] = locale; return args; };
+  for (const name of ["Collator", "DateTimeFormat", "DisplayNames", "ListFormat", "NumberFormat", "PluralRules", "RelativeTimeFormat", "Segmenter"]) {
+    const target = Intl[name];
+    if (typeof target !== "function") continue;
+    Intl[name] = new Proxy(target, {
+      apply(target, receiver, args) { return Reflect.apply(target, receiver, defaultArgs(args)); },
+      construct(target, args, constructor) { return Reflect.construct(target, defaultArgs(args), constructor); },
+    });
+  }
+  for (const [prototype, names, index] of [[Date.prototype,["toLocaleString","toLocaleDateString","toLocaleTimeString"],0],[Number.prototype,["toLocaleString"],0],[BigInt.prototype,["toLocaleString"],0],[String.prototype,["localeCompare"],1]]) {
+    for (const name of names) {
+      const target = prototype[name];
+      prototype[name] = new Proxy(target, { apply(target, receiver, args) { return Reflect.apply(target, receiver, defaultArgs(args,index)); } });
+    }
+  }
+}
+
 const __ua = __pick("userAgent",
   (ops.op_user_agent && ops.op_user_agent()) || __fp.defaultUserAgent || "");
 // Derive the major from the ACTUAL UA string so navigator.userAgentData.brands always
@@ -14537,6 +14581,7 @@ fn make_runtime_with_storage_and_options(
             storage_effects: storage.partition_response_effects(
                 csp.partition.as_ref().map_or(0, |partition| partition.id),
             ),
+            emulation: storage.4.clone(),
             inline_sources: inline_sources.clone(),
             credentials: module_credentials.clone(),
             csp: csp.clone(),

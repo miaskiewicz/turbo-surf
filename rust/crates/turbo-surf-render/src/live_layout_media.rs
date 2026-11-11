@@ -409,6 +409,7 @@ mod tests {
         let options = crate::browser_emulation::BrowserEmulation {
             color_scheme: Some("dark".into()),
             reduced_motion: Some("reduce".into()),
+            ..Default::default()
         };
         let emulated = base.emulated(&options);
         assert_eq!(

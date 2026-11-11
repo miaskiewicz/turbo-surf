@@ -2922,6 +2922,7 @@ class Page {
       JSON.stringify({
         colorScheme: this._media?.colorScheme ?? this._context._colorScheme,
         reducedMotion: this._media?.reducedMotion ?? this._context._reducedMotion,
+        locale: this._context._locale,
       }),
     );
   }
@@ -3544,31 +3545,7 @@ class BrowserContext {
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
     this._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
-    // Locale: real Playwright runs `devices['Desktop Chrome']` (locale en-US), and the
-    // app picks UI language from the `NEXT_LOCALE` cookie (next-intl) — with none it
-    // defaults to es-MX, so English text/role-name assertions miss. Seed NEXT_LOCALE to
-    // match the browser locale (default en-US) unless the caller already provided one.
-    // NOTE: the settings suite expects the es-MX default (Chrome shows es-MX there) — a known
-    // parity gap; the post-login NEXT_LOCALE=en-US source is not yet pinned. See memory.
     this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
-    if (this._locale && !cookies.some((c) => c.name === "NEXT_LOCALE")) {
-      let host = "localhost";
-      try {
-        host = new URL(this._baseURL || "http://localhost").hostname;
-      } catch {
-        /* keep */
-      }
-      cookies.push({
-        name: "NEXT_LOCALE",
-        value: this._locale,
-        domain: host,
-        path: "/",
-        secure: false,
-        http_only: false,
-        same_site: "lax",
-        expires_at: 1900000000000,
-      });
-    }
     this._cookies = JSON.stringify(cookies);
     this._requestState = native.requestStateNew?.();
     // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
@@ -3594,12 +3571,16 @@ class BrowserContext {
     this._bindings = new Map();
     this._pages = [];
     this._listeners = new Map();
-    if (this._colorScheme || this._reducedMotion) this._configureNative();
+    if (this._colorScheme || this._reducedMotion || this._locale) this._configureNative();
   }
   _configureNative() {
     native.requestStateConfigure(
       this._requestState,
-      JSON.stringify({ colorScheme: this._colorScheme, reducedMotion: this._reducedMotion }),
+      JSON.stringify({
+        colorScheme: this._colorScheme,
+        reducedMotion: this._reducedMotion,
+        locale: this._locale,
+      }),
     );
     for (const page of this._pages) if (!page._closed) page._configureNative();
   }

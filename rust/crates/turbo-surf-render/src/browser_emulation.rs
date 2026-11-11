@@ -7,10 +7,34 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct BrowserEmulation {
     pub(crate) color_scheme: Option<String>,
     pub(crate) reduced_motion: Option<String>,
+    pub(crate) locale: Option<String>,
 }
 
 impl BrowserEmulation {
+    pub(crate) fn request_headers(
+        &self,
+        authored: std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        let mut headers = std::collections::BTreeMap::new();
+        if let Some(locale) = &self.locale {
+            headers.insert("accept-language".to_string(), locale.clone());
+        }
+        headers.extend(
+            authored
+                .into_iter()
+                .map(|(key, value)| (key.to_ascii_lowercase(), value)),
+        );
+        headers
+    }
     pub(crate) fn validate(&self) -> Result<(), String> {
+        if self.locale.as_ref().is_some_and(|locale| {
+            locale.is_empty()
+                || !locale
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        }) {
+            return Err("Invalid locale".into());
+        }
         if self
             .color_scheme
             .as_deref()
@@ -74,5 +98,34 @@ mod tests {
             .configure_emulation(r#"{"colorScheme":"invalid"}"#)
             .is_err());
         assert_eq!(first.emulation().color_scheme.as_deref(), Some("light"));
+    }
+    #[test]
+    fn locale_defaults_are_per_context_and_authored_language_still_wins() {
+        let options = BrowserEmulation {
+            locale: Some("fr-FR".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            options
+                .request_headers(Default::default())
+                .get("accept-language")
+                .map(String::as_str),
+            Some("fr-FR")
+        );
+        let authored =
+            std::collections::BTreeMap::from([("Accept-Language".into(), "de-DE".into())]);
+        assert_eq!(
+            options
+                .request_headers(authored)
+                .get("accept-language")
+                .map(String::as_str),
+            Some("de-DE")
+        );
+        assert!(BrowserEmulation {
+            locale: Some("fr_FR".into()),
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
     }
 }

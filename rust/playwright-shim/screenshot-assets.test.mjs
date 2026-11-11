@@ -61,6 +61,8 @@ test("screenshots retain no-store image bytes only within the current document",
     page._html = snapshot.replace("/img/11.png", "/img/new.png");
     await page.screenshot({ externalCss: false });
     assert.ok(stats().requests > loaded, "snapshot changes invalidate retained resources");
+    page._html = snapshot;
+    await page.screenshot({ externalCss: false });
     const beforeNavigation = stats().requests;
     await page.goto(page.url(), { waitUntil: "load" });
     page._html = snapshot;

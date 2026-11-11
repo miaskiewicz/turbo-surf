@@ -42,7 +42,7 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "build:addon": "cd rust && cargo build --release -p turbo-surf-napi",
-    "test:shim": "node --test --test-force-exit --test-timeout=300000 --test-concurrency=1 rust/playwright-shim/test.mjs rust/playwright-shim/surface.test.mjs rust/playwright-shim/screenshot-assets.test.mjs rust/playwright-shim/native-profile.test.mjs rust/playwright-shim/native-peer-events.test.mjs rust/playwright-shim/input-hardware.test.mjs rust/playwright-shim/config.test.mjs rust/playwright-shim/skip-isolation.test.mjs",
+    "test:shim": "node --test --test-force-exit --test-timeout=300000 --test-concurrency=1 rust/playwright-shim/test.mjs rust/playwright-shim/surface.test.mjs rust/playwright-shim/screenshot-assets.test.mjs rust/playwright-shim/runtime-locator.test.mjs rust/playwright-shim/native-profile.test.mjs rust/playwright-shim/native-peer-events.test.mjs rust/playwright-shim/input-hardware.test.mjs rust/playwright-shim/config.test.mjs rust/playwright-shim/skip-isolation.test.mjs",
     "test:config": "node --test --test-force-exit --test-timeout=30000 rust/playwright-shim/config.test.mjs",
     "test:e2e": "node --import ./rust/playwright-shim/register.mjs --test --test-force-exit --test-timeout=300000 --test-concurrency=1 rust/playwright-shim/dropin.spec.mjs rust/playwright-shim/e2e/*.spec.mjs",
     "test:playwright": "npm run build:addon && timeout --signal=KILL 600 npm run test:shim && timeout --signal=KILL 600 npm run test:e2e",

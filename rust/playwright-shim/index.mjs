@@ -3607,8 +3607,9 @@ function makeDownload(entry) {
 // BrowserContext
 // ---------------------------------------------------------------------------
 class BrowserContext {
-  constructor(opts = {}) {
+  constructor(opts = {}, browser = null) {
     this._closed = false;
+    this._browser = browser;
     // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
     // so every supported key can reach fixture-constructed contexts without
     // the test code having to pass it explicitly. In-suite `opts` still wins
@@ -3752,7 +3753,7 @@ class BrowserContext {
     return this._requestCtx;
   }
   browser() {
-    return browserStub;
+    return this._browser ?? browserStub;
   }
   async close() {
     if (this._closed) return;
@@ -3761,6 +3762,7 @@ class BrowserContext {
     await this._requestCtx?.dispose();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
+    this._browser?._forgetContext(this);
   }
   route = UNSUPPORTED("context.route", NETIO);
   routeFromHAR = UNSUPPORTED("context.routeFromHAR", NETIO);
@@ -3793,33 +3795,50 @@ class BrowserContext {
   }
 }
 
-const browserStub = {
-  version: () => "turbo-surf",
-  browserType: () => ({ name: () => "chromium" }),
-  async newContext(opts) {
-    return new BrowserContext(opts);
-  },
-  async newPage(opts) {
-    const page = await new BrowserContext(opts).newPage();
-    page._ownsContext = true;
-    return page;
-  },
-  contexts: () => [],
-  isConnected: () => true,
-  async close() {},
-};
+function makeBrowser() {
+  const contexts = new Set();
+  let connected = true;
+  const ensureConnected = () => {
+    if (!connected) throw new Error("Target page, context or browser has been closed");
+  };
+  return {
+    version: () => "turbo-surf",
+    browserType: () => ({ name: () => "chromium" }),
+    async newContext(opts) {
+      ensureConnected();
+      const context = new BrowserContext(opts, this);
+      contexts.add(context);
+      return context;
+    },
+    async newPage(opts) {
+      const page = await (await this.newContext(opts)).newPage();
+      page._ownsContext = true;
+      return page;
+    },
+    _forgetContext: (context) => contexts.delete(context),
+    contexts: () => [...contexts],
+    isConnected: () => connected,
+    async close() {
+      if (!connected) return;
+      connected = false;
+      await Promise.all(Array.from(contexts, (context) => context.close()));
+    },
+  };
+}
+
+const browserStub = makeBrowser();
 
 // Minimal browser entry for drop-in feel: chromium.launch() → newPage().
 export const chromium = {
   name: () => "chromium",
   async launch() {
-    return browserStub;
+    return makeBrowser();
   },
   async launchPersistentContext(_dir, opts) {
-    return new BrowserContext(opts);
+    return makeBrowser().newContext(opts);
   },
   async connect() {
-    return browserStub;
+    return makeBrowser();
   },
 };
 export const firefox = chromium;

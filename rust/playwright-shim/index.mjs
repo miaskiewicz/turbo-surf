@@ -3742,9 +3742,23 @@ function skipConditionMet(args) {
   return !!c;
 }
 
-function makeTestFn(baseDefs, extDefs = {}) {
+const rootFixtureUses = new Map();
+function fixtureUses(keys) {
+  const result = {};
+  for (const scope of [rootFixtureUses, ...getSkipStack().map((frame) => frame.fixtureUses)]) {
+    for (const key of keys) Object.assign(result, scope?.get(key));
+  }
+  return result;
+}
+
+function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
+  const useKey = Symbol("fixture use");
+  const useKeys = [...parentUseKeys, useKey];
   const open = (testInfo) => openFixtures(baseDefs, extDefs, testInfo);
   const run = (name, fn) => {
+    const uses = fixtureUses(useKeys);
+    const testDefs = { ...extDefs, ...uses };
+    const openTest = (info) => openFixtures(baseDefs, testDefs, info);
     wireFixtureHooks(open);
     if (describeSkipped()) {
       nodeTest.skip(name, () => {});
@@ -3758,11 +3772,11 @@ function makeTestFn(baseDefs, extDefs = {}) {
           // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
           // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
           // open its OWN fixtures, else custom fixtures resolve to undefined.
-          if (_current && Object.keys(extDefs).length === 0) {
+          if (_current && Object.keys(testDefs).length === 0) {
             await fn(_current.arg, testInfo);
             return;
           }
-          const { arg, teardown } = await open(testInfo);
+          const { arg, teardown } = await openTest(testInfo);
           try {
             await fn(arg, testInfo);
           } finally {
@@ -3798,7 +3812,11 @@ function makeTestFn(baseDefs, extDefs = {}) {
   run.fail = run;
   run.slow = () => {};
   run.setTimeout = () => {};
-  run.use = () => {};
+  run.use = (overrides) => {
+    const frame = getSkipStack().at(-1);
+    const scope = frame ? (frame.fixtureUses ??= new Map()) : rootFixtureUses;
+    scope.set(useKey, { ...scope.get(useKey), ...overrides });
+  };
   run.step = async (_name, body) => {
     const skipped = Symbol("step skipped");
     const info = {
@@ -3826,7 +3844,7 @@ function makeTestFn(baseDefs, extDefs = {}) {
   run.afterAll = (fn) => after(async () => fn({ browser: browserStub }));
   // A new fixture name extends; reusing a base/ext name OVERRIDES it but the
   // override still sees the prior value (Playwright's `page: ({page}) => …`).
-  run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more });
+  run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more }, useKeys);
   return run;
 }
 

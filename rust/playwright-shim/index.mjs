@@ -182,6 +182,16 @@ function cssAttrValue(text) {
   return `"${String(text).replace(/"/g, '\\"')}"`;
 }
 
+function validateResourceTagOptions(kind, opts) {
+  const supplied = [opts.content != null, opts.url != null, opts.path != null].filter(
+    Boolean,
+  ).length;
+  if (supplied !== 1)
+    throw new Error(
+      `add${kind === "style" ? "Style" : "Script"}Tag requires exactly one of content, url or path`,
+    );
+}
+
 // --- page.route helpers (shim-side, fulfill-only) --------------------------
 // Normalize a route pattern + fulfill payload into a JSON-serializable record.
 // `patternKey` is the original user pattern as a string so `unroute` can match.
@@ -3298,13 +3308,7 @@ class Page {
     return this._addResourceTag("script", opts);
   }
   async _addResourceTag(kind, opts) {
-    const supplied = [opts.content != null, opts.url != null, opts.path != null].filter(
-      Boolean,
-    ).length;
-    if (supplied !== 1)
-      throw new Error(
-        `add${kind === "style" ? "Style" : "Script"}Tag requires exactly one of content, url or path`,
-      );
+    validateResourceTagOptions(kind, opts);
     const content = opts.path != null ? await readFile(opts.path, "utf8") : opts.content;
     if (kind === "script" && opts.type === "module") {
       throw new Error("addScriptTag module injection load completion is not supported");

@@ -2589,3 +2589,18 @@ test("CSS and id assertions accept regex and retain negation (#437)", async () =
   await expect(page.locator("#hidden")).toHaveCSS("display", globalPattern, { timeout: 0 });
   await page.close();
 });
+
+test("attribute expectations preserve absence and normalize existence options (#436)", async () => {
+  const page = await fresh();
+  await expect(page.locator("#go")).toHaveAttribute("id", { timeout: 0 });
+  await expect(page.locator("#go")).toHaveAttribute("id", /^go$/, { timeout: 0 });
+  await assert.rejects(() =>
+    expect(page.locator("#go")).toHaveAttribute("data-absent", /^$/, { timeout: 0 }),
+  );
+  await expect(page.locator("#go")).not.toHaveAttribute("data-absent", /^$/, { timeout: 0 });
+  await page.setContent('<button id="present" data-empty="">target</button>');
+  await expect(page.locator("#present")).toHaveAttribute("data-empty", { timeout: 0 });
+  await expect(page.locator("#present")).toHaveAttribute("data-empty", /^$/, { timeout: 0 });
+  await expect(page.locator("#present")).not.toHaveAttribute("data-absent", { timeout: 0 });
+  await page.close();
+});

@@ -3557,11 +3557,15 @@ class LocatorExpect extends BaseExpect {
     this._ok(matchText(d, got), `expected accessible description ${d}, got "${got}"`);
   }
   async toHaveAttribute(name, value, opts) {
+    if (value && typeof value === "object" && !(value instanceof RegExp)) {
+      opts = value;
+      value = undefined;
+    }
     let got;
     const test = async () => {
       got = await this._v.getAttribute(name);
       if (value === undefined) return got !== null;
-      return value instanceof RegExp ? value.test(got ?? "") : got === value;
+      return got !== null && matchText(value, got);
     };
     this._ok(await this._retry(test, opts), `expected attribute ${name}=${value}, got ${got}`);
   }

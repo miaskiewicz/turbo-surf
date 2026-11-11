@@ -122,6 +122,38 @@ function nativeCookieAttributes(cookie) {
   };
 }
 
+class DownloadNavigationError extends Error {
+  constructor() {
+    super("page.goto: net::ERR_ABORTED: Download is starting");
+  }
+}
+
+function attachmentRecord(response) {
+  const disposition = (response.headers ?? []).find(
+    ([name]) => name.toLowerCase() === "content-disposition",
+  )?.[1];
+  if (!disposition || !/^attachment(?:;|$)/i.test(disposition.trim())) return null;
+  return {
+    filename: attachmentFilename(disposition, response.finalUrl),
+    url: response.finalUrl,
+    bodyBytes: response.bodyBytes ?? Buffer.from(response.html ?? ""),
+  };
+}
+
+function attachmentFilename(disposition, url) {
+  const encoded = /(?:^|;)\s*filename\*\s*=\s*UTF-8'[^']*'([^;]*)/i.exec(disposition);
+  const plain = /(?:^|;)\s*filename\s*=\s*(?:"((?:\\.|[^"])*)"|([^;]*))/i.exec(disposition);
+  let filename = plain ? (plain[1] ?? plain[2]).trim().replace(/\\(.)/g, "$1") : "";
+  if (encoded) {
+    try {
+      filename = decodeURIComponent(encoded[1].trim());
+    } catch {
+      /* use the plain filename */
+    }
+  }
+  return filename || new URL(url).pathname.split("/").at(-1) || "download";
+}
+
 // Build an executable source string from page.evaluate's (fn|string, arg) form.
 function evalSource(script, arg) {
   if (typeof script === "function") return `(${script.toString()})(${evaluationArgument(arg)})`;
@@ -2407,6 +2439,12 @@ class Page {
       throw error;
     }
     const r = JSON.parse(raw);
+    const attachment = attachmentRecord(r);
+    if (attachment) {
+      if (r.cookies !== this._cookies) this._context._setCookies(r.cookies);
+      this._recordDownload(attachment);
+      throw new DownloadNavigationError();
+    }
     if (r.status === 204 || r.status === 205) {
       this._cookies = r.cookies;
       throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
@@ -2677,9 +2715,14 @@ class Page {
   async dispatchEvent() {}
 
   async _followIntent(intent) {
-    if (intent.action === "navigate") return this.goto(intent.url);
-    if (intent.action === "submit") return this._submit(intent);
-    return null; // inert (a JS-only handler — nothing to fire without JS)
+    try {
+      if (intent.action === "navigate") return await this.goto(intent.url);
+      if (intent.action === "submit") return await this._submit(intent);
+      return null; // inert (a JS-only handler — nothing to fire without JS)
+    } catch (error) {
+      if (error instanceof DownloadNavigationError) return null;
+      throw error;
+    }
   }
   async _submit(intent) {
     const method = intent.method === "GET" ? null : intent.method;
@@ -3013,16 +3056,29 @@ class Page {
       });
     }
     if (event !== "download") return undefined;
+    return this._waitForDownload(opts);
+  }
+  _recordDownload(entry) {
+    const download = makeDownload(entry);
+    (this._downloads ??= []).push(download);
+    this._emit("download", download);
+  }
+  async _waitForDownload(opts = {}) {
+    const timeout = opts.timeout ?? 30000;
     await this._ensureLive();
-    if (this._session == null) return undefined;
     const start = Date.now();
-    while (Date.now() - start < timeout) {
+    while (timeout === 0 || Date.now() - start < timeout) {
+      if (this._closed) throw new Error("page is closed");
+      if (this._downloads?.length) return this._downloads.shift();
       let raw;
       try {
-        raw = await native.liveEvalEngine(
-          this._session,
-          "globalThis.__RESULT = JSON.stringify((__tsNs.downloads || []).splice(0));",
-        );
+        raw =
+          this._session == null
+            ? null
+            : await native.liveEvalEngine(
+                this._session,
+                "globalThis.__RESULT = JSON.stringify((__tsNs.downloads || []).splice(0));",
+              );
       } catch {
         raw = null;
       }
@@ -3032,10 +3088,13 @@ class Page {
       } catch {
         entries = [];
       }
-      if (entries.length) return makeDownload(entries[0]);
+      for (const entry of entries) this._recordDownload(entry);
+      if (this._downloads?.length) return this._downloads.shift();
       await new Promise((r) => setTimeout(r, 30)); // let the concurrent click drive + push
     }
-    return undefined;
+    const error = new Error(`Timeout ${timeout}ms exceeded while waiting for event download`);
+    error.name = "TimeoutError";
+    throw error;
   }
   async waitForResponse(matcher, opts = {}) {
     const test = networkWaitMatcher(matcher, this._context._baseURL);
@@ -3763,19 +3822,21 @@ function makeDownload(entry) {
   const fs = require("node:fs");
   const os = require("node:os");
   const path = require("node:path");
+  const filename =
+    path.basename((entry.filename || "download").replaceAll("\\", "/")) || "download";
   const content =
     entry.bodyBytes == null ? Buffer.from(entry.content ?? "") : Buffer.from(entry.bodyBytes);
   let cached = null;
   const writeTemp = () => {
     if (cached) return cached;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-surf-dl-"));
-    const p = path.join(dir, entry.filename || "download");
+    const p = path.join(dir, filename);
     fs.writeFileSync(p, content);
     cached = p;
     return p;
   };
   return {
-    suggestedFilename: () => entry.filename || "download",
+    suggestedFilename: () => filename,
     url: () => entry.url || "",
     async path() {
       return writeTemp();

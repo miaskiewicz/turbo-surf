@@ -7,7 +7,11 @@
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import test from "node:test";
+
+const require = createRequire(import.meta.url);
+const native = require("../crates/turbo-surf-napi/index.js");
 
 let shim;
 try {
@@ -787,6 +791,123 @@ test("page.screenshot renders synthetic pixels (no browser)", async () => {
   const png = await p.screenshot();
   assert.ok(Buffer.isBuffer(png) && png.length > 0);
   assert.deepEqual([...png.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+});
+
+// A repeat capture must serve from the page's loaded-image state, not refetch
+// (even no-store resources) — and any snapshot change must invalidate.
+test("page.screenshot retains loaded image bytes across captures, invalidates on change", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    if (url.pathname.startsWith("/img/")) {
+      server.requests.push(url.pathname);
+      res.writeHead(200, {
+        "content-type": "image/png",
+        "cache-control": "no-store",
+      });
+      return res.end(
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      );
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(
+      "<!doctype html><body>" +
+        '<img src="/img/a.png" width="8" height="8"><img src="/img/b.png" width="8" height="8">' +
+        "</body>",
+    );
+  });
+  server.requests = [];
+  const base = await listen(server);
+  try {
+    const p = newPage();
+    await p.goto(`${base}/page`, { waitUntil: "load" });
+    const imageRequests = () => server.requests.filter((u) => u.startsWith("/img/")).length;
+    const first = await p.screenshot({ type: "png" });
+    const afterFirst = imageRequests();
+    assert.ok(afterFirst >= 2);
+    const second = await p.screenshot({ type: "png" });
+    assert.equal(imageRequests(), afterFirst, "a repeat capture must not refetch images");
+    assert.ok(first.equals(second), "retained bytes must render byte-identical pixels");
+    // Content change invalidates the retained map: the new snapshot fetches again.
+    p._html = p._html.replace("/img/b.png", "/img/c.png");
+    await p.screenshot({ type: "png" });
+    assert.ok(imageRequests() > afterFirst, "changed content must refetch the new asset");
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+// Stylesheet + image preparation are independent fetches; they must run
+// concurrently (bounded) instead of one-at-a-time.
+test("page.screenshot prepares stylesheet and image assets concurrently", async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    if (url.pathname === "/s.css") {
+      server.requests.push(url.pathname);
+      res.writeHead(200, { "content-type": "text/css" });
+      return setTimeout(() => res.end("body{margin:0}"), 30);
+    }
+    if (url.pathname.startsWith("/img/")) {
+      server.requests.push(url.pathname);
+      res.writeHead(200, { "content-type": "image/png" });
+      return setTimeout(
+        () =>
+          res.end(
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+              "base64",
+            ),
+          ),
+        30,
+      );
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    server.requests.push(url.pathname);
+    res.end(
+      "<!doctype html><head><link rel='stylesheet' href='/s.css'></head><body>" +
+        '<img src="/img/a.png" width="8" height="8"><img src="/img/b.png" width="8" height="8">' +
+        "</body>",
+    );
+  });
+  server.requests = [];
+  const base = await listen(server);
+  // Instrument the native fetch surfaces to observe peak in-flight fetches.
+  const peaks = { images: 0, css: 0 };
+  let active = { images: 0, css: 0 };
+  const origBytes = native.fetchBytes;
+  const origCookies = native.fetchWithCookies;
+  native.fetchBytes = async (...args) => {
+    active.images++;
+    peaks.images = Math.max(peaks.images, active.images);
+    try {
+      return await origBytes(...args);
+    } finally {
+      active.images--;
+    }
+  };
+  native.fetchWithCookies = async (...args) => {
+    active.css++;
+    peaks.css = Math.max(peaks.css, active.css);
+    try {
+      return await origCookies(...args);
+    } finally {
+      active.css--;
+    }
+  };
+  try {
+    const p = newPage();
+    await p.goto(`${base}/page`, { waitUntil: "load" });
+    const png = await p.screenshot({ type: "png", images: true, externalCss: true });
+    assert.ok(png.length > 0);
+    assert.ok(peaks.images >= 2, `image fetches must overlap (peak ${peaks.images})`);
+    assert.ok(peaks.css >= 1, "the stylesheet must be fetched for a styled render");
+  } finally {
+    native.fetchBytes = origBytes;
+    native.fetchWithCookies = origCookies;
+    await new Promise((r) => server.close(r));
+  }
 });
 
 test("honest throws: pixel / input / network-interception", async () => {

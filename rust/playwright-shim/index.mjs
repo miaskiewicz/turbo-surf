@@ -4491,10 +4491,22 @@ function fixtureUses(keys, frames = getSkipStack()) {
   return result;
 }
 
+function recordTestError(info, error) {
+  if (error instanceof AggregateError) {
+    for (const nested of error.errors) recordTestError(info, nested);
+    return;
+  }
+  if (error === SKIP_SIGNAL || info.errors.includes(error)) return;
+  info.status = "failed";
+  info.errors.push(error);
+  info.error ??= error;
+}
+
 async function invokeTestBody(fn, arg, info, expectedFailure) {
   try {
     await fn(arg, info);
   } catch (error) {
+    if (error !== SKIP_SIGNAL) recordTestError(info, error);
     if (error === SKIP_SIGNAL || !expectedFailure) throw error;
     return;
   }
@@ -4517,6 +4529,7 @@ async function finishAttempt(plan, fixtures, info, errors) {
     try {
       await invokeFixtureFunction(hook, fixtures, info);
     } catch (error) {
+      recordTestError(info, error);
       errors.push(error);
     }
   }
@@ -4531,7 +4544,9 @@ async function executeAttempt(plan, t) {
   const info = makeTestInfo(plan.name);
   if (plan.expectedFailure) info.expectedStatus = "failed";
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
-  const fixtures = await openFixtures(plan.baseDefs, defs, info);
+  const fixtures = await openFixtures(plan.baseDefs, defs, info, (error) =>
+    recordTestError(info, error),
+  );
   return activeAttemptStore.run({ info, fixtures, plan }, async () => {
     const errors = [];
     try {
@@ -4540,7 +4555,10 @@ async function executeAttempt(plan, t) {
       await fixtures.resolve(fixtureNames(plan.fn));
       await invokeTestBody(plan.fn, fixtures.arg, info, plan.expectedFailure);
     } catch (error) {
-      if (error !== SKIP_SIGNAL) errors.push(error);
+      if (error !== SKIP_SIGNAL) {
+        recordTestError(info, error);
+        errors.push(error);
+      } else info.status = "skipped";
     } finally {
       await finishAttempt(plan, fixtures, info, errors);
     }
@@ -4614,7 +4632,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
     }
   };
   run.step.skip = async () => {};
-  run.info = () => makeTestInfo("");
+  run.info = () => activeAttemptStore.getStore()?.info ?? makeTestInfo("");
   run.beforeEach = (fn) => registerTestHook("beforeEach", fn);
   run.afterEach = (fn) => registerTestHook("afterEach", fn);
   run.beforeAll = (fn) => {
@@ -4665,13 +4683,23 @@ function makeDescribe() {
 }
 
 function makeTestInfo(title) {
-  return {
+  const info = {
     title,
     titlePath: [title],
     outputDir: "/tmp",
     outputPath: (...p) => ["/tmp", ...p].join("/"),
     snapshotPath: (...p) => ["/tmp", ...p].join("/"),
-    attach: async () => {},
+    attach: async (name, options) => {
+      const attachment = { name, contentType: options.contentType ?? "application/octet-stream" };
+      if (options.path !== undefined) {
+        attachment.path = options.path;
+        await readFile(options.path);
+      } else
+        attachment.body = Buffer.isBuffer(options.body)
+          ? Buffer.from(options.body)
+          : Buffer.from(String(options.body ?? ""));
+      info.attachments.push(attachment);
+    },
     attachments: [],
     skip: () => {},
     fixme: () => {},
@@ -4683,8 +4711,9 @@ function makeTestInfo(title) {
     status: "passed",
     expectedStatus: "passed",
     retry: 0,
-    project: { name: "turbo-surf" },
+    project: { name: process.env.TURBO_PW_PROJECT_NAME ?? "turbo-surf" },
   };
+  return info;
 }
 
 export const test = makeTestFn(makeBaseFixtures());

@@ -3686,3 +3686,24 @@ test("fixture teardown waits in dependency order and reports asynchronous failur
   assert.equal((result.stdout.match(/OUTER_THROW/g) ?? []).length, 1);
   assert.equal((result.stdout.match(/INNER_COMPLETE/g) ?? []).length, 1);
 });
+
+test("failed attempts share accurate TestInfo with hooks and fixture teardown", async () => {
+  const { runShimProbe } = await import("./runner-probes.mjs");
+  const result = await runShimProbe(`
+    const extended=base.extend({capture:async(_f,use,info)=>{
+      await use(true);
+      console.log('TEARDOWN_STATUS='+JSON.stringify({status:info.status,error:info.error?.message,errors:info.errors.length}));
+    }});
+    extended.afterEach((_f,info)=>console.log('HOOK_STATUS='+JSON.stringify({status:info?.status,current:extended.info().status,error:info?.error?.message,errors:info?.errors.length})));
+    extended('intentional failure',({capture})=>{assert.equal(capture,true);throw Error('intentional body failure');});
+  `);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(
+    result.stdout,
+    /HOOK_STATUS={"status":"failed","current":"failed","error":"intentional body failure","errors":1}/,
+  );
+  assert.match(
+    result.stdout,
+    /TEARDOWN_STATUS={"status":"failed","error":"intentional body failure","errors":1}/,
+  );
+});

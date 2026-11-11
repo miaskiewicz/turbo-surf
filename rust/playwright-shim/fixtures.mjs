@@ -39,7 +39,7 @@ async function startFixture(name, def, arg, testInfo, teardowns) {
   });
 }
 
-export async function openFixtures(baseDefs, extDefs, testInfo) {
+export async function openFixtures(baseDefs, extDefs, testInfo, onError = () => {}) {
   const arg = {};
   const teardowns = [];
   const resolved = new Set();
@@ -74,6 +74,7 @@ export async function openFixtures(baseDefs, extDefs, testInfo) {
         await record.completion;
       } catch (error) {
         errors.push(error);
+        onError(error);
       }
     }
     if (errors.length) throw new AggregateError(errors, "Fixture teardown failed");

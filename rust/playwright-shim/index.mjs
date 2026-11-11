@@ -3879,6 +3879,13 @@ const skipStackStore = new AsyncLocalStorage();
 const activeTStore = new AsyncLocalStorage();
 const getSkipStack = () => skipStackStore.getStore() ?? [];
 const getActiveT = () => activeTStore.getStore() ?? null;
+// Direct context access keeps regression tests out of node:test's registrar.
+export const __internals = Object.freeze({
+  skipStackStore,
+  activeTStore,
+  getSkipStack,
+  getActiveT,
+});
 const describeSkipped = () => getSkipStack().some((f) => f.skip);
 const isDeclareForm = (args) => typeof args[0] === "string" && typeof args[1] === "function";
 function skipConditionMet(args) {

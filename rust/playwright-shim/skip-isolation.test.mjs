@@ -1,11 +1,7 @@
-// Regression for #284: `activeT` and the describe-skip stack used to be
-// module-level mutables, so concurrent node:test runs that touched the shim
-// clobbered each other's active context. The AsyncLocalStorage-backed storage
-// keeps each frame isolated. This test drives two concurrent async bodies,
-// each setting up and reading back a pw.describe scope with a conditional
-// skip, and asserts neither leaks into the other's registration decisions.
-
+// Regression for #284/#299: exercise the actual ALS slots without registering
+// node:test suites inside an already-running test body.
 import assert from "node:assert/strict";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import test from "node:test";
 
 let shim;
@@ -15,50 +11,50 @@ try {
   console.log("shim: native addon not built, skipping —", e.message);
   process.exit(0);
 }
-const { test: pw } = shim;
+const { test: pw, __internals } = shim;
 
-// FIXME(turbo-surf#299): nesting `pw.describe()` / `pw()` inside a running
-// node:test parent deadlocks on the CI runner (300s --test-timeout kills
-// the parent test). The #284 fix (AsyncLocalStorage-backed activeT) is
-// shipped and covered by local runs; this regression is rewritten in v0.8.3
-// to drive the ALS slots directly rather than through node:test's own
-// registrar. See miaskiewicz/turbo-surf#299.
-test.skip("shim describe skip-frames are per-context under concurrent registration", async () => {
-  // Each body registers a describe. Inside the body, a conditional skip
-  // either flips the local frame (a) or is a no-op (b). A shared module-level
-  // stack would let (a)'s skip mark (b)'s frame when their bodies interleave,
-  // since pw.describe pushes/pops an array. We yield to the microtask queue
-  // in between to force the interleave even though the bodies are sync.
-  const log = [];
-  const a = (async () => {
-    pw.describe("race-A", () => {
-      pw.skip(true, "A"); // sets frame.skip = true on A's stack
-      log.push("A-body");
-    });
-  })();
-  const b = (async () => {
-    await Promise.resolve();
-    pw.describe("race-B", () => {
-      pw.skip(false, "B"); // condition false → no-op
-      log.push("B-body");
-    });
-  })();
-  await Promise.all([a, b]);
-  assert.deepEqual(log.sort(), ["A-body", "B-body"]);
+test("shim describe skip-frames remain isolated across concurrent async contexts", async () => {
+  const { skipStackStore, getSkipStack } = __internals;
+  const first = [{ skip: false }];
+  const second = [{ skip: false }];
+  await Promise.all([
+    skipStackStore.run(first, async () => {
+      await nextTurn();
+      pw.skip(true, "first only");
+      await nextTurn();
+      assert.equal(getSkipStack(), first);
+      assert.equal(getSkipStack()[0].skip, true);
+    }),
+    skipStackStore.run(second, async () => {
+      await nextTurn();
+      pw.skip(false, "second stays enabled");
+      await nextTurn();
+      assert.equal(getSkipStack(), second);
+      assert.equal(getSkipStack()[0].skip, false);
+    }),
+  ]);
+  assert.deepEqual(getSkipStack(), []);
 });
 
-test.skip("shim activeT is per-context under concurrent registration", async () => {
-  // Two pw.test registrations in parallel: both read pw.info() / runtime
-  // pw.skip against the wrong frame only if activeT is module-global. With
-  // per-context ALS storage, each registration resolves cleanly.
-  const errors = [];
-  const register = async (name) => {
-    try {
-      pw(name, async () => {});
-    } catch (e) {
-      errors.push(`${name}: ${e.message}`);
-    }
-  };
-  await Promise.all([register("rt-A"), register("rt-B"), register("rt-C")]);
-  assert.deepEqual(errors, []);
+test("shim active test remains isolated across concurrent async contexts", async () => {
+  const { activeTStore, getActiveT } = __internals;
+  const skipped = [];
+  await Promise.all(
+    ["first", "second", "third"].map(async (name) => {
+      const context = { skip: (reason) => skipped.push([name, reason]) };
+      await activeTStore.run(context, async () => {
+        await nextTurn();
+        assert.equal(getActiveT(), context);
+        assert.throws(() => pw.skip(true, name));
+        await nextTurn();
+        assert.equal(getActiveT(), context);
+      });
+    }),
+  );
+  assert.deepEqual(skipped.toSorted(), [
+    ["first", "first"],
+    ["second", "second"],
+    ["third", "third"],
+  ]);
+  assert.equal(getActiveT(), null);
 });

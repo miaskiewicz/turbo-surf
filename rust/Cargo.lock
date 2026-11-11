@@ -6129,6 +6129,7 @@ dependencies = [
 name = "turbo-surf-napi"
 version = "0.8.2"
 dependencies = [
+ "image",
  "napi",
  "napi-build",
  "napi-derive",

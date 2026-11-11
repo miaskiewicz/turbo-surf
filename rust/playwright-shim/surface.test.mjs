@@ -7,6 +7,9 @@
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 let shim;
@@ -2026,4 +2029,28 @@ test("selector counts avoid materializing match payloads (#461)", async () => {
   assert.equal(await page.locator("li").filter({ hasText: "one" }).count(), 1);
   assert.equal(await page.locator("#missing").count(), 0);
   await page.close();
+});
+test("screenshot encodes JPEG type, inferred paths, and quality (#467)", async () => {
+  const p = newPage();
+  const directory = await mkdtemp(join(tmpdir(), "surf-jpeg-"));
+  await p.setContent("<style>body{background:linear-gradient(red,blue)}</style><p>jpeg output</p>");
+  try {
+    const png = await p.screenshot({ images: false, externalCss: false });
+    assert.equal(png.subarray(0, 4).toString("hex"), "89504e47");
+    const low = await p.screenshot({ type: "jpeg", quality: 10 });
+    const high = await p.screenshot({ type: "jpeg", quality: 90 });
+    assert.equal(low.subarray(0, 2).toString("hex"), "ffd8");
+    assert.equal(high.subarray(0, 2).toString("hex"), "ffd8");
+    assert.ok(!low.equals(high));
+    const path = join(directory, "inferred.JPG");
+    const inferred = await p.screenshot({ path });
+    assert.equal(inferred.subarray(0, 2).toString("hex"), "ffd8");
+    assert.deepEqual(await readFile(path), inferred);
+    await assert.rejects(() => p.screenshot({ type: "jpeg", quality: 101 }), /quality/);
+    await assert.rejects(() => p.screenshot({ type: "png", quality: 50 }), /quality/);
+    await assert.rejects(() => p.screenshot({ type: "unsupported" }), /type/);
+  } finally {
+    await p.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

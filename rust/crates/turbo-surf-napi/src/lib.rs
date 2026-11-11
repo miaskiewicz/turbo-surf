@@ -6,6 +6,8 @@
 
 mod document_response;
 mod parse_cache;
+mod screenshot_output;
+pub use screenshot_output::screenshot_jpeg;
 mod session;
 // Re-export the live-session napi free functions so they're reachable from the crate
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;

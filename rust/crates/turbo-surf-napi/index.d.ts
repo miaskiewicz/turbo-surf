@@ -158,6 +158,8 @@ export function imageUrls(html: string): string[];
 /** Like `*WithCss` but also paints `<img>`/`background-image` boxes from the
  * `images` map (each `imageUrls` ref → its fetched bytes). PNG/JPEG are drawn;
  * other formats fall back to a placeholder. */
+/** Re-encode native PNG output as JPEG with quality 0..100 (default 80). */
+export function screenshotJpeg(png: Buffer, quality?: number): Buffer;
 export function screenshotWithAssets(
   html: string,
   externalCss: string,

@@ -3597,6 +3597,7 @@ function makeNetResponse(e) {
         ? value
         : `${all[name]}${name === "set-cookie" ? "\n" : ", "}${value}`;
   }
+  let response = null;
   const req = {
     url: () => e.url,
     method: () => e.method || "GET",
@@ -3604,8 +3605,11 @@ function makeNetResponse(e) {
     postData: () => null,
     resourceType: () => "fetch",
     failure: () => (e.status === 0 ? { errorText: e.error || "net::ERR_FAILED" } : null),
+    async response() {
+      return e.status > 0 ? response : null;
+    },
   };
-  return {
+  response = {
     url: () => e.url,
     status: () => e.status,
     statusText: () => e.statusText ?? "",
@@ -3638,6 +3642,7 @@ function makeNetResponse(e) {
       return null;
     },
   };
+  return response;
 }
 
 // A Playwright-like Download built from a captured client-side export (a `<a download>`

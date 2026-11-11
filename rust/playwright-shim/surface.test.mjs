@@ -4311,3 +4311,30 @@ test("Default locator actions wait for enabled editable visible controls (#346)"
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Completed emitted requests link back to their exact response (#344)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/api") {
+      res.setHeader("content-type", "application/json");
+      res.end('{"state":"owed"}');
+    } else res.end('<script>fetch("/api")</script>');
+  });
+  const base = await listen(server);
+  const page = newPage();
+  const completed = [];
+  page.on("requestfinished", (request) => {
+    if (request.url().endsWith("/api")) completed.push(request);
+  });
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    assert.equal(completed.length, 1);
+    const response = await completed[0].response();
+    assert.equal(response.request(), completed[0]);
+    assert.equal(response.status(), 200);
+    assert.deepEqual(await response.json(), { state: "owed" });
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

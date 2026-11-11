@@ -2820,6 +2820,12 @@ test("fill edits contenteditable text with input events and a collapsed caret (#
   const base = await listen(server),
     p = newPage();
   try {
+    await p.setContent('<div id="static" contenteditable="true">old</div>');
+    await p.locator("#static").fill("static edit");
+    assert.equal(
+      await p.evaluate(() => document.querySelector("#static").textContent),
+      "static edit",
+    );
     await p.goto(base, { waitUntil: "networkidle" });
     await p.locator("#field").fill("new");
     assert.deepEqual(

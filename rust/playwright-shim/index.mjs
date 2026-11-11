@@ -780,6 +780,12 @@ class Locator {
       Number.isNaN(Number(text))
     )
       throw new Error("Cannot type text into input[type=number]");
+    if (!this._canDriveLive && match) {
+      const editable = native.attrOf(this._html, match.node, "contenteditable");
+      if (["", "true", "plaintext-only"].includes(editable?.toLowerCase())) {
+        await this._page._ensureLive();
+      }
+    }
     if (this._canDriveLive) return void (await this._driveLive("fill", text));
     this._page._html = native.fillNode(this._html, this._requireNode(), text);
   }

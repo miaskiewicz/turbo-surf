@@ -31,9 +31,21 @@ pub fn is_enabled(tree: &Tree, h: Handle) -> bool {
     tree.get_attribute(h, "disabled").is_none()
 }
 
-/// Has the `checked` attribute (static model of `.checked`).
+/// Native checkbox/radio or supported ARIA checked state.
 pub fn is_checked(tree: &Tree, h: Handle) -> bool {
-    tree.get_attribute(h, "checked").is_some()
+    if tree.tag_name(h).as_deref() == Some("INPUT")
+        && matches!(tree.get_attribute(h, "type"), Some("checkbox" | "radio"))
+    {
+        return tree.get_attribute(h, "checked").is_some();
+    }
+    tree.get_attribute(h, "role").is_some_and(|roles| {
+        roles.split_whitespace().any(|role| {
+            matches!(
+                role,
+                "checkbox" | "radio" | "switch" | "menuitemcheckbox" | "menuitemradio"
+            )
+        })
+    }) && tree.get_attribute(h, "aria-checked") == Some("true")
 }
 
 fn is_content_editable(tree: &Tree, h: Handle) -> bool {
@@ -59,7 +71,11 @@ pub fn is_editable(tree: &Tree, h: Handle) -> bool {
 pub fn is_empty(tree: &Tree, h: Handle) -> bool {
     match tree.tag_name(h).as_deref() {
         Some("INPUT") => input_value_of(tree, h).trim().is_empty(),
-        Some("TEXTAREA") => tree.get_attribute(h, "value").map_or_else(|| tree.text_content(h), str::to_string).trim().is_empty(),
+        Some("TEXTAREA") => tree
+            .get_attribute(h, "value")
+            .map_or_else(|| tree.text_content(h), str::to_string)
+            .trim()
+            .is_empty(),
         _ => text_of(tree, h).is_empty(),
     }
 }
@@ -131,7 +147,7 @@ mod tests {
     #[test]
     fn enabled_checked_editable() {
         let tree = Tree::parse(
-            "<input id='a'><input id='b' disabled><input id='c' checked><input id='d' readonly>",
+            "<input id='a'><input id='b' disabled><input id='c' type='checkbox' checked><input id='d' readonly>",
         );
         assert!(is_enabled(&tree, first(&tree, "#a")));
         assert!(!is_enabled(&tree, first(&tree, "#b")));
@@ -140,6 +156,15 @@ mod tests {
         assert!(is_editable(&tree, first(&tree, "#a")));
         assert!(!is_editable(&tree, first(&tree, "#b"))); // disabled
         assert!(!is_editable(&tree, first(&tree, "#d"))); // readonly
+    }
+
+    #[test]
+    fn checked_state_requires_native_type_or_aria_role() {
+        let tree = Tree::parse("<div id='aria' role='checkbox' aria-checked='true'></div><div id='plain' checked></div><input id='text' checked><div id='mixed' role='switch' aria-checked='mixed'></div>");
+        assert!(is_checked(&tree, first(&tree, "#aria")));
+        for selector in ["#plain", "#text", "#mixed"] {
+            assert!(!is_checked(&tree, first(&tree, selector)));
+        }
     }
 
     #[test]

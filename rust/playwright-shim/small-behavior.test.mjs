@@ -22,3 +22,27 @@ test("toBeEmpty uses control values and descendant text, including live dirty va
     await page.close();
   }
 });
+
+test("isChecked validates native and ARIA types and reads live checked state", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<input id="native" type="checkbox" checked><div id="aria" role="checkbox" aria-checked="true"></div><div id="plain" checked></div><input id="text" checked>',
+    );
+    assert.equal(await page.locator("#native").isChecked(), true);
+    assert.equal(await page.locator("#aria").isChecked(), true);
+    await assert.rejects(
+      () => page.locator("#plain").isChecked(),
+      /Not a checkbox or radio button/,
+    );
+    await assert.rejects(() => page.locator("#text").isChecked(), /Not a checkbox or radio button/);
+    await page._ensureLive();
+    await page._sessionEval(
+      "document.querySelector('#native').checked = false; document.querySelector('#aria').setAttribute('aria-checked', 'mixed');",
+    );
+    assert.equal(await page.locator("#native").isChecked(), false);
+    assert.equal(await page.locator("#aria").isChecked(), false);
+  } finally {
+    await page.close();
+  }
+});

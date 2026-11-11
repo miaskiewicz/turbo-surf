@@ -584,8 +584,15 @@ class Locator {
     return !(await this.isVisible());
   }
   async isChecked() {
-    const n = this._node();
-    return n != null && native.isChecked(this._html, n);
+    return this._readElement((element) => {
+      if (element.tagName === "INPUT" && /^(checkbox|radio)$/.test(element.type))
+        return element.checked;
+      const roles = ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"];
+      if ((element.getAttribute("role") ?? "").split(/\s+/).some((role) => roles.includes(role))) {
+        return element.getAttribute("aria-checked") === "true";
+      }
+      throw new Error("Not a checkbox or radio button");
+    });
   }
   async isEnabled() {
     const n = this._node();

@@ -1407,13 +1407,15 @@ test("waitForResponse polls the native drain while waiting (live session)", asyn
   assert.ok(drainCalls >= 2, `drain must be polled while waiting (got ${drainCalls})`);
 });
 
-test("waitForResponse returns a buffered response from the current action", async () => {
+test("waitForResponse rejects previously buffered responses from the current action", async () => {
   const p = newPage();
   const mk = (url, status, seq) => ({ url: () => url, status: () => status, _seq: seq });
   p._actionSeq = 3;
   p._recentResponses = [mk("https://x/api/details", 200, 3)]; // drained THIS action, pre-call
-  const got = await p.waitForResponse((r) => r.url().includes("/api/details"), { timeout: 1000 });
-  assert.equal(got.status(), 200);
+  await assert.rejects(
+    p.waitForResponse((r) => r.url().includes("/api/details"), { timeout: 10 }),
+    { name: "TimeoutError" },
+  );
 });
 
 // Locator.getByTestId must scope to the parent locator's subtree (like .locator()), not the

@@ -3816,3 +3816,35 @@ test("once removes before invocation and supports original callback removal (#37
   assert.deepEqual(order, ["duplicate", "duplicate"]);
   await page.close();
 });
+test("Context headers reach authored and subsequent native page fetches (#392)", async () => {
+  const requests = [];
+  const server = createServer((req, res) => {
+    requests.push({ url: req.url, headers: req.headers });
+    res.setHeader("content-type", "text/html");
+    res.end(req.url === "/" ? '<script>fetch("/authored")</script>' : "OK");
+  });
+  const base = await listen(server);
+  const ctx = new BrowserContext({ extraHTTPHeaders: { "x-probe": "yes" } });
+  try {
+    const p = await ctx.newPage();
+    await p.goto(base, { waitUntil: "networkidle" });
+    await p.evaluate(() => fetch("/fetch").then((response) => response.text()));
+    assert.equal(requests.find((request) => request.url === "/").headers["x-probe"], "yes");
+    assert.equal(requests.find((request) => request.url === "/authored").headers["x-probe"], "yes");
+    assert.equal(requests.find((request) => request.url === "/fetch").headers["x-probe"], "yes");
+    await ctx.setExtraHTTPHeaders({ "x-next": "new" });
+    await p.evaluate(() => fetch("/next").then((response) => response.text()));
+    const next = requests.find((request) => request.url === "/next").headers;
+    assert.equal(next["x-next"], "new");
+    assert.equal(next["x-probe"], undefined);
+    await p.setExtraHTTPHeaders({});
+    await p.evaluate(() => fetch("/cleared").then((response) => response.text()));
+    assert.equal(
+      requests.find((request) => request.url === "/cleared").headers["x-next"],
+      undefined,
+    );
+  } finally {
+    await ctx.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

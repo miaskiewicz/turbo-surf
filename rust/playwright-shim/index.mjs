@@ -2956,6 +2956,7 @@ class Page {
   }
   async setExtraHTTPHeaders(headers) {
     this._context._headers = { ...headers };
+    this._context._configureNative();
   }
   _configureNative() {
     native.requestStateConfigure(
@@ -2964,6 +2965,7 @@ class Page {
         colorScheme: this._media?.colorScheme ?? this._context._colorScheme,
         reducedMotion: this._media?.reducedMotion ?? this._context._reducedMotion,
         locale: this._context._locale,
+        extraHTTPHeaders: this._context._headers,
       }),
     );
   }
@@ -3663,7 +3665,13 @@ class BrowserContext {
     this._bindings = new Map();
     this._pages = [];
     this._listeners = new Map();
-    if (this._colorScheme || this._reducedMotion || this._locale) this._configureNative();
+    if (
+      this._colorScheme ||
+      this._reducedMotion ||
+      this._locale ||
+      Object.keys(this._headers).length
+    )
+      this._configureNative();
   }
   _configureNative() {
     native.requestStateConfigure(
@@ -3672,6 +3680,7 @@ class BrowserContext {
         colorScheme: this._colorScheme,
         reducedMotion: this._reducedMotion,
         locale: this._locale,
+        extraHTTPHeaders: this._headers,
       }),
     );
     for (const page of this._pages) if (!page._closed) page._configureNative();
@@ -3724,6 +3733,7 @@ class BrowserContext {
   }
   async setExtraHTTPHeaders(headers) {
     this._headers = { ...headers };
+    this._configureNative();
   }
   async setDefaultTimeout() {}
   async setDefaultNavigationTimeout(timeout) {

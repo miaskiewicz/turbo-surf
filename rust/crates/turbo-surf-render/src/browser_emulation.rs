@@ -8,6 +8,8 @@ pub(crate) struct BrowserEmulation {
     pub(crate) color_scheme: Option<String>,
     pub(crate) reduced_motion: Option<String>,
     pub(crate) locale: Option<String>,
+    #[serde(default, rename = "extraHTTPHeaders")]
+    pub(crate) extra_http_headers: std::collections::BTreeMap<String, String>,
 }
 
 impl BrowserEmulation {
@@ -19,6 +21,11 @@ impl BrowserEmulation {
         if let Some(locale) = &self.locale {
             headers.insert("accept-language".to_string(), locale.clone());
         }
+        headers.extend(
+            self.extra_http_headers
+                .iter()
+                .map(|(name, value)| (name.to_ascii_lowercase(), value.clone())),
+        );
         headers.extend(
             authored
                 .into_iter()
@@ -127,5 +134,26 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+    #[test]
+    fn extra_headers_reach_transport_with_case_insensitive_request_overrides() {
+        let options = BrowserEmulation {
+            extra_http_headers: std::collections::BTreeMap::from([(
+                "X-Probe".into(),
+                "context".into(),
+            )]),
+            ..Default::default()
+        };
+        assert_eq!(
+            options
+                .request_headers(Default::default())
+                .get("x-probe")
+                .map(String::as_str),
+            Some("context")
+        );
+        let authored = std::collections::BTreeMap::from([("x-PROBE".into(), "request".into())]);
+        let headers = options.request_headers(authored);
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers.get("x-probe").map(String::as_str), Some("request"));
     }
 }

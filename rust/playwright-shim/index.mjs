@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { isDeepStrictEqual } from "node:util";
+import { equalValues } from "./equality.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -4074,7 +4074,7 @@ class ValueExpect extends BaseExpect {
     this._ok(deepEqual(this._v, x), `expected ${json(this._v)} to equal ${json(x)}`);
   }
   toStrictEqual(x) {
-    return this.toEqual(x);
+    this._ok(deepEqual(this._v, x, true), `expected ${json(this._v)} to strictly equal ${json(x)}`);
   }
   toContain(x) {
     const pass =
@@ -4225,14 +4225,8 @@ function matchesThrownError(error, expected) {
   throw new TypeError("toThrow expects a string, RegExp, Error or error constructor");
 }
 
-function deepEqual(a, b) {
-  if (typeof b?.asymmetricMatch === "function") return b.asymmetricMatch(a);
-  if (typeof a?.asymmetricMatch === "function") return a.asymmetricMatch(b);
-  if (Object.is(a, b)) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a == null || b == null) return false;
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  return ka.length === kb.length && ka.every((k) => deepEqual(a[k], b[k]));
+function deepEqual(a, b, strict = false) {
+  return equalValues(a, b, strict);
 }
 function subset(want, got) {
   if (typeof want?.asymmetricMatch === "function") return want.asymmetricMatch(got);
@@ -4241,7 +4235,7 @@ function subset(want, got) {
   if (Array.isArray(want)) {
     if (!Array.isArray(got) || want.length !== got.length) return false;
   } else if (Object.prototype.toString.call(want) !== "[object Object]") {
-    return isDeepStrictEqual(want, got);
+    return deepEqual(want, got);
   }
   return Reflect.ownKeys(want)
     .filter((key) => Object.prototype.propertyIsEnumerable.call(want, key))

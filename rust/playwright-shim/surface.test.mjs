@@ -3434,3 +3434,42 @@ test("promise rejection assertions preserve not and error matchers (#382)", asyn
   await assert.doesNotReject(expect(Promise.resolve(2)).resolves.not.toBe(3));
   await assert.rejects(expect(Promise.resolve("same")).rejects.not.toThrow("other"));
 });
+
+test("deep equality handles typed values symbols cycles and strictness (#381)", () => {
+  const token = Symbol("token");
+  for (const [left, right] of [
+    [new Date(0), new Date(1)],
+    [new Map([["a", 1]]), new Map([["a", 2]])],
+    [new Set([1]), new Set([2])],
+    [/one/i, /two/g],
+    [new Error("one"), new Error("two")],
+    [{ [token]: 1 }, { [token]: 2 }],
+    [new Uint8Array([1]), new Uint8Array([2])],
+  ])
+    assert.throws(() => expect(left).toEqual(right));
+  assert.doesNotThrow(() => expect({ a: undefined }).toEqual({}));
+  assert.throws(() => expect({ a: undefined }).toStrictEqual({}));
+  class Employee {
+    constructor() {
+      this.id = 1;
+    }
+  }
+  assert.doesNotThrow(() => expect(new Employee()).toEqual({ id: 1 }));
+  assert.throws(() => expect(new Employee()).toStrictEqual({ id: 1 }));
+  const left = { id: 1 };
+  left.self = left;
+  const right = { id: 1 };
+  right.self = right;
+  assert.doesNotThrow(() => expect(left).toEqual(right));
+  assert.doesNotThrow(() => expect(left).toStrictEqual(right));
+  assert.throws(() => expect(left).toEqual({ id: 1, self: { id: 2 } }));
+  assert.throws(() => expect([new Map([["a", 1]])]).toContainEqual(new Map([["a", 2]])));
+  assert.doesNotThrow(() =>
+    expect(new Set([{ id: 1 }, { id: 2 }])).toEqual(new Set([{ id: 2 }, { id: 1 }])),
+  );
+  const a = new Map();
+  a.set("self", a);
+  const b = new Map();
+  b.set("self", b);
+  assert.doesNotThrow(() => expect(a).toEqual(b));
+});

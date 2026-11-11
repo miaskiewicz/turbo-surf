@@ -3758,7 +3758,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   const run = (name, fn) => {
     const uses = fixtureUses(useKeys);
     const testDefs = { ...extDefs, ...uses };
-    const openTest = (info) => openFixtures(baseDefs, testDefs, info);
+    const openTest = (info) => openFixtures(baseDefs, testDefs, info, fixtureNames(fn));
     wireFixtureHooks(open);
     if (describeSkipped()) {
       nodeTest.skip(name, () => {});
@@ -3906,34 +3906,59 @@ function makeTestInfo(title) {
   };
 }
 
-// Resolve the fixture argument object. Base fixtures (browser → context → page →
-// request → baseURL) resolve first, then extensions in insertion order — so an
-// extension overriding a base name (e.g. `page`) already sees the base value in
-// `arg` when it runs, and replaces it via `use(val)`. Returns { arg, teardown }.
-async function openFixtures(baseDefs, extDefs, testInfo) {
+// Destructuring identifies requested fixtures without running unrelated factories.
+function fixtureNames(fn) {
+  const match = /^[^(]*\(\s*\{([^}]*)\}/.exec(String(fn));
+  if (!match) return [];
+  return match[1]
+    .split(",")
+    .map((field) => field.trim().split(/[:=]/, 1)[0].trim())
+    .filter(Boolean);
+}
+
+async function startFixture(name, def, arg, testInfo, teardowns) {
+  if (typeof def !== "function") {
+    arg[name] = def;
+    return;
+  }
+  await new Promise((settle, reject) => {
+    const used = (value) =>
+      new Promise((release) => {
+        arg[name] = value;
+        teardowns.push(release);
+        settle();
+      });
+    Promise.resolve()
+      .then(() => def(arg, used, testInfo))
+      .then(settle, reject);
+  });
+}
+
+async function openFixtures(baseDefs, extDefs, testInfo, requested) {
   const arg = {};
   const teardowns = [];
-  const resolve = async (name, def) => {
-    if (def === undefined) return;
-    if (typeof def !== "function") {
-      arg[name] = def;
-      return;
+  const resolved = new Set();
+  const resolving = new Set();
+  const resolveFixture = async (name, baseOnly = false) => {
+    const key = `${baseOnly ? "base:" : ""}${name}`;
+    if (resolved.has(key)) return;
+    if (resolving.has(key)) throw new Error(`Fixture dependency cycle at ${name}`);
+    const overridden = !baseOnly && Object.hasOwn(extDefs, name);
+    const defs = overridden ? extDefs : baseDefs;
+    if (!Object.hasOwn(defs, name)) throw new Error(`Unknown fixture ${name}`);
+    resolving.add(key);
+    const def = defs[name];
+    const dependencies = def === baseDefs.page ? ["context"] : fixtureNames(def);
+    for (const dependency of dependencies) {
+      await resolveFixture(dependency, overridden && dependency === name);
     }
-    await new Promise((settle, reject) => {
-      const used = (val) =>
-        new Promise((release) => {
-          arg[name] = val;
-          teardowns.push(release);
-          settle();
-        });
-      Promise.resolve(def(arg, used, testInfo)).then(() => settle(), reject);
-    });
+    await startFixture(name, def, arg, testInfo, teardowns);
+    resolving.delete(key);
+    resolved.add(key);
   };
-  // oxlint-disable no-await-in-loop
-  for (const name of ["browser", "context", "page", "request", "baseURL"])
-    await resolve(name, baseDefs[name]);
-  for (const name of Object.keys(extDefs)) await resolve(name, extDefs[name]);
-  // oxlint-enable no-await-in-loop
+  for (const name of requested ?? [...Object.keys(baseDefs), ...Object.keys(extDefs)]) {
+    await resolveFixture(name);
+  }
   const teardown = async () => {
     for (const release of teardowns.toReversed()) release();
   };

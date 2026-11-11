@@ -2490,3 +2490,37 @@ test("Frame.evaluate executes and awaits in the child realm and propagates error
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Frame locator interactions target the child and preserve nested frame scope (#443)", async () => {
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "text/html");
+    res.end(
+      "<button id=\"same\" onclick=\"document.body.setAttribute('data-clicked','host')\">Host</button><iframe name=\"child\" srcdoc=\"&lt;button id=same onclick=&quot;document.body.setAttribute('data-clicked','child')&quot;&gt;Child&lt;/button&gt;&lt;input id=entry&gt;\"></iframe>",
+    );
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    const frame = p.frame("child");
+    await frame.locator("#same").click();
+    assert.equal(await p.evaluate(() => document.body.getAttribute("data-clicked")), null);
+    assert.equal(await frame.evaluate(() => document.body.getAttribute("data-clicked")), "child");
+    await frame.locator("#entry").fill("child value");
+    assert.equal(await frame.evaluate(() => document.querySelector("#entry").value), "child value");
+    await frame.getByRole("button", { name: "Child" }).click();
+    await frame.evaluate(() => {
+      const nested = document.createElement("iframe");
+      nested.name = "nested";
+      nested.srcdoc = `<button id=same onclick="document.body.setAttribute('data-clicked','nested')">Nested</button>`;
+      document.body.appendChild(nested);
+    });
+    const nested = p.frame("nested");
+    await nested.locator("#same").click();
+    assert.equal(await nested.evaluate(() => document.body.getAttribute("data-clicked")), "nested");
+    assert.equal(await frame.evaluate(() => document.body.getAttribute("data-clicked")), "child");
+  } finally {
+    await p.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

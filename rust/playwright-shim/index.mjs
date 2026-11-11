@@ -670,8 +670,7 @@ class Locator {
           ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
           : null;
       if (leaf) {
-        const raw = await native.liveEvalEngine(
-          this._page._session,
+        const raw = await this._page._evalEngine(
           `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
         );
         let matches = [];
@@ -695,8 +694,7 @@ class Locator {
     // over a re-serialized snapshot can reorder portal'd nodes → wrong element clicked.
     if (this._getBy && this._page._session != null) {
       const g = this._getBy;
-      const raw = await native.liveEvalEngine(
-        this._page._session,
+      const raw = await this._page._evalEngine(
         `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
       );
       let matches = [];
@@ -900,8 +898,7 @@ class Locator {
     if (this._page._session == null) return null;
     if (this._testId) {
       const { attribute, source, flags, root } = this._testId;
-      const raw = await native.liveEvalEngine(
-        this._page._session,
+      const raw = await this._page._evalEngine(
         `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `document.querySelectorAll(${JSON.stringify(root)})` : "[document]"}; const hits = new Set(); for (const root of roots) for (const el of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(el.getAttribute(${JSON.stringify(attribute)}))) hits.add(el); } const all = Array.from(document.querySelectorAll('*')); const matches = all.filter(el => hits.has(el)); const n = ${this._index ?? 0}; globalThis.__RESULT = String(all.indexOf(matches[n < 0 ? matches.length + n : n])); })();`,
       );
       const idx = Number(raw);
@@ -917,8 +914,7 @@ class Locator {
           ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
           : null;
       if (leaf) {
-        const raw = await native.liveEvalEngine(
-          this._page._session,
+        const raw = await this._page._evalEngine(
           `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
         );
         let matches = [];
@@ -933,8 +929,7 @@ class Locator {
       }
     }
     if (this._selector) {
-      const raw = await native.liveEvalEngine(
-        this._page._session,
+      const raw = await this._page._evalEngine(
         `(() => { const els = document.querySelectorAll(${JSON.stringify(this._selector)}); const n = ${this._index ?? 0}; const i = n < 0 ? els.length + n : n; const list = []; const all = document.querySelectorAll('*'); for (let k = 0; k < all.length; k++) if (all[k] === els[i]) { globalThis.__RESULT = String(k); return; } globalThis.__RESULT = ''; })();`,
       );
       const n = raw ? Number(raw) : NaN;
@@ -942,8 +937,7 @@ class Locator {
     }
     if (this._getBy) {
       const g = this._getBy;
-      const raw = await native.liveEvalEngine(
-        this._page._session,
+      const raw = await this._page._evalEngine(
         `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
       );
       let matches = [];
@@ -1311,7 +1305,7 @@ class Frame {
   childFrames() {
     return this._parentPage.frames().filter((frame) => frame._parentFrame === this);
   }
-  _realmExpression(source) {
+  _realmExpression(source, helpers = false) {
     return `(() => {
       let child = globalThis;
       for (const index of ${JSON.stringify(this._path)}) {
@@ -1319,7 +1313,15 @@ class Frame {
         if (!host) throw new Error('turbo-surf: frame is detached');
         child = host.contentWindow;
       }
-      return child.Function(${JSON.stringify(`return (${source});`)})();
+      let code = ${JSON.stringify(`return (${source});`)};
+      if (${helpers}) {
+        // Compile the existing surf helpers in the child so their document and
+        // intrinsics belong to that realm rather than closing over the host.
+        const names = ['tcGetBy', 'tcResolveScoped', 'tcApplyHover'];
+        const prelude = names.map(name => '__G[' + JSON.stringify(name) + '] = (' + __tsNs[name].toString() + ');').join('');
+        code = 'const __G = {}; const __tsNs = __G;' + prelude + code;
+      }
+      return child.Function(code)();
     })()`;
   }
   async evaluate(script, arg) {
@@ -1376,11 +1378,24 @@ class Frame {
   _followIntent(intent) {
     return this._parentPage._followIntent(intent);
   }
-  _sessionDispatch(selector, index, kind, value) {
-    return this._parentPage._sessionDispatch(selector, index, kind, value);
+  _evalEngine(script) {
+    const expression = this._realmExpression(
+      `(() => { ${script}; return globalThis.__RESULT; })()`,
+      true,
+    );
+    return native.liveEvalEngine(this._session, `globalThis.__RESULT = ${expression};`);
   }
-  _sessionEval(script) {
-    return this._parentPage._sessionEval(script);
+  async _sessionDispatch(selector, index, kind, value) {
+    if (kind !== "isfocused") this._parentPage._actionSeq++;
+    const result = await this._sessionEval(interactionScript(selector, index ?? 0, kind, value));
+    if (result === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    return result;
+  }
+  async _sessionEval(script) {
+    const result = await this._evalEngine(script);
+    await this._parentPage._refreshFromSession();
+    await this._parentPage._drainBindings();
+    return result;
   }
   _redrain() {
     return this._parentPage._redrain();
@@ -1780,6 +1795,9 @@ class Page {
 
   // Drive an interaction in the live isolate (real DOM events → running app handlers →
   // re-render), then refresh the Page snapshot. `kind` is "click" | "fill".
+  _evalEngine(script) {
+    return native.liveEvalEngine(this._session, script);
+  }
   async _sessionDispatch(selector, index, kind, value) {
     // A new user interaction: responses produced by THIS action (and after) are "fresh"
     // for any waitForResponse paired with it; responses from before are stale. The

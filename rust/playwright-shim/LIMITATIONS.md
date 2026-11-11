@@ -124,7 +124,8 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `locator`, `getByRole`, `getByText`, `getByLabel`, `getByTestId`, `getByPlaceholder`, `getByAltText`, `getByTitle` | ✅ | `getByTestId` honors the context `testIdAttribute`. |
 | `click`, `dblclick`, `tap`, `fill`, `type`, `press`, `check`, `uncheck`, `setChecked`, `selectOption` | ✅ | DOM-level events in live sessions; static paths resolve navigation/form intents. Not hardware input. |
 | `evaluate`, `evaluateHandle` | ⚠️ | String and `(fn, arg)` forms run in V8 over rtdom. The current bridge returns string values; typed result/handle serialization is incomplete. |
-| `render`, `addScriptTag({content})` | ✅ | Runs page JS and re-renders the DOM (hydration). |
+| `render` | ✅ | Runs page JS over the snapshot and re-renders the DOM. |
+| `addStyleTag`, `addScriptTag` | ⚠️ | Inserts content, URL, or path sources into the live document and awaits external loads. Returns a locator for the inserted tag; generic ElementHandle support is tracked separately (#343). Module script injection rejects because its load-completion lifecycle is unsupported. |
 | `addInitScript` | ✅ | Stored on the context and installed before authored scripts in every frame of the live session — the top page plus every child frame (static `<iframe src>`, srcdoc, nested, dynamically created, blob URL). Page-level calls also render over the current HTML. |
 | `setExtraHTTPHeaders` | ✅ | **Real** — extra headers are sent on page navigation and linked-CSS fetches; not a global override of every live fetch/XHR request. |
 | `setContent`, `storageState`, `addCookies`, `context`, `request` | ✅ | |

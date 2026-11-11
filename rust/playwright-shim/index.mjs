@@ -2932,28 +2932,40 @@ class Page {
     if (this._live) await this._redrain();
   }
   async bringToFront() {}
-  async addStyleTag(opts = {}) {
+  addStyleTag(opts = {}) {
+    return this._addResourceTag("style", opts);
+  }
+  addScriptTag(opts = {}) {
+    return this._addResourceTag("script", opts);
+  }
+  async _addResourceTag(kind, opts) {
     const supplied = [opts.content != null, opts.url != null, opts.path != null].filter(
       Boolean,
     ).length;
-    if (supplied !== 1) throw new Error("addStyleTag requires exactly one of content, url or path");
+    if (supplied !== 1)
+      throw new Error(
+        `add${kind === "style" ? "Style" : "Script"}Tag requires exactly one of content, url or path`,
+      );
     const content = opts.path != null ? await readFile(opts.path, "utf8") : opts.content;
+    if (kind === "script" && opts.type === "module") {
+      throw new Error("addScriptTag module injection load completion is not supported");
+    }
+    const external = opts.url != null;
+    const tagName = kind === "script" ? "script" : external ? "link" : "style";
+    const waitForLoad = external;
     if (!this._live) await this._openLiveSession();
-    const token = `style-${(this._injectedTagSeq = (this._injectedTagSeq ?? 0) + 1)}`;
+    const token = `${kind}-${(this._injectedTagSeq = (this._injectedTagSeq ?? 0) + 1)}`;
     const result = await native.liveEvalExpression(
       this._session,
       `(async () => {
       try {
-        const tag = document.createElement(${opts.url != null ? '"link"' : '"style"'});
+        const tag = document.createElement(${JSON.stringify(tagName)});
         tag.setAttribute('data-ts-injected', ${JSON.stringify(token)});
-        ${
-          opts.url != null
-            ? `tag.rel = 'stylesheet'; tag.href = ${JSON.stringify(String(opts.url))};
-        const loaded = new Promise((resolve, reject) => { tag.onload = resolve; tag.onerror = () => reject(new Error('Unable to load stylesheet')); });`
-            : `tag.textContent = ${JSON.stringify(String(content))};`
-        }
+        ${kind === "script" && opts.type != null ? `tag.type = ${JSON.stringify(String(opts.type))};` : ""}
+        ${external ? (kind === "style" ? `tag.rel = 'stylesheet'; tag.href = ${JSON.stringify(String(opts.url))};` : `tag.src = ${JSON.stringify(String(opts.url))};`) : `tag.textContent = ${JSON.stringify(String(content))};`}
+        ${waitForLoad ? `const loaded = new Promise((resolve, reject) => { tag.onload = resolve; tag.onerror = () => reject(new Error('Unable to load ${kind}')); });` : ""}
         document.head.appendChild(tag);
-        ${opts.url != null ? "await loaded;" : ""}
+        ${waitForLoad ? "await loaded;" : ""}
         return JSON.stringify({ ok: true });
       } catch (error) { return JSON.stringify({ error: String(error.message || error) }); }
     })()`,
@@ -2962,9 +2974,6 @@ class Page {
     await this._refreshFromSession();
     if (outcome.error) throw new Error(outcome.error);
     return this.locator(`[data-ts-injected="${token}"]`);
-  }
-  async addScriptTag(opts = {}) {
-    if (opts.content) await this.render(opts.content);
   }
   storageState() {
     return this._context.storageState();

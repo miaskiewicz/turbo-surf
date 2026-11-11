@@ -3555,3 +3555,36 @@ test("Context locale configures native language and Intl without site cookies (#
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("addScriptTag executes content URL and path scripts in the live realm (#387)", async () => {
+  const server = createServer((req, res) => {
+    res.writeHead(req.url === "/missing.js" ? 404 : 200, { "content-type": "text/javascript" });
+    res.end("globalThis.externalMarker = 42");
+  });
+  const base = await listen(server);
+  const directory = await mkdtemp(join(tmpdir(), "surf-script-"));
+  const page = newPage();
+  try {
+    await page.setContent('<div id="target">old</div>');
+    await page._ensureLive();
+    assert.ok(await page.addScriptTag({ content: "globalThis.inlineMarker = 43" }));
+    assert.equal(await page.evaluate(() => globalThis.inlineMarker), 43);
+    assert.ok(await page.addScriptTag({ url: `${base}/script.js` }));
+    assert.equal(await page.evaluate(() => globalThis.externalMarker), 42);
+    await assert.rejects(
+      page.addScriptTag({ type: "module", content: "globalThis.moduleMarker = 45" }),
+      /module.*not supported/,
+    );
+    const path = join(directory, "script.js");
+    await writeFile(path, 'document.querySelector("#target").textContent = "path"');
+    await page.addScriptTag({ path });
+    assert.equal(await page.locator("#target").textContent(), "path");
+    await assert.rejects(page.addScriptTag({ url: `${base}/missing.js` }), /load|script/i);
+    await assert.rejects(page.addScriptTag({}), /content|url|path/i);
+  } finally {
+    await page.close();
+    await rm(directory, { recursive: true, force: true });
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -94,23 +94,118 @@ fn trimmed(s: Option<&str>) -> String {
     s.map(|v| v.trim().to_string()).unwrap_or_default()
 }
 
-/// Accessible name: aria-label > text > placeholder > value > title.
+fn normalized(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn image_name(tree: &Tree, h: Handle) -> Option<String> {
+    if tree.tag_name(h).as_deref() != Some("IMG") {
+        return None;
+    }
+    tree.get_attribute(h, "alt").map(normalized)
+}
+
+fn reference_name(tree: &Tree, h: Handle) -> String {
+    let label = normalized(tree.get_attribute(h, "aria-label").unwrap_or(""));
+    if !label.is_empty() {
+        return label;
+    }
+    if let Some(name) = image_name(tree, h) {
+        return name;
+    }
+    text_of(tree, h)
+}
+
+fn labelledby_name(tree: &Tree, h: Handle) -> Option<String> {
+    let targets: Vec<_> = id_list(tree, h, "aria-labelledby")
+        .into_iter()
+        .filter_map(|id| tree.get_element_by_id(&id))
+        .collect();
+    if targets.is_empty() {
+        return None;
+    }
+    Some(
+        targets
+            .into_iter()
+            .map(|target| reference_name(tree, target))
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn labelable(tree: &Tree, h: Handle) -> bool {
+    if tree.tag_name(h).as_deref() == Some("INPUT") {
+        return !tree
+            .get_attribute(h, "type")
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("hidden"));
+    }
+    matches!(
+        tree.tag_name(h).as_deref(),
+        Some("BUTTON" | "METER" | "OUTPUT" | "PROGRESS" | "SELECT" | "TEXTAREA")
+    )
+}
+
+fn associated_label(tree: &Tree, label: Handle, h: Handle) -> bool {
+    match tree.get_attribute(label, "for") {
+        Some(id) => !id.is_empty() && tree.get_element_by_id(id) == Some(h),
+        None => {
+            tree.descendants(label)
+                .into_iter()
+                .find(|&node| labelable(tree, node))
+                == Some(h)
+        }
+    }
+}
+
+fn native_label_name(tree: &Tree, h: Handle) -> Option<String> {
+    if !labelable(tree, h) {
+        return None;
+    }
+    let labels: Vec<_> = tree
+        .query_selector_all("label")
+        .iter()
+        .copied()
+        .filter(|&label| associated_label(tree, label, h))
+        .collect();
+    if labels.is_empty() {
+        return None;
+    }
+    Some(
+        labels
+            .into_iter()
+            .map(|label| reference_name(tree, label))
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+/// Accessible name from ordered ID references, ARIA labels, native labels and content.
 pub fn accessible_name(tree: &Tree, h: Handle) -> String {
+    if let Some(name) = labelledby_name(tree, h) {
+        return name;
+    }
+    let label = normalized(tree.get_attribute(h, "aria-label").unwrap_or(""));
+    if !label.is_empty() {
+        return label;
+    }
+    if let Some(name) = native_label_name(tree, h) {
+        return name;
+    }
+    if let Some(name) = image_name(tree, h) {
+        return name;
+    }
     let candidates = [
-        trimmed(tree.get_attribute(h, "aria-label")),
-        if tree.tag_name(h).as_deref() == Some("IMG") {
-            trimmed(tree.get_attribute(h, "alt"))
-        } else {
-            String::new()
-        },
-        tree.text_content(h).trim().to_string(),
+        text_of(tree, h),
         trimmed(tree.get_attribute(h, "placeholder")),
         trimmed(tree.get_attribute(h, "value")),
         trimmed(tree.get_attribute(h, "title")),
     ];
     candidates
         .into_iter()
-        .find(|s| !s.is_empty())
+        .find(|name| !name.is_empty())
+        .map(|name| normalized(&name))
         .unwrap_or_default()
 }
 
@@ -216,6 +311,23 @@ mod tests {
         assert_eq!(accessible_name(&t5, first(&t5, "a")), "T");
         let t6 = Tree::parse("<span></span>");
         assert_eq!(accessible_name(&t6, first(&t6, "span")), "");
+    }
+
+    #[test]
+    fn accessible_names_use_idref_order_native_labels_and_valid_empty_references() {
+        let tree = Tree::parse("<button id='named' aria-label='wrong' aria-labelledby='a b'>Fallback</button><span id='a' hidden>Pay</span><span id='b'>employees</span><label for='field'>Employee</label><label for='field'>name</label><input id='field'><label>Wrapped<input id='wrapped'></label><button id='empty' aria-labelledby='blank' aria-label='wrong'>fallback</button><span id='blank'></span><button id='self' aria-labelledby='self'>Self text</button>");
+        for (id, expected) in [
+            ("named", "Pay employees"),
+            ("field", "Employee name"),
+            ("wrapped", "Wrapped"),
+            ("empty", ""),
+            ("self", "Self text"),
+        ] {
+            assert_eq!(
+                accessible_name(&tree, tree.get_element_by_id(id).unwrap()),
+                expected
+            );
+        }
     }
 
     #[test]

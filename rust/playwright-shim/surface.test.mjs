@@ -4415,3 +4415,23 @@ test("exact text label and role names survive static scoped and live resolution 
   assert.equal(await page.evaluate(() => document.body.getAttribute("data-saved")), "yes");
   await page.close();
 });
+
+test("accessible names resolve ordered ID references and associated native labels (#375)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<button id="labelled" aria-label="wrong" aria-labelledby="part1 part2">Fallback</button><span id="part1" hidden>Pay</span><span id="part2">employees</span><label for="first">Employee</label><label for="first">name</label><input id="first"><label>Wrapped label<input id="wrapped"></label><button id="missing" aria-labelledby="missing-id" aria-label="Fallback name">text</button>',
+  );
+  assert.equal(await page.getByRole("button", { name: "Pay employees" }).count(), 1);
+  assert.equal(await page.getByRole("textbox", { name: "Employee name", exact: true }).count(), 1);
+  await expect(page.locator("#labelled")).toHaveAccessibleName("Pay employees");
+  await expect(page.locator("#first")).toHaveAccessibleName("Employee name");
+  await expect(page.locator("#wrapped")).toHaveAccessibleName("Wrapped label");
+  await expect(page.locator("#missing")).toHaveAccessibleName("Fallback name");
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('#labelled').onclick = () => document.body.setAttribute('data-named','yes')",
+  );
+  await page.getByRole("button", { name: "Pay employees", exact: true }).click();
+  assert.equal(await page.evaluate(() => document.body.getAttribute("data-named")), "yes");
+  await page.close();
+});

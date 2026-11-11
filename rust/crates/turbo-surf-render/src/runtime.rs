@@ -12285,11 +12285,24 @@ __G.tcGetBy = function (kind, value, name, root, options) {
       nav: "navigation", main: "main", article: "article", aside: "complementary", fieldset: "group", option: "option"
     })[tag] || "generic";
   };
+  const normalizeName = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+  const referenceName = (el) => {
+    const label = normalizeName(attr(el, 'aria-label'));
+    if (label) return label;
+    if ((el.tagName || '').toLowerCase() === 'img' && el.hasAttribute('alt')) return normalizeName(attr(el, 'alt'));
+    return normalizeName(el.textContent);
+  };
   const accName = (el) => {
-    const cands = [attr(el, "aria-label").trim(), (el.tagName || '').toLowerCase() === 'img' ? attr(el, 'alt').trim() : '', (el.textContent || "").trim(),
-      attr(el, "placeholder").trim(), attr(el, "value").trim(), attr(el, "title").trim()];
-    for (const c of cands) if (c) return c;
-    return "";
+    const refs = attr(el, 'aria-labelledby').trim().split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)).filter(Boolean);
+    if (refs.length) return refs.map(referenceName).filter(Boolean).join(' ');
+    const label = normalizeName(attr(el, 'aria-label'));
+    if (label) return label;
+    if (el.labels && el.labels.length) return Array.from(el.labels).map(referenceName).filter(Boolean).join(' ');
+    if ((el.tagName || '').toLowerCase() === 'img' && el.hasAttribute('alt')) return normalizeName(attr(el, 'alt'));
+    const candidates = [el.textContent, attr(el, 'placeholder'), attr(el, 'value'), attr(el, 'title')];
+    for (const candidate of candidates) { const value = normalizeName(candidate); if (value) return value; }
+    return '';
   };
   const matcher = (want) => {
     if (want == null) return () => true;

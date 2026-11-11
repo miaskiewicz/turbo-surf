@@ -899,9 +899,9 @@ class Locator {
     if (this._canDriveLive) return void (await this._driveLive("blur"));
   }
   async scrollIntoViewIfNeeded() {
-    // No viewport, but a real page scrolls the element into view and also fires
-    // focus for a programmatic scroll on a focusable control — keep it a no-op
-    // today since the live engine has no viewport geometry.
+    await this.evaluate((element) =>
+      element.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }),
+    );
   }
   async highlight() {}
   async _isFocused() {

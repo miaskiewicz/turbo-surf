@@ -64,3 +64,23 @@ test("Page.evaluate awaits async callbacks after ordinary load navigation", asyn
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("scrollIntoViewIfNeeded moves an offscreen target into the viewport", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<style>body{margin:0}#space{height:1600px}</style><div id="space"></div><button id="bottom">Bottom</button>',
+    );
+    await page._ensureLive();
+    await page.locator("#bottom").scrollIntoViewIfNeeded();
+    const result = await page.evaluate(() => ({
+      y: scrollY,
+      top: document.querySelector("#bottom").getBoundingClientRect().top,
+      height: innerHeight,
+    }));
+    assert.ok(result.y > 0);
+    assert.ok(result.top >= 0 && result.top < result.height);
+  } finally {
+    await page.close();
+  }
+});

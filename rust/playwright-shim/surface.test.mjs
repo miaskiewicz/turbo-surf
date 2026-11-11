@@ -2385,3 +2385,32 @@ test("no-content navigation retains the active document and history (#428)", asy
     await new Promise((done) => server.close(done));
   }
 });
+
+test("screenshot clip crops output without changing viewport layout (#466)", async () => {
+  const p = newPage({ viewport: { width: 100, height: 80 } });
+  await p.setContent(
+    "<style>body{margin:0}div{position:absolute;left:10px;top:10px;width:20px;height:20px;background:red}</style><div></div>",
+  );
+  try {
+    const full = await p.screenshot();
+    const clip = await p.screenshot({ clip: { x: 5, y: 5, width: 20, height: 10 } });
+    assert.equal(full.readUInt32BE(16), 100);
+    assert.equal(full.readUInt32BE(20), 80);
+    assert.equal(clip.readUInt32BE(16), 20);
+    assert.equal(clip.readUInt32BE(20), 10);
+    const jpeg = await p.screenshot({ type: "jpeg", clip: { x: 5, y: 5, width: 20, height: 10 } });
+    assert.equal(jpeg.subarray(0, 2).toString("hex"), "ffd8");
+    for (const invalid of [
+      { x: -1, y: 0, width: 20, height: 10 },
+      { x: 0, y: 0, width: 0, height: 10 },
+      { x: NaN, y: 0, width: 20, height: 10 },
+    ])
+      await assert.rejects(() => p.screenshot({ clip: invalid }), /clip/);
+    await assert.rejects(
+      () => p.screenshot({ clip: { x: 200, y: 200, width: 10, height: 10 } }),
+      /clip/,
+    );
+  } finally {
+    await p.close();
+  }
+});

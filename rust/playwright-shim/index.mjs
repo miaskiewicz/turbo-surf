@@ -2602,25 +2602,15 @@ class Page {
   // browser. Real pixels, but a *representative* render (honors CSS
   // position/z-index stacking; paints PNG/JPEG `<img>`/background images it can
   // fetch, others fall back to a placeholder). `type: "svg"` (or a `.svg` path)
-  // returns a vector document; PNG and JPEG preserve the requested encoding. `fullPage: true` grows the image to
-  // the full content height; `clip` is ignored (width/height or the context
-  // viewport drive layout). Returns a Buffer; writes `path` if given.
+  // returns a vector document; PNG and JPEG preserve the requested encoding.
+  // `fullPage: true` grows the image to
+  // the full content height; `clip` crops the rendered pixels while the context
+  // viewport drives layout. Returns a Buffer; writes `path` if given.
   async screenshot(opts = {}) {
     const vp = this._context._viewport ?? { width: 1280, height: 800 };
     const width = opts.width ?? vp.width;
     const height = opts.height ?? vp.height;
-    const extension = typeof opts.path === "string" ? opts.path.split(".").pop().toLowerCase() : "";
-    const type =
-      opts.type ?? ({ svg: "svg", jpg: "jpeg", jpeg: "jpeg", png: "png" }[extension] || "png");
-    if (!["png", "jpeg", "svg"].includes(type)) throw new Error("Unsupported screenshot type");
-    if (
-      opts.quality != null &&
-      (type !== "jpeg" || !Number.isInteger(opts.quality) || opts.quality < 0 || opts.quality > 100)
-    ) {
-      throw new Error(
-        "Screenshot quality is only supported for JPEG and must be an integer from 0 to 100",
-      );
-    }
+    const type = screenshotEncoding(opts);
     const asSvg = type === "svg";
     // Fetch the page's external <link> stylesheets and <img>/background-image
     // bytes so the render is styled and images paint. The two preparations are
@@ -2638,6 +2628,7 @@ class Page {
           "utf8",
         )
       : native.screenshotWithAssets(this._html, css, images, width, height, fullPage);
+    if (opts.clip) out = cropScreenshot(out, opts.clip, asSvg);
     if (type === "jpeg") out = native.screenshotJpeg(out, opts.quality);
     if (opts.path) await writeFile(opts.path, out);
     return out;
@@ -2927,6 +2918,39 @@ function makeTouchscreen(page) {
       })();`);
     },
   };
+}
+
+function screenshotEncoding(opts) {
+  const extension = typeof opts.path === "string" ? opts.path.split(".").pop().toLowerCase() : "";
+  const type =
+    opts.type ?? ({ svg: "svg", jpg: "jpeg", jpeg: "jpeg", png: "png" }[extension] || "png");
+  if (!["png", "jpeg", "svg"].includes(type)) throw new Error("Unsupported screenshot type");
+  if (
+    opts.quality != null &&
+    (type !== "jpeg" || !Number.isInteger(opts.quality) || opts.quality < 0 || opts.quality > 100)
+  ) {
+    throw new Error(
+      "Screenshot quality is only supported for JPEG and must be an integer from 0 to 100",
+    );
+  }
+  return type;
+}
+
+function cropScreenshot(png, clip, asSvg) {
+  if (asSvg) throw new Error("Screenshot clip is unavailable for SVG output");
+  const { x, y, width, height } = clip;
+  if (
+    ![x, y, width, height].every(Number.isFinite) ||
+    x < 0 ||
+    y < 0 ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    throw new Error(
+      "Screenshot clip requires nonnegative coordinates and positive finite dimensions",
+    );
+  }
+  return native.screenshotCrop(png, x, y, width, height);
 }
 
 // Drag `srcIdx` to `dstIdx` (live `querySelectorAll('*')` positions). Fires the

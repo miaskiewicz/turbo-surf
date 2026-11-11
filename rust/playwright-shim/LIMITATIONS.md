@@ -134,7 +134,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `viewportSize`, `setViewportSize` | ✅ | Stored, and the viewport now drives `page.screenshot()` layout width/height. |
 | `setDefaultTimeout`, `setDefaultNavigationTimeout`, `emulateMedia`, `bringToFront` | ⚠️ | Stored / no-op (no live layout to affect). |
 | `isClosed`, `close`, `video` (→ null), `workers` (→ []) | ✅ | |
-| `screenshot` | ⚠️ | Synthetic native render (PNG, or SVG via `{type:"svg"}`) — representative, not browser-faithful. `path` and `fullPage` work; `clip` is ignored. |
+| `screenshot` | ⚠️ | Synthetic native render (PNG/JPEG, or SVG via `{type:"svg"}`) — representative, not browser-faithful. JPEG quality and path inference work; `clip` crops PNG/JPEG output to rendered-image bounds without changing layout. SVG clipping throws. Device scale, masking and transparent background remain unsupported; full-page positioned overflow is tracked in [turbo-dom#496](https://github.com/miaskiewicz/turbo-dom/issues/496). |
 | `pdf` | ❌ | Throws — no PDF implementation in the shim. |
 | `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate so JS hover handlers (menu-open) fire. Static snapshot: no-op. Not hardware input. |
 | `dragAndDrop`, `mouse.*`, `touchscreen.*` | ✅ | Live app only: dispatches pointer / mouse / touch / HTML5-drag events into the isolate at element centers (or at `(x, y)` for coord-based entries). Static snapshot: no-op. Not hardware input. |

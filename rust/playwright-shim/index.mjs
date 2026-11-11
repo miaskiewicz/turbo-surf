@@ -3659,7 +3659,20 @@ function makeTestFn(baseDefs, extDefs = {}) {
   run.slow = () => {};
   run.setTimeout = () => {};
   run.use = () => {};
-  run.step = async (_name, body) => body();
+  run.step = async (_name, body) => {
+    const skipped = Symbol("step skipped");
+    const info = {
+      skip(condition = true, _description) {
+        if (condition) throw skipped;
+      },
+    };
+    try {
+      return await body(info);
+    } catch (error) {
+      if (error !== skipped) throw error;
+    }
+  };
+  run.step.skip = async () => {};
   run.info = () => makeTestInfo("");
   run.beforeEach = (fn) => {
     wireFixtureHooks(open);

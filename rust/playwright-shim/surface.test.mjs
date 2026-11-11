@@ -2916,3 +2916,34 @@ test("getBy parents retain their scope for CSS and getBy children (#472)", async
   assert.equal(await page.locator("body").getAttribute("data-clicked"), "one");
   await page.close();
 });
+test("cleanup hooks all execute before their failures are reported", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "surf-cleanup-"));
+  for (const kind of ["afterEach", "afterAll"]) {
+    const file = join(root, `${kind}.mjs`);
+    await writeFile(
+      file,
+      `import {test} from ${JSON.stringify(new URL("./index.mjs", import.meta.url).href)};
+      test.${kind}(()=>{console.log('FIRST_CLEANUP');throw Error('first cleanup failure');});
+      test.${kind}(()=>{console.log('SECOND_CLEANUP');throw Error('second cleanup failure');});
+      test.${kind}(()=>console.log('THIRD_CLEANUP'));
+      test('body',()=>console.log('BODY_COMPLETED'));`,
+    );
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(process.execPath, ["--test", "--test-force-exit", file], {
+      env,
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /FIRST_CLEANUP/);
+    assert.match(result.stdout, /SECOND_CLEANUP/);
+    assert.match(result.stdout, /THIRD_CLEANUP/);
+    assert.match(result.stdout, /first cleanup failure/);
+    assert.match(result.stdout, /second cleanup failure/);
+  }
+});

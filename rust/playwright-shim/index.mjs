@@ -4076,6 +4076,37 @@ function focusedScopeAllowed(scope) {
   return !hasFocusedTests || !scope || scope.only || scope.containsFocus;
 }
 
+const rootCleanupHooks = new Map();
+async function runCleanupHooks(hooks, args) {
+  const errors = [];
+  for (const hook of hooks) {
+    try {
+      await hook(args);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length) throw new AggregateError(errors, "Cleanup hooks failed");
+}
+
+function registerCleanupHook(kind, fn) {
+  const scope = getSkipStack().at(-1);
+  const store = scope ? (scope.cleanupHooks ??= new Map()) : rootCleanupHooks;
+  if (store.has(kind)) {
+    store.get(kind).push(fn);
+    return;
+  }
+  const hooks = [fn];
+  store.set(kind, hooks);
+  const register = kind === "afterEach" ? afterEach : after;
+  register(async (context) => {
+    const allowed = kind === "afterEach" ? focusedTestAllowed(context) : focusedScopeAllowed(scope);
+    if (!allowed) return;
+    const arg = kind === "afterEach" ? (_current?.arg ?? {}) : { browser: browserStub };
+    await runCleanupHooks(hooks, arg);
+  });
+}
+
 const rootFixtureUses = new Map();
 function fixtureUses(keys) {
   const result = {};
@@ -4184,9 +4215,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   };
   run.afterEach = (fn) => {
     wireFixtureHooks(open);
-    afterEach(async (context) => {
-      if (focusedTestAllowed(context)) await fn(_current?.arg ?? {});
-    });
+    registerCleanupHook("afterEach", fn);
   };
   run.beforeAll = (fn) => {
     const scope = getSkipStack().at(-1);
@@ -4194,12 +4223,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
       if (focusedScopeAllowed(scope)) await fn({ browser: browserStub });
     });
   };
-  run.afterAll = (fn) => {
-    const scope = getSkipStack().at(-1);
-    after(async () => {
-      if (focusedScopeAllowed(scope)) await fn({ browser: browserStub });
-    });
-  };
+  run.afterAll = (fn) => registerCleanupHook("afterAll", fn);
   // A new fixture name extends; reusing a base/ext name OVERRIDES it but the
   // override still sees the prior value (Playwright's `page: ({page}) => …`).
   run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more }, useKeys);

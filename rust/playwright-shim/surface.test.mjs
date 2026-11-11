@@ -2273,3 +2273,36 @@ test("API request status and redirect policies are honored (#335)", async () => 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("API params merge query strings and form fields encode as URL data (#333)", async () => {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    res.end(
+      JSON.stringify({
+        path: req.url,
+        type: req.headers["content-type"],
+        body: Buffer.concat(chunks).toString(),
+      }),
+    );
+  });
+  const base = await listen(server);
+  const api = await request.newContext({ baseURL: base });
+  try {
+    const query = await (
+      await api.get("/echo?original=yes", { params: { search: "hello world", limit: 2 } })
+    ).json();
+    assert.equal(query.path, "/echo?original=yes&search=hello+world&limit=2");
+    const form = await (await api.post("/echo", { form: { name: "hello world", n: 2 } })).json();
+    assert.equal(form.body, "name=hello+world&n=2");
+    assert.equal(form.type, "application/x-www-form-urlencoded");
+    const repeated = await (
+      await api.get("/echo", { params: new URLSearchParams("q=1&q=2") })
+    ).json();
+    assert.equal(repeated.path, "/echo?q=1&q=2");
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

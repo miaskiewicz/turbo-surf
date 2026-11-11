@@ -4042,6 +4042,16 @@ export const request = {
     const encode = async (o = {}) => {
       const h = mergeHeaders(ctxHeaders(), o.headers);
       let body = null;
+      if ([o.data, o.form, o.multipart].filter((value) => value !== undefined).length > 1) {
+        throw new Error("data, form and multipart are mutually exclusive");
+      }
+      if (o.form !== undefined) {
+        const entries = o.form instanceof FormData ? o.form.entries() : o.form;
+        body = new URLSearchParams(entries).toString();
+        if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
+          h["Content-Type"] = "application/x-www-form-urlencoded";
+        }
+      }
       if (o.multipart !== undefined) {
         const multipart = await encodeMultipart(o.multipart);
         body = multipart.body;
@@ -4067,7 +4077,13 @@ export const request = {
     };
     const call = async (url, method, o = {}) => {
       ensureOpen();
-      const target = resolve(url);
+      let target = resolve(url);
+      if (o.params !== undefined) {
+        const parsed = new URL(target);
+        for (const [name, value] of new URLSearchParams(o.params))
+          parsed.searchParams.append(name, value);
+        target = parsed.href;
+      }
       const maxRedirects = o.maxRedirects ?? opts.maxRedirects;
       if (maxRedirects !== undefined && (!Number.isInteger(maxRedirects) || maxRedirects < 0)) {
         throw new Error("maxRedirects must be a non-negative integer");

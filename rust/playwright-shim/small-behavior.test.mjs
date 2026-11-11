@@ -66,3 +66,21 @@ test("boundingBox returns live positioned geometry and null for hidden elements"
     await page.close();
   }
 });
+
+test("exposeBinding reports the originating main frame", async () => {
+  const page = newPage();
+  try {
+    let source;
+    await page.exposeBinding("reportSource", (value) => {
+      source = value;
+    });
+    await page.setContent('<button onclick="reportSource()">call</button>');
+    await page._ensureLive();
+    await page._sessionEval("reportSource()");
+    assert.equal(source.frame, page.mainFrame());
+    assert.equal(source.page, page);
+    assert.equal(source.context, page.context());
+  } finally {
+    await page.close();
+  }
+});

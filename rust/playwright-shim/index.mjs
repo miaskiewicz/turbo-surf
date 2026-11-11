@@ -1694,13 +1694,13 @@ class Page {
         `(() => {
           const out = [];
           const seen = new Set();
-          const walk = (w) => {
+          const walk = (w, framePath = []) => {
             if (!w || seen.has(w)) return;
             seen.add(w);
             try {
               const bag = w.__tsExpose;
               if (bag && bag.q && bag.q.length) {
-                for (const c of bag.q.splice(0)) out.push(c);
+                for (const c of bag.q.splice(0)) out.push({ ...c, framePath });
               }
             } catch (_e) {}
             let n = 0;
@@ -1708,7 +1708,7 @@ class Page {
             for (let i = 0; i < n; i++) {
               let child = null;
               try { child = w.frames[i]; } catch (_e) { child = null; }
-              if (child) walk(child);
+              if (child) walk(child, [...framePath, i]);
             }
           };
           walk(globalThis);
@@ -1728,7 +1728,16 @@ class Page {
         const args = Array.isArray(call.args) ? call.args : [];
         try {
           if (entry.isBinding) {
-            await entry.fn({ page: this, context: this._context, frame: null }, ...args);
+            const path = call.framePath ?? [];
+            this._syncFrames();
+            const frame =
+              path.length === 0
+                ? this.mainFrame()
+                : this._frames.find(
+                    (candidate) => JSON.stringify(candidate._path) === JSON.stringify(path),
+                  );
+            if (!frame) throw new Error("Exposed binding caller frame is detached");
+            await entry.fn({ page: this, context: this._context, frame }, ...args);
           } else {
             await entry.fn(...args);
           }

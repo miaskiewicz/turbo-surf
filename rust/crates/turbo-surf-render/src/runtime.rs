@@ -2086,6 +2086,15 @@ struct FetchOut {
 #[derive(Default)]
 struct NetworkLog(std::collections::VecDeque<serde_json::Value>);
 
+#[op2]
+fn op_page_diagnostic(state: &mut OpState, #[serde] entry: serde_json::Value) {
+    let log = state.borrow_mut::<NetworkLog>();
+    if log.0.len() == 1000 {
+        log.0.pop_front();
+    }
+    log.0.push_back(entry);
+}
+
 // Classic scripts are scheduled onto the host pump. Executing inside a JS eval
 // or a synchronous op retains the dispatcher's frames in page Error stacks.
 struct ClassicScriptJob {
@@ -8453,6 +8462,7 @@ deno_core::extension!(
         fetch_streams::op_fetch_release,
         fetch_streams::op_fetch_read,
         op_fetch,
+        op_page_diagnostic,
         network_transports::op_connect_allowed,
         network_transports::op_ws_open,
         network_transports::op_ws_send_text,
@@ -9209,6 +9219,13 @@ ops.op_storage_events_factory((key,oldValue,newValue,url,session)=>{
  ops.op_event_trust(event,-1);ops.op_dispatch_host_event(event,globalThis);
 },()=>new __StorageEventImplementation(''));
 
+const __pageErrorApply = Reflect.apply;
+const __pageErrorRead = Object.fromEntries(["error","message"].map(name=>[name,Object.getOwnPropertyDescriptor(ErrorEvent.prototype,name).get]));
+globalThis.addEventListener("error", event => {
+  if (!event.isTrusted) return;
+  const error = __pageErrorApply(__pageErrorRead.error,event,[]);
+  ops.op_page_diagnostic({event:"pageerror",name:String(error?.name || "Error"),message:String(error?.message || __pageErrorApply(__pageErrorRead.message,event,[])),stack:String(error?.stack || "")});
+});
 const __log = (...a) => __print(a.map(String).join(" ") + "\n");
 globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
 const __timers = [];

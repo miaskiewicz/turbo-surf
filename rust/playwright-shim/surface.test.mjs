@@ -21,6 +21,27 @@ try {
 }
 const { BrowserContext, chromium, devices, expect, newPage, request, test: pw } = shim;
 
+test("uncaught live handler exceptions emit Error payloads", async () => {
+  const page = newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error));
+  try {
+    await page.setContent(
+      "<button onclick=\"this.textContent='started';throw new TypeError('uncaught-click-marker')\">Run</button>",
+    );
+    await page._ensureLive();
+    await page.locator("button").click();
+    assert.equal(await page.locator("button").textContent(), "started");
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0] instanceof Error);
+    assert.equal(errors[0].name, "TypeError");
+    assert.equal(errors[0].message, "uncaught-click-marker");
+    assert.match(errors[0].stack, /uncaught-click-marker/);
+  } finally {
+    await page.close();
+  }
+});
+
 test("response waits poll a newly available native log within ten milliseconds", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const page = newPage();

@@ -1986,7 +1986,8 @@ class Page {
       !this._listeners.has("response") &&
       !this._listeners.has("requestfinished") &&
       !this._listeners.has("requestfailed") &&
-      !this._listeners.has("request")
+      !this._listeners.has("request") &&
+      !this._listeners.has("pageerror")
     )
       return;
     let raw;
@@ -2004,6 +2005,13 @@ class Page {
     }
     this._recentResponses = this._recentResponses ?? [];
     for (const e of entries) {
+      if (e.event === "pageerror") {
+        const error = new Error(e.message);
+        error.name = e.name;
+        if (e.stack) error.stack = e.stack;
+        this._emit("pageerror", error);
+        continue;
+      }
       const resp = makeNetResponse(e);
       resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
       this._emit("request", resp.request());
@@ -2218,7 +2226,8 @@ class Page {
     else if (
       !this._live &&
       this._autoHydrate !== false &&
-      (this._listeners.has("response") ||
+      (this._listeners.has("pageerror") ||
+        this._listeners.has("response") ||
         this._listeners.has("request") ||
         this._listeners.has("requestfinished") ||
         this._listeners.has("requestfailed"))

@@ -58,6 +58,13 @@ fn describe(tree: &Tree, h: Handle) -> Match {
 }
 
 fn css_results(tree: &Tree, root: Handle, selector: &str) -> Vec<Match> {
+    if root == tree.root() {
+        return tree
+            .query_selector_all(selector)
+            .iter()
+            .map(|&h| describe(tree, h))
+            .collect();
+    }
     turbo_dom_parser::rtdom::NodeRef::new(tree, root)
         .query_selector_all(selector)
         .iter()

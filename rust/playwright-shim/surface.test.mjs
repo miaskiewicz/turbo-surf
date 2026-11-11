@@ -2659,3 +2659,27 @@ test("viewport assertions use intersection ratio rather than visibility (#430)",
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("boolean locator assertions honor expected-state options and negation (#429)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<input id="unchecked" type="checkbox"><input id="disabled" disabled><input id="readonly" readonly><div id="hidden" hidden>hidden</div><button id="shown">shown</button>',
+  );
+  const cases = [
+    ["#unchecked", "toBeChecked", "checked"],
+    ["#missing", "toBeAttached", "attached"],
+    ["#disabled", "toBeEnabled", "enabled"],
+    ["#readonly", "toBeEditable", "editable"],
+    ["#hidden", "toBeVisible", "visible"],
+  ];
+  for (const [selector, matcher, option] of cases) {
+    const assertion = expect(page.locator(selector));
+    await assertion[matcher]({ [option]: false, timeout: 0 });
+    await assertion.not[matcher]({ [option]: true, timeout: 0 });
+    await assert.rejects(() => assertion.not[matcher]({ [option]: false, timeout: 0 }));
+    await assert.rejects(() => assertion[matcher]({ [option]: true, timeout: 0 }));
+  }
+  await expect(page.locator("#shown")).toBeVisible({ visible: true, timeout: 0 });
+  await expect(page.locator("#shown")).not.toBeVisible({ visible: false, timeout: 0 });
+  await page.close();
+});

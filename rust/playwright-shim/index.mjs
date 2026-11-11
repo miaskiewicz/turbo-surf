@@ -3463,7 +3463,10 @@ class LocatorExpect extends BaseExpect {
     return this._v._snapshot() ?? {};
   }
   async toBeVisible(opts) {
-    this._ok(await this._retry(() => this._v.isVisible(), opts), "expected element to be visible");
+    this._ok(
+      await this._retry(async () => (await this._v.isVisible()) === (opts?.visible ?? true), opts),
+      "expected element to be visible",
+    );
   }
   async toBeHidden(opts) {
     this._ok(
@@ -3473,15 +3476,21 @@ class LocatorExpect extends BaseExpect {
   }
   async toBeAttached(opts) {
     this._ok(
-      await this._retry(async () => (await this._v.count()) > 0, opts),
+      await this._retry(() => (this._v._node() != null) === (opts?.attached ?? true), opts),
       "expected element to be attached",
     );
   }
   async toBeChecked(opts) {
-    this._ok(await this._retry(() => this._snap().checked, opts), "expected element to be checked");
+    this._ok(
+      await this._retry(() => this._snap().checked === (opts?.checked ?? true), opts),
+      "expected element to be checked",
+    );
   }
   async toBeEnabled(opts) {
-    this._ok(await this._retry(() => this._snap().enabled, opts), "expected element to be enabled");
+    this._ok(
+      await this._retry(() => this._snap().enabled === (opts?.enabled ?? true), opts),
+      "expected element to be enabled",
+    );
   }
   async toBeDisabled(opts) {
     this._ok(
@@ -3491,7 +3500,7 @@ class LocatorExpect extends BaseExpect {
   }
   async toBeEditable(opts) {
     this._ok(
-      await this._retry(() => this._snap().editable, opts),
+      await this._retry(() => this._snap().editable === (opts?.editable ?? true), opts),
       "expected element to be editable",
     );
   }

@@ -4134,3 +4134,90 @@ test("Network waits support URL globs and await predicate results (#354)", async
     await page.close();
   }
 });
+
+test("Live locator inputValue and value assertions read dirty DOM properties (#350)", async () => {
+  const server = createServer((req, res) =>
+    res.end("<input id=text value=old><textarea id=area>before</textarea>"),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await page.locator("#text").fill("new");
+    assert.equal(await page.locator("#text").inputValue(), "new");
+    assert.equal(await page.locator("#text").getAttribute("value"), "old");
+    await expect(page.locator("#text")).toHaveValue("new", { timeout: 0 });
+    await page.evaluate(() => {
+      document.querySelector("#area").value = "after";
+    });
+    assert.equal(await page.locator("#area").inputValue(), "after");
+    await expect(page.locator("#area")).toHaveValue("after", { timeout: 0 });
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("Live checkbox actions execute one default and retain requested state (#351)", async () => {
+  const server = createServer((req, res) =>
+    res.end(`<input id=off type=checkbox><input id=on type=checkbox checked>
+    <input id=canceled type=checkbox onclick="event.preventDefault()">
+    <script>globalThis.changes=[]; for(const el of document.querySelectorAll('input')) el.addEventListener('change',()=>changes.push(el.id));</script>`),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await page.locator("#off").check();
+    assert.equal(await page.evaluate(() => document.querySelector("#off").checked), true);
+    assert.equal(await page.locator("#off").isChecked(), true);
+    await expect(page.locator("#off")).toBeChecked({ timeout: 0 });
+    await page.locator("#off").check();
+    await page.locator("#on").uncheck();
+    assert.equal(await page.locator("#on").isChecked(), false);
+    await page.locator("#on").setChecked(true);
+    await page.locator("#on").setChecked(false);
+    assert.deepEqual(await page.evaluate(() => changes), ["off", "on", "on", "on"]);
+    await assert.rejects(page.locator("#canceled").check(), /checked state|did not change/);
+    assert.equal(await page.evaluate(() => document.querySelector("#canceled").checked), false);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("Locator visibility follows rendered boxes while ignoring opacity (#353)", async () => {
+  const server = createServer((req, res) =>
+    res.end(`<!doctype html><style>
+    .hidden {visibility:hidden} .override {visibility:visible}
+    </style><div hidden><button id=ancestor>hidden</button></div>
+    <button id=opacity style="opacity:0">transparent</button><span id=empty></span><div id=emptydiv></div>
+    <div class=hidden><button class=override id=override>shown</button></div>
+    <div style="display:contents" id=contents><button>child</button></div>
+    <button id=offscreen style="position:absolute;left:-10000px">offscreen</button>`),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    for (const [id, visible] of [
+      ["ancestor", false],
+      ["opacity", true],
+      ["empty", false],
+      ["emptydiv", false],
+      ["override", true],
+      ["contents", true],
+      ["offscreen", true],
+    ]) {
+      assert.equal(await page.locator(`#${id}`).isVisible(), visible, id);
+      if (visible) await expect(page.locator(`#${id}`)).not.toBeHidden({ timeout: 0 });
+      else await expect(page.locator(`#${id}`)).toBeHidden({ timeout: 0 });
+    }
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

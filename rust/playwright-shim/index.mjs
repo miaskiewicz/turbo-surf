@@ -346,6 +346,28 @@ function buildExposeInitScript(names) {
 // the match array (each `{ node, text, html }`) in ONE napi call; composition
 // (first/last/nth/filter) and counts stay in JS over that array.
 // ---------------------------------------------------------------------------
+function renderedVisibility(element) {
+  for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+    if (getComputedStyle(ancestor).display === "none") return false;
+  }
+  const style = getComputedStyle(element);
+  if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+  if (style.display === "contents") {
+    for (const child of element.childNodes) {
+      if (child.nodeType === 1 && renderedVisibility(child)) return true;
+      if (child.nodeType === 3) {
+        const range = document.createRange();
+        range.selectNode(child);
+        const rect = range.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) return true;
+      }
+    }
+    return false;
+  }
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
 class Locator {
   constructor(page, resolve, opts = {}) {
     this._page = page;
@@ -631,8 +653,9 @@ class Locator {
     return n == null ? "" : native.inputValueOf(this._html, n);
   }
   async isVisible() {
-    const n = this._node();
-    return n != null && native.isVisible(this._html, n);
+    if (this._node() == null) return false;
+    await this._page._ensureLive();
+    return !!(await this._liveRead(renderedVisibility));
   }
   async isHidden() {
     return !(await this.isVisible());

@@ -1968,3 +1968,25 @@ test("API per-request headers override context names case-insensitively (#432)",
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("API disposal rejects requests and retained response bodies (#431)", async () => {
+  let requests = 0;
+  const server = createServer((req, res) => {
+    requests++;
+    res.end("body");
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  try {
+    const response = await api.get(base);
+    await api.dispose();
+    await api.dispose();
+    await assert.rejects(api.get(base), /disposed|closed/i);
+    await assert.rejects(response.text(), /disposed|closed/i);
+    assert.equal(requests, 1);
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

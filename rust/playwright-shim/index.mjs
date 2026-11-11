@@ -2828,7 +2828,7 @@ function makeKeyboard(page) {
   };
 }
 
-function makeResponse(r) {
+function makeResponse(r, ensureOpen = () => {}) {
   return {
     status: () => r.status,
     ok: () => r.status >= 200 && r.status < 300,
@@ -2836,9 +2836,11 @@ function makeResponse(r) {
     statusText: () => "",
     headers: () => r.headers ?? {},
     async text() {
+      ensureOpen();
       return r.html ?? "";
     },
     async json() {
+      ensureOpen();
       return JSON.parse(r.html ?? "null");
     },
   };
@@ -3801,6 +3803,11 @@ export const request = {
     // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
     const requestState = native.requestStateNew?.(bc?._requestState);
+    let disposed = false;
+    const responses = new Set();
+    const ensureOpen = () => {
+      if (disposed) throw new Error("APIRequestContext has been disposed");
+    };
     const optHeaders = {
       ...(opts.userAgent ? { "User-Agent": opts.userAgent } : {}),
       ...opts.extraHTTPHeaders,
@@ -3855,6 +3862,7 @@ export const request = {
       return { body, hdr };
     };
     const call = async (url, method, o = {}) => {
+      ensureOpen();
       const target = resolve(url);
       const credentialHeaders =
         credentialAllowed(target) && credentials.send === "always"
@@ -3898,7 +3906,9 @@ export const request = {
       // the next page.goto / page.request / context.request sees them.
       if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;
       // oxlint-enable no-underscore-dangle
-      return makeResponse(parsed);
+      ensureOpen();
+      responses.add(parsed);
+      return makeResponse(parsed, ensureOpen);
     };
     return {
       get: (url, o = {}) => call(url, null, o),
@@ -3909,9 +3919,14 @@ export const request = {
       head: (url, o = {}) => call(url, "HEAD", o),
       fetch: (url, o = {}) => call(url, o.method ?? null, o),
       async storageState() {
+        ensureOpen();
         return { cookies: [], origins: [] };
       },
       async dispose() {
+        if (disposed) return;
+        disposed = true;
+        for (const response of responses) response.html = null;
+        responses.clear();
         if (requestState != null) native.requestStateClose(requestState);
       },
     };

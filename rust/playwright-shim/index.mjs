@@ -3785,6 +3785,9 @@ export const request = {
       if (o.data !== null && o.data !== undefined) {
         if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {
           body = String(o.data);
+          if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
+            h["Content-Type"] = "application/octet-stream";
+          }
         } else {
           body = JSON.stringify(o.data);
           if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {

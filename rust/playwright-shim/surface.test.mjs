@@ -1857,3 +1857,33 @@ test("visibility assertions request only the visibility predicate (#486)", async
   }
   await page.close();
 });
+
+test("API string and Buffer data default to octet-stream (#435)", async () => {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    res.end(
+      JSON.stringify({ type: req.headers["content-type"], body: Buffer.concat(chunks).toString() }),
+    );
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  try {
+    for (const data of ["hello", Buffer.from("hello")]) {
+      assert.deepEqual(await (await api.post(base, { data })).json(), {
+        type: "application/octet-stream",
+        body: "hello",
+      });
+    }
+    assert.equal(
+      (await (await api.post(base, { data: {}, headers: { "content-TYPE": "text/plain" } })).json())
+        .type,
+      "text/plain",
+    );
+    assert.equal((await (await api.post(base, { data: {} })).json()).type, "application/json");
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

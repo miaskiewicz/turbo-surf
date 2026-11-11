@@ -21,6 +21,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { equalValues } from "./equality.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
+import {
+  encodeEvaluationValue,
+  decodeEvaluationValue,
+  evaluationArgument,
+} from "./evaluation-codec.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -51,7 +56,7 @@ function cookieMatchesUrl(cookie, url) {
 
 // Build an executable source string from page.evaluate's (fn|string, arg) form.
 function evalSource(script, arg) {
-  if (typeof script === "function") return `(${script.toString()})(${JSON.stringify(arg ?? null)})`;
+  if (typeof script === "function") return `(${script.toString()})(${evaluationArgument(arg)})`;
   return String(script);
 }
 
@@ -693,7 +698,7 @@ class Locator {
     const index = await this._resolveLiveIdx();
     if (index == null) throw new Error("turbo-surf: locator matched no elements");
     return this._page.evaluate(
-      `(${fn.toString()})(document.querySelectorAll('*')[${index}], ${JSON.stringify(arg ?? null)})`,
+      `(${fn.toString()})(document.querySelectorAll('*')[${index}], ${evaluationArgument(arg)})`,
     );
   }
   async evaluateAll(fn, arg) {
@@ -715,7 +720,7 @@ class Locator {
       indices = this._all().map((element) => positions.get(element.node));
     }
     return this._page.evaluate(
-      `(() => { const all = document.querySelectorAll('*'); return (${fn.toString()})(${JSON.stringify(indices)}.map(index => all[index]), ${JSON.stringify(arg ?? null)}); })()`,
+      `(() => { const all = document.querySelectorAll('*'); return (${fn.toString()})(${JSON.stringify(indices)}.map(index => all[index]), ${evaluationArgument(arg)}); })()`,
     );
   }
   async ariaSnapshot() {
@@ -1518,7 +1523,7 @@ class Frame {
       `(async () => {
       try {
         const value = await (${expression});
-        return JSON.stringify({ok:true, value, absent:value === undefined});
+        return JSON.stringify({ok:true, value: (${encodeEvaluationValue.toString()})(value)});
       } catch(error) { return JSON.stringify({ok:false, message:String(error?.message ?? error)}); }
     })()`,
     );
@@ -1526,7 +1531,7 @@ class Frame {
     await this._parentPage._drainBindings();
     const result = JSON.parse(raw);
     if (!result.ok) throw new Error(result.message);
-    return result.absent ? undefined : result.value;
+    return decodeEvaluationValue(result.value);
   }
   async content() {
     return this._html;
@@ -1862,7 +1867,7 @@ class Page {
       bag.evaluations.set(${id}, null);
       Promise.resolve().then(() => (${body})).then(
         value => {
-          try { bag.evaluations.set(${id}, JSON.stringify({value})); }
+          try { bag.evaluations.set(${id}, JSON.stringify({value: (${encodeEvaluationValue.toString()})(value)})); }
           catch (error) { bag.evaluations.set(${id}, JSON.stringify({error: String(error.message)})); }
         },
         error => bag.evaluations.set(${id}, JSON.stringify({error: String(error.message)})));
@@ -1880,7 +1885,7 @@ class Page {
           const result = JSON.parse(raw);
           if (result.error) throw new Error(result.error);
           await this._refreshFromSession();
-          return result.value;
+          return decodeEvaluationValue(result.value);
         }
         await this._redrain();
         await new Promise((resolve) => setTimeout(resolve, 1));
@@ -2365,42 +2370,17 @@ class Page {
   async evaluate(script, arg) {
     if (this._closed) throw new Error("page is closed");
     await this._ensureLive();
-    if (this._live) {
-      const body = evalSource(script, arg);
-      if (this._mergedBindings().size) return this._evaluateWithBindings(body);
-      // The native bridge returns a UTF-8 string, so round-trip structured values
-      // through JSON with a sentinel prefix: primitives / arrays / plain objects
-      // ride the JSON path; non-serializable results fall back to String(result).
-      const out = await native.liveEvalExpression(
-        this._session,
-        `(async () => { try { const result = await (${body}); if (result === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(result); } catch { return String(result); } } catch { return ""; } })()`,
-      );
-      await this._refreshFromSession();
-      await this._drainBindings();
-      if (typeof out === "string" && out.startsWith("__ts_json__:")) {
-        try {
-          return JSON.parse(out.slice("__ts_json__:".length));
-        } catch {
-          /* malformed payload — fall through to raw string */
-        }
-      }
-      return out;
-    }
-    // Static path: `native.evaluate` returns the trailing expression as a
-    // string, so an `{a:1}` return comes back as "[object Object]". Mirror the
-    // live path — wrap so the trailing expression is a JSON-prefixed string,
-    // then parse back on the shim side.
     const body = evalSource(script, arg);
-    const wrapped = `(() => { try { var __r = (${body}); if (__r === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(__r); } catch { return String(__r); } } catch { return ""; } })()`;
-    const out = native.evaluate(this._html, wrapped);
-    if (typeof out === "string" && out.startsWith("__ts_json__:")) {
-      try {
-        return JSON.parse(out.slice("__ts_json__:".length));
-      } catch {
-        /* malformed payload — fall through to raw string */
-      }
-    }
-    return out;
+    if (this._mergedBindings().size) return this._evaluateWithBindings(body);
+    const raw = await native.liveEvalExpression(
+      this._session,
+      `(async () => { try {
+        return JSON.stringify({value: (${encodeEvaluationValue.toString()})(await (${body}))});
+      } catch { return JSON.stringify({value: ["value", ""]}); } })()`,
+    );
+    await this._refreshFromSession();
+    await this._drainBindings();
+    return decodeEvaluationValue(JSON.parse(raw).value);
   }
   async evaluateHandle(script, arg) {
     return this.evaluate(script, arg);

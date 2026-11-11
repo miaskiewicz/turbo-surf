@@ -105,3 +105,47 @@ test("hover enters newly hovered ancestors and preserves related targets on depa
     await page.close();
   }
 });
+
+test("evaluate preserves special primitive values in nested results across page and frame realms", async () => {
+  const page = newPage();
+  const check = (value) => {
+    assert.equal(value[0], undefined);
+    assert.ok(Number.isNaN(value[1]));
+    assert.equal(value[2], Infinity);
+    assert.equal(value[3], -Infinity);
+    assert.ok(Object.is(value[4], -0));
+    assert.equal(value[5], 42n);
+    assert.ok(Object.hasOwn(value[6], "nested"));
+  };
+  try {
+    await page.setContent('<iframe name="child" srcdoc="<p>child</p>"></iframe>');
+    const callback = () => [undefined, NaN, Infinity, -Infinity, -0, 42n, { nested: undefined }];
+    check(await page.evaluate(callback));
+    check(await page.frame({ name: "child" }).evaluate(callback));
+    await page.exposeFunction("bindingPresent", () => 0);
+    check(await page.evaluate(callback));
+  } finally {
+    await page.close();
+  }
+});
+
+test("evaluation codec preserves cyclic objects and special callback arguments", async () => {
+  const page = newPage();
+  try {
+    const value = {
+      zero: -0,
+      large: 42n,
+      date: new Date("2026-01-01T00:00:00Z"),
+      pattern: /value/gi,
+    };
+    value.self = value;
+    const result = await page.evaluate((arg) => arg, value);
+    assert.equal(result.self, result);
+    assert.ok(Object.is(result.zero, -0));
+    assert.equal(result.large, 42n);
+    assert.equal(result.date.toISOString(), value.date.toISOString());
+    assert.equal(result.pattern.flags, "gi");
+  } finally {
+    await page.close();
+  }
+});

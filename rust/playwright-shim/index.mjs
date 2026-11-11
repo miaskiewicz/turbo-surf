@@ -57,6 +57,16 @@ function cookieMatchesUrl(cookie, url) {
   );
 }
 
+function isXPathSelector(selector) {
+  return (
+    typeof selector === "string" && /^(?:xpath=|\/|\.\.?\/|\.\.?$|\()/.test(selector.trimStart())
+  );
+}
+
+function hasSelectorEngine(selector) {
+  return isXPathSelector(selector) || (selector?.trimStart() ?? "").startsWith("css=");
+}
+
 // Build an executable source string from page.evaluate's (fn|string, arg) form.
 function evalSource(script, arg) {
   if (typeof script === "function") return `(${script.toString()})(${evaluationArgument(arg)})`;
@@ -479,7 +489,11 @@ class Locator {
   // __tcResolveScoped. Null for the common non-indexed case (keep the simple CSS-concat path).
   _indexedScope() {
     const sc = this._childScope();
-    return sc.some((s) => s.idx != null || s.filter != null || s.getBy != null) ? sc : null;
+    return sc.some(
+      (s) => s.idx != null || s.filter != null || s.getBy != null || isXPathSelector(s.sel),
+    )
+      ? sc
+      : null;
   }
   // A selector-backed child carrying the nth-aware scope chain (live-driven via the chain).
   _scopedSelectorChild(selector, scope, parent = this) {
@@ -495,6 +509,8 @@ class Locator {
     // A `.nth()`/`.filter()` ancestor → walk the scope chain (it carries the index/filter a
     // CSS-concat can't express), even if `.filter()` dropped our own `_selector`.
     const scope = this._indexedScope();
+    if (hasSelectorEngine(selector))
+      return this._scopedSelectorChild(selector, scope ?? this._childScope(), this);
     if (selector.includes(":scope"))
       return this._scopedSelectorChild(selector, scope ?? this._childScope(), this);
     if (scope) return this._scopedSelectorChild(selector, scope);
@@ -754,7 +770,8 @@ class Locator {
     if (
       this._scope &&
       (this._scope.some((s) => s.idx != null || s.filter != null || s.getBy != null) ||
-        this._parent) &&
+        this._parent ||
+        hasSelectorEngine(this._selector)) &&
       this._page._session != null
     ) {
       const leaf = this._selector
@@ -1028,7 +1045,8 @@ class Locator {
     if (
       (this._scope &&
         this._scope.some((s) => s.idx != null || s.filter != null || s.getBy != null)) ||
-      this._parent
+      this._parent ||
+      hasSelectorEngine(this._selector)
     ) {
       const leaf = this._selector
         ? { selector: this._selector }
@@ -1511,7 +1529,7 @@ class Frame {
         if (!helperState) { helperState = {}; states.set(child.document, helperState); }
         // Compile the existing surf helpers in the child so their document and
         // intrinsics belong to that realm rather than closing over the host.
-        const names = ['tcGetBy', 'tcResolveScoped', 'tcApplyHover'];
+        const names = ['tcGetBy', 'tcQuerySelector', 'tcResolveScoped', 'tcApplyHover'];
         const prelude = names.map(name => '__G[' + JSON.stringify(name) + '] = (' + __tsNs[name].toString() + ');').join('');
         code = 'const __G = arguments[0]; const __tsNs = __G;' + prelude + code;
       }

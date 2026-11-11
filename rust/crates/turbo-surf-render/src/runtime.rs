@@ -12336,6 +12336,23 @@ __G.tcGetBy = function (kind, value, name, root, options) {
   globalThis.__RESULT = JSON.stringify(hits.map((el) => ({ idx: idxOf(el) })));
 };
 
+// Keep each locator step's selector engine and context instead of concatenating XPath as CSS.
+__G.tcQuerySelector = function (root, selector) {
+  let expression = String(selector).trimStart();
+  const xpath = /^(?:xpath=|\/|\.\.?\/|\.\.?$|\()/.test(expression);
+  if (!xpath) return root.querySelectorAll(expression.replace(/^css=/, ""));
+  expression = expression.replace(/^xpath=/, "");
+  if (root.nodeType !== 9 && expression.startsWith("/")) expression = "." + expression;
+  const doc = root.nodeType === 9 ? root : root.ownerDocument;
+  const result = doc.evaluate(expression, root, null, 7, null);
+  const nodes = [];
+  for (let i = 0; i < result.snapshotLength; i++) {
+    const node = result.snapshotItem(i);
+    if (node.nodeType === 1) nodes.push(node);
+  }
+  return nodes;
+};
+
 // Resolve a locator through an nth-aware scope CHAIN, then match its leaf. `scope` is an
 // ordered list of {sel, idx}: at each level, querySelectorAll(sel) within the current set,
 // and when idx != null keep only that one (the `.nth(i)` of a parent locator). The leaf is
@@ -12355,7 +12372,7 @@ __G.tcResolveScoped = function (scope, leaf) {
     } else for (let ci = 0; ci < cur.length; ci++) {
       let m;
       try {
-        m = cur[ci].querySelectorAll(s.sel);
+        m = __G.tcQuerySelector(cur[ci], s.sel);
       } catch (e) {
         m = [];
       }
@@ -12385,7 +12402,7 @@ __G.tcResolveScoped = function (scope, leaf) {
     for (let ci = 0; ci < cur.length; ci++) {
       let m;
       try {
-        m = cur[ci].querySelectorAll(leaf.selector);
+        m = __G.tcQuerySelector(cur[ci], leaf.selector);
       } catch (e) {
         m = [];
       }

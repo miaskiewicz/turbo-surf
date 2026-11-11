@@ -1,6 +1,7 @@
 //! Unified node-query (port of `src/query.mjs`): query by CSS selector OR XPath,
 //! get back matches as `{ node, html, text }`. `Auto` treats a selector starting
-//! with `/`, `./`, or `(` as XPath, else CSS. Sizzle-only extensions (`:contains`)
+//! with `/`, `.`, `./`, `..`, or `(` as XPath, else CSS; explicit `xpath=` /
+//! `css=` prefixes choose their engine. Sizzle-only extensions (`:contains`)
 //! are NOT supported — use the XPath `text()` predicate.
 
 use crate::text::text;
@@ -37,7 +38,23 @@ fn serialize_handle_opt<S: serde::Serializer>(h: &Option<Handle>, s: S) -> Resul
 
 fn looks_like_xpath(selector: &str) -> bool {
     let s = selector.trim_start();
-    s.starts_with('/') || s.starts_with('(') || selector.starts_with("./")
+    s.starts_with('/')
+        || s.starts_with('(')
+        || s.starts_with("./")
+        || s == "."
+        || s == ".."
+        || s.starts_with("../")
+}
+
+fn selector_parts(selector: &str, ty: QueryType) -> (&str, QueryType) {
+    let selector = selector.trim_start();
+    if let Some(xpath) = selector.strip_prefix("xpath=") {
+        return (xpath, QueryType::Xpath);
+    }
+    if let Some(css) = selector.strip_prefix("css=") {
+        return (css, QueryType::Css);
+    }
+    (selector, resolve_type(selector, ty))
 }
 
 fn resolve_type(selector: &str, ty: QueryType) -> QueryType {
@@ -89,7 +106,8 @@ fn xpath_results(tree: &Tree, root: Handle, selector: &str) -> Vec<Match> {
 
 /// Query `tree` (rooted at `root`) by CSS or XPath.
 pub fn query(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> Vec<Match> {
-    match resolve_type(selector, ty) {
+    let (selector, ty) = selector_parts(selector, ty);
+    match ty {
         QueryType::Xpath => xpath_results(tree, root, selector),
         _ => css_results(tree, root, selector),
     }
@@ -97,7 +115,8 @@ pub fn query(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> Vec<Ma
 
 /// Count matches without materializing HTML or text payloads.
 pub fn query_count(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> usize {
-    match resolve_type(selector, ty) {
+    let (selector, ty) = selector_parts(selector, ty);
+    match ty {
         QueryType::Xpath => match evaluate(tree, root, selector) {
             XPath::Values(values) => values.len(),
             XPath::Nodes(nodes) => nodes.len(),
@@ -114,6 +133,27 @@ pub fn query_first(tree: &Tree, root: Handle, selector: &str, ty: QueryType) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_engines_route_queries_and_scalar_counts() {
+        let tree =
+            Tree::parse("<section><button>inside</button></section><button>outside</button>");
+        for selector in ["xpath=//button", "css=button"] {
+            assert_eq!(
+                query(&tree, tree.root(), selector, QueryType::Auto).len(),
+                2
+            );
+            assert_eq!(
+                query_count(&tree, tree.root(), selector, QueryType::Auto),
+                2
+            );
+        }
+        let section = tree.query_selector("section").unwrap();
+        assert_eq!(
+            query(&tree, section, "xpath=.//button", QueryType::Auto).len(),
+            1
+        );
+    }
 
     #[test]
     fn count_matches_queries_without_describing_results() {

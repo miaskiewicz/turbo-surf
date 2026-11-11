@@ -3981,3 +3981,71 @@ test("expect.poll retries values awaits async callbacks and preserves not (#366)
     /timed out/i,
   );
 });
+
+test("XPath engine prefixes and scoped parent locators retain their context (#365)", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<section><div data-testid="marker"></div><button data-testid="target">inside</button></section><button data-testid="target">outside</button><div class="MuiPickersInputBase-root"><div data-testid="field"><div class="MuiPickersSectionList-root"><span>01</span></div></div></div>',
+    );
+    assert.equal(await page.locator("xpath=//button").count(), 2);
+    assert.equal(await page.locator("//button").count(), 2);
+    const target = page.getByTestId("marker").locator("xpath=..").getByTestId("target");
+    assert.equal(await target.count(), 1);
+    assert.equal(await target.textContent(), "inside");
+    const sections = page
+      .getByTestId("field")
+      .locator(
+        'xpath=descendant-or-self::div[contains(@class,"MuiPickersSectionList-root")] | ancestor::*[contains(@class,"MuiPickersInputBase-root")][1]//div[contains(@class,"MuiPickersSectionList-root")]',
+      );
+    assert.equal(await sections.count(), 1);
+    assert.equal(await sections.locator("xpath=.").count(), 1);
+    assert.equal(await page.locator("css=section").locator("xpath=.//button").count(), 1);
+  } finally {
+    await page.close();
+  }
+});
+
+test("scoped XPath parent actions dispatch only to the selected live target (#365)", async () => {
+  const server = createServer((_req, res) =>
+    res.end(
+      '<section><div data-testid="marker"></div><button data-testid="target">inside</button></section><button data-testid="target">outside</button><p id="result">none</p><script>document.querySelectorAll("button").forEach(button=>button.addEventListener("click",()=>document.querySelector("#result").textContent=button.textContent))</script>',
+    ),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await page.getByTestId("marker").locator("xpath=..").getByTestId("target").click();
+    assert.equal(await page.locator("#result").textContent(), "inside");
+    await page.locator("xpath=//button").last().click();
+    assert.equal(await page.locator("#result").textContent(), "outside");
+  } finally {
+    await page.close();
+    await new Promise((done) => server.close(done));
+  }
+});
+
+test("XPath parent chains execute in an iframe realm (#365)", async () => {
+  const server = createServer((_req, res) =>
+    res.end(
+      `<iframe srcdoc="<section><span data-testid='marker'></span><button data-testid='target' onclick=&quot;this.textContent='changed'&quot;>inside</button></section><button data-testid='target'>outside</button>"></iframe>`,
+    ),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    const target = page
+      .frameLocator("iframe")
+      .getByTestId("marker")
+      .locator("xpath=..")
+      .getByTestId("target");
+    assert.equal(await target.count(), 1);
+    await target.click();
+    assert.equal(await target.textContent(), "changed");
+  } finally {
+    await page.close();
+    await new Promise((done) => server.close(done));
+  }
+});

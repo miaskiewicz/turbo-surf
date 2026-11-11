@@ -571,11 +571,11 @@ class Locator {
   }
   getByText(t, o) {
     if (!this._selector && !this._indexedScope()) return this._page.getByText(t, o);
-    return this._scopedGetBy("text", String(t), null);
+    return this._scopedGetBy("text", String(t), null, o);
   }
   getByLabel(t, o) {
     if (!this._selector && !this._indexedScope()) return this._page.getByLabel(t, o);
-    return this._scopedGetBy("label", String(t), null);
+    return this._scopedGetBy("label", String(t), null, o);
   }
   getByTestId(t) {
     if (t instanceof RegExp) return this._page._regexTestId(t, this._selector);
@@ -1708,15 +1708,23 @@ class Frame {
       },
     );
   }
-  getByText(text) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
-      getBy: { kind: "text", value: String(text), name: null },
-    });
+  getByText(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "text", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "text", value: String(text), name: null, options: opts },
+      },
+    );
   }
-  getByLabel(text) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "label", String(text))), {
-      getBy: { kind: "label", value: String(text), name: null },
-    });
+  getByLabel(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "label", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "label", value: String(text), name: null, options: opts },
+      },
+    );
   }
   getByPlaceholder(text) {
     return this._locFromSelector(`[placeholder*=${cssAttrValue(text)}]`);
@@ -1776,11 +1784,11 @@ class FrameLocator {
   getByRole(role, opts) {
     return this._resolveFrame().getByRole(role, opts);
   }
-  getByText(t) {
-    return this._resolveFrame().getByText(t);
+  getByText(t, opts) {
+    return this._resolveFrame().getByText(t, opts);
   }
-  getByLabel(t) {
-    return this._resolveFrame().getByLabel(t);
+  getByLabel(t, opts) {
+    return this._resolveFrame().getByLabel(t, opts);
   }
   getByPlaceholder(t) {
     return this._resolveFrame().getByPlaceholder(t);
@@ -2623,15 +2631,23 @@ class Page {
       },
     );
   }
-  getByText(text, _o) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
-      getBy: { kind: "text", value: String(text), name: null },
-    });
+  getByText(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "text", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "text", value: String(text), name: null, options: opts },
+      },
+    );
   }
-  getByLabel(text, _o) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "label", String(text))), {
-      getBy: { kind: "label", value: String(text), name: null },
-    });
+  getByLabel(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "label", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "label", value: String(text), name: null, options: opts },
+      },
+    );
   }
   // The native get_by handles role/text/label; placeholder/alt/title map cleanly
   // to attribute selectors (substring, like Playwright's default exact:false).

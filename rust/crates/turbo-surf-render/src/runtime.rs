@@ -12294,7 +12294,15 @@ __G.tcGetBy = function (kind, value, name, root, options) {
   const matcher = (want) => {
     if (want == null) return () => true;
     const m = /^\/(.*)\/([a-z]*)$/.exec(want);
-    if (!m) return (v) => String(v).indexOf(want) >= 0;
+    if (!m) {
+      const normalize = (text) => String(text).trim().replace(/\s+/g, ' ');
+      if (options.exact) {
+        const expected = normalize(want);
+        return (value) => normalize(value) === expected;
+      }
+      const expected = String(want).toLowerCase();
+      return (value) => String(value).toLowerCase().indexOf(expected) >= 0;
+    }
     let re;
     try { re = new RegExp(m[1], m[2]); } catch (_e) { return () => false; }
     return (v) => { re.lastIndex = 0; return re.test(v); };

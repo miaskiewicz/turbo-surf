@@ -13,10 +13,11 @@ const ELEMENT_NODE: u8 = 1;
 
 #[derive(Default, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct RoleOptions {
+pub struct LocatorOptions {
     pub include_hidden: bool,
     pub pressed: Option<bool>,
     pub level: Option<u32>,
+    pub exact: bool,
 }
 
 fn accessibility_hidden(tree: &Tree, h: Handle) -> bool {
@@ -38,7 +39,7 @@ fn accessibility_hidden(tree: &Tree, h: Handle) -> bool {
     false
 }
 
-pub fn matches_role_options(tree: &Tree, h: Handle, options: &RoleOptions) -> bool {
+pub fn matches_role_options(tree: &Tree, h: Handle, options: &LocatorOptions) -> bool {
     if !options.include_hidden && accessibility_hidden(tree, h) {
         return false;
     }
@@ -53,7 +54,7 @@ pub fn matches_role_options(tree: &Tree, h: Handle, options: &RoleOptions) -> bo
     })
 }
 
-/// Text match mode. `Exact` compares trimmed strings; `Substring` is a
+/// Text match mode. `Exact` compares whitespace-normalized strings; `Substring` is a
 /// case-insensitive `contains` (the Playwright default); `Regex` treats `want`
 /// as a `/source/flags` literal (Playwright passes `RegExp` names this way).
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -109,7 +110,11 @@ impl TextMatcher {
             _ => None,
         };
         Self {
-            want: want.to_string(),
+            want: if mode == TextMode::Exact {
+                want.split_whitespace().collect::<Vec<_>>().join(" ")
+            } else {
+                want.to_string()
+            },
             mode,
             re,
         }
@@ -118,7 +123,7 @@ impl TextMatcher {
     pub fn matches(&self, value: &str) -> bool {
         let v = value.trim();
         match self.mode {
-            TextMode::Exact => v == self.want,
+            TextMode::Exact => v.split_whitespace().eq(self.want.split_whitespace()),
             TextMode::Substring => v.to_lowercase().contains(&self.want.to_lowercase()),
             TextMode::Regex => self.re.as_ref().is_some_and(|re| re.is_match(v)),
         }
@@ -363,7 +368,7 @@ mod tests {
     #[test]
     fn role_options_distinguish_accessibility_hidden_and_pressed_states() {
         let tree = Tree::parse("<button id='yes' aria-pressed='true'>Toggle</button><button id='no' aria-pressed='false'>Toggle</button><button id='transparent' style='opacity:0'>visible</button><div aria-hidden='true'><button id='aria'>hidden</button></div><div style='display:none'><button id='css'>hidden</button></div><button id='hidden' hidden>hidden</button>");
-        let options = RoleOptions {
+        let options = LocatorOptions {
             pressed: Some(true),
             ..Default::default()
         };
@@ -380,20 +385,39 @@ mod tests {
         assert!(matches_role_options(
             &tree,
             tree.get_element_by_id("transparent").unwrap(),
-            &RoleOptions::default()
+            &LocatorOptions::default()
         ));
         for id in ["aria", "css", "hidden"] {
             let node = tree.get_element_by_id(id).unwrap();
-            assert!(!matches_role_options(&tree, node, &RoleOptions::default()));
+            assert!(!matches_role_options(
+                &tree,
+                node,
+                &LocatorOptions::default()
+            ));
             assert!(matches_role_options(
                 &tree,
                 node,
-                &RoleOptions {
+                &LocatorOptions {
                     include_hidden: true,
                     ..Default::default()
                 }
             ));
         }
+    }
+
+    #[test]
+    fn exact_text_matching_normalizes_whitespace_without_substring_matches() {
+        assert!(text_match(
+            "  Hello \n world  ",
+            " Hello world ",
+            TextMode::Exact
+        ));
+        assert!(!text_match("Payroll export", "Payroll", TextMode::Exact));
+        let tree = Tree::parse("<label for='a'>Employee name</label><input id='a'><label for='b'>Employee name extra</label><input id='b'>");
+        assert_eq!(
+            by_label(&tree, "Employee name", TextMode::Exact),
+            vec![tree.get_element_by_id("a").unwrap()]
+        );
     }
 
     #[test]

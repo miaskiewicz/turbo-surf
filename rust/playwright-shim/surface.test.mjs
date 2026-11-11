@@ -4388,3 +4388,30 @@ test("role locators resolve native headings table structure and image names (#37
   assert.equal(await page.evaluate(() => document.body.getAttribute("data-heading")), "two");
   await page.close();
 });
+
+test("exact text label and role names survive static scoped and live resolution (#376)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<div id="scope"><span>Payroll export</span><span>Payroll</span><label for="first">Employee name</label><input id="first"><label for="last">Employee name extra</label><input id="last"><button id="saveas">Save as</button><button id="save">Save</button></div>',
+  );
+  assert.equal(await page.getByText("Payroll", { exact: true }).count(), 1);
+  assert.equal(await page.getByText(/^payroll$/i, { exact: true }).count(), 1);
+  assert.equal(await page.getByLabel("Employee name", { exact: true }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "Save", exact: true }).count(), 1);
+  assert.equal(await page.locator("#scope").getByText("Payroll", { exact: true }).count(), 1);
+  assert.equal(
+    await page.locator("#scope").getByLabel("Employee name", { exact: true }).count(),
+    1,
+  );
+  assert.equal(
+    await page.locator("#scope").getByRole("button", { name: "Save", exact: true }).count(),
+    1,
+  );
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('#save').onclick = () => document.body.setAttribute('data-saved','yes')",
+  );
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  assert.equal(await page.evaluate(() => document.body.getAttribute("data-saved")), "yes");
+  await page.close();
+});

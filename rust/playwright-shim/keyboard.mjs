@@ -1,4 +1,4 @@
-import { editKeyboardText, applyKeyboardDefault } from "./keyboard-defaults.mjs";
+import { keyboardDefaultsSource } from "./keyboard-defaults.mjs";
 
 const modifierCodes = {
   Shift: "ShiftLeft",
@@ -59,8 +59,7 @@ export function makeKeyboard(page) {
       metaKey: has("Meta"),
     };
     const result = await page._sessionEval(`(() => {
-      const editKeyboardText = (${editKeyboardText.toString()});
-      const applyKeyboardDefault = (${applyKeyboardDefault.toString()});
+      ${keyboardDefaultsSource()}
       const element = document.activeElement || document.body || document.documentElement;
       const options = {...${JSON.stringify(options)}, bubbles: true, cancelable: true, view: globalThis};
       let allowed = element.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, options));
@@ -102,7 +101,7 @@ export function makeKeyboard(page) {
     async insertText(text) {
       await page._ensureLive();
       await page._sessionEval(
-        `(${editKeyboardText.toString()})(document.activeElement, ${JSON.stringify(String(text))}, "insertText", __tsNs.replaceControlSelection)`,
+        `(() => { ${keyboardDefaultsSource()} editKeyboardText(document.activeElement, ${JSON.stringify(String(text))}, "insertText", __tsNs.replaceControlSelection); })()`,
       );
     },
   };

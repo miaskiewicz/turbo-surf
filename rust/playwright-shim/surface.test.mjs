@@ -1808,3 +1808,27 @@ test("successful locator assertions read each observed value once (#487)", async
   }
   await page.close();
 });
+
+test("API context retains its connection pool across uncached requests (#485)", async () => {
+  const connections = new Set();
+  let requests = 0;
+  const server = createServer((req, res) => {
+    connections.add(req.socket);
+    res.setHeader("cache-control", "no-store");
+    res.end(JSON.stringify({ sequence: ++requests }));
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  try {
+    for (let sequence = 1; sequence <= 5; sequence++) {
+      const response = await api.get(base);
+      assert.equal(response.status(), 200);
+      assert.deepEqual(await response.json(), { sequence });
+    }
+    assert.equal(connections.size, 1);
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

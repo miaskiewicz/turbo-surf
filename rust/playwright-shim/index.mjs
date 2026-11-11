@@ -3727,6 +3727,7 @@ export const request = {
     };
     // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
+    const requestState = native.requestStateNew?.(bc?._requestState);
     const optHeaders = opts.extraHTTPHeaders ?? {};
     // Resolve the context's `extraHTTPHeaders` live from the parent
     // BrowserContext (if bound) so a `context.setExtraHTTPHeaders(...)` call
@@ -3764,7 +3765,15 @@ export const request = {
     const call = async (url, method, o = {}) => {
       const { body, hdr } = encode(o);
       const inCookies = bc && bc._cookies ? bc._cookies : "[]";
-      const raw = await native.fetchWithCookies(resolve(url), inCookies, method ?? null, body, hdr);
+      const raw = await native.fetchWithCookies(
+        resolve(url),
+        inCookies,
+        method ?? null,
+        body,
+        hdr,
+        false,
+        requestState,
+      );
       const parsed = JSON.parse(raw);
       // Merge Set-Cookie writes back into the parent BrowserContext's jar so
       // the next page.goto / page.request / context.request sees them.
@@ -3783,7 +3792,9 @@ export const request = {
       async storageState() {
         return { cookies: [], origins: [] };
       },
-      async dispose() {},
+      async dispose() {
+        if (requestState != null) native.requestStateClose(requestState);
+      },
     };
   },
 };

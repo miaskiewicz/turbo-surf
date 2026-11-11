@@ -3541,8 +3541,14 @@ class BrowserContext {
   async cookies() {
     return JSON.parse(this._cookies);
   }
+  _setCookies(cookies) {
+    this._cookies = cookies;
+    for (const page of this._pages) {
+      if (page._session != null) native.liveSetCookies(page._session, cookies);
+    }
+  }
   async clearCookies() {
-    this._cookies = "[]";
+    this._setCookies("[]");
   }
   async addInitScript(script, arg) {
     this._initScripts.push(evalSource(script, arg));

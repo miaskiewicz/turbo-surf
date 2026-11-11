@@ -67,6 +67,7 @@ export function liveEvalExpression(id: number, expression: string): Promise<stri
 export function liveSerialize(id: number): string;
 /** The live session's cookies (storageState JSON), incl. HttpOnly session cookies. */
 export function liveCookies(id: number): string;
+export function liveSetCookies(id: number, cookies: string): void;
 /** Close a live session (reset binding, drop isolate, unregister). */
 export function liveClose(id: number): void;
 

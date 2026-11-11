@@ -17722,6 +17722,14 @@ impl PageSession {
         s
     }
 
+    /// Replace context cookies while preserving the shared jar used by live APIs.
+    pub fn set_cookies(&mut self, cookies: &str) {
+        apply_report_cookies(&mut self.rt.op_state().borrow_mut());
+        let op_state = self.rt.op_state();
+        let jar = op_state.borrow().borrow::<Jar>().clone();
+        *jar.borrow_mut() = CookieJar::from_storage_state(cookies);
+    }
+
     /// Tear down: reset the binding while the isolate is still alive, then drop it.
     pub fn close(mut self) {
         let _activation = self.rt.activation_key().enter();

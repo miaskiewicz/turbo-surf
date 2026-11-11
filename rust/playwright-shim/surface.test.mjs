@@ -3042,3 +3042,23 @@ test("history navigation honors networkidle hydration (#425)", async () => {
     await new Promise((done) => server.close(done));
   }
 });
+
+test("clearing context cookies updates every active page jar (#424)", async () => {
+  const server = createServer((_req, res) => {
+    res.setHeader("set-cookie", ["session=old; Path=/", "scoped=yes; Path=/scoped"]);
+    res.end("<title>cookies</title>");
+  });
+  const base = await listen(server);
+  const context = new BrowserContext();
+  try {
+    const pages = [await context.newPage(), await context.newPage()];
+    for (const page of pages) await page.goto(base, { waitUntil: "networkidle" });
+    await context.clearCookies();
+    assert.deepEqual(await context.cookies(), []);
+    for (const page of pages) assert.equal(await page.evaluate(() => document.cookie), "");
+    assert.deepEqual(await context.cookies(), []);
+  } finally {
+    await context.close();
+    await new Promise((done) => server.close(done));
+  }
+});

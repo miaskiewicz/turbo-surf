@@ -221,6 +221,7 @@ enum LiveJob {
     Expression(String, SyncSender<std::result::Result<String, String>>),
     Serialize(SyncSender<String>),
     Cookies(SyncSender<String>),
+    SetCookies(String, SyncSender<()>),
     NetworkLog(SyncSender<String>),
     Close(SyncSender<()>),
 }
@@ -352,6 +353,10 @@ impl Task for LiveOpenTask {
                     }
                     LiveJob::NetworkLog(reply) => {
                         let _ = reply.send(session.drain_network_log());
+                    }
+                    LiveJob::SetCookies(cookies, reply) => {
+                        session.set_cookies(&cookies);
+                        let _ = reply.send(());
                     }
                     LiveJob::Cookies(reply) => {
                         let _ = reply.send(session.cookies());
@@ -521,6 +526,15 @@ pub fn live_cookies(id: u32) -> Result<String> {
     live_send(id, LiveJob::Cookies(reply)).map_err(Error::from_reason)?;
     rx.recv()
         .map_err(|_| Error::from_reason("live session dropped cookies reply"))
+}
+
+/// Replace the live context cookie jar without reopening its document.
+#[napi]
+pub fn live_set_cookies(id: u32, cookies: String) -> Result<()> {
+    let (reply, rx) = sync_channel(1);
+    live_send(id, LiveJob::SetCookies(cookies, reply)).map_err(Error::from_reason)?;
+    rx.recv()
+        .map_err(|_| Error::from_reason("live session dropped cookie update reply"))
 }
 
 /// Close a live session: reset the binding, drop the isolate, unregister (sync).

@@ -4482,18 +4482,22 @@ function focusedScopeAllowed(scope) {
   return !hasFocusedTests || !scope || scope.only || scope.containsFocus;
 }
 
+function cleanupErrors(error) {
+  return error instanceof AggregateError ? error.errors.flatMap(cleanupErrors) : [error];
+}
+
 const rootCleanupHooks = new Map();
 after(async () => {
   const errors = [];
   try {
     await runCleanupHooks(rootCleanupHooks.get("afterAll") ?? [], { browser: browserStub });
   } catch (error) {
-    errors.push(error);
+    errors.push(...cleanupErrors(error));
   }
   try {
     await teardownWorkerFixtures();
   } catch (error) {
-    errors.push(error);
+    errors.push(...cleanupErrors(error));
   }
   if (errors.length) throw new AggregateError(errors, "Worker cleanup failed");
 });

@@ -1491,7 +1491,7 @@ test("request metadata and client hints survive hydration and stay context scope
       assert.ok(headers, `missing ${path}`);
       assert.equal(headers["sec-fetch-dest"], dest, path);
       assert.equal(headers["sec-fetch-mode"], mode, path);
-      assert.equal(headers["sec-fetch-site"], "same-origin", path);
+      assert.equal(headers["sec-fetch-site"], mode === "navigate" ? "none" : "same-origin", path);
       assert.equal(headers["sec-ch-ua-arch"], '"arm"', path);
       assert.equal(headers.cookie, "sid=context", path);
       if (mode !== "navigate") assert.equal(headers["sec-fetch-user"], undefined, path);

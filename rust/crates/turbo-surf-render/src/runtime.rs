@@ -16746,7 +16746,7 @@ impl Watchdog {
                     // Keep the deadline enforced until the owner joins this guard.
                     handle.terminate_execution();
                 }
-                std::thread::sleep(std::time::Duration::from_millis(2));
+                std::thread::park_timeout(std::time::Duration::from_millis(2));
             }
         });
         Watchdog {
@@ -16760,8 +16760,42 @@ impl Drop for Watchdog {
     fn drop(&mut self) {
         self.done.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Some(t) = self.thread.take() {
+            t.thread().unpark();
             let _ = t.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod watchdog_cancellation_tests {
+    use super::Watchdog;
+    use std::sync::{atomic::AtomicBool, mpsc, Arc};
+    use std::time::Duration;
+
+    #[test]
+    fn dropping_watchdog_wakes_its_waiting_thread() {
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            std::thread::park_timeout(Duration::from_secs(10));
+        });
+        ready_rx.recv().unwrap();
+        let waiting = worker.thread().clone();
+        let watchdog = Watchdog {
+            exceeded: Arc::new(AtomicBool::new(false)),
+            done: Arc::new(AtomicBool::new(false)),
+            thread: Some(worker),
+        };
+        let (cancel_tx, cancel_rx) = mpsc::channel();
+        let cancel = std::thread::spawn(move || {
+            drop(watchdog);
+            cancel_tx.send(()).unwrap();
+        });
+        let result = cancel_rx.recv_timeout(Duration::from_secs(1));
+        // Release only our worker even when the assertion fails.
+        waiting.unpark();
+        cancel.join().unwrap();
+        result.expect("dropping a completed watchdog must wake its deadline wait");
     }
 }
 

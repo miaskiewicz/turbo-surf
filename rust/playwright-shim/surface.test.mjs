@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -3262,6 +3262,45 @@ test("socket failures emit requestfailed without response or requestfinished (#4
     assert.notEqual(xhrFailure.errorText, "net::ERR_FAILED");
   } finally {
     await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("addStyleTag inserts content URL and path sheets into the live document (#388)", async () => {
+  const server = createServer((req, res) => {
+    res.writeHead(req.url === "/missing.css" ? 404 : 200, { "content-type": "text/css" });
+    res.end("#target { color: rgb(44, 55, 66) }");
+  });
+  const base = await listen(server);
+  const directory = await mkdtemp(join(tmpdir(), "surf-style-"));
+  const page = newPage();
+  try {
+    await page.setContent('<div id="target">target</div>');
+    await page._ensureLive();
+    const handle = await page.addStyleTag({ content: "#target { color: rgb(11, 22, 33) }" });
+    assert.ok(handle);
+    assert.equal(
+      await page.evaluate(() => getComputedStyle(document.querySelector("#target")).color),
+      "rgb(11, 22, 33)",
+    );
+    await page.addStyleTag({ url: `${base}/sheet.css` });
+    assert.equal(
+      await page.evaluate(() => getComputedStyle(document.querySelector("#target")).color),
+      "rgb(44, 55, 66)",
+    );
+    const path = join(directory, "sheet.css");
+    await writeFile(path, "#target { color: rgb(77, 88, 99) }");
+    await page.addStyleTag({ path });
+    assert.equal(
+      await page.evaluate(() => getComputedStyle(document.querySelector("#target")).color),
+      "rgb(77, 88, 99)",
+    );
+    await assert.rejects(page.addStyleTag({ url: `${base}/missing.css` }), /load|stylesheet/i);
+    await assert.rejects(page.addStyleTag({}), /content|url|path/i);
+  } finally {
+    await page.close();
+    await rm(directory, { recursive: true, force: true });
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }

@@ -2932,7 +2932,37 @@ class Page {
     if (this._live) await this._redrain();
   }
   async bringToFront() {}
-  async addStyleTag() {}
+  async addStyleTag(opts = {}) {
+    const supplied = [opts.content != null, opts.url != null, opts.path != null].filter(
+      Boolean,
+    ).length;
+    if (supplied !== 1) throw new Error("addStyleTag requires exactly one of content, url or path");
+    const content = opts.path != null ? await readFile(opts.path, "utf8") : opts.content;
+    if (!this._live) await this._openLiveSession();
+    const token = `style-${(this._injectedTagSeq = (this._injectedTagSeq ?? 0) + 1)}`;
+    const result = await native.liveEvalExpression(
+      this._session,
+      `(async () => {
+      try {
+        const tag = document.createElement(${opts.url != null ? '"link"' : '"style"'});
+        tag.setAttribute('data-ts-injected', ${JSON.stringify(token)});
+        ${
+          opts.url != null
+            ? `tag.rel = 'stylesheet'; tag.href = ${JSON.stringify(String(opts.url))};
+        const loaded = new Promise((resolve, reject) => { tag.onload = resolve; tag.onerror = () => reject(new Error('Unable to load stylesheet')); });`
+            : `tag.textContent = ${JSON.stringify(String(content))};`
+        }
+        document.head.appendChild(tag);
+        ${opts.url != null ? "await loaded;" : ""}
+        return JSON.stringify({ ok: true });
+      } catch (error) { return JSON.stringify({ error: String(error.message || error) }); }
+    })()`,
+    );
+    const outcome = JSON.parse(result);
+    await this._refreshFromSession();
+    if (outcome.error) throw new Error(outcome.error);
+    return this.locator(`[data-ts-injected="${token}"]`);
+  }
   async addScriptTag(opts = {}) {
     if (opts.content) await this.render(opts.content);
   }

@@ -572,8 +572,7 @@ class Locator {
     return match.node == null ? (match.text ?? "") : native.textContentOf(this._html, match.node);
   }
   async innerText() {
-    const m = this._all();
-    return m.length ? (m[0].text ?? "").trim() : "";
+    return (await this._readElement((element) => element.innerText)) ?? "";
   }
   async innerHTML() {
     const m = this._all();
@@ -583,7 +582,10 @@ class Locator {
     return this._all().map((match) => this._textContent(match));
   }
   async allInnerTexts() {
-    return this._all().map((x) => (x.text ?? "").trim());
+    const matches = this._all();
+    const out = [];
+    for (let i = 0; i < matches.length; i++) out.push(await this.nth(i).innerText());
+    return out;
   }
 
   // --- accessors (node-handle backed; cross to Rust) ---

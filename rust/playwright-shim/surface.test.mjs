@@ -3629,3 +3629,21 @@ test("role queries filter pressed state and accessibility-hidden ancestors (#379
   assert.equal(await page.evaluate(() => document.body.getAttribute("data-clicked")), "unpressed");
   await page.close();
 });
+test("innerText reads rendered text and excludes hidden descendants (#378)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<div class="rendered" id="rendered">First<span style="display:none">SECRET</span><br>Second<div>Third</div></div><div class="rendered">Fourth<span hidden>HIDE</span></div>',
+  );
+  assert.equal(await page.locator("#rendered").innerText(), "First\nSecond\nThird");
+  assert.deepEqual(await page.locator(".rendered").allInnerTexts(), [
+    "First\nSecond\nThird",
+    "Fourth",
+  ]);
+  assert.ok(
+    (await page.evaluate(() => document.querySelector("#rendered").textContent)).includes("SECRET"),
+  );
+  await page._ensureLive();
+  await page.evaluate(() => (document.querySelector("#rendered span").style.display = "inline"));
+  assert.equal(await page.locator("#rendered").innerText(), "FirstSECRET\nSecond\nThird");
+  await page.close();
+});

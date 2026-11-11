@@ -2571,3 +2571,21 @@ test("toHaveJSProperty reads typed properties in the live realm (#438)", async (
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("CSS and id assertions accept regex and retain negation (#437)", async () => {
+  const page = await fresh();
+  await expect(page.locator("#go")).toHaveId("go", { timeout: 0 });
+  await expect(page.locator("#go")).toHaveId(/^go$/, { timeout: 0 });
+  await expect(page.locator("#go")).not.toHaveId(/^wrong$/, { timeout: 0 });
+  await assert.rejects(() => expect(page.locator("#go")).toHaveId(/^wrong$/, { timeout: 0 }));
+  await expect(page.locator("#hidden")).toHaveCSS("display", "none", { timeout: 0 });
+  await expect(page.locator("#hidden")).toHaveCSS("display", /^none$/, { timeout: 0 });
+  await expect(page.locator("#hidden")).not.toHaveCSS("display", /^block$/, { timeout: 0 });
+  await assert.rejects(() =>
+    expect(page.locator("#hidden")).toHaveCSS("display", /^block$/, { timeout: 0 }),
+  );
+  const globalPattern = /none/g;
+  await expect(page.locator("#hidden")).toHaveCSS("display", globalPattern, { timeout: 0 });
+  await expect(page.locator("#hidden")).toHaveCSS("display", globalPattern, { timeout: 0 });
+  await page.close();
+});

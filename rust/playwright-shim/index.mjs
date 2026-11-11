@@ -3573,13 +3573,21 @@ class LocatorExpect extends BaseExpect {
   async toContainClass(cls) {
     return this.toHaveClass(cls);
   }
-  async toHaveId(id) {
-    const got = await this._v.getAttribute("id");
-    this._ok(got === id, `expected id ${id}, got ${got}`);
+  async toHaveId(id, opts) {
+    let got;
+    const pass = await this._retry(async () => {
+      got = await this._v.getAttribute("id");
+      return got !== null && matchText(id, got);
+    }, opts);
+    this._ok(pass, `expected id ${id}, got ${got}`);
   }
-  async toHaveCSS(name, value) {
-    const got = await this._v.cssValue(name);
-    this._ok(got === value, `expected css ${name}:${value}, got "${got}"`);
+  async toHaveCSS(name, value, opts) {
+    let got;
+    const pass = await this._retry(async () => {
+      got = await this._v.cssValue(name);
+      return matchText(value, got);
+    }, opts);
+    this._ok(pass, `expected css ${name}:${value}, got "${got}"`);
   }
   async toHaveJSProperty(name, value, opts) {
     let got;
@@ -3773,7 +3781,10 @@ class ValueExpect extends BaseExpect {
 }
 
 function matchText(expected, got) {
-  if (expected instanceof RegExp) return expected.test(got);
+  if (expected instanceof RegExp) {
+    expected.lastIndex = 0;
+    return expected.test(got);
+  }
   if (Array.isArray(expected)) return expected.some((e) => matchText(e, got));
   return got === expected;
 }

@@ -2665,10 +2665,13 @@ class Page {
     throw new Error(`turbo-surf: waitForURL(${url}) — current url is ${this._url}`);
   }
   async waitForSelector(selector, opts = {}) {
-    const present = (await this.locator(selector).count()) > 0;
-    if (!present && opts.state !== "hidden" && opts.state !== "detached")
-      throw new Error(`turbo-surf: waitForSelector(${selector}) found no element`);
-    return present ? this.locator(selector) : null;
+    const state = opts.state ?? "visible";
+    if (!["attached", "detached", "hidden", "visible"].includes(state)) {
+      throw new Error(`Unsupported selector wait state: ${state}`);
+    }
+    const locator = this.locator(selector);
+    await locator.waitFor(opts);
+    return state === "hidden" || state === "detached" ? null : locator.elementHandle();
   }
   // Poll `fn(arg)` in the live isolate until truthy. `arg` may be an ElementHandle
   // (from locator.elementHandle()) — resolved to the live element so e.g.

@@ -56,3 +56,34 @@ test("each launched browser owns its contexts and closes only its resources", as
     await second.close();
   }
 });
+
+test("page selector waits honor states, timeouts and later insertions", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent(
+      '<div id="hidden" style="display:none">hidden</div><div id="visible">visible</div>',
+    );
+    await assert.rejects(
+      page.waitForSelector("#hidden", { state: "visible", timeout: 30 }),
+      /timed out/i,
+    );
+    await assert.rejects(
+      page.waitForSelector("#visible", { state: "hidden", timeout: 30 }),
+      /timed out/i,
+    );
+    await assert.rejects(
+      page.waitForSelector("#visible", { state: "detached", timeout: 30 }),
+      /timed out/i,
+    );
+    assert.equal(await page.waitForSelector("#hidden", { state: "hidden" }), null);
+    assert.equal(await page.waitForSelector("#missing", { state: "detached" }), null);
+    assert.ok(await page.waitForSelector("#hidden", { state: "attached" }));
+    const waiting = page.waitForSelector("#later", { state: "attached", timeout: 1000 });
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML("beforeend", '<div id="later">ready</div>');
+    });
+    assert.ok(await waiting);
+  } finally {
+    await page.close();
+  }
+});

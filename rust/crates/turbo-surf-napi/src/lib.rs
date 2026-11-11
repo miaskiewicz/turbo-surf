@@ -9,6 +9,7 @@ mod parse_cache;
 mod screenshot_output;
 pub use screenshot_output::{screenshot_crop, screenshot_jpeg};
 mod session;
+mod upload_mime;
 // Re-export the live-session napi free functions so they're reachable from the crate
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
@@ -57,6 +58,11 @@ pub(crate) fn ensure_render_init() {
     turbo_surf_render::ensure_platform();
 }
 use view::{Field, FieldType, QueryType, TextMode};
+
+#[napi]
+pub fn file_mime_type(path: String) -> String {
+    upload_mime::file_mime_type(&path)
+}
 
 #[napi]
 pub fn version() -> String {

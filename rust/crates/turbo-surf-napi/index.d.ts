@@ -3,6 +3,8 @@
 // JS shim that wraps this addon.
 
 export function version(): string;
+/** Infer an uploaded file path's MIME type; unknown extensions use application/octet-stream. */
+export function fileMimeType(path: string): string;
 /** Actual V8 version linked into the native renderer; host-only diagnostics. */
 export function engineVersion(): string;
 

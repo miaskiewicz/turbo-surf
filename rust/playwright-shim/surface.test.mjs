@@ -4737,3 +4737,32 @@ test("Configured response budgets admit large scripts and API bodies (#342)", as
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("File paths infer upload MIME types and preserve explicit payload types (#340)", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "surf-mime-"));
+  const path = join(directory, "fixture.CSV");
+  await writeFile(path, "a,b\n1,2\n");
+  const page = newPage();
+  try {
+    await page.setContent("<input id=file type=file>");
+    await page._ensureLive();
+    await page.locator("#file").setInputFiles(path);
+    assert.deepEqual(
+      await page.evaluate(() => ({
+        name: document.querySelector("#file").files[0].name,
+        type: document.querySelector("#file").files[0].type,
+      })),
+      { name: "fixture.CSV", type: "text/csv" },
+    );
+    await page
+      .locator("#file")
+      .setInputFiles({ name: "fixture.csv", mimeType: "text/custom", buffer: Buffer.from("x") });
+    assert.equal(
+      await page.evaluate(() => document.querySelector("#file").files[0].type),
+      "text/custom",
+    );
+  } finally {
+    await page.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

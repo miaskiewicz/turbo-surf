@@ -1336,7 +1336,12 @@ function normalizeInputFiles(files) {
   return list.map((f) => {
     if (typeof f === "string") {
       const data = fs.readFileSync(f).toString("latin1");
-      return { name: path.basename(f), type: "", lastModified: fs.statSync(f).mtimeMs, data };
+      return {
+        name: path.basename(f),
+        type: native.fileMimeType(f),
+        lastModified: fs.statSync(f).mtimeMs,
+        data,
+      };
     }
     let data = "";
     if (f.buffer != null) data = Buffer.from(f.buffer).toString("latin1");

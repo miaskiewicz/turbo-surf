@@ -33,6 +33,7 @@ coretext = ["turbo-dom-raster/coretext"]
 native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 
 [dependencies]
+mime_guess = "2.0.5"
 napi = { version = "2", default-features = false, features = ["napi6", "tokio_rt"] }
 napi-derive = "2"
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.8.2" }

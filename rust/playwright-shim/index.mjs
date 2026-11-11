@@ -651,9 +651,7 @@ class Locator {
         return JSON.stringify({value: element ? (${fn.toString()})(element) : null});
       } catch (error) { return JSON.stringify({error: String(error.message)}); }
     })()`;
-    const raw = live
-      ? await native.liveEvalEngine(this._page._session, script)
-      : native.evaluate(this._html, script);
+    const raw = live ? await this._page._evalEngine(script) : native.evaluate(this._html, script);
     const result = JSON.parse(raw);
     if (result.error) throw new Error(result.error);
     return result.value;
@@ -690,13 +688,13 @@ class Locator {
     const n = this._node();
     return n == null ? null : JSON.parse(native.nodeSnapshot(this._html, n));
   }
-  // locator.evaluate runs page JS with the element selected by CSS (the element
-  // is the callback's first arg). Needs a selector-backed locator — see LIMITATIONS.
   async evaluate(fn, arg) {
-    if (!this._selector)
-      throw new Error("turbo-surf: locator.evaluate needs a CSS-selector-backed locator");
-    const src = `(${fn.toString()})(document.querySelector(${JSON.stringify(this._selector)}), ${JSON.stringify(arg ?? null)})`;
-    return native.evaluate(this._html, src);
+    await this._page._ensureLive();
+    const index = await this._resolveLiveIdx();
+    if (index == null) throw new Error("turbo-surf: locator matched no elements");
+    return this._page.evaluate(
+      `(${fn.toString()})(document.querySelectorAll('*')[${index}], ${JSON.stringify(arg ?? null)})`,
+    );
   }
   async evaluateAll(fn, arg) {
     return native.evaluate(this._html, evalSource(fn, arg));

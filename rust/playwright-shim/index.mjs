@@ -719,10 +719,21 @@ class Locator {
     this._page._html = native.selectOptionNode(this._html, this._requireNode(), sval);
     return [sval];
   }
-  async click() {
+  async click(opts = {}) {
+    const modifiers = opts.modifiers?.map((modifier) =>
+      modifier === "ControlOrMeta"
+        ? process.platform === "darwin"
+          ? "Meta"
+          : "Control"
+        : modifier,
+    );
+    opts = { ...opts, modifiers };
     if (this._canDriveLive) {
       const urlBefore = this._page._url;
-      const r = await this._driveLive("click");
+      let r;
+      for (let count = 1; count <= (opts.clickCount ?? 1); count++)
+        r = await this._driveLive("click", { ...opts, clickCount: count });
+      if (opts.button && opts.button !== "left") return;
       // A JS handler that navigated changed the URL (SPA router / form POST + redirect).
       // If the URL is unchanged AND the app didn't preventDefault, the click hit a plain
       // <a>/<form> whose browser default action our event dispatch doesn't perform —
@@ -1096,16 +1107,26 @@ function interactionScript(selector, index, kind, value) {
     // role="combobox", which opens on its own mousedown) actually fire. Focus and
     // the default-action (form submit) logic stay on the matched control \`el\`.
     let tgt = el; while (tgt.firstElementChild) tgt = tgt.firstElementChild;
-    const o = { bubbles: true, cancelable: true, view: globalThis, button: 0 };
+    const options = ${val} || {};
+    const rect = el.getBoundingClientRect();
+    const position = options.position || { x: rect.width / 2, y: rect.height / 2 };
+    const button = options.button === "right" ? 2 : options.button === "middle" ? 1 : 0;
+    const modifiers = options.modifiers || [];
+    const o = { bubbles: true, cancelable: true, view: globalThis, button,
+      clientX: rect.left + position.x, clientY: rect.top + position.y,
+      detail: options.clickCount || 1, shiftKey: modifiers.includes("Shift"),
+      ctrlKey: modifiers.includes("Control"),
+      altKey: modifiers.includes("Alt"), metaKey: modifiers.includes("Meta") };
     // Full pointer+mouse sequence like a real browser: pointer events FIRST (MUI v5+ /
     // Radix / many libs gate selection on pointerdown/up, and MUI Autocomplete/Select
     // options preventDefault mousedown to keep input focus — without the pointer pair the
     // option click never commits the value). PointerEvent if available, else MouseEvent.
     const PE = globalThis.PointerEvent || globalThis.MouseEvent;
-    const pe = (t) => new PE(t, { bubbles: true, cancelable: true, view: globalThis, button: 0, pointerId: 1, isPrimary: true });
+    const pe = (t) => new PE(t, { ...o, detail: 0, buttons: t === "pointerup" ? 0 : [1, 4, 2][button], pointerId: 1, isPrimary: true });
     tgt.dispatchEvent(pe("pointerdown"));
     const md = new MouseEvent("mousedown", o);
     tgt.dispatchEvent(md);
+    if (button === 2) tgt.dispatchEvent(new MouseEvent("contextmenu", o));
     // Focus follows the browser rules: a click moves focus to a FOCUSABLE target, BUT a
     // mousedown handler that calls preventDefault() suppresses the focus shift. MUI's
     // Autocomplete/Select listbox preventDefaults mousedown precisely to keep the input
@@ -1115,12 +1136,13 @@ function interactionScript(selector, index, kind, value) {
     if (focusable && !md.defaultPrevented && typeof el.focus === "function") el.focus();
     tgt.dispatchEvent(pe("pointerup"));
     tgt.dispatchEvent(new MouseEvent("mouseup", o));
-    const clickEv = new MouseEvent("click", o);
+    const clickEv = new MouseEvent(button === 0 ? "click" : "auxclick", o);
     tgt.dispatchEvent(clickEv);
+    if (button === 0 && o.detail === 2) tgt.dispatchEvent(new MouseEvent("dblclick", o));
     // Browser default action of clicking a submit control: fire the form's submit
     // event (React's onSubmit is delegated). Our dispatch has no default action, so do
     // it explicitly — unless the click was preventDefault'd.
-    if (!clickEv.defaultPrevented) {
+    if (button === 0 && !clickEv.defaultPrevented) {
       let f = null;
       for (let p = el; p; p = p.parentElement) { if (p.tagName === "FORM") { f = p; break; } }
       const ty = (el.getAttribute && (el.getAttribute("type") || "")).toLowerCase();

@@ -287,3 +287,62 @@ test("mouse buttons retain chords and require a matching press (#440)", async ()
     await teardown();
   }
 });
+
+test("locator click forwards position modifiers button and clickCount (#439)", async () => {
+  const { page, teardown } = await fixture();
+  try {
+    await page.evaluate(() => {
+      window.locatorClicks = [];
+      document.getElementById("src").style.cssText =
+        "position:absolute;left:20px;top:100px;width:100px;height:100px";
+      for (const type of ["click", "contextmenu", "auxclick"])
+        document.getElementById("src").addEventListener(type, (event) =>
+          window.locatorClicks.push({
+            type,
+            x: event.clientX,
+            y: event.clientY,
+            button: event.button,
+            detail: event.detail,
+            shift: event.shiftKey,
+          }),
+        );
+    });
+    await page
+      .locator("#src")
+      .click({ position: { x: 10, y: 15 }, modifiers: ["Shift"], clickCount: 2 });
+    const result = await page.evaluate(() => window.locatorClicks);
+    assert.deepEqual(
+      result.map(({ type, button, detail, shift }) => ({ type, button, detail, shift })),
+      [
+        { type: "click", button: 0, detail: 1, shift: true },
+        { type: "click", button: 0, detail: 2, shift: true },
+      ],
+    );
+    const rect = await page.evaluate(() => {
+      const r = document.getElementById("src").getBoundingClientRect();
+      return { x: r.x, y: r.y };
+    });
+    assert.deepEqual(
+      result.map(({ x, y }) => ({ x, y })),
+      [
+        { x: rect.x + 10, y: rect.y + 15 },
+        { x: rect.x + 10, y: rect.y + 15 },
+      ],
+    );
+    await page.evaluate(() => {
+      window.locatorClicks = [];
+    });
+    await page.locator("#src").click({ button: "right" });
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.locatorClicks.map(({ type, button, shift }) => ({ type, button, shift })),
+      ),
+      [
+        { type: "contextmenu", button: 2, shift: false },
+        { type: "auxclick", button: 2, shift: false },
+      ],
+    );
+  } finally {
+    await teardown();
+  }
+});

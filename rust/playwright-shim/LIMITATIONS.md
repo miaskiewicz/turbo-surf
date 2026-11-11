@@ -239,3 +239,11 @@ into **one** crossing so an `expect(locator)` chain doesn't cross 3×. A further
 lever — **not built**, because e2e is network-bound — would be a
 `node_snapshot`-style batch for the attribute/class/CSS matchers (which still
 cross per-name, as there's no attribute-map iterator on the seam).
+
+
+### CLI runtime capabilities
+
+The `turbo-surf-test` CLI requires Node.js 20.14+ or 22+ for completed-test
+worker shutdown (`--test-force-exit`). Configured `grepInvert` requires Node.js
+22.1+ (`--test-skip-pattern`). Earlier runtimes receive a clear error before
+web servers start; the package's launcher remains available on Node.js 20+.

@@ -22,6 +22,7 @@ import {
   orderProjects,
   startWebServers,
   stopWebServers,
+  testRunnerFlags,
 } from "./config.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -497,3 +498,22 @@ test(
     assert.match(readFileSync(join(root, "playwright-report.html"), "utf8"), /completed test/);
   },
 );
+
+test("test runner capabilities report explicit supported Node versions", () => {
+  assert.throws(() => testRunnerFlags({}, "20.13.0"), /requires Node.js 20.14/);
+  assert.throws(() => testRunnerFlags({}, "21.7.0"), /requires Node.js 20.14/);
+  assert.deepEqual(testRunnerFlags({}, "20.14.0"), ["--test-force-exit"]);
+  assert.throws(
+    () => testRunnerFlags({ grepInvert: [/excluded/] }, "20.19.0"),
+    /grepInvert requires Node.js 22.1/,
+  );
+  assert.throws(
+    () => testRunnerFlags({ grepInvert: [/excluded/] }, "22.0.0"),
+    /grepInvert requires Node.js 22.1/,
+  );
+  assert.deepEqual(testRunnerFlags({ grep: [/selected/i], grepInvert: [/excluded/] }, "22.1.0"), [
+    "--test-force-exit",
+    "--test-name-pattern=/selected/i",
+    "--test-skip-pattern=/excluded/",
+  ]);
+});

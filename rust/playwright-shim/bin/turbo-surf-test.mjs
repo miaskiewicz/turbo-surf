@@ -15,6 +15,7 @@ import {
   orderProjects,
   startWebServers,
   stopWebServers,
+  testRunnerFlags,
 } from "../config.mjs";
 
 const SHIM_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,6 +58,7 @@ export async function run(argv) {
     console.error(`turbo-surf-test: no projects matched ${JSON.stringify(values.project)}`);
     return 2;
   }
+  for (const project of chosen) testRunnerFlags(project);
   const webHandles = await startWebServers(config.webServer, (m) =>
     console.log(`[webServer] ${m}`),
   );
@@ -122,11 +124,9 @@ function runProject(project, files, reporter) {
     "--import",
     REGISTER,
     "--test",
-    "--test-force-exit",
     `--test-reporter=${nodeReporter}`,
     "--test-reporter-destination=stdout",
-    ...(project.grep ?? []).map((pattern) => `--test-name-pattern=${pattern}`),
-    ...(project.grepInvert ?? []).map((pattern) => `--test-skip-pattern=${pattern}`),
+    ...testRunnerFlags(project),
     ...files,
   ];
   return new Promise((resolveP) => {

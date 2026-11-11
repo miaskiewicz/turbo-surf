@@ -318,3 +318,21 @@ export function orderProjects(projects, selectedNames) {
   }
   return ordered;
 }
+
+export function testRunnerFlags(project, version = process.versions.node) {
+  const [major, minor] = version.split(".").map(Number);
+  const forceExit = major >= 22 || (major === 20 && minor >= 14);
+  if (!forceExit) {
+    throw new Error(
+      `turbo-surf-test requires Node.js 20.14+ or 22+ for completed-test worker shutdown; current ${version}`,
+    );
+  }
+  if (project.grepInvert?.length && !(major > 22 || (major === 22 && minor >= 1))) {
+    throw new Error(`turbo-surf-test: grepInvert requires Node.js 22.1+; current ${version}`);
+  }
+  return [
+    "--test-force-exit",
+    ...(project.grep ?? []).map((pattern) => `--test-name-pattern=${pattern}`),
+    ...(project.grepInvert ?? []).map((pattern) => `--test-skip-pattern=${pattern}`),
+  ];
+}

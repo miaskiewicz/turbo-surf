@@ -2996,3 +2996,27 @@ test("navigation deadlines cancel slow goto and reload fetches (#427)", async ()
     await new Promise((done) => server.close(done));
   }
 });
+
+test("direct navigation referrers are explicit and reload retains them (#426)", async () => {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push(req.headers.referer ?? null);
+    res.end("<title>referrer</title>");
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(`${base}/a`, { referer: `${base}/custom`, waitUntil: "networkidle" });
+    assert.equal(seen.at(-1), `${base}/custom`);
+    assert.equal(await page.evaluate(() => document.referrer), `${base}/custom`);
+    await page.reload({ waitUntil: "networkidle" });
+    assert.equal(seen.at(-1), `${base}/custom`);
+    assert.equal(await page.evaluate(() => document.referrer), `${base}/custom`);
+    await page.goto(`${base}/b`, { waitUntil: "networkidle" });
+    assert.equal(seen.at(-1), null);
+    assert.equal(await page.evaluate(() => document.referrer), "");
+  } finally {
+    await page.close();
+    await new Promise((done) => server.close(done));
+  }
+});

@@ -2071,7 +2071,11 @@ class Page {
         false,
         this._requestState,
         JSON.stringify({
-          source: /^https?:/.test(this._url) ? this._url : null,
+          source: Object.hasOwn(opts ?? {}, "referer")
+            ? opts.referer
+            : /^https?:/.test(this._url)
+              ? this._url
+              : null,
           destination: "document",
           referrerPolicy: this._navigationReferrerPolicy(),
         }),
@@ -2110,7 +2114,10 @@ class Page {
     const previous = this._url;
     this._navHops = 0; // user navigation — reset the redirect-follow budget
     this._autoHydrate = opts?.waitUntil !== "commit"; // 'commit' = inspect raw shell
-    const resp = await this._navigate(this._resolveUrl(url), undefined, undefined, opts);
+    const resp = await this._navigate(this._resolveUrl(url), undefined, undefined, {
+      ...opts,
+      referer: opts?.referer ?? null,
+    });
     if (previous !== "about:blank") this._history.push(previous);
     this._fwd = []; // a committed navigation invalidates the forward stack
     // `waitUntil:'networkidle'` (or a later waitForLoadState('networkidle')) opens a LIVE
@@ -2142,7 +2149,10 @@ class Page {
     // re-appear); without this the reloaded doc stays the raw un-hydrated shell and reads
     // (e.g. a settings select's value) see an empty DOM.
     this._autoHydrate = opts?.waitUntil !== "commit";
-    const resp = await this._navigate(this._url, undefined, undefined, opts);
+    const resp = await this._navigate(this._url, undefined, undefined, {
+      ...opts,
+      referer: opts?.referer ?? this._documentResponse?.referrer ?? null,
+    });
     if (opts?.waitUntil === "networkidle") await this._openLiveSession();
     return resp;
   }

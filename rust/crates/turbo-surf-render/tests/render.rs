@@ -65,6 +65,47 @@ async fn deferred_classics_download_concurrently_and_execute_in_document_order()
     );
 }
 
+#[tokio::test]
+async fn idle_scalar_evaluations_do_not_scan_the_dom_signature() {
+    let mut session = PageSession::open(
+        &format!("<body>{}</body>", "<input value=abc>".repeat(5000)),
+        "https://example.test/",
+        "",
+        "",
+        DEFAULT_RENDER_BUDGET_MS,
+    )
+    .await
+    .unwrap();
+    session
+        .eval_engine("const original=__tsNs.domSig;globalThis.signatureScans=0;__tsNs.domSig=()=>{signatureScans++;return original()};")
+        .await
+        .unwrap();
+    session
+        .eval("signatureScans=0;globalThis.__RESULT=42")
+        .await
+        .unwrap();
+    assert_eq!(
+        session
+            .eval_expression("String(signatureScans)")
+            .await
+            .unwrap(),
+        "0",
+        "genuinely idle evaluations do not need a settling heuristic"
+    );
+    session
+        .eval("setTimeout(()=>{document.querySelector('input').value='updated'},0)")
+        .await
+        .unwrap();
+    assert_eq!(
+        session
+            .eval_expression("document.querySelector('input').value")
+            .await
+            .unwrap(),
+        "updated",
+        "pending timer work still settles before returning"
+    );
+}
+
 // The deno_core `Deno` global must NOT leak to page scope — `'Deno' in window` /
 // `typeof window.Deno` is the single most-checked browserless/electron tell. Bootstrap
 // captures the op table into closures then deletes the global. This also exercises the

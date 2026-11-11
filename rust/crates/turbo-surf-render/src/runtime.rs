@@ -16873,11 +16873,17 @@ struct QuiescenceSample {
 /// [`QuiescenceSample`].
 fn sample_quiescence_state(rt: &mut JsRuntime, fired: u32) -> Result<QuiescenceSample, String> {
     let pending = namespace_call(rt, "pendingWork", &[])?;
-    let sig_v = namespace_call(rt, "domSig", &[])?;
     let fetches = namespace_call(rt, "pendingFetchCount", &[])?;
     let still = read_string(rt, pending)? == "1";
     let awaiting_fetch = read_string(rt, fetches)? != "0";
-    let sig = read_string(rt, sig_v)?;
+    // Idle rounds stop immediately; in-flight fetches reset stability regardless
+    // of DOM state. Neither path uses the potentially expensive control scan.
+    let sig = if (still || fired != 0) && !awaiting_fetch {
+        let sig_v = namespace_call(rt, "domSig", &[])?;
+        read_string(rt, sig_v)?
+    } else {
+        String::new()
+    };
     Ok(QuiescenceSample {
         still,
         fired_any: fired != 0,

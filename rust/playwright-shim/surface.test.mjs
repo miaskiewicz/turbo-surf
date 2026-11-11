@@ -2429,3 +2429,29 @@ test("nested scope selectors evaluate against each matched parent (#475)", async
   ]);
   await page.close();
 });
+
+test("child reads honor indexed and filtered ancestors (#474)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<div class="card" id="one"><button class="child">first</button></div><div class="card" id="two"><button class="child">second</button></div>',
+  );
+  const child = page.locator(".card").nth(-1).locator(".child");
+  assert.equal(await child.count(), 1);
+  assert.deepEqual(await child.allTextContents(), ["second"]);
+  assert.equal(await child.getAttribute("class"), "child");
+  assert.deepEqual(await page.locator(".card").last().getByRole("button").allTextContents(), [
+    "second",
+  ]);
+  assert.deepEqual(
+    await page.locator(".card").filter({ hasText: "second" }).locator(".child").allTextContents(),
+    ["second"],
+  );
+  assert.equal(await page.locator(".card").nth(8).locator(".child").count(), 0);
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('#two button').onclick = () => document.body.setAttribute('data-clicked','two')",
+  );
+  await child.click();
+  assert.equal(await page.locator("body").getAttribute("data-clicked"), "two");
+  await page.close();
+});

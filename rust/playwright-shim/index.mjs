@@ -372,7 +372,18 @@ class Locator {
           }
         }
       }
-    } else m = this._resolve(this._page._html);
+    } else {
+      m = this._resolve(this._page._html);
+      if (this._parent) {
+        const descendants = new Set();
+        for (const parent of this._parent._all()) {
+          for (const match of JSON.parse(native.query(this._html, "*", "css", parent.node))) {
+            descendants.add(match.node);
+          }
+        }
+        m = m.filter((match) => descendants.has(match.node));
+      }
+    }
     if (this._filter) m = m.filter(this._filter);
     if (this._index == null) return m;
     const i = this._index < 0 ? m.length + this._index : this._index;
@@ -449,7 +460,7 @@ class Locator {
     return sc.some((s) => s.idx != null || s.filter != null) ? sc : null;
   }
   // A selector-backed child carrying the nth-aware scope chain (live-driven via the chain).
-  _scopedSelectorChild(selector, scope, parent = null) {
+  _scopedSelectorChild(selector, scope, parent = this) {
     const loc = this._page._locFromSelector(selector);
     loc._scope = scope;
     loc._parent = parent;
@@ -477,6 +488,7 @@ class Locator {
       return new Locator(this._page, (h) => JSON.parse(native.getBy(h, kind, value, name)), {
         getBy: { kind, value, name },
         scope,
+        parent: this,
       });
     }
     const root = this._selector;

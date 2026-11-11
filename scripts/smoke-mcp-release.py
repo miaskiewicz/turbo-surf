@@ -115,7 +115,7 @@ def verify_protocol(stdout, version, url):
         raise ValueError("Artifact did not execute expected DOM/native crypto/stream JS")
 
 
-def smoke(command, version, source_commit, work, output, timeout=60):
+def smoke(command, version, source_commit, work, output, timeout=60, env=None):
     global CHILD
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("Expected exact release version and source commit")
@@ -152,7 +152,10 @@ def smoke(command, version, source_commit, work, output, timeout=60):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     url = "http://127.0.0.1:" + str(server.server_address[1]) + "/portable"
-    env, removed = clean_environment()
+    clean_env, removed = clean_environment()
+    if env is not None:
+        clean_env.update(env)
+    env = clean_env
     requests = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "artifact-javascript-smoke", "version": "1"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "goto", "arguments": {"url": url}}},

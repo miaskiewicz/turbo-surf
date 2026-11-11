@@ -245,7 +245,9 @@ jobs:
           version = json.loads((root / 'package.json').read_text())['version']
           output = Path(os.environ['RUNNER_TEMP']) / 'npm-release-package'
           # Stage the linux-x64 binary into a mock platform package for the smoke test.
-          mock_pkg = Path(os.environ['RUNNER_TEMP']) / 'mock-platform-pkg'
+          # Node resolves @scope/pkg as NODE_PATH/@scope/pkg/, so nest accordingly.
+          mock_root = Path(os.environ['RUNNER_TEMP']) / 'mock-node-modules'
+          mock_pkg = mock_root / '@miaskiewicz' / 'turbo-surf-linux-x64'
           mock_pkg.mkdir(parents=True)
           (mock_pkg / 'package.json').write_text(json.dumps({
               'name': '@miaskiewicz/turbo-surf-linux-x64', 'version': version}))
@@ -255,8 +257,7 @@ jobs:
               (mock_pkg / 'turbo-surf-mcp').chmod(0o755)
               break
           # Point Node module resolution at our mock.
-          env = os.environ.copy()
-          env['NODE_PATH'] = str(mock_pkg.parent)
+          env = {'NODE_PATH': str(mock_root)}
           spec = importlib.util.spec_from_file_location('release_smoke', root / 'scripts/smoke-mcp-release.py')
           smoke = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(smoke)
@@ -264,8 +265,10 @@ jobs:
               if hasattr(signal, name):
                   signal.signal(getattr(signal, name), smoke.interrupted)
           smoke_output = output / 'javascript-smoke'
+          version_env = os.environ.copy()
+          version_env['NODE_PATH'] = str(mock_root)
           result = subprocess.run([shutil.which('node'), str(root / 'cli.js'), '--version'],
-              capture_output=True, text=True, timeout=30, env=env)
+              capture_output=True, text=True, timeout=30, env=version_env)
           print('CLI --version:', result.stdout.strip(), '(exit', result.returncode, ')')
           if result.returncode != 0:
               print('stderr:', result.stderr)

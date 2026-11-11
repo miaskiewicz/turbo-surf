@@ -73,3 +73,47 @@ test("XHR route abort emits an error and continue reaches the real response", as
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("route fallback visits older handlers and unroute updates one live wrapper", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("access-control-allow-origin", "*");
+    response.end("upstream");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const endpoint = `http://127.0.0.1:${server.address().port}/api`;
+  const page = shim.newPage();
+  const older = (route) => route.fulfill({ body: "older" });
+  const newer = (route) => route.fallback();
+  try {
+    await page.route("**/api", older);
+    await page.route("**/api", newer);
+    await page.setContent("<body></body>");
+    await page._ensureLive();
+    const read = () => page.evaluate(async (url) => (await fetch(url)).text(), endpoint);
+    assert.equal(await read(), "older");
+    assert.equal(
+      await page.evaluate(
+        (url) =>
+          new Promise((resolve) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", url);
+            xhr.onload = () => resolve(xhr.responseText);
+            xhr.send();
+          }),
+        endpoint,
+      ),
+      "older",
+    );
+    await page.unroute("**/api", newer);
+    assert.equal(await read(), "older");
+    await page.unroute("**/api", older);
+    assert.equal(await read(), "upstream");
+    await page.route("**/api", (route) => route.fulfill({ body: "replaced" }));
+    assert.equal(await read(), "replaced");
+    await page.unroute("**/api");
+    assert.equal(await read(), "upstream");
+  } finally {
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

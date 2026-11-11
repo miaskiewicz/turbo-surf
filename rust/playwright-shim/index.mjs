@@ -136,6 +136,7 @@ function normalizeRoute(pattern, handler) {
     flags: isRegex ? pattern.flags : "",
     patternKey: isRegex ? pattern.source : String(pattern),
     handlerSource: `(${String(handler)})`,
+    handler,
   };
 }
 
@@ -145,9 +146,8 @@ function normalizeRoute(pattern, handler) {
 // supports `**` (any chars) and `*` (any non-slash chars), with substring as a
 // final fallback.
 function buildRouteInitScript(routes) {
-  if (!routes || !routes.length) return "";
   const table = JSON.stringify(
-    routes.map((r) => ({
+    (routes ?? []).map((r) => ({
       kind: r.kind,
       pattern: r.pattern,
       flags: r.flags,
@@ -155,11 +155,20 @@ function buildRouteInitScript(routes) {
     })),
   );
   return `(() => {
-    const routes = (${table}).map((r) => {
+    const previous = globalThis.fetch && globalThis.fetch.__turboRouteState;
+    const state = previous || {routes: [], fetch: globalThis.fetch, xhr: globalThis.XMLHttpRequest};
+    const routes = state.routes;
+    const next = (${table}).map((r) => {
       let fn = null;
       try { fn = (0, eval)(r.handlerSource); } catch (_e) { /* malformed handler — route is a no-op */ }
       return { kind: r.kind, pattern: r.pattern, flags: r.flags, fn };
     });
+    routes.splice(0, routes.length, ...next);
+    if (!routes.length) {
+      if (previous) { globalThis.fetch = state.fetch; globalThis.XMLHttpRequest = state.xhr; }
+      return;
+    }
+    if (previous) return;
     const globToRegex = (p) => {
       // Escape * and ? too, so the two translation passes below can locate
       // every star — a bare * in the source would otherwise skip the escape
@@ -182,12 +191,12 @@ function buildRouteInitScript(routes) {
       } catch (_e) { /* non-URL input — raw-only matching */ }
       return out;
     };
-    const find = (url) => {
+    const find = (url, start = routes.length - 1) => {
       const urls = candidates(url);
       // Playwright runs the LATEST handler first (reverse registration order) so
       // a per-test override can shadow a globally registered mock. Iterate the
       // route table from the end.
-      for (let i = routes.length - 1; i >= 0; i--) {
+      for (let i = start; i >= 0; i--) {
         const r = routes[i];
         for (const u of urls) {
           try {
@@ -234,6 +243,15 @@ function buildRouteInitScript(routes) {
       try { if (typeof r.fn === "function") await r.fn(route, req); } catch (_e) { /* handler threw — leave inert */ }
       return { fulfilled, action };
     };
+    const runRouteChain = async (first, url, method, init, headers) => {
+      let route = first;
+      while (route) {
+        const decision = await runHandler(route, url, method, init, headers);
+        if (decision.action !== "fallback") return decision;
+        route = find(url, routes.indexOf(route) - 1);
+      }
+      return {fulfilled: null, action: "continue"};
+    };
     const collectHeaders = (init) => {
       const h = init && init.headers;
       if (!h) return {};
@@ -248,11 +266,12 @@ function buildRouteInitScript(routes) {
         const method = (init && init.method) || (typeof input === "object" && input && input.method) || "GET";
         const r = find(url);
         if (!r) return origFetch(input, init);
-        const { fulfilled, action } = await runHandler(r, url, method, init || {}, collectHeaders(init));
+        const { fulfilled, action } = await runRouteChain(r, url, method, init || {}, collectHeaders(init));
         if (fulfilled) return synth(fulfilled);
         if (action === "abort") throw new TypeError("net::ERR_ABORTED");
         return origFetch(input, init);
       };
+      Object.defineProperty(globalThis.fetch, "__turboRouteState", {value: state});
     }
     if (typeof globalThis.XMLHttpRequest === "function") {
       const OrigXHR = globalThis.XMLHttpRequest;
@@ -299,9 +318,10 @@ function buildRouteInitScript(routes) {
         this._real.send(body);
       };
       MockXHR.prototype.send = function (body) {
+        this._mocked = find(this._url);
         if (this._mocked) {
           const self = this;
-          runHandler(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled, action }) => {
+          runRouteChain(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled, action }) => {
             if (action === "abort") {
               self.readyState = 4;
               self.status = 0;
@@ -3286,7 +3306,7 @@ class Page {
   // Caveat: the serialized handler loses outer-scope closures — captured host
   // identifiers and host-side `await` on Node helpers don't cross into V8.
   // Pattern: string (substring OR glob with `*`/`**`) or RegExp. `continue` and
-  // `fallback` let the real network through; `abort` rejects the fetch.
+  // `fallback` walks older handlers; `continue` uses the network and `abort` rejects.
   // XHR goes through this same wrapper for the common xhr.open+send path.
   async route(urlPattern, handler) {
     this._routes = this._routes ?? [];
@@ -3294,18 +3314,18 @@ class Page {
     this._routeInitScript = buildRouteInitScript(this._routes);
     // Inject into the CURRENT live isolate too, so a route registered after
     // goto intercepts subsequent fetches without requiring a re-navigation
-    // (turbo-surf#282). The wrapper falls through to the previously-wrapped
-    // fetch for non-matches, so stacking is safe.
+    // (turbo-surf#282). Updating the existing table avoids stale wrapper chains.
     if (this._live && this._routeInitScript) {
       await native.liveEvalEngine(this._session, this._routeInitScript);
     }
   }
-  // Drop a previously-registered route by its original pattern (handler ignored
-  // here because the shim collapses each route to its fulfilled payload).
-  async unroute(urlPattern) {
+  // An optional handler removes only that registration, preserving older matches.
+  async unroute(urlPattern, handler) {
     if (!this._routes) return;
     const key = urlPattern instanceof RegExp ? urlPattern.source : String(urlPattern);
-    this._routes = this._routes.filter((r) => r.patternKey !== key);
+    this._routes = this._routes.filter(
+      (r) => r.patternKey !== key || (handler && r.handler !== handler),
+    );
     this._routeInitScript = buildRouteInitScript(this._routes);
     if (this._live && this._routeInitScript) {
       await native.liveEvalEngine(this._session, this._routeInitScript);

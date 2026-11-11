@@ -326,3 +326,31 @@ test(
     }
   },
 );
+
+test("webServer cwd resolves against the configuration directory", async () => {
+  const root = tmp();
+  const port = await freePort();
+  writeFileSync(
+    join(root, "server.mjs"),
+    `import {createServer} from 'node:http';
+    createServer((req,res)=>res.end('ok')).listen(${port}, '127.0.0.1');`,
+  );
+  const config = normalizeConfig(
+    {
+      webServer: {
+        command: `"${process.execPath}" server.mjs`,
+        port,
+        timeout: 2000,
+        gracefulShutdown: { signal: "SIGTERM", timeout: 200 },
+      },
+    },
+    root,
+  );
+  assert.equal(config.webServer[0].cwd, root);
+  const relative = normalizeConfig({ webServer: { command: "unused", cwd: "nested" } }, root);
+  assert.equal(relative.webServer[0].cwd, join(root, "nested"));
+  const absolute = normalizeConfig({ webServer: { command: "unused", cwd: root } }, "/elsewhere");
+  assert.equal(absolute.webServer[0].cwd, root);
+  const handles = await startWebServers(config.webServer);
+  await stopWebServers(handles);
+});

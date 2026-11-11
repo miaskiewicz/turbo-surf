@@ -42,7 +42,7 @@ export function normalizeConfig(raw, rootDir) {
   const testMatch = toArray(r.testMatch) ?? DEFAULT_TEST_MATCH;
   const testIgnore = toArray(r.testIgnore) ?? DEFAULT_TEST_IGNORE;
   const reporter = normalizeReporter(r.reporter);
-  const webServer = normalizeWebServer(r.webServer);
+  const webServer = normalizeWebServer(r.webServer, rootDir);
   const use = r.use ?? {};
   const rawProjects = Array.isArray(r.projects) ? r.projects : [];
   const projects = rawProjects.length
@@ -71,13 +71,13 @@ function normalizeReporter(r) {
   return [[String(r)]];
 }
 
-function normalizeWebServer(w) {
+function normalizeWebServer(w, rootDir) {
   if (!w) return [];
   return (Array.isArray(w) ? w : [w]).map((s) => ({
     command: s.command,
     url: s.url,
     port: s.port,
-    cwd: s.cwd,
+    cwd: resolve(rootDir, s.cwd ?? "."),
     env: s.env ?? {},
     timeout: s.timeout ?? 60_000,
     reuseExistingServer: s.reuseExistingServer ?? false,

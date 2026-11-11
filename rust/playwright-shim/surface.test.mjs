@@ -4338,3 +4338,32 @@ test("Completed emitted requests link back to their exact response (#344)", asyn
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Opacity-only sibling animations do not reject unrelated geometry (#345)", async () => {
+  const server = createServer((req, res) =>
+    res.end(
+      "<style>@keyframes fade{from{opacity:0}to{opacity:1}}#sibling{animation:fade 100s both}#target{width:120px;height:20px}</style><div id=sibling>sibling</div><div id=target>target</div>",
+    ),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    assert.equal(
+      await page.evaluate(() => document.querySelector("#target").getBoundingClientRect().width),
+      120,
+    );
+    await page.evaluate(() => {
+      document.querySelector("#sibling").style.animation = "fade 1ms both";
+    });
+    await page.waitForTimeout(25);
+    assert.equal(
+      await page.evaluate(() => document.querySelector("#target").getBoundingClientRect().width),
+      120,
+    );
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

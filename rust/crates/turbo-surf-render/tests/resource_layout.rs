@@ -86,3 +86,18 @@ fn used_web_fonts_lay_out_and_start_loading() {
         );
     }
 }
+
+#[test]
+fn opacity_only_animation_does_not_reject_unrelated_geometry() {
+    for duration in ["100s", "1ms"] {
+        let html = format!("<!doctype html><style>@keyframes fade{{from{{opacity:0}}to{{opacity:1}}}}#sibling{{animation:fade {duration} both}}#target{{width:120px;height:20px}}</style><div id='sibling'>sibling</div><div id='target'>target</div>");
+        assert_eq!(
+            run_with_dom(
+                &html,
+                "String(document.getElementById('target').getBoundingClientRect().width)"
+            )
+            .unwrap(),
+            "120"
+        );
+    }
+}

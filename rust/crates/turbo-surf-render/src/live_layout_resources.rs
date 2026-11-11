@@ -37,6 +37,19 @@ pub(crate) fn definition(source: &str) -> Result<Definition, String> {
                 _ => Definition::Inert,
             })
         }
+        // Opacity does not change layout boxes, even while its animation is active.
+        [CssRule::Keyframes(rule)]
+            if rule.keyframes.iter().all(|frame| {
+                frame
+                    .declarations
+                    .declarations
+                    .iter()
+                    .chain(frame.declarations.important_declarations.iter())
+                    .all(|property| matches!(property, Property::Opacity(_)))
+            }) =>
+        {
+            Ok(Definition::Inert)
+        }
         [CssRule::Keyframes(rule)] => Ok(Definition::Animation(match &rule.name {
             KeyframesName::Ident(name) => name.0.to_string(),
             KeyframesName::Custom(name) => name.to_string(),
@@ -261,11 +274,15 @@ mod definition_tests {
             ),
             ("@font-face{font-family:x}", Ok(Definition::Inert)),
             (
-                "@keyframes spin{to{opacity:0}}",
+                "@keyframes fade{from{opacity:0}to{opacity:1}}",
+                Ok(Definition::Inert),
+            ),
+            (
+                "@keyframes spin{to{transform:rotate(1deg)}}",
                 Ok(Definition::Animation("spin".into())),
             ),
             (
-                "@keyframes \"spin it\"{to{opacity:0}}",
+                "@keyframes \"spin it\"{to{width:1px}}",
                 Ok(Definition::Animation("spin it".into())),
             ),
             (

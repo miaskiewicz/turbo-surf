@@ -3755,3 +3755,18 @@ test("calling fixture use twice fails promptly during teardown", async () => {
   assert.equal(result.error, undefined);
   assert.match(result.stdout, /Fixture value called use more than once/);
 });
+test("off removes only the most recent duplicate listener (#374)", async () => {
+  const page = newPage();
+  const calls = [];
+  const duplicate = () => calls.push("duplicate");
+  const middle = () => calls.push("middle");
+  page.on("load", duplicate).on("load", middle).on("load", duplicate);
+  assert.equal(page.off("load", duplicate), page);
+  page._emit("load");
+  assert.deepEqual(calls, ["duplicate", "middle"]);
+  calls.length = 0;
+  page.removeListener("load", duplicate);
+  page._emit("load");
+  assert.deepEqual(calls, ["middle"]);
+  await page.close();
+});

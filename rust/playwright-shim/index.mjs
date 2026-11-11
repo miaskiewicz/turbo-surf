@@ -2901,11 +2901,8 @@ class Page {
   }
   off(event, fn) {
     const arr = this._listeners.get(event);
-    if (arr)
-      this._listeners.set(
-        event,
-        arr.filter((f) => f !== fn),
-      );
+    const index = arr?.lastIndexOf(fn) ?? -1;
+    if (index >= 0) this._listeners.set(event, [...arr.slice(0, index), ...arr.slice(index + 1)]);
     return this;
   }
   removeListener(event, fn) {

@@ -49,12 +49,24 @@ export function normalizeConfig(raw, rootDir) {
     ? rawProjects.map((p) => ({
         name: String(p.name ?? "default"),
         dependencies: p.dependencies ?? [],
+        grep: toArray(p.grep ?? r.grep),
+        grepInvert: toArray(p.grepInvert ?? r.grepInvert),
         use: { ...use, ...p.use },
         testDir: p.testDir ? resolve(rootDir, p.testDir) : testDir,
         testMatch: toArray(p.testMatch) ?? testMatch,
         testIgnore: toArray(p.testIgnore) ?? testIgnore,
       }))
-    : [{ name: "default", use, testDir, testMatch, testIgnore }];
+    : [
+        {
+          name: "default",
+          use,
+          testDir,
+          testMatch,
+          testIgnore,
+          grep: toArray(r.grep),
+          grepInvert: toArray(r.grepInvert),
+        },
+      ];
   return { rootDir, testDir, testMatch, testIgnore, reporter, webServer, use, projects };
 }
 

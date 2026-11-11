@@ -455,3 +455,31 @@ test("CLI explicitly rejects unsupported reporters including secondary entries",
     assert.doesNotMatch(result.stdout, /BODY_RAN/);
   }
 });
+
+test("CLI honors inherited and project grep/grepInvert across suite titles", async () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, "grep.spec.mjs"),
+    `import {test,describe} from 'node:test';
+    describe('Selected suite',()=>{
+      test('desired',()=>console.log('SELECTED'));
+      test('excluded',()=>{throw Error('excluded ran');});
+    });
+    test('unwanted',()=>{throw Error('unwanted ran');});`,
+  );
+  const config = join(root, "grep.config.mjs");
+  writeFileSync(
+    config,
+    `export default {grep:/selected/i,grepInvert:/excluded/,projects:[{name:'inherited'}]};`,
+  );
+  const inherited = await runCli(["--config", config], root);
+  assert.equal(inherited.code, 0, inherited.stdout + inherited.stderr);
+  assert.match(inherited.stdout, /SELECTED/);
+  writeFileSync(
+    config,
+    `export default {grep:/nothing/,projects:[{name:'override',grep:[/selected/i,/else/],grepInvert:/excluded/}]};`,
+  );
+  const override = await runCli(["--config", config], root);
+  assert.equal(override.code, 0, override.stdout + override.stderr);
+  assert.match(override.stdout, /SELECTED/);
+});

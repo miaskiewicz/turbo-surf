@@ -124,6 +124,8 @@ function runProject(project, files, reporter) {
     "--test",
     `--test-reporter=${nodeReporter}`,
     "--test-reporter-destination=stdout",
+    ...(project.grep ?? []).map((pattern) => `--test-name-pattern=${pattern}`),
+    ...(project.grepInvert ?? []).map((pattern) => `--test-skip-pattern=${pattern}`),
     ...files,
   ];
   return new Promise((resolveP) => {

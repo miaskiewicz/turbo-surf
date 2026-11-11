@@ -3042,31 +3042,35 @@ function makeTouchscreen(page) {
       if (!page._live) return;
       const xi = Math.round(x);
       const yi = Math.round(y);
-      await page._sessionEval(`(() => {
+      const result = await page._sessionEval(`(() => {
         const t = (document.elementFromPoint(${xi}, ${yi}) || document.documentElement || document.body);
         if (!t) return;
-        const PE = globalThis.PointerEvent || globalThis.MouseEvent;
         const common = { bubbles: true, cancelable: true, view: globalThis, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi} };
-        t.dispatchEvent(new PE("pointerdown", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        let touch, start, end;
         try {
-          const touchInit = { identifier: 1, target: t, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi}, pageX: ${xi}, pageY: ${yi} };
-          const Touch = globalThis.Touch;
-          const TouchEvent = globalThis.TouchEvent;
-          if (Touch && TouchEvent) {
-            const touch = new Touch(touchInit);
-            t.dispatchEvent(new TouchEvent("touchstart", { ...common, touches: [touch], targetTouches: [touch], changedTouches: [touch] }));
-            t.dispatchEvent(new TouchEvent("touchend", { ...common, touches: [], targetTouches: [], changedTouches: [touch] }));
-          } else {
-            t.dispatchEvent(new Event("touchstart", common));
-            t.dispatchEvent(new Event("touchend", common));
-          }
-        } catch (_) {
-          t.dispatchEvent(new Event("touchstart", common));
-          t.dispatchEvent(new Event("touchend", common));
+          touch = new Touch({ identifier: 1, target: t, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi}, pageX: ${xi}, pageY: ${yi} });
+          start = new TouchEvent("touchstart", { ...common, touches: [touch], targetTouches: [touch], changedTouches: [touch] });
+          end = new TouchEvent("touchend", { ...common, touches: [], targetTouches: [], changedTouches: [touch] });
+          if (start.touches?.length !== 1 || start.changedTouches?.length !== 1 || end.touches?.length !== 0 || end.changedTouches?.length !== 1) throw new Error("missing touch lists");
+        } catch {
+          globalThis.__RESULT = "TOUCH_UNAVAILABLE";
+          return;
         }
+        const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+        t.dispatchEvent(new PE("pointerdown", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        const accepted = t.dispatchEvent(start);
         t.dispatchEvent(new PE("pointerup", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
-        t.dispatchEvent(new MouseEvent("click", common));
+        const ended = t.dispatchEvent(end);
+        if (accepted && ended) {
+          for (const type of ["mousedown", "mouseup", "click"])
+            t.dispatchEvent(new MouseEvent(type, { ...common, button: 0, detail: 1 }));
+        }
+        globalThis.__RESULT = "OK";
       })();`);
+      if (result === "TOUCH_UNAVAILABLE")
+        throw new Error(
+          "turbo-surf: touchscreen.tap unavailable — native Touch/TouchEvent payloads unsupported",
+        );
     },
   };
 }

@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 let shim;
 try {
@@ -96,6 +97,19 @@ test("page.mouse.wheel fires a wheel event", async () => {
 test("page.touchscreen.tap fires pointer+touch events and a click", async () => {
   const { page, teardown } = await fixture();
   try {
+    const touchSupported = await page.evaluate(() => {
+      try {
+        const touch = new Touch({ identifier: 1, target: document.body });
+        return new TouchEvent("touchstart", { touches: [touch] }).touches.length === 1;
+      } catch {
+        return false;
+      }
+    });
+    if (!touchSupported) {
+      await assert.rejects(() => page.touchscreen.tap(30, 40), /touchscreen.tap unavailable/);
+      assert.equal(await page.locator("#log").textContent(), "");
+      return;
+    }
     await page.touchscreen.tap(30, 40);
     const log = await page.locator("#log").textContent();
     for (const ev of ["pointerdown", "touchstart", "pointerup", "touchend", "click"]) {
@@ -345,4 +359,62 @@ test("locator click forwards position modifiers button and clickCount (#439)", a
   } finally {
     await teardown();
   }
+});
+
+test("touch taps honor cancellation and genuine payload ordering (#442)", async () => {
+  const page = newPage();
+  page._session = 1;
+  const records = [];
+  let cancel = false;
+  class InputEvent {
+    constructor(type, init) {
+      this.type = type;
+      Object.assign(this, init);
+    }
+    preventDefault() {
+      if (this.cancelable) this.defaultPrevented = true;
+    }
+  }
+  class Touch {
+    constructor(init) {
+      Object.assign(this, init);
+    }
+  }
+  const target = {
+    dispatchEvent(event) {
+      records.push([event.type, event.touches?.length, event.changedTouches?.length]);
+      if (cancel && event.type === "touchstart") event.preventDefault();
+      return !event.defaultPrevented;
+    },
+  };
+  page._sessionEval = async (source) =>
+    runInNewContext(source, {
+      document: { elementFromPoint: () => target },
+      Touch,
+      TouchEvent: InputEvent,
+      PointerEvent: InputEvent,
+      MouseEvent: InputEvent,
+      Event: InputEvent,
+    });
+  await page.touchscreen.tap(10, 20);
+  assert.deepEqual(
+    records.map(([type]) => type),
+    ["pointerdown", "touchstart", "pointerup", "touchend", "mousedown", "mouseup", "click"],
+  );
+  assert.deepEqual(
+    records.find(([type]) => type === "touchstart"),
+    ["touchstart", 1, 1],
+  );
+  assert.deepEqual(
+    records.find(([type]) => type === "touchend"),
+    ["touchend", 0, 1],
+  );
+  records.length = 0;
+  cancel = true;
+  await page.touchscreen.tap(10, 20);
+  assert.deepEqual(
+    records.map(([type]) => type),
+    ["pointerdown", "touchstart", "pointerup", "touchend"],
+  );
+  page._session = null;
 });

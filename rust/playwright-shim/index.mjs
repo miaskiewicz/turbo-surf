@@ -3509,10 +3509,28 @@ class LocatorExpect extends BaseExpect {
     this._ok(await this._retry(() => this._v._isFocused(), opts), "expected element to be focused");
   }
   async toBeInViewport(opts) {
-    this._ok(
-      await this._retry(() => this._snap().visible, opts),
-      "expected element to be in viewport",
-    );
+    const ratio = opts?.ratio ?? 0;
+    if (ratio < 0 || ratio > 1) throw new Error("ratio must be between 0 and 1");
+    const pass = await this._retry(async () => {
+      const locator = this._v;
+      await locator._page._ensureLive();
+      const index = await locator._resolveLiveIdx();
+      if (index == null) return false;
+      return locator._page.evaluate(
+        ({ index, viewport, ratio }) => {
+          const rect = document.querySelectorAll("*")[index].getBoundingClientRect();
+          const width = Math.max(0, Math.min(rect.right, viewport.width) - Math.max(rect.left, 0));
+          const height = Math.max(
+            0,
+            Math.min(rect.bottom, viewport.height) - Math.max(rect.top, 0),
+          );
+          const area = rect.width * rect.height;
+          return area > 0 && width * height > 0 && (width * height) / area >= ratio;
+        },
+        { index, viewport: locator._page.viewportSize(), ratio },
+      );
+    }, opts);
+    this._ok(pass, "expected element to be in viewport");
   }
   async toHaveCount(n, opts) {
     let got;

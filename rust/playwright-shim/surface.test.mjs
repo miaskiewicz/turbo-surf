@@ -2633,3 +2633,29 @@ test("attribute expectations preserve absence and normalize existence options (#
   await expect(page.locator("#present")).not.toHaveAttribute("data-absent", { timeout: 0 });
   await page.close();
 });
+
+test("viewport assertions use intersection ratio rather than visibility (#430)", async () => {
+  const server = createServer((_req, res) =>
+    res.end(
+      '<style>body{margin:0}#outside{position:absolute;top:2000px;width:100px;height:100px}#partial{position:absolute;top:180px;width:100px;height:100px}</style><div id="outside">outside</div><div id="partial">partial</div>',
+    ),
+  );
+  const base = await listen(server);
+  const context = new BrowserContext({ viewport: { width: 300, height: 200 } });
+  const page = await context.newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await expect(page.locator("#outside")).not.toBeInViewport({ timeout: 0 });
+    await assert.rejects(() => expect(page.locator("#outside")).toBeInViewport({ timeout: 0 }));
+    await expect(page.locator("#partial")).toBeInViewport({ ratio: 0.1, timeout: 0 });
+    await expect(page.locator("#partial")).toBeInViewport({ ratio: 0.2, timeout: 0 });
+    await expect(page.locator("#partial")).not.toBeInViewport({ ratio: 0.5, timeout: 0 });
+    await assert.rejects(() =>
+      expect(page.locator("#partial")).toBeInViewport({ ratio: 0.5, timeout: 0 }),
+    );
+  } finally {
+    await context.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

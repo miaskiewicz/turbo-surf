@@ -51,3 +51,18 @@ test("scoped live role matching never reads outside candidates", () => {
   assert.deepEqual(JSON.parse(context.__RESULT), [{ idx: 1 }]);
   assert.equal(outsideReads(), 0);
 });
+
+test("live regex role names compile once and reset state for each candidate", () => {
+  const { context } = fixture();
+  vm.runInContext(
+    `
+    var compileCount = 0;
+    var OriginalRegExp = RegExp;
+    RegExp = function (...args) { compileCount++; return new OriginalRegExp(...args); };
+    __G.tcGetBy('role', 'button', '/Inside/g');
+  `,
+    context,
+  );
+  assert.equal(JSON.parse(context.__RESULT).length, 101);
+  assert.equal(context.compileCount, 1);
+});

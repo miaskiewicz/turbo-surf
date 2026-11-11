@@ -12246,36 +12246,39 @@ __G.tcGetBy = function (kind, value, name, root) {
     for (const c of cands) if (c) return c;
     return "";
   };
-  // Substring match, or a `/pattern/flags` regex literal (mirrors turbo-surf-view).
-  const tmatch = (v, want) => {
-    if (want == null) return true;
+  const matcher = (want) => {
+    if (want == null) return () => true;
     const m = /^\/(.*)\/([a-z]*)$/.exec(want);
-    if (m) { try { return new RegExp(m[1], m[2]).test(v); } catch (_e) { return false; } }
-    return String(v).indexOf(want) >= 0;
+    if (!m) return (v) => String(v).indexOf(want) >= 0;
+    let re;
+    try { re = new RegExp(m[1], m[2]); } catch (_e) { return () => false; }
+    return (v) => { re.lastIndex = 0; return re.test(v); };
   };
+  const nameMatch = matcher(name);
+  const valueMatch = matcher(value);
   const idxOf = (el) => all.indexOf(el);
   let hits = [];
   if (kind === "role") {
-    for (const el of all) if ((!inScope || inScope.has(el)) && roleOf(el) === value && tmatch(accName(el), name)) hits.push(el);
+    for (const el of all) if ((!inScope || inScope.has(el)) && roleOf(el) === value && nameMatch(accName(el))) hits.push(el);
   } else if (kind === "label") {
     const seen = new Set();
     const push = (el) => { if (el && !seen.has(el)) { seen.add(el); hits.push(el); } };
     for (const lab of document.querySelectorAll("label")) {
-      if (!tmatch((lab.textContent || "").trim(), value)) continue;
+      if (!valueMatch((lab.textContent || "").trim())) continue;
       const forId = attr(lab, "for");
       if (forId) push(document.getElementById(forId));
       const id = attr(lab, "id");
       if (id) for (const t of document.querySelectorAll('[aria-labelledby~="' + id + '"]')) push(t);
       push(lab.querySelector("input,select,textarea"));
     }
-    for (const el of document.querySelectorAll("[aria-label]")) if (tmatch(attr(el, "aria-label"), value)) push(el);
+    for (const el of document.querySelectorAll("[aria-label]")) if (valueMatch(attr(el, "aria-label"))) push(el);
   } else if (kind === "text") {
     // Leaf-text match: the element's text matches AND no descendant element also matches
     // (so we target the tightest node, like turbo-surf-view's by_text).
     for (const el of all) {
-      if (!tmatch((el.textContent || "").trim(), value)) continue;
+      if (!valueMatch((el.textContent || "").trim())) continue;
       let childMatch = false;
-      for (const c of el.querySelectorAll("*")) { if (tmatch((c.textContent || "").trim(), value)) { childMatch = true; break; } }
+      for (const c of el.querySelectorAll("*")) { if (valueMatch((c.textContent || "").trim())) { childMatch = true; break; } }
       if (!childMatch) hits.push(el);
     }
   }

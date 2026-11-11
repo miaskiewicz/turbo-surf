@@ -26,8 +26,15 @@ pub fn is_regex_literal(want: &str) -> bool {
     want.len() >= 2 && want.starts_with('/') && want[1..].rfind('/').is_some()
 }
 
+#[cfg(test)]
+thread_local! {
+    static REGEX_COMPILES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `/source/flags` → compiled `Regex` (`i` flag honored via inline `(?i)`).
 fn compile_regex_literal(want: &str) -> Option<regex::Regex> {
+    #[cfg(test)]
+    REGEX_COMPILES.with(|count| count.set(count.get() + 1));
     let body = want.strip_prefix('/')?;
     let last = body.rfind('/')?;
     let (src, flags) = (&body[..last], &body[last + 1..]);
@@ -41,11 +48,38 @@ fn compile_regex_literal(want: &str) -> Option<regex::Regex> {
 
 /// Does `value` match `want` under `mode` (after trimming)?
 pub fn text_match(value: &str, want: &str, mode: TextMode) -> bool {
-    let v = value.trim();
-    match mode {
-        TextMode::Exact => v == want,
-        TextMode::Substring => v.to_lowercase().contains(&want.to_lowercase()),
-        TextMode::Regex => compile_regex_literal(want).is_some_and(|re| re.is_match(v)),
+    TextMatcher::new(want, mode).matches(value)
+}
+
+/// A compiled text matcher: built once per query, reused across candidates.
+/// Per-candidate compilation made regex names quadratic-scale (the regex is
+/// built in every comparison otherwise).
+pub struct TextMatcher {
+    want: String,
+    mode: TextMode,
+    re: Option<regex::Regex>,
+}
+
+impl TextMatcher {
+    pub fn new(want: &str, mode: TextMode) -> Self {
+        let re = match mode {
+            TextMode::Regex => compile_regex_literal(want),
+            _ => None,
+        };
+        Self {
+            want: want.to_string(),
+            mode,
+            re,
+        }
+    }
+
+    pub fn matches(&self, value: &str) -> bool {
+        let v = value.trim();
+        match self.mode {
+            TextMode::Exact => v == self.want,
+            TextMode::Substring => v.to_lowercase().contains(&self.want.to_lowercase()),
+            TextMode::Regex => self.re.as_ref().is_some_and(|re| re.is_match(v)),
+        }
     }
 }
 
@@ -62,11 +96,12 @@ fn push_unique(out: &mut Vec<Handle>, seen: &mut HashSet<Handle>, h: Handle) {
 /// `getByRole(role, name?)` — elements whose resolved ARIA role equals `role`,
 /// optionally filtered by accessible-name match.
 pub fn by_role(tree: &Tree, role: &str, name: Option<(&str, TextMode)>) -> Vec<Handle> {
+    let matcher = name.map(|(want, mode)| TextMatcher::new(want, mode));
     all_elements(tree)
         .into_iter()
         .filter(|&h| role_of(tree, h) == role)
-        .filter(|&h| match name {
-            Some((want, mode)) => text_match(&accessible_name(tree, h), want, mode),
+        .filter(|&h| match matcher {
+            Some(ref matcher) => matcher.matches(&accessible_name(tree, h)),
             None => true,
         })
         .collect()
@@ -79,6 +114,7 @@ pub fn by_role_in(
     role: &str,
     name: Option<(&str, TextMode)>,
 ) -> Vec<Handle> {
+    let matcher = name.map(|(want, mode)| TextMatcher::new(want, mode));
     let mut candidates = HashSet::new();
     for &root in roots {
         candidates.insert(root);
@@ -89,36 +125,38 @@ pub fn by_role_in(
         .filter(|h| candidates.contains(h))
         .filter(|&h| role_of(tree, h) == role)
         .filter(|&h| {
-            name.is_none_or(|(want, mode)| text_match(&accessible_name(tree, h), want, mode))
+            matcher
+                .as_ref()
+                .is_none_or(|matcher| matcher.matches(&accessible_name(tree, h)))
         })
         .collect()
 }
 
-fn has_matching_child(tree: &Tree, h: Handle, want: &str, mode: TextMode) -> bool {
+fn has_matching_child(tree: &Tree, h: Handle, matcher: &TextMatcher) -> bool {
     tree.descendants(h)
         .into_iter()
         .filter(|&c| tree.node_type_id(c) == ELEMENT_NODE)
-        .any(|c| text_match(&text_of(tree, c), want, mode))
+        .any(|c| matcher.matches(&text_of(tree, c)))
 }
 
 /// `getByText(want)` — innermost elements whose text matches and which have no
 /// matching descendant (so the deepest holder wins).
 pub fn by_text(tree: &Tree, want: &str, mode: TextMode) -> Vec<Handle> {
+    let matcher = TextMatcher::new(want, mode);
     all_elements(tree)
         .into_iter()
-        .filter(|&h| {
-            text_match(&text_of(tree, h), want, mode) && !has_matching_child(tree, h, want, mode)
-        })
+        .filter(|&h| matcher.matches(&text_of(tree, h)) && !has_matching_child(tree, h, &matcher))
         .collect()
 }
 
 /// `getByAttr(attr, want)` — elements with `attr` whose value matches.
 pub fn by_attr_text(tree: &Tree, attr: &str, want: &str, mode: TextMode) -> Vec<Handle> {
+    let matcher = TextMatcher::new(want, mode);
     tree.query_selector_all(&format!("[{attr}]"))
         .iter()
         .copied()
         .filter(|&h| match tree.get_attribute(h, attr) {
-            Some(v) => text_match(v, want, mode),
+            Some(v) => matcher.matches(v),
             None => unreachable!("the [attr] selector only matches elements with {attr}"),
         })
         .collect()
@@ -161,16 +199,17 @@ fn first_descendant_control(tree: &Tree, h: Handle) -> Option<Handle> {
 /// `getByLabel(want)` — controls labelled by a matching `<label>` (for=/wrapped/
 /// aria-labelledby), plus controls whose own `aria-label` matches.
 pub fn by_label(tree: &Tree, want: &str, mode: TextMode) -> Vec<Handle> {
+    let matcher = TextMatcher::new(want, mode);
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for label in tree.query_selector_all("label").iter() {
-        if text_match(&tree.text_content(*label), want, mode) {
+        if matcher.matches(&tree.text_content(*label)) {
             collect_label_targets(tree, *label, &mut out, &mut seen);
         }
     }
     for el in tree.query_selector_all("[aria-label]").iter() {
         if let Some(v) = tree.get_attribute(*el, "aria-label") {
-            if text_match(v, want, mode) {
+            if matcher.matches(v) {
                 push_unique(&mut out, &mut seen, *el);
             }
         }
@@ -278,5 +317,12 @@ mod tests {
         assert!(by_role_in(&tree, &[], "button", None).is_empty());
         let root = tree.query_selector_all("#a");
         assert_eq!(by_role_in(&tree, &root, "button", None), root.to_vec());
+    }
+    #[test]
+    fn role_regex_compiles_once_per_query() {
+        let tree = Tree::parse(&"<button>Hit</button>".repeat(100));
+        REGEX_COMPILES.with(|count| count.set(0));
+        assert_eq!(by_role(&tree, "button", Some(("/Hit/", Regex))).len(), 100);
+        REGEX_COMPILES.with(|count| assert_eq!(count.get(), 1));
     }
 }

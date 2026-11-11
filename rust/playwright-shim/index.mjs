@@ -2681,13 +2681,13 @@ class Page {
 // adds a second click and a `dblclick`. `wheel(dx, dy)` fires a `wheel` event at
 // the current cursor target.
 function makeMouse(page) {
-  const state = { x: 0, y: 0, button: 0, buttons: 0 };
+  const state = { x: 0, y: 0, button: 0, buttons: 0, detail: 1 };
   const run = async (script) => {
     if (!page._live) return;
     await page._sessionEval(script);
   };
   const base = (extra = "") =>
-    `{ bubbles: true, cancelable: true, view: globalThis, clientX: ${state.x}, clientY: ${state.y}, screenX: ${state.x}, screenY: ${state.y}, button: ${state.button}, buttons: ${state.buttons}${extra} }`;
+    `{ bubbles: true, cancelable: true, view: globalThis, clientX: ${state.x}, clientY: ${state.y}, screenX: ${state.x}, screenY: ${state.y}, button: ${state.button}, buttons: ${state.buttons}, detail: ${state.detail}${extra} }`;
   // Re-read state.x/state.y on every dispatch — baking them at definition time
   // sent every click/down/up/wheel to document.elementFromPoint(0,0) regardless
   // of the preceding move(x, y).
@@ -2706,11 +2706,13 @@ function makeMouse(page) {
     await run(dispatch("pointermove", "mousemove"));
   }
   async function down(opts) {
+    state.detail = opts?.clickCount ?? 1;
     state.button = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
     state.buttons = 1 << state.button;
     await run(dispatch("pointerdown", "mousedown"));
   }
   async function up(opts) {
+    state.detail = opts?.clickCount ?? 1;
     const btn = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
     state.button = btn;
     state.buttons = 0;
@@ -2725,17 +2727,21 @@ function makeMouse(page) {
   }
   async function click(x, y, opts) {
     await move(x, y);
-    await down(opts);
-    await up(opts);
+    for (let count = 1; count <= (opts?.clickCount ?? 1); count++) {
+      const step = { ...opts, clickCount: count };
+      await down(step);
+      if (opts?.delay) await new Promise((resolve) => setTimeout(resolve, opts.delay));
+      await up(step);
+      if (count === 2) {
+        await run(`(() => {
+          const t = ${targetExpr()};
+          if (t) t.dispatchEvent(new MouseEvent("dblclick", ${base()}));
+        })();`);
+      }
+    }
   }
   async function dblclick(x, y, opts) {
-    await click(x, y, opts);
-    await click(x, y, opts);
-    await run(`(() => {
-      const t = ${targetExpr()};
-      if (!t) return;
-      t.dispatchEvent(new MouseEvent("dblclick", ${base(", detail: 2")}));
-    })();`);
+    await click(x, y, { ...opts, clickCount: 2 });
   }
   async function wheel(dx, dy) {
     if (!page._live) return;

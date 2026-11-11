@@ -179,3 +179,43 @@ test("dragTo respects canceled dragstart and rejected dragover (#471)", async ()
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("mouse clickCount preserves incremental details and dblclick (#441)", async () => {
+  const { page, teardown } = await fixture();
+  try {
+    await page.evaluate(() => {
+      window.clickDetails = [];
+      for (const type of ["mousedown", "mouseup", "click", "dblclick"])
+        window.addEventListener(type, (event) => window.clickDetails.push([type, event.detail]));
+    });
+    await page.mouse.click(10, 20, { clickCount: 3 });
+    assert.deepEqual(await page.evaluate(() => window.clickDetails), [
+      ["mousedown", 1],
+      ["mouseup", 1],
+      ["click", 1],
+      ["mousedown", 2],
+      ["mouseup", 2],
+      ["click", 2],
+      ["dblclick", 2],
+      ["mousedown", 3],
+      ["mouseup", 3],
+      ["click", 3],
+    ]);
+    await page.evaluate(() => {
+      window.clickDetails = [];
+    });
+    await page.mouse.dblclick(10, 20);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.clickDetails.filter(([type]) => type === "click" || type === "dblclick"),
+      ),
+      [
+        ["click", 1],
+        ["click", 2],
+        ["dblclick", 2],
+      ],
+    );
+  } finally {
+    await teardown();
+  }
+});

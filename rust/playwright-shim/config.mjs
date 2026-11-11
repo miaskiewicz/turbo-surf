@@ -140,8 +140,14 @@ function escapeLiteral(s) {
   return s.replace(/[.+^$|()[\]\\]/g, (c) => `\\${c}`);
 }
 
-export function matchAny(path, globs) {
-  return globs.some((g) => globToRegex(g).test(path));
+export function matchAny(path, globs, absolutePath = path) {
+  return globs.some((pattern) => {
+    if (!(pattern instanceof RegExp)) return globToRegex(pattern).test(path);
+    pattern.lastIndex = 0;
+    const matched = pattern.test(absolutePath);
+    pattern.lastIndex = 0;
+    return matched;
+  });
 }
 
 export function discoverTests(project) {
@@ -154,8 +160,8 @@ export function discoverTests(project) {
         walk(p);
       } else if (ent.isFile()) {
         const rel = relative(project.testDir, p).split(sep).join("/");
-        if (matchAny(rel, project.testIgnore)) continue;
-        if (matchAny(rel, project.testMatch)) files.push(p);
+        if (matchAny(rel, project.testIgnore, p)) continue;
+        if (matchAny(rel, project.testMatch, p)) files.push(p);
       }
     }
   };

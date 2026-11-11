@@ -354,3 +354,16 @@ test("webServer cwd resolves against the configuration directory", async () => {
   const handles = await startWebServers(config.webServer);
   await stopWebServers(handles);
 });
+
+test("discoverTests honors RegExp selectors against absolute paths without state leakage", () => {
+  const root = tmp();
+  writeFileSync(join(root, "one.spec.mjs"), "// fixture");
+  writeFileSync(join(root, "two.spec.mjs"), "// fixture");
+  const project = {
+    testDir: root,
+    testMatch: [new RegExp(`${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/.*\\.spec\\.mjs$`, "g")],
+    testIgnore: [/two\.spec\.mjs$/g],
+  };
+  assert.deepEqual(discoverTests(project), [join(root, "one.spec.mjs")]);
+  assert.deepEqual(discoverTests(project), [join(root, "one.spec.mjs")]);
+});

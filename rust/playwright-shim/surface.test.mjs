@@ -2572,6 +2572,35 @@ test("toHaveJSProperty reads typed properties in the live realm (#438)", async (
   }
 });
 
+test("fill rejects invalid number text before mutating the value (#411)", async () => {
+  const server = createServer((_request, response) =>
+    response.end('<input id="field" type="number" value="12">'),
+  );
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    for (const live of [false, true]) {
+      if (live) await p.goto(base, { waitUntil: "networkidle" });
+      else await p.setContent('<input id="field" type="number" value="12">');
+      await assert.rejects(
+        () => p.locator("#field").fill("abc"),
+        /Cannot type text into input\[type=number\]/,
+      );
+      assert.equal(await p.locator("#field").inputValue(), "12");
+      if (live) assert.equal(await p.evaluate(() => document.querySelector("#field").value), "12");
+      await p.locator("#field").fill("-2.5");
+      const changed = live
+        ? await p.evaluate(() => document.querySelector("#field").value)
+        : await p.locator("#field").inputValue();
+      assert.equal(changed, "-2.5");
+    }
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("CSS and id assertions accept regex and retain negation (#437)", async () => {
   const page = await fresh();
   await expect(page.locator("#go")).toHaveId("go", { timeout: 0 });

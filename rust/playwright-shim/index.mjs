@@ -715,8 +715,17 @@ class Locator {
     return this._page._sessionDispatch("*", m[0].idx, kind, value);
   }
   async fill(value) {
-    if (this._canDriveLive) return void (await this._driveLive("fill", String(value)));
-    this._page._html = native.fillNode(this._html, this._requireNode(), String(value));
+    const text = String(value);
+    const match = this._all()[0];
+    if (
+      /^<input[\s>]/i.test(match?.html ?? "") &&
+      native.attrOf(this._html, match.node, "type")?.toLowerCase() === "number" &&
+      text !== "" &&
+      Number.isNaN(Number(text))
+    )
+      throw new Error("Cannot type text into input[type=number]");
+    if (this._canDriveLive) return void (await this._driveLive("fill", text));
+    this._page._html = native.fillNode(this._html, this._requireNode(), text);
   }
   async clear() {
     return this.fill("");

@@ -334,7 +334,12 @@ pub fn get_by(
     };
     let nm = name.as_deref().map(|n| (n, mode_for(n)));
     let mut hits = match kind.as_str() {
-        "role" => view::by_role(&tree, &value, nm),
+        "role" => match root.as_deref().filter(|s| !s.is_empty()) {
+            Some(selector) => {
+                view::locator::by_role_in(&tree, &tree.query_selector_all(selector), &value, nm)
+            }
+            None => view::by_role(&tree, &value, nm),
+        },
         "text" => view::by_text(&tree, &value, mode_for(&value)),
         "label" => view::by_label(&tree, &value, mode_for(&value)),
         _ => Vec::new(),

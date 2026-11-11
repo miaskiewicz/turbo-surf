@@ -72,6 +72,28 @@ pub fn by_role(tree: &Tree, role: &str, name: Option<(&str, TextMode)>) -> Vec<H
         .collect()
 }
 
+/// Resolve roles only within the selected subtrees, preserving document order.
+pub fn by_role_in(
+    tree: &Tree,
+    roots: &[Handle],
+    role: &str,
+    name: Option<(&str, TextMode)>,
+) -> Vec<Handle> {
+    let mut candidates = HashSet::new();
+    for &root in roots {
+        candidates.insert(root);
+        candidates.extend(tree.descendants(root));
+    }
+    all_elements(tree)
+        .into_iter()
+        .filter(|h| candidates.contains(h))
+        .filter(|&h| role_of(tree, h) == role)
+        .filter(|&h| {
+            name.is_none_or(|(want, mode)| text_match(&accessible_name(tree, h), want, mode))
+        })
+        .collect()
+}
+
 fn has_matching_child(tree: &Tree, h: Handle, want: &str, mode: TextMode) -> bool {
     tree.descendants(h)
         .into_iter()
@@ -241,5 +263,20 @@ mod tests {
         // for= and aria-label both point at the same control → counted once.
         let tree = Tree::parse("<label for='e'>Email</label><input id='e' aria-label='Email'>");
         assert_eq!(by_label(&tree, "Email", Exact).len(), 1);
+    }
+    #[test]
+    fn scoped_roles_preserve_order_and_empty_roots() {
+        let tree = Tree::parse("<button id='outside'>Hit</button><div id='scope'><button id='a'>Hit</button><div id='inner'><button id='b'>Hit</button></div></div>");
+        let roots = tree.query_selector_all("#scope, #inner");
+        let hits = by_role_in(&tree, &roots, "button", Some(("Hit", Exact)));
+        assert_eq!(
+            hits.iter()
+                .map(|&h| tree.get_attribute(h, "id").unwrap())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        assert!(by_role_in(&tree, &[], "button", None).is_empty());
+        let root = tree.query_selector_all("#a");
+        assert_eq!(by_role_in(&tree, &root, "button", None), root.to_vec());
     }
 }

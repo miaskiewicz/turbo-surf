@@ -12256,7 +12256,7 @@ __G.tcGetBy = function (kind, value, name, root) {
   const idxOf = (el) => all.indexOf(el);
   let hits = [];
   if (kind === "role") {
-    for (const el of all) if (roleOf(el) === value && tmatch(accName(el), name)) hits.push(el);
+    for (const el of all) if ((!inScope || inScope.has(el)) && roleOf(el) === value && tmatch(accName(el), name)) hits.push(el);
   } else if (kind === "label") {
     const seen = new Set();
     const push = (el) => { if (el && !seen.has(el)) { seen.add(el); hits.push(el); } };

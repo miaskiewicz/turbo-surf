@@ -619,6 +619,13 @@ pub fn render_ts(
 // Handles are stable for a given HTML parse, so the shim resolves matches (which
 // carry `node`) then reads by handle — works for both `query` and `getBy`.
 
+/// Raw DOM descendant text; distinct from the structured agent-facing text view.
+#[napi]
+pub fn text_content_of(html: String, node: u32) -> String {
+    let tree = parsed(&html);
+    tree.text_content(Handle::from_raw(node))
+}
+
 #[napi]
 pub fn attr_of(html: String, node: u32, name: String) -> Option<String> {
     let node = Handle::from_raw(node);

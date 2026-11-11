@@ -3104,3 +3104,19 @@ test("adding cookies replaces matching identities without losing other scopes (#
   assert.equal(cookies.filter((entry) => entry.value === "old").length, 2);
   await context.close();
 });
+
+test("textContent reads preserve raw descendant DOM text (#421)", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<div class="row">  A  <span hidden>B</span> C \n D  <!-- ignored --></div><div class="row"><script> x  y </script><style> a  b </style></div>',
+    );
+    const rows = page.locator(".row");
+    assert.equal(await rows.first().textContent(), "  A  B C \n D  ");
+    assert.deepEqual(await rows.allTextContents(), ["  A  B C \n D  ", " x  y  a  b "]);
+    assert.equal(await page.locator(".missing").textContent(), null);
+    assert.deepEqual(await page.locator(".missing").allTextContents(), []);
+  } finally {
+    await page.close();
+  }
+});

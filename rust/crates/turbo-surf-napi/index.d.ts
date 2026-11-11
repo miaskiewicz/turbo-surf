@@ -116,6 +116,7 @@ export function selectOptionNode(html: string, node: number, value: string): str
 export function clickNode(html: string, node: number, baseUrl: string): string;
 
 // Per-element accessors by node handle.
+export function textContentOf(html: string, node: number): string;
 export function attrOf(html: string, node: number, name: string): string | null;
 export function inputValueOf(html: string, node: number): string;
 export function isVisible(html: string, node: number): boolean;

@@ -557,7 +557,10 @@ class Locator {
   }
   async textContent() {
     const m = this._all();
-    return m.length ? (m[0].text ?? null) : null;
+    return m.length ? this._textContent(m[0]) : null;
+  }
+  _textContent(match) {
+    return match.node == null ? (match.text ?? "") : native.textContentOf(this._html, match.node);
   }
   async innerText() {
     const m = this._all();
@@ -568,7 +571,7 @@ class Locator {
     return m.length ? (m[0].html ?? null) : null;
   }
   async allTextContents() {
-    return this._all().map((x) => x.text ?? "");
+    return this._all().map((match) => this._textContent(match));
   }
   async allInnerTexts() {
     return this._all().map((x) => (x.text ?? "").trim());

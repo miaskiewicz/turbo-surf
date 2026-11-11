@@ -1887,3 +1887,28 @@ test("API string and Buffer data default to octet-stream (#435)", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+test("getByTestId regex preserves flags, scope and repeated global matching (#477)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<div id="scope"><button data-testid="item-1">one</button><button data-testid="ITEM-2">two</button></div><button data-testid="item-3">outside</button><div data-testid="other">other</div>',
+  );
+  assert.equal(await page.getByTestId("item-1").count(), 1);
+  const items = page.getByTestId(/^item-/gi);
+  assert.equal(await items.count(), 3);
+  assert.equal(await items.count(), 3);
+  assert.equal(
+    await page
+      .locator("#scope")
+      .getByTestId(/^item-/i)
+      .count(),
+    2,
+  );
+  assert.equal(await page.getByTestId(/missing/).count(), 0);
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('[data-testid=\"item-1\"]').onclick = () => document.body.setAttribute('data-clicked', 'yes')",
+  );
+  await page.getByTestId(/^item-1$/).click();
+  assert.equal(await page.locator("body").getAttribute("data-clicked"), "yes");
+  await page.close();
+});

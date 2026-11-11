@@ -327,6 +327,7 @@ class Locator {
     // re-resolve the match IN the running isolate (live `*` indices) instead of trusting
     // a re-serialized snapshot's index, which diverges for portal'd content (MUI options).
     this._getBy = opts.getBy ?? null;
+    this._testId = opts.testId ?? null;
     // nth-aware scope chain ([{sel, idx, filter}, …]) for nested locators where a parent had
     // `.nth(i)` or `.filter(...)` — a CSS-concat selector can't express "the i-th (or
     // text-filtered) match's subtree", so the live drive walks this chain via
@@ -380,6 +381,7 @@ class Locator {
     const loc = new Locator(this._page, this._resolve, {
       ...opts,
       getBy: this._getBy,
+      testId: this._testId,
       scope: this._scope,
       // The base selector survives composition (incl. `.filter()`); the serializable filter
       // spec carries unless this derivation sets its own (a `.filter()` call passes one).
@@ -469,6 +471,7 @@ class Locator {
     return this._scopedGetBy("label", String(t), null);
   }
   getByTestId(t) {
+    if (t instanceof RegExp) return this._page._regexTestId(t, this._selector);
     // Scope to this locator's subtree when it is selector-backed (like `locator()` does) —
     // `card.getByTestId('x')` must match only descendants of the card, not the whole document.
     // A `.filter()`/`.nth()` ancestor walks the scope chain (it carries the filter/index our
@@ -605,6 +608,11 @@ class Locator {
   // is what lets getByRole/getByLabel/getByText drive the running app (fill/click), not
   // just mutate the static HTML snapshot.
   async _driveLive(kind, value) {
+    if (this._testId) {
+      const idx = await this._resolveLiveIdx();
+      if (idx == null) throw new Error("turbo-surf: locator matched no elements");
+      return this._page._sessionDispatch("*", idx, kind, value);
+    }
     // nth-aware scope chain: a CSS selector can't target "the i-th match's subtree", so walk
     // the chain in the live isolate and dispatch on the matched element's global index.
     if (
@@ -835,6 +843,15 @@ class Locator {
   // Returns null when the locator matches nothing. Used by dragTo and page.dragAndDrop.
   async _resolveLiveIdx() {
     if (this._page._session == null) return null;
+    if (this._testId) {
+      const { attribute, source, flags, root } = this._testId;
+      const raw = await native.liveEvalEngine(
+        this._page._session,
+        `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `document.querySelectorAll(${JSON.stringify(root)})` : "[document]"}; const hits = new Set(); for (const root of roots) for (const el of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(el.getAttribute(${JSON.stringify(attribute)}))) hits.add(el); } const all = Array.from(document.querySelectorAll('*')); const matches = all.filter(el => hits.has(el)); const n = ${this._index ?? 0}; globalThis.__RESULT = String(all.indexOf(matches[n < 0 ? matches.length + n : n])); })();`,
+      );
+      const idx = Number(raw);
+      return Number.isInteger(idx) && idx >= 0 ? idx : null;
+    }
     if (this._scope && this._scope.some((s) => s.idx != null || s.filter != null)) {
       const leaf = this._selector
         ? { selector: this._selector }
@@ -2033,8 +2050,23 @@ class Page {
   getByTitle(text, _o) {
     return this._locFromSelector(`[title*=${cssAttrValue(text)}]`);
   }
+  _regexTestId(pattern, root = null) {
+    const attribute = this._context._testIdAttribute;
+    const re = new RegExp(pattern.source, pattern.flags);
+    const selector = `${root ? `${root} ` : ""}[${attribute}]`;
+    return new Locator(
+      this,
+      (html) =>
+        JSON.parse(native.query(html, selector)).filter((match) => {
+          re.lastIndex = 0;
+          return re.test(native.attrOf(html, match.node, attribute));
+        }),
+      { testId: { attribute, source: pattern.source, flags: pattern.flags, root } },
+    );
+  }
   getByTestId(id) {
-    return this._locFromSelector(`[${this._context._testIdAttribute}="${id}"]`);
+    if (id instanceof RegExp) return this._regexTestId(id);
+    return this._locFromSelector(`[${this._context._testIdAttribute}=${cssAttrValue(id)}]`);
   }
 
   // --- frames ---

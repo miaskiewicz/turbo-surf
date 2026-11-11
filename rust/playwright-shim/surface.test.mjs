@@ -3085,3 +3085,22 @@ test("context cookie URL filters honor host path and secure scope (#423)", async
   assert.equal((await context.cookies()).length, 4);
   await context.close();
 });
+
+test("adding cookies replaces matching identities without losing other scopes (#422)", async () => {
+  const context = new BrowserContext();
+  const cookie = { name: "session", value: "old", domain: "example.test", path: "/" };
+  context.addCookies([cookie, { ...cookie, path: "/scoped" }, { ...cookie, domain: "other.test" }]);
+  context.addCookies([
+    { ...cookie, value: "new" },
+    { ...cookie, value: "latest" },
+  ]);
+  const cookies = await context.cookies();
+  assert.equal(cookies.length, 3);
+  assert.equal(
+    cookies.find((entry) => entry.domain === "example.test" && entry.path === "/").value,
+    "latest",
+  );
+  assert.equal(context.storageState().cookies.length, 3);
+  assert.equal(cookies.filter((entry) => entry.value === "old").length, 2);
+  await context.close();
+});

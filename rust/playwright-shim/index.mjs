@@ -3550,8 +3550,14 @@ class BrowserContext {
     return { cookies: JSON.parse(this._cookies), origins: [] };
   }
   addCookies(cookies) {
-    const existing = JSON.parse(this._cookies);
-    this._cookies = JSON.stringify([...existing, ...cookies]);
+    const merged = new Map();
+    for (const cookie of [...JSON.parse(this._cookies), ...cookies]) {
+      const domain = String(cookie.domain ?? "")
+        .toLowerCase()
+        .replace(/^\./, "");
+      merged.set(JSON.stringify([cookie.name, domain, cookie.path || "/"]), cookie);
+    }
+    this._setCookies(JSON.stringify([...merged.values()]));
   }
   async cookies(urls) {
     const cookies = JSON.parse(this._cookies);

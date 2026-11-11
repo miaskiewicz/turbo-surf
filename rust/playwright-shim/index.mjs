@@ -1455,8 +1455,11 @@ function interactionScript(selector, index, kind, value, frameTyping = false) {
     // the exact bytes, select them through the input's own FileList (the prototype files
     // setter, as Chrome's DOM.setFileInputFiles does), then fire input/change.
     return `(() => { ${pick} else {
+      const files = ${val};
+      if (el.tagName !== 'INPUT' || el.type !== 'file') throw new Error('Node is not an input[type=file]');
+      if (!el.multiple && files.length > 1) throw new Error('Non-multiple file input can only accept single file');
       const data = new globalThis.DataTransfer();
-      for (const f of ${val}) {
+      for (const f of files) {
         const bytes = new Uint8Array(f.data.length);
         for (let i = 0; i < bytes.length; i++) bytes[i] = f.data.charCodeAt(i) & 255;
         const options = { type: f.type };

@@ -4766,3 +4766,29 @@ test("File paths infer upload MIME types and preserve explicit payload types (#3
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Single-file uploads reject invalid cardinality without replacing files (#339)", async () => {
+  const page = newPage();
+  const file = (name) => ({ name, mimeType: "text/plain", buffer: Buffer.from(name) });
+  try {
+    await page.setContent("<input id=single type=file><input id=multi type=file multiple>");
+    await page._ensureLive();
+    await page.locator("#single").setInputFiles(file("before.txt"));
+    await assert.rejects(
+      page.locator("#single").setInputFiles([file("one.txt"), file("two.txt")]),
+      /Non-multiple file input can only accept single file/,
+    );
+    assert.deepEqual(
+      await page.evaluate(() =>
+        Array.from(document.querySelector("#single").files, (file) => file.name),
+      ),
+      ["before.txt"],
+    );
+    await page.locator("#multi").setInputFiles([file("one.txt"), file("two.txt")]);
+    assert.equal(await page.evaluate(() => document.querySelector("#multi").files.length), 2);
+    await page.locator("#single").setInputFiles([]);
+    assert.equal(await page.evaluate(() => document.querySelector("#single").files.length), 0);
+  } finally {
+    await page.close();
+  }
+});

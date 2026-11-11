@@ -595,8 +595,8 @@ test("Page waiters resolve on the static DOM", async () => {
   assert.ok(await p.waitForSelector("h1"));
   assert.equal(await p.waitForSelector("nope", { state: "hidden" }), null);
   assert.equal(Number(await p.waitForFunction(() => 1 + 1)), 2);
-  assert.ok((await p.waitForResponse()).status);
-  assert.ok((await p.waitForRequest()).url());
+  await assert.rejects(p.waitForResponse(undefined, { timeout: 10 }), { name: "TimeoutError" });
+  await assert.rejects(p.waitForRequest(undefined, { timeout: 10 }), { name: "TimeoutError" });
   await p.waitForURL(/Doc|about/);
 });
 

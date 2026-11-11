@@ -2894,14 +2894,20 @@ class Page {
     return this;
   }
   once(event, fn) {
-    return this.on(event, fn);
+    const once = (payload) => {
+      this.off(event, once);
+      fn.call(this, payload);
+    };
+    once.listener = fn;
+    return this.on(event, once);
   }
   addListener(event, fn) {
     return this.on(event, fn);
   }
   off(event, fn) {
     const arr = this._listeners.get(event);
-    const index = arr?.lastIndexOf(fn) ?? -1;
+    const index =
+      arr?.findLastIndex((listener) => listener === fn || listener.listener === fn) ?? -1;
     if (index >= 0) this._listeners.set(event, [...arr.slice(0, index), ...arr.slice(index + 1)]);
     return this;
   }

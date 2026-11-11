@@ -3770,3 +3770,28 @@ test("off removes only the most recent duplicate listener (#374)", async () => {
   assert.deepEqual(calls, ["middle"]);
   await page.close();
 });
+
+test("once removes before invocation and supports original callback removal (#373)", async () => {
+  const page = newPage();
+  let calls = 0;
+  page.once("load", () => {
+    if (++calls === 1) page._emit("load");
+  });
+  page._emit("load");
+  page._emit("load");
+  assert.equal(calls, 1);
+  const removed = () => {
+    throw new Error("removed once handler ran");
+  };
+  page.once("load", removed);
+  page.off("load", removed);
+  page._emit("load");
+  const order = [];
+  const duplicate = () => order.push("duplicate");
+  page.on("custom", duplicate).once("custom", duplicate);
+  page.removeListener("custom", duplicate);
+  page._emit("custom");
+  page._emit("custom");
+  assert.deepEqual(order, ["duplicate", "duplicate"]);
+  await page.close();
+});

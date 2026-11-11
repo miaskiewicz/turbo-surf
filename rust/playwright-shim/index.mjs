@@ -582,7 +582,15 @@ class Locator {
     const n = this._node();
     return n == null ? null : (native.attrOf(this._html, n, name) ?? null);
   }
+  async _liveRead(fn, arg) {
+    const index = await this._resolveLiveIdx();
+    if (index == null) return null;
+    return this._page.evaluate(
+      `(${fn.toString()})(document.querySelectorAll("*")[${index}],${JSON.stringify(arg ?? null)})`,
+    );
+  }
   async inputValue() {
+    if (this._page._live) return (await this._liveRead((el) => el.value)) ?? "";
     const n = this._node();
     return n == null ? "" : native.inputValueOf(this._html, n);
   }
@@ -3849,8 +3857,8 @@ class LocatorExpect extends BaseExpect {
   }
   async toHaveValue(value, opts) {
     let got;
-    const pass = await this._retry(() => {
-      got = this._snap().value ?? "";
+    const pass = await this._retry(async () => {
+      got = await this._v.inputValue();
       return matchText(value, got);
     }, opts);
     this._ok(pass, `expected value ${value}, got "${got}"`);

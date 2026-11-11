@@ -3120,3 +3120,27 @@ test("textContent reads preserve raw descendant DOM text (#421)", async () => {
     await page.close();
   }
 });
+
+test("Live locator inputValue and value assertions read dirty DOM properties (#350)", async () => {
+  const server = createServer((req, res) =>
+    res.end("<input id=text value=old><textarea id=area>before</textarea>"),
+  );
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await page.locator("#text").fill("new");
+    assert.equal(await page.locator("#text").inputValue(), "new");
+    assert.equal(await page.locator("#text").getAttribute("value"), "old");
+    await expect(page.locator("#text")).toHaveValue("new", { timeout: 0 });
+    await page.evaluate(() => {
+      document.querySelector("#area").value = "after";
+    });
+    assert.equal(await page.locator("#area").inputValue(), "after");
+    await expect(page.locator("#area")).toHaveValue("after", { timeout: 0 });
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

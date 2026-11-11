@@ -1286,13 +1286,24 @@ function interactionScript(selector, index, kind, value) {
     // bound to inner nodes (and React's delegation) see a target inside them.
     return `(() => { ${pick} else {
       let t = el; while (t.firstElementChild) t = t.firstElementChild;
-      const o = { bubbles: true, cancelable: true, view: globalThis };
-      const oe = { bubbles: false, cancelable: true, view: globalThis };
-      t.dispatchEvent(new MouseEvent("pointerover", o));
-      t.dispatchEvent(new MouseEvent("mouseover", o));
-      t.dispatchEvent(new MouseEvent("pointerenter", oe));
-      t.dispatchEvent(new MouseEvent("mouseenter", oe));
-      t.dispatchEvent(new MouseEvent("mousemove", o));
+      const previous = __tsNs.shimHoverTarget ?? null;
+      const ancestry = node => { const path = []; while (node) { path.push(node); node = node.parentElement; } return path; };
+      const oldPath = ancestry(previous), newPath = ancestry(t);
+      const boundary = (prefix, Constructor) => {
+        const emit = (node, type, relatedTarget, bubbles) => node.dispatchEvent(new Constructor(type, {
+          bubbles, cancelable: bubbles, view: globalThis, relatedTarget,
+          pointerId: 1, pointerType: "mouse", isPrimary: true,
+        }));
+        if (previous === t) return;
+        if (previous) emit(previous, prefix + "out", t, true);
+        for (const node of oldPath) if (!newPath.includes(node)) emit(node, prefix + "leave", t, false);
+        emit(t, prefix + "over", previous, true);
+        for (const node of newPath.slice().reverse()) if (!oldPath.includes(node)) emit(node, prefix + "enter", previous, false);
+      };
+      boundary("pointer", PointerEvent);
+      boundary("mouse", MouseEvent);
+      __tsNs.shimHoverTarget = t;
+      t.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: globalThis }));
       // Also apply CSS :hover styles — a menu revealed purely by a hover descendant rule has
       // no JS handler; without this it stays display:none (no pointer state in the cascade).
       if (typeof __tsNs.tcApplyHover === "function") __tsNs.tcApplyHover(el);
@@ -1485,14 +1496,18 @@ class Frame {
         child = host.contentWindow;
       }
       let code = ${JSON.stringify(`return (${source});`)};
+      let helperState;
       if (${helpers}) {
+        const states = __tsNs.shimFrameHelperStates ??= new WeakMap();
+        helperState = states.get(child.document);
+        if (!helperState) { helperState = {}; states.set(child.document, helperState); }
         // Compile the existing surf helpers in the child so their document and
         // intrinsics belong to that realm rather than closing over the host.
         const names = ['tcGetBy', 'tcResolveScoped', 'tcApplyHover'];
         const prelude = names.map(name => '__G[' + JSON.stringify(name) + '] = (' + __tsNs[name].toString() + ');').join('');
-        code = 'const __G = {}; const __tsNs = __G;' + prelude + code;
+        code = 'const __G = arguments[0]; const __tsNs = __G;' + prelude + code;
       }
-      return child.Function(code)();
+      return child.Function(code)(helperState);
     })()`;
   }
   async evaluate(script, arg) {

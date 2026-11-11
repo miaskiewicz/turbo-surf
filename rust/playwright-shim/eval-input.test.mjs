@@ -84,3 +84,24 @@ test("scrollIntoViewIfNeeded moves an offscreen target into the viewport", async
     await page.close();
   }
 });
+
+test("hover enters newly hovered ancestors and preserves related targets on departure", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      '<div id="parent"><span id="child">child</span></div><button id="other">other</button><script>window.hoverLog=[]; for(const id of ["parent","child"]) for(const type of ["pointerenter","mouseenter","pointerleave","mouseleave"]) document.getElementById(id).addEventListener(type,e=>hoverLog.push([id,e.type,e.relatedTarget?.id||null]));</script>',
+    );
+    await page._ensureLive();
+    await page.locator("#parent").hover();
+    const first = await page.evaluate(() => hoverLog.slice());
+    assert.ok(first.some(([id, type]) => id === "parent" && type === "mouseenter"));
+    assert.ok(first.some(([id, type]) => id === "parent" && type === "pointerenter"));
+    await page.locator("#parent").hover();
+    assert.equal((await page.evaluate(() => hoverLog)).length, first.length);
+    await page.locator("#other").hover();
+    const last = await page.evaluate(() => hoverLog.slice(-4));
+    assert.ok(last.every(([, type, related]) => type.endsWith("leave") && related === "other"));
+  } finally {
+    await page.close();
+  }
+});

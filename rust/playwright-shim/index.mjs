@@ -697,7 +697,26 @@ class Locator {
     );
   }
   async evaluateAll(fn, arg) {
-    return native.evaluate(this._html, evalSource(fn, arg));
+    await this._page._ensureLive();
+    let indices;
+    if (this._selector && !this._filter && this._scope.length === 0) {
+      const raw = await this._page._evalEngine(`(() => {
+        const all = Array.from(document.querySelectorAll('*'));
+        const positions = new Map(all.map((element, index) => [element, index]));
+        let matches = Array.from(document.querySelectorAll(${JSON.stringify(this._selector)}));
+        const n = ${this._index ?? "null"};
+        if (n != null) matches = [matches[n < 0 ? matches.length + n : n]].filter(Boolean);
+        globalThis.__RESULT = JSON.stringify(matches.map(element => positions.get(element)));
+      })()`);
+      indices = JSON.parse(raw);
+    } else {
+      const all = JSON.parse(native.query(this._html, "*", "css"));
+      const positions = new Map(all.map((element, index) => [element.node, index]));
+      indices = this._all().map((element) => positions.get(element.node));
+    }
+    return this._page.evaluate(
+      `(() => { const all = document.querySelectorAll('*'); return (${fn.toString()})(${JSON.stringify(indices)}.map(index => all[index]), ${JSON.stringify(arg ?? null)}); })()`,
+    );
   }
   async ariaSnapshot() {
     const n = this._node();

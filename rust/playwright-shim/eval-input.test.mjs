@@ -27,3 +27,26 @@ test("Locator.evaluate uses indexed live nodes and persists page effects", async
     await page.close();
   }
 });
+
+test("Locator.evaluateAll receives the complete matched collection and optional argument", async () => {
+  const page = newPage();
+  try {
+    await page.setContent("<ul><li>A</li><li>B</li></ul>");
+    assert.deepEqual(
+      await page
+        .locator("li")
+        .evaluateAll((nodes, suffix) => nodes.map((node) => node.textContent + suffix), "!"),
+      ["A!", "B!"],
+    );
+    assert.deepEqual(
+      await page
+        .locator("li")
+        .nth(1)
+        .evaluateAll((nodes) => nodes.map((node) => node.textContent)),
+      ["B"],
+    );
+    assert.equal(await page.locator(".absent").evaluateAll((nodes) => nodes.length), 0);
+  } finally {
+    await page.close();
+  }
+});

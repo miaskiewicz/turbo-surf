@@ -1406,7 +1406,7 @@ class FrameLocator {
     return new FrameLocator(this._resolveFrame(), selector);
   }
   owner() {
-    return this._resolveFrame();
+    return this._parent.locator(this._selector).nth(this._index);
   }
 }
 

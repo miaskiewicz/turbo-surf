@@ -2121,3 +2121,18 @@ test("Live frame registry tracks nested frames and actual navigation URLs (#447)
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("FrameLocator.owner returns the indexed parent-scoped iframe locator (#446)", async () => {
+  const p = newPage();
+  await p.setContent(
+    '<iframe id="first" srcdoc="&lt;iframe id=inner&gt;&lt;/iframe&gt;"></iframe><iframe id="second"></iframe>',
+  );
+  const owner = p.frameLocator("iframe").nth(1).owner();
+  assert.equal(await owner.count(), 1);
+  assert.equal(await owner.getAttribute("id"), "second");
+  assert.equal(
+    await p.frameLocator("#first").frameLocator("#inner").owner().getAttribute("id"),
+    "inner",
+  );
+  await p.close();
+});

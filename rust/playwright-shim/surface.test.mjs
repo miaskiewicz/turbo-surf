@@ -2455,3 +2455,38 @@ test("child reads honor indexed and filtered ancestors (#474)", async () => {
   assert.equal(await page.locator("body").getAttribute("data-clicked"), "two");
   await page.close();
 });
+test("Frame.evaluate executes and awaits in the child realm and propagates errors (#444)", async () => {
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "text/html");
+    res.end(
+      '<title>Host</title><iframe name="child" srcdoc="&lt;title&gt;Child&lt;/title&gt;&lt;script&gt;globalThis.childOnly=42&lt;/script&gt;"></iframe>',
+    );
+  });
+  const base = await listen(server);
+  const p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    const frame = p.frame("child");
+    assert.deepEqual(
+      await frame.evaluate(
+        async (arg) => ({
+          title: document.title,
+          value: await Promise.resolve(globalThis.childOnly + arg),
+        }),
+        3,
+      ),
+      { title: "Child", value: 45 },
+    );
+    assert.equal(await frame.evaluate("document.title"), "Child");
+    await assert.rejects(
+      frame.evaluate(() => {
+        throw new Error("child exploded");
+      }),
+      /child exploded/,
+    );
+    assert.equal(await p.evaluate(() => document.title), "Host");
+  } finally {
+    await p.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -1311,6 +1311,35 @@ class Frame {
   childFrames() {
     return this._parentPage.frames().filter((frame) => frame._parentFrame === this);
   }
+  _realmExpression(source) {
+    return `(() => {
+      let child = globalThis;
+      for (const index of ${JSON.stringify(this._path)}) {
+        const host = child.document.querySelectorAll('iframe')[index];
+        if (!host) throw new Error('turbo-surf: frame is detached');
+        child = host.contentWindow;
+      }
+      return child.Function(${JSON.stringify(`return (${source});`)})();
+    })()`;
+  }
+  async evaluate(script, arg) {
+    await this._ensureLive();
+    const expression = this._realmExpression(evalSource(script, arg));
+    const raw = await native.liveEvalExpression(
+      this._session,
+      `(async () => {
+      try {
+        const value = await (${expression});
+        return JSON.stringify({ok:true, value, absent:value === undefined});
+      } catch(error) { return JSON.stringify({ok:false, message:String(error?.message ?? error)}); }
+    })()`,
+    );
+    await this._parentPage._refreshFromSession();
+    await this._parentPage._drainBindings();
+    const result = JSON.parse(raw);
+    if (!result.ok) throw new Error(result.message);
+    return result.absent ? undefined : result.value;
+  }
   async content() {
     return this._html;
   }

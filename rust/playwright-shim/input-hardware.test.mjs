@@ -40,6 +40,7 @@ const WITH_LOG = `<!doctype html><html><body>
     const rec = (e) => { log.textContent += e.type + (e.target && e.target.id ? ':' + e.target.id : '') + ','; };
     const types = ['pointerdown','pointermove','pointerup','mousedown','mousemove','mouseup','click','dblclick','wheel','touchstart','touchend','dragstart','dragenter','dragover','drop','dragend'];
     for (const t of types) window.addEventListener(t, rec, true);
+    document.getElementById('dst').addEventListener('dragover', e => e.preventDefault());
   </script>
 </body></html>`;
 
@@ -133,5 +134,48 @@ test("page.dragAndDrop(source, target) wraps dragTo", async () => {
     assert.match(log, /drop:dst/);
   } finally {
     await teardown();
+  }
+});
+
+test("dragTo respects canceled dragstart and rejected dragover (#471)", async () => {
+  const server = serveHtml(`<!doctype html><div id="src" draggable="true">source</div>
+    <div id="dst">target</div><script>
+    window.events = [];
+    window.cancelStart = false;
+    window.acceptDrop = true;
+    const source = document.getElementById('src');
+    const target = document.getElementById('dst');
+    source.addEventListener('dragstart', e => {
+      events.push('dragstart');
+      if (cancelStart) e.preventDefault();
+      else e.dataTransfer.setData('text/plain', 'payload');
+    });
+    target.addEventListener('dragover', e => {
+      events.push('dragover');
+      if (acceptDrop) e.preventDefault();
+    });
+    target.addEventListener('drop', e => events.push('drop:' + e.dataTransfer.getData('text/plain')));
+    source.addEventListener('dragend', () => events.push('dragend'));
+    </script>`);
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    for (const [mode, expected] of [
+      ["control", ["dragstart", "dragover", "drop:payload", "dragend"]],
+      ["cancelStart", ["dragstart"]],
+      ["rejectDrop", ["dragstart", "dragover", "dragend"]],
+    ]) {
+      await page.goto(base, { waitUntil: "networkidle" });
+      await page.evaluate((value) => {
+        window.cancelStart = value === "cancelStart";
+        window.acceptDrop = value !== "rejectDrop";
+      }, mode);
+      await page.locator("#src").dragTo(page.locator("#dst"));
+      assert.deepEqual(await page.evaluate(() => window.events), expected, mode);
+    }
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
   }
 });

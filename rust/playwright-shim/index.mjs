@@ -2782,12 +2782,18 @@ function dragScript(srcIdx, dstIdx) {
     src.dispatchEvent(new PE("pointerdown", pointerOpts("pointerdown")));
     src.dispatchEvent(new MouseEvent("mousedown", mouseOpts(1)));
     const DE = globalThis.DragEvent || globalThis.MouseEvent;
-    src.dispatchEvent(new DE("dragstart", dragOpts()));
+    if (!src.dispatchEvent(new DE("dragstart", dragOpts()))) {
+      src.dispatchEvent(new PE("pointerup", pointerOpts("pointerup")));
+      src.dispatchEvent(new MouseEvent("mouseup", mouseOpts(0)));
+      globalThis.__RESULT = "OK";
+      return;
+    }
     dst.dispatchEvent(new PE("pointermove", pointerOpts("pointermove")));
     dst.dispatchEvent(new MouseEvent("mousemove", mouseOpts(1)));
     dst.dispatchEvent(new DE("dragenter", dragOpts()));
-    dst.dispatchEvent(new DE("dragover", dragOpts()));
-    dst.dispatchEvent(new DE("drop", dragOpts()));
+    if (!dst.dispatchEvent(new DE("dragover", dragOpts()))) {
+      dst.dispatchEvent(new DE("drop", dragOpts()));
+    }
     src.dispatchEvent(new DE("dragend", dragOpts()));
     dst.dispatchEvent(new PE("pointerup", pointerOpts("pointerup")));
     dst.dispatchEvent(new MouseEvent("mouseup", mouseOpts(0)));

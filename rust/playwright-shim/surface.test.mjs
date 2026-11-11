@@ -2306,3 +2306,32 @@ test("API params merge query strings and form fields encode as URL data (#333)",
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Standalone API contexts retain their own cookie jars and storage state (#331)", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/set") res.setHeader("set-cookie", "session=token; Path=/; HttpOnly");
+    res.end(req.headers.cookie ?? "");
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  const isolated = await request.newContext();
+  try {
+    await api.get(`${base}/set`);
+    assert.equal(await (await api.get(base)).text(), "session=token");
+    assert.equal(await (await isolated.get(base)).text(), "");
+    const stored = await api.storageState();
+    assert.equal(stored.cookies.length, 1);
+    assert.equal(stored.cookies[0].name, "session");
+    const restored = await request.newContext({ storageState: stored });
+    try {
+      assert.equal(await (await restored.get(base)).text(), "session=token");
+    } finally {
+      await restored.dispose();
+    }
+  } finally {
+    await api.dispose();
+    await isolated.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

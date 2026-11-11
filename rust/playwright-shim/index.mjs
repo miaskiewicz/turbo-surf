@@ -3999,6 +3999,13 @@ export const request = {
     };
     // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
+    let cookies = JSON.stringify(opts.storageState?.cookies ?? []);
+    const initialState =
+      typeof opts.storageState === "string"
+        ? readFile(opts.storageState, "utf8").then((text) => {
+            cookies = JSON.stringify(JSON.parse(text).cookies ?? []);
+          })
+        : Promise.resolve();
     const requestState = native.requestStateNew?.(bc?._requestState);
     let disposed = false;
     const responses = new Set();
@@ -4077,6 +4084,7 @@ export const request = {
     };
     const call = async (url, method, o = {}) => {
       ensureOpen();
+      await initialState;
       let target = resolve(url);
       if (o.params !== undefined) {
         const parsed = new URL(target);
@@ -4093,7 +4101,7 @@ export const request = {
           ? { Authorization: authorization, ...o.headers }
           : o.headers;
       const { body, hdr } = await encode({ ...o, headers: credentialHeaders });
-      const inCookies = bc && bc._cookies ? bc._cookies : "[]";
+      const inCookies = bc ? bc._cookies : cookies;
       let raw = await native.fetchWithCookies(
         target,
         inCookies,
@@ -4134,7 +4142,10 @@ export const request = {
       }
       // Merge Set-Cookie writes back into the parent BrowserContext's jar so
       // the next page.goto / page.request / context.request sees them.
-      if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;
+      if (typeof parsed.cookies === "string") {
+        if (bc) bc._cookies = parsed.cookies;
+        else cookies = parsed.cookies;
+      }
       // oxlint-enable no-underscore-dangle
       ensureOpen();
       if (
@@ -4154,15 +4165,19 @@ export const request = {
       delete: (url, o = {}) => call(url, "DELETE", o),
       head: (url, o = {}) => call(url, "HEAD", o),
       fetch: (url, o = {}) => call(url, o.method ?? null, o),
-      async storageState() {
+      async storageState(o = {}) {
         ensureOpen();
-        return { cookies: [], origins: [] };
+        await initialState;
+        const state = { cookies: JSON.parse(bc ? bc._cookies : cookies), origins: [] };
+        if (o.path) await writeFile(o.path, JSON.stringify(state));
+        return state;
       },
       async dispose() {
         if (disposed) return;
         disposed = true;
         for (const response of responses) response.html = null;
         responses.clear();
+        cookies = "[]";
         if (requestState != null) native.requestStateClose(requestState);
       },
     };

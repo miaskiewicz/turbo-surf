@@ -3417,3 +3417,20 @@ test("toHaveProperty distinguishes path existence and supports array paths (#383
   assert.doesNotThrow(() => expect({ a: [{ b: 2 }] }).toHaveProperty("a[0].b", 2));
   assert.doesNotThrow(() => expect({ a: null }).not.toHaveProperty("a.b"));
 });
+
+test("promise rejection assertions preserve not and error matchers (#382)", async () => {
+  const rejected = (error) => {
+    const promise = Promise.reject(error);
+    promise.catch(() => {});
+    return promise;
+  };
+  await assert.rejects(expect(rejected(new Error("same"))).rejects.not.toThrow("same"));
+  await assert.doesNotReject(expect(rejected(new Error("other"))).rejects.not.toThrow("same"));
+  await assert.doesNotReject(expect(rejected(new TypeError("same"))).rejects.toThrow(TypeError));
+  await assert.doesNotReject(
+    expect(rejected(new Error("same"))).rejects.toThrow(new Error("same")),
+  );
+  await assert.doesNotReject(expect(rejected(new Error("same"))).rejects.toThrow(/same/));
+  await assert.doesNotReject(expect(Promise.resolve(2)).resolves.not.toBe(3));
+  await assert.rejects(expect(Promise.resolve("same")).rejects.not.toThrow("other"));
+});

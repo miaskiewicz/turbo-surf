@@ -4027,20 +4027,19 @@ function asyncMatchers(awaiter, neg) {
   return new Proxy(
     {},
     {
-      get:
-        (_t, name) =>
-        async (...args) => {
+      get: (_target, name) => {
+        if (name === "not") return asyncMatchers(awaiter, !neg);
+        return async (...args) => {
           const { value, threw } = await awaiter();
-          if (threw && (name === "toThrow" || name === "toThrowError")) {
-            const m = args[0];
-            const ok =
-              m == null ||
-              (m instanceof RegExp ? m.test(value.message) : String(value.message).includes(m));
-            if (!ok) throw new Error(`expected rejection to match ${m}, got "${value.message}"`);
-            return undefined;
-          }
-          return new ValueExpect(value, neg)[name](...args);
-        },
+          const received =
+            threw && (name === "toThrow" || name === "toThrowError")
+              ? () => {
+                  throw value;
+                }
+              : value;
+          return new ValueExpect(received, neg)[name](...args);
+        };
+      },
     },
   );
 }

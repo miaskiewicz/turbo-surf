@@ -49,3 +49,25 @@ test("screenshot image preparation overlaps independent fetches within its bound
     assert.ok(stats().peak <= 8, "image preparation must remain bounded");
   });
 });
+
+test("screenshots retain no-store image bytes only within the current document", async () => {
+  await withImages(async (page, stats) => {
+    const snapshot = page._html;
+    const first = await page.screenshot({ externalCss: false });
+    const loaded = stats().requests;
+    const second = await page.screenshot({ externalCss: false });
+    assert.equal(stats().requests, loaded, "repeat capture must reuse resident images");
+    assert.ok(first.equals(second), "resident bytes preserve rendered pixels");
+    page._html = snapshot.replace("/img/11.png", "/img/new.png");
+    await page.screenshot({ externalCss: false });
+    assert.ok(stats().requests > loaded, "snapshot changes invalidate retained resources");
+    const beforeNavigation = stats().requests;
+    await page.goto(page.url(), { waitUntil: "load" });
+    page._html = snapshot;
+    await page.screenshot({ externalCss: false });
+    assert.ok(
+      stats().requests > beforeNavigation,
+      "same URL navigation creates new resident state",
+    );
+  });
+});

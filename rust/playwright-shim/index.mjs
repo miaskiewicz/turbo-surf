@@ -1697,6 +1697,7 @@ class Page {
 
   async _navigate(url, method, body) {
     if (this._closed) throw new Error("page is closed");
+    this._imageCache = undefined;
     this._closeSession(); // a fresh document — discard the prior live app
     // `about:blank` (and other about: URLs) are not network resources — a browser shows an
     // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
@@ -1919,6 +1920,7 @@ class Page {
   }
 
   async setContent(html) {
+    this._imageCache = undefined;
     this._html = html;
     this._emit("load");
   }
@@ -2409,6 +2411,7 @@ class Page {
     this._closeSession();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
+    this._imageCache = undefined;
     this._closed = true;
     this._emit("close");
     if (this._ownsContext) await this._context.close();
@@ -2459,6 +2462,8 @@ class Page {
   // and failed/unresolvable refs are skipped; count capped to match the engine.
   async _fetchImages() {
     if (!/^https?:/.test(this._url ?? "")) return {};
+    const key = `${this._url}\u0000${this._html}`;
+    if (this._imageCache?.key === key) return this._imageCache.images;
     const entries = await mapBounded(native.imageUrls(this._html).slice(0, 60), 8, async (ref) => {
       try {
         const abs = new URL(ref, this._url).href;
@@ -2469,6 +2474,7 @@ class Page {
       }
     });
     const images = Object.fromEntries(entries.filter(Boolean));
+    this._imageCache = { key, images };
     return images;
   }
 

@@ -2964,12 +2964,21 @@ function makeKeyboard(page) {
 }
 
 function makeResponse(r, ensureOpen = () => {}) {
+  const headers = {};
+  const entries = Array.isArray(r.headers) ? r.headers : Object.entries(r.headers ?? {});
+  for (const [key, value] of entries) {
+    const name = key.toLowerCase();
+    headers[name] =
+      headers[name] === undefined
+        ? value
+        : `${headers[name]}${name === "set-cookie" ? "\n" : ", "}${value}`;
+  }
   return {
     status: () => r.status,
     ok: () => r.status >= 200 && r.status < 300,
     url: () => r.finalUrl,
-    statusText: () => "",
-    headers: () => r.headers ?? {},
+    statusText: () => r.statusText ?? "",
+    headers: () => ({ ...headers }),
     async text() {
       ensureOpen();
       return r.html ?? "";

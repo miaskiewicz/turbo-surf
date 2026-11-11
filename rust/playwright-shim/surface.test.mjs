@@ -2227,3 +2227,25 @@ test("API multipart encodes fields and binary files (#434)", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("API response headers use lowercase names and preserve status text (#338)", async () => {
+  const server = createServer((req, res) => {
+    res.statusCode = 429;
+    res.statusMessage = "Probe Rate Limit";
+    res.setHeader("Retry-After", "3");
+    res.setHeader("Set-Cookie", ["a=1; Path=/", "b=2; Path=/"]);
+    res.end("ok");
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  try {
+    const response = await api.get(base);
+    assert.equal(response.headers()["retry-after"], "3");
+    assert.equal(response.headers()["set-cookie"], "a=1; Path=/\nb=2; Path=/");
+    assert.equal(response.statusText(), "Probe Rate Limit");
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

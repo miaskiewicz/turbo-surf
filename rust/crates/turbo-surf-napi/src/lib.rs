@@ -1023,6 +1023,7 @@ async fn do_fetch_headers(
         "html": res.html,
         "finalUrl": res.final_url,
         "status": res.status,
+        "statusText": res.status_text,
         "referrer": response_metadata.lock().unwrap().referrer,
         "headers": res.headers,
         "redirected": res.redirected,

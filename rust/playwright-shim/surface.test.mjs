@@ -4367,3 +4367,24 @@ test("Opacity-only sibling animations do not reject unrelated geometry (#345)", 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("role locators resolve native headings table structure and image names (#377)", async () => {
+  const page = newPage();
+  await page.setContent(
+    '<h1>Overview</h1><h2 id="second">Overview</h2><table><thead><tr><th>Employee</th></tr></thead><tbody><tr><th scope="row">Alice</th><td>Engineer</td></tr></tbody></table><img alt="Company logo"><img alt="Company logo">',
+  );
+  assert.equal(await page.getByRole("heading", { name: "Overview", level: 2 }).count(), 1);
+  assert.equal(await page.getByRole("heading").count(), 2);
+  assert.equal(await page.getByRole("columnheader", { name: "Employee" }).count(), 1);
+  assert.equal(await page.getByRole("row").count(), 2);
+  assert.equal(await page.getByRole("rowheader", { name: "Alice" }).count(), 1);
+  assert.equal(await page.getByRole("cell", { name: "Engineer" }).count(), 1);
+  assert.equal(await page.getByRole("img", { name: "Company logo" }).count(), 2);
+  await page._ensureLive();
+  await page.evaluate(
+    "document.querySelector('#second').onclick = () => document.body.setAttribute('data-heading','two')",
+  );
+  await page.getByRole("heading", { name: "Overview", level: 2 }).click();
+  assert.equal(await page.evaluate(() => document.body.getAttribute("data-heading")), "two");
+  await page.close();
+});

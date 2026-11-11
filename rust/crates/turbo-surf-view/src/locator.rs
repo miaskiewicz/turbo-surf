@@ -16,6 +16,7 @@ const ELEMENT_NODE: u8 = 1;
 pub struct RoleOptions {
     pub include_hidden: bool,
     pub pressed: Option<bool>,
+    pub level: Option<u32>,
 }
 
 fn accessibility_hidden(tree: &Tree, h: Handle) -> bool {
@@ -39,6 +40,12 @@ fn accessibility_hidden(tree: &Tree, h: Handle) -> bool {
 
 pub fn matches_role_options(tree: &Tree, h: Handle, options: &RoleOptions) -> bool {
     if !options.include_hidden && accessibility_hidden(tree, h) {
+        return false;
+    }
+    if options
+        .level
+        .is_some_and(|level| crate::aria::heading_level(tree, h) != Some(level))
+    {
         return false;
     }
     options.pressed.is_none_or(|pressed| {

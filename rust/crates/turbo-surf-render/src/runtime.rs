@@ -12277,10 +12277,16 @@ __G.tcGetBy = function (kind, value, name, root, options) {
       return t === "checkbox" ? "checkbox" : t === "radio" ? "radio"
         : (t === "button" || t === "submit" || t === "reset") ? "button" : "textbox";
     }
-    return ({ a: "link", button: "button", select: "combobox", textarea: "textbox" })[tag] || "generic";
+    if (tag === "th" && /^(row|rowgroup)$/.test(attr(el, "scope"))) return "rowheader";
+    return ({ a: "link", button: "button", select: "combobox", textarea: "textbox",
+      h1: "heading", h2: "heading", h3: "heading", h4: "heading", h5: "heading", h6: "heading",
+      img: "img", table: "table", thead: "rowgroup", tbody: "rowgroup", tfoot: "rowgroup",
+      tr: "row", th: "columnheader", td: "cell", ul: "list", ol: "list", li: "listitem",
+      nav: "navigation", main: "main", article: "article", aside: "complementary", fieldset: "group", option: "option"
+    })[tag] || "generic";
   };
   const accName = (el) => {
-    const cands = [attr(el, "aria-label").trim(), (el.textContent || "").trim(),
+    const cands = [attr(el, "aria-label").trim(), (el.tagName || '').toLowerCase() === 'img' ? attr(el, 'alt').trim() : '', (el.textContent || "").trim(),
       attr(el, "placeholder").trim(), attr(el, "value").trim(), attr(el, "title").trim()];
     for (const c of cands) if (c) return c;
     return "";
@@ -12323,6 +12329,7 @@ __G.tcGetBy = function (kind, value, name, root, options) {
     }
   }
   if (kind === "role") hits = hits.filter((el) => {
+    if (options.level != null && Number(attr(el, 'aria-level') || (el.tagName || '').slice(1)) !== options.level) return false;
     if (options.pressed != null && attr(el, 'aria-pressed') !== String(options.pressed)) return false;
     if (options.includeHidden) return true;
     const visibility = getComputedStyle(el).visibility;

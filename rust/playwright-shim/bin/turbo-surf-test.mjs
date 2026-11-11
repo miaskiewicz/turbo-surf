@@ -44,6 +44,14 @@ export async function run(argv) {
   }
   const config = await loadConfig(configPath);
   const reporter = values.reporter ? [[values.reporter]] : config.reporter;
+  const supportedReporters = new Set(["list", "spec", "tap", "dot", "html"]);
+  for (const [kind] of reporter) {
+    if (!supportedReporters.has(kind)) {
+      throw new Error(
+        `turbo-surf-test: unsupported reporter ${kind}; supported: ${[...supportedReporters].join(", ")}`,
+      );
+    }
+  }
   const chosen = orderProjects(config.projects, values.project);
   if (!chosen.length) {
     console.error(`turbo-surf-test: no projects matched ${JSON.stringify(values.project)}`);

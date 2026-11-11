@@ -436,3 +436,22 @@ test("CLI rejects no matching tests unless pass-with-no-tests is explicit", asyn
   const allowed = await runCli(["--config", config, "--pass-with-no-tests"], root);
   assert.equal(allowed.code, 0, allowed.stdout + allowed.stderr);
 });
+
+test("CLI explicitly rejects unsupported reporters including secondary entries", async () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, "success.spec.mjs"),
+    "import test from 'node:test';test('body must not run',()=>console.log('BODY_RAN'));",
+  );
+  const config = join(root, "json.config.mjs");
+  for (const reporter of [
+    "[['json',{outputFile:'result.json'}]]",
+    "[['list'],['json',{outputFile:'result.json'}]]",
+  ]) {
+    writeFileSync(config, `export default {reporter:${reporter}};`);
+    const result = await runCli(["--config", config], root);
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /unsupported reporter.*json/i);
+    assert.doesNotMatch(result.stdout, /BODY_RAN/);
+  }
+});

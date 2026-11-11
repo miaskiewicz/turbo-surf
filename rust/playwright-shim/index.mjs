@@ -1962,6 +1962,7 @@ class Page {
     if (
       !this._listeners.has("response") &&
       !this._listeners.has("requestfinished") &&
+      !this._listeners.has("requestfailed") &&
       !this._listeners.has("request")
     )
       return;
@@ -1982,8 +1983,12 @@ class Page {
     for (const e of entries) {
       const resp = makeNetResponse(e);
       resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
-      this._recentResponses.push(resp);
       this._emit("request", resp.request());
+      if (e.status === 0) {
+        this._emit("requestfailed", resp.request());
+        continue;
+      }
+      this._recentResponses.push(resp);
       this._emit("response", resp);
       this._emit("requestfinished", resp.request());
     }
@@ -2192,7 +2197,8 @@ class Page {
       this._autoHydrate !== false &&
       (this._listeners.has("response") ||
         this._listeners.has("request") ||
-        this._listeners.has("requestfinished"))
+        this._listeners.has("requestfinished") ||
+        this._listeners.has("requestfailed"))
     ) {
       await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     }
@@ -2713,7 +2719,7 @@ class Page {
   // resolve to undefined — matches the pre-fix no-op for off-spec names.
   async waitForEvent(event, opts) {
     const timeout = (opts && typeof opts === "object" && opts.timeout) || 30000;
-    if (event === "response" || event === "request" || event === "requestfinished") {
+    if (["response", "request", "requestfinished", "requestfailed"].includes(event)) {
       const predicate =
         opts && typeof opts === "object" && typeof opts.predicate === "function"
           ? opts.predicate
@@ -3429,6 +3435,7 @@ function makeNetResponse(e) {
     headers: () => (e.contentType ? { "content-type": e.contentType } : {}),
     postData: () => null,
     resourceType: () => "fetch",
+    failure: () => (e.status === 0 ? { errorText: e.error || "net::ERR_FAILED" } : null),
   };
   return {
     url: () => e.url,

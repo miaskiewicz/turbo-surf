@@ -3211,3 +3211,58 @@ test("navigation deadlines also cancel slow hydration (#427)", async () => {
     await new Promise((done) => server.close(done));
   }
 });
+
+test("socket failures emit requestfailed without response or requestfinished (#407)", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/broken") {
+      request.socket.destroy();
+      return;
+    }
+    response.end(
+      `<button id="run" onclick="fetch('/broken').catch(()=>globalThis.result='rejected')">fetch</button><script>globalThis.result='ready'</script>`,
+    );
+  });
+  const base = await listen(server),
+    p = newPage(),
+    events = [];
+  for (const type of ["requestfailed", "response", "requestfinished"])
+    p.on(type, (entry) => {
+      if (entry.url().endsWith("/broken"))
+        events.push({ type, failure: type === "requestfailed" ? entry.failure() : null });
+    });
+  try {
+    await p.goto(base, { waitUntil: "networkidle" });
+    await p.locator("#run").click();
+    let result;
+    for (let i = 0; i < 30; i++) {
+      result = await p.evaluate(() => globalThis.result);
+      if (result === "rejected") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(result, "rejected");
+    assert.deepEqual(
+      events.map((entry) => entry.type),
+      ["requestfailed"],
+    );
+    assert.equal(typeof events[0].failure.errorText, "string");
+    assert.ok(events[0].failure.errorText.length > 0);
+    assert.notEqual(
+      events[0].failure.errorText,
+      "net::ERR_FAILED",
+      "retain the native transport error",
+    );
+    const failed = p.waitForEvent("requestfailed", { timeout: 1000 });
+    await p.evaluate(() => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "/broken");
+      xhr.send();
+    });
+    const xhrFailure = (await failed).failure();
+    assert.ok(xhrFailure.errorText.length > 0);
+    assert.notEqual(xhrFailure.errorText, "net::ERR_FAILED");
+  } finally {
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

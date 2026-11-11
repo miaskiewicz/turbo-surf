@@ -2919,6 +2919,10 @@ async fn run_stream_fetch_branch(
             Some(request.await)
         }
     };
+    let failure_error = response
+        .as_ref()
+        .and_then(|result| result.as_ref().err())
+        .map(ToString::to_string);
     let out = stream_response_to_out(
         response,
         target,
@@ -2952,6 +2956,7 @@ async fn run_stream_fetch_branch(
         "streamId": cancel_id,
         "body": "",
         "bodyIncomplete": true,
+        "error": failure_error,
     });
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
@@ -3669,6 +3674,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
             ..Default::default()
         };
     };
+    let failure_error = response.as_ref().err().cloned();
     let out = match response {
         Ok(r) => fetch_response_to_out(FetchResponseOut {
             state: &state,
@@ -3694,7 +3700,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     };
     jar_rc.borrow_mut().merge_request_changes(local);
     fetch_streams::release(&mut state.borrow_mut(), cancel_id);
-    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text});
+    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text,"error":failure_error});
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
     if log.0.len() == 1000 {

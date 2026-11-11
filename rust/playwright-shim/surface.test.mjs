@@ -2632,6 +2632,25 @@ test("fill rejects invalid number text before mutating the value (#411)", async 
   }
 });
 
+test("API pooled connections do not cache otherwise cacheable responses (#485)", async () => {
+  let sequence = 0;
+  const server = createServer((req, res) => {
+    res.setHeader("cache-control", "public, max-age=3600");
+    res.end(String(++sequence));
+  });
+  const base = await listen(server);
+  const api = await request.newContext();
+  try {
+    assert.equal(await (await api.get(base)).text(), "1");
+    assert.equal(await (await api.get(base)).text(), "2");
+    assert.equal(sequence, 2);
+  } finally {
+    await api.dispose();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("CSS and id assertions accept regex and retain negation (#437)", async () => {
   const page = await fresh();
   await expect(page.locator("#go")).toHaveId("go", { timeout: 0 });

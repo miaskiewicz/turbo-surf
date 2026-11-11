@@ -4449,6 +4449,7 @@ export const request = {
         null,
         Buffer.isBuffer(body) ? body : null,
         maxRedirects,
+        true,
       );
       let parsed = JSON.parse(raw);
       if (
@@ -4473,6 +4474,7 @@ export const request = {
           null,
           Buffer.isBuffer(body) ? body : null,
           maxRedirects,
+          true,
         );
         parsed = JSON.parse(raw);
       }

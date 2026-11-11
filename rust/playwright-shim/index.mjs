@@ -4116,11 +4116,21 @@ function fixtureUses(keys) {
   return result;
 }
 
+async function invokeTestBody(fn, arg, info, expectedFailure) {
+  try {
+    await fn(arg, info);
+  } catch (error) {
+    if (error === SKIP_SIGNAL || !expectedFailure) throw error;
+    return;
+  }
+  if (expectedFailure) throw new Error("Expected test to fail, but it passed");
+}
+
 function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   const useKey = Symbol("fixture use");
   const useKeys = [...parentUseKeys, useKey];
   const open = (testInfo) => openFixtures(baseDefs, extDefs, testInfo);
-  const run = (name, fn, only = false) => {
+  const run = (name, fn, only = false, expectedFailure = false) => {
     const focused = only || getSkipStack().some((frame) => frame.only);
     if (only) markFocused();
     const fullName = [...getSkipStack().map((frame) => frame.title), name].join(" > ");
@@ -4142,18 +4152,19 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
           return;
         }
         const testInfo = makeTestInfo(name);
+        if (expectedFailure) testInfo.expectedStatus = "failed";
         try {
           // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
           // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
           // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
           // open its OWN fixtures, else custom fixtures resolve to undefined.
           if (_current && Object.keys(testDefs).length === 0) {
-            await fn(_current.arg, testInfo);
+            await invokeTestBody(fn, _current.arg, testInfo, expectedFailure);
             return;
           }
           const { arg, teardown } = await openTest(testInfo);
           try {
-            await fn(arg, testInfo);
+            await invokeTestBody(fn, arg, testInfo, expectedFailure);
           } finally {
             await teardown();
           }
@@ -4184,7 +4195,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   };
   run.only = (name, fn) => run(name, fn, true);
   run.fixme = run.skip;
-  run.fail = run;
+  run.fail = (name, fn) => run(name, fn, false, true);
   run.slow = () => {};
   run.setTimeout = () => {};
   run.use = (overrides) => {

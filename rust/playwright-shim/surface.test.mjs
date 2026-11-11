@@ -2947,3 +2947,28 @@ test("cleanup hooks all execute before their failures are reported", async () =>
     assert.match(result.stdout, /second cleanup failure/);
   }
 });
+
+test("test.fail distinguishes expected failures from unexpected passes", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "surf-expected-failure-"));
+  for (const throws of [true, false]) {
+    const file = join(root, `${throws}.mjs`);
+    await writeFile(
+      file,
+      `import {test} from ${JSON.stringify(new URL("./index.mjs", import.meta.url).href)};
+      test.fail('marked failure',()=>{${throws ? "throw Error('expected failure');" : "console.log('BODY_PASSED');"}});`,
+    );
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(process.execPath, ["--test", "--test-force-exit", file], {
+      env,
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    assert.equal(result.status, throws ? 0 : 1, result.stdout + result.stderr);
+    if (!throws) assert.match(result.stdout, /Expected test to fail, but it passed/);
+  }
+});

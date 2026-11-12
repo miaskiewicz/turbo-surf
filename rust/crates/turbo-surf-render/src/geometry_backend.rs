@@ -136,6 +136,7 @@ deno_core::extension!(
         crate::web_fonts::op_font_face_detach,
         crate::web_fonts::op_font_face_rule,
         crate::live_layout_backend::op_live_element_scroll,
+        crate::live_layout_backend::op_live_element_scroll_extent,
         crate::live_layout_backend::op_live_element_scroll_to,
         crate::live_layout_backend::op_live_viewport_offset,
         crate::live_layout_backend::op_live_scroll_into_view,

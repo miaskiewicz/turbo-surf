@@ -136,21 +136,24 @@ fn unrelated_rect_is_independent_of_a_descendant_rotation() {
 }
 
 #[test]
-fn rect_animation_admission_keeps_scroll_and_flow_dependencies_strict() {
+fn rect_animation_admission_keeps_gutter_and_flow_dependencies_strict() {
     for (frame, overflow) in [
-        ("transform:rotate(90deg)", "auto"),
-        ("width:80px", "visible"),
+        (
+            "transform:rotate(90deg)",
+            "overflow:auto;scrollbar-gutter:stable",
+        ),
+        ("width:80px", "overflow:visible"),
     ] {
-        let html=format!("<!doctype html><style>@keyframes change{{to{{{frame}}}}}#outer{{overflow:{overflow};width:80px;height:60px}}#spin{{animation:change 1s infinite}}</style><div id=outer><div id=spin>spinner</div></div>");
+        let html=format!("<!doctype html><style>@keyframes change{{to{{{frame}}}}}#outer{{{overflow};width:80px;height:60px}}#spin{{animation:change 1s infinite}}</style><div id=outer><div id=spin>spinner</div></div>");
         let result=run_with_dom(&html,"(()=>{try{return document.getElementById('outer').getBoundingClientRect().width}catch(e){return e.message}})()").unwrap();
         assert!(result.contains("animation resource"), "{frame}: {result}");
     }
 }
 
 #[test]
-fn rect_admission_cannot_escape_to_scroll_extent_or_reparented_geometry() {
+fn local_box_admission_cannot_escape_to_root_extent_hit_test_or_reparented_geometry() {
     let html="<!doctype html><style>@keyframes spin{to{transform:rotate(360deg)}}#spin{animation:spin 1s infinite}#target{width:80px;height:60px}</style><div id=target></div><div id=spin></div>";
-    let actual=run_with_dom(html,"(()=>{const target=document.getElementById('target'),spin=document.getElementById('spin');const read=f=>{try{return f()}catch(e){return e.message}};const result=[read(()=>target.getBoundingClientRect().width),read(()=>target.scrollWidth),read(()=>target.offsetWidth)];spin.append(target);result.push(read(()=>target.getBoundingClientRect().width));return JSON.stringify(result)})()").unwrap();
+    let actual=run_with_dom(html,"(()=>{const target=document.getElementById('target'),spin=document.getElementById('spin');const read=f=>{try{return f()}catch(e){return e.message}};const result=[read(()=>target.getBoundingClientRect().width),read(()=>document.documentElement.scrollWidth),read(()=>document.elementFromPoint(0,0))];spin.append(target);result.push(read(()=>target.getBoundingClientRect().width));return JSON.stringify(result)})()").unwrap();
     let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
     assert_eq!(result[0], 80);
     for i in 1..4 {
@@ -244,7 +247,7 @@ fn rect_outside_hidden_animated_descendant_keeps_its_auto_height() {
 }
 
 #[test]
-fn clipped_animation_admission_keeps_shared_mixed_axes_and_scroll_dependencies_strict() {
+fn clipped_box_admission_keeps_descendant_extent_and_scroll_offsets_strict() {
     let read="(()=>{try{return document.getElementById('target').getBoundingClientRect().width}catch(e){return e.message}})()";
     for overflow in [
         "overflow:auto",
@@ -252,20 +255,19 @@ fn clipped_animation_admission_keeps_shared_mixed_axes_and_scroll_dependencies_s
         "overflow-x:hidden;overflow-y:visible",
     ] {
         let actual = run_with_dom(&clipped_spinner(overflow), read).unwrap();
-        assert!(
-            actual.contains("animation resource"),
-            "{overflow}: {actual}"
-        );
+        assert_eq!(actual, "80", "{overflow}: {actual}");
+        let extent=run_with_dom(&clipped_spinner(overflow),"(()=>{const target=document.getElementById('target');target.getBoundingClientRect();try{return target.scrollHeight}catch(e){return e.message}})()").unwrap();
+        assert!(extent.contains("animation resource"), "{extent}");
     }
     let shared = clipped_spinner("overflow:hidden")
         .replace("</style>", "</style><body style='overflow:hidden'>");
-    assert!(run_with_dom(&shared, read)
-        .unwrap()
-        .contains("animation resource"));
-    let actual=run_with_dom(&clipped_spinner("overflow:hidden"),"(()=>{const spin=document.getElementById('spin'),circle=document.querySelector('circle');spin.style.animation='none';circle.style.animation='none';document.body.style.height='4000px';window.scrollTo(0,100);const before=window.scrollY;spin.style.removeProperty('animation');circle.style.removeProperty('animation');try{return JSON.stringify([before,document.getElementById('target').getBoundingClientRect().width])}catch(e){return JSON.stringify([before,e.message])}})()").unwrap();
+    assert_eq!(run_with_dom(&shared, read).unwrap(), "80");
+    let actual=run_with_dom(&clipped_spinner("overflow:hidden"),"(()=>{const spin=document.getElementById('spin'),circle=document.querySelector('circle');spin.style.animation='none';circle.style.animation='none';document.body.style.height='4000px';window.scrollTo(0,100);const before=window.scrollY;spin.style.removeProperty('animation');circle.style.removeProperty('animation');try{return JSON.stringify([before,document.getElementById('target').getBoundingClientRect().width])}catch(e){return JSON.stringify([before,e.message])}finally{spin.style.animation='none';circle.style.animation='none';window.scrollTo(0,0);document.body.style.removeProperty('height');spin.style.removeProperty('animation');circle.style.removeProperty('animation')}})()").unwrap();
     let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
     assert_eq!(result[0], 100);
     assert!(result[1].as_str().unwrap().contains("animation resource"));
     let query=run_with_dom(&clipped_spinner("overflow:hidden"),"(()=>{try{return document.getElementById('clip').getBoundingClientRect().width}catch(e){return e.message}})()").unwrap();
-    assert!(query.contains("animation resource"));
+    assert_eq!(query, "80");
+    let extent=run_with_dom(&clipped_spinner("overflow:hidden"),"(()=>{const clip=document.getElementById('clip');clip.getBoundingClientRect();const name=getComputedStyle(document.getElementById('spin')).animationName;if(name!=='spin')return 'fixture animation missing:'+name;try{return clip.scrollWidth}catch(e){return e.message}})()").unwrap();
+    assert!(extent.contains("animation resource"), "{extent}");
 }

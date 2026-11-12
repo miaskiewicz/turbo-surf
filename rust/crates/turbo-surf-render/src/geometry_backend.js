@@ -453,7 +453,7 @@
             const viewport = ops.op_live_viewport_client(this);
             if (viewport !== null) return viewport[name === "clientWidth" ? 0 : 1];
           }
-          return ops.op_live_element_geometry(this, false)[group][field];
+          return ops.op_live_element_geometry(this, true)[group][field];
         },
         "get " + name,
         0,
@@ -895,6 +895,8 @@
       get: make(
         function () {
           brand(this, 1);
+          if (field === "width" || field === "height")
+            return ops.op_live_element_scroll_extent(this)[field === "width" ? 0 : 1];
           return ops.op_live_element_scroll(this, 0, 0)[field];
         },
         `get ${name}`,

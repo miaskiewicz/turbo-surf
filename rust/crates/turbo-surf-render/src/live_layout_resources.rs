@@ -5,6 +5,18 @@ use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
 use lightningcss::traits::ToCss;
 use turbo_dom_layout::{ComputedStyle, StyledNode};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueryKind {
+    LocalBox,
+    ScrollExtent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Query {
+    pub(crate) source: turbo_dom_parser::rtdom::tree::Handle,
+    pub(crate) kind: QueryKind,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Definition {
     Font(String),
@@ -253,6 +265,7 @@ fn matches_underlying(style: &ComputedStyle, name: &str, expected: &str) -> bool
 fn independent_effect(
     path: &[&turbo_dom_layout::StyledElement],
     requested: &[&turbo_dom_layout::StyledElement],
+    kind: QueryKind,
 ) -> bool {
     let Some(element) = path.last() else {
         return false;
@@ -263,25 +276,22 @@ fn independent_effect(
     {
         return false;
     }
-    if !requested.iter().all(|ancestor| {
-        overflow_axes(&ancestor.style)
-            .is_some_and(|axes| axes.iter().all(|axis| matches!(*axis, "visible" | "clip")))
-    }) {
+    if kind == QueryKind::ScrollExtent
+        && requested
+            .last()
+            .is_some_and(|target| path.iter().any(|ancestor| ancestor.source == target.source))
+    {
         return false;
     }
-    path.iter().all(|ancestor| {
-        let Some(axes) = overflow_axes(&ancestor.style) else {
-            return false;
-        };
-        if axes.iter().all(|axis| matches!(*axis, "visible" | "clip")) {
-            return true;
-        }
-        // A hidden-only descendant boundary clips the animated overflow without
-        // allocating scrollbars or translating the requested ancestor's box.
-        !requested
-            .iter()
-            .any(|shared| shared.source == ancestor.source)
-            && axes.iter().all(|axis| matches!(*axis, "hidden" | "clip"))
+    // With overlay scrollbars and zero retained offsets, clipping/scrolling
+    // branches cannot allocate a gutter or translate another element's box.
+    // Scroll extents additionally depend on every animated descendant above.
+    path.iter().chain(requested).all(|ancestor| {
+        overflow_axes(&ancestor.style).is_some()
+            && ancestor
+                .style
+                .get("scrollbar-gutter")
+                .is_none_or(|value| value.eq_ignore_ascii_case("auto"))
     })
 }
 
@@ -330,20 +340,24 @@ fn element_path<'a>(
 pub(crate) fn validate(
     nodes: &[StyledNode],
     rules: &[crate::live_stylesheets::ActiveRule],
-    requested: Option<turbo_dom_parser::rtdom::tree::Handle>,
+    requested: Option<Query>,
 ) -> Result<(), String> {
     let definitions = Definitions::collect(rules);
     if definitions.animations.is_empty() {
         return validate_nodes(nodes, &definitions);
     }
+    let Some(query) = requested else {
+        return validate_nodes(nodes, &definitions);
+    };
     let mut path = Vec::new();
-    if !requested.is_some_and(|source| element_path(nodes, source, &mut path)) {
+    if !element_path(nodes, query.source, &mut path) {
         return validate_nodes(nodes, &definitions);
     }
     validate_rect_nodes(
         nodes,
         &definitions,
         &path,
+        query.kind,
         &mut Vec::new(),
         &mut Seen::new(),
     )
@@ -353,6 +367,7 @@ fn validate_rect_nodes<'a>(
     nodes: &'a [StyledNode],
     definitions: &Definitions,
     requested: &[&turbo_dom_layout::StyledElement],
+    kind: QueryKind,
     path: &mut Vec<&'a turbo_dom_layout::StyledElement>,
     seen: &mut Seen<'a>,
 ) -> Result<(), String> {
@@ -367,9 +382,9 @@ fn validate_rect_nodes<'a>(
         }
         path.push(element);
         validate_style_for_rect(&element.style, definitions, seen, || {
-            independent_effect(path, requested)
+            independent_effect(path, requested, kind)
         })?;
-        validate_rect_nodes(&element.children, definitions, requested, path, seen)?;
+        validate_rect_nodes(&element.children, definitions, requested, kind, path, seen)?;
         path.pop();
     }
     Ok(())

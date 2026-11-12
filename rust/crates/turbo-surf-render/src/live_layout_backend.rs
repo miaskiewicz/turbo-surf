@@ -1,6 +1,7 @@
 //! Actual native layout behind CSSOM reads. Each read captures current native
 //! tree/CSS state; no public getters or page-installed layout cache participates.
 use crate::live_layout_media::{HostMedia, ViewportMedia};
+use crate::live_layout_resources::{Query, QueryKind};
 use deno_core::{op2, v8};
 use deno_error::JsErrorBox;
 use serde::Serialize;
@@ -44,7 +45,7 @@ pub(crate) async fn initialize_system_fonts_async() -> Result<(), String> {
 #[derive(PartialEq)]
 struct CacheKey {
     realm: u64,
-    visual_rect: Option<u32>,
+    resource_query: Option<Query>,
     document: u32,
     version: u64,
     width: u32,
@@ -344,7 +345,17 @@ fn rendered_box<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<Option<RenderedBox>, String> {
+    rendered_box_with_query(scope, receiver, None)
+}
+fn rendered_box_with_query<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    query: Option<QueryKind>,
+) -> Result<Option<RenderedBox>, String> {
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
+    if let Some(kind) = query {
+        set_resource_query(&mut input, kind);
+    }
     if !input.connected || !input.browsing_context {
         return Ok(None);
     }
@@ -405,7 +416,8 @@ pub(crate) fn op_live_element_used_size<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<Option<[f64; 5]>, JsErrorBox> {
-    let rendered = rendered_box(scope, receiver).map_err(JsErrorBox::generic)?;
+    let rendered = rendered_box_with_query(scope, receiver, Some(QueryKind::LocalBox))
+        .map_err(JsErrorBox::generic)?;
     Ok(rendered.and_then(|(view, id, rect, used)| used_size(&view, id, rect, used)))
 }
 fn used_size(
@@ -510,23 +522,43 @@ pub(crate) fn op_live_element_geometry<'s>(
         }
     })
 }
+fn zero_scroll_offsets(context: v8::Local<v8::Context>) -> bool {
+    scroll_state(context)
+        .values
+        .borrow()
+        .values()
+        .all(|offset| *offset == [0.0; 2])
+}
+fn resource_query_allowed(
+    input: &crate::live_layout_dom::NativeLayoutInput<'_>,
+    query: Query,
+) -> bool {
+    input.owner_context.is_some_and(zero_scroll_offsets)
+        && !(query.kind == QueryKind::ScrollExtent
+            && input.tree.capture.quirks
+            && input.tree.capture.body
+                == Some(crate::live_layout::source_id(
+                    input.tree.document_id(),
+                    query.source,
+                )))
+}
+fn set_resource_query(input: &mut crate::live_layout_dom::NativeLayoutInput<'_>, kind: QueryKind) {
+    let query = Query {
+        source: input.handle,
+        kind,
+    };
+    input.tree.resource_query = resource_query_allowed(input, query).then_some(query);
+}
+
 fn measure<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     visual_rect: bool,
 ) -> Result<Geometry, String> {
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
-    input.tree.visual_rect = visual_rect
-        .then_some(input.owner_context)
-        .flatten()
-        .filter(|context| {
-            scroll_state(*context)
-                .values
-                .borrow()
-                .values()
-                .all(|offset| *offset == [0.0; 2])
-        })
-        .map(|_| input.handle);
+    if visual_rect {
+        set_resource_query(&mut input, QueryKind::LocalBox);
+    }
     let geometry = if !input.connected || !input.browsing_context {
         turbo_dom_layout::cssom_view::metrics::empty_geometry()
     } else {
@@ -652,9 +684,9 @@ fn refresh<'s>(
         {
             return Err("native layout source left its document after its capture".into());
         }
-        let visual_rect = input.tree.visual_rect;
+        let resource_query = input.tree.resource_query;
         *input = fresh;
-        input.tree.visual_rect = visual_rect;
+        input.tree.resource_query = resource_query;
         #[cfg(test)]
         recapture_tests::after_capture(scope);
     }
@@ -689,6 +721,13 @@ fn resolve_layout<'s>(
     viewport: &Viewport,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
     refresh(scope, input)?;
+    if input
+        .tree
+        .resource_query
+        .is_some_and(|query| !resource_query_allowed(input, query))
+    {
+        input.tree.resource_query = None;
+    }
     let input = &*input;
     let (tree, sheets) = (&input.tree, input.sheets.as_slice());
     let key_timer =
@@ -706,7 +745,7 @@ fn resolve_layout<'s>(
     };
     let key = CacheKey {
         realm: viewport.realm,
-        visual_rect: tree.visual_rect.map(|handle| handle.raw()),
+        resource_query: tree.resource_query,
         document: tree.document_id(),
         version: tree.capture.tree_version,
         width: viewport.width.to_bits(),
@@ -856,6 +895,49 @@ pub(crate) fn op_live_element_scroll<'s>(
     };
     scroll(scope, receiver, target, false, axis & 4 != 0).map_err(geometry_error)
 }
+/// Read only the requested scroller's extent. Animated descendants remain
+/// unsupported even when their parent's independent border box is available.
+#[op2(reentrant)]
+#[serde]
+pub(crate) fn op_live_element_scroll_extent<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Vec<i32>, JsErrorBox> {
+    scroll_extent(scope, receiver)
+        .map(|extent| extent.to_vec())
+        .map_err(geometry_error)
+}
+fn scroll_extent<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<[i32; 2], String> {
+    let Some(current) = scroll_view_with_query(scope, receiver, Some(QueryKind::ScrollExtent))?
+    else {
+        return Ok([0; 2]);
+    };
+    let (key, metrics) = scroller(&current.view, &current.viewport, current.id)?;
+    let zoom = if key == turbo_dom_layout::cssom_view::scroll::VIEWPORT {
+        1.0
+    } else {
+        current.view.zoom(key)
+    };
+    let state = scroll_state(current.context);
+    let mut values = state.values.borrow_mut();
+    values.retain(|source, _| {
+        *source == turbo_dom_layout::cssom_view::scroll::VIEWPORT
+            || current.view.styles.contains_key(source)
+    });
+    apply_scroll(
+        &mut values,
+        key,
+        &metrics,
+        &current.viewport,
+        [None; 2],
+        false,
+    );
+    Ok([unzoom(metrics.width, zoom), unzoom(metrics.height, zoom)])
+}
+
 /// Scroll an element (or, for the root, the viewport) to absolute or relative
 /// offsets. NaN keeps the current axis; other values are already finite.
 #[op2(reentrant)]
@@ -881,6 +963,13 @@ fn scroll_view<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<Option<ScrollView<'s>>, String> {
+    scroll_view_with_query(scope, receiver, None)
+}
+fn scroll_view_with_query<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    query: Option<QueryKind>,
+) -> Result<Option<ScrollView<'s>>, String> {
     // A realm still running trusted bootstrap (for example a new frame probing
     // window members) has no layout viewport yet: it observes the initial origin
     // and must not capture another document's layout mid-initialization.
@@ -892,6 +981,9 @@ fn scroll_view<'s>(
         return Ok(None);
     }
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
+    if let Some(kind) = query {
+        set_resource_query(&mut input, kind);
+    }
     if !input.connected || !input.browsing_context {
         return Ok(None);
     }

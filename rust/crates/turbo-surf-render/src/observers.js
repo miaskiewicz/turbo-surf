@@ -146,7 +146,7 @@
       if (!apply(connected, target, [])) return null;
       let geometry;
       try {
-        geometry = ops.op_live_element_geometry(target);
+        geometry = ops.op_live_element_geometry(target, true);
       } catch {
         return null;
       }
@@ -347,6 +347,7 @@
     unregister(resizeObservers, record);
   });
   function broadcastResizes() {
+    // oxlint-disable-next-line unicorn/no-useless-spread -- Callbacks may change the observer set during this delivery.
     for (const record of [...resizeObservers]) {
       const entries = [];
       for (const observation of record.observations) {
@@ -628,6 +629,7 @@
     return { box, rootBounds, intersection, intersecting, ratio, index, time };
   }
   function updateIntersections(time) {
+    // oxlint-disable-next-line unicorn/no-useless-spread -- Callbacks may change the observer set during this delivery.
     for (const record of [...intersectionObservers]) {
       for (const observation of record.observations) {
         const state = observe(record, observation.target, time);

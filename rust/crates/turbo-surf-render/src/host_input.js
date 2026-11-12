@@ -235,7 +235,7 @@
   }
   // The driver installs before public geometry methods; use the captured native op.
   function targetCenter(target) {
-    const box = elementGeometry(target).bounds;
+    const box = elementGeometry(target, true).bounds;
     cursorX = box[0] + box[2] / 2;
     cursorY = box[1] + box[3] / 2;
   }

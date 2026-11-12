@@ -897,6 +897,7 @@
           brand(this, 1);
           if (field === "width" || field === "height")
             return ops.op_live_element_scroll_extent(this)[field === "width" ? 0 : 1];
+          if (ops.op_live_element_scroll_offset_is_zero(this)) return 0;
           return ops.op_live_element_scroll(this, 0, 0)[field];
         },
         `get ${name}`,

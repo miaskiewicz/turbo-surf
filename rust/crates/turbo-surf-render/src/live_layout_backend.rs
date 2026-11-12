@@ -938,6 +938,35 @@ fn scroll_extent<'s>(
     Ok([unzoom(metrics.width, zoom), unzoom(metrics.height, zoom)])
 }
 
+/// Zero is a valid initial offset regardless of layout extent or overflow mode.
+/// A nonzero retained position still needs the ordinary layout/clamping path.
+#[op2(fast, reentrant)]
+pub(crate) fn op_live_element_scroll_offset_is_zero<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<bool, JsErrorBox> {
+    scroll_offset_is_zero(scope, receiver).map_err(geometry_error)
+}
+fn scroll_offset_is_zero<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<bool, String> {
+    use turbo_dom_browser_env::host_internals::{
+        current_document_context, enter_document_of, handle_of, is_browsing_context, is_connected,
+        with_tree,
+    };
+    let _document = enter_document_of(scope, receiver);
+    let handle = handle_of(scope, receiver).ok_or("Illegal invocation")?;
+    let connected =
+        with_tree(|tree| (tree.node_type_id(handle) == 1).then(|| is_connected(tree, handle)))
+            .ok_or("native layout document is unavailable")?
+            .ok_or("Illegal invocation")?;
+    if !connected || !is_browsing_context() {
+        return Ok(true);
+    }
+    Ok(current_document_context(scope).is_some_and(zero_scroll_offsets))
+}
+
 /// Scroll an element (or, for the root, the viewport) to absolute or relative
 /// offsets. NaN keeps the current axis; other values are already finite.
 #[op2(reentrant)]

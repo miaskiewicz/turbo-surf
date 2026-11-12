@@ -225,6 +225,7 @@ enum LiveJob {
     Resize(u32, u32, SyncSender<std::result::Result<String, String>>),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
+    EngineCollect(String, SyncSender<std::result::Result<String, String>>),
     EngineRead(String, SyncSender<std::result::Result<String, String>>),
     Expression(
         String,
@@ -449,6 +450,9 @@ impl Task for LiveOpenTask {
                     LiveJob::EngineEval(script, reply) => {
                         let _ = reply.send(rt.block_on(session.eval_engine(&script)));
                     }
+                    LiveJob::EngineCollect(script, reply) => {
+                        let _ = reply.send(rt.block_on(session.collect_engine(&script)));
+                    }
                     LiveJob::EngineRead(script, reply) => {
                         let _ = reply.send(session.read_engine(&script));
                     }
@@ -584,6 +588,7 @@ pub struct LiveEvalTask {
     expression: bool,
     tracked: bool,
     engine: bool,
+    collect: bool,
 }
 
 #[napi]
@@ -599,6 +604,8 @@ impl Task for LiveEvalTask {
                 LiveJob::ExpressionTracked(std::mem::take(&mut self.script), reply)
             } else if self.expression {
                 LiveJob::Expression(std::mem::take(&mut self.script), self.engine, reply)
+            } else if self.collect {
+                LiveJob::EngineCollect(std::mem::take(&mut self.script), reply)
             } else if self.engine {
                 LiveJob::EngineEval(std::mem::take(&mut self.script), reply)
             } else {
@@ -624,6 +631,7 @@ pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
         script,
         expression: false,
         tracked: false,
+        collect: false,
         engine: false,
     })
 }
@@ -631,12 +639,13 @@ pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
 /// [`live_eval`] for a driver script that needs the engine namespace: the script runs as
 /// a function body whose `__tsNs` parameter is the namespace (turbo-dom#222).
 #[napi]
-pub fn live_eval_engine(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+pub fn live_eval_engine(id: u32, script: String, collect: Option<bool>) -> AsyncTask<LiveEvalTask> {
     AsyncTask::new(LiveEvalTask {
         id,
         script,
         expression: false,
         tracked: false,
+        collect: collect.unwrap_or(false),
         engine: true,
     })
 }
@@ -649,6 +658,7 @@ pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> 
         script,
         expression: true,
         tracked: false,
+        collect: false,
         engine: false,
     })
 }
@@ -661,6 +671,7 @@ pub fn live_eval_expression_tracked(id: u32, script: String) -> AsyncTask<LiveEv
         script,
         expression: true,
         tracked: true,
+        collect: false,
         engine: false,
     })
 }
@@ -673,6 +684,7 @@ pub fn live_eval_engine_expression(id: u32, script: String) -> AsyncTask<LiveEva
         script,
         expression: true,
         tracked: false,
+        collect: false,
         engine: true,
     })
 }

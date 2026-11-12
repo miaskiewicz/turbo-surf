@@ -69,8 +69,8 @@ export function liveOpen(
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
-/** `liveEval` for a driver script that needs the engine namespace (its `__tsNs` parameter). */
-export function liveEvalEngine(id: number, script: string): Promise<string>;
+/** Private-namespace driver eval; collect polls one ready turn without resuming hydration. */
+export function liveEvalEngine(id: number, script: string, collect?: boolean): Promise<string>;
 /** Bounded synchronous engine query; JSON-encode its return without draining the event loop. */
 export function liveReadEngine(id: number, script: string): string;
 /** Await an expression’s actual native Promise completion. */

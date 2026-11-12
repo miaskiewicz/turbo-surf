@@ -16232,6 +16232,57 @@ fn settle_classic_script_waiter<'s>(
     }
 }
 
+// A collector services one ready turn, never parking on unrelated page IO or
+// running the document's hydration/quiescence loops while its host replies wait.
+async fn poll_driver_turn(rt: &mut JsRuntime) -> Result<(), String> {
+    rt.v8_isolate().perform_microtask_checkpoint();
+    #[cfg(turbo_surf_native_proxy)]
+    drive_pending_module_stage(rt)?;
+    let message = rt
+        .op_state()
+        .borrow_mut()
+        .borrow_mut::<FrameContexts>()
+        .messages
+        .pop_front();
+    if let Some(message) = message {
+        deliver_window_message(rt, message)?;
+    }
+    let job = rt
+        .op_state()
+        .borrow_mut()
+        .borrow_mut::<ClassicScripts>()
+        .jobs
+        .pop_front();
+    if let Some(job) = job {
+        run_pending_classic_script(rt, job)?;
+    }
+    std::future::poll_fn(|cx| {
+        let result = rt.poll_event_loop(cx, deno_core::PollEventLoopOptions::default());
+        if let std::task::Poll::Ready(Err(error)) = result {
+            let text = error.to_string();
+            if !text.contains("Uncaught (in promise)") && !text.contains("Unhandled") {
+                return std::task::Poll::Ready(Err(text));
+            }
+        }
+        if let Some(std::task::Poll::Ready(Some(Err(error)))) = drain_pending_storage_event(rt) {
+            return std::task::Poll::Ready(Err(error));
+        }
+        let mut timer_budget = 1;
+        if let WindowTimerStep::Fired(std::task::Poll::Ready(Some(Err(error)))) =
+            run_due_window_timers(rt, &mut timer_budget, false)
+        {
+            return std::task::Poll::Ready(Err(error));
+        }
+        if let Some(std::task::Poll::Ready(Some(Err(error)))) =
+            drain_next_background_resource_task(rt)
+        {
+            return std::task::Poll::Ready(Err(error));
+        }
+        std::task::Poll::Ready(Ok(()))
+    })
+    .await
+}
+
 async fn drain_event_loop_until_completion(
     rt: &mut JsRuntime,
     condition: Option<&str>,
@@ -18155,6 +18206,39 @@ impl PageSession {
     /// namespace (turbo-dom#222), which page script cannot reach.
     pub async fn eval_engine(&mut self, script: &str) -> Result<String, String> {
         self.eval_in(script, true).await
+    }
+
+    /// Collect a driver result without recursively resuming document hydration.
+    /// One bounded event-loop turn keeps native IO and due guest tasks moving.
+    pub async fn collect_engine(&mut self, script: &str) -> Result<String, String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
+        let key = self.rt.activation_key();
+        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let result = key
+            .during(async {
+                execute_engine_script(&mut self.rt, script)?;
+                // Capture before guest tasks run: a page must not overwrite a collected reply.
+                let value = self
+                    .rt
+                    .execute_script(
+                        "<collected-result>",
+                        "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)",
+                    )
+                    .map_err(|error| error.to_string())?;
+                let result = read_string(&mut self.rt, value)?;
+                poll_driver_turn(&mut self.rt).await?;
+                Ok(result)
+            })
+            .await;
+        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(watchdog);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        if exceeded {
+            return Err("Driver collection exceeded the session execution budget".into());
+        }
+        result
     }
 
     async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {

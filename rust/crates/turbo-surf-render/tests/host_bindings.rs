@@ -150,3 +150,37 @@ async fn post_load_host_dependency_yields_before_repeating_hydration_passes() {
         HydrationPhase::Complete
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn collecting_a_host_reply_does_not_reenter_document_hydration() {
+    let mut page =
+        page(r#"<body><script type="module">globalThis.result=await hostWait()</script>"#).await;
+    let phase = page.hydration_diagnostics().progress.phase;
+    page.collect_engine(
+        "globalThis.collectTicks=0;setTimeout(()=>collectTicks++,0);globalThis.__RESULT='';",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        page.eval_expression("collectTicks").await.unwrap(),
+        "1",
+        "a collector must keep servicing due guest timers while host work is paused"
+    );
+    page.collect_engine("__tsNs.finishHost('ready');globalThis.__RESULT='collected';")
+        .await
+        .unwrap();
+    assert_eq!(
+        page.hydration_diagnostics().progress.phase,
+        phase,
+        "collecting a host reply must not recursively resume the whole document"
+    );
+    assert_eq!(
+        page.eval_expression("globalThis.result").await.unwrap(),
+        "ready"
+    );
+    page.eval_engine("globalThis.__RESULT='';").await.unwrap();
+    assert_eq!(
+        page.hydration_diagnostics().progress.phase,
+        HydrationPhase::Complete
+    );
+}

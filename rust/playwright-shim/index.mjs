@@ -2433,8 +2433,8 @@ ${engine}`,
     return out;
   }
 
-  _collectSession(id, script) {
-    if (!this._contentCollecting) return native.liveEvalEngine(id, script);
+  _collectSession(id, script, collect = false) {
+    if (!this._contentCollecting) return native.liveEvalEngine(id, script, collect);
     return native.liveEvalEngineExpression(
       id,
       `(async () => { ${script}
@@ -2581,6 +2581,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
           walk(globalThis);
           globalThis.__RESULT = JSON.stringify(out);
         })();`,
+      true,
     );
     if (!raw) return [];
     let calls;
@@ -2595,7 +2596,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const args = Array.isArray(call.args) ? call.args : [];
     if (!entry.isBinding) return entry.fn(...args);
     const path = call.framePath ?? [];
-    if (path.length && !this._requestFrames?.has(call.nonce)) await this._refreshFromSession();
+    if (path.length && !this._requestFrames?.has(call.nonce)) await this._refreshFromSession(true);
     this._syncFrames();
     const frame = path.length === 0 ? this.mainFrame() : this._requestFrames?.get(call.nonce);
     if (!frame || frame._detached || (path.length && frame._requestContextId !== call.nonce))
@@ -2630,6 +2631,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         pending.reject(bag.error(result.error.message,result.error.name));
       } else pending.resolve(result.value);
     })()`,
+      true,
     );
   }
   async _drainBindings(deadline = Infinity) {
@@ -2641,6 +2643,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     try {
       const pending = new Set();
       let rounds = 0;
+      let advanced = false;
       let failure;
       while (this._session != null) {
         if (Date.now() >= deadline) {
@@ -2651,6 +2654,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
           throw error;
         }
         const calls = await this._takeBindingCalls();
+        if (this._session == null || this._closed) break;
         if (calls.length && ++rounds > 100)
           throw new Error("Exposed binding call budget exhausted");
         for (const call of calls) {
@@ -2664,13 +2668,21 @@ return String(globalThis.__RESULT ?? ""); })()`,
             .finally(() => pending.delete(task));
           pending.add(task);
         }
-        if (!pending.size && !calls.length) break;
+        if (calls.length) advanced = false;
+        if (!pending.size && !calls.length) {
+          if (changed && !advanced && !this._contentCollecting) {
+            advanced = true;
+            await native.liveEvalEngine(this._session, "globalThis.__RESULT = '';");
+            continue;
+          }
+          break;
+        }
         // Keep servicing calls while an async host callback awaits another page operation.
         if (pending.size)
           await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 1))]);
         if (failure) throw failure;
       }
-      if (changed) await this._refreshFromSession();
+      if (changed) await this._refreshFromSession(true);
     } finally {
       this._draining = false;
     }
@@ -2705,7 +2717,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         if (raw) {
           const result = JSON.parse(raw);
           if (result.error) throw decodeEvaluationError(result.error);
-          await this._refreshFromSession();
+          await this._refreshFromSession(true);
           return decodeEvaluationValue(result.value);
         }
         await this._redrain();
@@ -2758,7 +2770,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._session = session;
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);
-      await this._refreshFromSession();
+      await this._refreshFromSession(true);
       await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
       if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
         this._closeSession();
@@ -2781,13 +2793,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
   // over `this._html`) and a subsequent navigation see the post-interaction state.
-  async _refreshFromSession() {
+  async _refreshFromSession(collect = false) {
     if (this._session == null) return;
+    const collectScript = (id, script) => this._collectSession(id, script, collect);
     const previousUrl = this._url;
     let historyNavigation = null;
     let rscNavigation = false;
     try {
-      const encoded = await this._collectSession(
+      const encoded = await collectScript(
         this._session,
         "globalThis.__RESULT = __tsNs.takeHistoryNavigation();",
       );
@@ -2798,7 +2811,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (historyNavigation) syncHistory(this, historyNavigation);
     this._html = native.liveSerialize(this._session);
     try {
-      const href = await this._collectSession(
+      const href = await collectScript(
         this._session,
         "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
       );
@@ -2816,7 +2829,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // engine — it fetches the target's RSC flight, which the runtime records on __rscNav.
     // Treat that as the navigation target (the post-login redirect chain rides this).
     try {
-      const nav = await this._collectSession(
+      const nav = await collectScript(
         this._session,
         "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
@@ -2837,7 +2850,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     if (!historyNavigation && previousUrl !== this._url) this._emit("framenavigated", this);
     if (this._html.includes("<iframe")) {
-      await this._refreshRequestFrames();
+      await this._refreshRequestFrames(collect);
     } else this._frameEntries = undefined;
     this._syncFrames();
     await this._drainNetworkEvents();
@@ -2853,7 +2866,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
-  async _refreshRequestFrames() {
+  async _refreshRequestFrames(collect = false) {
     const session = this._session;
     const frames = await this._collectSession(
       session,
@@ -2868,6 +2881,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         });
         globalThis.__RESULT = JSON.stringify({contextId:__tsNs.requestContextId?.(globalThis),frames:walk(document, [])});
       })();`,
+      collect,
     );
     if (this._session !== session) throw new Error("Frame execution context was destroyed");
     const metadata = JSON.parse(frames);

@@ -140,6 +140,7 @@ function runProject(project, files, reporter) {
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_OPTIONS;
   env.TURBO_PW_PROJECT_NAME = project.name;
+  env.TURBO_PW_EXECUTION = JSON.stringify({ timeout: project.timeout, retries: project.retries });
   env.TURBO_PW_USE = JSON.stringify(use);
   // Playwright's canonical `use` keys that the shim already reads — forward them
   // so fixtures see the merged project config without a code change in-suite.

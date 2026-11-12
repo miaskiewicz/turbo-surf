@@ -5328,8 +5328,20 @@ expect.any = (constructor) => {
 // ---------------------------------------------------------------------------
 // @playwright/test surface (drop-in over node:test) — fixtures, hooks, steps.
 // ---------------------------------------------------------------------------
-import { after, before, describe as nodeDescribe, test as nodeTest } from "node:test";
+import { after, describe as nodeDescribe, test as nodeTest } from "node:test";
 import { fixtureNames, openFixtures, teardownWorkerFixtures } from "./fixtures.mjs";
+import {
+  isolatedAttempt,
+  executionOptions,
+  executeIsolated,
+  closeAttemptProcesses,
+  validateTimeout,
+} from "./attempt-process.mjs";
+const attemptPlans = new Map();
+const attemptOccurrences = new Map();
+let workerAttempt = null;
+const initializedWorkerScopes = new Set();
+let activeWorkerScopes = [];
 
 // A fixture set: each value is either a plain default or [fn, opts] / async fn
 // of ({ ...fixtures }, use). We resolve them lazily and tear down after `use`.
@@ -5422,6 +5434,10 @@ function applySkip(args) {
     getActiveT()?.skip(reason);
     throw SKIP_SIGNAL;
   }
+  if (!workerHook && getActiveT()) {
+    getActiveT().skip(reason);
+    throw SKIP_SIGNAL;
+  }
   const target = workerHook?.scope ?? scope;
   target.skip = true;
   target.skipReason = reason;
@@ -5452,6 +5468,7 @@ function cleanupErrors(error) {
 
 const rootCleanupHooks = new Map();
 after(async () => {
+  await closeAttemptProcesses();
   const errors = [];
   try {
     await runCleanupHooks(rootCleanupHooks.get("afterAll") ?? [], { browser: browserStub });
@@ -5482,22 +5499,6 @@ function registerTestHook(kind, fn) {
   const store = scope ? (scope.testHooks ??= new Map()) : rootTestHooks;
   if (!store.has(kind)) store.set(kind, []);
   store.get(kind).push(fn);
-}
-
-function registerCleanupHook(_kind, fn) {
-  const scope = getSkipStack().at(-1);
-  const store = scope ? (scope.cleanupHooks ??= new Map()) : rootCleanupHooks;
-  const kind = "afterAll";
-  if (store.has(kind)) {
-    store.get(kind).push(fn);
-    return;
-  }
-  const hooks = [fn];
-  store.set(kind, hooks);
-  if (!scope) return;
-  after(async () => {
-    if (focusedScopeAllowed(scope)) await runCleanupHooks(hooks, { browser: browserStub });
-  });
 }
 
 const rootFixtureUses = new Map();
@@ -5614,7 +5615,21 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
       nodeTest.skip(name, () => {});
       return;
     }
-    const plan = { name, fn, baseDefs, extDefs, useKeys, frames, expectedFailure };
+    const titleKey = JSON.stringify([...frames.map((frame) => frame.title), name]);
+    const occurrence = attemptOccurrences.get(titleKey) ?? 0;
+    attemptOccurrences.set(titleKey, occurrence + 1);
+    const plan = {
+      name,
+      fn,
+      baseDefs,
+      extDefs,
+      useKeys,
+      frames,
+      expectedFailure,
+      id: `${titleKey}:${occurrence}`,
+    };
+    attemptPlans.set(plan.id, plan);
+    if (isolatedAttempt) return;
     const register = only && process.execArgv.includes("--test-only") ? nodeTest.only : nodeTest;
     register(name, async (t) =>
       activeTStore.run(t, async () => {
@@ -5627,7 +5642,7 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
           t.skip(skippedScope.skipReason);
           return;
         }
-        await executeAttempt(plan, t);
+        await executeIsolated(plan, t, executionOptions([rootSkipScope, ...frames]));
       }),
     );
   };
@@ -5643,8 +5658,18 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   run.only = (name, fn) => run(name, fn, true);
   run.fixme = run.skip;
   run.fail = (name, fn) => run(name, fn, false, true);
-  run.slow = () => {};
-  run.setTimeout = () => {};
+  run.slow = () => {
+    const current = activeAttemptStore.getStore() ?? activeWorkerHookStore.getStore();
+    const timeout =
+      current?.info.timeout ?? executionOptions([rootSkipScope, ...getSkipStack()]).timeout;
+    run.setTimeout(timeout * 3);
+  };
+  run.setTimeout = (timeout) => {
+    validateTimeout(timeout);
+    const current = activeAttemptStore.getStore() ?? activeWorkerHookStore.getStore();
+    if (current) current.info.setTimeout(timeout);
+    else ((getSkipStack().at(-1) ?? rootSkipScope).execution ??= {}).timeout = timeout;
+  };
   run.use = (overrides) => {
     const frame = getSkipStack().at(-1);
     const scope = frame ? (frame.fixtureUses ??= new Map()) : rootFixtureUses;
@@ -5673,14 +5698,15 @@ function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
   run.beforeAll = (fn) => {
     const frames = [...getSkipStack()];
     const scope = frames.at(-1);
-    before(async () => {
-      if (focusedScopeAllowed(scope))
-        await invokeWorkerHook(fn, { baseDefs, extDefs, useKeys, frames });
-    });
+    const target = scope ?? rootSkipScope;
+    (target.workerBefore ??= []).push(() =>
+      invokeWorkerHook(fn, { baseDefs, extDefs, useKeys, frames }),
+    );
   };
   run.afterAll = (fn) => {
     const frames = [...getSkipStack()];
-    registerCleanupHook("afterAll", () =>
+    const target = frames.at(-1) ?? rootSkipScope;
+    (target.workerAfter ??= []).push(() =>
       invokeWorkerHook(fn, { baseDefs, extDefs, useKeys, frames }),
     );
   };
@@ -5704,6 +5730,11 @@ function makeDescribe() {
   const d = (name, fn, only = false) => {
     const focused = only || getSkipStack().some((frame) => frame.only);
     if (only) markFocused();
+    if (isolatedAttempt)
+      return skipStackStore.run(
+        [...getSkipStack(), { title: name, skip: false, only: focused }],
+        fn,
+      );
     const register =
       only && process.execArgv.includes("--test-only") ? nodeDescribe.only : nodeDescribe;
     return register(name, async () =>
@@ -5720,7 +5751,16 @@ function makeDescribe() {
   d.only = (name, fn) => d(name, fn, true);
   d.serial = d;
   d.parallel = d;
-  d.configure = () => {};
+  d.configure = (options) => {
+    const scope = getSkipStack().at(-1) ?? rootSkipScope;
+    if (options.timeout !== undefined) validateTimeout(options.timeout);
+    if (
+      options.retries !== undefined &&
+      (!Number.isInteger(options.retries) || options.retries < 0)
+    )
+      throw new Error("Retries must be a non-negative integer");
+    scope.execution = { ...scope.execution, ...options };
+  };
   return d;
 }
 
@@ -5746,17 +5786,69 @@ function makeTestInfo(title) {
     skip: (...args) => applySkip(args),
     fixme: (...args) => applySkip(args),
     fail: () => {},
-    slow: () => {},
-    setTimeout: () => {},
+    slow: () => info.setTimeout(info.timeout * 3),
+    timeout: workerAttempt?.timeout ?? 30000,
+    setTimeout: (timeout) => {
+      info.timeout = validateTimeout(timeout);
+      if (workerAttempt) process.send?.({ kind: "timeout", timeout });
+    },
     annotations: [],
     errors: [],
     status: "passed",
     expectedStatus: "passed",
-    retry: 0,
+    retry: workerAttempt?.retry ?? 0,
     project: { name: process.env.TURBO_PW_PROJECT_NAME ?? "turbo-surf" },
   };
   return info;
 }
+
+export const __attemptWorker = {
+  async run(message) {
+    workerAttempt = message;
+    const plan = attemptPlans.get(message.id);
+    if (!plan) throw new Error(`Unknown test attempt ${message.id}`);
+    const scopes = [rootSkipScope, ...plan.frames];
+    for (const scope of activeWorkerScopes.slice().reverse()) {
+      if (!scopes.includes(scope)) {
+        await runCleanupHooks(scope.workerAfter ?? [], {});
+        initializedWorkerScopes.delete(scope);
+      }
+    }
+    activeWorkerScopes = scopes;
+    for (const scope of scopes) {
+      if (!initializedWorkerScopes.has(scope)) {
+        initializedWorkerScopes.add(scope);
+        for (const hook of scope.workerBefore ?? []) await hook();
+      }
+    }
+    const skipped = scopes.find((scope) => scope.skip);
+    if (skipped) return { skipped: true, reason: skipped.skipReason };
+    let reason;
+    const t = {
+      skip(value) {
+        reason = value ?? "skipped";
+      },
+    };
+    await activeTStore.run(t, () => executeAttempt(plan, t));
+    return { skipped: reason !== undefined, reason };
+  },
+  async close() {
+    const errors = [];
+    for (const scope of [...initializedWorkerScopes].reverse()) {
+      try {
+        await runCleanupHooks(scope.workerAfter ?? [], {});
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    try {
+      await teardownWorkerFixtures();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length) throw new AggregateError(errors, "Worker cleanup failed");
+  },
+};
 
 export const test = makeTestFn(makeBaseFixtures());
 

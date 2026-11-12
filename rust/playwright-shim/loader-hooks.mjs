@@ -23,6 +23,8 @@ export function redirectTarget(specifier) {
 }
 
 export function resolveHook(specifier, context, nextResolve) {
+  if (process.env.TURBO_PW_ATTEMPT_WORKER === "1" && specifier === "node:test")
+    return { url: new URL("./attempt-test-stub.mjs", import.meta.url).href, shortCircuit: true };
   const url = redirectTarget(specifier);
   if (url) return { url, shortCircuit: true };
   const typed = typescriptTarget(specifier, context.parentURL);

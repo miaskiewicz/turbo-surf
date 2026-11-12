@@ -10,6 +10,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateArtifactOptions } from "./artifact-options.mjs";
+import { executionOptions } from "./attempt-process.mjs";
 
 const DEFAULT_CONFIG_NAMES = [
   "playwright.config.ts",
@@ -49,6 +50,8 @@ export function normalizeConfig(raw, rootDir) {
   const projects = rawProjects.length
     ? rawProjects.map((p) => ({
         name: String(p.name ?? "default"),
+        timeout: p.timeout ?? r.timeout ?? 30000,
+        retries: p.retries ?? r.retries ?? 0,
         dependencies: p.dependencies ?? [],
         grep: toArray(p.grep ?? r.grep),
         grepInvert: toArray(p.grepInvert ?? r.grepInvert),
@@ -60,6 +63,8 @@ export function normalizeConfig(raw, rootDir) {
     : [
         {
           name: "default",
+          timeout: r.timeout ?? 30000,
+          retries: r.retries ?? 0,
           use,
           testDir,
           testMatch,
@@ -332,6 +337,9 @@ export function orderProjects(projects, selectedNames) {
 }
 
 export function testRunnerFlags(project, version = process.versions.node) {
+  executionOptions([
+    { execution: { timeout: project.timeout ?? 30000, retries: project.retries ?? 0 } },
+  ]);
   validateArtifactOptions(project.use);
   const [major, minor] = version.split(".").map(Number);
   const forceExit = major >= 22 || (major === 20 && minor >= 14);

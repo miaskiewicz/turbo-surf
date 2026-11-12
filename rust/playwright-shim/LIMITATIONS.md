@@ -216,6 +216,14 @@ Runs on `node:test`. `test`, `test.describe(.skip/.only)`, `test.skip/only/fixme
 `test.step`, `test.beforeAll/afterAll/beforeEach/afterEach`, `test.extend`
 (custom fixtures), the built-in `{ page, context, browser, request, baseURL }`
 fixtures, and a `testInfo` (`outputPath`, `project`, `attach`, …) are supported.
+Test callbacks run in a persistent subprocess per test file. Successful tests
+share module state and worker fixtures. Failed attempts restart that process;
+`testInfo.retry` identifies the fresh attempt. Config/project `timeout` and
+`retries`, `test.describe.configure`, and runtime `test.setTimeout` /
+`testInfo.setTimeout` are honored (zero disables the test deadline).
+A deadline terminates the subprocess, including synchronous runaway code, before
+any retry starts. A terminated process cannot run remaining JavaScript cleanup;
+ordinary failures await fixture and hook cleanup before restarting.
 `defineConfig` is identity and `devices[...]` returns an empty descriptor.
 
 ### `playwright.config` + CLI entry
@@ -247,7 +255,7 @@ npx turbo-surf-test --config pw.config.mjs --project chrome --reporter list
 `.ts` configs/specs need a Node that strips types inline (Node 23+, or Node 22
 with `--experimental-strip-types`); the shim doesn't ship its own TS loader.
 Browser-only reporters (`junit`/the real Playwright HTML trace viewer),
-sharding, retries, and `testConfig.webServer.stdout` capture are not
+sharding and `testConfig.webServer.stdout` capture are not
 implemented.
 
 ## Optional future perf lever (documented, not built)

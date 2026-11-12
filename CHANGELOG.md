@@ -91,6 +91,9 @@ branch.
 
 ### Pages, frames, and evaluation
 
+- Wait for URL changes through the configured deadline, including unlimited
+  waits, without canceling requests or sibling URL waits when one wait expires
+  (#497).
 - Await live evaluation after ordinary navigation, preserve tagged JavaScript
   values such as undefined, non-finite numbers, negative zero and BigInt, and
   reject with the original page exception details (#362, #359, #357).

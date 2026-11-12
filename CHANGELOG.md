@@ -47,6 +47,10 @@ branch.
 - Allow definitely clipped animation-only descendant branches in independent
   rectangle reads, retaining shared-ancestor, scrolling, and uncertain-overflow
   checks. Evaluate that dependency proof only for effects that need it (#498).
+- Scope box, computed-size, observer, pointer-center, and leaf scroll-extent
+  reads to their actual animation dependencies. Cache receiver and read purpose
+  separately, retaining checks for affected targets, descendants of extent
+  queries, nonzero scrolling, uncertain gutters, and true hit testing (#498).
 - Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
   exceptions, maintain NodeIterator's root and reference cursor, and honor idle
   callback timeout and deadline behavior (#449, #450, #451, #452).

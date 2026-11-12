@@ -54,6 +54,9 @@ branch.
 - Read a native element's known zero scroll offset without an unrelated layout
   rejection, allowing modal reflow checks. Preserve owner-document/realm checks
   and the existing layout/clamping path for retained nonzero offsets (#498).
+- Preserve unchanged zero scroll assignments after numeric conversion and smooth
+  scroll interruption, so modal mounting does not request unrelated layout.
+  Actual movement retains the existing clamping and resource checks (#498).
 - Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
   exceptions, maintain NodeIterator's root and reference cursor, and honor idle
   callback timeout and deadline behavior (#449, #450, #451, #452).

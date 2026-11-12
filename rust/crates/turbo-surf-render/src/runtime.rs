@@ -9614,11 +9614,6 @@ ops.op_storage_events_factory((key,oldValue,newValue,url,session)=>{
 
 const __pageErrorApply = Reflect.apply;
 const __pageErrorRead = Object.fromEntries(["error","message"].map(name=>[name,Object.getOwnPropertyDescriptor(ErrorEvent.prototype,name).get]));
-globalThis.addEventListener("error", event => {
-  if (!event.isTrusted) return;
-  const error = __pageErrorApply(__pageErrorRead.error,event,[]);
-  ops.op_page_diagnostic({event:"pageerror",name:String(error?.name || "Error"),message:String(error?.message || __pageErrorApply(__pageErrorRead.message,event,[])),stack:String(error?.stack || "")});
-});
 const __consoleError = Error;
 const __consoleApply = Reflect.apply;
 const __consoleDescriptors = Object.getOwnPropertyDescriptors;
@@ -11099,6 +11094,15 @@ for (const name of ["message", "filename", "lineno", "colno", "error"]) {
   Object.defineProperty(ErrorEvent.prototype, name, {...descriptor, enumerable:true});
 }
 Object.defineProperty(ErrorEvent.prototype, Symbol.toStringTag, {value:"ErrorEvent", configurable:true});
+globalThis.addEventListener("error", event => {
+  if (!event.isTrusted) return;
+  // Classic reporters use this runtime's event; native listener exceptions keep
+  // the producer's captured event brand and require its original accessors.
+  const record = __errorEventState.get(event);
+  const error = record ? record.error : __pageErrorApply(__pageErrorRead.error,event,[]);
+  const message = record ? record.message : __pageErrorApply(__pageErrorRead.message,event,[]);
+  ops.op_page_diagnostic({event:"pageerror",name:String(error?.name || "Error"),message:String(error?.message || message),stack:String(error?.stack || "")});
+});
 // PromiseRejectionEvent and the Window promise-rejection tracker (turbo-surf#103).
 // deno_core's V8 reject callback hands over unhandled rejections after the microtask
 // checkpoint; like Chrome, each report is a task queued behind the timers already

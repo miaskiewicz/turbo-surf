@@ -123,3 +123,32 @@ async fn cross_origin_no_cors_errors_are_muted_while_cors_errors_keep_the_except
     server.abort();
     cross_server.abort();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn diagnostics_accept_classic_and_native_error_event_brands_once() {
+    let mut page = PageSession::open(
+        "<script>throw new Error('classic diagnostic')</script>",
+        "https://errors.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval("reportError(new Error('native diagnostic')); dispatchEvent(new ErrorEvent('error',{error:new Error('synthetic diagnostic')}));")
+        .await
+        .unwrap();
+    let records: Value = serde_json::from_str(&page.drain_network_log()).unwrap();
+    let errors: Vec<_> = records
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|record| record["event"] == "pageerror")
+        .map(|record| record["message"].clone())
+        .collect();
+    assert_eq!(
+        errors,
+        vec![json!("classic diagnostic"), json!("native diagnostic")]
+    );
+    page.close();
+}

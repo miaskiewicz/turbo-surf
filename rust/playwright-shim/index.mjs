@@ -1059,6 +1059,14 @@ class Locator {
   }
   async selectedValues() {
     await this._prepareQuery();
+    if (this._page._live)
+      return (
+        (await this._readElement((element) =>
+          Array.from(element.options)
+            .filter((option) => option.selected)
+            .map((option) => option.value),
+        )) ?? []
+      );
     const n = this._node();
     return n == null ? [] : native.selectedValuesOf(this._html, n);
   }
@@ -3520,20 +3528,20 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   // --- page-level actions (selector shortcuts) ---
-  async fill(selector, value) {
-    this._html = native.fill(this._html, selector, value);
+  async fill(selector, value, options) {
+    return this.locator(selector).fill(value, options);
   }
   async type(selector, value) {
-    return this.fill(selector, value);
+    return this.locator(selector).type(value);
   }
   async check(selector) {
-    this._html = native.setChecked(this._html, selector, true);
+    return this.locator(selector).check();
   }
   async uncheck(selector) {
-    this._html = native.setChecked(this._html, selector, false);
+    return this.locator(selector).uncheck();
   }
   async setChecked(selector, on) {
-    this._html = native.setChecked(this._html, selector, !!on);
+    return this.locator(selector).setChecked(on);
   }
   async selectOption(selector, value, options) {
     return this.locator(selector).selectOption(value, options);

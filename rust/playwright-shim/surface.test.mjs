@@ -5036,3 +5036,33 @@ test("Filtered locator plans retain nested scopes, indexed stages and frame iden
     await other.close();
   }
 });
+
+test("Page control shortcuts and selectedValues share the live control state after setContent", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      `<input id="text"><input id="check" type="checkbox"><select id="select" multiple><option value="a" selected>A</option><option value="b">B</option></select><script>globalThis.changes=[];document.addEventListener('change',event=>changes.push(event.target.id));</script>`,
+    );
+    await page.fill("#text", "hello");
+    await page.type("#text", "!");
+    await page.check("#check");
+    await page.selectOption("#select", ["b"]);
+    assert.equal(await page.locator("#text").inputValue(), "hello!");
+    assert.equal(await page.locator("#check").isChecked(), true);
+    assert.deepEqual(await page.locator("#select").selectedValues(), ["b"]);
+    await expect(page.locator("#select")).toHaveValues(["b"]);
+    await page.uncheck("#check");
+    assert.equal(await page.locator("#check").isChecked(), false);
+    await page.setChecked("#check", true);
+    assert.equal(await page.locator("#check").isChecked(), true);
+    await page.evaluate(() => {
+      const select = document.querySelector("#select");
+      select.options[0].selected = true;
+      select.options[1].selected = false;
+    });
+    assert.deepEqual(await page.locator("#select").selectedValues(), ["a"]);
+    assert.ok((await page.evaluate(() => changes)).includes("select"));
+  } finally {
+    await page.close();
+  }
+});

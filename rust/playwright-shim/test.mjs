@@ -107,10 +107,9 @@ test("actions: fill / check / selectOption mutate the DOM", async () => {
   await page.fill("#t", "hello");
   await page.check("#c");
   await page.selectOption("#s", "b");
-  assert.match(await page.content(), /value="hello"/);
-  assert.match(await page.content(), /id="c"[^>]*checked|checked[^>]*id="c"/);
-  // the select now has b selected (serialized)
-  assert.match(await page.content(), /value="b"[^>]*selected|selected[^>]*value="b"/);
+  assert.equal(await page.locator("#t").inputValue(), "hello");
+  assert.equal(await page.locator("#c").isChecked(), true);
+  assert.deepEqual(await page.locator("#s").selectedValues(), ["b"]);
 });
 
 test("click follows a link to a new page", async () => {

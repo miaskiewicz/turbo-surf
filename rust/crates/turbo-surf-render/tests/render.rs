@@ -5313,3 +5313,17 @@ async fn engine_reads_are_synchronous_bounded_and_preserve_the_live_document() {
     );
     session.close();
 }
+
+#[test]
+fn scoped_css_nesting_in_shadow_styles_preserves_document_visibility_and_cssom() {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let html = r#"<!doctype html><body><input id=entry><div id=overlay></div><script>
+        const root = document.querySelector('#overlay').attachShadow({mode:'open'});
+        root.innerHTML = `<style>:host { display:block; width:100px; @media print { display:none; } } .mark, #absent { width:30px; & > .icon { width:20px; height:8px; } @supports(display:block) { & > .icon { height:9px; } } } #inside { width:40px; }</style><div class=mark><div id=inside class=icon></div></div>`;
+        </script>"#;
+        let mut page = PageSession::open(html, "https://nesting.test/", "", "", 5000).await.unwrap();
+        let result = page.eval_expression(r#"JSON.stringify((() => { const host=document.querySelector('#overlay'); const root=host.shadowRoot; const child=root.querySelector('#inside'); return {entry:getComputedStyle(document.querySelector('#entry')).visibility,host:getComputedStyle(host).display,width:getComputedStyle(child).width,height:getComputedStyle(child).height,nested:root.querySelector('style').sheet.cssRules[0].cssRules.length}; })())"#).await.unwrap();
+        assert_eq!(result, r#"{"entry":"visible","host":"block","width":"20px","height":"9px","nested":1}"#);
+        page.close();
+    });
+}

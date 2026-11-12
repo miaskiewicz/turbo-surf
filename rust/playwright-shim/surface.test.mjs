@@ -345,7 +345,7 @@ test("LocatorAssertions: attribute / class / role / id / aria-name matchers", as
   const p = await fresh();
   await expect(p.locator("a[title]")).toHaveAttribute("href", "/next");
   await expect(p.locator("a[title]")).toHaveAttribute("href");
-  await expect(p.locator("#go")).toHaveClass("primary");
+  await expect(p.locator("#go")).toHaveClass("primary btn");
   await expect(p.locator("#go")).toContainClass("btn");
   await expect(p.locator("#go")).toHaveId("go");
   await expect(p.locator("a[title]")).toHaveRole("link");
@@ -4827,6 +4827,35 @@ test("selectOption supports complete value, label, index and clearing selections
       await p.evaluate(() => document.querySelector("#multi").selectedOptions.length),
       0,
     );
+  } finally {
+    await p.close();
+  }
+});
+
+test("Class assertions compare complete token sets and ordered class lists (#336)", async () => {
+  const p = newPage();
+  try {
+    await p.setContent(
+      '<div id=one class="a b"></div><ul><li class="x y"></li><li class=z></li></ul>',
+    );
+    await assert.rejects(expect(p.locator("#one")).toHaveClass("a", { timeout: 0 }));
+    await expect(p.locator("#one")).toHaveClass("b a");
+    await expect(p.locator("#one")).toHaveClass(/^a b$/);
+    await expect(p.locator("#one")).toContainClass("a");
+    await expect(p.locator("li")).toHaveClass(["y x", /^z$/]);
+    await assert.rejects(expect(p.locator("li")).toHaveClass(["x y"], { timeout: 0 }));
+    await p._ensureLive();
+    const redrain = p._redrain.bind(p);
+    let retries = 0;
+    p._redrain = async () => {
+      retries++;
+      await p.evaluate(() => {
+        document.querySelector("#one").className = "ready";
+      });
+      await redrain();
+    };
+    await expect(p.locator("#one")).toHaveClass("ready", { timeout: 1000 });
+    assert.ok(retries > 0);
   } finally {
     await p.close();
   }

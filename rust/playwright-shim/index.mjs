@@ -4579,13 +4579,28 @@ class LocatorExpect extends BaseExpect {
     };
     this._ok(await this._retry(test, opts), `expected attribute ${name}=${value}, got ${got}`);
   }
-  async toHaveClass(cls) {
-    const got = (await this._v.getAttribute("class")) ?? "";
-    const pass = cls instanceof RegExp ? cls.test(got) : got.split(/\s+/).includes(cls);
-    this._ok(pass, `expected class "${cls}" in "${got}"`);
+  async _classAssertion(expected, options, contains) {
+    let got;
+    const pass = await this._retry(async () => {
+      if (Array.isArray(expected)) {
+        got = this._v
+          ._all()
+          .map((match) => native.attrOf(this._v._html, match.node, "class") ?? "");
+        return (
+          got.length === expected.length &&
+          got.every((value, index) => classMatches(expected[index], value, contains))
+        );
+      }
+      got = (await this._v.getAttribute("class")) ?? "";
+      return classMatches(expected, got, contains);
+    }, options);
+    this._ok(pass, `expected classes ${json(expected)}, got ${json(got)}`);
   }
-  async toContainClass(cls) {
-    return this.toHaveClass(cls);
+  async toHaveClass(classes, options) {
+    return this._classAssertion(classes, options, false);
+  }
+  async toContainClass(classes, options) {
+    return this._classAssertion(classes, options, true);
   }
   async toHaveId(id, opts) {
     let got;
@@ -4858,6 +4873,19 @@ class ValueExpect extends BaseExpect {
   }
   toHaveScreenshot = UNSUPPORTED("toHaveScreenshot", PIXEL);
   toMatchSnapshot = UNSUPPORTED("toMatchSnapshot", PIXEL);
+}
+
+function classMatches(expected, actual, contains) {
+  if (expected instanceof RegExp) {
+    expected.lastIndex = 0;
+    return expected.test(actual);
+  }
+  const tokens = (value) => String(value).split(/\s+/).filter(Boolean).sort();
+  const wanted = tokens(expected);
+  const got = tokens(actual);
+  return contains
+    ? wanted.every((token) => got.includes(token))
+    : wanted.length === got.length && wanted.every((token, index) => token === got[index]);
 }
 
 function matchText(expected, got) {

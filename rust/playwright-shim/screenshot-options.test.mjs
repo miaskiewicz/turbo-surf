@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pngPixels } from "./screenshot-test-utils.mjs";
+import { RECTANGLES, jpegDimensions, pngPixels } from "./screenshot-test-utils.mjs";
 
 let shim;
 try {
@@ -89,6 +89,27 @@ test("screenshot masks and native capture share one snapshot across resource pre
     const shot = pngPixels(await pending);
     assert.deepEqual(shot.pixel(15, 15), [255, 0, 255, 255]);
     assert.deepEqual(shot.pixel(90, 70), [255, 255, 255, 255]);
+  } finally {
+    await p.close();
+  }
+});
+test("full-page capture includes positioned overflow and viewport minimum (#468)", async () => {
+  const p = newPage({ viewport: { width: 100, height: 80 } });
+  try {
+    await p.setContent(RECTANGLES);
+    const viewport = pngPixels(await p.screenshot());
+    assert.deepEqual([viewport.width, viewport.height], [100, 80]);
+    const full = pngPixels(await p.screenshot({ fullPage: true }));
+    assert.deepEqual([full.width, full.height], [100, 240]);
+    assert.deepEqual(full.pixel(15, 15), [255, 0, 0, 255]);
+    assert.deepEqual(full.pixel(5, 235), [0, 0, 255, 255]);
+    assert.deepEqual(jpegDimensions(await p.screenshot({ fullPage: true, type: "jpeg" })), {
+      width: 100,
+      height: 240,
+    });
+    await p.setContent("<style>html,body{margin:0}</style>");
+    const empty = pngPixels(await p.screenshot({ fullPage: true }));
+    assert.deepEqual([empty.width, empty.height], [100, 80]);
   } finally {
     await p.close();
   }

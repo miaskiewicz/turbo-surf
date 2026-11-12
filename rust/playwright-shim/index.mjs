@@ -1059,15 +1059,32 @@ class Locator {
   async setChecked(on) {
     return on ? this.check() : this.uncheck();
   }
-  async selectOption(value) {
-    const v = Array.isArray(value) ? value[0] : value;
-    const sval = String(v?.value ?? v);
-    if (this._canDriveLive) {
-      await this._driveLive("select", sval);
-      return [sval];
-    }
-    this._page._html = native.selectOptionNode(this._html, this._requireNode(), sval);
-    return [sval];
+  async selectOption(value, options = {}) {
+    const choices = normalizeSelectChoices(value);
+    const deadline = Date.now() + (options.timeout ?? 30000);
+    do {
+      try {
+        if (this._canDriveLive) return JSON.parse(await this._driveLive("select", choices));
+        const node = this._requireNode();
+        const index = JSON.parse(native.query(this._html, "*", "css")).findIndex(
+          (match) => match.node === node,
+        );
+        const result = JSON.parse(
+          native.evaluateEngine(
+            this._html,
+            `
+          const values = (${selectOptionOperation.toString()})(document.querySelectorAll('*')[${index}], ${JSON.stringify(choices)}, true);
+          return JSON.stringify({ values, html: document.documentElement.outerHTML });`,
+          ),
+        );
+        this._page._html = result.html;
+        return result.values;
+      } catch (error) {
+        if (!error.message.includes("Options did not match") || Date.now() >= deadline) throw error;
+        await this._page._redrain();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    } while (true);
   }
   async click(opts = {}) {
     await this._waitActionable("click", opts);
@@ -1329,6 +1346,57 @@ function serializableFilterSpec(opts) {
 // Normalize Playwright setInputFiles args (path string | {name,mimeType,buffer} |
 // arrays thereof) into [{ name, type, data }] with data as a latin1 binary string
 // (so the isolate's File/Blob → FileReader.readAsDataURL → btoa round-trips bytes).
+function normalizeSelectChoices(value) {
+  const values = value == null ? [] : Array.isArray(value) ? value : [value];
+  return values.map((choice) => {
+    if (typeof choice === "string") return { value: choice };
+    if (
+      !choice ||
+      typeof choice !== "object" ||
+      !["value", "label", "index"].some((key) => choice[key] !== undefined)
+    )
+      throw new TypeError("selectOption requires a value, label or index");
+    if (choice.index !== undefined && (!Number.isInteger(choice.index) || choice.index < 0))
+      throw new TypeError("selectOption index must be a nonnegative integer");
+    for (const key of ["value", "label"])
+      if (choice[key] !== undefined && typeof choice[key] !== "string")
+        throw new TypeError(`selectOption ${key} must be a string`);
+    return { value: choice.value, label: choice.label, index: choice.index };
+  });
+}
+
+function selectOptionOperation(element, choices, snapshot) {
+  if (element.tagName !== "SELECT") throw new Error("Element is not a select");
+  const options = Array.from(element.options);
+  let remaining = choices.slice();
+  const selected = [];
+  for (let index = 0; index < options.length && remaining.length; index++) {
+    const option = options[index];
+    const matches = (choice) =>
+      (choice.value === undefined || choice.value === option.value) &&
+      (choice.label === undefined || choice.label === option.label) &&
+      (choice.index === undefined || choice.index === index);
+    if (!remaining.some(matches)) continue;
+    selected.push(option);
+    remaining = element.multiple ? remaining.filter((choice) => !matches(choice)) : [];
+  }
+  if (remaining.length) throw new Error("Options did not match the requested selection");
+  const selectedSet = new Set(selected);
+  element.selectedIndex = -1;
+  for (const option of options) {
+    option.selected = selectedSet.has(option);
+    if (snapshot) {
+      if (option.selected) option.setAttribute("selected", "");
+      else option.removeAttribute("selected");
+    }
+  }
+  if (!snapshot) {
+    element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  return selected.map((option) => option.value);
+}
+
 function normalizeInputFiles(files) {
   const fs = require("node:fs");
   const path = require("node:path");
@@ -1444,10 +1512,7 @@ function interactionScript(selector, index, kind, value, frameTyping = false) {
   }
   if (kind === "select") {
     return `(() => { ${pick} else {
-      el.value = ${val};
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      globalThis.__RESULT = "OK";
+      globalThis.__RESULT = JSON.stringify((${selectOptionOperation.toString()})(el, ${val}, false));
     } })();`;
   }
   if (kind === "setfiles") {
@@ -2805,9 +2870,8 @@ class Page {
   async setChecked(selector, on) {
     this._html = native.setChecked(this._html, selector, !!on);
   }
-  async selectOption(selector, value) {
-    const v = Array.isArray(value) ? value[0] : value;
-    this._html = native.selectOption(this._html, selector, String(v?.value ?? v));
+  async selectOption(selector, value, options) {
+    return this.locator(selector).selectOption(value, options);
   }
   async setInputFiles(selector, files) {
     return this.locator(selector).setInputFiles(files);

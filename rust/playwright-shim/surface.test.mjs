@@ -4792,3 +4792,41 @@ test("Single-file uploads reject invalid cardinality without replacing files (#3
     await page.close();
   }
 });
+
+test("selectOption supports complete value, label, index and clearing selections (#337)", async () => {
+  const p = newPage();
+  try {
+    await p.setContent(
+      "<select id=multi multiple><option value=a>Alpha</option><option value=b>Beta</option></select><select id=one><option value=a>Alpha</option><option value=b>Beta</option></select>",
+    );
+    assert.deepEqual(await p.locator("#multi").selectOption(["a", "b"]), ["a", "b"]);
+    assert.deepEqual(
+      await p.evaluate(() =>
+        Array.from(document.querySelector("#multi").selectedOptions, (option) => option.value),
+      ),
+      ["a", "b"],
+    );
+    assert.deepEqual(await p.locator("#one").selectOption({ label: "Beta" }), ["b"]);
+    assert.equal(await p.locator("#one").inputValue(), "b");
+    assert.deepEqual(await p.selectOption("#one", { index: 0 }), ["a"]);
+    await p._ensureLive();
+    assert.deepEqual(await p.locator("#multi").selectOption([{ index: 1 }]), ["b"]);
+    await assert.rejects(
+      p.locator("#multi").selectOption(["a", "missing"], { timeout: 20 }),
+      /Options did not match/,
+    );
+    assert.deepEqual(
+      await p.evaluate(() =>
+        Array.from(document.querySelector("#multi").selectedOptions, (option) => option.value),
+      ),
+      ["b"],
+    );
+    assert.deepEqual(await p.locator("#multi").selectOption([]), []);
+    assert.equal(
+      await p.evaluate(() => document.querySelector("#multi").selectedOptions.length),
+      0,
+    );
+  } finally {
+    await p.close();
+  }
+});

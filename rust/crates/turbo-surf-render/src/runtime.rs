@@ -11885,7 +11885,11 @@ ops.op_set_host_capabilities({replaceDocumentContent:html=>{
   __resourcePromises=new __resourceSetConstructor();
   __orderedDynamicScripts=__initialDynamicScriptGate;
   __replacingDocumentContent=true;
-  try{scripts=ops.op_replace_document_content(__document,html);}
+  try{
+    scripts=ops.op_replace_document_content(__document,html);
+    // Native replacement bypasses the guest insertion delegates.
+    ops.op_frame_host_helper(__document,"syncFrameConnections",[__document]);
+  }
   finally{__replacingDocumentContent=false;}
   __initialResourceScripts.length=0;
   for(let index=0;index<scripts.length;index++)__initialResourceScripts[index]=scripts[index];

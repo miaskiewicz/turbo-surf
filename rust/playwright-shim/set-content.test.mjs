@@ -335,21 +335,40 @@ test("setContent clears old intrinsic metadata before same-URL image reloads (#3
   }
 });
 
-test("setContent retires pending old image and classic-script resources (#386)", async () => {
-  const held = [];
+test("setContent retires old resources while activating replacement frames and resources (#386)", async () => {
+  const held = [],
+    seen = [];
   const server = createServer((req, res) => {
+    seen.push(req.url);
     if (req.url === "/old.svg" || req.url === "/old.js") held.push({ url: req.url, res });
-    else res.end("<body>old</body>");
+    else if (req.url === "/new.svg") {
+      res.setHeader("content-type", "image/svg+xml");
+      res.end('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"/>');
+    } else if (req.url === "/new.js") {
+      res.setHeader("content-type", "text/javascript");
+      res.end("globalThis.freshContentScript=44");
+    } else res.end("<body>old</body>");
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const page = newPage();
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "networkidle" });
-    await page.setContent('<img src="/old.svg"><script async src="/old.js"></script>', {
-      waitUntil: "domcontentloaded",
+    await page.evaluate(() => {
+      globalThis.contentEvents = [];
+      document.addEventListener("DOMContentLoaded", () => contentEvents.push("dcl"));
+      window.addEventListener("load", () => contentEvents.push("load"));
     });
+    await page.setContent(
+      '<iframe name="old" srcdoc="<b>old</b>"></iframe><img src="/old.svg"><script async src="/old.js"></script>',
+      { waitUntil: "domcontentloaded" },
+    );
     assert.deepEqual(held.map(({ url }) => url).sort(), ["/old.js", "/old.svg"]);
-    await page.setContent("<p>replacement</p>", { timeout: 500 });
+    const previous = page.frame({ name: "old" });
+    await page.setContent(
+      `<p>replacement</p><iframe name="new" srcdoc="<script>globalThis.childMarker=44</script>"></iframe><img src="/new.svg"><script src="/new.js"></script>`,
+      { timeout: 5000 },
+    );
+    assert.equal(previous.isDetached(), true);
     for (const { url, res } of held) {
       res.setHeader("content-type", url.endsWith(".js") ? "text/javascript" : "image/svg+xml");
       res.end(
@@ -358,19 +377,57 @@ test("setContent retires pending old image and classic-script resources (#386)",
           : '<svg xmlns="http://www.w3.org/2000/svg" width="700" height="400"/>',
       );
     }
-    assert.equal(await page.evaluate(() => typeof retiredContentScript), "undefined");
-    assert.equal(
+    assert.deepEqual(
+      await page.evaluate(() => [
+        typeof retiredContentScript,
+        freshContentScript,
+        document.readyState,
+        contentEvents,
+      ]),
+      ["undefined", 44, "complete", ["dcl", "dcl", "load"]],
+    );
+    assert.equal(await page.frame({ name: "new" }).evaluate(() => childMarker), 44);
+    const metadata = JSON.parse(
       await native.liveEvalEngineExpression(
         page._session,
         "JSON.stringify(__tsNs.screenshotImageMetadata())",
       ),
-      "{}",
     );
-    assert.equal(await page.locator("p").textContent(), "replacement");
+    assert.deepEqual(
+      Object.values(metadata).map(({ width }) => width),
+      [120],
+    );
+    for (const path of ["/new.svg", "/new.js"])
+      assert.equal(seen.filter((url) => url === path).length, 1);
   } finally {
     for (const { res } of held) if (!res.writableEnded) res.end("");
     await page.close();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("setContent activates imported srcdoc frames and retires replaced children (#386)", async () => {
+  const page = newPage();
+  try {
+    await page.setContent('<iframe name="before" srcdoc="<b>before</b>"></iframe>');
+    const before = page.frame({ name: "before" });
+    const main = page.mainFrame();
+    await page.setContent(
+      `<iframe name="after" srcdoc="<b id='child'>child</b><script>globalThis.childMarker=44</script>"></iframe>`,
+    );
+    const after = page.frame({ name: "after" });
+    assert.equal(page.mainFrame(), main);
+    assert.equal(before.isDetached(), true);
+    assert.equal(page.frame({ name: "after" }), after);
+    assert.deepEqual(
+      await after.evaluate(() => [
+        document.querySelector("#child")?.textContent,
+        globalThis.childMarker,
+      ]),
+      ["child", 44],
+    );
+  } finally {
+    await page.close();
   }
 });

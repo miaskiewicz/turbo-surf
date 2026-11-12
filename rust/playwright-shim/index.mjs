@@ -2567,7 +2567,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     let historyNavigation = null;
     let rscNavigation = false;
     try {
-      const encoded = await native.liveEvalEngine(
+      const encoded = await this._collectSession(
         this._session,
         "globalThis.__RESULT = __tsNs.takeHistoryNavigation();",
       );

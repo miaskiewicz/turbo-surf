@@ -35,8 +35,9 @@ branch.
   and re-enable the unchanged Chrome 156 abort-order oracle. Legacy
   `document.createEvent("Event")` aliases remain usable after full runtime
   initialization, including the React development callback path (#295, #347).
-- Admit opacity-only animation keyframes for geometry reads while retaining
-  resource admission checks for geometry-changing animations (#345).
+- Admit opacity-only animation keyframes and constant longhands equal to the
+  element's computed style for geometry reads, while retaining resource admission
+  checks for geometry-changing animations (#345).
 - Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
   exceptions, maintain NodeIterator's root and reference cursor, and honor idle
   callback timeout and deadline behavior (#449, #450, #451, #452).

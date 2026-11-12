@@ -3646,10 +3646,12 @@ class Page {
     const height = opts.height ?? vp.height;
     const html = this._html;
     const maskIndices = screenshotMaskIndices(this, opts.mask);
+    const deviceScale = screenshotDeviceScale(opts, this._context._deviceScaleFactor);
     const type = screenshotEncoding(opts);
     const asSvg = type === "svg";
     const optionsJson = JSON.stringify({
       fullPage: opts.fullPage === true,
+      deviceScale,
       maskIndices,
       maskColor: opts.maskColor ?? "#ff00ff",
       omitBackground: type !== "jpeg" && opts.omitBackground === true,
@@ -3670,7 +3672,7 @@ class Page {
           "utf8",
         )
       : native.screenshotCapture(html, css, images, width, height, optionsJson, metadataJson);
-    if (opts.clip) out = cropScreenshot(out, opts.clip, asSvg);
+    if (opts.clip) out = cropScreenshot(out, opts.clip, asSvg, deviceScale, opts.fullPage === true);
     if (type === "jpeg") out = native.screenshotJpeg(out, opts.quality);
     if (opts.path) await writeFile(opts.path, out);
     return out;
@@ -4010,6 +4012,13 @@ function screenshotMaskIndices(page, masks) {
   return [...selected];
 }
 
+function screenshotDeviceScale(options, deviceScale = 1) {
+  if (options.scale != null && !["css", "device"].includes(options.scale)) {
+    throw new Error("Screenshot scale must be css or device");
+  }
+  return options.scale === "css" ? 1 : deviceScale;
+}
+
 function screenshotEncoding(opts) {
   const extension = typeof opts.path === "string" ? opts.path.split(".").pop().toLowerCase() : "";
   const type =
@@ -4026,7 +4035,7 @@ function screenshotEncoding(opts) {
   return type;
 }
 
-function cropScreenshot(png, clip, asSvg) {
+function cropScreenshot(png, clip, asSvg, deviceScale = 1, fullPage = false) {
   if (asSvg) throw new Error("Screenshot clip is unavailable for SVG output");
   const { x, y, width, height } = clip;
   if (
@@ -4040,7 +4049,14 @@ function cropScreenshot(png, clip, asSvg) {
       "Screenshot clip requires nonnegative coordinates and positive finite dimensions",
     );
   }
-  return native.screenshotCrop(png, x, y, width, height);
+  // Playwright truncates viewport clip dimensions in CSS pixels before device scaling.
+  return native.screenshotCrop(
+    png,
+    Math.round(x * deviceScale),
+    Math.round(y * deviceScale),
+    Math.round((fullPage ? width : Math.floor(width + 1e-3)) * deviceScale),
+    Math.round((fullPage ? height : Math.floor(height + 1e-3)) * deviceScale),
+  );
 }
 
 // Drag `srcIdx` to `dstIdx` (live `querySelectorAll('*')` positions). Fires the
@@ -4262,6 +4278,9 @@ class BrowserContext {
     }
     const merged = { ...projectUse, ...opts };
     validateArtifactOptions(merged);
+    this._deviceScaleFactor = merged.deviceScaleFactor ?? 1;
+    if (!Number.isFinite(this._deviceScaleFactor) || this._deviceScaleFactor <= 0)
+      throw new Error("deviceScaleFactor must be finite and positive");
     this.tracing = Object.fromEntries(
       ["start", "startChunk", "stopChunk", "stop", "group", "groupEnd"].map((method) => [
         method,

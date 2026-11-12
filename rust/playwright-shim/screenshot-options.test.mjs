@@ -138,3 +138,110 @@ test("omitBackground preserves transparent canvas and authored background pixels
     await p.close();
   }
 });
+
+test("native screenshot device scale preserves CSS layout and scales clip pixels (#470)", async () => {
+  for (const deviceScaleFactor of [2, 1.25, 1.5, 1.2]) {
+    const p = newPage({ viewport: { width: 100, height: 80 }, deviceScaleFactor });
+    try {
+      await p.setContent(RECTANGLES);
+      const css = pngPixels(await p.screenshot({ scale: "css" }));
+      assert.deepEqual([css.width, css.height], [100, 80]);
+      assert.deepEqual(css.pixel(15, 15), [255, 0, 0, 255]);
+      const device = pngPixels(await p.screenshot({ scale: "device" }));
+      assert.deepEqual(
+        [device.width, device.height],
+        [Math.round(100 * deviceScaleFactor), Math.round(80 * deviceScaleFactor)],
+        String(deviceScaleFactor),
+      );
+      assert.deepEqual(
+        device.pixel(Math.round(15 * deviceScaleFactor), Math.round(15 * deviceScaleFactor)),
+        [255, 0, 0, 255],
+      );
+      assert.deepEqual(device.pixel(3, 3), [255, 255, 255, 255]);
+      const combined = pngPixels(
+        await p.screenshot({ mask: [p.locator("#secret")], omitBackground: true }),
+      );
+      assert.deepEqual(
+        combined.pixel(Math.round(15 * deviceScaleFactor), Math.round(15 * deviceScaleFactor)),
+        [255, 0, 255, 255],
+      );
+      assert.deepEqual(combined.pixel(3, 3), [0, 0, 0, 0]);
+      const full = pngPixels(await p.screenshot({ fullPage: true }));
+      assert.deepEqual(
+        [full.width, full.height],
+        [Math.round(100 * deviceScaleFactor), Math.round(240 * deviceScaleFactor)],
+      );
+      assert.deepEqual(
+        full.pixel(Math.round(5 * deviceScaleFactor), Math.round(235 * deviceScaleFactor)),
+        [0, 0, 255, 255],
+      );
+      const clip = pngPixels(await p.screenshot({ clip: { x: 10, y: 10, width: 10, height: 10 } }));
+      assert.deepEqual(
+        [clip.width, clip.height],
+        [Math.round(10 * deviceScaleFactor), Math.round(10 * deviceScaleFactor)],
+      );
+      assert.deepEqual(clip.pixel(2, 2), [255, 0, 0, 255]);
+      const jpeg = jpegDimensions(await p.screenshot({ type: "jpeg", scale: "device" }));
+      assert.deepEqual(jpeg, {
+        width: Math.round(100 * deviceScaleFactor),
+        height: Math.round(80 * deviceScaleFactor),
+      });
+    } finally {
+      await p.close();
+    }
+  }
+});
+
+test("screenshot scale validates context/options and retains SVG CSS coordinates (#470)", async () => {
+  for (const deviceScaleFactor of [0, -1, Infinity, NaN])
+    assert.throws(() => newPage({ deviceScaleFactor }), /deviceScaleFactor/);
+  const p = newPage({ viewport: { width: 100, height: 80 }, deviceScaleFactor: 1.25 });
+  try {
+    await p.setContent(RECTANGLES);
+    const svg = (await p.screenshot({ type: "svg" })).toString("utf8");
+    assert.match(svg, /width="125"/);
+    assert.match(svg, /height="100"/);
+    assert.match(svg, /viewBox="0 0 100 80"/);
+    await assert.rejects(() => p.screenshot({ scale: "invalid" }), /scale/);
+    await assert.rejects(
+      () => p.screenshot({ type: "svg", clip: { x: 0, y: 0, width: 10, height: 10 } }),
+      /clip.*unavailable/,
+    );
+  } finally {
+    await p.close();
+  }
+});
+
+test("fractional DPR viewport dimensions and clipped CSS sizes match Playwright controls (#470)", async () => {
+  for (const [width, height, deviceScaleFactor, expected] of [
+    [103, 83, 1.2, [124, 100]],
+    [101, 81, 1.25, [126, 101]],
+    [101, 81, 1.5, [152, 122]],
+    [101, 81, 1.6, [162, 130]],
+    [101, 81, 0.5, [51, 41]],
+  ]) {
+    const p = newPage({ viewport: { width, height }, deviceScaleFactor });
+    try {
+      await p.setContent(RECTANGLES);
+      const shot = pngPixels(await p.screenshot());
+      assert.deepEqual([shot.width, shot.height], expected);
+      const controlClip = pngPixels(
+        await p.screenshot({ clip: { x: 0.25, y: 0.5, width: 10.5, height: 20.25 } }),
+      );
+      assert.deepEqual(
+        [controlClip.width, controlClip.height],
+        [Math.round(10 * deviceScaleFactor), Math.round(20 * deviceScaleFactor)],
+      );
+      const clipped = pngPixels(
+        await p.screenshot({ clip: { x: 10.25, y: 10.5, width: 10.5, height: 10.25 } }),
+      );
+      assert.deepEqual(
+        [clipped.width, clipped.height],
+        [Math.round(10 * deviceScaleFactor), Math.round(10 * deviceScaleFactor)],
+      );
+      assert.deepEqual(clipped.pixel(2, 2), [255, 0, 0, 255]);
+    } finally {
+      await p.close();
+    }
+  }
+});

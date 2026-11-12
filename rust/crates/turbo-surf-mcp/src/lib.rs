@@ -681,7 +681,9 @@ impl Session {
         script: &str,
         await_final_program: bool,
     ) -> Result<String, String> {
-        let mut page = turbo_surf_render::PageSession::open_with_document_response(
+        // Keep initialization state off nested MCP dispatch frames so V8 lazy
+        // extension startup retains its native stack headroom.
+        let mut page = Box::pin(turbo_surf_render::PageSession::open_with_document_response(
             html,
             base,
             &self.jar.storage_state(),
@@ -692,7 +694,7 @@ impl Session {
             &self.response_headers,
             self.browsing_storage.clone(),
             self.response_metadata.clone(),
-        )
+        ))
         .await?;
         let mut program_error = None;
         let mut programs = script

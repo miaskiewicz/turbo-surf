@@ -71,54 +71,51 @@ actions can hydrate on demand unless navigation used `waitUntil:"commit"`. Stati
 snapshot paths have no background app event loop. Live assertions can re-drain the
 session, but timing and waiting are not the same as a continuously running browser.
 
-The current render tier gives iframes separate V8 contexts, native DOM trees and
-constructor prototypes. V8 origin tokens restrict cross-origin access, while complete
-WindowProxy/navigation/policy semantics remain incomplete.
-Node/Element/HTMLElement/Document and character-data interfaces have separate prototype
-chains and projected native accessors validate their receivers. Document-specific
-instance properties and compatibility APIs still have partial Web IDL coverage.
-Native fragments move their children on insertion. ShadowRoot supports host/mode,
-open/closed lookup and scoped queries; slots, retargeting and composed painting remain
-incomplete. DOM event methods share EventTarget's prototype while retaining native tree
-listeners and independent subclass listener state.
-Native namespace-aware element/attribute APIs retain URIs, prefixes and qualified names;
-Attr nodes retain live values and ownership through attachment/removal. NamedNodeMap is live
-and branded. XML document parsing and serialization remain unsupported.
-Event state is private; script dispatch is untrusted and engine events use host dispatch.
-Element property handlers retain private state and participate in the native listener registry,
-including assignment order and cancellation. Inline handler attributes, event propagation,
-listener options and subclass coverage remain incomplete.
-Playwright `Frame` and `FrameLocator` objects expose engine iframe contexts: `page.frame({name})`, `page.frame('name')`, `page.frames()` and `page.frameLocator('iframe[...]')` scope queries to the child document, not the host (turbo-surf#225). srcdoc iframes carry their inner markup; src-loaded iframes list with empty content (live hydration populates them in the engine, but the snapshot shim does not fetch iframe src here). Frame-level mutations (fill/check through a frame locator) write to the Frame's own cached HTML and do not propagate back to the host page's `<iframe>`.
-Classic page/frame scripts run through the Rust host pump with source locations rather
-than indirect eval. Parsed hidden inputs expose their token values; input/textarea dirty
-values, defaults, cloning and select selection state work in the live runtime. Input-type
-sanitization, validation/reset and persistence of live values through an HTML snapshot
-remain incomplete. Style text exposes grammar-validated CSSOM rules and live branded
-CSSRuleList/StyleSheetList collections with receiver-checked native list operations.
-Live hydration retains the authentic HTTP policy headers, response status and
-selected navigation referrer. Context/page init scripts run through the trusted
-native initializer rather than added HTML tokens. Source header referrer policy
-and final redirect request metadata are forwarded before page scripts execute.
-Dynamic meta referrer changes and complete browser navigation/resource reporting
-lifecycle remain separate coverage work.
+The binding surface is maintained in the pinned
+[turbo-dom-browser-env documentation](https://github.com/miaskiewicz/turbo-dom/blob/ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6/crates/turbo-dom-browser-env/README.md),
+with Chrome controls in that crate. It includes native DOM interfaces, namespace
+and Attr operations, shadow DOM, events, forms, XML `DOMParser`/CDATA/
+`XMLSerializer`, and bounded internal-DTD attribute/entity processing. Supported
+interfaces are not promises of complete browser behavior. Surf-specific examples:
 
-Live hydration loads linked/imported stylesheets, enforces inline style CSP against native
-attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
-CSS getters share private interface brands. It sizes PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL and `image/svg+xml` image resources (any `data:`
-form) with load/error events like Chrome and selects `<picture>` / `srcset` / `sizes`
-sources like Chrome (the binding's selection); CSS image/font resource loading is incomplete.
-Realm DOMException identity/structured cloning and custom-element `:defined` state
-through storage collection have dedicated regression controls
-(`tests/dom_exception_identity.rs`, `tests/custom_elements_defined.rs` in render).
-CSSOM changes made with
-`insertRule` do not alter
-serialized HTML and therefore are not automatically painted by snapshot screenshots.
+- [Binding controls](../crates/turbo-surf-render/tests/binding_dom_controls.rs)
+  cover shadow-tree event paths, adoption reactions and realm DOMException
+  identity; [DOMException](../crates/turbo-surf-render/tests/dom_exception_identity.rs)
+  and [custom-element state](../crates/turbo-surf-render/tests/custom_elements_defined.rs)
+  controls cover the former #42/#41 regressions.
+- [XML response controls](../crates/turbo-surf-render/tests/xhr_document.rs)
+  cover `responseXML`/document responses and malformed/encoded XML;
+  [live geometry contracts](../crates/turbo-surf-render/tests/live_geometry_contracts.rs)
+  cover native XML factories and empty geometry for inert documents.
+- [Form methods](../crates/turbo-surf-render/tests/form_methods.rs) and
+  [host input](../crates/turbo-surf-render/tests/host_input.rs) cover validation,
+  requestSubmit, live values and cancellation. Live property state should be
+  read in the owning realm; an HTML snapshot cannot represent every DOM property.
+- [Frame controls](./surface.test.mjs) cover srcdoc and fetched/nested frame
+  identity, detach events, scoped locators and frame mutations. Frames share the
+  page session while using their own realm/document; live frame actions and
+  evaluation refresh the session state. Snapshot reads reflect the last drain.
+- [CSP metadata](../crates/turbo-surf-render/tests/csp_navigation_metadata.rs)
+  and [referrer policy](../crates/turbo-surf-render/tests/referrer_policy.rs)
+  controls cover trusted initialization and request policy forwarding.
+- [Font loading](../crates/turbo-surf-render/tests/font_face.rs) covers
+  `@font-face`, WOFF/WOFF2, CSP/CORS, native font registration and `document.fonts`
+  timing. Live font/layout behavior is distinct from snapshot screenshot capture.
+
+Classic page/frame scripts run through the Rust host pump with source locations.
+Live hydration loads linked/imported stylesheets, enforces inline style CSP and
+protects opaque stylesheet rules from script access. Image resources include
+PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL and SVG, with picture/srcset/sizes selection.
+CSSOM `insertRule` changes do not alter serialized HTML and therefore are not
+automatically painted by snapshot screenshots. Engine-specific frame and policy
+bounds belong in the [parity gaps](../../harness/detection/PARITY-GAPS.md) and
+[hydration guide](../HEADLESS-HYDRATION.md), rather than an obsolete missing-API list.
 
 A `BrowserContext` owns request state shared by page navigations, live hydration,
 module/fetch/XHR requests and screenshot assets. This preserves per-origin `Accept-CH`
 negotiation and HTTP-client state when a live runtime is replaced. Navigation/resource
-headers, referrer/Origin and credentials use explicit request contexts. This is not
-complete CORS enforcement or browser redirect/permissions-policy behavior.
+headers, referrer/Origin and credentials use explicit request contexts. Policy behavior is scoped to the native request services and the documented
+[parity gaps](../../harness/detection/PARITY-GAPS.md).
 Captured requests retain authored/context headers and buffered POST bytes. Native
 navigation tracing emits each redirect-hop request; `isNavigationRequest()` distinguishes
 document navigations from subresources, and `frame()` uses captured native frame identity
@@ -165,7 +162,7 @@ an animation-toggle option is future work ([#500](https://github.com/miaskiewicz
 | `storageState`, `addCookies`, `context`, `request` | ✅ | |
 | `waitForLoadState`, `waitForTimeout`, `waitForURL`, `waitForSelector`, `waitForFunction`, `waitForResponse`, `waitForRequest`, `waitForNavigation`, `waitForEvent` | ⚠️ | `waitForLoadState('load'\|'domcontentloaded'\|'networkidle')` all hydrate the SPA (one "settled" tier). `waitForResponse` / `waitForRequest` short-circuit on the native-log drain (#218/#222). `waitForNavigation` polls for a URL change. `waitForEvent` handles `'response'/'request'/'requestfinished'/'download'`. `waitForSelector` checks the current snapshot. `waitForURL` and `waitForFunction` drain/poll a live session. No browser event loop. |
 | `on`, `once`, `off`, `addListener`, `removeListener` | ⚠️ | Registry; lifecycle events fire, and captured live fetch/XHR request/response events are emitted when drained. Console events expose type, text, source location and live argument handles. Native dialogs remain unsupported. |
-| `mainFrame`, `frame`, `frames`, `frameLocator` | ✅ | `mainFrame` returns the host page (the page implements the Frame surface). `frames()` lists the page + each `<iframe>`; `frame(name)` / `frame({name,url})` find a child; `frameLocator('iframe[...]')` scopes the locator chain to the child document. srcdoc iframes carry their inner markup; src-loaded iframes list with empty content until the engine hydrates them. |
+| `mainFrame`, `frame`, `frames`, `frameLocator` | ✅ | `mainFrame` returns the host page (the page implements the Frame surface). `frames()` retains nested native frame identity and detach state; `frame(name)` / `frame({name,url})` find a child; `frameLocator('iframe[...]')` scopes the locator chain to the child document. Live hydration loads src/srcdoc frames; snapshot reads reflect the last drain. |
 | `viewportSize`, `setViewportSize` | ✅ | Stored, and the viewport now drives `page.screenshot()` layout width/height. |
 | `setDefaultTimeout`, `setDefaultNavigationTimeout` | ⚠️ | Configure shim deadlines; browser timing semantics remain partial. |
 | `emulateMedia` | ⚠️ | Forwards color scheme and reduced motion into native request/session configuration and re-drains a live session. Full media-type emulation is not implemented. |

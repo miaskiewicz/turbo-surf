@@ -269,7 +269,7 @@ function buildRouteInitScript(routes, bindingName) {
     })),
   );
   return `(() => {
-    const invokeHost = __tsNs.shimBindings.functions[${JSON.stringify(bindingName)}];
+    const invokeHost = __tsNs.shimBindings?.functions[${JSON.stringify(bindingName)}];
     const previous = __tsNs.shimRouteState;
     const state = previous || {routes: [], fetch: globalThis.fetch, xhr: globalThis.XMLHttpRequest};
     __tsNs.shimRouteState = state;

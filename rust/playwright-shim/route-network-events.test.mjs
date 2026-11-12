@@ -199,3 +199,23 @@ test("CSP-denied routes cannot publish an invented fulfilled response", async ()
     assert.equal(seen.response.length, 0);
     assert.equal(wire.includes("/api/denied"), false);
   }));
+
+test("unrouting every handler survives a fresh realm and later route reactivation", async () =>
+  fixture(async (page, origin) => {
+    await page.route("**/api/cycle", (route) => route.fulfill({ json: { source: "first" } }));
+    await page.unroute("**/api/cycle");
+    await page.goto(origin, { waitUntil: "networkidle" });
+    assert.deepEqual(await page.evaluate(async () => (await fetch("/api/cycle")).json()), {
+      source: "upstream",
+      url: "/api/cycle",
+    });
+    await page.route("**/api/cycle", (route) => route.fulfill({ json: { source: "reactivated" } }));
+    assert.deepEqual(await page.evaluate(async () => (await fetch("/api/cycle")).json()), {
+      source: "reactivated",
+    });
+    await page.unroute("**/api/cycle");
+    assert.deepEqual(await page.evaluate(async () => (await fetch("/api/cycle")).json()), {
+      source: "upstream",
+      url: "/api/cycle",
+    });
+  }));

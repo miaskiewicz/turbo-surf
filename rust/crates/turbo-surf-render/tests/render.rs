@@ -5284,3 +5284,32 @@ fn set_content_host_handoff_keeps_realm_and_runs_parser_lifecycle() {
         session.close();
     });
 }
+
+#[tokio::test]
+async fn engine_reads_are_synchronous_bounded_and_preserve_the_live_document() {
+    let mut session = PageSession::open(
+        "<body><button>one</button></body>",
+        "https://example.test/",
+        "",
+        "",
+        150,
+    )
+    .await
+    .unwrap();
+    assert_eq!(session.read_engine("globalThis.readTimer = false; setTimeout(() => { readTimer = true; }, 0); document.querySelector('button').textContent='two'; return {text: document.querySelector('button').textContent, timer: readTimer, helper: typeof __tsNs.tcQuerySelector};").unwrap(), r#"{"text":"two","timer":false,"helper":"function"}"#);
+    assert!(session
+        .read_engine("return Promise.resolve(1)")
+        .unwrap_err()
+        .contains("synchronous"));
+    assert!(session
+        .read_engine("while (true) {}")
+        .unwrap_err()
+        .contains("budget"));
+    assert_eq!(
+        session
+            .read_engine("return document.querySelector('button').textContent")
+            .unwrap(),
+        "\"two\""
+    );
+    session.close();
+}

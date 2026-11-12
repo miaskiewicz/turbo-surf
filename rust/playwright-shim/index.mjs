@@ -25,6 +25,7 @@ import { historyUrl, syncHistory, traverseLive } from "./history-navigation.mjs"
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
 import { equalValues } from "./equality.mjs";
+import { queryVisibleSelector } from "./visible-selector.mjs";
 import {
   decodeEvaluationError,
   decodeEvaluationValue,
@@ -562,7 +563,43 @@ class Locator {
     ];
   }
 
+  _needsQuery() {
+    return (
+      !!this._selector?.includes(":visible") ||
+      !!this._parent?._needsQuery() ||
+      (!!this._composite &&
+        (this._composite.left._needsQuery() || this._composite.right._needsQuery()))
+    );
+  }
+  async _prepareQuery() {
+    if (this._needsQuery()) {
+      await this._page._ensureLive();
+      if (!this._page._live) throw new Error("Extended locator queries require a live document");
+    }
+  }
+  _queryRecords() {
+    const marker = `data-turbo-surf-query-${randomUUID()}`;
+    const result = this._page._readEngine(`
+      const matches = ${this._liveElementsExpression()};
+      const all = Array.from(document.querySelectorAll('*'));
+      const positions = new Map(all.map((element, index) => [element, index]));
+      const copy = document.documentElement.cloneNode(true);
+      const copies = [copy, ...copy.querySelectorAll('*')];
+      const indices = matches.map(element => positions.get(element));
+      indices.forEach((index, order) => copies[index].setAttribute(${JSON.stringify(marker)}, String(order)));
+      return {html: copy.outerHTML, indices, text: matches.map(element => element.textContent)};
+    `);
+    this._queryHtml = result.html;
+    const records = JSON.parse(native.query(result.html, `[${marker}]`, "css"));
+    const ordered = Array.from({ length: result.indices.length });
+    for (const record of records) {
+      const order = Number(native.attrOf(result.html, record.node, marker));
+      ordered[order] = { ...record, idx: result.indices[order], liveText: result.text[order] };
+    }
+    return ordered;
+  }
   _all() {
+    if (this._needsQuery()) return this._queryRecords();
     let m;
     if (this._parent && this._selector) {
       const seen = new Set();
@@ -611,7 +648,7 @@ class Locator {
     return n;
   }
   get _html() {
-    return this._page._html;
+    return this._needsQuery() && this._queryHtml != null ? this._queryHtml : this._page._html;
   }
 
   // --- composition (pure JS, no napi) ---
@@ -682,7 +719,7 @@ class Locator {
     return this._combine(other, "or");
   }
   _hasComposite() {
-    return this._composite != null || !!this._parent?._hasComposite();
+    return this._needsQuery() || this._composite != null || !!this._parent?._hasComposite();
   }
   _liveBaseExpression() {
     if (this._composite) {
@@ -691,7 +728,7 @@ class Locator {
     }
     if (this._selector) {
       const roots = this._parent ? this._parent._liveElementsExpression() : "[document]";
-      return `(${orderedLocatorElements.toString()})(${roots}.flatMap(root => Array.from(__tsNs.tcQuerySelector(root, ${JSON.stringify(this._selector)}))))`;
+      return `(${orderedLocatorElements.toString()})(${roots}.flatMap(root => Array.from(${!isXPathSelector(this._selector) ? `(${queryVisibleSelector.toString()})(root, ${JSON.stringify(this._selector.replace(/^css=/, ""))}, ${renderedVisibility.toString()})` : `__tsNs.tcQuerySelector(root, ${JSON.stringify(this._selector)})`})))`;
     }
     if (this._testId) {
       const { attribute, source, flags, root } = this._testId;
@@ -826,7 +863,10 @@ class Locator {
 
   // --- counts / text (from the single resolve payload) ---
   async count() {
-    if (this._count && !this._filter && this._scope.length === 0) {
+    await this._prepareQuery();
+    if (this._needsQuery())
+      return this._page._readEngine(`return (${this._liveElementsExpression()}).length;`);
+    if (!this._needsQuery() && this._count && !this._filter && this._scope.length === 0) {
       const count = this._count(this._page._html);
       if (this._index == null) return count;
       const index = this._index < 0 ? count + this._index : this._index;
@@ -835,25 +875,32 @@ class Locator {
     return this._all().length;
   }
   async all() {
+    await this._prepareQuery();
     return this._all().map((_, i) => this.nth(i));
   }
   async textContent() {
+    await this._prepareQuery();
     const match = this._singleMatch();
     return match ? this._textContent(match) : null;
   }
   _textContent(match) {
+    if (match.liveText !== undefined) return match.liveText;
     return match.node == null ? (match.text ?? "") : native.textContentOf(this._html, match.node);
   }
   async innerText() {
+    await this._prepareQuery();
     return (await this._readElement((element) => element.innerText)) ?? "";
   }
   async innerHTML() {
+    await this._prepareQuery();
     return this._singleMatch()?.html ?? null;
   }
   async allTextContents() {
+    await this._prepareQuery();
     return this._all().map((match) => this._textContent(match));
   }
   async allInnerTexts() {
+    await this._prepareQuery();
     const matches = this._all();
     const out = [];
     for (let i = 0; i < matches.length; i++) out.push(await this.nth(i).innerText());
@@ -862,10 +909,12 @@ class Locator {
 
   // --- accessors (node-handle backed; cross to Rust) ---
   async getAttribute(name) {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? null : (native.attrOf(this._html, n, name) ?? null);
   }
   async _liveRead(fn, arg) {
+    await this._prepareQuery();
     const index = await this._resolveLiveIdx();
     if (index == null) return null;
     return this._page.evaluate(
@@ -873,19 +922,23 @@ class Locator {
     );
   }
   async inputValue() {
+    await this._prepareQuery();
     if (this._page._live) return (await this._liveRead((el) => el.value)) ?? "";
     const n = this._node();
     return n == null ? "" : native.inputValueOf(this._html, n);
   }
   async isVisible() {
+    await this._prepareQuery();
     if (this._node() == null) return false;
     await this._page._ensureLive();
     return !!(await this._liveRead(renderedVisibility));
   }
   async isHidden() {
+    await this._prepareQuery();
     return !(await this.isVisible());
   }
   async isChecked() {
+    await this._prepareQuery();
     return this._readElement((element) => {
       if (element.tagName === "INPUT" && /^(checkbox|radio)$/.test(element.type))
         return element.checked;
@@ -897,17 +950,21 @@ class Locator {
     });
   }
   async isEnabled() {
+    await this._prepareQuery();
     const n = this._node();
     return n != null && native.isEnabled(this._html, n);
   }
   async isDisabled() {
+    await this._prepareQuery();
     return !(await this.isEnabled());
   }
   async isEditable() {
+    await this._prepareQuery();
     const n = this._node();
     return n != null && native.isEditable(this._html, n);
   }
   async _readElement(fn) {
+    await this._prepareQuery();
     const live = this._page._session != null;
     const match = live ? null : this._singleMatch();
     const index = live
@@ -929,28 +986,34 @@ class Locator {
     return result.value;
   }
   async isEmpty() {
+    await this._prepareQuery();
     return this._readElement((element) => {
       const text = /^(INPUT|TEXTAREA)$/.test(element.tagName) ? element.value : element.textContent;
       return String(text ?? "").trim().length === 0;
     });
   }
   async ariaRole() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? null : native.ariaRoleOf(this._html, n);
   }
   async accessibleName() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? "" : native.accessibleNameOf(this._html, n);
   }
   async accessibleDescription() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? "" : native.accessibleDescriptionOf(this._html, n);
   }
   async selectedValues() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? [] : native.selectedValuesOf(this._html, n);
   }
   async cssValue(name) {
+    await this._prepareQuery();
     if (this._page._live)
       return (
         (await this._liveRead(
@@ -968,6 +1031,7 @@ class Locator {
     return n == null ? null : JSON.parse(native.nodeSnapshot(this._html, n));
   }
   async evaluate(fn, arg) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     const index = await this._resolveLiveIdx();
     if (index == null) throw new Error("turbo-surf: locator matched no elements");
@@ -976,9 +1040,10 @@ class Locator {
     );
   }
   async evaluateAll(fn, arg) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     let indices;
-    if (this._selector && !this._filter && this._scope.length === 0) {
+    if (!this._needsQuery() && this._selector && !this._filter && this._scope.length === 0) {
       const raw = await this._page._evalEngine(`(() => {
         const all = Array.from(document.querySelectorAll('*'));
         const positions = new Map(all.map((element, index) => [element, index]));
@@ -988,6 +1053,8 @@ class Locator {
         globalThis.__RESULT = JSON.stringify(matches.map(element => positions.get(element)));
       })()`);
       indices = JSON.parse(raw);
+    } else if (this._needsQuery()) {
+      indices = this._all().map((element) => element.idx);
     } else {
       const all = JSON.parse(native.query(this._html, "*", "css"));
       const positions = new Map(all.map((element, index) => [element.node, index]));
@@ -998,6 +1065,7 @@ class Locator {
     );
   }
   async ariaSnapshot() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? "" : native.ariaSnapshot(this._html, n);
   }
@@ -1015,6 +1083,7 @@ class Locator {
   // is what lets getByRole/getByLabel/getByText drive the running app (fill/click), not
   // just mutate the static HTML snapshot.
   async _driveLive(kind, value) {
+    await this._prepareQuery();
     if (this._hasComposite()) {
       const index = await this._resolveLiveIdx();
       if (index == null) throw new Error("turbo-surf: locator matched no elements");
@@ -1093,6 +1162,7 @@ class Locator {
     return this._page._sessionDispatch("*", m[0].idx, kind, value);
   }
   async _waitActionable(kind, options = {}) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     if (options.force) return;
     const deadline = Date.now() + (options.timeout ?? 30000);
@@ -1116,6 +1186,7 @@ class Locator {
     });
   }
   async fill(value, options = {}) {
+    await this._prepareQuery();
     await this._waitActionable("fill", options);
     const text = String(value);
     const match = this._singleMatch();
@@ -1136,27 +1207,34 @@ class Locator {
     this._page._html = native.fillNode(this._html, this._requireNode(), text);
   }
   async clear(options) {
+    await this._prepareQuery();
     return this.fill("", options);
   }
   async type(value) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     return void (await this._driveLive("type", String(value)));
   }
   async pressSequentially(value) {
+    await this._prepareQuery();
     return this.type(value);
   }
   async check() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("check"));
     this._page._html = native.setCheckedNode(this._html, this._requireNode(), true);
   }
   async uncheck() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("uncheck"));
     this._page._html = native.setCheckedNode(this._html, this._requireNode(), false);
   }
   async setChecked(on) {
+    await this._prepareQuery();
     return on ? this.check() : this.uncheck();
   }
   async selectOption(value, options = {}) {
+    await this._prepareQuery();
     const choices = normalizeSelectChoices(value);
     const deadline = Date.now() + (options.timeout ?? 30000);
     do {
@@ -1184,6 +1262,7 @@ class Locator {
     } while (true);
   }
   async click(opts = {}) {
+    await this._prepareQuery();
     await this._waitActionable("click", opts);
     const modifiers = opts.modifiers?.map((modifier) =>
       modifier === "ControlOrMeta"
@@ -1218,29 +1297,36 @@ class Locator {
     return this._page._followIntent(intent);
   }
   async dblclick(opts = {}) {
+    await this._prepareQuery();
     return this.click({ ...opts, clickCount: 2 });
   }
   async tap() {
+    await this._prepareQuery();
     return this.click();
   }
   async press(key) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     await this.focus();
     return (this._page.keyboard ?? makeKeyboard(this._page)).press(key);
   }
   async focus() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("focus"));
   }
   async blur() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("blur"));
   }
   async scrollIntoViewIfNeeded() {
+    await this._prepareQuery();
     await this.evaluate((element) =>
       element.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }),
     );
   }
   async highlight() {}
   async _isFocused() {
+    await this._prepareQuery();
     if (!this._canDriveLive) return false;
     try {
       const r = await this._driveLive("isfocused");
@@ -1250,6 +1336,7 @@ class Locator {
     }
   }
   async waitFor(opts = {}) {
+    await this._prepareQuery();
     // "Wait for this element" — for an SPA the element only exists after the app runs, so
     // ensure the page is hydrated (a live session). This covers the bare `goto(/login)` +
     // `emailField.waitFor()` login flow (no `waitUntil:'networkidle'`).
@@ -1274,6 +1361,7 @@ class Locator {
   }
 
   async boundingBox() {
+    await this._prepareQuery();
     await this._page._ensureLive();
     return this._readElement((element) => {
       for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
@@ -1297,6 +1385,7 @@ class Locator {
   // `fn(element)` against the live node (e.g. wait for a submit button's !disabled).
   async elementHandle() {
     await ensureHandleSession(this._page);
+    await this._prepareQuery();
     const index = await this._resolveLiveIdx();
     if (index == null) return null;
     return this._page.evaluateHandle(
@@ -1308,6 +1397,7 @@ class Locator {
   // Hover has no rendering effect here, but JS hover handlers (menu-open) are real.
   // Drive the live app with mouseenter/over events; otherwise best-effort no-op.
   async hover() {
+    await this._prepareQuery();
     await this._page._ensureLive();
     if (this._page._live) return void (await this._driveLive("hover"));
   }
@@ -1315,6 +1405,7 @@ class Locator {
   // dispatchEvent(type) — fire a named DOM event into the live app (e.g. a row
   // checkbox's 'click'). Static snapshot has no JS handlers, so it needs the isolate.
   async dispatchEvent(type, eventInit = {}) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     if (this._page._live)
       return void (await this._driveLive("dispatch", { type: String(type), eventInit }));
@@ -1324,6 +1415,7 @@ class Locator {
   // assign them to the <input type=file> so the app's change handler / upload runs. No
   // OS file picker, but the upload PIPELINE is real.
   async setInputFiles(files) {
+    await this._prepareQuery();
     const payload = normalizeInputFiles(files);
     await this._page._ensureLive();
     if (this._page._live) return void (await this._driveLive("setfiles", payload));
@@ -1334,6 +1426,7 @@ class Locator {
   // so there's no native drag image, but JS handlers (onDragStart/Over/Drop/End and
   // pointer/mouse listeners) fire exactly as in a real browser (turbo-surf#227).
   async dragTo(target, _opts) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     if (!this._page._live) return;
     const src = await this._resolveLiveIdx();
@@ -1345,7 +1438,17 @@ class Locator {
   // Resolve this locator to the live `querySelectorAll('*')` index of its first match.
   // Returns null when the locator matches nothing. Used by dragTo and page.dragAndDrop.
   async _resolveLiveIdx() {
+    await this._prepareQuery();
     if (this._page._session == null) return null;
+    if (this._needsQuery()) {
+      const indices = this._page._readEngine(`
+        const matches = ${this._liveElementsExpression()};
+        const positions = new Map(Array.from(document.querySelectorAll('*'), (element, index) => [element, index]));
+        return matches.map(element => positions.get(element));
+      `);
+      this._checkLiveCardinality(indices);
+      return indices[0] ?? null;
+    }
     if (this._hasComposite()) {
       const raw = await this._page._evalEngine(
         `(() => { const matches = ${this._liveElementsExpression()}; const all = Array.from(document.querySelectorAll('*')); const indices = new Map(all.map((element,index) => [element,index])); globalThis.__RESULT = JSON.stringify(matches.map(element => ({idx:indices.get(element)}))); })()`,
@@ -2033,6 +2136,10 @@ class Frame {
   _followIntent(intent) {
     return this._parentPage._followIntent(intent);
   }
+  _readEngine(script) {
+    const expression = this._realmExpression(`(() => { ${script} })()`, true);
+    return JSON.parse(native.liveReadEngine(this._session, `return ${expression};`));
+  }
   _evalEngine(script) {
     const expression = this._realmExpression(
       `(() => { ${script}; return globalThis.__RESULT; })()`,
@@ -2652,6 +2759,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   // Drive an interaction in the live isolate (real DOM events → running app handlers →
   // re-render), then refresh the Page snapshot. `kind` is "click" | "fill".
+  _readEngine(script) {
+    return JSON.parse(native.liveReadEngine(this._session, script));
+  }
   _evalEngine(script) {
     return native.liveEvalEngine(this._session, script);
   }
@@ -4625,6 +4735,7 @@ class BaseExpect {
         return false;
       }
     };
+    await this._v?._prepareQuery?.();
     let pass = await run();
     while ((this._neg ? pass : !pass) && Date.now() - start < timeout) {
       if (!page) break;

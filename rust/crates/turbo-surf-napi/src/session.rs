@@ -225,6 +225,7 @@ enum LiveJob {
     Resize(u32, u32, SyncSender<std::result::Result<String, String>>),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
+    EngineRead(String, SyncSender<std::result::Result<String, String>>),
     Expression(
         String,
         bool,
@@ -387,6 +388,9 @@ impl Task for LiveOpenTask {
                     }
                     LiveJob::EngineEval(script, reply) => {
                         let _ = reply.send(rt.block_on(session.eval_engine(&script)));
+                    }
+                    LiveJob::EngineRead(script, reply) => {
+                        let _ = reply.send(session.read_engine(&script));
                     }
                     LiveJob::Expression(script, engine, reply) => {
                         let result = if engine {
@@ -650,6 +654,18 @@ impl Task for LiveNetworkLogTask {
 #[napi]
 pub fn live_network_log(id: u32) -> AsyncTask<LiveNetworkLogTask> {
     AsyncTask::new(LiveNetworkLogTask { id })
+}
+
+/// Return a synchronous driver query without pumping the page event loop.
+#[napi]
+pub fn live_read_engine(id: u32, script: String) -> Result<String> {
+    let (reply, rx) = sync_channel(1);
+    live_send(id, LiveJob::EngineRead(script, reply)).map_err(Error::from_reason)?;
+    // A preceding asynchronous command may await the caller's localhost server.
+    // Bound this wait so a synchronous query cannot deadlock that Node event loop.
+    rx.recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|_| Error::from_reason("live session is busy or engine read timed out"))?
+        .map_err(Error::from_reason)
 }
 
 /// Serialize the live DOM to HTML (sync — no network).

@@ -4922,3 +4922,43 @@ test("Locator unions and intersections honor indexed operands, order and live ch
     await p.close();
   }
 });
+
+test("Extended visible CSS resolves the same live elements for reads and actions (#349)", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      `<style>.off { display:none } .inherited { visibility:hidden } .restored { visibility:visible }</style><section class="off"><button>ancestor hidden</button></section><section><button class="off">hidden</button><button id="shown" style="opacity:0" onclick="this.dataset.clicked='yes'">shown</button></section><div class="inherited"><button class="restored">restored</button></div>`,
+    );
+    const buttons = page.locator("section:visible > button:visible");
+    assert.equal(await buttons.count(), 1);
+    assert.equal(await buttons.getAttribute("id"), "shown");
+    assert.equal(await buttons.textContent(), "shown");
+    await buttons.click();
+    assert.equal(await buttons.getAttribute("data-clicked"), "yes");
+    assert.equal(await page.locator("button:visible").count(), 2);
+    assert.equal(await page.locator("button:not(:visible)").count(), 2);
+    assert.equal(await page.locator("section:has(> button:visible)").count(), 1);
+    assert.equal(await page.locator("button:is(.off, :visible)").count(), 3);
+    assert.equal(await page.locator("button:visible, #shown").count(), 2);
+    assert.equal(await page.locator("button.off:has(+ button:visible)").count(), 1);
+    await page.evaluate(() =>
+      document.querySelector("#shown").setAttribute("data-token", ":visible"),
+    );
+    assert.equal(await page.locator('[data-token=":visible"]:visible').count(), 1);
+    assert.equal(
+      await page.evaluate(() =>
+        Array.from(document.querySelectorAll("*")).some((element) =>
+          Array.from(element.attributes).some((attribute) =>
+            attribute.name.startsWith("data-turbo-surf-query-"),
+          ),
+        ),
+      ),
+      false,
+    );
+    await page.evaluate(() => document.styleSheets[0].insertRule("#shown {display:none}", 0));
+    assert.equal(await buttons.count(), 0);
+    assert.equal(await page.locator("button:visible").textContent(), "restored");
+  } finally {
+    await page.close();
+  }
+});

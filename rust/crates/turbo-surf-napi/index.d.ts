@@ -69,6 +69,8 @@ export function liveOpen(
 export function liveEval(id: number, script: string): Promise<string>;
 /** `liveEval` for a driver script that needs the engine namespace (its `__tsNs` parameter). */
 export function liveEvalEngine(id: number, script: string): Promise<string>;
+/** Bounded synchronous engine query; JSON-encode its return without draining the event loop. */
+export function liveReadEngine(id: number, script: string): string;
 /** Await an expression’s actual native Promise completion. */
 export function liveEvalEngineExpression(id: number, expression: string): Promise<string>;
 export function liveEvalExpression(id: number, expression: string): Promise<string>;

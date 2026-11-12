@@ -17721,6 +17721,35 @@ impl PageSession {
         self.eval_engine("").await.map(|_| ())
     }
 
+    /// Read the live realm without advancing timers, network work or navigation.
+    /// Driver-only scripts return a JSON value synchronously under the session budget.
+    pub fn read_engine(&mut self, script: &str) -> Result<String, String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
+        let _activation = self.rt.activation_key().enter();
+        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let result = execute_engine_script(&mut self.rt, script).and_then(|value| {
+            let promise = {
+                deno_core::scope!(scope, self.rt);
+                v8::Local::new(scope, &value).is_promise()
+            };
+            if promise {
+                Err("Engine read must return a synchronous value".into())
+            } else {
+                read_json(&mut self.rt, value)
+            }
+        });
+        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(watchdog);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        if exceeded {
+            Err("Engine read exceeded the session execution budget".into())
+        } else {
+            result
+        }
+    }
+
     /// Run `script` in the LIVE isolate, then drain the event loop to quiescence so any
     /// work the script triggered (event handlers, re-render, fetch) completes. Returns
     /// `String(globalThis.__RESULT || '')` — scripts that need to return a value stash

@@ -12,7 +12,7 @@ turbo-surf-view = "=0.8.2"
 turbo-surf-page = "=0.8.2"
 turbo-surf-render = "=0.8.2"
 turbo-surf-mcp = "=0.8.2"
-turbo-dom-parser = { package = "turbo-dom", version = "=0.8.2" }
+turbo-dom-parser = { package = "turbo-dom", version = "=0.8.3" }
 # The synthetic screenshot / canvas raster tier, published from turbo-dom.
-turbo-dom-raster = "=0.8.2"
+turbo-dom-raster = "=0.8.3"
 serde_json = "1"

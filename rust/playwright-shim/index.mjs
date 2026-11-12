@@ -4716,7 +4716,7 @@ function makeCapturedRequest(e, frame, response = () => null) {
 
 function makeNetResponse(e, frame, lifecycle) {
   const entries = e.headers ?? (e.contentType ? [["content-type", e.contentType]] : []);
-  const all = {};
+  const all = Object.create(null);
   for (const [key, value] of entries) {
     const name = key.toLowerCase();
     all[name] =

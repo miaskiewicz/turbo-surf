@@ -236,3 +236,28 @@ for (const mode of ["initial", "initial-close", "form", "form-console"])
       await new Promise((r) => server.close(r));
     }
   });
+
+test("captured response header names cannot collide with object prototypes", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/headers") {
+      response.setHeader("__proto__", "proto-value");
+      response.setHeader("constructor", "constructor-value");
+      response.end("ok");
+    } else response.end("<body>headers</body>");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = shim.newPage();
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    const pending = page.waitForResponse((response) => response.url().endsWith("/headers"));
+    await page.evaluate(async () => (await fetch("/headers")).text());
+    const response = await pending;
+    assert.equal(await response.headerValue("__proto__"), "proto-value");
+    assert.equal(await response.headerValue("constructor"), "constructor-value");
+    assert.equal(Object.hasOwn(await response.allHeaders(), "__proto__"), true);
+    assert.equal((await response.allHeaders()).constructor, "constructor-value");
+  } finally {
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

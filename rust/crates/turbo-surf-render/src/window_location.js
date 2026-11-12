@@ -853,6 +853,7 @@
       return pending;
     },
     committed(kind, from, pending) {
+      ops.op_driver_sync_changed();
       apply(arrayPush, changes, [
         { __proto__: null, kind, id: activeEntry().hostId, url: activeEntry().url },
       ]);

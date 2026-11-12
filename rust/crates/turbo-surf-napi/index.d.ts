@@ -74,6 +74,8 @@ export function liveReadEngine(id: number, script: string): string;
 /** Await an expression’s actual native Promise completion. */
 export function liveEvalEngineExpression(id: number, expression: string): Promise<string>;
 export function liveEvalExpression(id: number, expression: string): Promise<string>;
+/** Collector value plus authoritative driver snapshot invalidation. */
+export function liveEvalExpressionTracked(id: number, expression: string): Promise<string>;
 /** Serialize the live session's current DOM to HTML. */
 export function liveSerialize(id: number): string;
 /** The live session's cookies (storageState JSON), incl. HttpOnly session cookies. */

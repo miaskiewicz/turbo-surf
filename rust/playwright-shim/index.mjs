@@ -3064,24 +3064,25 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return native.ariaSnapshot(this._html, 0);
   }
 
-  // Evaluate JS against the page DOM. Supports (fn, arg) and string forms. When a live
-  // session is up, run in the LIVE isolate (sees the running app's state + can mutate
-  // it) and refresh the snapshot; otherwise run statelessly over the cached HTML.
+  // Evaluate in the retained isolate. Native revisions identify actual changes to
+  // the driver's snapshots; exposed bindings keep their cooperative settlement pump.
   async evaluate(script, arg) {
     if (this._closed) throw new Error("page is closed");
     if (hasJSHandles(arg)) return handleEvaluation(this, script, arg);
     await this._ensureLive();
     const body = evalSource(script, arg);
     if (this._mergedBindings().size) return this._evaluateWithBindings(body);
-    const raw = await native.liveEvalExpression(
-      this._session,
-      `(async () => { try {
+    const tracked = JSON.parse(
+      await native.liveEvalExpressionTracked(
+        this._session,
+        `(async () => { try {
         return JSON.stringify({value: (${encodeEvaluationValue.toString()})(await (${body}))});
       } catch(error) { return JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); } })()`,
+      ),
     );
-    await this._refreshFromSession();
-    await this._drainBindings();
-    const result = JSON.parse(raw);
+    if (tracked.needsSync) await this._refreshFromSession();
+    else if (tracked.events) await this._drainNetworkEvents();
+    const result = JSON.parse(tracked.value);
     if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
   }

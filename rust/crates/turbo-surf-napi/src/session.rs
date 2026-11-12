@@ -231,6 +231,7 @@ enum LiveJob {
         bool,
         SyncSender<std::result::Result<String, String>>,
     ),
+    ExpressionTracked(String, SyncSender<std::result::Result<String, String>>),
     Serialize(SyncSender<String>),
     Cookies(SyncSender<String>),
     SetCookies(String, SyncSender<()>),
@@ -400,8 +401,11 @@ impl Task for LiveOpenTask {
                         };
                         let _ = reply.send(result);
                     }
+                    LiveJob::ExpressionTracked(script, reply) => {
+                        let _ = reply.send(rt.block_on(session.eval_expression_tracked(&script)));
+                    }
                     LiveJob::Serialize(reply) => {
-                        let _ = reply.send(session.serialize());
+                        let _ = reply.send(session.serialize_for_driver());
                     }
                     LiveJob::NetworkLog(reply) => {
                         let _ = reply.send(session.drain_network_log());
@@ -411,7 +415,7 @@ impl Task for LiveOpenTask {
                         let _ = reply.send(());
                     }
                     LiveJob::Cookies(reply) => {
-                        let _ = reply.send(session.cookies());
+                        let _ = reply.send(session.cookies_for_driver());
                     }
                     LiveJob::Close(reply) => {
                         session.close();
@@ -507,6 +511,7 @@ pub struct LiveEvalTask {
     id: u32,
     script: String,
     expression: bool,
+    tracked: bool,
     engine: bool,
 }
 
@@ -519,7 +524,9 @@ impl Task for LiveEvalTask {
         let (reply, rx) = sync_channel(1);
         live_send(
             self.id,
-            if self.expression {
+            if self.tracked {
+                LiveJob::ExpressionTracked(std::mem::take(&mut self.script), reply)
+            } else if self.expression {
                 LiveJob::Expression(std::mem::take(&mut self.script), self.engine, reply)
             } else if self.engine {
                 LiveJob::EngineEval(std::mem::take(&mut self.script), reply)
@@ -545,6 +552,7 @@ pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
         id,
         script,
         expression: false,
+        tracked: false,
         engine: false,
     })
 }
@@ -557,6 +565,7 @@ pub fn live_eval_engine(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
         id,
         script,
         expression: false,
+        tracked: false,
         engine: true,
     })
 }
@@ -568,6 +577,19 @@ pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> 
         id,
         script,
         expression: true,
+        tracked: false,
+        engine: false,
+    })
+}
+
+/// Evaluate and return a JSON envelope with the result and host-owned sync invalidation.
+#[napi]
+pub fn live_eval_expression_tracked(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: true,
+        tracked: true,
         engine: false,
     })
 }
@@ -579,6 +601,7 @@ pub fn live_eval_engine_expression(id: u32, script: String) -> AsyncTask<LiveEva
         id,
         script,
         expression: true,
+        tracked: false,
         engine: true,
     })
 }

@@ -20,6 +20,8 @@ mod window_proxy;
 #[cfg(turbo_surf_native_proxy)]
 #[path = "code_generation.rs"]
 mod code_generation;
+#[path = "driver_sync.rs"]
+mod driver_sync;
 
 #[cfg(turbo_surf_native_proxy)]
 #[path = "frame_modules.rs"]
@@ -8505,6 +8507,11 @@ fn op_window_media_state(scope: &mut v8::PinScope, window: v8::Local<v8::Object>
     }
 }
 
+#[op2(fast)]
+fn op_driver_sync_changed(state: &mut OpState) {
+    driver_sync::changed(state);
+}
+
 #[op2]
 #[string]
 fn op_history_document_id(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> String {
@@ -8513,6 +8520,7 @@ fn op_history_document_id(scope: &mut v8::PinScope, document: v8::Local<v8::Obje
 
 #[op2(nofast)]
 fn op_script_navigation_admitted(scope: &mut v8::PinScope, #[string] target: String) {
+    driver_sync::changed(&mut JsRuntime::op_state_from(scope).borrow_mut());
     script_navigation::record(
         scope.get_entered_or_microtask_context(),
         scope.get_current_context(),
@@ -8630,6 +8638,7 @@ deno_core::extension!(
         op_user_activation_read,
         op_script_navigation_admitted,
         op_history_document_id,
+        op_driver_sync_changed,
         op_capture_runtime_core,
         op_set_host_capabilities,
         op_form_data_entries,
@@ -9549,11 +9558,13 @@ const __createTimer = (name, repeat, handler, delay, args, rendering = false) =>
   const level=rendering?-1:ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
   const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerDue(nesting,delay,rendering),delay,nesting,repeat,args,sequence:ops.op_task_sequence(),rendering};
+  ops.op_driver_sync_changed();
   __timerSet(id,timer);__timerPush(timer);return id;
 };
 // A non-timer task (id 0: never cancellable, no timer id consumed) in the same
 // deadline/sequence order as this agent's timers.
 const __queueTimerTask = (fn, due, sequence) => {
+  ops.op_driver_sync_changed();
   __timerPush({__proto__:null,id:0,fn,source:null,due,delay:0,nesting:0,repeat:false,args:[],sequence});
 };
 globalThis.setTimeout=(handler,delay=0,...args)=>__createTimer("setTimeout",false,handler,delay,args);
@@ -9636,6 +9647,7 @@ const __frameStage = (ts) => { __frameNow = ts; __clockEpoch = __taskEpoch; __cl
 // A task that runs before any other due task, so a frame's stages stay contiguous while
 // each still ends with its own microtask checkpoint.
 const __frameTask = (fn) => {
+  ops.op_driver_sync_changed();
   const id = __tid++;
   // Sequence 0 sorts before every queued task (agent sequences start at 1).
   const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[],sequence:0};
@@ -9706,6 +9718,7 @@ if (typeof __G.installAnimationHost === "function") __G.installAnimationHost({
   task(callback) { __frameTimer(callback, 0); },
 });
 globalThis.requestAnimationFrame = (fn) => {
+  ops.op_driver_sync_changed();
   const id = ++__rafId;
   __rafQueue[__rafQueue.length] = { id, fn };
   __scheduleFrame();
@@ -10282,6 +10295,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
         // reload carrying `_rsc` returns a flight payload, not HTML.
         u.searchParams.delete("_rsc");
         __G.rscNav = u.pathname + u.search + u.hash;
+        ops.op_driver_sync_changed();
       }
     }
   } catch (_e) {}
@@ -15000,6 +15014,7 @@ fn make_runtime_with_storage_and_options(
     let mut state = state.borrow_mut();
     state.put(ResourceBudget(options.max_resource_bytes));
     state.put(NetworkLog::default());
+    state.put(driver_sync::Revision::default());
     state.put(blob_store);
     state.put(form_submission::Queue::default());
     state.put(storage);
@@ -17356,6 +17371,8 @@ pub struct HydrationDiagnostics {
 /// created and driven from a single owning thread (the napi layer pins one thread per
 /// session). `close()` (or drop) resets the binding while the isolate is still alive.
 pub struct PageSession {
+    driver_snapshot: Option<driver_sync::Snapshot>,
+    driver_cookies: Option<String>,
     script_inventory: Option<crate::script_inventory::ScriptInventory>,
     navigation_count: u64,
     rt: OwnedRuntime,
@@ -17658,6 +17675,8 @@ impl PageSession {
         };
         match result {
             Ok(_) => Ok(PageSession {
+                driver_snapshot: None,
+                driver_cookies: None,
                 script_inventory,
                 navigation_count: 0,
                 rt,
@@ -17681,6 +17700,8 @@ impl PageSession {
             Err(e) if budget_exceeded || rt.v8_isolate().is_execution_terminating() => {
                 rt.v8_isolate().cancel_terminate_execution();
                 Ok(PageSession {
+                    driver_snapshot: None,
+                    driver_cookies: None,
                     script_inventory,
                     navigation_count: 0,
                     rt,

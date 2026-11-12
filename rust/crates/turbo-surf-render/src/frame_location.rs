@@ -124,6 +124,7 @@ fn navigate_kind<'s>(
         );
         return;
     }
+    driver_sync::changed(&mut JsRuntime::op_state_from(scope).borrow_mut());
     let Some(host) = target.get_slot::<FrameHost>() else {
         // The top-level document navigates through its own Location (window_location.js):
         // same-document fragments, session history and the sandbox check (turbo-surf#84).

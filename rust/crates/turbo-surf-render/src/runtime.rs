@@ -93,6 +93,8 @@ mod storage_state;
 #[path = "sync_xhr.rs"]
 mod sync_xhr;
 use privacy_sandbox::{op_private_token_issuer, op_private_token_query};
+#[path = "document_content.rs"]
+mod document_content;
 #[path = "form_submission.rs"]
 mod form_submission;
 #[path = "script_navigation.rs"]
@@ -8679,6 +8681,7 @@ deno_core::extension!(
         op_parse_xml_document,
         op_parse_xml_response,
         op_parser_scripts,
+        document_content::op_replace_document_content,
         op_trusted_type_string,
         op_timer_code_allowed,
         op_run_timer_code,
@@ -11857,9 +11860,27 @@ const __resourceJSONParse = JSON.parse;
 const __resourceThen = Function.prototype.call.bind(Promise.prototype.then);
 // Parse order, including parser scripts inside declarative shadow roots.
 const __initialResourceScripts = ops.op_parser_scripts(__document);
-let __orderedDynamicScripts = Promise.resolve();
-const __resources = new WeakMap();
-const __resourcePromises = new Set();
+let __replacingDocumentContent = false;
+ops.op_set_host_capabilities({replaceDocumentContent:html=>{
+  let scripts;
+  __resourceDocumentGeneration++;
+  __resources=new __resourceMapConstructor();
+  __resourcePromises=new __resourceSetConstructor();
+  __orderedDynamicScripts=__initialDynamicScriptGate;
+  __replacingDocumentContent=true;
+  try{scripts=ops.op_replace_document_content(__document,html);}
+  finally{__replacingDocumentContent=false;}
+  __initialResourceScripts.length=0;
+  for(let index=0;index<scripts.length;index++)__initialResourceScripts[index]=scripts[index];
+  __resourceMutationEpoch++;
+  __fontStyleUpdated=false;
+}});
+const __initialDynamicScriptGate = Promise.resolve();
+const __resourceMapConstructor = WeakMap, __resourceSetConstructor = Set;
+let __orderedDynamicScripts = __initialDynamicScriptGate;
+let __resources = new __resourceMapConstructor();
+let __resourcePromises = new __resourceSetConstructor();
+let __resourceDocumentGeneration = 0;
 const __resourceSheetConstructor = CSSStyleSheet;
 const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readRules;
 // Image load state is published to the binding's HTMLImageElement.prototype accessors
@@ -11905,8 +11926,9 @@ function __fireResourceEvent(el, kind, win = globalThis) {
   try { ops.op_dispatch_host_event(ev, el); } catch (_) {}
 }
 function __trackResource(promise) {
-  __intrinsicApply(__intrinsicSetAdd, __resourcePromises, [promise]);
-  __promiseFinally(promise, () => __intrinsicApply(__intrinsicSetDelete, __resourcePromises, [promise]));
+  const promises=__resourcePromises;
+  __intrinsicApply(__intrinsicSetAdd, promises, [promise]);
+  __promiseFinally(promise, () => __intrinsicApply(__intrinsicSetDelete, promises, [promise]));
   return promise;
 }
 function __resourceNow() { return __perfNow(); }
@@ -12164,6 +12186,7 @@ function __prepareResourceScript(el) {
   return ops.op_prepare_resource_script(__document, el);
 }
 __G.execScriptEl = async function (el, preparation = null, executionGate = null) {
+  const generation=__resourceDocumentGeneration;
   if (!el || !ops.op_document_scripts_allowed(__document)) return;
   const prepared = preparation || __prepareResourceScript(el);
   if (!prepared) return;
@@ -12186,6 +12209,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
     const resources=__G.loadDocumentResources(__document,globalThis,deferred?null:el);
     if(!prepared.asynchronous||!(external||module))await resources;
   }
+  if(generation!==__resourceDocumentGeneration)return;
   const absoluteSource=get("src")?new URL(get("src"),__baseApply(__resourceBaseURL,__document,[])).href:"";
   const parserScripts=__intrinsicApply(__resourceDocumentQuery,__document,["script"]);
   let parserIndex=-1;
@@ -12238,6 +12262,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
       code = prepared.source;
     }
     if (executionGate) await executionGate;
+    if(generation!==__resourceDocumentGeneration)return;
     // Legacy classic bundles retain their import.meta compatibility rewrite.
     // Import/export parse failures move the original text to Deno's real graph;
     // explicit module elements use the separate standards path above.
@@ -12364,9 +12389,13 @@ function __reselectPicture(picture) {
 function __imageMutation(event) {
   if (event.type === "attributes") {
     if (event.attributeNamespace!==null) return;
-    if (__imageMutationAttributes[event.attributeName] && __ownedImage(event.target))
-      __loadImage(event.target,globalThis,false,true);
-    else if (__sourceMutationAttributes[event.attributeName] && __resourceElementKind(event.target)==="SOURCE")
+    if (__imageMutationAttributes[event.attributeName] && __ownedImage(event.target)) {
+      // Importing replacement markup queues its initial detached src assignment.
+      // An already-admitted parser load owns that same initial request.
+      const initial=__replacingDocumentContent && event.oldValue===null &&
+        !__listIncludes(event.ancestors,__document);
+      __loadImage(event.target,globalThis,false,!initial);
+    } else if (__sourceMutationAttributes[event.attributeName] && __resourceElementKind(event.target)==="SOURCE")
       __reselectPicture(__resourceApply(__resourceParentNode,event.target,[]));
   } else if (event.type === "childList") {
     for (let index=0; index<event.added.length; index++) __startInsertedImages(event.added[index]);
@@ -13617,6 +13646,7 @@ __G.domSig = (() => {
     __G.performancePhase("domContentLoadedEventEnd");
   };
   let __documentCompleted = false;
+  let __contentLoadGeneration = 0;
   const dispatchDocumentComplete = () => {
     if (__documentCompleted) return;
     __documentCompleted = true;
@@ -13628,7 +13658,8 @@ __G.domSig = (() => {
     __G.performancePhase("loadEventEnd");
     lifecycleEvent(globalThis, "pageshow");
   };
-  ops.op_set_host_capabilities({documentLoading:()=>{__G.initialLoading=true;__G.setDocumentReadyState("loading");},markDocumentInteractive:__markDocumentInteractive,dispatchDocumentInteractive,dispatchDocumentComplete});
+  ops.op_set_host_capabilities({scheduleContentLoad:()=>{const generation=__contentLoadGeneration;__resourceThen(__G.waitForDocumentResources(),()=>{if(generation===__contentLoadGeneration)dispatchDocumentComplete();});}});
+  ops.op_set_host_capabilities({documentLoading:()=>{__contentLoadGeneration++;__documentCompleted=false;__G.initialLoading=true;__G.setDocumentReadyState("loading");},markDocumentInteractive:__markDocumentInteractive,dispatchDocumentInteractive,dispatchDocumentComplete});
 
   // NB: navigator is now a full `Navigator` instance built earlier — zero own props, all 84
   // members (incl. userAgent/platform/webdriver) as native-marked getters on `Navigator.prototype`

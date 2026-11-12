@@ -5270,3 +5270,17 @@ async fn host_viewport_resize_updates_geometry_media_and_events_without_guest_au
     assert_eq!(page.eval_engine_expression("JSON.stringify([innerWidth,matchMedia('(max-width:600px)').matches,document.getElementById('target').getBoundingClientRect().width,resizeCount])").await.unwrap(), "[1280,false,220,2]");
     page.close();
 }
+
+#[test]
+fn set_content_host_handoff_keeps_realm_and_runs_parser_lifecycle() {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let mut session = PageSession::open("<div id='target'>old</div>", "https://content.test/", "", "", 3000).await.unwrap();
+        session.eval("globalThis.savedDocument=document;globalThis.savedPrototype=HTMLElement.prototype;globalThis.oldNode=document.querySelector('#target');globalThis.contentOrder=[];customElements.define('content-check',class extends HTMLElement{constructor(){super();contentOrder.push('construct:'+document.querySelector('#target').textContent)}connectedCallback(){contentOrder.push('connected:'+this.isConnected)}});document.addEventListener('DOMContentLoaded',()=>contentOrder.push('dcl'));window.addEventListener('load',()=>contentOrder.push('load')); ").await.unwrap();
+        session.set_content("<style>#target{color:rgb(11,22,33)}</style><div id='target'>new</div><content-check></content-check><script>contentOrder.push('script');globalThis.contentMarker=44</script>", "load", Some(3000)).await.unwrap();
+        assert_eq!(session.eval_expression("JSON.stringify({same:savedDocument===document,prototype:savedPrototype===HTMLElement.prototype,detached:!oldNode.isConnected&&oldNode.ownerDocument===document,custom:document.querySelector('content-check') instanceof customElements.get('content-check'),marker:globalThis.contentMarker,state:document.readyState,color:getComputedStyle(document.querySelector('#target')).color,order:contentOrder})").await.unwrap(), r#"{"same":true,"prototype":true,"detached":true,"custom":true,"marker":44,"state":"complete","color":"rgb(11, 22, 33)","order":["construct:new","connected:true","script","dcl","load"]}"#);
+        session.set_content("<p>again</p><script>contentMarker++</script>", "networkidle", Some(3000)).await.unwrap();
+        assert_eq!(session.eval_expression("JSON.stringify({marker:contentMarker,loads:contentOrder.filter(value=>value==='load').length,same:savedDocument===document})").await.unwrap(), r#"{"marker":45,"loads":2,"same":true}"#);
+        assert!(session.set_content("ignored", "unsupported", None).await.unwrap_err().contains("waitUntil"));
+        session.close();
+    });
+}

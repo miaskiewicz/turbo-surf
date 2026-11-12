@@ -216,6 +216,13 @@ use tokio::sync::mpsc::UnboundedSender as MpscSender;
 use turbo_surf_render::{PageSession, PageSessionOptions, DEFAULT_RENDER_BUDGET_MS};
 
 enum LiveJob {
+    Content(
+        String,
+        String,
+        Option<u64>,
+        SyncSender<std::result::Result<String, String>>,
+    ),
+    EngineExpression(String, SyncSender<std::result::Result<String, String>>),
     Resize(u32, u32, SyncSender<std::result::Result<String, String>>),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
@@ -361,6 +368,14 @@ impl Task for LiveOpenTask {
                     }
                 };
                 match job {
+                    LiveJob::Content(html, wait_until, timeout, reply) => {
+                        let result = rt.block_on(session.set_content(&html, &wait_until, timeout));
+                        storage_work |= wait_until == "domcontentloaded" && result.is_ok();
+                        let _ = reply.send(result);
+                    }
+                    LiveJob::EngineExpression(script, reply) => {
+                        let _ = reply.send(rt.block_on(session.eval_engine_expression(&script)));
+                    }
                     LiveJob::Resize(width, height, reply) => {
                         let result = rt
                             .block_on(session.set_viewport(width, height))
@@ -495,7 +510,9 @@ impl Task for LiveEvalTask {
         let (reply, rx) = sync_channel(1);
         live_send(
             self.id,
-            if self.expression {
+            if self.expression && self.engine {
+                LiveJob::EngineExpression(std::mem::take(&mut self.script), reply)
+            } else if self.expression {
                 LiveJob::Expression(std::mem::take(&mut self.script), reply)
             } else if self.engine {
                 LiveJob::EngineEval(std::mem::take(&mut self.script), reply)
@@ -545,6 +562,65 @@ pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> 
         script,
         expression: true,
         engine: false,
+    })
+}
+
+/// Await a collector in the engine namespace without waiting for unrelated resources.
+#[napi]
+pub fn live_eval_engine_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: true,
+        engine: true,
+    })
+}
+
+pub struct LiveContentTask {
+    id: u32,
+    html: String,
+    wait_until: String,
+    timeout_ms: Option<u32>,
+}
+
+#[napi]
+impl Task for LiveContentTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(
+            self.id,
+            LiveJob::Content(
+                std::mem::take(&mut self.html),
+                self.wait_until.clone(),
+                self.timeout_ms.map(u64::from),
+                reply,
+            ),
+        )
+        .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live content worker dropped reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Replace live document contents through the native parser/resource lifecycle.
+#[napi]
+pub fn live_set_content(
+    id: u32,
+    html: String,
+    wait_until: Option<String>,
+    timeout_ms: Option<u32>,
+) -> AsyncTask<LiveContentTask> {
+    AsyncTask::new(LiveContentTask {
+        id,
+        html,
+        wait_until: wait_until.unwrap_or_else(|| "load".into()),
+        timeout_ms,
     })
 }
 

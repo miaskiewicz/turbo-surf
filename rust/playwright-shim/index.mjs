@@ -2254,8 +2254,16 @@ class Page {
     return out;
   }
 
+  _collectSession(id, script) {
+    if (!this._contentCollecting) return native.liveEvalEngine(id, script);
+    return native.liveEvalEngineExpression(
+      id,
+      `(async () => { ${script}
+return String(globalThis.__RESULT ?? ""); })()`,
+    );
+  }
   async _takeBindingCalls() {
-    const raw = await native.liveEvalEngine(
+    const raw = await this._collectSession(
       this._session,
       `(() => {
           const out = [];
@@ -2314,7 +2322,7 @@ class Page {
         error: { name: String(error?.name ?? "Error"), message: String(error?.message ?? error) },
       });
     }
-    await native.liveEvalEngine(
+    await this._collectSession(
       this._session,
       `(() => {
       let realm = globalThis;
@@ -2449,7 +2457,7 @@ class Page {
     if (historyNavigation) syncHistory(this, historyNavigation);
     this._html = native.liveSerialize(this._session);
     try {
-      const href = await native.liveEvalEngine(
+      const href = await this._collectSession(
         this._session,
         "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
       );
@@ -2467,7 +2475,7 @@ class Page {
     // engine — it fetches the target's RSC flight, which the runtime records on __rscNav.
     // Treat that as the navigation target (the post-login redirect chain rides this).
     try {
-      const nav = await native.liveEvalEngine(
+      const nav = await this._collectSession(
         this._session,
         "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
@@ -2488,7 +2496,7 @@ class Page {
     }
     if (!historyNavigation && previousUrl !== this._url) this._emit("framenavigated", this);
     if (this._html.includes("<iframe")) {
-      const frames = await native.liveEvalEngine(
+      const frames = await this._collectSession(
         this._session,
         `(() => {
         const ids = __tsNs.shimFrameIds ??= new WeakMap();
@@ -2524,7 +2532,7 @@ class Page {
   async _redrain() {
     if (this._session == null) return;
     try {
-      await native.liveEvalEngine(this._session, "globalThis.__RESULT = '';");
+      await this._collectSession(this._session, "globalThis.__RESULT = '';");
     } catch {
       /* terminated mid-drain — refresh reads best-effort state */
     }
@@ -2991,18 +2999,49 @@ class Page {
     if (this._html) await this.render(evalSource(script, arg));
   }
 
-  async setContent(html) {
+  async setContent(html, opts = {}) {
+    if (this._closed) throw new Error("page is closed");
+    const waitUntil = opts.waitUntil ?? "load";
+    if (!["load", "domcontentloaded", "networkidle"].includes(waitUntil))
+      throw new Error(`Unsupported setContent waitUntil: ${waitUntil}`);
+    if (!this._live) {
+      const previous = this._html;
+      this._html = "";
+      try {
+        await this._openLiveSession(opts.timeout);
+      } catch (error) {
+        this._html = previous;
+        throw error;
+      }
+    }
     this._imageCache = undefined;
     closeScreenshotScene(this);
-    for (const frame of (this._frames ?? []).toReversed()) {
-      frame._detached = true;
-      this._emit("framedetached", frame);
+    let failure;
+    try {
+      this._html = await native.liveSetContent(
+        this._session,
+        String(html),
+        waitUntil,
+        opts.timeout,
+      );
+    } catch (error) {
+      failure = error;
     }
-    this._frames = [];
-    this._frameEntries = undefined;
-    this._html = html;
-    this._syncFrames();
-    this._emit("load");
+    const collecting = this._contentCollecting;
+    this._contentCollecting = true;
+    try {
+      await this._refreshFromSession();
+      await this._drainBindings();
+    } finally {
+      this._contentCollecting = collecting;
+    }
+    if (failure) {
+      if (/setContent timeout/.test(failure.message)) failure.name = "TimeoutError";
+      throw failure;
+    }
+    this._contentLoadPending = waitUntil === "domcontentloaded";
+    this._emit("domcontentloaded");
+    if (!this._contentLoadPending) this._emit("load");
   }
 
   // --- page-level actions (selector shortcuts) ---
@@ -3250,7 +3289,24 @@ class Page {
   // SPA's own scripts having run; the shim has one "settled" tier (a live
   // session with the authored scripts drained), so treat them the same and
   // hydrate if we aren't live yet.
-  async waitForLoadState(_state) {
+  async waitForLoadState(state = "load") {
+    if (this._contentLoadPending && state !== "domcontentloaded") {
+      const collecting = this._contentCollecting;
+      this._contentCollecting = true;
+      try {
+        if (state === "networkidle") await native.liveEvalEngine(this._session, "");
+        else
+          await native.liveEvalEngineExpression(
+            this._session,
+            "__tsNs.waitForDocumentResources().then(() => '')",
+          );
+        await this._refreshFromSession();
+        this._contentLoadPending = false;
+        this._emit("load");
+      } finally {
+        this._contentCollecting = collecting;
+      }
+    }
     if (!this._live) await this._openLiveSession();
   }
   async waitForTimeout(ms) {

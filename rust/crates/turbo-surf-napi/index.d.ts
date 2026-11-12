@@ -273,3 +273,5 @@ export class ScreenshotScene {
   svg(): string;
   close(): void;
 }
+export function liveSetContent(id: number, html: string, waitUntil?: string, timeoutMs?: number): Promise<string>;
+export function liveEvalEngineExpression(id: number, expression: string): Promise<string>;

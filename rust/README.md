@@ -7,8 +7,11 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
-requires `turbo-dom` 0.7 (with turbo-dom-layout / -raster / -browser-env 0.7.1 from
-crates.io). Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
+requires `turbo-dom` 0.8 and turbo-dom-layout / -raster / -browser-env 0.8.2.
+The v0.8.3 integration branch pins those four crates to turbo-dom commit
+`ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6` through the workspace
+`[patch.crates-io]` table, resolving all four to version 0.8.3;
+published-release validation must use the registry graph. Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
 original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
 mutation batches and bounded storage collection (the per-release history is in
 [CHANGELOG.md](../CHANGELOG.md)).
@@ -36,18 +39,17 @@ restore the caller before yielding.
 | `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 80-tool surface over a stateful session |
 
 Native layout/paint, canvas rasterization and system text measurement (optional
-Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.7.1 crate, which
+Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.8 family, which
 mcp/napi/py depend on (forwarding its `gpu-metal` / `coretext` features, and its
 `avif` / `jxl` image decoders, which are on by default); the layout engine is
-`turbo-dom-layout` 0.7.1. turbo-surf no longer depends on
+`turbo-dom-layout` from that same dependency graph. turbo-surf no longer depends on
 turbo-html2pdf.
 
 `cargo test --workspace` runs the offline engine suite. Required gates also include
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
 the root npm test command checks versions, the addon/shim and detection harness too.
 
-The render tier consumes `turbo-dom-layout` 0.7.1 (the layout half of
-turbo-html2pdf-core 0.3.9, relocated verbatim into turbo-dom) for native live-tree
+The render tier consumes `turbo-dom-layout` for native live-tree
 box geometry, transforms, element scroll metrics and point-hit regions: its live-DOM
 input (`turbo_dom_layout::live`) styles the page's own composed tree in place from the
 rules surf matched per tree scope, and its `cssom_view` modules (moved from this crate)
@@ -59,11 +61,25 @@ without guest getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in
 [LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 
+## Build profiles and feature flags
+
+[Build features](../docs/BUILD-FEATURES.md) lists every workspace feature,
+its defaults and forwarding, toolchains, platform targets and exact release
+commands. MCP/NAPI default to impersonation plus AVIF/JPEG XL; standalone
+Python defaults to those image decoders with the rustls resource transport.
+Cargo features unify across a build, so whole-workspace results do not prove a
+standalone wheel's feature graph.
+
+`gpu-metal`, `coretext` and `native-sdk-frame-read` are opt-in. The
+[GPU bridge](../docs/GPU-BRIDGE.md) documents which embedders install execution
+callbacks and how software fallback differs from actual GPU execution. A feature
+name alone does not establish hardware use, native-SDK identity or pixel parity.
+
 ## Registry dependency identity
 
 The seven direct Rust dependency aliases retain the existing source/API names.
-The Deno 0.x.1 family and `turbo-dom-v8` resolve from crates.io; the turbo-dom 0.7.1
-crates resolve from crates.io too. The
+The Deno 0.x.1 family and `turbo-dom-v8` resolve from crates.io. The four
+turbo-dom 0.8-family crates currently use the integration pin described above. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):
 
@@ -74,7 +90,7 @@ from turbo-dom):
 | `turbo-surf-btls-sys` | 0.5.6 | transport native dependency |
 | `turbo-surf-btls` | 0.5.6 | transport dependency |
 | `turbo-surf-tokio-btls` | 0.5.6 | transport runtime dependency |
-| `turbo-dom-v8` | 150.4.0 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
+| `turbo-dom-v8` | 150.4.1 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
 | `turbo-surf-deno-v8` | 0.4.1 | `v8` (the shared facade) |
 | `turbo-surf-serde-v8` | 0.321.1 | shared value conversion |
 | `turbo-surf-deno-core` | 0.412.1 | `deno_core` |

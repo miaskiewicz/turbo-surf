@@ -15,8 +15,8 @@ The `v*` tag fires npm + crates; the **PyPI wheel ships on a SEPARATE `pyv*` tag
 release fails if `PYPI_TOKEN` is absent; manual dispatch builds and tests without
 publishing. Cut BOTH tags at the same version for a full release.
 (The `turbo-surf-napi` + `turbo-surf-transform` crates are not published to
-crates.io. The napi addon ships as a prebuilt `.node` per platform **inside the
-same `turbo-surf` npm tarball** — see "napi addon in the npm tarball" below —
+crates.io. The napi addon ships as a prebuilt `.node` in each matching optional
+platform package — see [Per-platform packages](#per-platform-packages-replaces-turbo-surf288-bundled-model) below —
 so the playwright-shim works out of the box after `npm install turbo-surf`.)
 
 ## The one rule: every version string must match the tag
@@ -247,15 +247,33 @@ automatically installs only the matching platform's package.
 
 ## Shipping profiles
 
-The current npm release workflow builds the stock workspace with
-`cargo build --locked --release -p turbo-surf-mcp`. It enables default transport
-impersonation, uses the patched stock V8 150 backend and does not enable the
-experimental Chrome155 SDK, GPU bridge or CoreText feature union used in the
-native parity captures. Do not describe release CI outputs as that measured
-all-feature artifact. Standalone Python wheels do not select core's
-`impersonate` feature: their resource client uses reqwest/rustls, with software
-rasterization and the stock V8 backend. A whole-workspace build can unify core
-features through MCP/NAPI, so it does not establish the standalone wheel profile.
+The current npm workflow runs:
+
+```sh
+cargo build --locked --release -p turbo-surf-mcp -p turbo-surf-napi \
+  --target TARGET --manifest-path rust/Cargo.toml
+```
+
+It enables the two crates' default `impersonate`, `avif` and `jxl` features,
+uses the stock V8 150-family backend, and adds no `gpu-metal`, `coretext` or
+`native-sdk-frame-read` switches. The four npm targets are macOS arm64,
+Linux GNU x86_64/aarch64, and Windows MSVC x64. Neither a native 154/155 SDK
+nor a working GPU bridge is established by that build.
+
+Standalone Python wheel builds enable Python's default `avif`/`jxl` plus
+`pyo3/extension-module` from pyproject. They reach core through view/render with
+core dependency defaults disabled, using reqwest/rustls for resources. They do
+not select BoringSSL or install the guest WebGL execution callbacks. The wheels
+use CPython 3.8+ abi3 and the platform/glibc constraints described above.
+
+A whole-workspace build can unify core features through MCP/NAPI, so it does not
+establish the standalone wheel profile. Conversely, `--no-default-features` on
+MCP/NAPI alone does not disable dependency defaults and cannot establish a
+rustls-only artifact. The complete package/feature/forwarding matrix, optional
+build recipes and native toolchain requirements are in
+[Build features](docs/BUILD-FEATURES.md); the separate raster-backend/installed
+callback boundary is in [GPU bridge](docs/GPU-BRIDGE.md).
+
 Verify the actual wheel graph separately. The actual sdist must contain every
 required source/path dependency and build against
 the published registry graph; missing workspace patches must not silently select
@@ -280,9 +298,11 @@ Only the public re-export and its external regression differ; TLS, ALPN and HTTP
 implementation are unchanged. The unchanged upstream package version identifies
 that baseline, not a new registry release. The reviewed distributable transport packages preserve this
 source under the named `turbo-surf-*` dependency family. Core and render consume
-those published packages through seven explicit Cargo aliases; there are no root
-workspace patches. The original source revisions remain provenance, rather than
-downstream dependency overrides.
+those published packages through seven explicit Cargo aliases; the transport
+and Deno families have no root source overrides. This integration branch does
+still patch the four turbo-dom crates to
+`ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6`; remove that development patch only
+after the matching registry prerequisites are available and verified.
 
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile
 (`cargo build --locked`). Release authorization does not establish registry
@@ -323,12 +343,13 @@ The subsequent named dependency integration replaces twelve runtime packages at
 their existing versions and preserves all other lock records apart from the
 core/render dependency references. The previously tested Git candidates remain
 dated provenance, not current dependency metadata. Since the turbo-dom
-consolidation, layout comes from `turbo-dom-layout` (0.7.0) and the screenshot tier
-from `turbo-dom-raster` (0.7.0; both published from turbo-dom); turbo-surf no
-longer depends on turbo-html2pdf.
+consolidation, layout comes from `turbo-dom-layout` and the screenshot tier
+from `turbo-dom-raster`; the current manifests require 0.8.2 and the integration
+branch resolves them through the development patch above. turbo-surf no longer
+depends on turbo-html2pdf.
 
-The V8 binding is turbo-dom's `turbo-dom-v8` 150.4.0, a generated fork of
-RustyV8150.4.0 (patches + pins + generator in turbo-dom's
+The current lockfile resolves turbo-dom's `turbo-dom-v8` 150.4.1, a generated fork
+of the RustyV8 150.4 family (patches + pins + generator in turbo-dom's
 `crates/turbo-dom-v8`) carrying the native weak-handle teardown hardening and the
 interceptor ShouldThrowOnError fix. Those ownership fixes are required by the
 retained regressions; silently resolving the unpatched upstream crate would lose

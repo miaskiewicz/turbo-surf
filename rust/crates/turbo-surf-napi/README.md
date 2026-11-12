@@ -3,14 +3,16 @@
 The turbo-surf Rust engine exposed to Node as a napi-rs addon — the in-process
 bridge from the Rust core to JavaScript.
 
-**Not published.** This is a **dev/harness-only** crate. The shipped npm package
-(`turbo-surf`) is a thin launcher that spawns the standalone
-`turbo-surf-mcp` **binary** — it does not host Rust in Node. This addon exists so
-the JS code that genuinely needs an in-process DOM can run:
+The Rust crate is **not independently published to crates.io**, and this directory
+is not a separately published npm addon package. Release CI builds the addon and
+ships the `.node` file alongside the MCP binary in each optional
+`@miaskiewicz/turbo-surf-<platform>` npm package. The main `turbo-surf` package
+ships this loader and the Playwright shim. Its MCP launcher spawns the standalone
+binary; the shim and benchmark harnesses use the addon in-process.
 
-- the **Playwright shim** (`rust/playwright-shim/`) — Page/Locator/expect over the
-  engine, and
-- the **benchmark harnesses** (`harness/`) — driving the engine from Node.
+Prebuilt targets are macOS arm64, Linux GNU x86_64/aarch64 and Windows MSVC x64.
+The loader requires Node >= 20; runner-specific requirements are documented in the
+[shim limitations](../../playwright-shim/LIMITATIONS.md).
 
 ## Surface
 
@@ -51,8 +53,10 @@ share that state and use destination-specific request headers. Standalone
 
 ## Build
 
+From the repository root (`npm run build:addon` is the default release-build wrapper):
+
 ```sh
-cargo build --release -p turbo-surf-napi
+cargo build --locked --release --manifest-path rust/Cargo.toml -p turbo-surf-napi
 ```
 
 `index.js` resolves a packaged `turbo-surf.<triple>.node` if present, else falls
@@ -61,3 +65,23 @@ it copies the cdylib to a sibling `.node` and `require`s it. On macOS the copy
 invalidates the Mach-O code signature (→ `SIGKILL` on load), so the loader re-signs
 it ad-hoc (`codesign --force -s -`) after copying. The Playwright shim + harnesses
 auto-skip if no addon is built.
+
+
+Defaults are `impersonate`, `avif`, and `jxl`. Optional `gpu-metal`, `coretext`
+and `native-sdk-frame-read` forward to the raster/render crates. NAPI has no
+`trust-anchors` or `rustls` feature of its own. Disabling NAPI's defaults does not
+disable core/page dependency defaults. See the complete
+[build feature matrix](../../../docs/BUILD-FEATURES.md).
+
+On a `gpu-metal` build, `ensure_render_init` installs recorded-WebGL execution
+and adapter-metadata callbacks. Its normal hooks install text measurement and
+canvas PNG replay; it does not install the same RGBA hook as MCP. Backend
+compilation, successful adapter initialization and guest readback are separate
+checks; see [GPU bridge](../../../docs/GPU-BRIDGE.md). Stock npm builds leave the
+optional Metal/CoreText/native-SDK switches off.
+
+For reproducible harness runs, set `TURBO_SURF_NAPI_PATH` to the exact immutable
+`.node` file. Otherwise the loader prefers the installed platform package, then a
+sibling packaged addon, then local release/debug builds. Its local fallback uses
+`rust/target`; a custom `CARGO_TARGET_DIR` is not discovered automatically. Preserve
+build inputs and artifact hashes instead of assuming the newest source is loaded.

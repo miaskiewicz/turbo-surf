@@ -46,6 +46,8 @@ mod live_layout_supports;
 mod live_layout_zoom;
 mod live_stylesheets;
 mod message_ports;
+mod network_events;
+pub use network_events::NetworkEventLog;
 mod permissions_policy;
 mod probe;
 mod referrer_meta;

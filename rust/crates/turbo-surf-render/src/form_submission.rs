@@ -777,6 +777,8 @@ impl PageSession {
                 .borrow::<FrameContexts>()
                 .engine_init_script
                 .clone();
+            let network = self.network_event_log();
+            network.push(serde_json::json!({"kind":"navigation","initiator":"form","url":pending.plan.url,"final_url":response.final_url,"status":response.status,"method":pending.plan.method,"response_received":true}));
             let mut next = PageSession::open_with_document_response_unfollowed(
                 &response.html,
                 &response.final_url,
@@ -791,18 +793,9 @@ impl PageSession {
                 Some(activation),
                 self.options,
                 &engine_init_script,
+                Some(network),
             )
             .await?;
-            let mut logs: Vec<serde_json::Value> =
-                serde_json::from_str(&self.drain_network_log()).unwrap_or_default();
-            logs.push(serde_json::json!({"kind":"navigation","initiator":"form","url":pending.plan.url,"final_url":response.final_url,"status":response.status,"method":pending.plan.method,"response_received":true}));
-            {
-                let state = next.rt.op_state();
-                let mut state = state.borrow_mut();
-                let network = state.borrow_mut::<NetworkLog>();
-                logs.extend(network.0.drain(..));
-                network.0 = logs.into();
-            }
             next.navigation_count = self
                 .navigation_count
                 .checked_add(1)

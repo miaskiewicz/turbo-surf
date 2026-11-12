@@ -2342,6 +2342,14 @@ class FrameLocator {
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+const NETWORK_EVENTS = [
+  "response",
+  "request",
+  "requestfinished",
+  "requestfailed",
+  "pageerror",
+  "console",
+];
 class Page {
   constructor(context) {
     this._html = "";
@@ -2666,12 +2674,21 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
-  async _openLiveSession(timeoutMs) {
-    const started = Date.now();
-    // First hydration promotes the existing snapshot's provisional frame wrappers.
+  _openLiveSession(timeoutMs) {
+    if (this._closed) throw new Error("Page session closed");
+    if (this._openingSession) return this._openingSession.promise;
     if (this._session != null) this._closeSession();
+    const opening = { id: native.liveNetworkLogCreate() };
+    this._openingSession = opening;
+    this._openingNetworkId = opening.id;
+    this._updateNetworkPump();
+    opening.promise = this._startLiveSession(timeoutMs, opening);
+    return opening.promise;
+  }
+  async _startLiveSession(timeoutMs, opening) {
+    const started = Date.now();
     try {
-      this._session = await native.liveOpen(
+      const session = await native.liveOpen(
         this._html,
         this._url,
         this._cookies,
@@ -2679,6 +2696,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._requestState,
         JSON.stringify({
           ...this._documentResponse,
+          hostNetworkLog: opening.id,
           viewport: [this._viewport.width, this._viewport.height],
         }),
         this._initScriptSource(),
@@ -2686,24 +2704,31 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._context._maxResponseBytes,
         this._engineInitScriptSource(),
       );
+      if (this._closed || this._openingSession !== opening) {
+        native.liveClose(session);
+        throw new Error("Page session closed");
+      }
+      this._session = session;
+      this._hydrated = true;
+      this._loadedPath = pathOf(this._url);
+      await this._refreshFromSession();
+      await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
+      if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
+        this._closeSession();
+        throw new Error(`navigation timeout after ${timeoutMs}ms`);
+      }
     } catch (error) {
       if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
+      if (this._session === opening.id) this._closeSession();
+      else native.liveClose(opening.id);
+      if (this._openingSession === opening) this._failPendingNetworkResponses(error.message);
       throw error;
-    }
-    this._hydrated = true;
-    this._loadedPath = pathOf(this._url);
-    await this._refreshFromSession();
-    try {
-      await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
-    } catch (error) {
-      if (error.name === "TimeoutError") this._closeSession();
-      throw error;
-    }
-    if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
-      this._closeSession();
-      const error = new Error(`navigation timeout after ${timeoutMs}ms`);
-      error.name = "TimeoutError";
-      throw error;
+    } finally {
+      if (this._openingSession === opening) {
+        this._openingSession = null;
+        this._openingNetworkId = null;
+      }
+      this._updateNetworkPump();
     }
   }
 
@@ -2765,21 +2790,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     if (!historyNavigation && previousUrl !== this._url) this._emit("framenavigated", this);
     if (this._html.includes("<iframe")) {
-      const frames = await this._collectSession(
-        this._session,
-        `(() => {
-        const ids = __tsNs.shimFrameIds ??= new WeakMap();
-        __tsNs.shimFrameNext ??= 1;
-        const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
-          if (!ids.has(el)) ids.set(el, __tsNs.shimFrameNext++);
-          const entry = { node: ids.get(el), contextId: __tsNs.requestContextId?.(el.contentWindow), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
-          try { entry.url = el.contentWindow.location.href; if (el.contentDocument) { entry.html = el.contentDocument.documentElement?.outerHTML || ""; entry.live = true; entry.children = walk(el.contentDocument, entry.path); } } catch (_) {}
-          return entry;
-        });
-        globalThis.__RESULT = JSON.stringify(walk(document, []));
-      })();`,
-      );
-      this._frameEntries = JSON.parse(frames);
+      await this._refreshRequestFrames();
     } else this._frameEntries = undefined;
     this._syncFrames();
     await this._drainNetworkEvents();
@@ -2793,6 +2804,30 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
       await this._reopen(admitted?.url ?? this._url);
     }
+  }
+
+  async _refreshRequestFrames() {
+    const session = this._session;
+    const frames = await this._collectSession(
+      session,
+      `(() => {
+        const ids = __tsNs.shimFrameIds ??= new WeakMap();
+        __tsNs.shimFrameNext ??= 1;
+        const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
+          if (!ids.has(el)) ids.set(el, __tsNs.shimFrameNext++);
+          const entry = { node: ids.get(el), contextId: __tsNs.requestContextId?.(el.contentWindow), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
+          try { entry.url = el.contentWindow.location.href; if (el.contentDocument) { entry.html = el.contentDocument.documentElement?.outerHTML || ""; entry.live = true; entry.children = walk(el.contentDocument, entry.path); } } catch (_) {}
+          return entry;
+        });
+        globalThis.__RESULT = JSON.stringify({contextId:__tsNs.requestContextId?.(globalThis),frames:walk(document, [])});
+      })();`,
+    );
+    if (this._session !== session) throw new Error("Frame execution context was destroyed");
+    const metadata = JSON.parse(frames);
+    this._frameEntries = metadata.frames;
+    this._requestContextId = metadata.contextId;
+    if (metadata.contextId)
+      (this._requestFrames ??= new Map()).set(metadata.contextId, this.mainFrame());
   }
 
   // Re-pump the live app and pull its DOM forward. Backs web-first assertion retry:
@@ -2812,27 +2847,68 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // Drain the live app's network log and emit Playwright `response` events. Tests
   // subscribe with `page.on('response', …)` to capture API payloads (the payroll
   // period, employments lists). Each entry → a minimal Response (url/status/json/text).
+  _updateNetworkPump() {
+    const session = this._session ?? this._openingNetworkId;
+    const needed =
+      session != null &&
+      (this._openingSession ||
+        this._responseBodies?.size ||
+        NETWORK_EVENTS.some((event) => this._listeners.get(event)?.length));
+    if (needed && this._networkPump?.session === session && this._networkPump.active) return;
+    if (this._networkPump) {
+      this._networkPump.active = false;
+      try {
+        native.liveNetworkLogWake(this._networkPump.session);
+      } catch {}
+      this._networkPump = null;
+    }
+    if (!needed) return;
+    const pump = { session, active: true, wake: "0" };
+    this._networkPump = pump;
+    this._pumpNetworkEvents(pump).catch(() => {});
+  }
+  async _pumpNetworkEvents(pump) {
+    try {
+      while (pump.active) {
+        const signal = JSON.parse(await native.liveNetworkLogWait(pump.session, pump.wake));
+        if (!pump.active) break;
+        if (signal.closed) {
+          this._closeSession();
+          break;
+        }
+        pump.wake = signal.wake;
+        await this._drainNetworkEvents();
+      }
+    } catch (error) {
+      if (pump.active) this._failPendingNetworkResponses(error.message);
+    } finally {
+      if (this._networkPump === pump) this._networkPump = null;
+    }
+  }
   async _drainNetworkEvents() {
-    if (this._session == null) return;
-    if (
-      !this._listeners.has("response") &&
-      !this._listeners.has("requestfinished") &&
-      !this._listeners.has("requestfailed") &&
-      !this._listeners.has("request") &&
-      !this._listeners.has("pageerror") &&
-      !this._listeners.has("console")
-    )
-      return;
+    if (this._networkDrain) return this._networkDrain;
+    this._networkDrain = this._readNetworkEvents();
+    try {
+      await this._networkDrain;
+    } finally {
+      this._networkDrain = null;
+    }
+  }
+  async _readNetworkEvents() {
+    const session = this._session ?? this._openingNetworkId;
+    if (session == null) return;
     let raw;
     try {
-      raw = await native.liveNetworkLog(this._session);
+      raw = await native.liveNetworkLog(session);
     } catch {
       return;
     }
-    if (!raw) return;
-    let entries;
+    if (!raw || (this._session ?? this._openingNetworkId) !== session) return;
+    let entries, revision;
     try {
-      entries = JSON.parse(raw);
+      const batch = JSON.parse(raw);
+      entries = Array.isArray(batch) ? batch : batch.entries;
+      revision = batch.revision;
     } catch {
       return;
     }
@@ -2840,9 +2916,19 @@ return String(globalThis.__RESULT ?? ""); })()`,
     let previousHop = null;
     const discardedConsoleHandles = [];
     for (const e of entries) {
+      if ((this._session ?? this._openingNetworkId) !== session) break;
       if (e.event === "console") {
-        if (this._listeners.has("console")) this._emit("console", consoleMessage(this, e));
+        if (this._listeners.get("console")?.length) this._emit("console", consoleMessage(this, e));
         else discardedConsoleHandles.push(...e.args.map((argument) => argument.id));
+        continue;
+      }
+      if (e.event === "networkoverflow") {
+        this._failPendingNetworkResponses(e.message);
+        this._emit("pageerror", new Error(e.message));
+        continue;
+      }
+      if (e.event === "responsebody") {
+        this._finishNetworkResponse(e);
         continue;
       }
       if (e.event === "pageerror") {
@@ -2852,7 +2938,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._emit("pageerror", error);
         continue;
       }
-      const resp = makeNetResponse(e, this._requestFrame(e));
+      const { response: resp, lifecycle } = this._captureNetworkResponse(e);
       if (
         e.redirectHop > 0 &&
         previousHop &&
@@ -2871,16 +2957,64 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
       this._recentResponses.push(resp);
       this._emit("response", resp);
-      this._emit("requestfinished", resp.request());
+      if (!lifecycle) this._emit("requestfinished", resp.request());
     }
     if (this._recentResponses.length > 100)
       this._recentResponses.splice(0, this._recentResponses.length - 100);
-    if (discardedConsoleHandles.length) {
-      await native.liveEvalEngineExpression(
-        this._session,
-        `(${JSON.stringify(discardedConsoleHandles)}.forEach(id => __tsNs.remoteHandleDispose(id)), '')`,
-      );
+    if (discardedConsoleHandles.length && (this._session ?? this._openingNetworkId) === session)
+      native.liveNetworkLogDiscardHandles(session, JSON.stringify(discardedConsoleHandles));
+    if (revision != null && (this._session ?? this._openingNetworkId) === session)
+      native.liveNetworkLogAcknowledge(session, revision);
+  }
+
+  _failPendingNetworkResponses(message) {
+    for (const pending of this._responseBodies?.values() ?? []) {
+      pending.entry.error = message;
+      pending.reject(new Error(message));
+      this._emit("requestfailed", pending.response.request());
     }
+    this._responseBodies?.clear();
+    this._networkResponses?.clear();
+    this._updateNetworkPump();
+  }
+  _finishNetworkResponse(entry) {
+    const pending = this._responseBodies?.get(entry.id);
+    if (!pending) return;
+    for (const name of ["body", "bodyBytes", "bodyUnavailable", "bodyIncomplete", "error"])
+      if (Object.hasOwn(entry, name)) pending.entry[name] = entry[name];
+    if (entry.error || entry.bodyIncomplete) {
+      pending.reject(new Error(entry.error || "Response body incomplete"));
+      this._emit("requestfailed", pending.response.request());
+    } else {
+      pending.resolve();
+      this._emit("requestfinished", pending.response.request());
+    }
+    this._responseBodies.delete(entry.id);
+    this._networkResponses?.delete(entry.id);
+    this._updateNetworkPump();
+  }
+  _captureNetworkResponse(entry) {
+    let lifecycle;
+    if (entry.bodyPending) {
+      lifecycle = { entry };
+      lifecycle.promise = new Promise((resolve, reject) =>
+        Object.assign(lifecycle, { resolve, reject }),
+      );
+      lifecycle.promise.catch(() => {});
+    }
+    const response = makeNetResponse(entry, this._requestFrame(entry), lifecycle);
+    if (!lifecycle) return { response };
+    lifecycle.response = response;
+    (this._responseBodies ??= new Map()).set(entry.id, lifecycle);
+    (this._networkResponses ??= new Map()).set(entry.id, response);
+    const previous = this._networkResponses.get(entry.redirectFrom);
+    if (previous) {
+      requestRedirects.get(response.request()).from = previous.request();
+      requestRedirects.get(previous.request()).to = response.request();
+      this._networkResponses.delete(entry.redirectFrom);
+    }
+    this._updateNetworkPump();
+    return { response, lifecycle };
   }
 
   _requestFrame(entry) {
@@ -2914,6 +3048,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._routeRequests = undefined;
     if (this._routeHandlers)
       this._routeHandlers = new Map((this._routes ?? []).map((route) => [route.id, route]));
+    if (this._openingNetworkId != null) native.liveClose(this._openingNetworkId);
+    this._openingNetworkId = null;
+    this._openingSession = null;
+    this._failPendingNetworkResponses("Page session closed");
     for (const frame of (this._frames ?? []).toReversed()) {
       frame._detached = true;
       this._emit("framedetached", frame);
@@ -2930,6 +3068,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
       this._session = null;
     }
+    this._updateNetworkPump();
   }
 
   // Drive an interaction in the live isolate (real DOM events → running app handlers →
@@ -3831,6 +3970,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const arr = this._listeners.get(event) ?? [];
     arr.push(fn);
     this._listeners.set(event, arr);
+    this._updateNetworkPump();
     return this;
   }
   once(event, fn) {
@@ -3849,6 +3989,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const index =
       arr?.findLastIndex((listener) => listener === fn || listener.listener === fn) ?? -1;
     if (index >= 0) this._listeners.set(event, [...arr.slice(0, index), ...arr.slice(index + 1)]);
+    this._updateNetworkPump();
     return this;
   }
   removeListener(event, fn) {
@@ -4507,13 +4648,13 @@ function makeCapturedRequest(e, frame, response = () => null) {
     async response() {
       return e.status === 0 ? null : response();
     },
-    failure: () => (e.status === 0 ? { errorText: e.error || "net::ERR_FAILED" } : null),
+    failure: () => (e.status === 0 || e.error ? { errorText: e.error || "net::ERR_FAILED" } : null),
   };
   requestRedirects.set(request, redirects);
   return request;
 }
 
-function makeNetResponse(e, frame) {
+function makeNetResponse(e, frame, lifecycle) {
   const entries = e.headers ?? (e.contentType ? [["content-type", e.contentType]] : []);
   const all = {};
   for (const [key, value] of entries) {
@@ -4544,20 +4685,24 @@ function makeNetResponse(e, frame) {
       return entries.map(([name, value]) => ({ name, value }));
     },
     async body() {
+      await lifecycle?.promise;
       if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       if (e.bodyIncomplete) throw new Error("Response body is incomplete");
       return Buffer.from(e.bodyBytes ?? e.body ?? "");
     },
     async text() {
+      await lifecycle?.promise;
       if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       return e.body ?? "";
     },
     async json() {
+      await lifecycle?.promise;
       if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       return JSON.parse(e.body ?? "null");
     },
     request: () => req,
     async finished() {
+      await lifecycle?.promise;
       return null;
     },
   };

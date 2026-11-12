@@ -50,7 +50,7 @@ pub enum ErrorCode {
     Network,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpError {
     pub message: String,
     pub code: ErrorCode,
@@ -88,6 +88,8 @@ pub struct FetchResult {
 type BodyStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<bytes::Bytes, HttpError>> + Send>>;
 pub type ResponseChunkObserver = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync>;
+/// A transport terminal result, independent of guest stream consumption.
+pub type ResponseCompletionObserver = std::sync::Arc<dyn Fn(Result<(), HttpError>) + Send + Sync>;
 
 /// A live response body, optionally backed by an owner-cancellable native cache fill.
 pub struct ResponseBody {
@@ -152,10 +154,28 @@ impl ResponseBody {
     }
     pub fn background_cache_with_observer(
         self,
-        mut owner: tokio::sync::watch::Receiver<bool>,
+        owner: tokio::sync::watch::Receiver<bool>,
         observer: Option<ResponseChunkObserver>,
     ) -> Self {
-        if self.cache_store.is_none() {
+        self.background_observed_impl(owner, observer, None, false)
+    }
+    /// Download and observe transport completion independently of guest body pulls.
+    pub fn background_observed(
+        self,
+        owner: tokio::sync::watch::Receiver<bool>,
+        observer: ResponseChunkObserver,
+        completion: ResponseCompletionObserver,
+    ) -> Self {
+        self.background_observed_impl(owner, Some(observer), Some(completion), true)
+    }
+    fn background_observed_impl(
+        self,
+        mut owner: tokio::sync::watch::Receiver<bool>,
+        observer: Option<ResponseChunkObserver>,
+        completion: Option<ResponseCompletionObserver>,
+        force: bool,
+    ) -> Self {
+        if !force && self.cache_store.is_none() {
             return self;
         }
         let (cancel, mut canceled) = tokio::sync::watch::channel(false);
@@ -224,6 +244,9 @@ impl ResponseBody {
                 }
             };
             let mut state = background.state.lock().unwrap();
+            if let Some(completion) = completion {
+                completion(error.clone().map_or(Ok(()), Err));
+            }
             state.done = true;
             state.failed = error.is_some();
             state.error = error;
@@ -3113,6 +3136,39 @@ mod io_tests {
             assert!(response.body.next_chunk().await.unwrap().is_none());
             assert_eq!(task.await.unwrap(), 0);
         }
+    }
+
+    #[tokio::test]
+    async fn host_body_observation_completes_without_guest_pulls_or_cache_admission() {
+        let port = spawn().await;
+        let response = fetch_stream(&url(port, "/"), FetchOptions::default())
+            .await
+            .unwrap();
+        let (_owner, receiver) = tokio::sync::watch::channel(false);
+        let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = bytes.clone();
+        let (completed, completion) = tokio::sync::oneshot::channel();
+        let completed = std::sync::Mutex::new(Some(completed));
+        let mut body = response.body.background_observed(
+            receiver,
+            std::sync::Arc::new(move |chunk| captured.lock().unwrap().extend_from_slice(chunk)),
+            std::sync::Arc::new(move |result| {
+                if let Some(sender) = completed.lock().unwrap().take() {
+                    let _ = sender.send(result);
+                }
+            }),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), completion)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&bytes.lock().unwrap()).contains("ok"));
+        let mut consumed = Vec::new();
+        while let Some(chunk) = body.next_chunk().await.unwrap() {
+            consumed.extend(chunk);
+        }
+        assert_eq!(consumed, *bytes.lock().unwrap());
     }
 
     #[tokio::test]

@@ -121,8 +121,13 @@ navigation tracing emits each redirect-hop request; `isNavigationRequest()` dist
 document navigations from subresources, and `frame()` uses captured native frame identity
 and document paths rather than URL matching. Delivery still follows the native log drain.
 Redirect response events preserve native per-hop status and headers; intermediate bodies
-are unavailable and reject body reads. Header-time notification remains tracked in #483;
-streamed upload bodies are not retained by the request snapshot.
+are unavailable and reject body reads. Captured fetch responses publish admitted headers
+independently of body completion, including while the isolate awaits the body. Response
+body/text/JSON and finished promises wait for real transport completion; body failures
+reject and emit requestfailed, while requestfinished follows successful completion.
+Closing the session cancels owned transport and rejects pending body promises. The host
+event queue is bounded and reports overflow instead of leaving body promises unresolved.
+Streamed upload bodies are not retained by the request snapshot.
 `page.request()` and `BrowserContext.request()` share the parent context's cookie jar
 (reads + `Set-Cookie` writeback, #230) but still don't retain the `Accept-CH` hint state,
 and concurrent live resource requests merge cookie writes/deletions rather than replacing

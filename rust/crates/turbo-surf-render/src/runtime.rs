@@ -2098,20 +2098,13 @@ struct FetchOut {
     final_url: String,
 }
 
-#[derive(Default)]
-struct NetworkLog(std::collections::VecDeque<serde_json::Value>);
+type NetworkLog = crate::NetworkEventLog;
 
 #[op2]
 fn op_page_diagnostic(state: &mut OpState, #[serde] entry: serde_json::Value) {
     let log = state.borrow_mut::<NetworkLog>();
-    if log.0.len() == 1000 {
-        log.0.pop_front();
-    }
-    log.0.push_back(entry);
+    log.push(entry);
 }
-
-#[derive(Default)]
-struct ConsoleLog(std::collections::VecDeque<serde_json::Value>);
 
 #[op2]
 fn op_console_message(
@@ -2119,17 +2112,11 @@ fn op_console_message(
     state: &mut OpState,
     #[serde] entry: serde_json::Value,
 ) {
-    let log = state.borrow_mut::<ConsoleLog>();
-    if log.0.len() == 1000 {
-        if let Some(previous) = log.0.pop_front() {
-            for argument in previous["args"].as_array().into_iter().flatten() {
-                if let Some(id) = argument["id"].as_u64() {
-                    crate::remote_handles::dispose(scope, id as u32);
-                }
-            }
-        }
+    let log = state.borrow::<NetworkLog>().clone();
+    log.push(entry);
+    for id in log.take_disposals() {
+        crate::remote_handles::dispose(scope, id);
     }
-    log.0.push_back(entry);
 }
 
 // Classic scripts are scheduled onto the host pump. Executing inside a JS eval
@@ -2984,52 +2971,57 @@ mod fetch_request_metadata_tests {
     }
 }
 
-type FetchResponseTrace = std::sync::Mutex<Vec<turbo_surf_core::net::ResponseObservation>>;
+#[derive(Default)]
+struct FetchResponseTrace(std::sync::Mutex<Option<(u64, u16)>>);
 
+impl FetchResponseTrace {
+    fn observe(
+        &self,
+        log: &NetworkLog,
+        context: &FetchEventContext,
+        hop: turbo_surf_core::net::ResponseObservation,
+    ) {
+        let mut hops = self.0.lock().unwrap();
+        let id = log.next_id();
+        let prior = hops
+            .as_ref()
+            .filter(|(_, status)| (300..400).contains(status))
+            .map(|(id, _)| *id);
+        log.push(serde_json::json!({"event":"response", "id":id,"redirectFrom":prior,
+            "url":hop.url,"method":hop.method,"status":hop.status,"ok":(200..300).contains(&hop.status),
+            "statusText":hop.status_text,"headers":hop.headers,"context":context,
+            "request":{"headers":hop.request_headers,"bodyBytes":hop.request_body},"bodyPending":true,"bodyIncomplete":true,"body":"","bodyBytes":[]}));
+        if let Some((previous, _)) = hops.as_ref() {
+            log.push(
+                serde_json::json!({"event":"responsebody","id":previous,"bodyUnavailable":true,"bodyIncomplete":false}),
+            );
+        }
+        *hops = Some((id, hop.status));
+    }
+    fn last_id(&self) -> Option<u64> {
+        self.0.lock().unwrap().as_ref().map(|(id, _)| *id)
+    }
+}
 fn append_response_trace(
     log: &mut NetworkLog,
     mut entry: serde_json::Value,
     trace: &FetchResponseTrace,
 ) {
-    let hops = std::mem::take(&mut *trace.lock().unwrap());
-    let last = hops.len().saturating_sub(1);
-    if hops.is_empty() {
-        log.0.push_back(entry);
-        return;
-    }
-    for (index, hop) in hops.into_iter().enumerate() {
-        let mut row = entry.clone();
-        row["url"] = hop.url.into();
-        row["method"] = hop.method.into();
-        row["request"] =
-            serde_json::json!({"headers":hop.request_headers,"bodyBytes":hop.request_body});
-        row["status"] = hop.status.into();
-        row["ok"] = (200..300).contains(&hop.status).into();
-        row["statusText"] = hop.status_text.into();
-        row["contentType"] = hop
-            .headers
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-            .map_or("", |(_, value)| value.as_str())
-            .into();
-        row["headers"] = serde_json::json!(hop.headers);
-        row["redirectHop"] = index.into();
-        if index != last || entry["status"] == 0 {
-            row["body"] = "".into();
-            row["bodyBytes"] = serde_json::json!([]);
-            row["bodyUnavailable"] = true.into();
-            row.as_object_mut().unwrap().remove("streamId");
-            row["bodyIncomplete"] = false.into();
+    if let Some(id) = trace.last_id() {
+        if entry["streamed"] == true && entry["status"] != 0 {
+            return;
         }
-        log.0.push_back(row);
+        entry["bodyIncomplete"] = false.into();
+        entry["event"] = "responsebody".into();
+        entry["id"] = id.into();
+        if entry["status"] == 0 {
+            entry["error"] = entry["error"]
+                .as_str()
+                .unwrap_or("Response body failed")
+                .into();
+        }
     }
-    // A transport failure following a redirect remains a separate failed request.
-    if entry["status"] == 0 {
-        log.0.push_back(entry.take());
-    }
-    while log.0.len() > 1000 {
-        log.0.pop_front();
-    }
+    log.push(entry);
 }
 
 /// Parse the method / body / headers trio from the fetch init bag, stripping
@@ -3172,6 +3164,9 @@ async fn run_stream_fetch_branch(
         .as_ref()
         .and_then(|result| result.as_ref().err())
         .map(ToString::to_string);
+    if let (Some(job), Some(id)) = (cancel_job, response_trace.last_id()) {
+        fetch_streams::attach_log(job, state.borrow().borrow::<NetworkLog>().clone(), id);
+    }
     let out = stream_response_to_out(
         response,
         target,
@@ -3211,9 +3206,6 @@ async fn run_stream_fetch_branch(
     });
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
-    if log.0.len() == 1000 {
-        log.0.pop_front();
-    }
     append_response_trace(log, entry, response_trace);
     out
 }
@@ -3834,8 +3826,8 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     );
     let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
     let response_trace = FetchResponseTrace::default();
-    let observer =
-        |hop: turbo_surf_core::net::ResponseObservation| response_trace.lock().unwrap().push(hop);
+    let event_log = state.borrow().borrow::<NetworkLog>().clone();
+    let observer = |hop| response_trace.observe(&event_log, &event_context, hop);
     let mut opts = FetchOptions {
         response_observer: Some(&observer),
         http_credentials: auth_credentials.as_ref(),
@@ -3974,9 +3966,6 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"request":request_metadata,"context":event_context,"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text,"error":failure_error});
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
-    if log.0.len() == 1000 {
-        log.0.pop_front();
-    }
     append_response_trace(log, entry, &response_trace);
     out
 }
@@ -15167,8 +15156,9 @@ fn make_runtime_with_storage_and_options(
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put(ResourceBudget(options.max_resource_bytes));
-    state.put(NetworkLog::default());
-    state.put(ConsoleLog::default());
+    let network = NetworkLog::default();
+    state.put(network.own_world());
+    state.put(network);
     state.put(driver_sync::Revision::default());
     state.put(blob_store);
     state.put(form_submission::Queue::default());
@@ -17773,7 +17763,7 @@ impl PageSession {
         activation: Option<NavigationActivationSnapshot>,
         options: PageSessionOptions,
     ) -> Result<Self, String> {
-        Self::open_with_document_response_and_host_script(
+        Self::open_with_document_response_and_host_services(
             html,
             base,
             cookies,
@@ -17787,6 +17777,7 @@ impl PageSession {
             activation,
             options,
             "",
+            None,
         )
         .await
     }
@@ -17808,6 +17799,79 @@ impl PageSession {
         options: PageSessionOptions,
         engine_init_script: &str,
     ) -> Result<Self, String> {
+        Self::open_with_document_response_and_host_services(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            engine_init_script,
+            None,
+        )
+        .await
+    }
+
+    /// Install a stable host event queue before initial document hydration.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_event_log(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        event_log: Option<crate::NetworkEventLog>,
+    ) -> Result<Self, String> {
+        Self::open_with_document_response_and_host_services(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            "",
+            event_log,
+        )
+        .await
+    }
+
+    /// Install private driver services before authored document scripts execute.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_host_services(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        engine_init_script: &str,
+        event_log: Option<crate::NetworkEventLog>,
+    ) -> Result<Self, String> {
         let mut session = Self::open_with_document_response_unfollowed(
             html,
             base,
@@ -17822,6 +17886,7 @@ impl PageSession {
             activation,
             options,
             engine_init_script,
+            event_log,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -17843,6 +17908,7 @@ impl PageSession {
         activation: Option<NavigationActivationSnapshot>,
         options: PageSessionOptions,
         engine_init_script: &str,
+        event_log: Option<crate::NetworkEventLog>,
     ) -> Result<Self, String> {
         crate::live_layout_backend::initialize_system_fonts_async().await?;
         let mut rt = make_runtime_with_storage_and_options(
@@ -17853,6 +17919,15 @@ impl PageSession {
             storage,
             options,
         );
+        if let Some(event_log) = event_log {
+            if event_log.is_closed() {
+                return Err("Page session closed".into());
+            }
+            let state = rt.op_state();
+            let mut state = state.borrow_mut();
+            state.put(event_log.own_world());
+            state.put(event_log);
+        }
         user_activation::seed(&mut rt, base, activation);
         let mut script_inventory = std::env::var_os("TURBO_SURF_JS_TRACE")
             .map(|root| {
@@ -18370,14 +18445,30 @@ impl PageSession {
         crate::message_ports::diagnostics(scope)
     }
 
+    /// Release only host-discarded handles while the isolate owns execution.
+    pub fn flush_network_disposals(&mut self) {
+        let ids = self.network_event_log().take_disposals();
+        if ids.is_empty() {
+            return;
+        }
+        let _activation = self.rt.activation_key().enter();
+        deno_core::scope!(scope, self.rt);
+        for id in ids {
+            crate::remote_handles::dispose(scope, id);
+        }
+    }
+
+    /// A Send-only host queue; reading it never enters or borrows the isolate.
+    pub fn network_event_log(&self) -> crate::NetworkEventLog {
+        self.rt.op_state().borrow().borrow::<NetworkLog>().clone()
+    }
+
     /// Host-only response records; page JS cannot read raw opaque resource bodies.
     pub fn drain_network_log(&mut self) -> String {
         let state = self.rt.op_state();
         let mut state = state.borrow_mut();
         fetch_streams::refresh_logs(&mut state);
-        let mut rows: Vec<_> = state.borrow_mut::<NetworkLog>().0.drain(..).collect();
-        rows.extend(state.borrow_mut::<ConsoleLog>().0.drain(..));
-        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+        state.borrow::<NetworkLog>().drain_snapshot()
     }
 
     /// Snapshot the opt-in interface tracer inside each active native child context.

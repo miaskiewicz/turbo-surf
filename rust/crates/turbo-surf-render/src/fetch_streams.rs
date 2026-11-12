@@ -12,7 +12,7 @@ struct Jobs {
     bodies: HashMap<u32, v8::Weak<v8::Object>>,
 }
 pub(super) struct Job {
-    pub cancel: watch::Sender<bool>,
+    pub cancel: Arc<watch::Sender<bool>>,
     pub policy: crate::runtime::FetchPolicySnapshot,
     pub frame: super::RequestFrameMetadata,
     upload: std::sync::Mutex<Option<turbo_surf_core::upload_body::UploadBody>>,
@@ -20,12 +20,21 @@ pub(super) struct Job {
     graceful_upload_abort: std::sync::atomic::AtomicBool,
     body: Mutex<Option<ResponseBody>>,
     log_bytes: Arc<std::sync::Mutex<Vec<u8>>>,
+    event: std::sync::Mutex<Option<(crate::NetworkEventLog, u64)>>,
+    log_finished: Arc<std::sync::atomic::AtomicBool>,
     background: std::sync::atomic::AtomicBool,
-    log_finished: std::sync::atomic::AtomicBool,
     collected: std::sync::atomic::AtomicBool,
+}
+fn unregister_log(state: &OpState, id: u32) {
+    if let (Some(job), Some(log)) = (job(state, id), state.try_borrow::<super::NetworkLog>()) {
+        log.unregister(&job.cancel);
+    }
 }
 pub(super) fn job(state: &OpState, id: u32) -> Option<Arc<Job>> {
     state.try_borrow::<Jobs>()?.active.get(&id).cloned()
+}
+pub(super) fn attach_log(job: &Job, log: crate::NetworkEventLog, id: u64) {
+    *job.event.lock().unwrap() = Some((log, id));
 }
 pub(super) async fn install(job: &Job, body: ResponseBody) -> bool {
     if *job.cancel.borrow() {
@@ -38,10 +47,29 @@ pub(super) async fn install(job: &Job, body: ResponseBody) -> bool {
     let log = job.log_bytes.clone();
     let observer = Arc::new(move |bytes: &[u8]| {
         let mut log = log.lock().unwrap();
-        let remaining = (16 * 1024 * 1024_usize).saturating_sub(log.len());
-        log.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+        log.extend_from_slice(bytes);
     });
-    let body = body.background_cache_with_observer(job.cancel.subscribe(), Some(observer));
+    let event = job.event.lock().unwrap().clone();
+    let body = if let Some((log, id)) = event {
+        let bytes = job.log_bytes.clone();
+        let finished = job.log_finished.clone();
+        body.background_observed(
+            job.cancel.subscribe(),
+            observer,
+            Arc::new(move |result| {
+                if finished.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                    return;
+                }
+                let body = std::mem::take(&mut *bytes.lock().unwrap());
+                log.push(
+                    serde_json::json!({"event":"responsebody","id":id,"bodyBytes":body,
+                "body":String::from_utf8_lossy(&body),"bodyIncomplete":result.is_err(),"error":result.err().map(|e|e.to_string())}),
+                );
+            }),
+        )
+    } else {
+        body.background_cache_with_observer(job.cancel.subscribe(), Some(observer))
+    };
     job.background.store(
         body.has_background_cache(),
         std::sync::atomic::Ordering::Release,
@@ -86,6 +114,7 @@ fn prepare<'s>(
         state.put(Jobs::default())
     }
     sweep_state(scope, state);
+    let event_log = state.borrow::<super::NetworkLog>().clone();
     let jobs = state.borrow_mut::<Jobs>();
     if jobs.active.len() >= 256 {
         return Err(JsErrorBox::range_error("Too many active fetch bodies"));
@@ -96,6 +125,8 @@ fn prepare<'s>(
         .ok_or_else(|| JsErrorBox::range_error("Too many fetch requests"))?;
     let id = jobs.next;
     let (cancel, _) = watch::channel(false);
+    let cancel = Arc::new(cancel);
+    event_log.register(&cancel);
     jobs.owners.insert(id, v8::Weak::new(scope, context));
     jobs.active.insert(
         id,
@@ -109,7 +140,8 @@ fn prepare<'s>(
             body: Mutex::new(None),
             log_bytes: Arc::new(std::sync::Mutex::new(Vec::new())),
             background: std::sync::atomic::AtomicBool::new(false),
-            log_finished: std::sync::atomic::AtomicBool::new(false),
+            event: std::sync::Mutex::new(None),
+            log_finished: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             collected: std::sync::atomic::AtomicBool::new(false),
         }),
     );
@@ -168,6 +200,7 @@ pub(super) fn op_fetch_upload_finish(state: &mut OpState, id: u32) {
 /// reset. The guest rejection is independent of this bounded native cleanup.
 #[op2(fast)]
 pub(super) fn op_fetch_abort(state: &mut OpState, id: u32) {
+    unregister_log(state, id);
     let Some(jobs) = state.try_borrow_mut::<Jobs>() else {
         return;
     };
@@ -212,6 +245,7 @@ pub(super) async fn until_cancelled<T>(
 
 #[op2(fast)]
 pub(super) fn op_fetch_cancel(state: &mut OpState, id: u32) {
+    unregister_log(state, id);
     let Some(jobs) = state.try_borrow_mut::<Jobs>() else {
         return;
     };
@@ -260,10 +294,18 @@ pub(super) fn op_fetch_watch_body(
 }
 pub(crate) fn sweep(scope: &mut v8::PinScope) {
     let state = JsRuntime::op_state_from(scope);
+    let ids = state
+        .borrow()
+        .borrow::<super::NetworkLog>()
+        .take_disposals();
+    for id in ids {
+        crate::remote_handles::dispose(scope, id);
+    }
     sweep_state(scope, &mut state.borrow_mut());
 }
 fn sweep_state(scope: &mut v8::PinScope, state: &mut OpState) {
     refresh_logs(state);
+    let event_log = state.borrow::<super::NetworkLog>().clone();
     let Some(jobs) = state.try_borrow_mut::<Jobs>() else {
         return;
     };
@@ -296,6 +338,7 @@ fn sweep_state(scope: &mut v8::PinScope, state: &mut OpState) {
         } else {
             continue;
         }
+        event_log.unregister(&job.cancel);
         jobs.active.remove(&id);
         jobs.bodies.remove(&id);
         jobs.owners.remove(&id);
@@ -317,6 +360,7 @@ pub(super) fn retire_context(scope: &mut v8::PinScope, context: v8::Local<v8::Co
     }
 }
 fn release_cancel(state: &mut OpState, id: u32) {
+    unregister_log(state, id);
     let Some(jobs) = state.try_borrow_mut::<Jobs>() else {
         return;
     };
@@ -327,13 +371,22 @@ fn release_cancel(state: &mut OpState, id: u32) {
     jobs.bodies.remove(&id);
 }
 fn finish_log(state: &mut OpState, id: u32, job: &Job, incomplete: bool) {
+    if job.event.lock().unwrap().is_some() {
+        return;
+    }
     job.log_finished
         .store(true, std::sync::atomic::Ordering::Release);
     let bytes = std::mem::take(&mut *job.log_bytes.lock().unwrap());
     let Some(log) = state.try_borrow_mut::<super::NetworkLog>() else {
         return;
     };
-    if let Some(entry) = log.0.iter_mut().find(|entry| entry["streamId"] == id) {
+    if let Some(entry) = log
+        .rows
+        .lock()
+        .unwrap()
+        .iter_mut()
+        .find(|entry| entry["streamId"] == id)
+    {
         entry["body"] = String::from_utf8_lossy(&bytes).into_owned().into();
         entry["bodyBytes"] = serde_json::json!(bytes);
         entry["bodyIncomplete"] = incomplete.into();
@@ -349,6 +402,9 @@ pub(super) fn refresh_logs(state: &mut OpState) {
         .map(|(id, job)| (*id, job.clone()))
         .collect();
     for (id, job) in jobs {
+        if job.event.lock().unwrap().is_some() {
+            continue;
+        }
         if !job.background.load(std::sync::atomic::Ordering::Acquire)
             || job.log_finished.load(std::sync::atomic::Ordering::Acquire)
         {
@@ -363,7 +419,13 @@ pub(super) fn refresh_logs(state: &mut OpState) {
         let Some(log) = state.try_borrow_mut::<super::NetworkLog>() else {
             continue;
         };
-        if let Some(entry) = log.0.iter_mut().find(|entry| entry["streamId"] == id) {
+        if let Some(entry) = log
+            .rows
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| entry["streamId"] == id)
+        {
             entry["body"] = String::from_utf8_lossy(&bytes).into_owned().into();
             entry["bodyBytes"] = serde_json::json!(bytes);
             entry["bodyIncomplete"] = (!complete.unwrap_or(false)).into();
@@ -379,6 +441,7 @@ pub(super) fn op_fetch_release(state: &mut OpState, id: u32) {
     release(state, id)
 }
 pub(super) fn release(state: &mut OpState, id: u32) {
+    unregister_log(state, id);
     if let Some(jobs) = state.try_borrow_mut::<Jobs>() {
         jobs.active.remove(&id);
         jobs.owners.remove(&id);

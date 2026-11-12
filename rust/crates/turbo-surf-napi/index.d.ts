@@ -50,7 +50,7 @@ export function hydrate(
   documentResponse?: string,
 ): Promise<string>;
 
-/** documentResponse is host JSON {status, referrer, headers: [[name, value], ...], viewport?: [width, height]}.
+/** documentResponse is host JSON {status, referrer, headers: [[name, value], ...], viewport?: [width, height], hostNetworkLog?: number}.
  * initScript runs in the guest global before authored scripts.
  * engineInitScript is an optional driver-only body with the private __tsNs namespace.
  * Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
@@ -78,6 +78,17 @@ export function liveEvalEngineExpression(id: number, expression: string): Promis
 export function liveEvalExpression(id: number, expression: string): Promise<string>;
 /** Collector value plus authoritative driver snapshot invalidation. */
 export function liveEvalExpressionTracked(id: number, expression: string): Promise<string>;
+/** Reserve the host transport queue before initial hydration. */
+export function liveNetworkLogCreate(): number;
+/** Drain {entries, revision} without entering a body-awaiting isolate. */
+export function liveNetworkLog(id: number): Promise<string>;
+/** Wait for a transport event or an explicit pump wake; returns {wake, closed}. */
+export function liveNetworkLogWait(id: number, wakeToken: string): Promise<string>;
+export function liveNetworkLogWake(id: number): void;
+/** Discard unobserved console handles at the next actor boundary. */
+export function liveNetworkLogDiscardHandles(id: number, ids: string): void;
+/** Acknowledge a batch only after the host has processed its entries. */
+export function liveNetworkLogAcknowledge(id: number, revision: string): void;
 /** Serialize the live session's current DOM to HTML. */
 export function liveSerialize(id: number): string;
 /** The live session's cookies (storageState JSON), incl. HttpOnly session cookies. */

@@ -13,13 +13,33 @@ const pageOf = (owner) => owner._parentPage ?? owner;
 function state(handle, owner) {
   const item = states.get(handle);
   if (!item || item.disposed) throw new Error("JSHandle is disposed");
-  const page = pageOf(item.owner);
-  if (page._closed || page._session !== item.session)
+  const page = item.page;
+  if (page._closed || (page._session ?? page._openingNetworkId) !== item.session)
     throw new Error("JSHandle execution context was destroyed or page is closed");
+  if (!item.owner) throw new Error("JSHandle execution context is not ready");
   item.owner._assertAttached?.();
   if (owner && owner !== item.owner)
     throw new Error("JSHandle belongs to a different page or frame execution context");
   return item;
+}
+async function resolvedState(handle) {
+  const item = states.get(handle);
+  if (!item || item.disposed) throw new Error("JSHandle is disposed");
+  if (item.resolveOwner) {
+    item.resolving ??= Promise.resolve().then(item.resolveOwner);
+    item.owner = await item.resolving;
+    item.resolveOwner = null;
+  }
+  return state(handle);
+}
+async function resolveArgumentHandles(value, seen = new Set()) {
+  if (states.has(value)) {
+    await resolvedState(value);
+    return;
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return;
+  seen.add(value);
+  for (const item of Object.values(value)) await resolveArgumentHandles(item, seen);
 }
 export function hasJSHandles(value, seen = new Set()) {
   if (states.has(value)) return true;
@@ -63,6 +83,7 @@ export async function handleEvaluation(owner, script, arg, retain = false) {
   const page = pageOf(owner);
   if (page._closed || page._session == null)
     throw new Error("page is closed or execution context unavailable");
+  await resolveArgumentHandles(arg);
   const argumentSource = argumentExpression(arg, owner);
   const argument = owner._realmExpression
     ? `__tsNs.remoteHandleCompile(owner,${JSON.stringify(`"use strict"; const __tsNs=arguments[0]; return (${argumentSource});`)})(__tsNs)`
@@ -86,11 +107,13 @@ export async function handleEvaluation(owner, script, arg, retain = false) {
   if (result.error) throw decodeEvaluationError(result.error);
   return retain ? createJSHandle(owner, result.value) : decodeEvaluationValue(result.value);
 }
-export function createJSHandle(owner, descriptor) {
+export function createJSHandle(owner, descriptor, resolveOwner) {
   const handle = descriptor.kind === "element" ? new ElementHandle() : new JSHandle();
   states.set(handle, {
-    owner,
-    session: pageOf(owner)._session,
+    owner: resolveOwner ? null : owner,
+    page: pageOf(owner),
+    resolveOwner,
+    session: pageOf(owner)._session ?? pageOf(owner)._openingNetworkId,
     id: descriptor.id,
     disposed: false,
   });
@@ -98,11 +121,11 @@ export function createJSHandle(owner, descriptor) {
 }
 export class JSHandle {
   async jsonValue() {
-    const item = state(this);
+    const item = await resolvedState(this);
     return handleEvaluation(item.owner, (value) => value, this);
   }
   async evaluate(fn, arg) {
-    const item = state(this);
+    const item = await resolvedState(this);
     return handleEvaluation(
       item.owner,
       ({ value, arg, source }) => (0, eval)(`(${source})`)(value, arg),
@@ -114,7 +137,7 @@ export class JSHandle {
     );
   }
   async evaluateHandle(fn, arg) {
-    const item = state(this);
+    const item = await resolvedState(this);
     return handleEvaluation(
       item.owner,
       ({ value, arg, source }) => (0, eval)(`(${source})`)(value, arg),
@@ -143,12 +166,9 @@ export class JSHandle {
     const item = states.get(this);
     if (!item || item.disposed) return;
     item.disposed = true;
-    const page = pageOf(item.owner);
-    if (!page._closed && page._session === item.session)
-      await native.liveEvalEngineExpression(
-        item.session,
-        `(__tsNs.remoteHandleDispose(${item.id}), '')`,
-      );
+    const page = item.page;
+    if (!page._closed && (page._session ?? page._openingNetworkId) === item.session)
+      native.liveNetworkLogDiscardHandles(item.session, JSON.stringify([item.id]));
   }
   toString() {
     return "JSHandle";
@@ -188,7 +208,7 @@ export class ElementHandle extends JSHandle {
     return this.isVisible().then((value) => !value);
   }
   async _action(kind, value, options = {}) {
-    const item = state(this);
+    const item = await resolvedState(this);
     if ((kind === "click" || kind === "fill") && !options.force) {
       const deadline = options.timeout === 0 ? Infinity : Date.now() + (options.timeout ?? 30000);
       for (;;) {
@@ -210,7 +230,7 @@ export class ElementHandle extends JSHandle {
     return item.owner._sessionDispatch({ __remoteHandle: item.id }, 0, kind, value);
   }
   async click(options = {}) {
-    const item = state(this),
+    const item = await resolvedState(this),
       page = pageOf(item.owner),
       before = page._url;
     const result = await this._action("click", options, options);
@@ -230,7 +250,7 @@ export class ElementHandle extends JSHandle {
     return this._action("focus");
   }
   async press(key) {
-    const item = state(this);
+    const item = await resolvedState(this);
     await this.focus();
     return (item.owner.keyboard ?? makeKeyboard(item.owner)).press(key);
   }

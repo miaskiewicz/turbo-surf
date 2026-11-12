@@ -9,6 +9,8 @@ pub(crate) struct DocumentResponse {
     pub metadata: DocumentResponseMetadata,
     pub headers: Vec<(String, String)>,
     pub viewport: Option<[u32; 2]>,
+    #[serde(rename = "hostNetworkLog")]
+    pub host_network_log: Option<u32>,
 }
 pub(crate) fn parse(value: Option<String>) -> Result<DocumentResponse> {
     value.map_or_else(

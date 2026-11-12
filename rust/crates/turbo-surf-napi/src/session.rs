@@ -235,15 +235,49 @@ enum LiveJob {
     Serialize(SyncSender<String>),
     Cookies(SyncSender<String>),
     SetCookies(String, SyncSender<()>),
-    NetworkLog(SyncSender<String>),
+    CleanupNetwork,
     Close(SyncSender<()>),
 }
 
-static LIVE: OnceLock<Mutex<HashMap<u32, MpscSender<LiveJob>>>> = OnceLock::new();
+struct LiveConnection {
+    tx: MpscSender<LiveJob>,
+    network: turbo_surf_render::NetworkEventLog,
+}
+static LIVE: OnceLock<Mutex<HashMap<u32, LiveConnection>>> = OnceLock::new();
 static LIVE_NEXT: AtomicU32 = AtomicU32::new(1);
 
-fn live_registry() -> &'static Mutex<HashMap<u32, MpscSender<LiveJob>>> {
+fn live_registry() -> &'static Mutex<HashMap<u32, LiveConnection>> {
     LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+static OPENING_NETWORKS: OnceLock<Mutex<HashMap<u32, turbo_surf_render::NetworkEventLog>>> =
+    OnceLock::new();
+fn opening_networks() -> &'static Mutex<HashMap<u32, turbo_surf_render::NetworkEventLog>> {
+    OPENING_NETWORKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn network_log(id: u32) -> Result<turbo_surf_render::NetworkEventLog> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    if let Some(connection) = live.get(&id) {
+        return Ok(connection.network.clone());
+    }
+    opening_networks()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| Error::from_reason("no such live session"))
+}
+/// Reserve a host event queue before initial hydration starts.
+#[napi]
+pub fn live_network_log_create() -> Result<u32> {
+    let id = LIVE_NEXT.fetch_add(1, Ordering::Relaxed);
+    opening_networks()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?
+        .insert(id, turbo_surf_render::NetworkEventLog::default());
+    Ok(id)
 }
 
 fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
@@ -251,7 +285,8 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
         .lock()
         .map_err(|_| "session registry poisoned")?;
     let tx = reg.get(&id).ok_or("no such live session")?;
-    tx.send(job)
+    tx.tx
+        .send(job)
         .map_err(|_| "live session worker gone".to_string())
 }
 
@@ -287,6 +322,19 @@ impl Task for LiveOpenTask {
         let client_hints = self.client_hints.clone();
         let storage = self.storage.clone();
         let response = self.response.clone();
+        let reserved = response.host_network_log;
+        let id = reserved.unwrap_or_else(|| LIVE_NEXT.fetch_add(1, Ordering::Relaxed));
+        let network = if reserved.is_some() {
+            opening_networks()
+                .lock()
+                .map_err(|_| Error::from_reason("session registry poisoned"))?
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| Error::from_reason("Invalid opening network log"))?
+        } else {
+            turbo_surf_render::NetworkEventLog::default()
+        };
+        let worker_network = network.clone();
         let init_script = std::mem::take(&mut self.init_script);
         let engine_init_script = std::mem::take(&mut self.engine_init_script);
         let initial_timeout_ms = self.initial_timeout_ms;
@@ -304,7 +352,7 @@ impl Task for LiveOpenTask {
                 }
             };
             let mut session = match rt.block_on(
-                PageSession::open_with_document_response_and_host_script(
+                PageSession::open_with_document_response_and_host_services(
                     &html,
                     &base,
                     &cookies,
@@ -323,9 +371,15 @@ impl Task for LiveOpenTask {
                         ..Default::default()
                     },
                     &engine_init_script,
+                    Some(worker_network.clone()),
                 ),
             ) {
                 Ok(s) => {
+                    if worker_network.is_closed() {
+                        s.close();
+                        let _ = open_tx.send(Err("Page session closed".into()));
+                        return;
+                    }
                     if let Some(timeout) =
                         initial_timeout_ms.filter(|_| s.hydration_diagnostics().budget_exceeded)
                     {
@@ -375,12 +429,14 @@ impl Task for LiveOpenTask {
                         continue;
                     }
                 };
+                session.flush_network_disposals();
                 match job {
                     LiveJob::Content(html, wait_until, timeout, reply) => {
                         let result = rt.block_on(session.set_content(&html, &wait_until, timeout));
                         storage_work |= wait_until == "domcontentloaded" && result.is_ok();
                         let _ = reply.send(result);
                     }
+                    LiveJob::CleanupNetwork => {}
                     LiveJob::Resize(width, height, reply) => {
                         let result = rt
                             .block_on(session.set_viewport(width, height))
@@ -410,9 +466,6 @@ impl Task for LiveOpenTask {
                     LiveJob::Serialize(reply) => {
                         let _ = reply.send(session.serialize_for_driver());
                     }
-                    LiveJob::NetworkLog(reply) => {
-                        let _ = reply.send(session.drain_network_log());
-                    }
                     LiveJob::SetCookies(cookies, reply) => {
                         session.set_cookies(&cookies);
                         let _ = reply.send(());
@@ -428,15 +481,28 @@ impl Task for LiveOpenTask {
                 }
             }
         });
-        open_rx
+        let opened = open_rx
             .recv()
-            .map_err(|_| Error::from_reason("live session thread died during open"))?
-            .map_err(Error::from_reason)?;
-        let id = LIVE_NEXT.fetch_add(1, Ordering::Relaxed);
-        live_registry()
+            .map_err(|_| "live session thread died during open".to_owned())
+            .and_then(|value| value);
+        if let Err(error) = opened {
+            opening_networks().lock().unwrap().remove(&id);
+            network.close();
+            return Err(Error::from_reason(error));
+        }
+        let mut live = live_registry()
             .lock()
-            .map_err(|_| Error::from_reason("session registry poisoned"))?
-            .insert(id, tx);
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        let mut opening = opening_networks()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        if network.is_closed() || reserved.is_some() && !opening.contains_key(&id) {
+            let (reply, _) = sync_channel(1);
+            let _ = tx.send(LiveJob::Close(reply));
+            return Err(Error::from_reason("Page session closed"));
+        }
+        live.insert(id, LiveConnection { tx, network });
+        opening.remove(&id);
         Ok(id)
     }
 
@@ -659,29 +725,47 @@ pub fn live_set_content(
     })
 }
 
-pub struct LiveNetworkLogTask {
-    id: u32,
+/// Drain transport events without queueing behind an isolate awaiting its body.
+#[napi]
+pub async fn live_network_log(id: u32) -> Result<String> {
+    Ok(network_log(id)?.drain_batch())
 }
 
+/// Wait on native transport notifications without occupying the isolate actor.
 #[napi]
-impl Task for LiveNetworkLogTask {
-    type Output = String;
-    type JsValue = String;
-    fn compute(&mut self) -> Result<String> {
-        let (reply, rx) = sync_channel(1);
-        live_send(self.id, LiveJob::NetworkLog(reply)).map_err(Error::from_reason)?;
-        rx.recv()
-            .map_err(|_| Error::from_reason("live session dropped network log reply"))
-    }
-    fn resolve(&mut self, _env: Env, out: String) -> Result<String> {
-        Ok(out)
-    }
+pub async fn live_network_log_wait(id: u32, wake: String) -> Result<String> {
+    let wake = wake
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid network wake token"))?;
+    let log = network_log(id)?;
+    let (wake, closed) = log.wait_for_events(wake).await;
+    Ok(serde_json::json!({"wake":wake.to_string(),"closed":closed}).to_string())
+}
+#[napi]
+pub fn live_network_log_wake(id: u32) -> Result<()> {
+    network_log(id)?.wake();
+    Ok(())
+}
+/// Discard unobserved console argument IDs at the next safe isolate boundary.
+#[napi]
+pub fn live_network_log_discard_handles(id: u32, ids: String) -> Result<()> {
+    let ids = serde_json::from_str::<Vec<u32>>(&ids)
+        .map_err(|_| Error::from_reason("Invalid console argument IDs"))?;
+    network_log(id)?.discard_handles(ids);
+    let _ = live_send(id, LiveJob::CleanupNetwork);
+    Ok(())
 }
 
-/// Drain native response records without exposing raw resource bodies to guest JS.
+/// Acknowledge only the event batch already processed by the host driver.
 #[napi]
-pub fn live_network_log(id: u32) -> AsyncTask<LiveNetworkLogTask> {
-    AsyncTask::new(LiveNetworkLogTask { id })
+pub fn live_network_log_acknowledge(id: u32, revision: String) -> Result<()> {
+    let revision = revision
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid network revision"))?;
+    if !network_log(id)?.acknowledge(revision) {
+        return Err(Error::from_reason("Invalid network revision"));
+    }
+    Ok(())
 }
 
 /// Return a synchronous driver query without pumping the page event loop.
@@ -727,15 +811,22 @@ pub fn live_set_cookies(id: u32, cookies: String) -> Result<()> {
 /// Close a live session: reset the binding, drop the isolate, unregister (sync).
 #[napi]
 pub fn live_close(id: u32) -> Result<()> {
-    let tx = {
-        let mut reg = live_registry()
+    let (tx, opening) = {
+        let mut live = live_registry()
             .lock()
             .map_err(|_| Error::from_reason("session registry poisoned"))?;
-        reg.remove(&id)
+        let mut opening = opening_networks()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        (live.remove(&id), opening.remove(&id))
     };
-    if let Some(tx) = tx {
+    if let Some(log) = opening {
+        log.close();
+    }
+    if let Some(connection) = tx {
+        connection.network.close();
         let (reply, rx) = sync_channel(1);
-        if tx.send(LiveJob::Close(reply)).is_ok() {
+        if connection.tx.send(LiveJob::Close(reply)).is_ok() {
             let _ = rx.recv();
         }
     }

@@ -263,6 +263,7 @@ pub struct LiveOpenTask {
     initial_timeout_ms: Option<u32>,
     response: crate::document_response::DocumentResponse,
     init_script: String,
+    engine_init_script: String,
     html: String,
     base_url: String,
     cookies: String,
@@ -287,6 +288,7 @@ impl Task for LiveOpenTask {
         let storage = self.storage.clone();
         let response = self.response.clone();
         let init_script = std::mem::take(&mut self.init_script);
+        let engine_init_script = std::mem::take(&mut self.engine_init_script);
         let initial_timeout_ms = self.initial_timeout_ms;
         let viewport = response.viewport;
         let max_resource_bytes = self.max_resource_bytes;
@@ -302,7 +304,7 @@ impl Task for LiveOpenTask {
                 }
             };
             let mut session = match rt.block_on(
-                PageSession::open_with_document_response_and_options(
+                PageSession::open_with_document_response_and_host_script(
                     &html,
                     &base,
                     &cookies,
@@ -320,6 +322,7 @@ impl Task for LiveOpenTask {
                         viewport,
                         ..Default::default()
                     },
+                    &engine_init_script,
                 ),
             ) {
                 Ok(s) => {
@@ -455,6 +458,7 @@ pub fn live_open(
     init_script: Option<String>,
     timeout_ms: Option<u32>,
     max_resource_bytes: Option<u32>,
+    engine_init_script: Option<String>,
 ) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
@@ -465,6 +469,7 @@ pub fn live_open(
         initial_timeout_ms: timeout_ms.filter(|timeout| *timeout > 0),
         response: crate::document_response::parse(document_response)?,
         init_script: init_script.unwrap_or_default(),
+        engine_init_script: engine_init_script.unwrap_or_default(),
         html,
         base_url,
         cookies: cookies.unwrap_or_default(),

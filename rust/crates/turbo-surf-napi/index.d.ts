@@ -51,7 +51,8 @@ export function hydrate(
 ): Promise<string>;
 
 /** documentResponse is host JSON {status, referrer, headers: [[name, value], ...], viewport?: [width, height]}.
- * initScript runs through the trusted native entry before authored scripts.
+ * initScript runs in the guest global before authored scripts.
+ * engineInitScript is an optional driver-only body with the private __tsNs namespace.
  * Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
  * real DOM events into the running app. Returns a session id. */
 export function liveOpen(
@@ -64,6 +65,7 @@ export function liveOpen(
   initScript?: string,
   timeoutMs?: number,
   maxResourceBytes?: number,
+  engineInitScript?: string,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;

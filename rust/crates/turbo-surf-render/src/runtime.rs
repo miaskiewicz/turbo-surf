@@ -4819,6 +4819,7 @@ impl Default for WindowMessageLimits {
 #[derive(Default)]
 struct FrameContexts {
     init_script: String,
+    engine_init_script: String,
     contexts: Vec<v8::Global<v8::Context>>,
     core: Option<v8::Global<v8::Value>>,
     messages: std::collections::VecDeque<WindowMessage>,
@@ -5170,7 +5171,47 @@ impl MessageTargetOrigin {
     }
 }
 
+#[op2(fast, reentrant)]
+fn op_shim_binding_scripts(
+    scope: &mut v8::PinScope,
+    #[string] engine: String,
+    #[string] guest: String,
+    #[string] install: String,
+) -> Result<(), JsErrorBox> {
+    let contexts = {
+        let state = JsRuntime::op_state_from(scope);
+        let mut state = state.borrow_mut();
+        let frames = state.borrow_mut::<FrameContexts>();
+        frames.engine_init_script = engine.clone();
+        frames.init_script = guest;
+        frames.contexts.clone()
+    };
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if native_frame_is_retired(context) {
+            continue;
+        }
+        let scope = &mut v8::ContextScope::new(scope, context);
+        for source in [&engine, &install] {
+            if !source.is_empty() {
+                crate::browser_env::run_engine_script(scope, &format!("\"use strict\";{source}"))
+                    .ok_or_else(|| JsErrorBox::generic("frame driver script installation failed"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn run_frame_init_script(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
+    let engine_source = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .engine_init_script
+        .clone();
+    if !engine_source.is_empty() {
+        crate::browser_env::run_engine_script(scope, &engine_source)
+            .ok_or_else(|| JsErrorBox::generic("frame driver init script failed"))?;
+    }
     let source = JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<FrameContexts>()
@@ -5208,6 +5249,18 @@ fn frame_namespace<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s,
     }
     crate::browser_env::engine_namespace(scope)
 }
+#[op2]
+fn op_shim_binding_bag<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let context = window.get_creation_context(scope)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let namespace = frame_namespace(scope)?;
+    let key = v8::String::new(scope, "shimBindings")?;
+    namespace.get(scope, key.into())
+}
+
 /// A function the realm's own bootstrap registered through `op_set_host_capabilities`
 /// (never a page-reachable namespace lookup).
 #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
@@ -6772,11 +6825,13 @@ fn retire_frame_tree_impl<'s>(
                     let old_scope = &mut v8::ContextScope::new(scope, context);
                     let _ = call_frame_helper(old_scope, "cancelModuleGraphs", &[]);
                     let _ = call_frame_helper(old_scope, "cancelDocumentTasks", &[]);
+                    let _ = call_frame_helper(old_scope, "shimCancelBindings", &[]);
                     let _ = call_frame_helper(old_scope, "retireResourceDocument", &[]);
                 }
                 if context.get_slot::<FrameRetired>().is_none() {
                     crate::script_inventory::retire_frame(scope, context);
                 }
+                crate::shim_bindings::retire(context);
                 fetch_streams::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
                 blob_urls::retire_context(scope, context);
@@ -8739,6 +8794,9 @@ deno_core::extension!(
         fetch_streams::op_fetch_release,
         fetch_streams::op_fetch_read,
         op_fetch,
+        crate::shim_bindings::op_shim_binding_pending,
+        op_shim_binding_scripts,
+        op_shim_binding_bag,
         op_page_diagnostic,
         op_console_message,
         network_transports::op_connect_allowed,
@@ -8894,6 +8952,27 @@ let __markDocumentInteractive;
 const __stringify = JSON.stringify, __String = String;
 __G.requestContextId = window => ops.op_csp_context(window);
 __G.requestFrameSnapshot = () => __stringify({__proto__:null,url:location.href,id:ops.op_csp_context(globalThis)});
+__G.shimAuthorizeRoute = (document, url) => ops.op_csp_request(document, url, "connect-src", "");
+__G.shimBindingPending = active => ops.op_shim_binding_pending(__document, active);
+__G.shimBindingScripts = (engine, guest, install) => ops.op_shim_binding_scripts(engine, guest, install);
+__G.shimBindingBag = window => ops.op_shim_binding_bag(window);
+__G.shimBindingId = () => ops.op_csp_context(__document);
+__G.shimBindingPromise = executor => new __intrinsicPromise(executor);
+const __shimError = Error;
+__G.shimBindingError = (message, name) => {
+  const error = new __shimError(message);
+  __intrinsicDefine(error,"name",{__proto__:null,value:name,writable:true,configurable:true});
+  return error;
+};
+const __shimOwnKeys = Object.keys;
+__G.shimCancelBindings = () => {
+  const pending=__G.shimBindings?.pending;
+  if (!pending) return;
+  for (const id of __shimOwnKeys(pending)) {
+    const call=pending[id]; delete pending[id];
+    call.reject(__G.shimBindingError("Frame has been detached", "Error"));
+  }
+};
 // Intrinsics captured at install time (turbo-surf#87): engine code on the document
 // load and node insertion paths calls these, never a builtin it looks up at run time
 // (a page can replace any prototype method, accessor or static, and install index
@@ -15223,8 +15302,10 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let mut state = state.borrow_mut();
         let frames = state.borrow_mut::<FrameContexts>();
         let init_script = std::mem::take(&mut frames.init_script);
+        let engine_init_script = std::mem::take(&mut frames.engine_init_script);
         *frames = FrameContexts {
             init_script,
+            engine_init_script,
             ..Default::default()
         };
         // A new top-level document starts a new browsing context group.
@@ -16193,6 +16274,11 @@ async fn drain_event_loop_until_completion(
             if let Some(outcome) = drain_next_background_resource_task(rt) {
                 return outcome;
             }
+            if completion.is_none() && crate::shim_bindings::pending(rt) {
+                // Poll real IO and due timers, then free the actor for the
+                // embedder's reply rather than parking on its external work.
+                return std::task::Poll::Ready(Some(Ok(())));
+            }
             // Native I/O and official system timers use real monotonic time.
             // Do not leap a Window timer past their earlier wake-up. Keep one
             // precise wake so a stalled native request cannot starve the timer.
@@ -17102,36 +17188,65 @@ async fn hydrate_installed_document(
     run_lifecycle(rt, "documentLoading").map_err(|error| error.to_string())?;
     namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
     hydration_phase(rt, HydrationPhase::InitScript);
+    let engine_source = rt
+        .op_state()
+        .borrow()
+        .borrow::<FrameContexts>()
+        .engine_init_script
+        .clone();
+    if !engine_source.is_empty() {
+        execute_engine_script(rt, &engine_source)?;
+    }
     if !init_script.is_empty() {
         rt.execute_script("<init-script>", init_script.to_string())
             .map_err(|e| e.to_string())?;
     }
     hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
     namespace_call(rt, "startInitialHydrate", &[])?;
-    drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
-    hydration_phase(rt, HydrationPhase::ModuleScripts);
-    drain_module_scripts(rt, base).await?;
-    hydration_phase(rt, HydrationPhase::DocumentInteractive);
-    run_lifecycle(rt, "dispatchDocumentInteractive").map_err(|error| error.to_string())?;
-    // HTML load waits for script graph completion, images/styles and frames,
-    // independently of unrelated fetches or a module's pending top-level await.
-    hydration_phase(rt, HydrationPhase::LoadResources);
-    drain_event_loop_until(rt, Some("documentLoadReady")).await?;
-    hydration_phase(rt, HydrationPhase::DocumentComplete);
-    run_lifecycle(rt, "dispatchDocumentComplete")?;
-    // Unified event-loop pump. A single "run scripts+timers, then drain" pass isn't
-    // enough for a real SPA: React kicks a fetch, yields, the fetch resolves, React
-    // schedules MORE work (a timer via its MessageChannel), which schedules another
-    // fetch… So loop — run the hydration pump, drain async ops (microtasks + fetches +
-    // injected-script loads), check whether JS still has queued work — until it
-    // quiesces. The watchdog bounds wall time; MAX_PUMPS bounds a pathological spin.
-    hydration_phase(rt, HydrationPhase::PostLoadHydration);
-    run_post_load_hydration_pumps(rt, base).await?;
-    run_lifecycle(rt, "dispatchDocumentComplete").map_err(|error| error.to_string())?;
-    hydration_phase(rt, HydrationPhase::PostLoadQuiescence);
-    drain_to_quiescence(rt).await?;
-    hydration_phase(rt, HydrationPhase::Complete);
+    resume_host_hydration(rt, base).await?;
     Ok(crate::browser_env::document_html())
+}
+
+async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
+    loop {
+        let phase = rt.op_state().borrow().borrow::<HydrationProgress>().phase;
+        let next = match phase {
+            HydrationPhase::ParserAndDeferredScripts => {
+                drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
+                HydrationPhase::ModuleScripts
+            }
+            HydrationPhase::ModuleScripts => {
+                drain_module_scripts(rt, base).await?;
+                HydrationPhase::DocumentInteractive
+            }
+            HydrationPhase::DocumentInteractive => {
+                run_lifecycle(rt, "dispatchDocumentInteractive")?;
+                HydrationPhase::LoadResources
+            }
+            HydrationPhase::LoadResources => {
+                drain_event_loop_until(rt, Some("documentLoadReady")).await?;
+                HydrationPhase::DocumentComplete
+            }
+            HydrationPhase::DocumentComplete => {
+                run_lifecycle(rt, "dispatchDocumentComplete")?;
+                HydrationPhase::PostLoadHydration
+            }
+            HydrationPhase::PostLoadHydration => {
+                run_post_load_hydration_pumps(rt, base).await?;
+                run_lifecycle(rt, "dispatchDocumentComplete")?;
+                HydrationPhase::PostLoadQuiescence
+            }
+            HydrationPhase::PostLoadQuiescence => {
+                drain_to_quiescence(rt).await?;
+                HydrationPhase::Complete
+            }
+            _ => return Ok(()),
+        };
+        if crate::shim_bindings::pending(rt) {
+            return Ok(());
+        }
+        hydration_phase(rt, next);
+    }
 }
 
 // Compatibility only: evaluate module syntax in classic script elements (claimed via the engine namespace's `takeModuleScript`) through
@@ -17180,7 +17295,13 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
                 // Promise.all never resolves (→ the app never hydrates, no error).
                 let element = namespace_value(rt, "currentModuleEl");
                 namespace_call(rt, "setCurrentScript", &[HostArg::Value(element)])?;
-                let ev = rt.mod_evaluate(id).await;
+                let evaluation = rt.mod_evaluate(id);
+                if crate::shim_bindings::pending(rt) {
+                    drop(evaluation);
+                    namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
+                    return Ok(());
+                }
+                let ev = evaluation.await;
                 namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
                 if let Err(e) = ev {
                     eprintln!("module eval error ({spec_str}): {e}");
@@ -17301,6 +17422,9 @@ async fn drain_to_quiescence_with_scripts(
     rt: &mut JsRuntime,
     execute_document_scripts: bool,
 ) -> Result<(), String> {
+    if crate::shim_bindings::pending(rt) {
+        return drain_event_loop(rt).await;
+    }
     // Fresh virtual-time window for this interaction so its transitions (e.g. a closing
     // MUI modal's Fade-exit timer) fire + complete even when the clock is already large.
     namespace_call(rt, "resetTimerBudget", &[])?;
@@ -17649,6 +17773,41 @@ impl PageSession {
         activation: Option<NavigationActivationSnapshot>,
         options: PageSessionOptions,
     ) -> Result<Self, String> {
+        Self::open_with_document_response_and_host_script(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            "",
+        )
+        .await
+    }
+
+    /// Install private driver bindings separately from guest-global init scripts.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_host_script(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        engine_init_script: &str,
+    ) -> Result<Self, String> {
         let mut session = Self::open_with_document_response_unfollowed(
             html,
             base,
@@ -17662,6 +17821,7 @@ impl PageSession {
             response_metadata,
             activation,
             options,
+            engine_init_script,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -17682,6 +17842,7 @@ impl PageSession {
         response_metadata: crate::DocumentResponseMetadata,
         activation: Option<NavigationActivationSnapshot>,
         options: PageSessionOptions,
+        engine_init_script: &str,
     ) -> Result<Self, String> {
         crate::live_layout_backend::initialize_system_fonts_async().await?;
         let mut rt = make_runtime_with_storage_and_options(
@@ -17705,6 +17866,10 @@ impl PageSession {
             .borrow_mut()
             .borrow_mut::<FrameContexts>()
             .init_script = init_script.to_owned();
+        rt.op_state()
+            .borrow_mut()
+            .borrow_mut::<FrameContexts>()
+            .engine_init_script = engine_init_script.to_owned();
         rt.op_state().borrow_mut().put(response_metadata);
         rt.op_state().borrow_mut().borrow_mut::<ResponseHeaders>().0 = response_headers.to_vec();
         {
@@ -17886,6 +18051,8 @@ impl PageSession {
                             .execute_script("<session-eval>", script.to_string())
                             .map_err(|e| e.to_string())?;
                     }
+                    let base = self.rt.op_state().borrow().borrow::<Base>().0.clone();
+                    resume_host_hydration(&mut self.rt, &base).await?;
                     drain_to_quiescence(&mut self.rt).await
                 },
             )
@@ -17897,6 +18064,12 @@ impl PageSession {
         // drain — the budget is normally hit later on background churn (analytics
         // polling, React's idle scheduler). Returning the reached state beats throwing.
         self.rt.v8_isolate().cancel_terminate_execution();
+        self.hydration_diagnostics.progress = self
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<HydrationProgress>()
+            .clone();
         match drained {
             Err(e) if !(e.contains("terminat") || e.contains("execution")) => Err(e),
             _ => self

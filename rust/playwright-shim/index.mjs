@@ -36,6 +36,7 @@ import {
 } from "./evaluation-codec.mjs";
 import { makeKeyboard } from "./keyboard.mjs";
 import { captureAssets } from "./screenshot-resources.mjs";
+import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -199,7 +200,7 @@ function validateResourceTagOptions(kind, opts) {
     );
 }
 
-// --- page.route helpers (shim-side, fulfill-only) --------------------------
+// --- page.route helpers ---------------------------------------------------
 // Normalize a route pattern + fulfill payload into a JSON-serializable record.
 // `patternKey` is the original user pattern as a string so `unroute` can match.
 // Convert one HAR entry (Playwright / Chrome DevTools format) into the same
@@ -220,53 +221,60 @@ function harEntryToRoute(entry) {
     status: resp.status ?? 200,
     headers,
     contentType: content.mimeType ?? null,
-    body: content.text == null ? "" : String(content.text),
+    body:
+      content.encoding === "base64"
+        ? Buffer.from(content.text ?? "", "base64")
+        : content.text == null
+          ? ""
+          : String(content.text),
   };
-  // Replay a HAR entry as a fulfill-only handler so the init script can treat
-  // every route uniformly (handlerSource eval'd in the isolate, see #281).
-  const handlerSource = `(async (route) => { await route.fulfill(${JSON.stringify(payload)}); })`;
-  return { kind: "glob", pattern: url, flags: "", patternKey: url, handlerSource };
+  // HAR replay uses the same host dispatch and response encoding as normal routes.
+  return {
+    id: randomUUID(),
+    kind: "glob",
+    pattern: url,
+    flags: "",
+    patternKey: url,
+    handler: (route) => route.fulfill(payload),
+  };
 }
 
 function normalizeRoute(pattern, handler) {
   const isRegex = pattern instanceof RegExp;
-  // Serialize the handler so the init script can re-create it inside the live
-  // isolate and invoke it PER request with a live Request wrapper (#281). We
-  // wrap in parens so a `function` / `async function` declaration-form source
-  // evaluates to the function expression rather than a statement.
+  if (!isRegex && typeof pattern !== "string")
+    throw new TypeError("Route pattern must be a string or RegExp");
+  if (typeof handler !== "function") throw new TypeError("Route handler must be a function");
   return {
     kind: isRegex ? "regex" : "glob",
     pattern: isRegex ? pattern.source : String(pattern),
     flags: isRegex ? pattern.flags : "",
     patternKey: isRegex ? pattern.source : String(pattern),
-    handlerSource: `(${String(handler)})`,
+    id: randomUUID(),
     handler,
   };
 }
 
 // Build an init script that monkey-patches `fetch` (and XMLHttpRequest for the
 // common open+send path) inside the live isolate. Routes are matched in the
-// order they were registered; a RegExp source uses `new RegExp(...)`, a glob
+// reverse registration order; a RegExp source uses `new RegExp(...)`, a glob
 // supports `**` (any chars) and `*` (any non-slash chars), with substring as a
 // final fallback.
-function buildRouteInitScript(routes) {
+function buildRouteInitScript(routes, bindingName) {
   const table = JSON.stringify(
     (routes ?? []).map((r) => ({
       kind: r.kind,
       pattern: r.pattern,
       flags: r.flags,
-      handlerSource: r.handlerSource,
+      id: r.id,
     })),
   );
   return `(() => {
+    const invokeHost = globalThis[${JSON.stringify(bindingName)}];
     const previous = globalThis.fetch && globalThis.fetch.__turboRouteState;
     const state = previous || {routes: [], fetch: globalThis.fetch, xhr: globalThis.XMLHttpRequest};
     const routes = state.routes;
-    const next = (${table}).map((r) => {
-      let fn = null;
-      try { fn = (0, eval)(r.handlerSource); } catch (_e) { /* malformed handler — route is a no-op */ }
-      return { kind: r.kind, pattern: r.pattern, flags: r.flags, fn };
-    });
+    state.requests ??= new Map();
+    const next = ${table};
     routes.splice(0, routes.length, ...next);
     if (!routes.length) {
       if (previous) { globalThis.fetch = state.fetch; globalThis.XMLHttpRequest = state.xhr; }
@@ -295,13 +303,13 @@ function buildRouteInitScript(routes) {
       } catch (_e) { /* non-URL input — raw-only matching */ }
       return out;
     };
-    const find = (url, start = routes.length - 1) => {
+    const find = (url, start = routes.length - 1, table = routes) => {
       const urls = candidates(url);
       // Playwright runs the LATEST handler first (reverse registration order) so
       // a per-test override can shadow a globally registered mock. Iterate the
       // route table from the end.
       for (let i = start; i >= 0; i--) {
-        const r = routes[i];
+        const r = table[i];
         for (const u of urls) {
           try {
             if (r.kind === "regex") {
@@ -320,60 +328,65 @@ function buildRouteInitScript(routes) {
       const h = Object.assign({}, o.headers || {});
       if (o.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
         h["content-type"] = o.contentType;
-      return new Response(o.body == null ? "" : String(o.body), { status: o.status == null ? 200 : o.status, headers: h });
+      return new Response(o.status === 204 || o.status === 205 || o.status === 304 ? null : new Uint8Array(o.bodyBytes || []), { status: o.status == null ? 200 : o.status, headers: h });
     };
-    // Invoke a route handler per request (#281): build a Request wrapper
-    // carrying the LIVE url/method/headers, run handler(route, req), and
-    // return a {fulfill?, action?} decision the caller turns into a Response.
-    const runHandler = async (r, url, method, init, headers) => {
-      let fulfilled = null;
-      let action = null;
-      const body = init && init.body != null ? init.body : null;
-      const req = {
-        url: () => url,
-        method: () => String(method || "GET").toUpperCase(),
-        postData: () => (typeof body === "string" ? body : null),
-        postDataJSON: () => { try { return typeof body === "string" ? JSON.parse(body) : null; } catch (_e) { return null; } },
-        headers: () => headers || {},
-        resourceType: () => "xhr",
-      };
-      const route = {
-        request: () => req,
-        fulfill: async (opts) => { fulfilled = opts == null ? {} : opts; },
-        continue: async () => { action = "continue"; },
-        abort: async () => { action = "abort"; },
-        fallback: async () => { action = "fallback"; },
-      };
-      try { if (typeof r.fn === "function") await r.fn(route, req); } catch (_e) { /* handler threw — leave inert */ }
-      return { fulfilled, action };
+    // Only request records and decisions cross the isolate boundary; callbacks stay in Node.
+    const requestRecord = async (input, init, resourceType) => {
+      const request = new Request(input, init);
+      const headers = {}; request.headers.forEach((v,k)=>{headers[k]=v;});
+      const bodyBytes=request.body === null ? null : Array.from(new Uint8Array(await request.arrayBuffer()));
+      const requestId = state.nextRequest = (state.nextRequest || 0) + 1;
+      state.requests.set(requestId, request);
+      const record = {requestId, url:request.url, method:request.method, headers,
+        bodyBytes,
+        credentials:request.credentials, mode:request.mode, cache:request.cache,
+        redirect:request.redirect, referrer:request.referrer, referrerPolicy:request.referrerPolicy,
+        resourceType};
+      Object.defineProperty(record, 'signal', {value:request.signal});
+      return record;
     };
-    const runRouteChain = async (first, url, method, init, headers) => {
+    const routeDecision = async (pending, signal, requestId) => {
+      let abort;
+      const canceled = new Promise((_,reject)=>{
+        abort=()=>{invokeHost({cancel:requestId}).catch(()=>{});reject(signal.reason);};
+        if(signal.aborted) abort(); else signal.addEventListener('abort',abort,{once:true});
+      });
+      try { return await Promise.race([pending,canceled]); }
+      finally {signal.removeEventListener('abort',abort);}
+    };
+    const runRouteChain = async (first, request, chain) => {
       let route = first;
+      const signal = request.signal;
+      const originalUrl = request.url;
       while (route) {
-        const decision = await runHandler(route, url, method, init, headers);
-        if (decision.action !== "fallback") return decision;
-        route = find(url, routes.indexOf(route) - 1);
+        const decision = await routeDecision(invokeHost({id:route.id, request}), signal, request.requestId);
+        if (decision.request) request = decision.request;
+        if (decision.action !== "fallback") return {...decision, request};
+        route = find(originalUrl, chain.indexOf(route) - 1, chain);
       }
-      return {fulfilled: null, action: "continue"};
+      return {fulfilled: null, action: "continue", request};
     };
-    const collectHeaders = (init) => {
-      const h = init && init.headers;
-      if (!h) return {};
-      if (typeof h.forEach === "function") { const out = {}; h.forEach((v, k) => { out[k] = v; }); return out; }
-      if (typeof h === "object") return Object.assign({}, h);
-      return {};
+    const finishRequest = request => {
+      state.requests.delete(request.requestId);
+      invokeHost({complete:request.requestId}).catch(()=>{});
     };
+    const original = (request, signal) => state.fetch(request.url, {
+      ...request, signal, body:request.bodyBytes === null ? undefined : new Uint8Array(request.bodyBytes),
+    });
     if (typeof globalThis.fetch === "function") {
       const origFetch = globalThis.fetch;
       globalThis.fetch = async function (input, init) {
         const url = typeof input === "string" ? input : (input && input.url) || "";
-        const method = (init && init.method) || (typeof input === "object" && input && input.method) || "GET";
-        const r = find(url);
+        const chain = routes.slice();
+        const r = find(url, chain.length - 1, chain);
         if (!r) return origFetch(input, init);
-        const { fulfilled, action } = await runRouteChain(r, url, method, init || {}, collectHeaders(init));
-        if (fulfilled) return synth(fulfilled);
-        if (action === "abort") throw new TypeError("net::ERR_ABORTED");
-        return origFetch(input, init);
+        const request = await requestRecord(input, init, "fetch");
+        try {
+          const decision = await runRouteChain(r, request, chain);
+          if (decision.fulfilled) return synth(decision.fulfilled);
+          if (decision.action === "abort") throw new TypeError("net::ERR_" + (decision.errorCode || "ABORTED").toUpperCase());
+          return await original(decision.request, request.signal);
+        } finally {finishRequest(request);}
       };
       Object.defineProperty(globalThis.fetch, "__turboRouteState", {value: state});
     }
@@ -422,10 +435,11 @@ function buildRouteInitScript(routes) {
         this._real.send(body);
       };
       MockXHR.prototype.send = function (body) {
-        this._mocked = find(this._url);
+        const chain = routes.slice();
+        this._mocked = find(this._url, chain.length - 1, chain);
         if (this._mocked) {
           const self = this;
-          runRouteChain(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled, action }) => {
+          requestRecord(new URL(this._url, location.href).href, {method:this._method,body,headers:this._reqHeaders}, "xhr").then(request => runRouteChain(this._mocked, request, chain).finally(()=>finishRequest(request))).then(({ fulfilled, action, request }) => {
             if (action === "abort") {
               self.readyState = 4;
               self.status = 0;
@@ -435,11 +449,11 @@ function buildRouteInitScript(routes) {
               self._emit("loadend");
               return;
             }
-            if (!fulfilled) { self._sendReal(body); return; }
+            if (!fulfilled) { self._url=request.url; self._method=request.method; self._reqHeaders=request.headers; self._real=null; self._sendReal(request.bodyBytes === null ? null : new Uint8Array(request.bodyBytes)); return; }
             const o = fulfilled;
             self.readyState = 4;
             self.status = o.status == null ? 200 : o.status;
-            const b = o.body == null ? "" : String(o.body);
+            const b = new TextDecoder().decode(new Uint8Array(o.bodyBytes || []));
             self.responseText = b;
             self.response = b;
             self._emit("readystatechange");
@@ -461,15 +475,18 @@ function buildRouteInitScript(routes) {
 function buildExposeInitScript(names) {
   if (!names || !names.length) return "";
   const list = JSON.stringify(names);
-  return `(() => {
-    const bag = (globalThis.__tsExpose = globalThis.__tsExpose || { q: [], n: 0, pending: new Map() });
+  return `"use strict"; (() => {
+    const bag = __tsNs.shimBindings ||= {__proto__:null,q:{__proto__:null,length:0},n:0,nonce:__tsNs.shimBindingId(),error:__tsNs.shimBindingError,pending:{__proto__:null},evaluations:{__proto__:null}};
     const define = (name) => {
       if (typeof globalThis[name] === "function" && globalThis[name].__ts) return;
       const fn = function (...args) {
         const id = ++bag.n;
-        return new Promise((resolve, reject) => {
-          bag.pending.set(id, { resolve, reject });
-          bag.q.push({ id, name, args });
+        __tsNs.shimBindingPending(true);
+        return __tsNs.shimBindingPromise((resolve, reject) => {
+          let settled=false;
+          const finish=()=>{if(!settled){settled=true;__tsNs.shimBindingPending(false);}};
+          bag.pending[id] = {__proto__:null, resolve:value=>{finish();resolve(value);}, reject:error=>{finish();reject(error);} };
+          bag.q[bag.q.length++] = {__proto__:null, id, name, args };
         });
       };
       try { Object.defineProperty(fn, "__ts", { value: true }); } catch (_e) {}
@@ -479,7 +496,6 @@ function buildExposeInitScript(names) {
         try { globalThis[name] = fn; } catch (_e2) {}
       }
     };
-    globalThis.__tsExposeDefine = define;
     for (const n of ${list}) define(n);
   })();`;
 }
@@ -2364,10 +2380,20 @@ class Page {
   _initScriptSource() {
     const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
     if (this._routeInitScript) all.unshift(this._routeInitScript);
-    const exposeNames = [...this._mergedBindings().keys()];
-    const exposeScript = buildExposeInitScript(exposeNames);
-    if (exposeScript) all.unshift(exposeScript);
     return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
+  }
+
+  _engineInitScriptSource() {
+    return buildExposeInitScript([...this._mergedBindings().keys()]);
+  }
+  async _installNativeBindings() {
+    if (!this._live) return;
+    const engine = this._engineInitScriptSource();
+    await native.liveEvalEngine(
+      this._session,
+      `"use strict"; __tsNs.shimBindingScripts(${JSON.stringify(engine)}, ${JSON.stringify(this._initScriptSource())}, ${JSON.stringify(this._routeInitScript ?? "")});
+${engine}`,
+    );
   }
 
   // Merge context-level and page-level exposed bindings; page wins on name clash.
@@ -2375,6 +2401,11 @@ class Page {
     const out = new Map();
     for (const [k, v] of this._context._bindings ?? []) out.set(k, v);
     for (const [k, v] of this._bindings ?? []) out.set(k, v);
+    if (this._routeHandlers?.size)
+      out.set(this._routeBindingName, {
+        fn: (source, data) => this._invokeHostRoute(source, data),
+        isBinding: true,
+      });
     return out;
   }
 
@@ -2386,19 +2417,102 @@ class Page {
 return String(globalThis.__RESULT ?? ""); })()`,
     );
   }
+  _routeRequestController(frame, id) {
+    this._routeRequests ??= new WeakMap();
+    let requests = this._routeRequests.get(frame);
+    if (!requests) this._routeRequests.set(frame, (requests = new Map()));
+    if (!requests.has(id)) requests.set(id, new AbortController());
+    return { requests, controller: requests.get(id) };
+  }
+  async _invokeHostRoute(source, data) {
+    const { requests, controller } = this._routeRequestController(
+      source.frame,
+      data.request?.requestId ?? data.cancel ?? data.complete,
+    );
+    if (data.cancel !== undefined) {
+      controller.abort(new Error("Route's request has been aborted"));
+      return {};
+    }
+    if (data.complete !== undefined) {
+      requests.delete(data.complete);
+      return {};
+    }
+    this._routeLifetime ??= new AbortController();
+    const signal = AbortSignal.any([this._routeLifetime.signal, controller.signal]);
+    if (signal.aborted) throw signal.reason;
+    const entry = this._routeHandlers.get(data.id);
+    if (!entry) throw new Error("Route registration is no longer available");
+    const document = source.frame === this ? "document" : source.frame._realmExpression("document");
+    const allowed = await native.liveEvalEngine(
+      this._session,
+      `globalThis.__RESULT = String(__tsNs.shimAuthorizeRoute(${document}, ${JSON.stringify(data.request.url)}));`,
+    );
+    if (allowed !== "true") throw new TypeError("Failed to fetch");
+    if (!data.request.overriddenHeaders)
+      data = {
+        ...data,
+        request: {
+          ...data.request,
+          headers: {
+            ...Object.fromEntries(
+              Object.entries(this._context._headers).map(([k, v]) => [k.toLowerCase(), v]),
+            ),
+            ...data.request.headers,
+          },
+        },
+      };
+    const session = this._session;
+    const createRequest = (request) =>
+      makeCapturedRequest(
+        {
+          url: request.url,
+          method: request.method,
+          request,
+          context: { resourceType: request.resourceType },
+        },
+        source.frame,
+      );
+    const fetchResponse = async (request, options) => {
+      if (signal.aborted) throw signal.reason;
+      if (this._closed || session !== this._session)
+        throw new Error("Route's page has been closed or navigated");
+      const expression = `(async () => {
+        const request = ${JSON.stringify(request)};
+        const state = globalThis.fetch.__turboRouteState;
+        const response = await state.fetch(request.url, {
+          ...request, signal:state.requests.get(request.requestId)?.signal, body:request.bodyBytes === null ? undefined : new Uint8Array(request.bodyBytes),
+        });
+        return JSON.stringify({url:response.url,status:response.status,statusText:response.statusText,
+          headers:Array.from(response.headers),bodyBytes:Array.from(new Uint8Array(await response.arrayBuffer()))});
+      })()`;
+      if (
+        Object.keys(options).some((key) => !["url", "method", "postData", "headers"].includes(key))
+      )
+        throw new Error("Unsupported route.fetch option");
+      const raw = await this._evaluateWithBindings(
+        source.frame === this ? expression : source.frame._realmExpression(expression),
+      );
+      if (this._closed || session !== this._session)
+        throw new Error("Route's page has been closed or navigated");
+      return routeResponse(JSON.parse(raw));
+    };
+    return invokeHostRoute(entry.handler, data, createRequest, fetchResponse, signal);
+  }
+
   async _takeBindingCalls() {
     const raw = await this._collectSession(
       this._session,
-      `(() => {
+      `"use strict"; (() => {
           const out = [];
           const seen = new Set();
           const walk = (w, framePath = []) => {
             if (!w || seen.has(w)) return;
             seen.add(w);
             try {
-              const bag = w.__tsExpose;
+              const bag = __tsNs.shimBindingBag(w);
               if (bag && bag.q && bag.q.length) {
-                for (const c of bag.q.splice(0)) out.push({ ...c, framePath });
+                const queue=bag.q; bag.q={__proto__:null,length:0};
+                for(let i=0;i<queue.length;i++) out.push({...queue[i], framePath, nonce:bag.nonce});
               }
             } catch (_e) {}
             let n = 0;
@@ -2426,17 +2540,16 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const args = Array.isArray(call.args) ? call.args : [];
     if (!entry.isBinding) return entry.fn(...args);
     const path = call.framePath ?? [];
+    if (path.length && !this._requestFrames?.has(call.nonce)) await this._refreshFromSession();
     this._syncFrames();
-    const frame =
-      path.length === 0
-        ? this.mainFrame()
-        : this._frames.find(
-            (candidate) => JSON.stringify(candidate._path) === JSON.stringify(path),
-          );
-    if (!frame) throw new Error("Exposed binding caller frame is detached");
+    const frame = path.length === 0 ? this.mainFrame() : this._requestFrames?.get(call.nonce);
+    if (!frame || frame._detached || (path.length && frame._requestContextId !== call.nonce))
+      throw new Error("Exposed binding caller frame is detached");
+    call.originFrame = frame;
     return entry.fn({ page: this, context: this._context, frame }, ...args);
   }
   async _settleBindingCall(call, entry) {
+    const session = this._session;
     let payload;
     try {
       const value = await this._invokeBindingCall(call, entry);
@@ -2446,38 +2559,61 @@ return String(globalThis.__RESULT ?? ""); })()`,
         error: { name: String(error?.name ?? "Error"), message: String(error?.message ?? error) },
       });
     }
+    if (session !== this._session || this._closed) return;
+    const path = call.originFrame?._path ?? call.framePath ?? [];
+    if (call.originFrame?._detached) return;
     await this._collectSession(
-      this._session,
-      `(() => {
+      session,
+      `"use strict"; (() => {
       let realm = globalThis;
-      for (const index of ${JSON.stringify(call.framePath ?? [])}) realm = realm.frames[index];
-      const bag = realm.__tsExpose, pending = bag?.pending?.get(${call.id});
-      if (!pending) return;
-      bag.pending.delete(${call.id});
+      for (const index of ${JSON.stringify(path)}) realm = realm.frames[index];
+      const bag = __tsNs.shimBindingBag(realm), pending = bag?.pending?.[${call.id}];
+      if (!pending || bag.nonce !== ${JSON.stringify(call.nonce)}) return;
+      delete bag.pending[${call.id}];
       const result = ${payload};
       if (result.error) {
-        const error = new realm.Error(result.error.message); error.name = result.error.name;
-        pending.reject(error);
+        pending.reject(bag.error(result.error.message,result.error.name));
       } else pending.resolve(result.value);
     })()`,
     );
   }
-  async _drainBindings() {
+  async _drainBindings(deadline = Infinity) {
     if (this._session == null || this._draining) return;
     const handlers = this._mergedBindings();
     if (handlers.size === 0) return;
     this._draining = true;
     let changed = false;
     try {
-      for (let round = 0; round < 100; round++) {
+      const pending = new Set();
+      let rounds = 0;
+      let failure;
+      while (this._session != null) {
+        if (Date.now() >= deadline) {
+          const error = new Error("Timeout exceeded while waiting for host bindings");
+          error.name = "TimeoutError";
+          this._routeLifetime?.abort(error);
+          this._routeLifetime = undefined;
+          throw error;
+        }
         const calls = await this._takeBindingCalls();
-        if (!calls.length) break;
-        changed = true;
+        if (calls.length && ++rounds > 100)
+          throw new Error("Exposed binding call budget exhausted");
         for (const call of calls) {
           const entry = handlers.get(call.name);
-          if (entry) await this._settleBindingCall(call, entry);
+          if (!entry) continue;
+          changed = true;
+          const task = this._settleBindingCall(call, entry)
+            .catch((error) => {
+              failure ??= error;
+            })
+            .finally(() => pending.delete(task));
+          pending.add(task);
         }
-        if (round === 99) throw new Error("Exposed binding call budget exhausted");
+        if (!pending.size && !calls.length) break;
+        // Keep servicing calls while an async host callback awaits another page operation.
+        if (pending.size)
+          await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 1))]);
+        if (failure) throw failure;
       }
       if (changed) await this._refreshFromSession();
     } finally {
@@ -2489,24 +2625,27 @@ return String(globalThis.__RESULT ?? ""); })()`,
     await native.liveEvalEngine(
       this._session,
       `(() => {
-      const bag = globalThis.__tsExpose;
-      bag.evaluations ??= new Map();
-      bag.evaluations.set(${id}, null);
+      const bag = __tsNs.shimBindings;
+      bag.evaluations[${id}] = null;
       Promise.resolve().then(() => (${body})).then(
         value => {
-          try { bag.evaluations.set(${id}, JSON.stringify({value: (${encodeEvaluationValue.toString()})(value)})); }
-          catch (error) { bag.evaluations.set(${id}, JSON.stringify({error: (${encodeEvaluationError.toString()})(error)})); }
+          try { bag.evaluations[${id}] = JSON.stringify({value: (${encodeEvaluationValue.toString()})(value)}); }
+          catch (error) { bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); }
         },
-        error => bag.evaluations.set(${id}, JSON.stringify({error: (${encodeEvaluationError.toString()})(error)})));
+        error => {bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)});});
     })()`,
     );
     const deadline = Date.now() + 5000;
     try {
       while (Date.now() < deadline) {
-        await this._drainBindings();
+        if (this._session == null || this._closed)
+          throw new Error("Page has been closed or navigated");
+        await this._drainBindings(deadline);
+        if (this._session == null || this._closed)
+          throw new Error("Page has been closed or navigated");
         const raw = await native.liveEvalEngine(
           this._session,
-          `globalThis.__RESULT = globalThis.__tsExpose.evaluations.get(${id}) ?? '';`,
+          `globalThis.__RESULT = __tsNs.shimBindings.evaluations[${id}] ?? '';`,
         );
         if (raw) {
           const result = JSON.parse(raw);
@@ -2522,7 +2661,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (this._session != null)
         await native.liveEvalEngine(
           this._session,
-          `globalThis.__tsExpose?.evaluations?.delete(${id});`,
+          `delete __tsNs.shimBindings?.evaluations?.[${id}];`,
         );
     }
   }
@@ -2545,6 +2684,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._initScriptSource(),
         timeoutMs,
         this._context._maxResponseBytes,
+        this._engineInitScriptSource(),
       );
     } catch (error) {
       if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
@@ -2553,7 +2693,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._hydrated = true;
     this._loadedPath = pathOf(this._url);
     await this._refreshFromSession();
-    await this._drainBindings();
+    try {
+      await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
+    } catch (error) {
+      if (error.name === "TimeoutError") this._closeSession();
+      throw error;
+    }
     if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
       this._closeSession();
       const error = new Error(`navigation timeout after ${timeoutMs}ms`);
@@ -2661,6 +2806,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       /* terminated mid-drain — refresh reads best-effort state */
     }
     await this._refreshFromSession();
+    await this._drainBindings();
   }
 
   // Drain the live app's network log and emit Playwright `response` events. Tests
@@ -2763,6 +2909,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   _closeSession() {
+    this._routeLifetime?.abort(new Error("Route's page has been closed or navigated"));
+    this._routeLifetime = undefined;
+    this._routeRequests = undefined;
+    if (this._routeHandlers)
+      this._routeHandlers = new Map((this._routes ?? []).map((route) => [route.id, route]));
     for (const frame of (this._frames ?? []).toReversed()) {
       frame._detached = true;
       this._emit("framedetached", frame);
@@ -3144,6 +3295,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   async setContent(html, opts = {}) {
     if (this._closed) throw new Error("page is closed");
+    this._routeLifetime?.abort(new Error("Route's document has been replaced"));
+    this._routeLifetime = undefined;
+    this._routeRequests = undefined;
     const waitUntil = opts.waitUntil ?? "load";
     if (!["load", "domcontentloaded", "networkidle"].includes(waitUntil))
       throw new Error(`Unsupported setContent waitUntil: ${waitUntil}`);
@@ -3701,6 +3855,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return this.off(event, fn);
   }
   _emit(event, payload) {
+    if (event === "framedetached") {
+      const requests = this._routeRequests?.get(payload);
+      for (const controller of requests?.values() ?? [])
+        controller.abort(new Error("Route's frame has been detached"));
+      this._routeRequests?.delete(payload);
+    }
     for (const fn of this._listeners.get(event) ?? []) fn(payload);
   }
 
@@ -3804,6 +3964,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._imageCache = undefined;
     closeScreenshotScene(this);
     this._closed = true;
+    this._routeHandlers?.clear();
+    this._routes = [];
     const position = this._context._pages.indexOf(this);
     if (position >= 0) this._context._pages.splice(position, 1);
     this._emit("close");
@@ -3944,25 +4106,27 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   // --- unsupported → honest throws ---
   pdf = UNSUPPORTED("page.pdf", PIXEL);
-  // page.route(url, handler) — shim-side only, by monkey-patching `fetch` inside
-  // the live isolate via an init script. The handler is serialized and re-run
-  // PER request inside the isolate against a real Request wrapper (live
-  // url/method/headers), so handlers that branch on `req.url()` work (#281).
-  // Caveat: the serialized handler loses outer-scope closures — captured host
-  // identifiers and host-side `await` on Node helpers don't cross into V8.
-  // Pattern: string (substring OR glob with `*`/`**`) or RegExp. `continue` and
-  // `fallback` walks older handlers; `continue` uses the network and `abort` rejects.
-  // XHR goes through this same wrapper for the common xhr.open+send path.
+  // Route callbacks run in Node through the existing asynchronous binding pump.
+  // Guest fetch/XHR await serialized decisions; route.fetch bypasses the wrapper
+  // while retaining the initiating realm's native network services.
+  async _installRoutes() {
+    this._routeBindingName ??= "__turboHostRoute_" + randomUUID().replaceAll("-", "");
+    this._routeHandlers ??= new Map();
+    for (const route of this._routes) this._routeHandlers.set(route.id, route);
+    this._routeInitScript = buildRouteInitScript(this._routes, this._routeBindingName);
+    // Retired callbacks stay until navigation so already-queued requests can settle.
+    if (this._live) {
+      await this._installNativeBindings();
+      await native.liveEvalEngine(this._session, `"use strict"; ${this._routeInitScript}`);
+    }
+  }
   async route(urlPattern, handler) {
     this._routes = this._routes ?? [];
     this._routes.push(normalizeRoute(urlPattern, handler));
-    this._routeInitScript = buildRouteInitScript(this._routes);
+    await this._installRoutes();
     // Inject into the CURRENT live isolate too, so a route registered after
     // goto intercepts subsequent fetches without requiring a re-navigation
     // (turbo-surf#282). Updating the existing table avoids stale wrapper chains.
-    if (this._live && this._routeInitScript) {
-      await native.liveEvalEngine(this._session, this._routeInitScript);
-    }
   }
   // An optional handler removes only that registration, preserving older matches.
   async unroute(urlPattern, handler) {
@@ -3971,10 +4135,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._routes = this._routes.filter(
       (r) => r.patternKey !== key || (handler && r.handler !== handler),
     );
-    this._routeInitScript = buildRouteInitScript(this._routes);
-    if (this._live && this._routeInitScript) {
-      await native.liveEvalEngine(this._session, this._routeInitScript);
-    }
+    await this._installRoutes();
   }
   // page.routeFromHAR(har, options?) — read a Playwright/Chrome HAR file and
   // register each `log.entries[].request.url` as a route returning that entry's
@@ -4000,10 +4161,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (!matches(route.pattern)) continue;
       this._routes.push(route);
     }
-    this._routeInitScript = buildRouteInitScript(this._routes);
-    if (this._live && this._routeInitScript) {
-      await native.liveEvalEngine(this._session, this._routeInitScript);
-    }
+    await this._installRoutes();
   }
   pause = UNSUPPORTED("page.pause", "no inspector UI");
   // Persistent JS→host binding. The init-script path re-defines
@@ -4026,7 +4184,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._bindings = this._bindings ?? new Map();
     this._bindings.set(String(name), { fn, isBinding: true });
     if (this._live) {
-      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+      await this._installNativeBindings();
     }
   }
   async exposeFunction(name, fn) {
@@ -4034,7 +4192,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._bindings = this._bindings ?? new Map();
     this._bindings.set(String(name), { fn, isBinding: false });
     if (this._live) {
-      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+      await this._installNativeBindings();
     }
   }
 
@@ -4658,7 +4816,7 @@ class BrowserContext {
     this._bindings.set(String(name), { fn, isBinding: true });
     for (const page of this._pages) {
       if (page._live) {
-        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+        await page._installNativeBindings();
       }
     }
   }
@@ -4667,7 +4825,7 @@ class BrowserContext {
     this._bindings.set(String(name), { fn, isBinding: false });
     for (const page of this._pages) {
       if (page._live) {
-        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+        await page._installNativeBindings();
       }
     }
   }

@@ -770,6 +770,13 @@ impl PageSession {
             // No ActivationKey guard is live here. Hydrate the response with its real
             // policy/metadata, then dispose the retired isolate after the swap.
             let activation = self.navigation_activation_snapshot();
+            let engine_init_script = self
+                .rt
+                .op_state()
+                .borrow()
+                .borrow::<FrameContexts>()
+                .engine_init_script
+                .clone();
             let mut next = PageSession::open_with_document_response_unfollowed(
                 &response.html,
                 &response.final_url,
@@ -783,6 +790,7 @@ impl PageSession {
                 metadata,
                 Some(activation),
                 self.options,
+                &engine_init_script,
             )
             .await?;
             let mut logs: Vec<serde_json::Value> =

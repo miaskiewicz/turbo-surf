@@ -55,6 +55,7 @@ mod runtime;
 mod screenshot_metadata;
 mod script_fetch;
 mod script_inventory;
+mod shim_bindings;
 mod storage_gc;
 mod storage_inbox;
 pub use storage_inbox::StorageEventSignal;

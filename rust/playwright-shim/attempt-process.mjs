@@ -1,3 +1,4 @@
+import { nodePreloadArgs } from "./node-preloads.mjs";
 import { fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +27,13 @@ function startWorker(entry) {
   delete env.NODE_OPTIONS;
   const child = fork(new URL("./attempt-worker.mjs", import.meta.url), [entry], {
     env,
-    execArgv: ["--import", fileURLToPath(new URL("./register.mjs", import.meta.url))],
+    execArgv: [
+      ...nodePreloadArgs(process.execArgv, process.env.NODE_OPTIONS, [
+        new URL("./register.mjs", import.meta.url).href,
+      ]),
+      "--import",
+      fileURLToPath(new URL("./register.mjs", import.meta.url)),
+    ],
     stdio: ["ignore", "inherit", "inherit", "ipc"],
   });
   const worker = { child, ready: null };

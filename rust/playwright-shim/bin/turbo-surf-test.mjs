@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { nodePreloadArgs } from "../node-preloads.mjs";
 // `turbo-surf test` entry — the shim's answer to `npx playwright test`. Reads a
 // `playwright.config.*`, boots any `webServer`s, and runs each project as a
 // `node --import ../register.mjs --test …` sweep. See config.mjs for scope.
@@ -153,6 +154,7 @@ function runProject(project, files, reporter) {
   const captureTap = kind === "html";
   const nodeReporter = reporterToNode(kind);
   const args = [
+    ...nodePreloadArgs(process.execArgv, process.env.NODE_OPTIONS, [REGISTER]),
     "--import",
     REGISTER,
     "--test",

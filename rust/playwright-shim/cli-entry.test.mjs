@@ -101,3 +101,54 @@ test("webServer stays available throughout global setup and teardown", async () 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("CLI forwards explicit alias preloads through isolated attempts", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "surf-preload-cli-"));
+  try {
+    await mkdir(join(directory, "specs"));
+    await writeFile(join(directory, "value.mjs"), "export const value = 42;");
+    await writeFile(
+      join(directory, "alias-loader.mjs"),
+      `export function resolve(specifier, context, next) { return specifier === '@app/value' ? {url:new URL('./value.mjs', import.meta.url).href,shortCircuit:true} : next(specifier, context); }`,
+    );
+    await writeFile(
+      join(directory, "preload.mjs"),
+      `import {register} from 'node:module';register('./alias-loader.mjs',import.meta.url);`,
+    );
+    await writeFile(join(directory, "environment.cjs"), `globalThis.environmentPreload = true;`);
+    await writeFile(
+      join(directory, "playwright.config.mjs"),
+      `export default {testDir: './specs',testMatch:'*.spec.mjs',globalSetup:'./setup.mjs',timeout:5000};`,
+    );
+    await writeFile(
+      join(directory, "setup.mjs"),
+      `import {value} from '@app/value';export default ()=>{if(value!==42) throw Error('setup alias');};`,
+    );
+    await writeFile(
+      join(directory, "specs/alias.spec.mjs"),
+      `import {test,expect} from '@playwright/test';import {value} from '@app/value';import {writeFileSync} from 'node:fs';test('alias in isolated attempt',()=>{expect(value).toBe(42);expect(globalThis.environmentPreload).toBe(true);expect(process.env.NODE_OPTIONS).toBe(undefined);writeFileSync(new URL('../body.txt',import.meta.url),'passed');});`,
+    );
+    const env = {
+      ...process.env,
+      NODE_OPTIONS: `--require "${join(directory, "environment.cjs")}"`,
+    };
+    delete env.NODE_TEST_CONTEXT;
+    const result = await exec(
+      process.execPath,
+      [
+        "--import",
+        join(directory, "preload.mjs"),
+        cli,
+        "--config",
+        join(directory, "playwright.config.mjs"),
+        "--reporter",
+        "tap",
+      ],
+      { cwd: directory, env, timeout: 20000 },
+    );
+    assert.match(result.stdout, /# pass 1/);
+    assert.equal(await readFile(join(directory, "body.txt"), "utf8"), "passed");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

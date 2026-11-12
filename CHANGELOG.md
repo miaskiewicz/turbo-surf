@@ -4,7 +4,7 @@
 
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.3` revision
-`8a29893a1c9984c01165ee382645649c79f50810` ([producer PR #489](https://github.com/miaskiewicz/turbo-dom/pull/489)). The dependency graph
+`ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6` ([producer PR #489](https://github.com/miaskiewicz/turbo-dom/pull/489)). The dependency graph
 continues to use one `turbo-dom-v8` 150.4.1. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.

@@ -533,6 +533,9 @@ class Locator {
     this._testId = opts.testId ?? null;
     this._parent = opts.parent ?? null;
     this._composite = opts.composite ?? null;
+    // Each wrapper preserves the preceding selection stage (including nth) before filtering.
+    this._querySource = opts.querySource ?? null;
+    this._queryFilter = opts.queryFilter ?? null;
     // nth-aware scope chain ([{sel, idx, filter}, …]) for nested locators where a parent had
     // `.nth(i)` or `.filter(...)` — a CSS-concat selector can't express "the i-th (or
     // text-filtered) match's subtree", so the live drive walks this chain via
@@ -565,6 +568,7 @@ class Locator {
 
   _needsQuery() {
     return (
+      !!this._querySource ||
       !!this._selector?.includes(":visible") ||
       !!this._parent?._needsQuery() ||
       (!!this._composite &&
@@ -583,6 +587,7 @@ class Locator {
       const matches = ${this._liveElementsExpression()};
       const all = Array.from(document.querySelectorAll('*'));
       const positions = new Map(all.map((element, index) => [element, index]));
+      // Mark a detached copy: reparsing may repair invalid live HTML and reorder nodes.
       const copy = document.documentElement.cloneNode(true);
       const copies = [copy, ...copy.querySelectorAll('*')];
       const indices = matches.map(element => positions.get(element));
@@ -679,18 +684,18 @@ class Locator {
     return this.nth(-1);
   }
   nth(i) {
+    if (this._needsQuery()) return new Locator(this._page, null, { querySource: this, index: i });
     // An earlier index has already reduced the set to at most one element.
     const index =
       this._index == null ? i : i === 0 || i === -1 ? this._index : Number.MAX_SAFE_INTEGER;
     return this._derive({ index, filter: this._filter });
   }
   filter(opts = {}) {
-    const pred = buildFilter(this._page, opts);
-    return this._derive({
-      index: this._index,
-      filter: pred,
-      filterSpec: serializableFilterSpec(opts),
-    });
+    for (const key of ["has", "hasNot"]) {
+      if (opts[key] != null && (!(opts[key] instanceof Locator) || opts[key]._page !== this._page))
+        throw new Error("Filter locators must belong to the same frame");
+    }
+    return new Locator(this._page, null, { querySource: this, queryFilter: { ...opts } });
   }
   _combine(other, operation) {
     if (!(other instanceof Locator) || other._page !== this._page)
@@ -721,29 +726,51 @@ class Locator {
   _hasComposite() {
     return this._needsQuery() || this._composite != null || !!this._parent?._hasComposite();
   }
-  _liveBaseExpression() {
+  _liveBaseExpression(context = "document") {
+    if (this._querySource) return this._querySource._liveElementsExpression(context);
     if (this._composite) {
       const { left, right, operation } = this._composite;
-      return `(() => { const left = ${left._liveElementsExpression()}; const right = ${right._liveElementsExpression()}; const keep = new Set(right); return (${orderedLocatorElements.toString()})(${operation === "and" ? "left.filter(element => keep.has(element))" : "[...left, ...right]"}); })()`;
+      return `(() => { const left = ${left._liveElementsExpression(context)}; const right = ${right._liveElementsExpression(context)}; const keep = new Set(right); return (${orderedLocatorElements.toString()})(${operation === "and" ? "left.filter(element => keep.has(element))" : "[...left, ...right]"}); })()`;
     }
     if (this._selector) {
-      const roots = this._parent ? this._parent._liveElementsExpression() : "[document]";
+      const roots = this._parent ? this._parent._liveElementsExpression(context) : `[${context}]`;
       return `(${orderedLocatorElements.toString()})(${roots}.flatMap(root => Array.from(${!isXPathSelector(this._selector) ? `(${queryVisibleSelector.toString()})(root, ${JSON.stringify(this._selector.replace(/^css=/, ""))}, ${renderedVisibility.toString()})` : `__tsNs.tcQuerySelector(root, ${JSON.stringify(this._selector)})`})))`;
     }
     if (this._testId) {
       const { attribute, source, flags, root } = this._testId;
-      return `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `document.querySelectorAll(${JSON.stringify(root)})` : "[document]"}; const matches = []; for (const root of roots) for (const element of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(element.getAttribute(${JSON.stringify(attribute)}))) matches.push(element); } return (${orderedLocatorElements.toString()})(matches); })()`;
+      return `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `(${context}).querySelectorAll(${JSON.stringify(root)})` : `[${context}]`}; const matches = []; for (const root of roots) for (const element of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(element.getAttribute(${JSON.stringify(attribute)}))) matches.push(element); } return (${orderedLocatorElements.toString()})(matches); })()`;
     }
     if (this._getBy) {
       const g = this._getBy;
-      return `(() => { __tsNs.tcGetBy(${JSON.stringify(g.kind)}, ${JSON.stringify(g.value)}, ${JSON.stringify(g.name)}, ${JSON.stringify(g.root)}, ${JSON.stringify(g.options ?? {})}); const all = Array.from(document.querySelectorAll('*')); return JSON.parse(globalThis.__RESULT).map(match => all[match.idx]); })()`;
+      return `(() => { __tsNs.tcGetBy(${JSON.stringify(g.kind)}, ${JSON.stringify(g.value)}, ${JSON.stringify(g.name)}, null, ${JSON.stringify(g.options ?? {})}); const all = Array.from(document.querySelectorAll('*')); const roots = ${g.root ? `Array.from((${context}).querySelectorAll(${JSON.stringify(g.root)}))` : `[${context}]`}; return JSON.parse(globalThis.__RESULT).map(match => all[match.idx]).filter(element => roots.some(root => root !== element && root.contains(element))); })()`;
     }
     throw new Error("Custom locator expressions cannot be composed in a live DOM");
   }
-  _liveElementsExpression() {
-    let source = this._liveBaseExpression();
+  _liveElementsExpression(context = "document") {
+    let source = this._liveBaseExpression(context);
     if (this._parent && !this._selector)
-      source = `(() => { const roots = ${this._parent._liveElementsExpression()}; return ${source}.filter(element => roots.some(root => root !== element && root.contains(element))); })()`;
+      source = `(() => { const roots = ${this._parent._liveElementsExpression(context)}; return ${source}.filter(element => roots.some(root => root !== element && root.contains(element))); })()`;
+    if (this._queryFilter) {
+      const opts = this._queryFilter;
+      const checks = [];
+      for (const key of ["hasText", "hasNotText"]) {
+        const value = opts[key];
+        if (value == null) continue;
+        const check =
+          value instanceof RegExp
+            ? `new RegExp(${JSON.stringify(value.source)}, ${JSON.stringify(value.flags)}).test(element.textContent || '')`
+            : `String(element.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(${JSON.stringify(String(value).replace(/\s+/g, " ").trim().toLowerCase())})`;
+        checks.push(key === "hasNotText" ? `!(${check})` : check);
+      }
+      for (const key of ["has", "hasNot"])
+        if (opts[key]) {
+          const check = `(${opts[key]._liveElementsExpression("element")}).length > 0`;
+          checks.push(key === "hasNot" ? `!(${check})` : check);
+        }
+      if (opts.visible != null)
+        checks.push(`(${renderedVisibility.toString()})(element) === ${!!opts.visible}`);
+      source = `${source}.filter(element => ${checks.length ? checks.join(" && ") : "true"})`;
+    }
     if (this._filter) {
       if (!this._filterSpec)
         throw new Error("This locator filter cannot be composed in a live DOM");
@@ -893,6 +920,7 @@ class Locator {
   }
   async innerHTML() {
     await this._prepareQuery();
+    if (this._needsQuery()) return this._readElement((element) => element.innerHTML);
     return this._singleMatch()?.html ?? null;
   }
   async allTextContents() {
@@ -1531,32 +1559,6 @@ function orderedLocatorElements(elements) {
 
 function strictLocatorError(count) {
   return new Error(`strict mode violation: locator resolved to ${count} elements`);
-}
-
-function buildFilter(_page, opts) {
-  const checks = [];
-  if (opts.hasText != null) {
-    const re = opts.hasText instanceof RegExp ? opts.hasText : null;
-    checks.push((m) => (re ? re.test(m.text ?? "") : (m.text ?? "").includes(opts.hasText)));
-  }
-  if (opts.hasNotText != null) {
-    checks.push((m) => !(m.text ?? "").includes(opts.hasNotText));
-  }
-  return (m) => checks.every((c) => c(m));
-}
-
-// Serializable subset of a `.filter()` for the live scope chain — __tcResolveScoped re-applies
-// it in the isolate so children of a filtered parent scope to the RIGHT element. Only plain
-// string hasText/hasNotText survive; regex / has / hasNot return null (those keep the
-// JS-predicate-only path: correct for reads, no live child scoping).
-function serializableFilterSpec(opts) {
-  if (opts.has != null || opts.hasNot != null) return null;
-  if (opts.hasText != null && typeof opts.hasText !== "string") return null;
-  if (opts.hasNotText != null && typeof opts.hasNotText !== "string") return null;
-  const spec = {};
-  if (typeof opts.hasText === "string") spec.hasText = opts.hasText;
-  if (typeof opts.hasNotText === "string") spec.hasNotText = opts.hasNotText;
-  return spec.hasText != null || spec.hasNotText != null ? spec : null;
 }
 
 // Build the JS run in a live session to drive an interaction by dispatching REAL DOM

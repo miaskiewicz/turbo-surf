@@ -4962,3 +4962,77 @@ test("Extended visible CSS resolves the same live elements for reads and actions
     await page.close();
   }
 });
+
+test("Locator filters preserve relative predicates, stage order and live read action identity (#328)", async () => {
+  const page = newPage();
+  try {
+    await page.setContent(
+      `<style>.off{display:none}</style><ul><li id="a">Alpha <b>one</b><button onclick="this.dataset.hit='yes'">edit</button></li><li id="b">Alpha two<button>edit</button></li><li id="c" class="off">Beta <b>three</b><button>edit</button></li></ul><p style="opacity:0">transparent</p>`,
+    );
+    const rows = page.locator("li");
+    assert.equal(await rows.filter({ has: page.locator("b") }).count(), 2);
+    assert.equal(await rows.filter({ hasNot: page.locator("b") }).getAttribute("id"), "b");
+    assert.equal(await rows.filter({ visible: true }).count(), 2);
+    assert.equal(await rows.filter({ visible: false }).getAttribute("id"), "c");
+    assert.equal(await page.locator("p").filter({ visible: true }).count(), 1);
+    assert.equal(await rows.filter({ hasText: "ALPHA" }).filter({ hasText: "three" }).count(), 0);
+    assert.equal(await rows.filter({ hasNotText: /Alpha/g }).getAttribute("id"), "c");
+    assert.equal(await rows.nth(1).filter({ hasText: "Beta" }).count(), 0);
+    assert.equal(await rows.filter({ hasText: "Beta" }).nth(0).getAttribute("id"), "c");
+    const chosen = rows
+      .filter({ has: page.locator("b").filter({ hasText: /^one$/ }) })
+      .filter({ visible: true });
+    assert.equal(await chosen.getAttribute("id"), "a");
+    assert.deepEqual(await chosen.allTextContents(), ["Alpha oneedit"]);
+    await chosen.getByRole("button", { name: "edit", exact: true }).click();
+    assert.equal(await chosen.locator("button").getAttribute("data-hit"), "yes");
+    assert.equal(await rows.filter({ has: page.locator("li b") }).count(), 0);
+    await page.evaluate(() => document.styleSheets[0].insertRule("#a {display:none}", 0));
+    assert.equal(await chosen.count(), 0);
+    assert.equal(await rows.filter({ visible: true }).getAttribute("id"), "b");
+  } finally {
+    await page.close();
+  }
+});
+
+test("Filtered locator plans retain nested scopes, indexed stages and frame identity (#328)", async () => {
+  const page = newPage();
+  const other = newPage();
+  try {
+    await page.setContent(
+      `<main><article id="first"><span>A   B</span><button data-testid="edit-first">edit</button></article><article id="second"><span>A B</span><button data-testid="edit-second">edit</button></article></main><iframe srcdoc="<section><button hidden>hidden</button><button id='child' onclick='this.dataset.hit=1'>child</button></section>"></iframe>`,
+    );
+    const articles = page.locator("article").filter({ hasText: "a b" });
+    assert.equal(await articles.count(), 2);
+    assert.equal(await articles.filter({ hasText: /A/g }).count(), 2);
+    assert.equal(await articles.filter({ hasNotText: /never/g }).count(), 2);
+    assert.equal(await articles.filter({ has: page.locator("span").nth(1) }).count(), 0);
+    const nested = articles.filter({ has: page.locator("span").filter({ hasNotText: /never/ }) });
+    assert.equal(
+      await nested.nth(1).getByTestId(/edit-/g).getAttribute("data-testid"),
+      "edit-second",
+    );
+    assert.deepEqual(
+      await nested.evaluateAll((elements) => elements.map((element) => element.id)),
+      ["first", "second"],
+    );
+    assert.equal(await nested.and(page.locator("#second")).getAttribute("id"), "second");
+    assert.equal(await nested.nth(1).or(nested.nth(0)).filter({ hasText: "a b" }).count(), 2);
+    assert.throws(() => articles.filter({ has: other.locator("span") }), /same frame/);
+    const child = page.frames().find((frame) => frame !== page.mainFrame());
+    const visible = child
+      .locator("section")
+      .filter({ has: child.locator("button").filter({ visible: true }) })
+      .getByRole("button")
+      .filter({ visible: true });
+    assert.equal(await visible.getAttribute("id"), "child");
+    await visible.click();
+    assert.equal(await visible.getAttribute("data-hit"), "1");
+    await expect(visible).toHaveText("child");
+    await expect(nested).toHaveClass(["", ""]);
+    assert.equal(await visible.innerHTML(), "child");
+  } finally {
+    await page.close();
+    await other.close();
+  }
+});

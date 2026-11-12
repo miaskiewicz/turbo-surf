@@ -213,6 +213,18 @@ fn constant_animation(style: &ComputedStyle, frames: &[Option<AnimationValues>])
     })
 }
 
+fn transform_only(style: &ComputedStyle, frames: &[Option<AnimationValues>]) -> bool {
+    !style
+        .get("animation-composition")
+        .is_some_and(|value| value.split(',').any(|part| part.trim() != "replace"))
+        && frames.iter().all(|frame| {
+            frame.as_ref().is_some_and(|frame| {
+                !frame.properties.is_empty()
+                    && frame.properties.iter().all(|(name, _)| name == "transform")
+            })
+        })
+}
+
 fn matches_underlying(style: &ComputedStyle, name: &str, expected: &str) -> bool {
     let Some(value) = style.get(name) else {
         return false;
@@ -223,12 +235,103 @@ fn matches_underlying(style: &ComputedStyle, name: &str, expected: &str) -> bool
         .is_some_and(|(_, actual)| actual == expected)
 }
 
-type Seen<'a> = std::collections::HashSet<(&'static str, &'a str)>;
+// Visual rects exclude descendants' overflow. A transform-only animation outside
+// the requested ancestor chain can be ignored only when no scroll-container
+// dependency can feed it back into layout or the requested scroll translation.
+fn independent_transform(
+    path: &[&turbo_dom_layout::StyledElement],
+    requested: &[&turbo_dom_layout::StyledElement],
+) -> bool {
+    let Some(element) = path.last() else {
+        return false;
+    };
+    if requested
+        .iter()
+        .any(|ancestor| ancestor.source == element.source)
+    {
+        return false;
+    }
+    !path.iter().chain(requested).any(|ancestor| {
+        ["overflow", "overflow-x", "overflow-y"].iter().any(|name| {
+            ancestor
+                .style
+                .get(name)
+                .is_some_and(|value| value != "visible" && value != "clip")
+        })
+    })
+}
+
+fn element_path<'a>(
+    nodes: &'a [StyledNode],
+    source: turbo_dom_parser::rtdom::tree::Handle,
+    path: &mut Vec<&'a turbo_dom_layout::StyledElement>,
+) -> bool {
+    for node in nodes {
+        let StyledNode::Element(element) = node else {
+            continue;
+        };
+        path.push(element);
+        if element.source == Some(source) || element_path(&element.children, source, path) {
+            return true;
+        }
+        path.pop();
+    }
+    false
+}
+
 pub(crate) fn validate(
     nodes: &[StyledNode],
     rules: &[crate::live_stylesheets::ActiveRule],
+    requested: Option<turbo_dom_parser::rtdom::tree::Handle>,
 ) -> Result<(), String> {
     let definitions = Definitions::collect(rules);
+    if definitions.animations.is_empty() {
+        return validate_nodes(nodes, &definitions);
+    }
+    let mut path = Vec::new();
+    if !requested.is_some_and(|source| element_path(nodes, source, &mut path)) {
+        return validate_nodes(nodes, &definitions);
+    }
+    validate_rect_nodes(
+        nodes,
+        &definitions,
+        &path,
+        &mut Vec::new(),
+        &mut Seen::new(),
+    )
+}
+
+fn validate_rect_nodes<'a>(
+    nodes: &'a [StyledNode],
+    definitions: &Definitions,
+    requested: &[&turbo_dom_layout::StyledElement],
+    path: &mut Vec<&'a turbo_dom_layout::StyledElement>,
+    seen: &mut Seen<'a>,
+) -> Result<(), String> {
+    for node in nodes {
+        let StyledNode::Element(element) = node else {
+            continue;
+        };
+        if turbo_dom_layout::layout::value::display_of(&element.style)
+            == turbo_dom_layout::layout::value::Display::None
+        {
+            continue;
+        }
+        path.push(element);
+        validate_style_for_rect(
+            &element.style,
+            definitions,
+            seen,
+            independent_transform(path, requested),
+        )?;
+        validate_rect_nodes(&element.children, definitions, requested, path, seen)?;
+        path.pop();
+    }
+    Ok(())
+}
+
+type Seen<'a> = std::collections::HashSet<(&'static str, &'a str)>;
+fn validate_nodes(nodes: &[StyledNode], definitions: &Definitions) -> Result<(), String> {
     if definitions.fonts.is_empty() && definitions.animations.is_empty() {
         return Ok(());
     }
@@ -243,7 +346,7 @@ pub(crate) fn validate(
         {
             continue;
         }
-        validate_style(&element.style, &definitions, &mut seen)?;
+        validate_style(&element.style, definitions, &mut seen)?;
         pending.extend(element.children.iter());
     }
     Ok(())
@@ -253,6 +356,14 @@ fn validate_style<'a>(
     style: &'a ComputedStyle,
     definitions: &Definitions,
     seen: &mut Seen<'a>,
+) -> Result<(), String> {
+    validate_style_for_rect(style, definitions, seen, false)
+}
+fn validate_style_for_rect<'a>(
+    style: &'a ComputedStyle,
+    definitions: &Definitions,
+    seen: &mut Seen<'a>,
+    independent: bool,
 ) -> Result<(), String> {
     if !definitions.fonts.is_empty() {
         for (name, id) in [
@@ -281,11 +392,15 @@ fn validate_style<'a>(
         }
     }
     if !definitions.animations.is_empty() {
-        validate_animations(style, definitions)?;
+        validate_animations(style, definitions, independent)?;
     }
     Ok(())
 }
-fn validate_animations(style: &ComputedStyle, definitions: &Definitions) -> Result<(), String> {
+fn validate_animations(
+    style: &ComputedStyle,
+    definitions: &Definitions,
+    independent: bool,
+) -> Result<(), String> {
     use lightningcss::vendor_prefix::VendorPrefix;
     for (name, id) in [
         (
@@ -321,11 +436,10 @@ fn validate_animations(style: &ComputedStyle, definitions: &Definitions) -> Resu
                 AnimationName::Ident(name) => name.0.to_string(),
                 AnimationName::String(name) => name.0.to_string(),
             };
-            if definitions
-                .animations
-                .get(&used)
-                .is_some_and(|frames| !constant_animation(style, frames))
-            {
+            if definitions.animations.get(&used).is_some_and(|frames| {
+                !constant_animation(style, frames)
+                    && !(independent && transform_only(style, frames))
+            }) {
                 return Err(format!(
                     "native live layout animation resource is unsupported: {used}"
                 ));

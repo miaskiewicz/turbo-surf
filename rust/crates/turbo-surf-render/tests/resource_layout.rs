@@ -123,3 +123,62 @@ fn constant_animation_admission_tracks_underlying_style_mutations() {
     let actual = run_with_dom(html, "(()=>{const node=document.getElementById('target');const width=node.getBoundingClientRect().width;node.style.width='44px';try{node.getBoundingClientRect();return 'silently frozen';}catch(error){return JSON.stringify([width,error.message.includes('animation resource')]);}})()").unwrap();
     assert_eq!(actual, "[43,true]");
 }
+
+#[test]
+fn unrelated_rect_is_independent_of_a_descendant_rotation() {
+    let html = "<!doctype html><style>@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}#spinner{width:40px;height:40px;animation:spin 1.4s linear infinite}#target{width:80px;height:60px;transition-duration:1s}</style><div id=target><span id=spinner></span></div>";
+    let actual = run_with_dom(html, "(()=>{const target=document.getElementById('target'),spinner=document.getElementById('spinner');const read=node=>{try{return node.getBoundingClientRect().width}catch(e){return e.message}};const before=read(target);const animated=read(spinner);target.style.animation='spin 1s infinite';const after=read(target);return JSON.stringify([getComputedStyle(spinner).transitionDuration,before,animated,after])})()").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(result[0], "0s");
+    assert_eq!(result[1], 80);
+    assert!(result[2].as_str().unwrap().contains("animation resource"));
+    assert!(result[3].as_str().unwrap().contains("animation resource"));
+}
+
+#[test]
+fn rect_animation_admission_keeps_scroll_and_flow_dependencies_strict() {
+    for (frame, overflow) in [
+        ("transform:rotate(90deg)", "auto"),
+        ("width:80px", "visible"),
+    ] {
+        let html=format!("<!doctype html><style>@keyframes change{{to{{{frame}}}}}#outer{{overflow:{overflow};width:80px;height:60px}}#spin{{animation:change 1s infinite}}</style><div id=outer><div id=spin>spinner</div></div>");
+        let result=run_with_dom(&html,"(()=>{try{return document.getElementById('outer').getBoundingClientRect().width}catch(e){return e.message}})()").unwrap();
+        assert!(result.contains("animation resource"), "{frame}: {result}");
+    }
+}
+
+#[test]
+fn rect_admission_cannot_escape_to_scroll_extent_or_reparented_geometry() {
+    let html="<!doctype html><style>@keyframes spin{to{transform:rotate(360deg)}}#spin{animation:spin 1s infinite}#target{width:80px;height:60px}</style><div id=target></div><div id=spin></div>";
+    let actual=run_with_dom(html,"(()=>{const target=document.getElementById('target'),spin=document.getElementById('spin');const read=f=>{try{return f()}catch(e){return e.message}};const result=[read(()=>target.getBoundingClientRect().width),read(()=>target.scrollWidth),read(()=>target.offsetWidth)];spin.append(target);result.push(read(()=>target.getBoundingClientRect().width));return JSON.stringify(result)})()").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(result[0], 80);
+    for i in 1..4 {
+        assert!(result[i].as_str().unwrap().contains("animation resource"));
+    }
+}
+
+#[test]
+fn rect_animation_admission_remains_strict_after_nonzero_scroll() {
+    let html="<!doctype html><style id=sheet>body{height:4000px}#target{width:80px;height:60px}</style><div id=target></div><div id=spin></div>";
+    let result=run_with_dom(html,"(()=>{window.scrollTo(0,100);const before=window.scrollY;const sheet=document.getElementById('sheet').sheet;sheet.insertRule('@keyframes spin{to{transform:rotate(360deg)}}');sheet.insertRule('#spin{animation:spin 1s infinite}');try{return JSON.stringify([before,document.getElementById('target').getBoundingClientRect().width])}catch(e){return JSON.stringify([before,e.message])}})()").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(result[0], 100);
+    assert!(result[1].as_str().unwrap().contains("animation resource"));
+}
+
+#[test]
+fn next_scroll_boundary_sequence_reads_known_viewport_extents() {
+    for (doctype, viewport_owner) in [
+        ("<!doctype html>", "document.documentElement"),
+        ("", "document.body"),
+    ] {
+        let html=format!("{doctype}<style>@keyframes spin{{to{{transform:rotate(360deg)}}}}#spin{{animation:spin 1s infinite}}#target{{width:80px;height:60px}}</style><div id=target><div id=spin></div></div>");
+        let result=run_with_dom(&html,&format!("(()=>{{const target=document.getElementById('target'),viewport={viewport_owner};return JSON.stringify([target.getBoundingClientRect().width,viewport.clientWidth,viewport.clientHeight,target.getBoundingClientRect().width,window.innerWidth,window.innerHeight])}})()")).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(result[0], 80);
+        assert_eq!(result[1], result[4]);
+        assert_eq!(result[2], result[5]);
+        assert_eq!(result[3], 80);
+    }
+}

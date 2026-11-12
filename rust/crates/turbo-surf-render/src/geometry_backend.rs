@@ -126,6 +126,7 @@ deno_core::extension!(
         crate::live_layout_supports::op_native_css_supports,
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
+        crate::live_layout_backend::op_live_viewport_client,
         crate::live_layout_backend::op_live_image_box,
         crate::live_layout_backend::op_live_element_used_size,
         crate::live_layout_backend::op_live_image_loaded,

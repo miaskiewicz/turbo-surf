@@ -1,4 +1,5 @@
 // Private, native-branded rectangle data; no guest-visible host registry.
+// oxlint-disable-next-line no-unused-expressions -- The host evaluates this expression to obtain the private installer.
 (function (core, make, frameWindow, frameStep, ns) {
   "use strict";
   const ops = core.ops;
@@ -102,6 +103,7 @@
       );
     return result;
   }
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep conversion helpers private to the installer.
   function number(value) {
     // Engine ToNumber rejects even a BigInt returned by valueOf/toPrimitive.
     return +value;
@@ -255,10 +257,10 @@
             typeof input !== "function"
           )
             throw new LocalTypeError("The provided value is not of type 'DOMRectInit'");
-          const dictionary = input ?? create(null);
+          const rectInit = input ?? create(null);
           // Web IDL dictionaries convert members in lexicographic order.
           const member = (name) => {
-            const value = dictionary[name];
+            const value = rectInit[name];
             return value === undefined ? 0 : number(value);
           };
           const height = member("height"),
@@ -411,7 +413,7 @@
     value: make(
       function () {
         brand(this, 1);
-        return rectangle(ops.op_live_element_geometry(this).bounds);
+        return rectangle(ops.op_live_element_geometry(this, true).bounds);
       },
       "getBoundingClientRect",
       0,
@@ -425,7 +427,7 @@
     value: make(
       function () {
         brand(this, 1);
-        return rectList(ops.op_live_element_geometry(this).rects);
+        return rectList(ops.op_live_element_geometry(this, true).rects);
       },
       "getClientRects",
       0,
@@ -447,7 +449,11 @@
       get: make(
         function () {
           brand(this, group === "offset" ? 2 : 1);
-          return ops.op_live_element_geometry(this)[group][field];
+          if (name === "clientWidth" || name === "clientHeight") {
+            const viewport = ops.op_live_viewport_client(this);
+            if (viewport !== null) return viewport[name === "clientWidth" ? 0 : 1];
+          }
+          return ops.op_live_element_geometry(this, false)[group][field];
         },
         "get " + name,
         0,
@@ -482,6 +488,7 @@
   function task(callback) {
     apply(hostTimeout, realmWindow, [callback, 0]);
   }
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep result factories private to the installer.
   function scrollResult(interrupted) {
     return { interrupted };
   }
@@ -1030,9 +1037,13 @@
             name === "caretRangeFromPoint"
               ? number(y === undefined ? 0 : y) | 0
               : floatCoordinate(y, name);
-          if (name === "caretPositionFromPoint" && arguments[2] != null) {
+          if (
+            name === "caretPositionFromPoint" &&
+            arguments[2] !== null &&
+            arguments[2] !== undefined
+          ) {
             const roots = arguments[2].shadowRoots;
-            if (roots != null && Array.from(roots).length !== 0)
+            if (roots !== null && roots !== undefined && Array.from(roots).length !== 0)
               throw new Error("Native shadow-root caret selection is unsupported");
           }
           const endpoint = ops.op_live_caret_at_point(this, x, y);
@@ -1099,6 +1110,7 @@
     let index = 0;
     const length = text.length;
     const at = (position) => apply(charCode, text, [position]);
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep parser predicates private to the installer.
     const space = (code) => code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
     while (index < length && space(at(index))) index++;
     let negative = false;

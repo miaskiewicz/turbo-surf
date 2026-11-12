@@ -44,6 +44,7 @@ pub(crate) async fn initialize_system_fonts_async() -> Result<(), String> {
 #[derive(PartialEq)]
 struct CacheKey {
     realm: u64,
+    visual_rect: Option<u32>,
     document: u32,
     version: u64,
     width: u32,
@@ -440,13 +441,68 @@ pub(crate) struct Geometry {
     client: ClientMetrics,
     offset: OffsetSize,
 }
+// Viewport client extents are host viewport metrics, not animated tree boxes.
+// As in window_viewport.js, this engine draws no classic scrollbars to subtract.
+#[op2(reentrant)]
+#[serde]
+pub(crate) fn op_live_viewport_client<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<[i32; 2]>, JsErrorBox> {
+    viewport_client(scope, receiver).map_err(JsErrorBox::generic)
+}
+fn viewport_client<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<[i32; 2]>, String> {
+    use turbo_dom_browser_env::host_internals::{enter_document_of, handle_of, with_tree};
+    let _document = enter_document_of(scope, receiver);
+    let handle = handle_of(scope, receiver).ok_or("Illegal invocation")?;
+    let candidate = with_tree(|tree| {
+        tree.parent(handle)
+            .is_some_and(|parent| tree.node_type_id(parent) == 9)
+            || tree.namespace_id(handle) == 0 && tree.local_name(handle) == Some("body")
+    })
+    .unwrap_or(false);
+    if !candidate {
+        return Ok(None);
+    }
+    let input = crate::live_layout_dom::capture(scope, receiver)?;
+    if !input.connected || !input.browsing_context {
+        return Ok(None);
+    }
+    let id = crate::live_layout::source_id(input.tree.document_id(), input.handle);
+    let eligible = if input.tree.capture.quirks {
+        input.tree.capture.body == Some(id)
+    } else {
+        let _document = turbo_dom_browser_env::host_internals::enter_document_of(scope, receiver);
+        turbo_dom_browser_env::host_internals::with_tree(|tree| {
+            tree.parent(input.handle)
+                .is_some_and(|parent| tree.node_type_id(parent) == 9)
+        })
+        .unwrap_or(false)
+    };
+    if !eligible {
+        return Ok(None);
+    }
+    let context = input
+        .owner_context
+        .ok_or("native layout owner realm unavailable")?;
+    let viewport = viewport(scope, context)?;
+    Ok(Some([
+        viewport.width.floor() as i32,
+        viewport.height.floor() as i32,
+    ]))
+}
+
 #[op2(reentrant)]
 #[serde]
 pub(crate) fn op_live_element_geometry<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
+    visual_rect: bool,
 ) -> Result<Geometry, JsErrorBox> {
-    measure(scope, receiver).map_err(|error| {
+    measure(scope, receiver, visual_rect).map_err(|error| {
         if error == "Illegal invocation" {
             JsErrorBox::type_error(error)
         } else {
@@ -457,8 +513,20 @@ pub(crate) fn op_live_element_geometry<'s>(
 fn measure<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
+    visual_rect: bool,
 ) -> Result<Geometry, String> {
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
+    input.tree.visual_rect = visual_rect
+        .then_some(input.owner_context)
+        .flatten()
+        .filter(|context| {
+            scroll_state(*context)
+                .values
+                .borrow()
+                .values()
+                .all(|offset| *offset == [0.0; 2])
+        })
+        .map(|_| input.handle);
     let geometry = if !input.connected || !input.browsing_context {
         turbo_dom_layout::cssom_view::metrics::empty_geometry()
     } else {
@@ -584,7 +652,9 @@ fn refresh<'s>(
         {
             return Err("native layout source left its document after its capture".into());
         }
+        let visual_rect = input.tree.visual_rect;
         *input = fresh;
+        input.tree.visual_rect = visual_rect;
         #[cfg(test)]
         recapture_tests::after_capture(scope);
     }
@@ -636,6 +706,7 @@ fn resolve_layout<'s>(
     };
     let key = CacheKey {
         realm: viewport.realm,
+        visual_rect: tree.visual_rect.map(|handle| handle.raw()),
         document: tree.document_id(),
         version: tree.capture.tree_version,
         width: viewport.width.to_bits(),

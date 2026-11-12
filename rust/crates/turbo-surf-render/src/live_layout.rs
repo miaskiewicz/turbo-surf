@@ -15,6 +15,7 @@ pub(crate) struct LiveTreeInput {
     /// Identities, SVG viewports, original text, quirks mode, `document.body` and the
     /// tree version, recorded under the source budgets at capture time.
     pub(crate) capture: LiveCapture,
+    pub(crate) visual_rect: Option<Handle>,
     pub(crate) composition: Option<crate::live_layout_composed::Composition>,
 }
 
@@ -23,6 +24,7 @@ impl LiveTreeInput {
     pub(crate) fn empty(document_id: u32, tree_version: u64) -> Self {
         Self {
             capture: LiveCapture::empty(document_id, tree_version),
+            visual_rect: None,
             composition: None,
         }
     }
@@ -75,6 +77,7 @@ pub(crate) fn capture_composed_tree(
     .map_err(|error| error.to_string())?;
     Ok(LiveTreeInput {
         capture,
+        visual_rect: None,
         composition: Some(composition),
     })
 }
@@ -383,7 +386,7 @@ fn snapshot_pass(
         &LiveOptions { layout_scale },
         |styled| {
             let styles = crate::live_layout_zoom::apply(styled, document);
-            crate::live_layout_resources::validate(styled, rules)?;
+            crate::live_layout_resources::validate(styled, rules, input.visual_rect)?;
             let containers = crate::live_container_queries::Containers::collect(styled, document);
             Ok((styles, containers))
         },

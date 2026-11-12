@@ -263,14 +263,50 @@ fn independent_effect(
     {
         return false;
     }
-    !path.iter().chain(requested).any(|ancestor| {
-        ["overflow", "overflow-x", "overflow-y"].iter().any(|name| {
-            ancestor
-                .style
-                .get(name)
-                .is_some_and(|value| value != "visible" && value != "clip")
-        })
+    if !requested.iter().all(|ancestor| {
+        overflow_axes(&ancestor.style)
+            .is_some_and(|axes| axes.iter().all(|axis| matches!(*axis, "visible" | "clip")))
+    }) {
+        return false;
+    }
+    path.iter().all(|ancestor| {
+        let Some(axes) = overflow_axes(&ancestor.style) else {
+            return false;
+        };
+        if axes.iter().all(|axis| matches!(*axis, "visible" | "clip")) {
+            return true;
+        }
+        // A hidden-only descendant boundary clips the animated overflow without
+        // allocating scrollbars or translating the requested ancestor's box.
+        !requested
+            .iter()
+            .any(|shared| shared.source == ancestor.source)
+            && axes.iter().all(|axis| matches!(*axis, "hidden" | "clip"))
     })
+}
+
+fn overflow_axes(style: &ComputedStyle) -> Option<[&'static str; 2]> {
+    for (name, id) in [
+        ("overflow", PropertyId::Overflow),
+        ("overflow-x", PropertyId::OverflowX),
+        ("overflow-y", PropertyId::OverflowY),
+    ] {
+        if let Some(value) = style.get(name) {
+            let property = Property::parse_string(id, value, ParserOptions::default()).ok()?;
+            if !matches!(
+                property,
+                Property::Overflow(_) | Property::OverflowX(_) | Property::OverflowY(_)
+            ) {
+                return None;
+            }
+        }
+    }
+    // The native CSSOM View resolver pairs visible with hidden/scroll as auto;
+    // looking only at authored axis tokens would incorrectly admit that case.
+    Some([
+        turbo_dom_layout::cssom_view::scroll::overflow(style, "overflow-x"),
+        turbo_dom_layout::cssom_view::scroll::overflow(style, "overflow-y"),
+    ])
 }
 
 fn element_path<'a>(
@@ -330,12 +366,9 @@ fn validate_rect_nodes<'a>(
             continue;
         }
         path.push(element);
-        validate_style_for_rect(
-            &element.style,
-            definitions,
-            seen,
-            independent_effect(path, requested),
-        )?;
+        validate_style_for_rect(&element.style, definitions, seen, || {
+            independent_effect(path, requested)
+        })?;
         validate_rect_nodes(&element.children, definitions, requested, path, seen)?;
         path.pop();
     }
@@ -369,13 +402,13 @@ fn validate_style<'a>(
     definitions: &Definitions,
     seen: &mut Seen<'a>,
 ) -> Result<(), String> {
-    validate_style_for_rect(style, definitions, seen, false)
+    validate_style_for_rect(style, definitions, seen, || false)
 }
 fn validate_style_for_rect<'a>(
     style: &'a ComputedStyle,
     definitions: &Definitions,
     seen: &mut Seen<'a>,
-    independent: bool,
+    independent: impl Fn() -> bool,
 ) -> Result<(), String> {
     if !definitions.fonts.is_empty() {
         for (name, id) in [
@@ -411,7 +444,7 @@ fn validate_style_for_rect<'a>(
 fn validate_animations(
     style: &ComputedStyle,
     definitions: &Definitions,
-    independent: bool,
+    independent: impl Fn() -> bool,
 ) -> Result<(), String> {
     use lightningcss::vendor_prefix::VendorPrefix;
     for (name, id) in [
@@ -450,7 +483,7 @@ fn validate_animations(
             };
             if definitions.animations.get(&used).is_some_and(|frames| {
                 !constant_animation(style, frames)
-                    && !(independent && paint_or_transform_only(style, frames))
+                    && !(paint_or_transform_only(style, frames) && independent())
             }) {
                 return Err(format!(
                     "native live layout animation resource is unsupported: {used}"
@@ -471,6 +504,30 @@ mod definition_tests {
             resource: Some(definition(source).unwrap()),
             containers: Vec::new(),
         }])
+    }
+
+    #[test]
+    fn rect_dependency_proof_only_runs_for_used_paint_animation() {
+        let definitions = animation_definitions("@keyframes spin{to{transform:rotate(360deg)}}");
+        let calls = std::cell::Cell::new(0);
+        let independent = || {
+            calls.set(calls.get() + 1);
+            true
+        };
+        validate_style_for_rect(
+            &ComputedStyle::default(),
+            &definitions,
+            &mut Seen::new(),
+            independent,
+        )
+        .unwrap();
+        assert_eq!(calls.get(), 0);
+        let changing = animation_definitions("@keyframes spin{to{width:100px}}");
+        let used = ComputedStyle::from_pairs([("animation-name", "spin")]);
+        assert!(validate_style_for_rect(&used, &changing, &mut Seen::new(), independent).is_err());
+        assert_eq!(calls.get(), 0);
+        validate_style_for_rect(&used, &definitions, &mut Seen::new(), independent).unwrap();
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]

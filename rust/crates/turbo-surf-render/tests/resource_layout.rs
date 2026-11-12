@@ -204,7 +204,7 @@ fn prefixed_opacity_scale_pulse_keeps_independent_rect_but_not_animated_rect() {
 
 #[test]
 fn rotating_svg_spinner_and_dash_circle_leave_parent_rect_independent() {
-    let html = "<!doctype html><style>@-webkit-keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}@keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}@-webkit-keyframes dash{0%{stroke-dasharray:1px,200px;stroke-dashoffset:0px}50%{stroke-dasharray:100px,200px;stroke-dashoffset:-15px}100%{stroke-dasharray:1px,200px;stroke-dashoffset:-126px}}@keyframes dash{0%{stroke-dasharray:1px,200px;stroke-dashoffset:0px}50%{stroke-dasharray:100px,200px;stroke-dashoffset:-15px}100%{stroke-dasharray:1px,200px;stroke-dashoffset:-126px}}#target{display:flex;flex-direction:column;width:80px;height:60px}#spin{display:inline-block;width:40px;height:40px;animation:spin 1.4s linear infinite}svg{display:block;overflow:visible}circle{stroke:currentColor;stroke-dasharray:80px,200px;stroke-dashoffset:0px;animation:dash 1.4s ease-in-out infinite;overflow:visible}</style><div id=target><span id=spin><svg viewBox='22 22 44 44'><circle cx=44 cy=44 r=20.2 fill=none stroke-width=3.6></circle></svg></span></div>";
+    let html = CIRCULAR_SPINNER;
     let actual = run_with_dom(html,"(()=>{const read=node=>{try{return node.getBoundingClientRect().width}catch(e){return e.message}};return JSON.stringify([read(document.getElementById('target')),document.documentElement.clientHeight,document.getElementById('target').getBoundingClientRect().height,read(document.getElementById('spin')),(()=>{document.getElementById('spin').style.animation='none';return read(document.querySelector('circle'))})()])})()").unwrap();
     let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
     assert_eq!(result[0], 80);
@@ -219,4 +219,53 @@ fn stroke_dash_animation_cannot_admit_mixed_flow_properties() {
     let html="<!doctype html><style>@keyframes dash{to{stroke-dashoffset:-15px;width:120px}}circle{animation:dash 1s infinite}#target{width:80px;height:60px}</style><div id=target><svg><circle cx=44 cy=44 r=20></circle></svg></div>";
     let actual=run_with_dom(html,"(()=>{try{return document.getElementById('target').getBoundingClientRect().width}catch(e){return e.message}})()").unwrap();
     assert!(actual.contains("animation resource"));
+}
+
+const CIRCULAR_SPINNER: &str = "<!doctype html><style>@-webkit-keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}@keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}@-webkit-keyframes dash{0%{stroke-dasharray:1px,200px;stroke-dashoffset:0px}50%{stroke-dasharray:100px,200px;stroke-dashoffset:-15px}100%{stroke-dasharray:1px,200px;stroke-dashoffset:-126px}}@keyframes dash{0%{stroke-dasharray:1px,200px;stroke-dashoffset:0px}50%{stroke-dasharray:100px,200px;stroke-dashoffset:-15px}100%{stroke-dasharray:1px,200px;stroke-dashoffset:-126px}}#target{display:flex;flex-direction:column;width:80px;height:60px}#spin{display:inline-block;width:40px;height:40px;animation:spin 1.4s linear infinite}svg{display:block;overflow:visible}circle{stroke:currentColor;stroke-dasharray:80px,200px;stroke-dashoffset:0px;animation:dash 1.4s ease-in-out infinite;overflow:visible}</style><div id=target><span id=spin><svg viewBox='22 22 44 44'><circle cx=44 cy=44 r=20.2 fill=none stroke-width=3.6></circle></svg></span></div>";
+
+fn clipped_spinner(overflow: &str) -> String {
+    CIRCULAR_SPINNER
+        .replace(
+            "<span id=spin>",
+            &format!("<div style='display:grid'><div id=clip style='{overflow}'><span id=spin>"),
+        )
+        .replace("</span></div>", "</span></div></div></div>")
+}
+
+#[test]
+fn rect_outside_hidden_animated_descendant_keeps_its_auto_height() {
+    let html = clipped_spinner("overflow:hidden")
+        .replace("<div id=target>", "<div id=target style='height:auto'>");
+    let actual=run_with_dom(&html,"JSON.stringify([document.getElementById('target').getBoundingClientRect().width,document.getElementById('target').getBoundingClientRect().height,document.documentElement.clientHeight])").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(result[0], 80);
+    assert_eq!(result[1], 44);
+    assert!(result[2].as_i64().unwrap() > 0);
+}
+
+#[test]
+fn clipped_animation_admission_keeps_shared_mixed_axes_and_scroll_dependencies_strict() {
+    let read="(()=>{try{return document.getElementById('target').getBoundingClientRect().width}catch(e){return e.message}})()";
+    for overflow in [
+        "overflow:auto",
+        "overflow:scroll",
+        "overflow-x:hidden;overflow-y:visible",
+    ] {
+        let actual = run_with_dom(&clipped_spinner(overflow), read).unwrap();
+        assert!(
+            actual.contains("animation resource"),
+            "{overflow}: {actual}"
+        );
+    }
+    let shared = clipped_spinner("overflow:hidden")
+        .replace("</style>", "</style><body style='overflow:hidden'>");
+    assert!(run_with_dom(&shared, read)
+        .unwrap()
+        .contains("animation resource"));
+    let actual=run_with_dom(&clipped_spinner("overflow:hidden"),"(()=>{const spin=document.getElementById('spin'),circle=document.querySelector('circle');spin.style.animation='none';circle.style.animation='none';document.body.style.height='4000px';window.scrollTo(0,100);const before=window.scrollY;spin.style.removeProperty('animation');circle.style.removeProperty('animation');try{return JSON.stringify([before,document.getElementById('target').getBoundingClientRect().width])}catch(e){return JSON.stringify([before,e.message])}})()").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(result[0], 100);
+    assert!(result[1].as_str().unwrap().contains("animation resource"));
+    let query=run_with_dom(&clipped_spinner("overflow:hidden"),"(()=>{try{return document.getElementById('clip').getBoundingClientRect().width}catch(e){return e.message}})()").unwrap();
+    assert!(query.contains("animation resource"));
 }

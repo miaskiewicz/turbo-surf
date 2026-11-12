@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import test from "node:test";
-import { createHash } from "node:crypto";
 let shim;
 try {
   shim = await import("./index.mjs");
@@ -90,7 +90,7 @@ for (const mode of ["consume", "unread", "event-only", "buffered", "broken", "cl
           assert.equal(finished.length, 1);
           assert.equal(failed.length, 0);
         }
-        await Promise.all(Array.from({ length: 5 }, () => page._drainNetworkEvents()));
+        await Promise.all(Array.from({ length: 5 }, () => page["_drainNetworkEvents"]()));
         assert.equal(responses.length, 1);
       }
     } finally {
@@ -131,10 +131,10 @@ test("response headers are not published for a policy-denied transport", async (
       ),
       true,
     );
-    await page._drainNetworkEvents();
+    await page["_drainNetworkEvents"]();
     assert.equal(requests, 0);
     assert.equal(responses.length, 0);
-    assert.equal(page._responseBodies?.size ?? 0, 0);
+    assert.equal(page["_responseBodies"]?.size ?? 0, 0);
   } finally {
     await page.close();
     server.closeAllConnections();
@@ -143,15 +143,19 @@ test("response headers are not published for a policy-denied transport", async (
 });
 
 for (const mode of ["initial", "initial-close", "form", "form-console"])
-  test(`headers remain observable during ${mode} hydration`, async () => {
+  test(`headers remain observable during ${mode} hydration`, { timeout: 10000 }, async () => {
     let release;
     const gate = new Promise((r) => (release = r));
+    let headersSent;
+    const wireHeaders = new Promise((resolve) => (headersSent = resolve));
+    let headerTimer;
     let ended = false;
     let destinations = 0;
     const server = createServer(async (q, s) => {
       if (q.url === "/slow") {
         s.writeHead(200, { "content-type": "application/json" });
         s.flushHeaders();
+        headersSent();
         await gate;
         ended = true;
         s.end('{"ok":true}');
@@ -172,11 +176,31 @@ for (const mode of ["initial", "initial-close", "form", "form-console"])
     if (mode === "form-console") page.on("console", (message) => messages.push(message));
     try {
       if (mode.startsWith("form")) await page.goto(origin + "/start", { waitUntil: "networkidle" });
-      const waiting = page.waitForResponse((r) => r.url().endsWith("/slow"), { timeout: 500 });
+      const waiting = new Promise((resolve) => {
+        const listener = (response) => {
+          if (!response.url().endsWith("/slow")) return;
+          page.off("response", listener);
+          resolve(response);
+        };
+        page.on("response", listener);
+      });
       action = mode.startsWith("form")
         ? page.locator("#submit").click()
         : page.goto(origin, { waitUntil: "networkidle" });
-      const response = await waiting;
+      // Cold isolate startup and form navigation precede the transport under test.
+      // Start the delivery deadline only once the server has flushed its headers;
+      // the body remains gated until the response has actually been observed.
+      await wireHeaders;
+      const response = await Promise.race([
+        waiting,
+        new Promise((_, reject) => {
+          headerTimer = setTimeout(
+            () => reject(new Error("Response headers were not delivered while the body was held")),
+            500,
+          );
+        }),
+      ]);
+      clearTimeout(headerTimer);
       assert.equal(ended, false);
       assert.equal(response.status(), 200);
       assert.equal(response.request().frame(), page.mainFrame());
@@ -191,7 +215,7 @@ for (const mode of ["initial", "initial-close", "form", "form-console"])
         await action;
         assert.equal(destinations, 1);
         if (mode === "form-console") {
-          const message = messages.find((message) => message.text().startsWith("before-form"));
+          const message = messages.find((entry) => entry.text().startsWith("before-form"));
           assert.ok(message, "console record must survive the native runtime swap");
           assert.equal(message.location().url, origin + "/start");
           const old = message.args()[1];
@@ -200,10 +224,11 @@ for (const mode of ["initial", "initial-close", "form", "form-console"])
           await old.dispose();
           assert.deepEqual(await current.jsonValue(), { phase: "after" });
           await current.dispose();
-          for (const argument of message.args()) await argument.dispose();
+          await Promise.all(message.args().map((argument) => argument.dispose()));
         }
       }
     } finally {
+      clearTimeout(headerTimer);
       release();
       await action?.catch(() => {});
       await page.close();

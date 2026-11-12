@@ -25,6 +25,9 @@ function overrideRequest(request, options = {}) {
 
 async function fulfillPayload(options = {}) {
   const response = options.response;
+  const status = options.status ?? response?.status() ?? 200;
+  if (!Number.isInteger(status) || status < 200 || status > 599)
+    throw new RangeError("Invalid route.fulfill response status");
   const headers = Object.fromEntries(
     Object.entries(options.headers ?? (response ? await response.allHeaders() : {})).map(
       ([name, value]) => [name.toLowerCase(), String(value)],
@@ -42,7 +45,7 @@ async function fulfillPayload(options = {}) {
   if (options.contentType !== undefined) headers["content-type"] = String(options.contentType);
   headers["content-length"] = String(body.length);
   return {
-    status: options.status ?? response?.status() ?? 200,
+    status,
     headers,
     bodyBytes: Array.from(body),
   };

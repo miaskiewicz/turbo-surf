@@ -29,6 +29,23 @@ impl Drop for NetworkWorldGuard {
     }
 }
 impl NetworkEventLog {
+    /// Publish the final host interception decision through the same response/body
+    /// protocol as transport observations. IDs and provenance belong to this hub.
+    pub fn publish_intercepted_response(&self, mut header: serde_json::Value, body: &[u8]) {
+        if self.is_closed() {
+            return;
+        }
+        let id = self.next_id();
+        header["event"] = "response".into();
+        header["id"] = id.into();
+        header["provenance"] = "intercepted".into();
+        header["bodyPending"] = true.into();
+        header["bodyIncomplete"] = true.into();
+        self.push(header);
+        self.push(serde_json::json!({"event":"responsebody","id":id,
+            "bodyBytes":body,"body":String::from_utf8_lossy(body),
+            "bodyIncomplete":false,"error":null}));
+    }
     pub(crate) fn own_world(&self) -> NetworkWorldGuard {
         self.worlds.fetch_add(1, Ordering::Relaxed);
         NetworkWorldGuard(self.clone())
@@ -286,5 +303,24 @@ mod tests {
         let late = Arc::new(late);
         log.register(&late);
         assert!(*late_receiver.borrow());
+    }
+    #[test]
+    fn intercepted_responses_share_native_ids_and_preserve_body_bytes() {
+        let log = NetworkEventLog::default();
+        let first = log.next_id();
+        log.publish_intercepted_response(
+            serde_json::json!({"id":first,"event":"console","status":201}),
+            &[0, 255],
+        );
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&log.drain()).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["event"], "response");
+        assert_eq!(rows[0]["id"], first + 1);
+        assert_eq!(rows[0]["provenance"], "intercepted");
+        assert_eq!(rows[1]["id"], rows[0]["id"]);
+        assert_eq!(rows[1]["bodyBytes"], serde_json::json!([0, 255]));
+        log.close();
+        log.publish_intercepted_response(serde_json::json!({"status":200}), b"late");
+        assert_eq!(log.drain(), "[]");
     }
 }

@@ -2972,7 +2972,10 @@ mod fetch_request_metadata_tests {
 }
 
 #[derive(Default)]
-struct FetchResponseTrace(std::sync::Mutex<Option<(u64, u16)>>);
+struct FetchResponseTrace {
+    last: std::sync::Mutex<Option<(u64, u16)>>,
+    suppressed: bool,
+}
 
 impl FetchResponseTrace {
     fn observe(
@@ -2981,7 +2984,10 @@ impl FetchResponseTrace {
         context: &FetchEventContext,
         hop: turbo_surf_core::net::ResponseObservation,
     ) {
-        let mut hops = self.0.lock().unwrap();
+        if self.suppressed {
+            return;
+        }
+        let mut hops = self.last.lock().unwrap();
         let id = log.next_id();
         let prior = hops
             .as_ref()
@@ -2999,7 +3005,7 @@ impl FetchResponseTrace {
         *hops = Some((id, hop.status));
     }
     fn last_id(&self) -> Option<u64> {
-        self.0.lock().unwrap().as_ref().map(|(id, _)| *id)
+        self.last.lock().unwrap().as_ref().map(|(id, _)| *id)
     }
 }
 fn append_response_trace(
@@ -3007,6 +3013,9 @@ fn append_response_trace(
     mut entry: serde_json::Value,
     trace: &FetchResponseTrace,
 ) {
+    if trace.suppressed {
+        return;
+    }
     if let Some(id) = trace.last_id() {
         if entry["streamed"] == true && entry["status"] != 0 {
             return;
@@ -3825,7 +3834,10 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         opaque_cache_nonce,
     );
     let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
-    let response_trace = FetchResponseTrace::default();
+    let response_trace = FetchResponseTrace {
+        suppressed: init["host_route_fetch"] == true,
+        ..Default::default()
+    };
     let event_log = state.borrow().borrow::<NetworkLog>().clone();
     let observer = |hop| response_trace.observe(&event_log, &event_context, hop);
     let mut opts = FetchOptions {
@@ -5248,6 +5260,19 @@ fn op_shim_binding_bag<'s>(
     let namespace = frame_namespace(scope)?;
     let key = v8::String::new(scope, "shimBindings")?;
     namespace.get(scope, key.into())
+}
+
+#[op2]
+fn op_shim_binding_namespace<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let context = window.get_creation_context(scope)?;
+    if native_frame_is_retired(context) {
+        return None;
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    frame_namespace(scope)
 }
 
 /// A function the realm's own bootstrap registered through `op_set_host_capabilities`
@@ -8786,6 +8811,7 @@ deno_core::extension!(
         crate::shim_bindings::op_shim_binding_pending,
         op_shim_binding_scripts,
         op_shim_binding_bag,
+        op_shim_binding_namespace,
         op_page_diagnostic,
         op_console_message,
         network_transports::op_connect_allowed,
@@ -8945,6 +8971,7 @@ __G.shimAuthorizeRoute = (document, url) => ops.op_csp_request(document, url, "c
 __G.shimBindingPending = active => ops.op_shim_binding_pending(__document, active);
 __G.shimBindingScripts = (engine, guest, install) => ops.op_shim_binding_scripts(engine, guest, install);
 __G.shimBindingBag = window => ops.op_shim_binding_bag(window);
+__G.shimBindingNamespace = window => ops.op_shim_binding_namespace(window);
 __G.shimBindingId = () => ops.op_csp_context(__document);
 __G.shimBindingPromise = executor => new __intrinsicPromise(executor);
 const __shimError = Error;
@@ -10438,7 +10465,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
       }
     }
   } catch (_e) {}
-  const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body, body_bytes:bodyBytes, upload:!!uploadPump, cancel_id:cancelId, stream:!o.destination, cache:o.cache,
+  const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body, body_bytes:bodyBytes, upload:!!uploadPump, cancel_id:cancelId, stream:!o.destination, cache:o.cache, host_route_fetch:__intrinsicHasOwn(o,"hostRouteFetch")&&o.hostRouteFetch===true,
     referrer:o.referrer,referrerPolicy:o.referrerPolicy,
     mode: o.mode, credentials: o.credentials, redirect:o.redirect, integrity:o.integrity, destination: o.destination, source, referrer_source:referrerSource,
     opaque_origin: ops.op_window_opaque(__document), ...cookieSite, initiator:o.initiator,
@@ -10491,9 +10518,13 @@ const __FetchRequest=Request;
 const __AbortSignalAborted=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"aborted").get;
 const __AbortSignalReason=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"reason").get;
 const __AbortAdd=EventTarget.prototype.addEventListener,__AbortRemove=EventTarget.prototype.removeEventListener;
+__G.shimRouteFetch = (input, init) => {
+  const request = new __FetchRequest(input, init);
+  return __fetchFromSource(request, {...__requestInit(request), destination:"", hostRouteFetch:true}, ops.op_document_request_url());
+};
 globalThis.fetch = async (input, init = undefined) => {
   const request = new __FetchRequest(input, init);
-  return __fetchFromSource(request, {...__requestInit(request), destination:""}, ops.op_document_request_url());
+  return __fetchFromSource(request, {...__requestInit(request), destination:"", hostRouteFetch:false}, ops.op_document_request_url());
 };
 // V8 clones preserve cycles and built-in types. Supported native keys use a
 // private host serializer; no page hook receives their material.

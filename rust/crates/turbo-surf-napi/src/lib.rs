@@ -24,8 +24,8 @@ pub use session::{
     live_close, live_cookies, live_eval, live_eval_engine, live_eval_engine_expression,
     live_eval_expression, live_eval_expression_tracked, live_network_log,
     live_network_log_acknowledge, live_network_log_create, live_network_log_discard_handles,
-    live_network_log_wait, live_network_log_wake, live_open, live_read_engine, live_resize,
-    live_serialize, live_set_content, live_set_cookies,
+    live_network_log_publish_intercepted, live_network_log_wait, live_network_log_wake, live_open,
+    live_read_engine, live_resize, live_serialize, live_set_content, live_set_cookies,
 };
 
 use napi::bindgen_prelude::*;

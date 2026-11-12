@@ -142,6 +142,9 @@ branch.
 - Execute request routes through actual host callbacks, including fulfilled and
   fetched responses, while preserving CSP, cancellation, deadlines, and genuine
   host dependencies in module initialization (#320).
+- Publish final fulfilled/rewritten route responses through the native response/body
+  event hub; hide internal `route.fetch()` transport while preserving ordinary
+  guest and continued-request events (#320).
 - Apply route registration changes to live sessions, traverse fallback handlers,
   remove obsolete interceptors, and honor XHR abort/continue outcomes (#322, #324).
 - Emit HTTP attachment downloads, reject missed download waits, keep commit-mode

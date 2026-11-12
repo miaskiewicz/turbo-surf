@@ -297,3 +297,5 @@ export function liveSetContent(
   waitUntil?: string,
   timeoutMs?: number,
 ): Promise<string>;
+
+export function liveNetworkLogPublishIntercepted(id: number, header: string, body: Buffer): void;

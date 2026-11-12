@@ -269,18 +269,20 @@ function buildRouteInitScript(routes, bindingName) {
     })),
   );
   return `(() => {
-    const invokeHost = globalThis[${JSON.stringify(bindingName)}];
-    const previous = globalThis.fetch && globalThis.fetch.__turboRouteState;
+    const invokeHost = __tsNs.shimBindings.functions[${JSON.stringify(bindingName)}];
+    const previous = __tsNs.shimRouteState;
     const state = previous || {routes: [], fetch: globalThis.fetch, xhr: globalThis.XMLHttpRequest};
+    __tsNs.shimRouteState = state;
     const routes = state.routes;
     state.requests ??= new Map();
     const next = ${table};
     routes.splice(0, routes.length, ...next);
     if (!routes.length) {
-      if (previous) { globalThis.fetch = state.fetch; globalThis.XMLHttpRequest = state.xhr; }
+      if (previous) { globalThis.fetch = state.fetch; globalThis.XMLHttpRequest = state.xhr; state.active=false; }
       return;
     }
-    if (previous) return;
+    if (state.active) return;
+    state.active=true;
     const globToRegex = (p) => {
       // Escape * and ? too, so the two translation passes below can locate
       // every star — a bare * in the source would otherwise skip the escape
@@ -388,7 +390,6 @@ function buildRouteInitScript(routes, bindingName) {
           return await original(decision.request, request.signal);
         } finally {finishRequest(request);}
       };
-      Object.defineProperty(globalThis.fetch, "__turboRouteState", {value: state});
     }
     if (typeof globalThis.XMLHttpRequest === "function") {
       const OrigXHR = globalThis.XMLHttpRequest;
@@ -472,12 +473,14 @@ function buildRouteInitScript(routes, bindingName) {
 
 // Persistent exposed functions queue serialized calls; Node settles the matching
 // guest promise after invoking the host handler between isolate evaluations.
-function buildExposeInitScript(names) {
+function buildExposeInitScript(names, internalName) {
   if (!names || !names.length) return "";
   const list = JSON.stringify(names);
   return `"use strict"; (() => {
     const bag = __tsNs.shimBindings ||= {__proto__:null,q:{__proto__:null,length:0},n:0,nonce:__tsNs.shimBindingId(),error:__tsNs.shimBindingError,pending:{__proto__:null},evaluations:{__proto__:null}};
+    bag.functions ||= {__proto__:null};
     const define = (name) => {
+      if (bag.functions[name]) return;
       if (typeof globalThis[name] === "function" && globalThis[name].__ts) return;
       const fn = function (...args) {
         const id = ++bag.n;
@@ -489,6 +492,8 @@ function buildExposeInitScript(names) {
           bag.q[bag.q.length++] = {__proto__:null, id, name, args };
         });
       };
+      bag.functions[name] = fn;
+      if (name === ${JSON.stringify(internalName)}) return;
       try { Object.defineProperty(fn, "__ts", { value: true }); } catch (_e) {}
       try {
         Object.defineProperty(globalThis, name, { value: fn, configurable: true, writable: true });
@@ -2387,19 +2392,22 @@ class Page {
   // inserting a script tag would change parser locations and subject it to CSP.
   _initScriptSource() {
     const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
-    if (this._routeInitScript) all.unshift(this._routeInitScript);
     return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
   }
 
   _engineInitScriptSource() {
-    return buildExposeInitScript([...this._mergedBindings().keys()]);
+    return (
+      buildExposeInitScript([...this._mergedBindings().keys()], this._routeBindingName) +
+      "\n" +
+      (this._routeInitScript ?? "")
+    );
   }
   async _installNativeBindings() {
     if (!this._live) return;
     const engine = this._engineInitScriptSource();
     await native.liveEvalEngine(
       this._session,
-      `"use strict"; __tsNs.shimBindingScripts(${JSON.stringify(engine)}, ${JSON.stringify(this._initScriptSource())}, ${JSON.stringify(this._routeInitScript ?? "")});
+      `"use strict"; __tsNs.shimBindingScripts(${JSON.stringify(engine)}, ${JSON.stringify(this._initScriptSource())}, "");
 ${engine}`,
     );
   }
@@ -2486,8 +2494,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
         throw new Error("Route's page has been closed or navigated");
       const expression = `(async () => {
         const request = ${JSON.stringify(request)};
-        const state = globalThis.fetch.__turboRouteState;
-        const response = await state.fetch(request.url, {
+        const window = ${source.frame === this ? "globalThis" : source.frame._realmExpression("globalThis")};
+        const realm = __tsNs.shimBindingNamespace(window);
+        const state = realm.shimRouteState;
+        const response = await realm.shimRouteFetch(request.url, {
           ...request, signal:state.requests.get(request.requestId)?.signal, body:request.bodyBytes === null ? undefined : new Uint8Array(request.bodyBytes),
         });
         return JSON.stringify({url:response.url,status:response.status,statusText:response.statusText,
@@ -2497,14 +2507,43 @@ return String(globalThis.__RESULT ?? ""); })()`,
         Object.keys(options).some((key) => !["url", "method", "postData", "headers"].includes(key))
       )
         throw new Error("Unsupported route.fetch option");
-      const raw = await this._evaluateWithBindings(
-        source.frame === this ? expression : source.frame._realmExpression(expression),
-      );
+      const raw = await this._evaluateWithBindings(expression);
       if (this._closed || session !== this._session)
         throw new Error("Route's page has been closed or navigated");
       return routeResponse(JSON.parse(raw));
     };
-    return invokeHostRoute(entry.handler, data, createRequest, fetchResponse, signal);
+    const decision = await invokeHostRoute(
+      entry.handler,
+      data,
+      createRequest,
+      fetchResponse,
+      signal,
+    );
+    if (decision.fulfilled && !signal.aborted && session === this._session && !this._closed) {
+      const value = decision.fulfilled;
+      const status = value.status ?? 200;
+      const body = [204, 205, 304].includes(status)
+        ? Buffer.alloc(0)
+        : Buffer.from(value.bodyBytes ?? []);
+      native.liveNetworkLogPublishIntercepted(
+        session,
+        JSON.stringify({
+          url: data.request.url,
+          method: data.request.method,
+          status,
+          statusText: "",
+          ok: status >= 200 && status < 300,
+          headers: Object.entries(value.headers ?? {}),
+          request: data.request,
+          context: {
+            resourceType: data.request.resourceType,
+            frame: { path: source.frame === this ? [] : source.frame._path },
+          },
+        }),
+        body,
+      );
+    }
+    return decision;
   }
 
   async _takeBindingCalls() {
@@ -4258,7 +4297,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // Retired callbacks stay until navigation so already-queued requests can settle.
     if (this._live) {
       await this._installNativeBindings();
-      await native.liveEvalEngine(this._session, `"use strict"; ${this._routeInitScript}`);
     }
   }
   async route(urlPattern, handler) {

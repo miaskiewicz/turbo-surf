@@ -731,6 +731,18 @@ pub async fn live_network_log(id: u32) -> Result<String> {
     Ok(network_log(id)?.drain_batch())
 }
 
+/// Host decisions share the native transport hub without taking the isolate actor.
+#[napi]
+pub fn live_network_log_publish_intercepted(id: u32, header: String, body: Buffer) -> Result<()> {
+    let header: serde_json::Value = serde_json::from_str(&header)
+        .map_err(|_| Error::from_reason("Invalid intercepted response"))?;
+    if !header.is_object() {
+        return Err(Error::from_reason("Invalid intercepted response"));
+    }
+    network_log(id)?.publish_intercepted_response(header, &body);
+    Ok(())
+}
+
 /// Wait on native transport notifications without occupying the isolate actor.
 #[napi]
 pub async fn live_network_log_wait(id: u32, wake: String) -> Result<String> {

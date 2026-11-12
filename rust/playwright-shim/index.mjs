@@ -527,6 +527,7 @@ class Locator {
     this._getBy = opts.getBy ?? null;
     this._testId = opts.testId ?? null;
     this._parent = opts.parent ?? null;
+    this._composite = opts.composite ?? null;
     // nth-aware scope chain ([{sel, idx, filter}, …]) for nested locators where a parent had
     // `.nth(i)` or `.filter(...)` — a CSS-concat selector can't express "the i-th (or
     // text-filtered) match's subtree", so the live drive walks this chain via
@@ -620,6 +621,7 @@ class Locator {
       getBy: this._getBy,
       testId: this._testId,
       parent: this._parent,
+      composite: this._composite,
       scope: this._scope,
       // The base selector survives composition (incl. `.filter()`); the serializable filter
       // spec carries unless this derivation sets its own (a `.filter()` call passes one).
@@ -649,15 +651,67 @@ class Locator {
       filterSpec: serializableFilterSpec(opts),
     });
   }
+  _combine(other, operation) {
+    if (!(other instanceof Locator) || other._page !== this._page)
+      throw new Error("Locator operands must belong to the same frame");
+    return new Locator(
+      this._page,
+      () => {
+        const left = this._all();
+        const right = other._all();
+        const keep = new Set(right.map((match) => match.node));
+        const matches =
+          operation === "and" ? left.filter((match) => keep.has(match.node)) : [...left, ...right];
+        const records = new Map(matches.map((match) => [match.node, match]));
+        const ordered = [];
+        for (const match of JSON.parse(native.query(this._html, "*", "css")))
+          if (records.has(match.node)) ordered.push(records.get(match.node));
+        return ordered;
+      },
+      { composite: { left: this, right: other, operation } },
+    );
+  }
   and(other) {
-    const keep = new Set();
-    return new Locator(this._page, (h) => {
-      for (const x of other._resolve(h)) keep.add(x.node);
-      return this._resolve(h).filter((x) => keep.has(x.node));
-    });
+    return this._combine(other, "and");
   }
   or(other) {
-    return new Locator(this._page, (h) => [...this._resolve(h), ...other._resolve(h)]);
+    return this._combine(other, "or");
+  }
+  _hasComposite() {
+    return this._composite != null || !!this._parent?._hasComposite();
+  }
+  _liveBaseExpression() {
+    if (this._composite) {
+      const { left, right, operation } = this._composite;
+      return `(() => { const left = ${left._liveElementsExpression()}; const right = ${right._liveElementsExpression()}; const keep = new Set(right); return (${orderedLocatorElements.toString()})(${operation === "and" ? "left.filter(element => keep.has(element))" : "[...left, ...right]"}); })()`;
+    }
+    if (this._selector) {
+      const roots = this._parent ? this._parent._liveElementsExpression() : "[document]";
+      return `(${orderedLocatorElements.toString()})(${roots}.flatMap(root => Array.from(__tsNs.tcQuerySelector(root, ${JSON.stringify(this._selector)}))))`;
+    }
+    if (this._testId) {
+      const { attribute, source, flags, root } = this._testId;
+      return `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `document.querySelectorAll(${JSON.stringify(root)})` : "[document]"}; const matches = []; for (const root of roots) for (const element of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(element.getAttribute(${JSON.stringify(attribute)}))) matches.push(element); } return (${orderedLocatorElements.toString()})(matches); })()`;
+    }
+    if (this._getBy) {
+      const g = this._getBy;
+      return `(() => { __tsNs.tcGetBy(${JSON.stringify(g.kind)}, ${JSON.stringify(g.value)}, ${JSON.stringify(g.name)}, ${JSON.stringify(g.root)}, ${JSON.stringify(g.options ?? {})}); const all = Array.from(document.querySelectorAll('*')); return JSON.parse(globalThis.__RESULT).map(match => all[match.idx]); })()`;
+    }
+    throw new Error("Custom locator expressions cannot be composed in a live DOM");
+  }
+  _liveElementsExpression() {
+    let source = this._liveBaseExpression();
+    if (this._parent && !this._selector)
+      source = `(() => { const roots = ${this._parent._liveElementsExpression()}; return ${source}.filter(element => roots.some(root => root !== element && root.contains(element))); })()`;
+    if (this._filter) {
+      if (!this._filterSpec)
+        throw new Error("This locator filter cannot be composed in a live DOM");
+      const spec = this._filterSpec;
+      source = `${source}.filter(element => ${spec.hasText != null ? `(element.textContent || '').includes(${JSON.stringify(spec.hasText)})` : "true"} && ${spec.hasNotText != null ? `!(element.textContent || '').includes(${JSON.stringify(spec.hasNotText)})` : "true"})`;
+    }
+    if (this._index != null)
+      source = `(() => { const matches = ${source}; const index = ${this._index}; const found = matches[index < 0 ? matches.length + index : index]; return found ? [found] : []; })()`;
+    return source;
   }
   // When this locator (or an ancestor) was indexed via `.nth(i)`, a CSS-concat selector can't
   // express "the i-th match's subtree" — return the scope CHAIN so the child drives via
@@ -681,6 +735,7 @@ class Locator {
   // `.card`→`button` case); a scope chain when an ancestor was `.nth(i)`. getBy-rooted nesting
   // carries its matcher through the same scope chain.
   locator(selector) {
+    if (this._hasComposite()) return this._scopedSelectorChild(selector, this._childScope(), this);
     // A `.nth()`/`.filter()` ancestor → walk the scope chain (it carries the index/filter a
     // CSS-concat can't express), even if `.filter()` dropped our own `_selector`.
     const scope = this._indexedScope();
@@ -696,6 +751,12 @@ class Locator {
   // the `root` selector, or the nth-aware scope chain when an ancestor was `.nth(i)`). A
   // getBy-rooted parent isn't CSS-expressible → document-scoped.
   _scopedGetBy(kind, value, name, options = null) {
+    if (this._hasComposite())
+      return new Locator(
+        this._page,
+        (html) => JSON.parse(native.getBy(html, kind, value, name, null, JSON.stringify(options))),
+        { getBy: { kind, value, name, options }, parent: this },
+      );
     const scope = this._indexedScope();
     if (scope) {
       return new Locator(
@@ -718,24 +779,32 @@ class Locator {
     );
   }
   getByRole(role, o) {
-    if (!this._selector && !this._indexedScope()) return this._page.getByRole(role, o);
+    if (!this._selector && !this._indexedScope() && !this._hasComposite())
+      return this._page.getByRole(role, o);
     return this._scopedGetBy("role", role, o?.name != null ? String(o.name) : null, o);
   }
   getByText(t, o) {
-    if (!this._selector && !this._indexedScope()) return this._page.getByText(t, o);
+    if (!this._selector && !this._indexedScope() && !this._hasComposite())
+      return this._page.getByText(t, o);
     return this._scopedGetBy("text", String(t), null, o);
   }
   getByLabel(t, o) {
-    if (!this._selector && !this._indexedScope()) return this._page.getByLabel(t, o);
+    if (!this._selector && !this._indexedScope() && !this._hasComposite())
+      return this._page.getByLabel(t, o);
     return this._scopedGetBy("label", String(t), null, o);
   }
   getByTestId(t) {
-    if (t instanceof RegExp) return this._page._regexTestId(t, this._selector);
+    if (t instanceof RegExp) {
+      const child = this._page._regexTestId(t, this._selector);
+      if (this._hasComposite()) child._parent = this;
+      return child;
+    }
     // Scope to this locator's subtree when it is selector-backed (like `locator()` does) —
     // `card.getByTestId('x')` must match only descendants of the card, not the whole document.
     // A `.filter()`/`.nth()` ancestor walks the scope chain (it carries the filter/index our
     // own `_selector` can't), so check that BEFORE falling back to a document-wide getByTestId.
     const childSel = `[${this._page._context._testIdAttribute}="${t}"]`;
+    if (this._hasComposite()) return this._scopedSelectorChild(childSel, this._childScope(), this);
     const scope = this._indexedScope();
     if (scope) return this._scopedSelectorChild(childSel, scope);
     if (!this._selector) return this._page.getByTestId(t);
@@ -942,6 +1011,11 @@ class Locator {
   // is what lets getByRole/getByLabel/getByText drive the running app (fill/click), not
   // just mutate the static HTML snapshot.
   async _driveLive(kind, value) {
+    if (this._hasComposite()) {
+      const index = await this._resolveLiveIdx();
+      if (index == null) throw new Error("turbo-surf: locator matched no elements");
+      return this._page._sessionDispatch("*", index, kind, value);
+    }
     if (this._testId) {
       const idx = await this._resolveLiveIdx();
       if (idx == null) throw new Error("turbo-surf: locator matched no elements");
@@ -1262,6 +1336,14 @@ class Locator {
   // Returns null when the locator matches nothing. Used by dragTo and page.dragAndDrop.
   async _resolveLiveIdx() {
     if (this._page._session == null) return null;
+    if (this._hasComposite()) {
+      const raw = await this._page._evalEngine(
+        `(() => { const matches = ${this._liveElementsExpression()}; const all = Array.from(document.querySelectorAll('*')); const indices = new Map(all.map((element,index) => [element,index])); globalThis.__RESULT = JSON.stringify(matches.map(element => ({idx:indices.get(element)}))); })()`,
+      );
+      const matches = JSON.parse(raw);
+      this._checkLiveCardinality(matches);
+      return matches[0]?.idx ?? null;
+    }
     if (this._testId) {
       const { attribute, source, flags, root } = this._testId;
       const raw = await this._page._evalEngine(
@@ -1329,6 +1411,11 @@ class Locator {
 }
 
 // filter({ hasText, has, hasNot, hasNotText }) → JS predicate over a match.
+function orderedLocatorElements(elements) {
+  const selected = new Set(elements);
+  return Array.from(document.querySelectorAll("*")).filter((element) => selected.has(element));
+}
+
 function strictLocatorError(count) {
   return new Error(`strict mode violation: locator resolved to ${count} elements`);
 }

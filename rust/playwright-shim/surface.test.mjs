@@ -4900,3 +4900,26 @@ test("Text array assertions compare ordered collections and subsequences (#332)"
     await p.close();
   }
 });
+
+test("Locator unions and intersections honor indexed operands, order and live child scope (#330)", async () => {
+  const p = newPage();
+  try {
+    await p.setContent(
+      "<section class=card><button onclick=\"document.body.dataset.clicked='one'\">one</button></section><section class=card><button onclick=\"document.body.dataset.clicked='two'\">two</button></section><section class=card><button onclick=\"document.body.dataset.clicked='three'\">three</button></section>",
+    );
+    const cards = p.locator(".card");
+    assert.equal(await cards.or(cards).count(), 3);
+    const ends = cards.last().or(cards.first());
+    assert.equal(await ends.count(), 2);
+    assert.deepEqual(await ends.allTextContents(), ["one", "three"]);
+    assert.equal(await cards.first().and(cards.last()).count(), 0);
+    assert.equal(await cards.first().and(cards.first()).count(), 1);
+    assert.equal(await ends.getByRole("button").count(), 2);
+    await ends.locator("button").nth(1).click({ force: true });
+    assert.equal(await p.evaluate(() => document.body.dataset.clicked), "three");
+    await cards.first().or(cards.first()).getByRole("button").click({ force: true });
+    assert.equal(await p.evaluate(() => document.body.dataset.clicked), "one");
+  } finally {
+    await p.close();
+  }
+});

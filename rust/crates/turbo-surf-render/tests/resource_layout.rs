@@ -45,6 +45,14 @@ fn referenced_fonts_and_animations_never_silently_fall_back_or_freeze() {
             "@keyframes 'Spin Name'{to{width:100px}}#target{animation-name:'Spin Name'}",
             "animation resource",
         ),
+        (
+            "@keyframes additive{0%{width:43px}}#target{animation:additive 100s;animation-composition:add}",
+            "animation resource",
+        ),
+        (
+            "@keyframes unresolved{0%{width:var(--size)}}#target{--size:43px;animation:unresolved 100s}",
+            "animation resource",
+        ),
     ];
     for (css, diagnostic) in cases {
         let html = format!("<!doctype html><style>#target{{width:43px;height:17px}}{css}</style><div id='target'></div>");
@@ -100,4 +108,18 @@ fn opacity_only_animation_does_not_reject_unrelated_geometry() {
             "120"
         );
     }
+}
+
+#[test]
+fn used_constant_keyframes_are_proven_against_the_actual_underlying_style() {
+    let html = "<!doctype html><style>@keyframes constant-layout{0%{display:block}} input{display:block;animation:constant-layout 10ms}#target{width:43px;height:17px}</style><input id=field><div id=target></div>";
+    let actual = run_with_dom(html, "JSON.stringify([getComputedStyle(document.getElementById('field')).display,document.getElementById('target').getBoundingClientRect().width])").unwrap();
+    assert_eq!(actual, "[\"block\",43]");
+}
+
+#[test]
+fn constant_animation_admission_tracks_underlying_style_mutations() {
+    let html = "<!doctype html><style>@keyframes steady{0%{width:43px}}#target{display:block;width:43px;height:17px;animation:steady 100s}</style><div id=target></div>";
+    let actual = run_with_dom(html, "(()=>{const node=document.getElementById('target');const width=node.getBoundingClientRect().width;node.style.width='44px';try{node.getBoundingClientRect();return 'silently frozen';}catch(error){return JSON.stringify([width,error.message.includes('animation resource')]);}})()").unwrap();
+    assert_eq!(actual, "[43,true]");
 }

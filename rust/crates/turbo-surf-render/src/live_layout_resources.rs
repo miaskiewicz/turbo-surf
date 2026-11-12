@@ -1,4 +1,4 @@
-//! Admit definitions only after actual matched styles prove them unused.
+//! Validate resource use against matched native styles before geometry.
 use lightningcss::properties::{animation::AnimationName, font::FontFamily, Property, PropertyId};
 use lightningcss::rules::{font_face::FontFaceProperty, keyframes::KeyframesName, CssRule};
 use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
@@ -106,7 +106,7 @@ pub(crate) fn family_name(family: &FontFamily<'_>) -> Result<String, String> {
 #[derive(Default)]
 struct Definitions {
     fonts: std::collections::HashSet<String>,
-    animations: std::collections::HashSet<String>,
+    animations: std::collections::HashMap<String, Vec<Option<AnimationValues>>>,
 }
 
 thread_local! {
@@ -127,13 +127,20 @@ pub(crate) fn take_used_fonts() -> Vec<String> {
 impl Definitions {
     fn collect(rules: &[crate::live_stylesheets::ActiveRule]) -> Self {
         let mut result = Self::default();
-        for definition in rules.iter().filter_map(|rule| rule.resource.as_ref()) {
+        for rule in rules {
+            let Some(definition) = rule.resource.as_ref() else {
+                continue;
+            };
             match definition {
                 Definition::Font(name) => {
                     result.fonts.insert(name.to_lowercase());
                 }
                 Definition::Animation(name) => {
-                    result.animations.insert(name.clone());
+                    result
+                        .animations
+                        .entry(name.clone())
+                        .or_default()
+                        .push(animation_values(&rule.text));
                 }
                 Definition::Inert
                 | Definition::Container(_)
@@ -143,6 +150,77 @@ impl Definitions {
         }
         result
     }
+}
+
+// A constant animation is geometry-safe only for the element whose underlying
+// longhand values were compared; the same animation name can change another node.
+#[derive(Default)]
+struct AnimationValues {
+    properties: Vec<(String, String)>,
+}
+
+fn animation_values(source: &str) -> Option<AnimationValues> {
+    let sheet = StyleSheet::parse(source, ParserOptions::default()).ok()?;
+    let [CssRule::Keyframes(rule)] = sheet.rules.0.as_slice() else {
+        return None;
+    };
+    let mut result = AnimationValues::default();
+    for frame in &rule.keyframes {
+        // Important declarations do not apply in CSS keyframes.
+        for property in &frame.declarations.declarations {
+            if !matches!(property, Property::Opacity(_)) {
+                result.properties.push(comparable_value(property)?);
+            }
+        }
+    }
+    Some(result)
+}
+
+fn comparable_value(property: &Property<'_>) -> Option<(String, String)> {
+    if matches!(
+        property,
+        Property::Unparsed(_) | Property::Custom(_) | Property::All(_)
+    ) {
+        return None;
+    }
+    let id = property.property_id();
+    if id.longhands().is_some() {
+        return None;
+    }
+    let value = property
+        .value_to_css_string(PrinterOptions::default())
+        .ok()?;
+    if ["inherit", "initial", "unset", "revert", "revert-layer"].contains(&value.as_str()) {
+        return None;
+    }
+    Some((id.to_css_string(PrinterOptions::default()).ok()?, value))
+}
+
+fn constant_animation(style: &ComputedStyle, frames: &[Option<AnimationValues>]) -> bool {
+    if style
+        .get("animation-composition")
+        .is_some_and(|value| value.split(',').any(|part| part.trim() != "replace"))
+    {
+        return false;
+    }
+    frames.iter().all(|frame| {
+        frame.as_ref().is_some_and(|frame| {
+            frame
+                .properties
+                .iter()
+                .all(|(name, expected)| matches_underlying(style, name, expected))
+        })
+    })
+}
+
+fn matches_underlying(style: &ComputedStyle, name: &str, expected: &str) -> bool {
+    let Some(value) = style.get(name) else {
+        return false;
+    };
+    Property::parse_string(PropertyId::from(name), value, ParserOptions::default())
+        .ok()
+        .and_then(|property| comparable_value(&property))
+        .is_some_and(|(_, actual)| actual == expected)
 }
 
 type Seen<'a> = std::collections::HashSet<(&'static str, &'a str)>;
@@ -203,15 +281,11 @@ fn validate_style<'a>(
         }
     }
     if !definitions.animations.is_empty() {
-        validate_animations(style, definitions, seen)?;
+        validate_animations(style, definitions)?;
     }
     Ok(())
 }
-fn validate_animations<'a>(
-    style: &'a ComputedStyle,
-    definitions: &Definitions,
-    seen: &mut Seen<'a>,
-) -> Result<(), String> {
+fn validate_animations(style: &ComputedStyle, definitions: &Definitions) -> Result<(), String> {
     use lightningcss::vendor_prefix::VendorPrefix;
     for (name, id) in [
         (
@@ -228,7 +302,7 @@ fn validate_animations<'a>(
             PropertyId::Animation(VendorPrefix::WebKit),
         ),
     ] {
-        let Some(value) = style.get(name).filter(|value| seen.insert((name, value))) else {
+        let Some(value) = style.get(name) else {
             continue;
         };
         let property = Property::parse_string(id, value, ParserOptions::default())
@@ -247,7 +321,11 @@ fn validate_animations<'a>(
                 AnimationName::Ident(name) => name.0.to_string(),
                 AnimationName::String(name) => name.0.to_string(),
             };
-            if definitions.animations.contains(&used) {
+            if definitions
+                .animations
+                .get(&used)
+                .is_some_and(|frames| !constant_animation(style, frames))
+            {
                 return Err(format!(
                     "native live layout animation resource is unsupported: {used}"
                 ));
@@ -260,6 +338,72 @@ fn validate_animations<'a>(
 #[cfg(test)]
 mod definition_tests {
     use super::*;
+    fn animation_definitions(source: &str) -> Definitions {
+        Definitions::collect(&[crate::live_stylesheets::ActiveRule {
+            text: source.into(),
+            scoped: None,
+            resource: Some(definition(source).unwrap()),
+            containers: Vec::new(),
+        }])
+    }
+
+    #[test]
+    fn active_keyframes_equal_to_each_underlying_style_are_layout_inert() {
+        for (css, property, value) in [
+            ("@keyframes steady{0%{display:block}}", "display", "block"),
+            (
+                "@keyframes steady{0%{width:43px}100%{width:43px;opacity:.5}}",
+                "width",
+                "43.0px",
+            ),
+        ] {
+            let definitions = animation_definitions(css);
+            let style =
+                ComputedStyle::from_pairs([("animation-name", "steady"), (property, value)]);
+            validate_style(&style, &definitions, &mut Seen::new()).unwrap();
+        }
+    }
+
+    #[test]
+    fn animation_proof_is_not_reused_for_a_different_underlying_style() {
+        let definitions = animation_definitions("@keyframes steady{0%{display:block}}");
+        let mut seen = Seen::new();
+        let safe = ComputedStyle::from_pairs([("animation-name", "steady"), ("display", "block")]);
+        validate_style(&safe, &definitions, &mut seen).unwrap();
+        let changing =
+            ComputedStyle::from_pairs([("animation-name", "steady"), ("display", "inline-block")]);
+        assert!(validate_style(&changing, &definitions, &mut seen)
+            .unwrap_err()
+            .contains("animation resource"));
+    }
+
+    #[test]
+    fn changing_unresolved_or_additive_keyframes_remain_unsupported() {
+        for (css, extra) in [
+            (
+                "@keyframes steady{0%{width:43px}100%{width:44px}}",
+                "replace",
+            ),
+            ("@keyframes steady{0%{width:var(--size)}}", "replace"),
+            ("@keyframes steady{0%{width:43px}}", "add"),
+            ("@keyframes steady{0%{width:inherit}}", "replace"),
+        ] {
+            let definitions = animation_definitions(css);
+            let style = ComputedStyle::from_pairs([
+                ("animation-name", "steady"),
+                ("width", "43px"),
+                ("--size", "43px"),
+                ("animation-composition", extra),
+            ]);
+            assert!(
+                validate_style(&style, &definitions, &mut Seen::new())
+                    .unwrap_err()
+                    .contains("animation resource"),
+                "{css}"
+            );
+        }
+    }
+
     #[test]
     fn resource_rules_classify_by_what_they_can_define() {
         let cases = [

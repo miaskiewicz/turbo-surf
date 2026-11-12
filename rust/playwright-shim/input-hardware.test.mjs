@@ -526,6 +526,8 @@ test("dispatchEvent preserves initializer fields and propagation (#371)", async 
         button: 2,
         x: 37,
         detail: 7,
+        key: undefined,
+        pointerType: undefined,
         bubbles: false,
         cancelable: false,
         composed: true,

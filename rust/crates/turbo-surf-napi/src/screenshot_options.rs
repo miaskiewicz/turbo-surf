@@ -10,7 +10,7 @@ use turbo_dom_raster::{ImageAssets, ImageMetadata, ScreenshotOptions, Viewport};
 pub(crate) struct CaptureOptions {
     pub full_page: bool,
     pub system_fonts: bool,
-    pub device_scale: f32,
+    pub device_scale: f64,
 }
 
 impl Default for CaptureOptions {

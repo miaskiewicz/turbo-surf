@@ -38,6 +38,10 @@ branch.
 - Admit opacity-only animation keyframes and constant longhands equal to the
   element's computed style for geometry reads, while retaining resource admission
   checks for geometry-changing animations (#345).
+- Keep unrelated transform-only animations from rejecting independent rectangle
+  reads, and read viewport client dimensions directly under the existing overlay
+  scrollbar policy. Animated targets, ancestors, and uncertain scroll or layout
+  dependencies retain resource admission checks (#498).
 - Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
   exceptions, maintain NodeIterator's root and reference cursor, and honor idle
   callback timeout and deadline behavior (#449, #450, #451, #452).

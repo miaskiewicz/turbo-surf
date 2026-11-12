@@ -3404,18 +3404,22 @@ class Page {
   // and failed/unresolvable refs are skipped; count capped to match the engine.
   async _fetchImages() {
     if (!/^https?:/.test(this._url ?? "")) return {};
-    const key = `${this._url}\u0000${this._html}`;
+    const url = this._url,
+      html = this._html;
+    const requestState = this._requestState,
+      cookies = this._cookies;
+    const key = `${url}\u0000${html}`;
     if (this._imageCache?.key === key) return this._imageCache.images;
-    const entries = await mapBounded(native.imageUrls(this._html).slice(0, 60), 8, async (ref) => {
+    const images = mapBounded(native.imageUrls(html).slice(0, 60), 8, async (ref) => {
       try {
-        const abs = new URL(ref, this._url).href;
-        const buf = await native.fetchBytes(abs, this._requestState, this._url, this._cookies);
+        const abs = new URL(ref, url).href;
+        const buf = await native.fetchBytes(abs, requestState, url, cookies);
         return buf && buf.length ? [ref, buf] : null;
       } catch {
         return null; /* skip an image that won't resolve/fetch */
       }
-    });
-    const images = Object.fromEntries(entries.filter(Boolean));
+    }).then((entries) => Object.fromEntries(entries.filter(Boolean)));
+    // Retain the pending operation now; a later invalidation must never be undone on completion.
     this._imageCache = { key, images };
     return images;
   }

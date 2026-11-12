@@ -4643,3 +4643,53 @@ test("static frame identity survives promotion to the live native registry (#447
     await p.close();
   }
 });
+
+test("in-flight screenshot assets cannot repopulate a reloaded document cache (#489)", async () => {
+  let images = 0,
+    release;
+  let markStarted;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB2kAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const html = '<img src="/asset.png" width="1" height="1">';
+  const server = createServer((request, response) => {
+    response.setHeader("cache-control", "no-store");
+    if (request.url === "/asset.png") {
+      images++;
+      response.setHeader("content-type", "image/png");
+      if (images === 1) {
+        release = () => {
+          if (!response.writableEnded) response.end(png);
+        };
+        markStarted();
+      } else response.end(png);
+    } else {
+      response.setHeader("content-type", "text/html");
+      response.end(html);
+    }
+  });
+  const base = await listen(server),
+    p = newPage();
+  try {
+    await p.goto(base, { waitUntil: "commit" });
+    const old = p.screenshot({ externalCss: false });
+    await started;
+    await p.reload({ waitUntil: "commit" });
+    release();
+    await old;
+    await p.screenshot({ externalCss: false });
+    assert.equal(images, 2, "old capture cannot restore assets after document invalidation");
+    await p.setContent(html);
+    await Promise.all([p.screenshot({ externalCss: false }), p.screenshot({ externalCss: false })]);
+    assert.equal(images, 3, "concurrent same-document captures share their pending asset fetch");
+  } finally {
+    release?.();
+    await p.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

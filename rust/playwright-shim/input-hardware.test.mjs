@@ -94,27 +94,65 @@ test("page.mouse.wheel fires a wheel event", async () => {
   }
 });
 
-test("page.touchscreen.tap fires pointer+touch events and a click", async () => {
+test("page.touchscreen.tap keeps native payloads and suppresses canceled activation (#442)", async () => {
   const { page, teardown } = await fixture();
   try {
-    const touchSupported = await page.evaluate(() => {
-      try {
-        const touch = new Touch({ identifier: 1, target: document.body });
-        return new TouchEvent("touchstart", { touches: [touch] }).touches.length === 1;
-      } catch {
-        return false;
+    await page.evaluate(() => {
+      window.nativeTouchRows = [];
+      window.cancelNativeTouch = false;
+      const target = document.getElementById("src");
+      for (const type of [
+        "pointerdown",
+        "touchstart",
+        "pointerup",
+        "touchend",
+        "mousedown",
+        "mouseup",
+        "click",
+      ]) {
+        target.addEventListener(
+          type,
+          (event) => {
+            const touch = event.changedTouches?.[0];
+            window.nativeTouchRows.push(
+              touch
+                ? [
+                    event.type,
+                    event.touches.length,
+                    event.targetTouches.length,
+                    event.changedTouches.length,
+                    touch instanceof Touch,
+                    touch.target === target,
+                    touch.clientX,
+                    touch.clientY,
+                  ]
+                : [event.type],
+            );
+            if (window.cancelNativeTouch && event.type === "touchstart") event.preventDefault();
+          },
+          { passive: false },
+        );
       }
     });
-    if (!touchSupported) {
-      await assert.rejects(() => page.touchscreen.tap(30, 40), /touchscreen.tap unavailable/);
-      assert.equal(await page.locator("#log").textContent(), "");
-      return;
-    }
     await page.touchscreen.tap(30, 40);
-    const log = await page.locator("#log").textContent();
-    for (const ev of ["pointerdown", "touchstart", "pointerup", "touchend", "click"]) {
-      assert.match(log, new RegExp(ev), `missing ${ev} in: ${log}`);
-    }
+    const ordinary = await page.evaluate(() => window.nativeTouchRows);
+    assert.deepEqual(
+      ordinary.map(([type]) => type),
+      ["pointerdown", "touchstart", "pointerup", "touchend", "mousedown", "mouseup", "click"],
+    );
+    assert.deepEqual(ordinary[1], ["touchstart", 1, 1, 1, true, true, 30, 40]);
+    assert.deepEqual(ordinary[3], ["touchend", 0, 0, 1, true, true, 30, 40]);
+    await page.evaluate(() => {
+      window.nativeTouchRows = [];
+      window.cancelNativeTouch = true;
+    });
+    await page.touchscreen.tap(30, 40);
+    assert.deepEqual(await page.evaluate(() => window.nativeTouchRows.map(([type]) => type)), [
+      "pointerdown",
+      "touchstart",
+      "pointerup",
+      "touchend",
+    ]);
   } finally {
     await teardown();
   }

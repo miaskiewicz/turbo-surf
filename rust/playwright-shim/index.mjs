@@ -16,21 +16,21 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { basename } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { captureAssets } from "./screenshot-resources.mjs";
-import { equalValues } from "./equality.mjs";
+import { basename } from "node:path";
 import { validateArtifactOptions } from "./artifact-options.mjs";
-import { makeKeyboard } from "./keyboard.mjs";
 import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
+import { equalValues } from "./equality.mjs";
 import {
-  encodeEvaluationValue,
-  encodeEvaluationError,
   decodeEvaluationError,
   decodeEvaluationValue,
+  encodeEvaluationError,
+  encodeEvaluationValue,
   evaluationArgument,
 } from "./evaluation-codec.mjs";
+import { makeKeyboard } from "./keyboard.mjs";
+import { captureAssets } from "./screenshot-resources.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -3644,10 +3644,14 @@ class Page {
     const vp = this._viewport;
     const width = opts.width ?? vp.width;
     const height = opts.height ?? vp.height;
+    const html = this._html;
+    const maskIndices = screenshotMaskIndices(this, opts.mask);
     const type = screenshotEncoding(opts);
     const asSvg = type === "svg";
     const optionsJson = JSON.stringify({
       fullPage: opts.fullPage === true,
+      maskIndices,
+      maskColor: opts.maskColor ?? "#ff00ff",
       systemFonts: opts.systemFonts === true,
     });
     const { css, images, metadataJson } = await captureAssets(
@@ -3657,21 +3661,14 @@ class Page {
       width,
       height,
       optionsJson,
+      html,
     );
     let out = asSvg
       ? Buffer.from(
-          native.screenshotCaptureSvg(
-            this._html,
-            css,
-            images,
-            width,
-            height,
-            optionsJson,
-            metadataJson,
-          ),
+          native.screenshotCaptureSvg(html, css, images, width, height, optionsJson, metadataJson),
           "utf8",
         )
-      : native.screenshotCapture(this._html, css, images, width, height, optionsJson, metadataJson);
+      : native.screenshotCapture(html, css, images, width, height, optionsJson, metadataJson);
     if (opts.clip) out = cropScreenshot(out, opts.clip, asSvg);
     if (type === "jpeg") out = native.screenshotJpeg(out, opts.quality);
     if (opts.path) await writeFile(opts.path, out);
@@ -3991,6 +3988,25 @@ function makeTouchscreen(page) {
         );
     },
   };
+}
+
+function screenshotMaskIndices(page, masks) {
+  if (masks == null) return [];
+  if (!Array.isArray(masks)) throw new Error("Screenshot mask must be an array of locators");
+  if (!masks.length) return [];
+  const all = JSON.parse(native.query(page._html, "*", "css"));
+  const indices = new Map(all.map((match, index) => [match.node, index]));
+  const selected = new Set();
+  for (const locator of masks) {
+    if (!(locator instanceof Locator) || locator._page !== page) {
+      throw new Error("Screenshot mask locators must belong to this page; frame masks unavailable");
+    }
+    for (const match of locator._all()) {
+      const index = indices.get(match.node);
+      if (index != null) selected.add(index);
+    }
+  }
+  return [...selected];
 }
 
 function screenshotEncoding(opts) {

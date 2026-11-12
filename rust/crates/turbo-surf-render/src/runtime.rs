@@ -8810,8 +8810,23 @@ if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
 // bootstrap by Rust; page script cannot reach it.
 const __G = __tsNs;
 __G.remoteHandleRetain = (owner, value) => ops.op_remote_handle_retain(owner, value);
-__G.remoteHandleGet = id => ops.op_remote_handle_get(id);
+__G.remoteHandleGet = (id, owner) => ops.op_remote_handle_get(id, owner);
 __G.remoteHandleDispose = id => ops.op_remote_handle_dispose(id);
+__G.remoteHandleCount = () => ops.op_remote_handle_count();
+__G.remoteHandleCompile = (owner, source) => ops.op_remote_handle_compile(owner, source);
+const __remoteHandleApply = Reflect.apply;
+const __remoteHandleFunctionSource = Function.prototype.toString;
+const __remoteHandleFrameStates = new WeakMap();
+const __remoteHandleFrameGet = WeakMap.prototype.get, __remoteHandleFrameSet = WeakMap.prototype.set;
+__G.remoteHandleFunctionSource = fn => __remoteHandleApply(__remoteHandleFunctionSource, fn, []);
+__G.remoteHandleFrameState = owner => {
+  let state = __remoteHandleApply(__remoteHandleFrameGet, __remoteHandleFrameStates, [owner]);
+  if (!state) {
+    state = {__proto__:null};
+    __remoteHandleApply(__remoteHandleFrameSet, __remoteHandleFrameStates, [owner, state]);
+  }
+  return state;
+};
 // Blink's message for an interface constructor called without `new` (turbo-surf#86):
 // interfaces without a constructor say "Illegal constructor", the others "Failed to
 // construct 'X': Please use the 'new' operator, ...". Every constructor this bootstrap

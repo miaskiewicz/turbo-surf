@@ -2,10 +2,11 @@
 use deno_core::{op2, v8, Extension};
 use deno_error::JsErrorBox;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+static NEXT_HANDLE: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Default)]
 struct Handles {
-    next: u32,
     owners: HashMap<u32, v8::Weak<v8::Context>>,
 }
 fn key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
@@ -44,15 +45,13 @@ fn op_remote_handle_retain<'s>(
     if scope.get_slot::<Handles>().is_none() {
         scope.set_slot(Handles::default());
     }
-    let id = scope
-        .get_slot::<Handles>()
-        .unwrap()
-        .next
-        .checked_add(1)
-        .ok_or_else(error)?;
+    let id = NEXT_HANDLE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+            next.checked_add(1)
+        })
+        .map_err(|_| error())?;
     let weak = v8::Weak::new(scope, context);
     let handles = scope.get_slot_mut::<Handles>().unwrap();
-    handles.next = id;
     handles.owners.retain(|_, owner| !owner.is_empty());
     handles.owners.insert(id, weak);
     let map = values(scope, context).ok_or_else(error)?;
@@ -64,6 +63,7 @@ fn op_remote_handle_retain<'s>(
 fn op_remote_handle_get<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     id: u32,
+    expected_owner: v8::Local<'s, v8::Value>,
 ) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
     let context = scope
         .get_slot::<Handles>()
@@ -72,6 +72,17 @@ fn op_remote_handle_get<'s>(
         .ok_or_else(error)?;
     if crate::runtime::native_frame_is_retired(context) {
         return Err(error());
+    }
+    if !expected_owner.is_undefined() {
+        let expected = v8::Local::<v8::Object>::try_from(expected_owner)
+            .ok()
+            .and_then(|owner| owner.get_creation_context(scope))
+            .ok_or_else(error)?;
+        if expected != context {
+            return Err(JsErrorBox::generic(
+                "JSHandle belongs to a different execution context",
+            ));
+        }
     }
     let map = values(scope, context).ok_or_else(error)?;
     let number = v8::Integer::new_from_unsigned(scope, id);
@@ -92,6 +103,36 @@ fn op_remote_handle_dispose(scope: &mut v8::PinScope, id: u32) {
         }
     }
 }
+#[op2(fast)]
+fn op_remote_handle_count(scope: &mut v8::PinScope) -> u32 {
+    scope.get_slot::<Handles>().map_or(0, |handles| {
+        handles
+            .owners
+            .values()
+            .filter(|owner| !owner.is_empty())
+            .count() as u32
+    })
+}
+#[op2(reentrant)]
+fn op_remote_handle_compile<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    owner: v8::Local<'s, v8::Object>,
+    #[string] source: &str,
+) -> Result<v8::Local<'s, v8::Function>, JsErrorBox> {
+    let context = owner.get_creation_context(scope).ok_or_else(error)?;
+    if crate::runtime::native_frame_is_retired(context) {
+        return Err(error());
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let code =
+        v8::String::new(scope, &format!("(function(){{\n{source}\n}})")).ok_or_else(error)?;
+    let script = v8::Script::compile(scope, code, None).ok_or_else(error)?;
+    script
+        .run(scope)
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        .ok_or_else(error)
+}
+
 pub(crate) fn extension() -> Extension {
     Extension {
         name: "turbo_surf_remote_handles",
@@ -99,6 +140,8 @@ pub(crate) fn extension() -> Extension {
             op_remote_handle_retain(),
             op_remote_handle_get(),
             op_remote_handle_dispose(),
+            op_remote_handle_count(),
+            op_remote_handle_compile(),
         ]),
         ..Default::default()
     }

@@ -124,3 +124,90 @@ test("ElementHandle actions keep the retained node when microtasks reorder its s
     await page.close();
   }
 });
+
+test("frame helper capabilities stay private when the guest replaces Function", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent('<iframe srcdoc="<button id=child>child</button>"></iframe>');
+    const frame = page.frames().find((frame) => frame !== page);
+    await frame.evaluate(() => {
+      const NativeFunction = Function;
+      globalThis.Function = function (...source) {
+        const compiled = NativeFunction(...source);
+        return function (...args) {
+          if (args[0]?.remoteHandleGet) globalThis.stolenRootCapabilities = args[0];
+          return compiled(...args);
+        };
+      };
+    });
+    await frame.locator("#child").click();
+    assert.equal(
+      await frame.evaluate(() => typeof globalThis.stolenRootCapabilities?.remoteHandleGet),
+      "undefined",
+    );
+    const child = await frame.locator("#child").elementHandle();
+    await child.click();
+    assert.equal(
+      await frame.evaluate(() => typeof globalThis.stolenRootCapabilities?.remoteHandleGet),
+      "undefined",
+    );
+    await child.dispose();
+  } finally {
+    await page.close();
+  }
+});
+
+test("nested handle arguments use the target frame prototypes", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent("<iframe></iframe>");
+    const frame = page.frames().find((frame) => frame !== page);
+    const object = await frame.evaluateHandle(() => ({ value: 7 }));
+    const result = await frame.evaluate(
+      ({ wrapped }) => ({
+        argumentOwnRealm: wrapped.constructor === Object,
+        handleOwnRealm: wrapped.object.constructor === Object,
+        value: wrapped.object.value,
+      }),
+      { wrapped: { object } },
+    );
+    assert.deepEqual(result, { argumentOwnRealm: true, handleOwnRealm: true, value: 7 });
+    await object.dispose();
+  } finally {
+    await page.close();
+  }
+});
+
+test("frame helper state ignores replaced guest intrinsics and inherited setters", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent('<iframe srcdoc="<button>child</button>"></iframe>');
+    await page.evaluate(() => {
+      const source = Function.prototype.toString;
+      Function.prototype.toString = function () {
+        const original = Reflect.apply(source, this, []);
+        return `function(...args){globalThis.leakedHelperState=__G;return (${original}).apply(this,args);}`;
+      };
+      globalThis.WeakMap = class {
+        get() {
+          return undefined;
+        }
+        set(_key, value) {
+          globalThis.leakedHelperState = value;
+        }
+      };
+      Object.defineProperty(Object.prototype, "remoteHandleGet", {
+        configurable: true,
+        set(value) {
+          globalThis.leakedRemoteGetter = value;
+        },
+      });
+    });
+    const frame = page.frames().find((frame) => frame !== page);
+    await frame.getByRole("button", { name: "child" }).click();
+    assert.equal(await page.evaluate(() => typeof globalThis.leakedRemoteGetter), "undefined");
+    assert.equal(await frame.evaluate(() => typeof globalThis.leakedHelperState), "undefined");
+  } finally {
+    await page.close();
+  }
+});

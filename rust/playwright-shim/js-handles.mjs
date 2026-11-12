@@ -31,7 +31,7 @@ function argumentExpression(value, owner) {
   const references = new Map(),
     declarations = [];
   function visit(value) {
-    if (states.has(value)) return `__tsNs.remoteHandleGet(${state(value, owner).id})`;
+    if (states.has(value)) return `__tsNs.remoteHandleGet(${state(value, owner).id},globalThis)`;
     if (!value || typeof value !== "object" || value instanceof Date || value instanceof RegExp)
       return evaluationArgument(value);
     if (references.has(value)) return references.get(value);
@@ -63,7 +63,10 @@ export async function handleEvaluation(owner, script, arg, retain = false) {
   const page = pageOf(owner);
   if (page._closed || page._session == null)
     throw new Error("page is closed or execution context unavailable");
-  const argument = argumentExpression(arg, owner);
+  const argumentSource = argumentExpression(arg, owner);
+  const argument = owner._realmExpression
+    ? `__tsNs.remoteHandleCompile(owner,${JSON.stringify(`"use strict"; const __tsNs=arguments[0]; return (${argumentSource});`)})(__tsNs)`
+    : argumentSource;
   const source =
     typeof script === "function"
       ? `return (${script.toString()})(arg);`

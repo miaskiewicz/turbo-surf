@@ -1728,7 +1728,7 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   const val = JSON.stringify(value ?? "");
   const remoteHandle = selector && typeof selector === "object" ? selector.__remoteHandle : null;
   const selection = Number.isInteger(remoteHandle)
-    ? `[__tsNs.remoteHandleGet(${remoteHandle})]`
+    ? `[__tsNs.remoteHandleGet(${remoteHandle},globalThis)]`
     : `document.querySelectorAll(${sel})`;
   const pick = `const els = ${selection};
     if (${strict} && els.length > 1) throw new Error('strict mode violation: locator resolved to ' + els.length + ' elements');
@@ -2068,17 +2068,19 @@ class Frame {
       let code = ${JSON.stringify(`return (${source});`)};
       let helperState;
       if (${helpers}) {
-        const states = __tsNs.shimFrameHelperStates ??= new WeakMap();
-        helperState = states.get(child.document);
-        if (!helperState) { helperState = {}; states.set(child.document, helperState); }
+        helperState = __tsNs.remoteHandleFrameState(child.document);
         helperState.remoteHandleGet = __tsNs.remoteHandleGet;
         // Compile the existing surf helpers in the child so their document and
         // intrinsics belong to that realm rather than closing over the host.
         const names = ['tcGetBy', 'tcQuerySelector', 'tcResolveScoped', 'tcApplyHover'];
-        const prelude = names.map(name => '__G[' + JSON.stringify(name) + '] = (' + __tsNs[name].toString() + ');').join('');
+        let prelude = '';
+        for (let index = 0; index < names.length; index++) {
+          const name = names[index];
+          prelude += '__G.' + name + ' = (' + __tsNs.remoteHandleFunctionSource(__tsNs[name]) + ');';
+        }
         code = '"use strict"; const __G = arguments[0]; const __tsNs = __G;' + prelude + code;
       }
-      return child.Function(code)(helperState);
+      return (${helpers} ? __tsNs.remoteHandleCompile(child, code) : child.Function(code))(helperState);
     })()`;
   }
   async evaluateHandle(script, arg) {

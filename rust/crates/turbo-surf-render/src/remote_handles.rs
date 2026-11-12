@@ -93,6 +93,9 @@ fn op_remote_handle_get<'s>(
 }
 #[op2(fast)]
 fn op_remote_handle_dispose(scope: &mut v8::PinScope, id: u32) {
+    dispose(scope, id);
+}
+pub(crate) fn dispose(scope: &mut v8::PinScope, id: u32) {
     let owner = scope
         .get_slot_mut::<Handles>()
         .and_then(|handles| handles.owners.remove(&id));

@@ -2110,6 +2110,28 @@ fn op_page_diagnostic(state: &mut OpState, #[serde] entry: serde_json::Value) {
     log.0.push_back(entry);
 }
 
+#[derive(Default)]
+struct ConsoleLog(std::collections::VecDeque<serde_json::Value>);
+
+#[op2]
+fn op_console_message(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    #[serde] entry: serde_json::Value,
+) {
+    let log = state.borrow_mut::<ConsoleLog>();
+    if log.0.len() == 1000 {
+        if let Some(previous) = log.0.pop_front() {
+            for argument in previous["args"].as_array().into_iter().flatten() {
+                if let Some(id) = argument["id"].as_u64() {
+                    crate::remote_handles::dispose(scope, id as u32);
+                }
+            }
+        }
+    }
+    log.0.push_back(entry);
+}
+
 // Classic scripts are scheduled onto the host pump. Executing inside a JS eval
 // or a synchronous op retains the dispatcher's frames in page Error stacks.
 struct ClassicScriptJob {
@@ -8718,6 +8740,7 @@ deno_core::extension!(
         fetch_streams::op_fetch_read,
         op_fetch,
         op_page_diagnostic,
+        op_console_message,
         network_transports::op_connect_allowed,
         network_transports::op_ws_open,
         network_transports::op_ws_send_text,
@@ -9501,8 +9524,41 @@ globalThis.addEventListener("error", event => {
   const error = __pageErrorApply(__pageErrorRead.error,event,[]);
   ops.op_page_diagnostic({event:"pageerror",name:String(error?.name || "Error"),message:String(error?.message || __pageErrorApply(__pageErrorRead.message,event,[])),stack:String(error?.stack || "")});
 });
-const __log = (...a) => __print(a.map(String).join(" ") + "\n");
-globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
+const __consoleError = Error;
+const __consoleApply = Reflect.apply;
+const __consoleDescriptors = Object.getOwnPropertyDescriptors;
+const __consoleKeys = Object.keys;
+const __consoleString = String;
+const __consoleJson = JSON.stringify;
+const __consoleElement = Element;
+const __consolePreview = value => {
+ if(typeof value==='string')return value;
+ if(value===null||typeof value!=='object')return __consoleString(value);
+ try {
+  const descriptors=__consoleDescriptors(value);
+  return '{'+__consoleKeys(descriptors).slice(0,5).map(key=>{
+   const descriptor=descriptors[key];const item=descriptor.value;
+   return key+': '+(!Object.hasOwn(descriptor,'value')?'[Getter]':item===null||typeof item!=='object'?typeof item==='string'?__consoleJson(item):__consoleString(item):'Object');
+  }).join(', ')+'}';
+ }catch(_error){return 'Object';}
+};
+const __consoleLocation = () => {
+ const stack=__consoleString(new __consoleError().stack||'');
+ for(const line of stack.split('\n').slice(1)){
+  const match=line.match(/(?:\(|at )([^()]+):(\d+):(\d+)\)?$/);
+  if(match&&!match[1].includes('<')&&!match[1].includes('ext:'))return {url:match[1].trim(),lineNumber:Number(match[2])-1,columnNumber:Number(match[3])-1};
+ }
+ return {url:__consoleString(location.href),lineNumber:0,columnNumber:0};
+};
+const __consoleLog = type => (...args) => {
+ const descriptors=[];
+ try {
+  for(const value of args) descriptors.push({id:__G.remoteHandleRetain(globalThis,value),kind:value instanceof __consoleElement?'element':'value'});
+  ops.op_console_message({event:'console',type,text:args.map(__consolePreview).join(' '),args:descriptors,location:__consoleLocation(),contextId:ops.op_csp_context(globalThis)});
+ }catch(error){for(const descriptor of descriptors)__G.remoteHandleDispose(descriptor.id);}
+};
+globalThis.console = {log:__consoleLog('log'),info:__consoleLog('info'),warn:__consoleLog('warning'),error:__consoleLog('error'),debug:__consoleLog('debug'),dir:__consoleLog('dir'),trace:__consoleLog('trace'),clear:__consoleLog('clear')};
+
 const __timers = [];
 Object.setPrototypeOf(__timers, null);
 const __timerPush = Array.prototype.push.bind(__timers);
@@ -15033,6 +15089,7 @@ fn make_runtime_with_storage_and_options(
     let mut state = state.borrow_mut();
     state.put(ResourceBudget(options.max_resource_bytes));
     state.put(NetworkLog::default());
+    state.put(ConsoleLog::default());
     state.put(driver_sync::Revision::default());
     state.put(blob_store);
     state.put(form_submission::Queue::default());
@@ -18145,7 +18202,8 @@ impl PageSession {
         let state = self.rt.op_state();
         let mut state = state.borrow_mut();
         fetch_streams::refresh_logs(&mut state);
-        let rows: Vec<_> = state.borrow_mut::<NetworkLog>().0.drain(..).collect();
+        let mut rows: Vec<_> = state.borrow_mut::<NetworkLog>().0.drain(..).collect();
+        rows.extend(state.borrow_mut::<ConsoleLog>().0.drain(..));
         serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
     }
 

@@ -47,7 +47,7 @@ pub(super) fn snapshot(rt: &mut OwnedRuntime) -> Option<Snapshot> {
 
 pub(super) fn pending_events(state: &mut OpState) -> bool {
     fetch_streams::refresh_logs(state);
-    !state.borrow::<NetworkLog>().0.is_empty()
+    !state.borrow::<NetworkLog>().0.is_empty() || !state.borrow::<ConsoleLog>().0.is_empty()
 }
 
 impl PageSession {

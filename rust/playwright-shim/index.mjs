@@ -15,6 +15,7 @@
 // or no-ops — see LIMITATIONS.md.
 
 import { handleEvaluation, hasJSHandles, ensureHandleSession } from "./js-handles.mjs";
+import { consoleMessage } from "./console-message.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -2672,7 +2673,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       !this._listeners.has("requestfinished") &&
       !this._listeners.has("requestfailed") &&
       !this._listeners.has("request") &&
-      !this._listeners.has("pageerror")
+      !this._listeners.has("pageerror") &&
+      !this._listeners.has("console")
     )
       return;
     let raw;
@@ -2690,7 +2692,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     this._recentResponses = this._recentResponses ?? [];
     let previousHop = null;
+    const discardedConsoleHandles = [];
     for (const e of entries) {
+      if (e.event === "console") {
+        if (this._listeners.has("console")) this._emit("console", consoleMessage(this, e));
+        else discardedConsoleHandles.push(...e.args.map((argument) => argument.id));
+        continue;
+      }
       if (e.event === "pageerror") {
         const error = new Error(e.message);
         error.name = e.name;
@@ -2721,6 +2729,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     if (this._recentResponses.length > 100)
       this._recentResponses.splice(0, this._recentResponses.length - 100);
+    if (discardedConsoleHandles.length) {
+      await native.liveEvalEngineExpression(
+        this._session,
+        `(${JSON.stringify(discardedConsoleHandles)}.forEach(id => __tsNs.remoteHandleDispose(id)), '')`,
+      );
+    }
   }
 
   _requestFrame(entry) {
@@ -2968,6 +2982,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       !this._live &&
       this._autoHydrate !== false &&
       (this._listeners.has("pageerror") ||
+        this._listeners.has("console") ||
         this._listeners.has("response") ||
         this._listeners.has("request") ||
         this._listeners.has("requestfinished") ||

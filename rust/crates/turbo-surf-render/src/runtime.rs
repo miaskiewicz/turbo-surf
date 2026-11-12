@@ -12048,10 +12048,13 @@ const __resourceThen = Function.prototype.call.bind(Promise.prototype.then);
 // Parse order, including parser scripts inside declarative shadow roots.
 const __initialResourceScripts = ops.op_parser_scripts(__document);
 let __replacingDocumentContent = false;
+let __replacementParserPreparations = new WeakMap();
+const __replacementParserDelete = Function.prototype.call.bind(WeakMap.prototype.delete);
 ops.op_set_host_capabilities({replaceDocumentContent:html=>{
   let scripts;
   __resourceDocumentGeneration++;
   __resources=new __resourceMapConstructor();
+  __replacementParserPreparations=new __resourceMapConstructor();
   __resourcePromises=new __resourceSetConstructor();
   __orderedDynamicScripts=__initialDynamicScriptGate;
   __replacingDocumentContent=true;
@@ -12374,6 +12377,11 @@ function __resourceScriptAttributes(prepared) {
   return attributes;
 }
 function __prepareResourceScript(el) {
+  const prepared=__intrinsicApply(__intrinsicWeakGet,__replacementParserPreparations,[el]);
+  if(prepared){
+    __replacementParserDelete(__replacementParserPreparations,el);
+    return prepared;
+  }
   return ops.op_prepare_resource_script(__document, el);
 }
 __G.execScriptEl = async function (el, preparation = null, executionGate = null) {
@@ -12490,6 +12498,12 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
   }
 };
 function __startResourceScript(element, prepared) {
+  // Replacement insertion callbacks precede the returned parser-order queue.
+  // Preserve native preparation instead of starting parser work as dynamic IO.
+  if(__replacingDocumentContent && prepared?.parserInserted){
+    __intrinsicApply(__intrinsicWeakSet,__replacementParserPreparations,[element,prepared]);
+    return;
+  }
   if (!prepared || prepared.kind === "importmap" || prepared.kind === "speculationrules") return;
   const attributes = __resourceScriptAttributes(prepared);
   if (prepared.kind !== "module" && __recordOwn(attributes,"nomodule")) return;

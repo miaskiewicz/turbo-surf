@@ -431,3 +431,58 @@ test("setContent activates imported srcdoc frames and retires replaced children 
     await page.close();
   }
 });
+
+test("replacement parser preparation stays ordered beside custom-element dynamic scripts (#386)", async () => {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push(req.url);
+    if (req.url.endsWith(".js")) {
+      res.setHeader("content-type", "text/javascript");
+      setTimeout(
+        () => res.end(`order.push(${JSON.stringify(req.url)})`),
+        req.url === "/blocking.js" ? 30 : 5,
+      );
+    } else res.end("<body>old</body>");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = newPage();
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "networkidle" });
+    await page.evaluate(() => {
+      globalThis.order = [];
+      document.addEventListener("DOMContentLoaded", () => order.push("dcl"));
+      window.addEventListener("load", () => order.push("load"));
+      customElements.define(
+        "dynamic-resource-check",
+        class extends HTMLElement {
+          connectedCallback() {
+            const inline = document.createElement("script");
+            inline.textContent = "order.push('ce-inline')";
+            document.head.append(inline);
+            const external = document.createElement("script");
+            external.src = "/dynamic.js";
+            external.async = false;
+            document.head.append(external);
+          }
+        },
+      );
+    });
+    await page.setContent(
+      '<dynamic-resource-check></dynamic-resource-check><script src="/blocking.js"></script><script>order.push("parser-inline")</script><script defer src="/deferred.js"></script>',
+    );
+    const order = await page.evaluate(() => globalThis.order);
+    assert.deepEqual(
+      order.filter((entry) => !["ce-inline", "/dynamic.js"].includes(entry)),
+      ["/blocking.js", "parser-inline", "/deferred.js", "dcl", "load"],
+    );
+    assert.equal(order.filter((entry) => entry === "ce-inline").length, 1);
+    assert.equal(order.filter((entry) => entry === "/dynamic.js").length, 1);
+    assert.ok(order.indexOf("/dynamic.js") < order.indexOf("load"));
+    for (const path of ["/dynamic.js", "/blocking.js", "/deferred.js"])
+      assert.equal(seen.filter((url) => url === path).length, 1);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { cpus } from "node:os";
 import { pathToFileURL } from "node:url";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { executionOptions } from "./attempt-process.mjs";
@@ -46,10 +47,12 @@ export function normalizeConfig(raw, rootDir) {
   const reporter = normalizeReporter(r.reporter);
   const webServer = normalizeWebServer(r.webServer, rootDir);
   const use = r.use ?? {};
+  const workers = normalizeWorkers(r.workers ?? "50%");
   const rawProjects = Array.isArray(r.projects) ? r.projects : [];
   const projects = rawProjects.length
     ? rawProjects.map((p) => ({
         name: String(p.name ?? "default"),
+        workers: Math.min(workers, normalizeWorkers(p.workers ?? workers)),
         timeout: p.timeout ?? r.timeout ?? 30000,
         retries: p.retries ?? r.retries ?? 0,
         dependencies: p.dependencies ?? [],
@@ -63,6 +66,7 @@ export function normalizeConfig(raw, rootDir) {
     : [
         {
           name: "default",
+          workers,
           timeout: r.timeout ?? 30000,
           retries: r.retries ?? 0,
           use,
@@ -82,9 +86,22 @@ export function normalizeConfig(raw, rootDir) {
     webServer,
     use,
     projects,
+    workers,
     globalSetup: r.globalSetup,
     globalTeardown: r.globalTeardown,
   };
+}
+
+function normalizeWorkers(value) {
+  if (typeof value === "string" && /^\d+%$/.test(value)) {
+    const percent = Number(value.slice(0, -1));
+    if (percent > 0 && Number.isFinite(percent))
+      return Math.max(1, Math.floor((cpus().length * percent) / 100));
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  throw new Error(
+    `turbo-surf-test: workers must be a positive integer or percentage; received ${String(value)}`,
+  );
 }
 
 function toArray(v) {
@@ -353,6 +370,9 @@ export function testRunnerFlags(project, version = process.versions.node) {
   }
   return [
     "--test-force-exit",
+    ...(project.workers === undefined
+      ? []
+      : [`--test-concurrency=${normalizeWorkers(project.workers)}`]),
     ...(project.grep ?? []).map((pattern) => `--test-name-pattern=${pattern}`),
     ...(project.grepInvert ?? []).map((pattern) => `--test-skip-pattern=${pattern}`),
   ];

@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -543,4 +543,61 @@ test("CLI rejects requested recording before executing the test body (#465)", as
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /video unavailable/);
   assert.doesNotMatch(result.stdout, /ARTIFACT_BODY_RAN/);
+});
+
+test("CLI honors configured workers:1 across files sharing an exclusive resource", async () => {
+  const root = tmp();
+  const lock = join(root, "suite.lock");
+  for (const name of ["one", "two"]) {
+    writeFileSync(
+      join(root, `${name}.spec.mjs`),
+      `
+      import test from 'node:test';
+      import {openSync, closeSync, unlinkSync} from 'node:fs';
+      test('exclusive ${name}', async () => {
+        const fd = openSync(${JSON.stringify(lock)}, 'wx');
+        try { await new Promise(resolve => setTimeout(resolve, 250)); }
+        finally { closeSync(fd); unlinkSync(${JSON.stringify(lock)}); }
+      });`,
+    );
+  }
+  const config = join(root, "playwright.config.mjs");
+  writeFileSync(config, "export default {workers:1};");
+  const result = await runCli(["--config", config], root);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /exclusive one/);
+  assert.match(result.stdout, /exclusive two/);
+});
+
+test("workers configuration supports integers, percentages and project caps", () => {
+  const config = normalizeConfig(
+    {
+      workers: 2,
+      projects: [
+        { name: "limited", workers: 1 },
+        { name: "capped", workers: 4 },
+        { name: "inherited" },
+      ],
+    },
+    "/root",
+  );
+  assert.deepEqual(
+    config.projects.map((project) => project.workers),
+    [1, 2, 2],
+  );
+  assert.equal(
+    normalizeConfig({ workers: "50%" }, "/root").workers,
+    Math.max(1, Math.floor(cpus().length / 2)),
+  );
+  assert.equal(
+    normalizeConfig({ workers: "1%" }, "/root").workers,
+    Math.max(1, Math.floor(cpus().length / 100)),
+  );
+  assert.ok(testRunnerFlags(config.projects[0]).includes("--test-concurrency=1"));
+  for (const workers of [0, -1, 1.5, NaN, Infinity, "0%", "bad%", "1", true]) {
+    assert.throws(
+      () => normalizeConfig({ workers, projects: [{ name: "project", workers }] }, "/root"),
+      /workers must be/,
+    );
+  }
 });

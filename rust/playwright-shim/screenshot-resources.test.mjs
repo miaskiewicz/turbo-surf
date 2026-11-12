@@ -92,6 +92,8 @@ test("resident image keys preserve URL strings without invoking object prototype
     try {
       await page.goto(url, { waitUntil: "commit" });
       await page.setContent("<img src='__proto__' width='3' height='2'>");
+      assert.deepEqual(requests, ["/__proto__"], "setContent loads the native image");
+      requests.length = 0;
       await page.screenshot({ externalCss: false });
       assert.equal(Object.hasOwn(page._imageCache.images, "__proto__"), true);
       assert.equal(Object.getPrototypeOf(page._imageCache.images), null);

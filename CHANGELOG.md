@@ -101,6 +101,8 @@ branch.
   pending image/script work before waiting for the new document (#386).
 - Keep handle-returning APIs as realm-bound remote handles, preserving object
   identity and explicit disposal instead of substituting serialized values (#343).
+- Preserve sparse-array lengths and undefined entries when handle arguments cross
+  the realm boundary.
 - Insert and execute script/style tags in the live document, including external
   scripts and stylesheet loading (#387, #388).
 - Keep frame identities, parent/child relationships and detach state; use live child
@@ -137,6 +139,8 @@ branch.
 - Preserve redirect response chains, status text, complete response headers, and
   binary response bodies. Header helpers expose the expected normalized and raw
   forms (#399, #398, #400, #338).
+- Preserve literal HTTP header names such as `__proto__` and `constructor` without
+  inheriting object properties or invoking prototype setters.
 - Publish response headers before body completion, including during initial and
   form navigation. Body reads await their own completion; unread bodies, failures,
   cancellation, and console handles retain correct lifecycle and ownership (#483).

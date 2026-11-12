@@ -4,13 +4,17 @@
 
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.3` revision
-`a5a667bd5b3e65bec99c74165c1cc0660535d455` ([producer PR #489](https://github.com/miaskiewicz/turbo-dom/pull/489)). The dependency graph
+`8a29893a1c9984c01165ee382645649c79f50810` ([producer PR #489](https://github.com/miaskiewicz/turbo-dom/pull/489)). The dependency graph
 continues to use one `turbo-dom-v8` 150.4.1. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.
 
 ### Engine and performance
 
+- Keep native runtime initialization state off nested MCP dispatch frames,
+  preserving stack headroom during official Deno extension loading.
+- Prepare nested CSS rules in their original tree scopes, including conditional
+  groups, while preserving the page's CSSOM.
 - Compile text regular expressions once per query, restrict role/name work to the
   requested scope, construct global action indices once, and retain a bounded LRU
   of parsed pages when reads alternate between pages (#492, #493, #494, #495).

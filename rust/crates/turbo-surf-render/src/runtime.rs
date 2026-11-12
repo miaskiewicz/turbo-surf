@@ -9643,8 +9643,10 @@ const __consoleLocation = () => {
 const __consoleLog = type => (...args) => {
  const descriptors=[];
  try {
+  const text=args.map(__consolePreview).join(' ');
+  __print(text+'\n');
   for(const value of args) descriptors.push({id:__G.remoteHandleRetain(globalThis,value),kind:value instanceof __consoleElement?'element':'value'});
-  ops.op_console_message({event:'console',type,text:args.map(__consolePreview).join(' '),args:descriptors,location:__consoleLocation(),contextId:ops.op_csp_context(globalThis)});
+  ops.op_console_message({event:'console',type,text,args:descriptors,location:__consoleLocation(),contextId:ops.op_csp_context(globalThis)});
  }catch(error){for(const descriptor of descriptors)__G.remoteHandleDispose(descriptor.id);}
 };
 globalThis.console = {log:__consoleLog('log'),info:__consoleLog('info'),warn:__consoleLog('warning'),error:__consoleLog('error'),debug:__consoleLog('debug'),dir:__consoleLog('dir'),trace:__consoleLog('trace'),clear:__consoleLog('clear')};

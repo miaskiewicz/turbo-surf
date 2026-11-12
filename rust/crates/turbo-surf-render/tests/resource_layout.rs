@@ -182,3 +182,41 @@ fn next_scroll_boundary_sequence_reads_known_viewport_extents() {
         assert_eq!(result[3], 80);
     }
 }
+
+#[test]
+fn typed_vendor_transform_aliases_preserve_rectangle_independence() {
+    let html="<!doctype html><style>@-webkit-keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}@keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}#spin{display:inline-block;animation:1.4s linear 0s infinite normal none running spin}#target{width:80px;height:60px}</style><div id=target><span id=spin></span></div>";
+    let actual=run_with_dom(html,"(()=>{const target=document.getElementById('target'),spin=document.getElementById('spin');const read=node=>{try{return node.getBoundingClientRect().width}catch(e){return e.message}};return JSON.stringify([read(target),document.documentElement.clientHeight,read(spin)])})()").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(result[0], 80);
+    assert!(result[1].as_i64().unwrap() > 0);
+    assert!(result[2].as_str().unwrap().contains("animation resource"));
+}
+
+#[test]
+fn prefixed_opacity_scale_pulse_keeps_independent_rect_but_not_animated_rect() {
+    let html="<!doctype html><style>@keyframes pulse{0%,60%,100%{opacity:.3;-ms-transform:scale(.8);transform:scale(.8)}30%{opacity:1;-ms-transform:scale(1);transform:scale(1)}}#pulse{width:8px;height:8px;animation:pulse 1.4s ease-in-out infinite;animation-delay:.2s}#target{width:80px;height:60px}</style><div id=target><div id=pulse></div></div>";
+    let actual=run_with_dom(html,"(()=>{const read=node=>{try{return node.getBoundingClientRect().width}catch(e){return e.message}};return JSON.stringify([read(document.getElementById('target')),read(document.getElementById('pulse'))])})()").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(result[0], 80);
+    assert!(result[1].as_str().unwrap().contains("animation resource"));
+}
+
+#[test]
+fn rotating_svg_spinner_and_dash_circle_leave_parent_rect_independent() {
+    let html = "<!doctype html><style>@-webkit-keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}@keyframes spin{0%{-ms-transform:rotate(0deg);transform:rotate(0deg)}100%{-ms-transform:rotate(360deg);transform:rotate(360deg)}}@-webkit-keyframes dash{0%{stroke-dasharray:1px,200px;stroke-dashoffset:0px}50%{stroke-dasharray:100px,200px;stroke-dashoffset:-15px}100%{stroke-dasharray:1px,200px;stroke-dashoffset:-126px}}@keyframes dash{0%{stroke-dasharray:1px,200px;stroke-dashoffset:0px}50%{stroke-dasharray:100px,200px;stroke-dashoffset:-15px}100%{stroke-dasharray:1px,200px;stroke-dashoffset:-126px}}#target{display:flex;flex-direction:column;width:80px;height:60px}#spin{display:inline-block;width:40px;height:40px;animation:spin 1.4s linear infinite}svg{display:block;overflow:visible}circle{stroke:currentColor;stroke-dasharray:80px,200px;stroke-dashoffset:0px;animation:dash 1.4s ease-in-out infinite;overflow:visible}</style><div id=target><span id=spin><svg viewBox='22 22 44 44'><circle cx=44 cy=44 r=20.2 fill=none stroke-width=3.6></circle></svg></span></div>";
+    let actual = run_with_dom(html,"(()=>{const read=node=>{try{return node.getBoundingClientRect().width}catch(e){return e.message}};return JSON.stringify([read(document.getElementById('target')),document.documentElement.clientHeight,document.getElementById('target').getBoundingClientRect().height,read(document.getElementById('spin')),(()=>{document.getElementById('spin').style.animation='none';return read(document.querySelector('circle'))})()])})()").unwrap();
+    let result: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(result[0], 80);
+    assert!(result[1].as_i64().unwrap() > 0);
+    assert_eq!(result[2], 60);
+    assert!(result[3].as_str().unwrap().contains("animation resource"));
+    assert!(result[4].as_str().unwrap().contains("animation resource"));
+}
+
+#[test]
+fn stroke_dash_animation_cannot_admit_mixed_flow_properties() {
+    let html="<!doctype html><style>@keyframes dash{to{stroke-dashoffset:-15px;width:120px}}circle{animation:dash 1s infinite}#target{width:80px;height:60px}</style><div id=target><svg><circle cx=44 cy=44 r=20></circle></svg></div>";
+    let actual=run_with_dom(html,"(()=>{try{return document.getElementById('target').getBoundingClientRect().width}catch(e){return e.message}})()").unwrap();
+    assert!(actual.contains("animation resource"));
+}

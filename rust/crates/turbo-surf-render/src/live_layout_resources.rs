@@ -156,6 +156,7 @@ impl Definitions {
 // longhand values were compared; the same animation name can change another node.
 #[derive(Default)]
 struct AnimationValues {
+    paint_or_transform_only: bool,
     properties: Vec<(String, String)>,
 }
 
@@ -164,11 +165,22 @@ fn animation_values(source: &str) -> Option<AnimationValues> {
     let [CssRule::Keyframes(rule)] = sheet.rules.0.as_slice() else {
         return None;
     };
-    let mut result = AnimationValues::default();
+    let mut result = AnimationValues {
+        paint_or_transform_only: true,
+        ..AnimationValues::default()
+    };
     for frame in &rule.keyframes {
         // Important declarations do not apply in CSS keyframes.
         for property in &frame.declarations.declarations {
             if !matches!(property, Property::Opacity(_)) {
+                // Typed vendor aliases share transform dependencies. Stroke dash
+                // paint also leaves another element's CSS border box unchanged.
+                result.paint_or_transform_only &= matches!(
+                    property,
+                    Property::Transform(_, _)
+                        | Property::StrokeDasharray(_)
+                        | Property::StrokeDashoffset(_)
+                );
                 result.properties.push(comparable_value(property)?);
             }
         }
@@ -213,15 +225,14 @@ fn constant_animation(style: &ComputedStyle, frames: &[Option<AnimationValues>])
     })
 }
 
-fn transform_only(style: &ComputedStyle, frames: &[Option<AnimationValues>]) -> bool {
+fn paint_or_transform_only(style: &ComputedStyle, frames: &[Option<AnimationValues>]) -> bool {
     !style
         .get("animation-composition")
         .is_some_and(|value| value.split(',').any(|part| part.trim() != "replace"))
         && frames.iter().all(|frame| {
-            frame.as_ref().is_some_and(|frame| {
-                !frame.properties.is_empty()
-                    && frame.properties.iter().all(|(name, _)| name == "transform")
-            })
+            frame
+                .as_ref()
+                .is_some_and(|frame| !frame.properties.is_empty() && frame.paint_or_transform_only)
         })
 }
 
@@ -235,10 +246,11 @@ fn matches_underlying(style: &ComputedStyle, name: &str, expected: &str) -> bool
         .is_some_and(|(_, actual)| actual == expected)
 }
 
-// Visual rects exclude descendants' overflow. A transform-only animation outside
-// the requested ancestor chain can be ignored only when no scroll-container
-// dependency can feed it back into layout or the requested scroll translation.
-fn independent_transform(
+// Visual rects exclude descendants' overflow. An animation of transforms
+// or stroke-dash paint outside the requested ancestor chain can be ignored only
+// when no scroll-container dependency can feed it back into layout or the
+// requested scroll translation.
+fn independent_effect(
     path: &[&turbo_dom_layout::StyledElement],
     requested: &[&turbo_dom_layout::StyledElement],
 ) -> bool {
@@ -322,7 +334,7 @@ fn validate_rect_nodes<'a>(
             &element.style,
             definitions,
             seen,
-            independent_transform(path, requested),
+            independent_effect(path, requested),
         )?;
         validate_rect_nodes(&element.children, definitions, requested, path, seen)?;
         path.pop();
@@ -438,7 +450,7 @@ fn validate_animations(
             };
             if definitions.animations.get(&used).is_some_and(|frames| {
                 !constant_animation(style, frames)
-                    && !(independent && transform_only(style, frames))
+                    && !(independent && paint_or_transform_only(style, frames))
             }) {
                 return Err(format!(
                     "native live layout animation resource is unsupported: {used}"

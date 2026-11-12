@@ -24,16 +24,14 @@ async fn native_anchor_activation_honors_cancellation_detachment_and_repeated_do
       anchor.addEventListener('click',event=>{events.push({brand:Object.prototype.toString.call(event),trusted:event.isTrusted,bubbles:event.bubbles,cancelable:event.cancelable,composed:event.composed,pointerId:event.pointerId});if(!recursive){recursive=true;anchor.click();recursive=false;}});
       const result=anchor.click();anchor.click();anchor.remove();anchor.click();
       const downloaded=records.slice(before);
-      return JSON.stringify({cancelled:downloaded.length===3,count:events.length,events,downloads:downloaded.map(record=>({filename:record.filename,content:record.content})),returnsUndefined:result===undefined,native:Function.prototype.toString.call(anchor.click).includes('[native code]'),inherits:anchor.click===HTMLElement.prototype.click&&!Object.hasOwn(HTMLAnchorElement.prototype,'click')});
+      return JSON.stringify({cancelled:downloaded.length===3,count:events.length,events,downloads:downloaded.map(record=>({filename:record.filename,bodyBytes:record.bodyBytes})),returnsUndefined:result===undefined,native:Function.prototype.toString.call(anchor.click).includes('[native code]'),inherits:anchor.click===HTMLElement.prototype.click&&!Object.hasOwn(HTMLAnchorElement.prototype,'click')});
     })()"#).await;
     for name in ["cancelled", "returnsUndefined", "native", "inherits"] {
         assert_eq!(value[name], true, "{value}");
     }
     assert_eq!(value["count"], 3);
-    assert_eq!(
-        value["downloads"],
-        json!([{"filename":"fixture.txt","content":"actual bytes"},{"filename":"fixture.txt","content":"actual bytes"},{"filename":"fixture.txt","content":"actual bytes"}])
-    );
+    let download = json!({"filename":"fixture.txt","bodyBytes":b"actual bytes".to_vec()});
+    assert_eq!(value["downloads"], json!(vec![download; 3]));
     for event in value["events"].as_array().unwrap() {
         assert_eq!(
             event,

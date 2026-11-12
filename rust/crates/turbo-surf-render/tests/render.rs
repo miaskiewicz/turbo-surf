@@ -3338,11 +3338,10 @@ async fn createobjecturl_anchor_download_is_captured() {
         download["filename"], "template.csv",
         "download filename must be captured: {out}"
     );
-    assert!(
-        download["content"]
-            .as_str()
-            .is_some_and(|c| c.contains("a,b,c")),
-        "download blob content must be captured: {out}"
+    assert_eq!(
+        download["bodyBytes"],
+        serde_json::json!(b"a,b,c\n1,2,3".to_vec()),
+        "download blob bytes must be captured exactly: {out}"
     );
 }
 

@@ -27,7 +27,7 @@ lto = "thin"
 
 # Validate the v0.8.3 release against turbo-dom PR #489's exact head.
 [patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5478441f18e6968718d7c1238f484a0ac2e5206f" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5478441f18e6968718d7c1238f484a0ac2e5206f" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5478441f18e6968718d7c1238f484a0ac2e5206f" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5478441f18e6968718d7c1238f484a0ac2e5206f" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7ff9618af4ccbf4cf12aa607bb58110105e1779c" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7ff9618af4ccbf4cf12aa607bb58110105e1779c" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7ff9618af4ccbf4cf12aa607bb58110105e1779c" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "7ff9618af4ccbf4cf12aa607bb58110105e1779c" }

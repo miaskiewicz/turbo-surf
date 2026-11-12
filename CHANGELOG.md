@@ -1,5 +1,217 @@
 # Changelog
 
+## [0.8.3] - Unreleased
+
+The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
+`turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.3` revision
+`5478441f18e6968718d7c1238f484a0ac2e5206f` (producer PR #489). The dependency graph
+continues to use one `turbo-dom-v8` 150.4.1. Combined release validation is still in
+progress; the entries below describe changes already integrated into the release
+branch.
+
+### Engine and performance
+
+- Compile text regular expressions once per query, restrict role/name work to the
+  requested scope, construct global action indices once, and retain a bounded LRU
+  of parsed pages when reads alternate between pages (#492, #493, #494, #495).
+- Download deferred classic scripts concurrently while preserving their required
+  execution order (#491).
+- Count locator matches and read visibility without serializing unnecessary HTML,
+  text, or accessible-name snapshots. Successful assertions reuse their observed
+  value instead of making extra queries to construct unused errors (#461, #486,
+  #487).
+- Avoid repeated idle DOM-signature scans after scalar evaluations, stop completed
+  watchdogs promptly, and skip unchanged stylesheet host reads (#463, #484, #309).
+- Use an ordered, early-terminating title search. Consumer coverage verifies large
+  unrelated bodies, title movement, removal, and writes (#462).
+- Bracket official timeout-signal callbacks with the canonical engine-task scope
+  and re-enable the unchanged Chrome 156 abort-order oracle. Legacy
+  `document.createEvent("Event")` aliases remain usable after full runtime
+  initialization, including the React development callback path (#295, #347).
+- Admit opacity-only animation keyframes for geometry reads while retaining
+  resource admission checks for geometry-changing animations (#345).
+- Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
+  exceptions, maintain NodeIterator's root and reference cursor, and honor idle
+  callback timeout and deadline behavior (#449, #450, #451, #452).
+
+### Locators and accessibility
+
+- Preserve chained `first`/`last`/`nth` selections, indexed ancestor scopes, nested
+  `:scope`, and parents created through `getBy*` locators (#472, #473, #474, #475).
+- Match regular-expression test IDs and keep placeholder, alternative-text, and
+  title queries inside their parent scopes (#477, #380).
+- Resolve native heading, table, and image roles; honor heading levels, pressed
+  state, accessibility visibility, and exact matching. Accessible names resolve
+  ordered `aria-labelledby` references and native labels (#375, #376, #377, #379).
+- Read rendered `innerText`, raw DOM `textContent`, and live input values according
+  to their distinct contracts. CSS and visibility reads use the live document and
+  its CSSOM rather than an outdated markup snapshot (#378, #421, #350, #352, #353).
+- Preserve XPath engine prefixes and relative parent/axis traversal. Locator
+  evaluation uses the selected live element or full matched collection, and
+  locator unions/intersections retain indexing, uniqueness, and document order
+  (#365, #364, #363, #330).
+- Enforce strict single-target actions and assertions, wait for actionable controls,
+  return live bounding boxes, and scroll the target into view (#334, #346, #418,
+  #361).
+
+### Input, forms, and events
+
+- Preserve mouse button masks, held-button state, click counts, and locator click
+  position/modifier/button options. Double clicks and ancestor hover boundaries
+  dispatch their corresponding events (#439, #440, #441, #370, #360).
+- Honor touch cancellation before compatibility mouse activation, preserve native
+  touch payloads when available, and reject unavailable payload construction
+  explicitly. Drag/drop stops after canceled starts or unaccepted drop targets
+  (#442, #471).
+- Keep keyboard modifiers and down/up transitions distinct; apply cancellable
+  editing and activation defaults; route locator key presses through the keyboard
+  driver (#356, #358, #323).
+- Fill contenteditable nodes through DOM selections, honor canceled `beforeinput`,
+  defer changes until blur, type at the current selection, and reject invalid
+  numeric text before changing the existing value (#408, #409, #410, #411).
+- Apply checkbox/radio activation once, read live checked state, validate supported
+  checkbox types, and avoid duplicate form submit activation (#351, #419, #348).
+- Resolve select options by value, label, or index with proper multiple selection;
+  infer upload MIME types from file extensions and preserve single-file input
+  cardinality (#337, #339, #340).
+- Dispatch synthetic events on the selected node with their initializer fields;
+  remove once listeners before callbacks and remove only one duplicate listener
+  registration at a time (#371, #372, #373, #374).
+
+### Pages, frames, and evaluation
+
+- Await live evaluation after ordinary navigation, preserve tagged JavaScript
+  values such as undefined, non-finite numbers, negative zero and BigInt, and
+  reject with the original page exception details (#362, #359, #357).
+- Hydrate when a web-first assertion misses its initial snapshot, rather than
+  failing against an inert post-navigation document (#310).
+- Replace live document contents without resetting the Window realm or custom
+  element registry, run the replacement parser/resource lifecycle, and retire old
+  pending image/script work before waiting for the new document (#386).
+- Keep handle-returning APIs as realm-bound remote handles, preserving object
+  identity and explicit disposal instead of substituting serialized values (#343).
+- Insert and execute script/style tags in the live document, including external
+  scripts and stylesheet loading (#387, #388).
+- Keep frame identities, parent/child relationships and detach state; use live child
+  documents and realms for reads, evaluation, and actions. Resolve frame URLs
+  against their owners and return the owning Locator from `FrameLocator.owner`
+  (#443, #444, #445, #446, #447, #448).
+- Resize the trusted live viewport independently for each page, updating geometry,
+  CSS media queries and resize events (#369).
+- Preserve same-document SPA state and structured history entries without replacing
+  the DOM; make actual reloads and history document traversals execute the intended
+  navigation/scripts (#319, #425).
+- Honor per-navigation deadlines through fetch and initial hydration, preserve
+  authored referrers, and retain the current document for HTTP 204/205 responses
+  (#427, #426, #428).
+- Track browser contexts and closed pages, close owned contexts on browser shutdown,
+  and wait for the requested selector state (#401, #402, #403).
+- Reject duplicate exposed-function registrations, settle returned values and
+  exceptions correctly, and identify the calling frame in exposed bindings
+  (#415, #416, #417).
+
+### HTTP requests, responses, and downloads
+
+- Retain native connection pools across API requests while bypassing browser HTTP
+  cache reuse for those requests (#485).
+- Preserve standalone cookie jars and cached `page.request` / `context.request`
+  properties; encode query parameters, form and multipart fields, string bodies,
+  and raw Buffer bytes correctly (#329, #331, #333, #434, #435, #341).
+- Apply request context user agents and scoped Basic credentials, merge headers
+  without case-sensitive duplicates, enforce disposal, and honor redirect and
+  failure-status policies (#433, #432, #431, #335).
+- Preserve actual captured request headers and POST bytes, link requests to their
+  responses, and report document navigations and redirects with the originating
+  frame identity (#311, #344, #307).
+- Preserve redirect response chains, status text, complete response headers, and
+  binary response bodies. Header helpers expose the expected normalized and raw
+  forms (#399, #398, #400, #338).
+- Emit transport failures as `requestfailed`, not fabricated successful responses.
+  Response waits reject on timeout, only observe newly delivered events, use URL
+  glob semantics and await async predicates; native polling uses a lower floor
+  (#407, #308, #354, #355, #296).
+- Apply route registration changes to live sessions, traverse fallback handlers,
+  remove obsolete interceptors, and honor XHR abort/continue outcomes (#322, #324).
+- Emit HTTP attachment downloads, reject missed download waits, keep commit-mode
+  attachment actions usable, and preserve Blob bytes through path, save and stream
+  access (#325, #327).
+- Configure finite response and script/module byte budgets through navigation and
+  resource admission instead of silently imposing the old fixed bundle cap (#342).
+
+### Context state
+
+- Normalize URL-form cookies for native jars; replace cookie identities rather than
+  append duplicates; filter cookie reads and removals by URL and identity; propagate
+  clearing into live pages (#314, #315, #422, #423, #424).
+- Import and export origin-localStorage storage state before authored scripts run,
+  preserving shared tabs and UTF-16 values (#317).
+- Apply locale defaults to native requests and Intl without inserting an
+  application cookie, and isolate color-scheme/reduced-motion preferences by
+  context (#395, #396).
+- Replace extra HTTP header sets, forward context headers to native live requests,
+  and answer origin-scoped browser Basic-auth challenges without leaking credentials
+  across redirects (#393, #392, #394).
+
+### Screenshots
+
+- Retain image bytes for the current document, invalidate them on navigation,
+  coalesce in-flight requests, and fetch independent resources with bounded
+  concurrency (#489, #490).
+- Use trusted intrinsic metadata and native paint-resource planning to avoid
+  fetching images that cannot contribute viewport pixels, while retaining
+  conservative handling for unknown sizes and effects/full-page captures (#496).
+- Retain an owned immutable prepared screenshot scene between unchanged captures;
+  invalidate on changed inputs, reuse its layout/resource plan, and release it on
+  close. Regression controls cover unchanged bytes, mutations, metadata, masks,
+  transparency, and device scale (#488).
+- Encode JPEG output and quality correctly; honor clips, masks, transparent initial
+  backgrounds, device/CSS scale selection and positioned full-page overflow
+  (#467, #466, #469, #464, #470, #468).
+
+### Assertions
+
+- Compare typed values, cycles, strict prototypes, promise rejection overloads,
+  property-path existence, array subset lengths, thrown error expectations,
+  recursive asymmetric matchers, and numeric/infinity cases correctly
+  (#381, #382, #383, #384, #385, #389, #390).
+- Preserve missing-attribute versus empty-value distinctions, match CSS/ID regular
+  expressions, compare actual JavaScript property values, and honor expected-state
+  options and viewport intersection ratios (#436, #437, #438, #429, #430).
+- Match complete class sets, ordered text arrays, and emptiness using current text
+  and control values (#336, #332, #420).
+- Retry awaited `expect.poll` and `toPass` callbacks; accumulate soft failures
+  without stopping the test body (#366, #367, #368).
+
+### Test runner and fixtures
+
+- Execute the CLI through npm bin symlinks, load TypeScript suites, exit completed
+  HTML-report runs, and reject unsupported runtime capability combinations
+  (#305, #300).
+- Respect grep/inverse-grep, regular-expression test-file selectors, project setup
+  dependencies, and no-tests failure semantics. Step callbacks receive step info
+  and support explicit step skipping (#454, #458, #457, #456, #459).
+- Resolve fixture dependencies lazily, share each attempt's fixture graph, honor
+  tuple/auto/worker lifetimes and plain scoped overrides, and retain setup across
+  sibling suites. All-suite hooks receive their supported browser fixture
+  (#453, #313, #321, #460, #479, #478).
+- Enforce per-test deadlines with isolated timed-out attempts and restart retry
+  workers so attempts do not share a stale test execution (#318).
+- Retain TestInfo outcomes and attachments, honor file/hook/TestInfo skip guards,
+  expected-failure and exclusive selection semantics, and run all cleanup hooks
+  before reporting errors (#312, #316, #414, #413, #412).
+- Resolve web-server commands relative to the configuration, require an acceptable
+  readiness response, and stop the full owned process tree while preserving reused
+  servers (#480, #482, #481).
+
+### Diagnostics and explicit limitations
+
+- Send page script/module/frame/timer diagnostics to stderr and emit uncaught page
+  exceptions as `pageerror`. Context-isolation regressions avoid nested registrar
+  deadlocks (#302, #406, #299).
+- Reject unsupported reporter configurations, offline emulation, and trace/video
+  recording requests explicitly instead of silently ignoring them or inventing
+  artifacts (#455, #306, #465).
+
 ## [0.8.2] - 2026-11-10
 
 Pinned at `turbo-dom = "0.8.2"` on crates.io (all four turbo-dom crates: `turbo-dom`, `turbo-dom-browser-env`, `turbo-dom-layout`, `turbo-dom-raster`; `turbo-dom-v8` 150.4.1 unchanged). `[patch.crates-io]` git bridge dropped.

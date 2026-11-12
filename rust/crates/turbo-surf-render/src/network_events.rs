@@ -16,6 +16,7 @@ pub struct NetworkEventLog {
     changed: Arc<tokio::sync::Notify>,
     closed: Arc<AtomicBool>,
     worlds: Arc<AtomicU64>,
+    host_bodies: Arc<AtomicBool>,
     disposals: Arc<Mutex<Vec<u32>>>,
     lost: Arc<AtomicBool>,
     cancellations: Arc<Mutex<Vec<CancellationOwner>>>,
@@ -29,6 +30,12 @@ impl Drop for NetworkWorldGuard {
     }
 }
 impl NetworkEventLog {
+    pub(crate) fn retain_host_bodies(&self) {
+        self.host_bodies.store(true, Ordering::Release);
+    }
+    pub(crate) fn owns_host_bodies(&self) -> bool {
+        self.host_bodies.load(Ordering::Acquire)
+    }
     /// Publish the final host interception decision through the same response/body
     /// protocol as transport observations. IDs and provenance belong to this hub.
     pub fn publish_intercepted_response(&self, mut header: serde_json::Value, body: &[u8]) {

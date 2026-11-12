@@ -108,6 +108,7 @@ pub struct ResponseBody {
     background: Option<std::sync::Arc<BackgroundBody>>,
 }
 struct BackgroundBody {
+    cache_fill: bool,
     state: std::sync::Mutex<BackgroundState>,
     ready: tokio::sync::Notify,
     cancel: tokio::sync::watch::Sender<bool>,
@@ -180,6 +181,7 @@ impl ResponseBody {
         }
         let (cancel, mut canceled) = tokio::sync::watch::channel(false);
         let background = std::sync::Arc::new(BackgroundBody {
+            cache_fill: self.cache_store.is_some(),
             state: std::sync::Mutex::new(BackgroundState::default()),
             ready: tokio::sync::Notify::new(),
             cancel,
@@ -258,6 +260,17 @@ impl ResponseBody {
     /// Collection releases queued guest bytes while the native cache fill keeps
     /// its creation-owner cancellation watch. No JS or IO occurs here.
     pub fn detach_cache_consumer(&mut self) -> bool {
+        let Some(background) = &self.background else {
+            return false;
+        };
+        if !background.cache_fill {
+            return false;
+        }
+        background.detach();
+        true
+    }
+    /// An external response observer owns completion independently of guest GC.
+    pub fn detach_observed_consumer(&mut self) -> bool {
         let Some(background) = &self.background else {
             return false;
         };
@@ -3157,6 +3170,10 @@ mod io_tests {
                     let _ = sender.send(result);
                 }
             }),
+        );
+        assert!(
+            !body.detach_cache_consumer(),
+            "observation is not cache admission"
         );
         tokio::time::timeout(std::time::Duration::from_secs(1), completion)
             .await

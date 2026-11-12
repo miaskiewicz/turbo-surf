@@ -17991,6 +17991,9 @@ impl PageSession {
         engine_init_script: &str,
         event_log: Option<crate::NetworkEventLog>,
     ) -> Result<Self, String> {
+        if let Some(log) = &event_log {
+            log.retain_host_bodies();
+        }
         let mut session = Self::open_with_document_response_unfollowed(
             html,
             base,

@@ -328,7 +328,12 @@ fn sweep_state(scope: &mut v8::PinScope, state: &mut OpState) {
                 continue;
             };
             if let Some(body) = body.as_mut() {
-                if body.detach_cache_consumer() && !body.background_complete() {
+                let retained = if event_log.owns_host_bodies() {
+                    body.detach_observed_consumer()
+                } else {
+                    body.detach_cache_consumer()
+                };
+                if retained && !body.background_complete() {
                     jobs.bodies.remove(&id);
                     continue;
                 }

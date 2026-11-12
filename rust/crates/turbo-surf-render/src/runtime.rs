@@ -6898,7 +6898,9 @@ fn create_frame<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     parent: v8::Local<'s, v8::Context>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
-    allocate_frame(scope, parent, None, true)
+    // frameRealm configures the initial document before publishing this context.
+    // Avoid bootstrapping its ENV twice and reading live parent geometry.
+    allocate_frame(scope, parent, None, cfg!(turbo_surf_native_proxy))
 }
 
 fn allocate_frame<'s>(
@@ -13337,12 +13339,11 @@ __G.domSig = (() => {
     const epoch = record.epoch;
     __pendingFetchCount++;
     try {
-      // Navigation starts after trusted bootstrap finishes installing the owner's
-      // geometry. Creating a replacement frame sooner can read its owner's
-      // uncaptured native viewport while configuring Window dimensions.
+      // Publish the initial realm synchronously; authored child work still waits
+      // until trusted bootstrap has finished installing the owner's geometry.
+      let window = frameRealm(el);
       await undefined;
       if (record.epoch !== epoch || !frameConnected(el)) return;
-      let window = frameRealm(el);
       if (!window) { fireIframeLoad(el, epoch); return; }
       let frameUrl = record.metadata.url;
       let html = "", responseId = 0;

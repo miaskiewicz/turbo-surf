@@ -99,7 +99,7 @@ pub struct Policy {
     policies: Arc<Vec<BTreeMap<String, Vec<String>>>>,
     originals: Arc<Vec<String>>,
     header_reports: Arc<Vec<bool>>,
-    form_action: Option<Arc<FormActionGate>>,
+    form_action: Option<Arc<Vec<Arc<FormActionGate>>>>,
 }
 /// A form submission's `form-action`, carried by the navigation request it starts in
 /// a child frame so every redirect hop answers to the submitting document (Chrome 156
@@ -174,8 +174,19 @@ impl Policy {
     /// checks (the initial URL and each redirect hop) also pass through `gate`.
     pub fn with_form_action(&self, gate: Arc<FormActionGate>) -> Self {
         Self {
-            form_action: Some(gate),
+            form_action: Some(Arc::new(vec![gate])),
             ..self.clone()
+        }
+    }
+    /// A navigation's form gate narrows an already captured request policy without
+    /// replacing its originating document's policy or losing existing gates.
+    pub fn include_form_actions(&mut self, navigation: &Self) {
+        let Some(gates) = navigation.form_action.as_ref() else {
+            return;
+        };
+        match self.form_action.as_mut() {
+            Some(existing) => Arc::make_mut(existing).extend(gates.iter().cloned()),
+            None => self.form_action = Some(gates.clone()),
         }
     }
     pub fn origin(&self) -> &str {
@@ -268,7 +279,7 @@ impl Policy {
             && self
                 .form_action
                 .as_ref()
-                .is_some_and(|gate| !gate.allows(target, redirected))
+                .is_some_and(|gates| gates.iter().any(|gate| !gate.allows(target, redirected)))
         {
             return false;
         }
@@ -929,6 +940,39 @@ mod tests {
         let gated = parent.with_form_action(open);
         assert!(!gated.allows_request("frame-src", "http://b.test/", "", false));
         assert!(parent.allows_request("frame-src", "http://a.test/", "", false));
+    }
+    #[test]
+    fn form_navigation_only_adds_its_gate_to_a_captured_parent_policy() {
+        let parent = Policy::new(
+            "http://a.test/",
+            ["frame-src 'self'; img-src 'none'".into()],
+        );
+        let gate = Arc::new(FormActionGate::new(Policy::new(
+            "http://a.test/",
+            ["form-action http://b.test".into()],
+        )));
+        let navigation = Policy::new("http://a.test/", ["frame-src *; img-src *".into()])
+            .with_form_action(gate.clone());
+        let mut captured = parent.clone();
+        captured.include_form_actions(&navigation);
+        assert!(!captured.allows_request("frame-src", "http://b.test/", "", true));
+        assert!(!captured.allows_request("frame-src", "http://a.test/", "", true));
+        assert!(!captured.allows_request("img-src", "http://a.test/image", "", false));
+        assert_eq!(gate.refused().as_deref(), Some("http://a.test/"));
+        assert!(parent.allows_request("frame-src", "http://a.test/", "", false));
+    }
+    #[test]
+    fn adding_an_unrestricted_navigation_gate_cannot_replace_a_captured_gate() {
+        let original = Arc::new(FormActionGate::new(Policy::new(
+            "http://a.test/",
+            ["form-action 'self'".into()],
+        )));
+        let mut captured = Policy::default().with_form_action(original.clone());
+        let navigation = Policy::default().with_form_action(Arc::new(FormActionGate::default()));
+        captured.include_form_actions(&navigation);
+        assert!(captured.allows_request("frame-src", "http://a.test/", "", false));
+        assert!(!captured.allows_request("frame-src", "http://b.test/hop", "", true));
+        assert_eq!(original.refused().as_deref(), Some("http://b.test/hop"));
     }
     #[test]
     fn implemented_trusted_types_and_sampling_are_not_reported_as_missing() {

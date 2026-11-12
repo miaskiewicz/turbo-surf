@@ -3125,7 +3125,13 @@ fn build_fetch_policy_snapshot(
     csp: Option<&CspHandle>,
 ) -> FetchPolicySnapshot {
     if let Some(job) = cancel_job {
-        return job.policy.clone();
+        let mut snapshot = job.policy.clone();
+        if let Some(handle) = csp {
+            snapshot
+                .active
+                .include_form_actions(&handle.policy.borrow().active);
+        }
+        return snapshot;
     }
     let Some(handle) = csp else {
         return FetchPolicySnapshot::default();

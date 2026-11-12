@@ -150,9 +150,10 @@ jobs:
       - name: Publish platform package
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         working-directory: npm/${{ matrix.npm_dir }}
-        run: npm publish --provenance --access public 2>&1 || {
-          rc=$?; npm view "$(node -p 'require("./package.json").name')@$(node -p 'require("./package.json").version')" version >/dev/null 2>&1 && echo "Already published — continuing" || exit $rc;
-        }
+        run: |
+          npm publish --provenance --access public 2>&1 || {
+            rc=$?; npm view "$(node -p 'require("./package.json").name')@$(node -p 'require("./package.json").version')" version >/dev/null 2>&1 && echo "Already published — continuing" || exit $rc;
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -295,8 +296,9 @@ jobs:
           if-no-files-found: warn
       - name: Publish thin launcher
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        run: npm publish "$RELEASE_TARBALL" --provenance --access public 2>&1 || {
-          rc=$?; npm view "turbo-surf@$(node -p 'require("./package.json").version')" version >/dev/null 2>&1 && echo "Already published — continuing" || exit $rc;
-        }
+        run: |
+          npm publish "$RELEASE_TARBALL" --provenance --access public 2>&1 || {
+            rc=$?; npm view "turbo-surf@$(node -p 'require("./package.json").version')" version >/dev/null 2>&1 && echo "Already published — continuing" || exit $rc;
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

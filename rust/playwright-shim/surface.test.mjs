@@ -4797,9 +4797,10 @@ test("selectOption supports complete value, label, index and clearing selections
   const p = newPage();
   try {
     await p.setContent(
-      "<select id=multi multiple><option value=a>Alpha</option><option value=b>Beta</option></select><select id=one><option value=a>Alpha</option><option value=b>Beta</option></select>",
+      "<!doctype html><select id=multi multiple><option value=a>Alpha</option><option value=b>Beta</option></select><select id=one><option value=a>Alpha</option><option value=b>Beta</option></select>",
     );
     assert.deepEqual(await p.locator("#multi").selectOption(["a", "b"]), ["a", "b"]);
+    assert.match(await p.content(), /^<!doctype html>/i);
     assert.deepEqual(
       await p.evaluate(() =>
         Array.from(document.querySelector("#multi").selectedOptions, (option) => option.value),

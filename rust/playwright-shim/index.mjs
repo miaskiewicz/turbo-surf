@@ -1074,7 +1074,7 @@ class Locator {
             this._html,
             `
           const values = (${selectOptionOperation.toString()})(document.querySelectorAll('*')[${index}], ${JSON.stringify(choices)}, true);
-          return JSON.stringify({ values, html: document.documentElement.outerHTML });`,
+          return JSON.stringify({ values, html: (${serializeDocumentType.toString()})(document) + document.documentElement.outerHTML });`,
           ),
         );
         this._page._html = result.html;
@@ -1363,6 +1363,21 @@ function normalizeSelectChoices(value) {
         throw new TypeError(`selectOption ${key} must be a string`);
     return { value: choice.value, label: choice.label, index: choice.index };
   });
+}
+
+function serializeDocumentType(document) {
+  const type = document.doctype;
+  if (!type) return "";
+  const quoted = (value) => (value.includes('"') ? "'" + value + "'" : '"' + value + '"');
+  const publicId = type.publicId || "";
+  const systemId = type.systemId || "";
+  return (
+    "<!DOCTYPE " +
+    type.name +
+    (publicId ? " PUBLIC " + quoted(publicId) : "") +
+    (systemId ? (publicId ? " " : " SYSTEM ") + quoted(systemId) : "") +
+    ">"
+  );
 }
 
 function selectOptionOperation(element, choices, snapshot) {

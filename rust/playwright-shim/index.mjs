@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { captureAssets } from "./screenshot-resources.mjs";
 import { equalValues } from "./equality.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { makeKeyboard } from "./keyboard.mjs";
@@ -3645,22 +3646,32 @@ class Page {
     const height = opts.height ?? vp.height;
     const type = screenshotEncoding(opts);
     const asSvg = type === "svg";
-    // Fetch the page's external <link> stylesheets and <img>/background-image
-    // bytes so the render is styled and images paint. The two preparations are
-    // independent, so they run concurrently; `{ externalCss: false }` /
-    // `{ images: false }` skip each.
-    const [css, images] = await Promise.all([
-      opts.externalCss === false ? Promise.resolve("") : this._fetchLinkedCss(),
-      opts.images === false ? Promise.resolve({}) : this._fetchImages(),
-    ]);
-    // Playwright's `fullPage` grows the image to the full content height.
-    const fullPage = opts.fullPage === true;
+    const optionsJson = JSON.stringify({
+      fullPage: opts.fullPage === true,
+      systemFonts: opts.systemFonts === true,
+    });
+    const { css, images, metadataJson } = await captureAssets(
+      this,
+      native,
+      opts,
+      width,
+      height,
+      optionsJson,
+    );
     let out = asSvg
       ? Buffer.from(
-          native.screenshotSvgWithAssets(this._html, css, images, width, height, fullPage),
+          native.screenshotCaptureSvg(
+            this._html,
+            css,
+            images,
+            width,
+            height,
+            optionsJson,
+            metadataJson,
+          ),
           "utf8",
         )
-      : native.screenshotWithAssets(this._html, css, images, width, height, fullPage);
+      : native.screenshotCapture(this._html, css, images, width, height, optionsJson, metadataJson);
     if (opts.clip) out = cropScreenshot(out, opts.clip, asSvg);
     if (type === "jpeg") out = native.screenshotJpeg(out, opts.quality);
     if (opts.path) await writeFile(opts.path, out);
@@ -3671,26 +3682,31 @@ class Page {
   // (the resolver key the raster expects), resolved against the page URL and
   // fetched as raw bytes over the engine's client. Best-effort: non-http pages
   // and failed/unresolvable refs are skipped; count capped to match the engine.
-  async _fetchImages() {
+  async _fetchImages(refs = native.imageUrls(this._html)) {
     if (!/^https?:/.test(this._url ?? "")) return {};
     const url = this._url,
       html = this._html;
     const requestState = this._requestState,
       cookies = this._cookies;
     const key = `${url}\u0000${html}`;
-    if (this._imageCache?.key === key) return this._imageCache.images;
-    const images = mapBounded(native.imageUrls(html).slice(0, 60), 8, async (ref) => {
-      try {
-        const abs = new URL(ref, url).href;
-        const buf = await native.fetchBytes(abs, requestState, url, cookies);
-        return buf && buf.length ? [ref, buf] : null;
-      } catch {
-        return null; /* skip an image that won't resolve/fetch */
-      }
-    }).then((entries) => Object.fromEntries(entries.filter(Boolean)));
-    // Retain the pending operation now; a later invalidation must never be undone on completion.
-    this._imageCache = { key, images };
-    return images;
+    if (this._imageCache?.key !== key) this._imageCache = { key, images: {} };
+    const images = this._imageCache.images;
+    const selected = [...new Set(refs.slice(0, 60))];
+    const entries = await mapBounded(selected, 8, async (ref) => {
+      // Share pending work without restoring an invalidated document's cache.
+      if (Object.hasOwn(images, ref)) return images[ref];
+      images[ref] = (async () => {
+        try {
+          const abs = new URL(ref, url).href;
+          const buf = await native.fetchBytes(abs, requestState, url, cookies);
+          return buf && buf.length ? [ref, buf] : null;
+        } catch {
+          return null;
+        }
+      })();
+      return images[ref];
+    });
+    return Object.fromEntries(entries.filter(Boolean));
   }
 
   // Concatenate the page's `<link rel="stylesheet">` bodies, resolved against the

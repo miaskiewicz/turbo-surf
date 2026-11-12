@@ -214,8 +214,44 @@ export function hydrationState(html: string): string;
 export function detect(html: string): string;
 export function queryCount(html: string, selector: string, kind?: string): number;
 export function query(html: string, selector: string, kind?: string, root?: number): string;
-export function getBy(html: string, kind: string, value: string, name?: string, root?: string, options?: string): string;
+export function getBy(
+  html: string,
+  kind: string,
+  value: string,
+  name?: string,
+  root?: string,
+  options?: string,
+): string;
 export function extract(html: string, baseUrl: string, schemaJson: string): string;
 
 /** Resize trusted live geometry and deliver resize/media rendering updates. */
 export function liveResize(id: number, width: number, height: number): Promise<string>;
+
+/** Conservative pixel-resource selection using independent intrinsic metadata. */
+export function screenshotCaptureResources(
+  html: string,
+  css: string,
+  width: number,
+  height: number,
+  metadataJson: string,
+  optionsJson: string,
+): string;
+/** Raster capture with independent metadata and explicit paint options. */
+export function screenshotCapture(
+  html: string,
+  css: string,
+  images: Record<string, Buffer>,
+  width?: number,
+  height?: number,
+  optionsJson?: string,
+  metadataJson?: string,
+): Buffer;
+export function screenshotCaptureSvg(
+  html: string,
+  css: string,
+  images: Record<string, Buffer>,
+  width?: number,
+  height?: number,
+  optionsJson?: string,
+  metadataJson?: string,
+): string;

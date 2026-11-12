@@ -5,9 +5,14 @@
 //! composes these; `goto` = `fetchHtml` then view calls on the cached HTML.
 
 mod document_response;
+mod image_metadata;
 mod parse_cache;
+mod screenshot_options;
 mod screenshot_output;
+pub use screenshot_options::{screenshot_capture, screenshot_capture_svg};
+mod screenshot_resources;
 pub use screenshot_output::{screenshot_crop, screenshot_jpeg};
+pub use screenshot_resources::screenshot_capture_resources;
 mod session;
 mod upload_mime;
 // Re-export the live-session napi free functions so they're reachable from the crate

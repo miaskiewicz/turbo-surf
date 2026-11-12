@@ -66,7 +66,8 @@ struct LoadedImages {
     epoch: u64,
     sizes: std::rc::Rc<std::collections::HashMap<String, Intrinsic>>,
 }
-thread_local! {static LOADED_IMAGES:std::cell::RefCell<std::collections::HashMap<u32,LoadedImages>>=std::cell::RefCell::new(std::collections::HashMap::new());}
+// Native document IDs repeat across isolates; the owning context also owns its sizes.
+type LoadedImageState = std::rc::Rc<std::cell::RefCell<LoadedImages>>;
 struct LoadedImageResolver(std::rc::Rc<std::collections::HashMap<String, Intrinsic>>);
 impl ImageResolver for LoadedImageResolver {
     fn resolve(&self, _name: &str) -> Option<&[u8]> {
@@ -76,16 +77,40 @@ impl ImageResolver for LoadedImageResolver {
         self.0.get(name).copied()
     }
 }
-fn loaded_images(document: u32) -> (u64, LoadedImageResolver) {
-    LOADED_IMAGES.with(|images| {
-        let images = images.borrow();
-        let entry = images.get(&document);
-        (
-            entry.map_or(0, |entry| entry.epoch),
-            LoadedImageResolver(entry.map_or_else(Default::default, |entry| entry.sizes.clone())),
-        )
-    })
+fn loaded_images(context: Option<v8::Local<v8::Context>>) -> (u64, LoadedImageResolver) {
+    let state = context.and_then(|context| context.get_slot::<std::cell::RefCell<LoadedImages>>());
+    match state {
+        Some(state) => {
+            let state = state.borrow();
+            (state.epoch, LoadedImageResolver(state.sizes.clone()))
+        }
+        None => (0, LoadedImageResolver(Default::default())),
+    }
 }
+pub(crate) fn screenshot_image_metadata(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+) -> std::rc::Rc<std::collections::HashMap<String, Intrinsic>> {
+    let _document = turbo_dom_browser_env::host_internals::enter_document_of(scope, document);
+    let context = turbo_dom_browser_env::host_internals::current_document_context(scope);
+    loaded_images(context).1 .0
+}
+
+pub(crate) fn clear_document_images(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) {
+    let _document = turbo_dom_browser_env::host_internals::enter_document_of(scope, document);
+    let Some(context) = turbo_dom_browser_env::host_internals::current_document_context(scope)
+    else {
+        return;
+    };
+    if let Some(state) = context.get_slot::<std::cell::RefCell<LoadedImages>>() {
+        let mut state = state.borrow_mut();
+        if !state.sizes.is_empty() {
+            state.sizes = Default::default();
+            state.epoch += 1;
+        }
+    }
+}
+
 /// Record the outcome of an `<img>` load (`src` is its raw attribute): a decoded image's
 /// natural size, or none for a broken one. `ratio` (else 0) is a viewBox-only SVG's
 /// natural aspect ratio from `image::probe_natural`: such an image has no natural size
@@ -99,7 +124,18 @@ pub(crate) fn op_live_image_loaded(
     height: u32,
     ratio: f64,
 ) {
-    let document = turbo_dom_browser_env::host_internals::document_id_of(scope, image) as u32;
+    let _document = turbo_dom_browser_env::host_internals::enter_document_of(scope, image);
+    let Some(context) = turbo_dom_browser_env::host_internals::current_document_context(scope)
+    else {
+        return;
+    };
+    let state: LoadedImageState = context
+        .get_slot::<std::cell::RefCell<LoadedImages>>()
+        .unwrap_or_else(|| {
+            let state = LoadedImageState::default();
+            context.set_slot(state.clone());
+            state
+        });
     let size = (width > 0 && height > 0).then(|| {
         if ratio > 0.0 && ratio.is_finite() {
             Intrinsic::ratio_only(width, height, ratio as f32, true)
@@ -107,18 +143,15 @@ pub(crate) fn op_live_image_loaded(
             Intrinsic::new(width, height, true)
         }
     });
-    LOADED_IMAGES.with(|images| {
-        let mut images = images.borrow_mut();
-        let entry = images.entry(document).or_default();
-        if entry.sizes.get(&src) != size.as_ref() {
-            let sizes = std::rc::Rc::make_mut(&mut entry.sizes);
-            match size {
-                Some(size) => sizes.insert(src, size),
-                None => sizes.remove(&src),
-            };
-            entry.epoch += 1;
-        }
-    });
+    let mut entry = state.borrow_mut();
+    if entry.sizes.get(&src) != size.as_ref() {
+        let sizes = std::rc::Rc::make_mut(&mut entry.sizes);
+        match size {
+            Some(size) => sizes.insert(src, size),
+            None => sizes.remove(&src),
+        };
+        entry.epoch += 1;
+    }
 }
 struct LayoutView {
     snapshot: turbo_dom_layout::layout_snapshot::LayoutSnapshot,
@@ -596,7 +629,7 @@ fn resolve_layout<'s>(
     let fonts = web_fonts
         .as_deref()
         .unwrap_or_else(|| initialize_system_fonts());
-    let (image_epoch, resolver) = loaded_images(tree.document_id());
+    let (image_epoch, resolver) = loaded_images(input.owner_context);
     let images = ImageCtx {
         resolver: &resolver,
         body_height: None,

@@ -129,6 +129,7 @@ deno_core::extension!(
         crate::live_layout_backend::op_live_image_box,
         crate::live_layout_backend::op_live_element_used_size,
         crate::live_layout_backend::op_live_image_loaded,
+        crate::screenshot_metadata::op_screenshot_image_metadata,
         crate::web_fonts::op_font_face_parse,
         crate::web_fonts::op_font_face_attach,
         crate::web_fonts::op_font_face_detach,

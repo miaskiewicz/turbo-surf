@@ -51,6 +51,7 @@ mod probe;
 mod referrer_meta;
 mod resource_policy;
 mod runtime;
+mod screenshot_metadata;
 mod script_fetch;
 mod script_inventory;
 mod storage_gc;

@@ -11858,6 +11858,8 @@ const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readR
 // Image load state is published to the binding's HTMLImageElement.prototype accessors
 // (complete/naturalWidth/naturalHeight/currentSrc); page JS cannot reach this record.
 const __imageHost = ops.op_interface_record_get(document).imageHost;
+__G.screenshotImageMetadata = () => ops.op_screenshot_image_metadata(__document, false);
+__G.clearScreenshotImageMetadata = () => ops.op_screenshot_image_metadata(__document, true);
 // width/height/x/y read the rendered box from surf's native live layout (turbo-dom#26):
 // null while the image is not being rendered; a layout this snapshot cannot supply reads
 // as not rendered (the attribute / natural size) rather than throwing from an IDL getter.

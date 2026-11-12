@@ -594,7 +594,7 @@ test("Page waiters resolve on the static DOM", async () => {
   await p.waitForTimeout(1);
   assert.ok(await p.waitForSelector("h1"));
   assert.equal(await p.waitForSelector("nope", { state: "hidden" }), null);
-  assert.equal(Number(await p.waitForFunction(() => 1 + 1)), 2);
+  assert.equal(await (await p.waitForFunction(() => 1 + 1)).jsonValue(), 2);
   await assert.rejects(p.waitForResponse(undefined, { timeout: 10 }), { name: "TimeoutError" });
   await assert.rejects(p.waitForRequest(undefined, { timeout: 10 }), { name: "TimeoutError" });
   await p.waitForURL(/Doc|about/);
@@ -1685,8 +1685,7 @@ test("addInitScript applies to every child frame (src, srcdoc, nested, dynamic, 
   }
 });
 
-// A getBy handle passed to the static waitForFunction resolves through the engine
-// namespace (turbo-dom#222): no live session, the handle is still the element.
+// Handles create a retained realm even when navigation stopped at commit.
 test("static waitForFunction resolves a getBy element handle", async () => {
   const server = createServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/html" });
@@ -1697,8 +1696,8 @@ test("static waitForFunction resolves a getBy element handle", async () => {
   try {
     await p.goto(`${base}/`, { waitUntil: "commit" });
     const handle = await p.getByRole("button", { name: "Save" }).elementHandle();
-    assert.equal(await p.waitForFunction((el) => el && el.id, handle), "go");
-    assert.equal(p._session, null);
+    assert.equal(await (await p.waitForFunction((el) => el && el.id, handle)).jsonValue(), "go");
+    assert.notEqual(p._session, null);
   } finally {
     await p.close();
     server.closeAllConnections();

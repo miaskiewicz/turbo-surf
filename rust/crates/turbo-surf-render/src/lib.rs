@@ -49,6 +49,7 @@ mod message_ports;
 mod permissions_policy;
 mod probe;
 mod referrer_meta;
+mod remote_handles;
 mod resource_policy;
 mod runtime;
 mod screenshot_metadata;

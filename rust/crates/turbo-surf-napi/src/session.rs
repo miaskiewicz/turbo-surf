@@ -222,11 +222,14 @@ enum LiveJob {
         Option<u64>,
         SyncSender<std::result::Result<String, String>>,
     ),
-    EngineExpression(String, SyncSender<std::result::Result<String, String>>),
     Resize(u32, u32, SyncSender<std::result::Result<String, String>>),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
-    Expression(String, SyncSender<std::result::Result<String, String>>),
+    Expression(
+        String,
+        bool,
+        SyncSender<std::result::Result<String, String>>,
+    ),
     Serialize(SyncSender<String>),
     Cookies(SyncSender<String>),
     SetCookies(String, SyncSender<()>),
@@ -373,9 +376,6 @@ impl Task for LiveOpenTask {
                         storage_work |= wait_until == "domcontentloaded" && result.is_ok();
                         let _ = reply.send(result);
                     }
-                    LiveJob::EngineExpression(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval_engine_expression(&script)));
-                    }
                     LiveJob::Resize(width, height, reply) => {
                         let result = rt
                             .block_on(session.set_viewport(width, height))
@@ -388,8 +388,13 @@ impl Task for LiveOpenTask {
                     LiveJob::EngineEval(script, reply) => {
                         let _ = reply.send(rt.block_on(session.eval_engine(&script)));
                     }
-                    LiveJob::Expression(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval_expression(&script)));
+                    LiveJob::Expression(script, engine, reply) => {
+                        let result = if engine {
+                            rt.block_on(session.eval_engine_expression(&script))
+                        } else {
+                            rt.block_on(session.eval_expression(&script))
+                        };
+                        let _ = reply.send(result);
                     }
                     LiveJob::Serialize(reply) => {
                         let _ = reply.send(session.serialize());
@@ -510,10 +515,8 @@ impl Task for LiveEvalTask {
         let (reply, rx) = sync_channel(1);
         live_send(
             self.id,
-            if self.expression && self.engine {
-                LiveJob::EngineExpression(std::mem::take(&mut self.script), reply)
-            } else if self.expression {
-                LiveJob::Expression(std::mem::take(&mut self.script), reply)
+            if self.expression {
+                LiveJob::Expression(std::mem::take(&mut self.script), self.engine, reply)
             } else if self.engine {
                 LiveJob::EngineEval(std::mem::take(&mut self.script), reply)
             } else {
@@ -565,7 +568,7 @@ pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> 
     })
 }
 
-/// Await a collector in the engine namespace without waiting for unrelated resources.
+/// Await a trusted driver expression without exposing its namespace to guest functions.
 #[napi]
 pub fn live_eval_engine_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
     AsyncTask::new(LiveEvalTask {

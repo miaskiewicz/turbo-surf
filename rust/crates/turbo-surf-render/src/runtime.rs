@@ -8800,6 +8800,9 @@ if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
 // The engine namespace (turbo-dom#222): a V8 private on the global, handed to this
 // bootstrap by Rust; page script cannot reach it.
 const __G = __tsNs;
+__G.remoteHandleRetain = (owner, value) => ops.op_remote_handle_retain(owner, value);
+__G.remoteHandleGet = id => ops.op_remote_handle_get(id);
+__G.remoteHandleDispose = id => ops.op_remote_handle_dispose(id);
 // Blink's message for an interface constructor called without `new` (turbo-surf#86):
 // interfaces without a constructor say "Illegal constructor", the others "Failed to
 // construct 'X': Please use the 'new' operator, ...". Every constructor this bootstrap
@@ -14905,6 +14908,7 @@ fn make_runtime_with_storage_and_options(
             extensions.push(crate::message_ports::extension());
             extensions.push(crate::audio_backend::extension());
             extensions.push(crate::geometry_backend::extension());
+            extensions.push(crate::remote_handles::extension());
             extensions.push(extension);
             extensions
         },
@@ -17981,6 +17985,13 @@ impl PageSession {
     pub fn native_storage_diagnostics_for_testing(&mut self) -> serde_json::Value {
         let _activation = self.rt.activation_key().enter();
         crate::storage_gc::diagnostics(self.rt.v8_isolate())
+    }
+
+    /// Host-only remote handle ownership accounting; never installed on guest globals.
+    #[doc(hidden)]
+    pub fn remote_handle_diagnostics_for_testing(&mut self) -> serde_json::Value {
+        let _activation = self.rt.activation_key().enter();
+        crate::remote_handles::diagnostics(self.rt.v8_isolate())
     }
 
     /// Host-only context registry accounting; never installed on guest globals.

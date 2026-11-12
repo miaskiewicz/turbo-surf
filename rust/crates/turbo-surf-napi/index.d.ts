@@ -70,6 +70,7 @@ export function liveEval(id: number, script: string): Promise<string>;
 /** `liveEval` for a driver script that needs the engine namespace (its `__tsNs` parameter). */
 export function liveEvalEngine(id: number, script: string): Promise<string>;
 /** Await an expression’s actual native Promise completion. */
+export function liveEvalEngineExpression(id: number, expression: string): Promise<string>;
 export function liveEvalExpression(id: number, expression: string): Promise<string>;
 /** Serialize the live session's current DOM to HTML. */
 export function liveSerialize(id: number): string;
@@ -274,4 +275,3 @@ export class ScreenshotScene {
   close(): void;
 }
 export function liveSetContent(id: number, html: string, waitUntil?: string, timeoutMs?: number): Promise<string>;
-export function liveEvalEngineExpression(id: number, expression: string): Promise<string>;

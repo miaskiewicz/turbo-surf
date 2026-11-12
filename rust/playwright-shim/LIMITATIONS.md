@@ -139,9 +139,9 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `getAttribute`, `inputValue`, `isVisible/Hidden/Checked/Enabled/Disabled/Editable` | ✅ | Selector shortcuts → Locator. |
 | `locator`, `getByRole`, `getByText`, `getByLabel`, `getByTestId`, `getByPlaceholder`, `getByAltText`, `getByTitle` | ✅ | `getByTestId` honors the context `testIdAttribute`. |
 | `click`, `dblclick`, `tap`, `fill`, `type`, `press`, `check`, `uncheck`, `setChecked`, `selectOption` | ✅ | DOM-level events in live sessions; static paths resolve navigation/form intents. Not hardware input. |
-| `evaluate`, `evaluateHandle` | ⚠️ | String and `(fn, arg)` forms run in V8 over rtdom. The current bridge returns string values; typed result/handle serialization is incomplete. |
+| `evaluate`, `evaluateHandle` | ✅ | Typed values and nested handle arguments run in the owning V8 realm. `evaluateHandle` returns a retained JSHandle/ElementHandle with live identity, property handles, evaluation and explicit disposal. Navigation/close/retired frames invalidate their handles. |
 | `render` | ✅ | Runs page JS over the snapshot and re-renders the DOM. |
-| `addStyleTag`, `addScriptTag` | ⚠️ | Inserts content, URL, or path sources into the live document and awaits external loads. Returns a locator for the inserted tag; generic ElementHandle support is tracked separately (#343). Module script injection rejects because its load-completion lifecycle is unsupported. |
+| `addStyleTag`, `addScriptTag` | ⚠️ | Inserts content, URL, or path sources into the live document and awaits external loads. Returns an ElementHandle for the inserted tag. Module script injection rejects because its load-completion lifecycle is unsupported. |
 | `addInitScript` | ✅ | Stored on the context and installed before authored scripts in every frame of the live session — the top page plus every child frame (static `<iframe src>`, srcdoc, nested, dynamically created, blob URL). Page-level calls also render over the current HTML. |
 | `setExtraHTTPHeaders` | ✅ | **Real** — extra headers are sent on page navigation and linked-CSS fetches; not a global override of every live fetch/XHR request. |
 | `setContent` | ⚠️ | Native host replacement preserves the Window, document, prototypes, bindings, and document listeners; parser scripts retain CSP admission and resource/load scheduling. Supports `load`, `domcontentloaded`, and `networkidle` waits with deadlines. Compatibility mode is retained; guest `document.open/write/close` remains unsupported. |
@@ -275,3 +275,7 @@ The `turbo-surf-test` CLI requires Node.js 20.14+ or 22+ for completed-test
 worker shutdown (`--test-force-exit`). Configured `grepInvert` requires Node.js
 22.1+ (`--test-skip-pattern`). Earlier runtimes receive a clear error before
 web servers start; the package's launcher remains available on Node.js 20+.
+
+### Retained handles
+
+`evaluateHandle`, `waitForFunction`, `waitForSelector` and locator `elementHandle` return genuine realm-owned handles. Handle access can open a retained realm after `waitUntil: "commit"`; values are not copied into JSON wrappers. `jsonValue()` serializes the current value, while `getProperty`, `getProperties` and `evaluateHandle` retain new references. Dispose handles when no longer needed. Passing a handle to a different page or frame rejects. Element reads preserve the exact node even after detachment; actions reject detached nodes.

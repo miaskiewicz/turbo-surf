@@ -14,6 +14,7 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
+import { handleEvaluation, hasJSHandles, ensureHandleSession } from "./js-handles.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -1295,12 +1296,13 @@ class Locator {
   // isolate (selector / getBy + index), so `page.waitForFunction(fn, handle)` can run
   // `fn(element)` against the live node (e.g. wait for a submit button's !disabled).
   async elementHandle() {
-    return {
-      __turboHandle: true,
-      selector: this._selector ?? null,
-      getBy: this._getBy ?? null,
-      index: this._index ?? 0,
-    };
+    await ensureHandleSession(this._page);
+    const index = await this._resolveLiveIdx();
+    if (index == null) return null;
+    return this._page.evaluateHandle(
+      (index) => document.querySelectorAll("*")[index] ?? null,
+      index,
+    );
   }
 
   // Hover has no rendering effect here, but JS hover handlers (menu-open) are real.
@@ -1968,7 +1970,11 @@ class Frame {
       return child.Function(code)(helperState);
     })()`;
   }
+  async evaluateHandle(script, arg) {
+    return handleEvaluation(this, script, arg, true);
+  }
   async evaluate(script, arg) {
+    if (hasJSHandles(arg)) return handleEvaluation(this, script, arg);
     await this._ensureLive();
     const expression = this._realmExpression(evalSource(script, arg));
     if (this._parentPage._mergedBindings().size)
@@ -2951,6 +2957,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // it) and refresh the snapshot; otherwise run statelessly over the cached HTML.
   async evaluate(script, arg) {
     if (this._closed) throw new Error("page is closed");
+    if (hasJSHandles(arg)) return handleEvaluation(this, script, arg);
     await this._ensureLive();
     const body = evalSource(script, arg);
     if (this._mergedBindings().size) return this._evaluateWithBindings(body);
@@ -2967,7 +2974,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return decodeEvaluationValue(result.value);
   }
   async evaluateHandle(script, arg) {
-    return this.evaluate(script, arg);
+    return handleEvaluation(this, script, arg, true);
   }
   // Run the page's own script (promises/timers/fetch/cookies) and replace the
   // cached HTML with the hydrated result — subsequent reads see the new DOM.
@@ -3353,60 +3360,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // (from locator.elementHandle()) — resolved to the live element so e.g.
   // `waitForFunction((btn) => !btn.disabled, await uploadButton.elementHandle())` works.
   async waitForFunction(fn, arg, opts) {
-    const timeout = (opts && typeof opts === "object" && opts.timeout) || 30000;
-    await this._ensureLive();
-    const fnStr = typeof fn === "function" ? fn.toString() : String(fn);
-    let argExpr;
-    if (arg && arg.__turboHandle) {
-      if (arg.selector) {
-        argExpr = `document.querySelectorAll(${JSON.stringify(arg.selector)})[${arg.index}]`;
-      } else if (arg.getBy) {
-        const g = arg.getBy;
-        argExpr =
-          `(function(){ __tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)},${JSON.stringify(g.options ?? {})}); ` +
-          `var h=JSON.parse(globalThis.__RESULT||"[]"); var all=document.querySelectorAll("*"); return h[${arg.index}]?all[h[${arg.index}].idx]:undefined; })()`;
-      } else {
-        argExpr = "undefined";
-      }
-    } else {
-      argExpr = JSON.stringify(arg ?? null);
-    }
-    // Capture BOTH truthiness and the VALUE — Playwright's waitForFunction resolves to the
-    // function's return value, not a boolean. Works live (poll the running app) and static
-    // (one eval over the snapshot; a static DOM won't change so don't spin).
-    const probe = `(() => { try { var __a = ${argExpr}; var __r = (${fnStr})(__a); return JSON.stringify({ ok: !!__r, v: __r === undefined ? null : __r }); } catch (_e) { return JSON.stringify({ ok: false, v: null }); } })()`;
-    const evalOnce = async () => {
-      let raw;
-      if (this._session != null) {
-        try {
-          raw = await native.liveEvalEngine(this._session, `globalThis.__RESULT = ${probe};`);
-        } catch {
-          raw = null;
-        }
-        await this._refreshFromSession();
-      } else {
-        try {
-          raw = native.evaluateEngine(this._html, `return ${probe};`);
-        } catch {
-          raw = null;
-        }
-      }
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return { ok: false, v: null };
-      }
-    };
+    const timeout = opts?.timeout ?? 30000;
     const start = Date.now();
     for (;;) {
-      const res = await evalOnce();
-      if (res && res.ok) return res.v;
-      if (this._session == null) break; // static snapshot won't change
-      if (Date.now() - start >= timeout) break;
-      await new Promise((res2) => setTimeout(res2, 40));
+      const handle = await this.evaluateHandle(fn, arg);
+      if (await handle.evaluate((value) => !!value)) return handle;
+      await handle.dispose();
+      if (timeout && Date.now() - start >= timeout)
+        throw new Error("turbo-surf: waitForFunction timed out");
+      await new Promise((resolve) => setTimeout(resolve, 40));
     }
-    throw new Error("turbo-surf: waitForFunction timed out");
   }
+
   // `waitForNavigation` resolves when the URL changes from the one at call time.
   // In a live session the change comes from a client redirect pumped by the next
   // drain; outside one it's the paired `goto`/click's synchronous nav. Poll url.
@@ -3684,7 +3649,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const outcome = JSON.parse(result);
     await this._refreshFromSession();
     if (outcome.error) throw new Error(outcome.error);
-    return this.locator(`[data-ts-injected="${token}"]`);
+    return this.locator(`[data-ts-injected="${token}"]`).elementHandle();
   }
   storageState() {
     return this._context.storageState();

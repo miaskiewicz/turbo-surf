@@ -22,8 +22,8 @@ mod upload_mime;
 // napi still registers them either way).
 pub use session::{
     live_close, live_cookies, live_eval, live_eval_engine, live_eval_engine_expression,
-    live_eval_expression, live_network_log, live_open, live_read_engine, live_resize,
-    live_serialize, live_set_content, live_set_cookies,
+    live_eval_expression, live_eval_expression_tracked, live_network_log, live_open,
+    live_read_engine, live_resize, live_serialize, live_set_content, live_set_cookies,
 };
 
 use napi::bindgen_prelude::*;

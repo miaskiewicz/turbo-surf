@@ -912,6 +912,7 @@
           brand(this, 1);
           value = number(value);
           interrupt(this);
+          if (value === 0 && ops.op_live_element_scroll_offset_is_zero(this)) return;
           scrolled(this, ops.op_live_element_scroll(this, name === "scrollLeft" ? 1 : 2, value));
         },
         `set ${name}`,

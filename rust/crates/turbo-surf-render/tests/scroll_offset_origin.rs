@@ -31,6 +31,7 @@ async fn mui_modal_manager_and_fade_can_read_known_zero_offsets_with_chat_animat
         for key in [
             "scrollbarSize",
             "padding",
+            "mountTop",
             "reflowTop",
             "reflowLeft",
             "bodyTop",
@@ -77,6 +78,30 @@ async fn borrowed_scroll_getter_uses_child_owner_context_not_parent_zero_state()
     assert_eq!(
         serde_json::from_str::<Value>(&actual).unwrap(),
         json!([0, 70, 70])
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unchanged_zero_assignment_converts_once_and_interrupts_pending_smooth_scroll() {
+    let mut page = PageSession::open(
+        "<!doctype html><div id=box style='height:40px;overflow:auto'><div style='height:200px'></div></div>",
+        "https://modal.test/",
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
+    let actual = page
+        .eval_json_expression(
+            "(async()=>{const box=document.getElementById('box');let conversions=0;const pending=box.scroll({top:60,behavior:'smooth'});box.scrollTop={valueOf(){conversions++;return 0}};const outcome=await pending;return {conversions,interrupted:outcome.interrupted,top:box.scrollTop}})()",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&actual).unwrap(),
+        json!({"conversions": 1, "interrupted": true, "top": 0})
     );
     page.close();
 }

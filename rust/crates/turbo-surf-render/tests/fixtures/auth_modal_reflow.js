@@ -24,6 +24,11 @@ window.openAuthModal = function () {
   };
   probe.remove();
   document.body.style.overflow = "hidden";
+  // MUI useModal.handleMounted runs this after ModalManager.mount.
+  report.mountTop = recordRead(() => {
+    modal.scrollTop = 0;
+    return modal.scrollTop;
+  });
   modal.style.opacity = "1";
   report.paperWidth = recordRead(() => paper.getBoundingClientRect().width);
   window.modalClicks = 0;

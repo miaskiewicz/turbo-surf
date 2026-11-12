@@ -3,6 +3,27 @@
 CI (`.github/workflows/ci.yml`) gates line coverage and cyclomatic complexity on top of the
 `lint + test` job. Run the same commands locally before pushing.
 
+The commands describe required checks, not a completed gate for the v0.8.3
+release candidate. Historical coverage and complexity measurements below apply
+only to their recorded revisions.
+
+## Local release checks
+
+`npm ci` installs the launcher/harness development tools. `npm run check` runs
+JS lint/format and `npm test`: version/single-V8 checks, Python release-helper
+checks, notice/audio-source checks, Rust workspace tests, clippy with
+`-- -D warnings`, `cargo fmt --check`, the addon-backed Playwright shim/e2e suites
+and offline detection tests. `test:playwright` builds the release NAPI addon first
+and bounds each Node suite with `timeout --signal=KILL 600`; macOS needs a
+compatible `timeout` command available. Node 22 supports the detection raw-CDP
+collector's native WebSocket API. Chrome remains optional development tooling.
+
+Use an isolated `CARGO_TARGET_DIR` for concurrent work and the matching addon
+output when running shim tests; do not reuse a test candidate's build directory.
+Default, feature-specific and native SDK builds are distinct configurations; see
+[build features](./BUILD-FEATURES.md) and the
+[Chrome parity runbook](../harness/detection/CHROME-PARITY-RUNBOOK.md).
+
 ## Coverage
 
 Line coverage of the Rust workspace is measured by `cargo tarpaulin` with the LLVM engine
@@ -19,9 +40,11 @@ runner): the `coverage-shard` matrix runs `python3 ../scripts/coverage-shard.py 
 settings, and the `coverage` job merges the shard reports (`scripts/merge-coverage-reports.py`:
 each crate keeps its own shard's coverable lines, a line is covered when any shard hits it)
 and applies the workspace `fail-under` and the per-crate floors to the merge. The render
-shard passes `--chunks 4`: every test process writes a profraw of all instrumented code, so
-render's test binaries are run in four chunks over one build, the profraws deleted between
-chunks (one run filled the 145G runner disk), and the chunk reports unioned.
+shard is split into `render-a` and `render-b`, each passing `--chunks 4` and
+`--slice 0/2` or `--slice 1/2`; their reports are unioned before the crate merge.
+Each runner builds once, then deletes profraws between its chunks; every test
+process writes a profraw of all instrumented code (one unsplit run filled the
+145G runner disk). The resulting chunk reports are unioned.
 
 Then every crate must meet its own floor (`rust/coverage-floors.json`, checked by
 `python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json
@@ -102,7 +125,8 @@ consol/cov-c4b bb1896f (LLVM line records, a finer count than tarpaulin's):
 | render, native engine | 18839/20576 | 91.56 | 91.5 |
 | native-only files (window_proxy, frame_location, frame_ancestors, code_generation, frame_modules) | 1277/1736 | 73.56 | 73.5 |
 
-Three render tests fail in that configuration independently of coverage (#71).
+That dated native-engine measurement recorded three render failures independently
+of coverage (#71); it is not the current candidate status.
 
 ## Complexity
 
@@ -142,5 +166,6 @@ collectors are hash-pinned by a Chrome control (for example `chrome-cdp-trace.mj
 `input-state.js`, checked by `resource-scan-order-chrome.test.mjs`): refactoring one
 re-captures its controls in the same change.
 
-The backlog is cleared: `npm run -s complexity:rust` and `npm run -s complexity:js` both exit
-0. See CHANGELOG for the refactor history (the last entry closed #154).
+The refactor history records the original backlog as cleared (the last entry
+closed #154). Run both complexity commands against the revision under review;
+that historical result does not establish the current candidate gate.

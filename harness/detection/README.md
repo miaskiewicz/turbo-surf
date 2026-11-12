@@ -1,6 +1,6 @@
 # Chrome versus turbo-surf detection harness
 
-Start with the [Chrome155 parity runbook](./CHROME-PARITY-RUNBOOK.md) for exact SDK/build commands, every comparison flag, opt-in timing and bridge settings, artifact checks and test order.
+Start with the [Chrome parity runbook](./CHROME-PARITY-RUNBOOK.md) for exact SDK/build commands, every comparison flag, opt-in timing and bridge settings, artifact checks and test order.
 
 To move the emulated browser identity to a new Chrome release, follow
 [CHROME-REVERSION.md](./CHROME-REVERSION.md): `node harness/detection/reversion-chrome.mjs --chrome <Chrome.app>`
@@ -38,6 +38,18 @@ markers; final observation stays incomplete. It adds no wait and borrows no
 earlier result. Actual raw-CDP/Patchright regression controls and the combined
 sixteen-test suite pass. Full detection passes200 on Node22 and191 on Node20
 with nine documented browser skips, plus two Python checks each.
+
+The measurements above are historical receipts for their recorded source revisions,
+not acceptance evidence for the current v0.8.3 release candidate. Integrated fixes
+and checked-in controls do not establish a completed final release gate or live
+authentication success. The default native path remains browserless Rust/V8;
+an explicitly selected browser solver is separate from this comparison.
+
+Native geometry admission now scopes animation checks to the queried source and
+read purpose: unrelated animations need not block unaffected boxes or leaf extents.
+Animated queries/ancestors, animated descendants contributing to extents, nonzero
+scrolling, uncertain gutters and actual point hit-testing retain strict checks.
+Animation toggling remains future [v0.8.4 work (#500)](https://github.com/miaskiewicz/turbo-surf/issues/500).
 
 ## Same-font geometry control
 
@@ -106,16 +118,20 @@ broader timer throttling, detached-document active-time or stream queue ordering
 
 ## Build and run
 
-On a Mac with a real Metal GPU:
+For the optional macOS Metal comparison, use a real Metal GPU. See
+[build features](../../docs/BUILD-FEATURES.md) for default and feature-specific
+builds; compiled GPU support alone does not install every language binding bridge.
+Use a private `CARGO_TARGET_DIR` when other builds are running:
 
 ```bash
-npm install
+npm ci
 # Optional: legacy Playwright/Patchright collectors only; raw CDP needs neither.
 # npm ci --prefix scripts/browser-sidecar   # pinned Patchright 1.59.4 (turbo-surf#53)
 cd rust
+export CARGO_TARGET_DIR="${TMPDIR:-/tmp}/turbo-surf-detection-target"
 cargo build --release -p turbo-surf-mcp --features trust-anchors,gpu-metal,coretext --example detection_trace
 cd ..
-npm run harness:detection -- --live --binary rust/target/release/examples/detection_trace --probes --debugger
+npm run harness:detection -- --live --binary "$CARGO_TARGET_DIR/release/examples/detection_trace" --probes --debugger
 ```
 
 Use an optimized binary for live timing conclusions: debug Rust CSS/layout work

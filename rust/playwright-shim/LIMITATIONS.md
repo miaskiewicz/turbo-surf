@@ -16,6 +16,11 @@ is the authoritative map of what is **supported**, what is a **no-op**, and what
 faithfully emulated is described below; some compatibility surfaces are stored values
 or no-ops rather than complete browser implementations.
 
+This describes the current v0.8.3 release candidate source, not a published release or
+a claim that its final release gates have passed. The default renderer is Rust/V8;
+Chrome/Playwright are development oracles. An explicitly selected browser solver is
+a separate optional path. See [build features](../../docs/BUILD-FEATURES.md).
+
 ## Response-size budget
 
 The default response-body limit remains 8 MiB. For development applications with
@@ -31,8 +36,8 @@ The engine has a real DOM (rtdom), V8, native layout/paint and an optional Metal
 WebGL bridge, but **no browser compositor or input hardware**. Some browser
 surfaces remain unavailable or approximate:
 
-- **Pixels / layout / rendering** — PDF, video, bounding boxes,
-  `toHaveScreenshot`/`toMatchSnapshot`, viewport-pixel scrolling. There is no
+- **Pixels / layout / rendering** — PDF, video,
+  `toHaveScreenshot`/`toMatchSnapshot`, browser compositor capture. There is no
   browser raster output to capture or compare. **Exception:** `page.screenshot()`
   is supported via a *synthetic* native layout+paint (see below) — a
   representative render, not a browser-faithful capture. It fetches the page's
@@ -49,18 +54,16 @@ surfaces remain unavailable or approximate:
   lack hardware-backed behavior. In a live session the shim dispatches synthetic
   pointer / mouse / touch / HTML5-drag events at the matched element (or
   `elementFromPoint(x, y)` for the coord-based `mouse` / `touchscreen` entries),
-  so JS handlers fire exactly as in a real browser. No compositor means no native
-  scroll, no drag image, no hit-testing beyond what native layout provides.
+  so app handlers receive events. No compositor means no drag image; scrolling
+  and hit-testing use native layout and its admission limits.
   Without a live session every input call is a clean no-op. `keyboard` dispatches
-  key events when a live session exists and is a no-op otherwise; it does not
-  provide browser text-editing defaults.
-- **In-process network interception** — `page.route(fulfill)` and
-  `page.routeFromHAR` are wired via an init-script `fetch`/XHR wrapper (register
-  BEFORE the next live session opens). The engine still fetches over Rust+wreq
-  (the default impersonate build) or reqwest; there is no shim request-
-  interception bus for dynamic `continue`/`abort`/`fallback` or context-scoped
-  routes, and HAR record mode is a follow-up.
-  (`setExtraHTTPHeaders` and cookies ARE wired through — those are real.)
+  key events when a live session exists and is a no-op otherwise; it provides
+  a subset of text-editing defaults, not full browser editing behavior.
+- **Network interception** — page-scoped fetch/XHR routes run host callbacks,
+  including fulfill, continue/fallback overrides, abort and `route.fetch()`.
+  Registration updates current and future sessions. General document/resource
+  interception and context routes remain unsupported; HAR is playback-only.
+  See the method rows below for the narrower replay semantics.
 
 Live `PageSession` calls retain the app's V8 isolate and drain timers, microtasks and
 network work when driven. A `networkidle` navigation opens a session immediately;
@@ -103,11 +106,11 @@ Live hydration loads linked/imported stylesheets, enforces inline style CSP agai
 attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
 CSS getters share private interface brands. It sizes PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL and `image/svg+xml` image resources (any `data:`
 form) with load/error events like Chrome and selects `<picture>` / `srcset` / `sizes`
-sources like Chrome (the binding's selection); CSS image/font resource loading is incomplete. Known gaps: a
-DOMException raised by a binding module (e.g. `img.decode()`'s `EncodingError`) is not
-`instanceof DOMException` and `structuredClone`s to `{}` (turbo-surf#42), and a parser-created
-`is=` element can match `:defined` once a GC has run turbo-dom's storage collection
-(turbo-surf#41). CSSOM changes made with
+sources like Chrome (the binding's selection); CSS image/font resource loading is incomplete.
+Realm DOMException identity/structured cloning and custom-element `:defined` state
+through storage collection have dedicated regression controls
+(`tests/dom_exception_identity.rs`, `tests/custom_elements_defined.rs` in render).
+CSSOM changes made with
 `insertRule` do not alter
 serialized HTML and therefore are not automatically painted by snapshot screenshots.
 
@@ -135,6 +138,15 @@ the whole jar. A bare `request.newContext()` (unbound) keeps its empty-jar behav
 HttpOnly cookies remain available to HTTP and storage state,
 while page JS cannot read, create or overwrite them through `document.cookie`.
 
+## Native geometry limits
+
+Geometry admission is scoped to the source and purpose of a read. Unaffected
+boxes and leaf scroll extents can be read despite unrelated animations. An
+animated query or ancestor, animated descendants contributing to an extent,
+nonzero scrolling and uncertain scrollbar gutters retain strict checks. Actual
+point hit-testing also stays strict. This does not advance animation timelines;
+an animation-toggle option is future work ([#500](https://github.com/miaskiewicz/turbo-surf/issues/500), v0.8.4).
+
 ## Page
 
 | Method | Status | Notes |
@@ -155,17 +167,17 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `on`, `once`, `off`, `addListener`, `removeListener` | ⚠️ | Registry; lifecycle events fire, and captured live fetch/XHR request/response events are emitted when drained. Console events expose type, text, source location and live argument handles. Native dialogs remain unsupported. |
 | `mainFrame`, `frame`, `frames`, `frameLocator` | ✅ | `mainFrame` returns the host page (the page implements the Frame surface). `frames()` lists the page + each `<iframe>`; `frame(name)` / `frame({name,url})` find a child; `frameLocator('iframe[...]')` scopes the locator chain to the child document. srcdoc iframes carry their inner markup; src-loaded iframes list with empty content until the engine hydrates them. |
 | `viewportSize`, `setViewportSize` | ✅ | Stored, and the viewport now drives `page.screenshot()` layout width/height. |
-| `setDefaultTimeout`, `setDefaultNavigationTimeout`, `emulateMedia`, `bringToFront` | ⚠️ | Stored / no-op (no live layout to affect). |
+| `setDefaultTimeout`, `setDefaultNavigationTimeout` | ⚠️ | Configure shim deadlines; browser timing semantics remain partial. |
+| `emulateMedia` | ⚠️ | Forwards color scheme and reduced motion into native request/session configuration and re-drains a live session. Full media-type emulation is not implemented. |
+| `bringToFront` | ⚠️ | No-op; no browser window. |
 | `isClosed`, `close`, `video` (→ null), `workers` (→ []) | ✅ | |
 | `screenshot` | ⚠️ | Synthetic native render (PNG/JPEG, or SVG via `{type:"svg"}`) — representative, not browser-faithful. JPEG quality and path inference work; `clip` crops PNG/JPEG output to rendered-image bounds without changing layout. SVG clipping throws. Snapshot-scoped locator masks use native clipped element geometry and CSS mask colors; cross-page/frame masks throw. PNG/SVG omitBackground preserves authored backgrounds; JPEG retains its opaque canvas. Device scale uses native capture with scale css/device and physical-pixel clip rounding; full-page capture includes positioned overflow and retains the viewport height minimum. |
 | `pdf` | ❌ | Throws — no PDF implementation in the shim. |
 | `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate so JS hover handlers (menu-open) fire. Static snapshot: no-op. Not hardware input. |
 | `dragAndDrop`, `mouse.*`, `touchscreen.*` | Partial | Live app only: dispatches pointer / mouse / touch / HTML5-drag events into the isolate at element centers (or at `(x, y)` for coord-based entries). Touch taps require genuine constructible native `Touch` and populated `TouchEvent` lists; unsupported bindings reject before dispatch instead of losing payloads ([turbo-dom#499](https://github.com/miaskiewicz/turbo-dom/issues/499)). Supported taps honor cancellation before compatibility mouse activation. Static snapshot: no-op. Not hardware input. |
-| `keyboard.*` | ⚠️ | Key-event dispatch in a live session; no-op without one, incomplete text-editing defaults. |
+| `keyboard.*` | ⚠️ | Key events plus partial input/contenteditable editing defaults in a live session; incomplete browser editing behavior. |
 | `route`, `unroute` | ⚠️ | Page fetch/XHR interception runs actual Node callbacks with closure state, async host work, fulfillment (including response/raw bytes), continue/fallback overrides, abort and `route.fetch()`. Uses the originating realm's native fetch/cookie/policy services; unsupported `route.fetch` options reject explicitly. Registration updates current and future sessions. Fulfilled and rewritten fetch/XHR responses feed native response/body events; internal `route.fetch()` traffic is private, and continued requests retain native observations. General document/resource interception remains unsupported. |
-| `routeFromHAR` | ⚠️ | Playback-only. Each `log.entries[].request.url` is registered as a shim-side route returning that entry's response body / status / content-type via the init-script `fetch`/XHR wrapper — call BEFORE the next live session opens. `options.url` filters entries (RegExp or substring). Record mode and strict `notFound: 'abort'` are not implemented. |
-| `exposeBinding`, `exposeFunction` | ❌ | Throws — no persistent JS↔host binding across renders. |
-| `routeFromHAR` | ❌ | Throws — no HAR replay. |
+| `routeFromHAR` | ⚠️ | Playback-only. Each `log.entries[].request.url` is registered as a shim-side route returning that entry's response body / status / content-type via the init-script `fetch`/XHR wrapper; registration updates current and future sessions. `options.url` filters entries (RegExp or substring). Record mode and strict `notFound: 'abort'` are not implemented. |
 | `exposeBinding`, `exposeFunction` | ⚠️ | Bindings persist across navigations and settle guest promises with serialized host results or errors. Circular/non-JSON host results reject. |
 | `pause`, `addLocatorHandler`, `pickLocator` | ❌ | Throws / n/a — no inspector UI. |
 | `clock`, `coverage`, `tracing`, `requestGC` | ❌ | n/a — no devtools protocol. |
@@ -181,13 +193,15 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `getAttribute`, `inputValue`, `selectedValues`, `cssValue`, `ariaRole`, `accessibleName`, `accessibleDescription` | ✅ | |
 | `is*` (`Visible/Hidden/Checked/Enabled/Disabled/Editable/Empty`) | ✅ | |
 | `fill`, `clear`, `type`, `pressSequentially`, `check`, `uncheck`, `setChecked`, `selectOption`, `click`, `dblclick`, `tap`, `press` | ✅ | DOM-level (same intent model as Page). |
-| `evaluate` | ⚠️ | Needs a CSS-selector-backed locator (element passed by `document.querySelector`). |
+| `evaluate`, `evaluateAll` | ✅ | Resolve the indexed live match or full matched collection in the owning page realm; page effects persist. |
 | `ariaSnapshot` | ✅ | |
 | `dispatchEvent` | ✅ | Live app only: fires the named DOM event into the isolate (e.g. a row's `click`). Static snapshot: no-op. |
 | `hover` | ✅ | Live app only: dispatches mouseenter/over into the isolate. Static snapshot: no-op. Not hardware input. |
 | `focus`, `blur` | ✅ | Live app only: calls `el.focus()` / `el.blur()` in the isolate so `document.activeElement` updates (and the app's focus/blur handlers fire). Static snapshot: no-op. `setContent(...)` opens or retains a live session, so focus and blur operate on its current native document. |
-| `scrollIntoViewIfNeeded`, `highlight`, `waitFor` | ⚠️ | No-op / resolve (no viewport, no layout — nothing to scroll into). |
-| `boundingBox` | ⚠️ | Returns `null` (there genuinely is no browser-faithful box). Geometry-conditional helpers (smooth-scroll, visibility-by-rect) no-op cleanly instead of throwing. |
+| `scrollIntoViewIfNeeded` | ⚠️ | Calls native `scrollIntoView` with nearest/instant behavior; subject to native geometry admission. |
+| `highlight` | ⚠️ | No-op; no inspector overlay. |
+| `waitFor` | ⚠️ | Opens a live session and polls attached/detached/visible/hidden state with a deadline, re-draining between attempts. |
+| `boundingBox` | ⚠️ | Reads live native layout geometry; hidden or boxless elements return null. Unsupported geometry rejects rather than fabricating browser values. |
 | `screenshot` | ❌ | Throws — pixels. |
 | `dragTo` | ✅ | Live app only: dispatches a full pointer+mouse+HTML5-drag sequence on source → target. Static snapshot: no-op. Not hardware input. |
 | `selectText` | ❌ | Throws — input hardware. |
@@ -211,7 +225,6 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `grantPermissions`, `clearPermissions`, `setGeolocation`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
 | `setOffline` | ❌ | Enabling offline emulation (including `newContext({ offline: true })`) rejects with a clear unsupported error; online mode is allowed. |
 | `tracing`, `recordVideo`, `use.trace`, `use.video` | ❌ | Tracing methods and enabled recording options reject with a clear no-browser engine error. Explicit trace/video `off` modes are accepted; `page.video()` returns null without recording. |
-| `route`, `unroute`, `exposeBinding`, `exposeFunction`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` and `page.routeFromHAR` work — see the Page table. |
 | `route`, `unroute`, `routeFromHAR`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
 | `exposeBinding`, `exposeFunction` | ⚠️ | Bindings apply to current and future pages across navigations; guest promises receive serialized host results or errors. |
 

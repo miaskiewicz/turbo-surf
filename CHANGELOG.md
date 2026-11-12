@@ -51,6 +51,9 @@ branch.
   reads to their actual animation dependencies. Cache receiver and read purpose
   separately, retaining checks for affected targets, descendants of extent
   queries, nonzero scrolling, uncertain gutters, and true hit testing (#498).
+- Read a native element's known zero scroll offset without an unrelated layout
+  rejection, allowing modal reflow checks. Preserve owner-document/realm checks
+  and the existing layout/clamping path for retained nonzero offsets (#498).
 - Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
   exceptions, maintain NodeIterator's root and reference cursor, and honor idle
   callback timeout and deadline behavior (#449, #450, #451, #452).

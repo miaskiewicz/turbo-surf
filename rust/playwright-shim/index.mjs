@@ -2342,6 +2342,7 @@ class Page {
       return;
     }
     this._recentResponses = this._recentResponses ?? [];
+    let previousHop = null;
     for (const e of entries) {
       if (e.event === "pageerror") {
         const error = new Error(e.message);
@@ -2351,6 +2352,16 @@ class Page {
         continue;
       }
       const resp = makeNetResponse(e, this._requestFrame(e));
+      if (
+        e.redirectHop > 0 &&
+        previousHop &&
+        previousHop.status() >= 300 &&
+        previousHop.status() < 400
+      ) {
+        requestRedirects.get(resp.request()).from = previousHop.request();
+        requestRedirects.get(previousHop.request()).to = resp.request();
+      }
+      previousHop = resp;
       resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
       this._emit("request", resp.request());
       if (e.status === 0) {
@@ -3878,12 +3889,14 @@ function makeResponse(r, ensureOpen = () => {}) {
 
 // A Playwright-like Response built from a captured live-app fetch (net-log entry),
 // for `page.on('response')` subscribers.
+const requestRedirects = new WeakMap();
 function makeCapturedRequest(e, frame, response = () => null) {
   const requestHeaders = Object.fromEntries(
     Object.entries(e.request?.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
   );
   const postData = e.request?.bodyBytes == null ? null : Buffer.from(e.request.bodyBytes);
-  return {
+  const redirects = { from: null, to: null };
+  const request = {
     url: () => e.url,
     method: () => e.method || "GET",
     headers: () => ({ ...requestHeaders }),
@@ -3893,6 +3906,8 @@ function makeCapturedRequest(e, frame, response = () => null) {
     postData: () => postData?.toString("utf8") ?? null,
     postDataBuffer: () => (postData == null ? null : Buffer.from(postData)),
     postDataJSON: () => (postData == null ? null : JSON.parse(postData.toString("utf8"))),
+    redirectedFrom: () => redirects.from,
+    redirectedTo: () => redirects.to,
     resourceType: () => e.context?.resourceType ?? "fetch",
     isNavigationRequest: () => !!e.context?.navigation,
     frame() {
@@ -3904,6 +3919,8 @@ function makeCapturedRequest(e, frame, response = () => null) {
     },
     failure: () => (e.status === 0 ? { errorText: e.error || "net::ERR_FAILED" } : null),
   };
+  requestRedirects.set(request, redirects);
+  return request;
 }
 
 function makeNetResponse(e, frame) {
@@ -3937,13 +3954,16 @@ function makeNetResponse(e, frame) {
       return entries.map(([name, value]) => ({ name, value }));
     },
     async body() {
+      if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       if (e.bodyIncomplete) throw new Error("Response body is incomplete");
       return Buffer.from(e.bodyBytes ?? e.body ?? "");
     },
     async text() {
+      if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       return e.body ?? "";
     },
     async json() {
+      if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       return JSON.parse(e.body ?? "null");
     },
     request: () => req,

@@ -120,8 +120,9 @@ Captured requests retain authored/context headers and buffered POST bytes. Nativ
 navigation tracing emits each redirect-hop request; `isNavigationRequest()` distinguishes
 document navigations from subresources, and `frame()` uses captured native frame identity
 and document paths rather than URL matching. Delivery still follows the native log drain.
-Intermediate redirect response events and header-time notification remain tracked in
-#399 and #483; streamed upload bodies are not retained by the request snapshot.
+Redirect response events preserve native per-hop status and headers; intermediate bodies
+are unavailable and reject body reads. Header-time notification remains tracked in #483;
+streamed upload bodies are not retained by the request snapshot.
 `page.request()` and `BrowserContext.request()` share the parent context's cookie jar
 (reads + `Set-Cookie` writeback, #230) but still don't retain the `Accept-CH` hint state,
 and concurrent live resource requests merge cookie writes/deletions rather than replacing

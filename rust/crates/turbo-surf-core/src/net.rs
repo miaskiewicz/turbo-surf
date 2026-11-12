@@ -363,6 +363,19 @@ struct NetworkResponseEffects {
     headers: Vec<(String, String)>,
 }
 
+/// Metadata observed from an actual admitted HTTP response before its body is read.
+#[derive(Clone, Debug)]
+pub struct ResponseObservation {
+    pub url: String,
+    pub method: String,
+    pub request_headers: BTreeMap<String, String>,
+    pub request_body: Option<Vec<u8>>,
+    pub status: u16,
+    pub status_text: String,
+    pub headers: Vec<(String, String)>,
+}
+pub type ResponseObserver<'a> = dyn Fn(ResponseObservation) + Send + Sync + 'a;
+
 pub type BeforeRequestFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), HttpError>> + Send>>;
 pub type BeforeRequest<'a> = dyn Fn(RequestContext, String, String, BTreeMap<String, String>) -> BeforeRequestFuture
@@ -386,6 +399,8 @@ pub struct FetchOptions<'a> {
     pub context: Option<RequestContext>,
     /// A native embedder policy checked before contacting every redirect target.
     pub request_policy: Option<&'a RequestPolicy<'a>>,
+    /// Actual admitted response metadata, including intermediate redirect hops.
+    pub response_observer: Option<&'a ResponseObserver<'a>>,
     /// A native embedder response policy checked before following redirects.
     pub response_policy: Option<&'a ResponsePolicy<'a>>,
     /// Pure native effects after credential admission, before guest response policy.
@@ -2049,6 +2064,7 @@ async fn request_with_auth(
     let response = cached_request(opts, hop, client).await?;
     notify_response_effects(opts, &response);
     check_response_policy(opts, hop, &response)?;
+    observe_response(opts, hop, &response);
     let Some(authorization) = challenge_authorization(opts, hop, &response) else {
         return Ok(response);
     };
@@ -2069,6 +2085,7 @@ async fn request_with_auth(
     let response = response?;
     notify_response_effects(opts, &response);
     check_response_policy(opts, hop, &response)?;
+    observe_response(opts, hop, &response);
     Ok(response)
 }
 
@@ -2181,6 +2198,23 @@ fn notify_response_effects(opts: &FetchOptions<'_>, res: &http::Response) {
         if context.sends_credentials(&effects.url) {
             observer(&context, &effects.url, &effects.headers);
         }
+    }
+}
+
+fn observe_response(opts: &FetchOptions<'_>, hop: &Hop, response: &http::Response) {
+    if let Some(observer) = opts.response_observer {
+        observer(ResponseObservation {
+            url: hop.url.clone(),
+            method: hop.method.clone(),
+            request_headers: opts.headers.clone(),
+            request_body: hop
+                .body_bytes
+                .clone()
+                .or_else(|| hop.body.as_ref().map(|b| b.as_bytes().to_vec())),
+            status: response.status().as_u16(),
+            status_text: status_text(response),
+            headers: response_headers_pairs(response),
+        });
     }
 }
 
@@ -2405,6 +2439,7 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
             || opts.context.is_some()
             || opts.request_policy.is_some()
             || opts.response_policy.is_some()
+            || opts.response_observer.is_some()
             || opts.response_side_effects.is_some()
             || opts.before_request.is_some()
             || opts.http_credentials.is_some() =>
@@ -2554,6 +2589,7 @@ fn needs_manual_redirect_path(opts: &FetchOptions<'_>) -> bool {
         || opts.context.is_some()
         || opts.request_policy.is_some()
         || opts.response_policy.is_some()
+        || opts.response_observer.is_some()
         || opts.response_side_effects.is_some()
         || opts.before_request.is_some()
         || opts.http_credentials.is_some()
@@ -3112,6 +3148,8 @@ mod io_tests {
         let responses = |_: &RequestContext, url: &str, _: &[(String, String)]| {
             url.ends_with("/start") || url.ends_with("/finish")
         };
+        let observed = std::sync::Mutex::new(Vec::new());
+        let observer = |hop: ResponseObservation| observed.lock().unwrap().push(hop);
         let mut jar = CookieJar::new();
         let mut response = fetch_stream(
             &target,
@@ -3120,11 +3158,31 @@ mod io_tests {
                 jar: Some(&mut jar),
                 request_policy: Some(&policy),
                 response_policy: Some(&responses),
+                response_observer: Some(&observer),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
+        assert_eq!(
+            observed
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|hop| hop.status)
+                .collect::<Vec<_>>(),
+            vec![302, 200]
+        );
+        {
+            let hops = observed.lock().unwrap();
+            assert!(hops[0].url.ends_with("/start"));
+            assert!(hops[1].url.ends_with("/finish"));
+            assert_eq!(hops[0].status_text, "Found");
+            assert!(hops[0]
+                .headers
+                .iter()
+                .any(|(name, value)| name.eq_ignore_ascii_case("location") && value == "/finish"));
+        }
         assert!(response.redirected);
         assert!(response.final_url.ends_with("/finish"));
         assert_eq!(
@@ -3225,6 +3283,8 @@ mod io_tests {
     #[tokio::test]
     async fn native_response_policy_denies_a_redirect_before_following_it() {
         let p = spawn().await;
+        let observed = std::sync::Mutex::new(Vec::new());
+        let observer = |hop: ResponseObservation| observed.lock().unwrap().push(hop);
         let seen = std::sync::Mutex::new(Vec::new());
         let request = |target: &str, _| {
             seen.lock().unwrap().push(target.to_string());
@@ -3240,6 +3300,7 @@ mod io_tests {
             FetchOptions {
                 request_policy: Some(&request),
                 response_policy: Some(&response),
+                response_observer: Some(&observer),
                 ..Default::default()
             },
         )
@@ -3248,6 +3309,7 @@ mod io_tests {
             result.unwrap_err().message,
             "Response blocked by native document policy"
         );
+        assert!(observed.lock().unwrap().is_empty());
         assert_eq!(*seen.lock().unwrap(), vec![url(p, "/r")]);
     }
 
@@ -4038,9 +4100,12 @@ mod http_auth_tests {
             password: "secret".into(),
             origin: Some(origin.clone()),
         };
+        let observed = std::sync::Mutex::new(Vec::new());
+        let observer = |hop: ResponseObservation| observed.lock().unwrap().push(hop);
         let response = fetch_html(
             &origin,
             FetchOptions {
+                response_observer: Some(&observer),
                 http_credentials: Some(&credentials),
                 ..Default::default()
             },
@@ -4049,6 +4114,15 @@ mod http_auth_tests {
         .unwrap();
         assert_eq!(response.status, 200);
         assert_eq!(response.html, "OK");
+        assert_eq!(
+            observed
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|hop| hop.status)
+                .collect::<Vec<_>>(),
+            vec![401, 200]
+        );
         assert_eq!(seen.lock().unwrap().len(), 2);
         assert!(!seen.lock().unwrap()[0].contains("authorization:"));
         seen.lock().unwrap().clear();

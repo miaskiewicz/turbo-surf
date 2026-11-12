@@ -2958,6 +2958,54 @@ mod fetch_request_metadata_tests {
     }
 }
 
+type FetchResponseTrace = std::sync::Mutex<Vec<turbo_surf_core::net::ResponseObservation>>;
+
+fn append_response_trace(
+    log: &mut NetworkLog,
+    mut entry: serde_json::Value,
+    trace: &FetchResponseTrace,
+) {
+    let hops = std::mem::take(&mut *trace.lock().unwrap());
+    let last = hops.len().saturating_sub(1);
+    if hops.is_empty() {
+        log.0.push_back(entry);
+        return;
+    }
+    for (index, hop) in hops.into_iter().enumerate() {
+        let mut row = entry.clone();
+        row["url"] = hop.url.into();
+        row["method"] = hop.method.into();
+        row["request"] =
+            serde_json::json!({"headers":hop.request_headers,"bodyBytes":hop.request_body});
+        row["status"] = hop.status.into();
+        row["ok"] = (200..300).contains(&hop.status).into();
+        row["statusText"] = hop.status_text.into();
+        row["contentType"] = hop
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            .map_or("", |(_, value)| value.as_str())
+            .into();
+        row["headers"] = serde_json::json!(hop.headers);
+        row["redirectHop"] = index.into();
+        if index != last || entry["status"] == 0 {
+            row["body"] = "".into();
+            row["bodyBytes"] = serde_json::json!([]);
+            row["bodyUnavailable"] = true.into();
+            row.as_object_mut().unwrap().remove("streamId");
+            row["bodyIncomplete"] = false.into();
+        }
+        log.0.push_back(row);
+    }
+    // A transport failure following a redirect remains a separate failed request.
+    if entry["status"] == 0 {
+        log.0.push_back(entry.take());
+    }
+    while log.0.len() > 1000 {
+        log.0.pop_front();
+    }
+}
+
 /// Parse the method / body / headers trio from the fetch init bag, stripping
 /// the browser-controlled headers the guest never gets to override (sec-*,
 /// cookie / origin / referer / host / user-agent / upgrade-insecure-requests).
@@ -3082,6 +3130,7 @@ async fn run_stream_fetch_branch(
     policy_blocked: &std::sync::atomic::AtomicBool,
     crossed_origin: &std::sync::atomic::AtomicBool,
     event_context: &FetchEventContext,
+    response_trace: &FetchResponseTrace,
 ) -> FetchOut {
     let request_metadata = FetchRequestMetadata::from_options(&opts);
     let response = {
@@ -3139,7 +3188,7 @@ async fn run_stream_fetch_branch(
     if log.0.len() == 1000 {
         log.0.pop_front();
     }
-    log.0.push_back(entry);
+    append_response_trace(log, entry, response_trace);
     out
 }
 
@@ -3758,7 +3807,11 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         opaque_cache_nonce,
     );
     let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
+    let response_trace = FetchResponseTrace::default();
+    let observer =
+        |hop: turbo_surf_core::net::ResponseObservation| response_trace.lock().unwrap().push(hop);
     let mut opts = FetchOptions {
+        response_observer: Some(&observer),
         http_credentials: auth_credentials.as_ref(),
         max_bytes: state.borrow().borrow::<ResourceBudget>().0,
         response_side_effects: Some(storage_effects.as_ref()),
@@ -3803,6 +3856,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
             &policy_blocked,
             &crossed_origin,
             &event_context,
+            &response_trace,
         )
         .await;
     }
@@ -3897,7 +3951,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     if log.0.len() == 1000 {
         log.0.pop_front();
     }
-    log.0.push_back(entry);
+    append_response_trace(log, entry, &response_trace);
     out
 }
 

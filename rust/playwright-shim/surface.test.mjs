@@ -4860,3 +4860,26 @@ test("Class assertions compare complete token sets and ordered class lists (#336
     await p.close();
   }
 });
+
+test("Single-target locator reads actions and negated assertions enforce strictness (#334)", async () => {
+  const p = newPage();
+  try {
+    await p.setContent(
+      "<button class=duplicate onclick=\"document.body.dataset.clicked='first'\">First</button><button class=duplicate onclick=\"document.body.dataset.clicked='second'\">Second</button>",
+    );
+    const buttons = p.locator(".duplicate");
+    await assert.rejects(buttons.textContent(), /strict mode violation/i);
+    await assert.rejects(expect(buttons).toBeVisible({ timeout: 0 }), /strict mode violation/i);
+    await assert.rejects(expect(buttons).not.toBeVisible({ timeout: 0 }), /strict mode violation/i);
+    await assert.rejects(buttons.click({ force: true }), /strict mode violation/i);
+    await assert.rejects(p.getByRole("button").click({ force: true }), /strict mode violation/i);
+    assert.equal(await p.evaluate(() => document.body.dataset.clicked), undefined);
+    await expect(buttons).toHaveCount(2);
+    assert.deepEqual(await buttons.allTextContents(), ["First", "Second"]);
+    assert.equal((await buttons.all()).length, 2);
+    await buttons.nth(1).click({ force: true });
+    assert.equal(await p.evaluate(() => document.body.dataset.clicked), "second");
+  } finally {
+    await p.close();
+  }
+});

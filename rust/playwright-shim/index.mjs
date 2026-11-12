@@ -589,9 +589,16 @@ class Locator {
     const i = this._index < 0 ? m.length + this._index : this._index;
     return m[i] ? [m[i]] : [];
   }
+  _singleMatch() {
+    const matches = this._all();
+    if (matches.length > 1) throw strictLocatorError(matches.length);
+    return matches[0] ?? null;
+  }
+  _checkLiveCardinality(matches) {
+    if (this._index == null && matches.length > 1) throw strictLocatorError(matches.length);
+  }
   _node() {
-    const m = this._all();
-    return m.length ? m[0].node : null;
+    return this._singleMatch()?.node ?? null;
   }
   _requireNode() {
     const n = this._node();
@@ -758,8 +765,8 @@ class Locator {
     return this._all().map((_, i) => this.nth(i));
   }
   async textContent() {
-    const m = this._all();
-    return m.length ? this._textContent(m[0]) : null;
+    const match = this._singleMatch();
+    return match ? this._textContent(match) : null;
   }
   _textContent(match) {
     return match.node == null ? (match.text ?? "") : native.textContentOf(this._html, match.node);
@@ -768,8 +775,7 @@ class Locator {
     return (await this._readElement((element) => element.innerText)) ?? "";
   }
   async innerHTML() {
-    const m = this._all();
-    return m.length ? (m[0].html ?? null) : null;
+    return this._singleMatch()?.html ?? null;
   }
   async allTextContents() {
     return this._all().map((match) => this._textContent(match));
@@ -830,7 +836,7 @@ class Locator {
   }
   async _readElement(fn) {
     const live = this._page._session != null;
-    const match = live ? null : this._all()[0];
+    const match = live ? null : this._singleMatch();
     const index = live
       ? await this._resolveLiveIdx()
       : match == null
@@ -965,6 +971,7 @@ class Locator {
         } catch {
           matches = [];
         }
+        this._checkLiveCardinality(matches);
         const i =
           this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
         const target = matches[i];
@@ -974,7 +981,13 @@ class Locator {
       }
     }
     if (this._selector)
-      return this._page._sessionDispatch(this._selector, this._index ?? 0, kind, value);
+      return this._page._sessionDispatch(
+        this._selector,
+        this._index ?? 0,
+        kind,
+        value,
+        this._index == null,
+      );
     // getByRole/getByText/getByLabel: resolve the match IN the live isolate so the index is
     // a LIVE `querySelectorAll('*')` position (the same context we dispatch into). Resolving
     // over a re-serialized snapshot can reorder portal'd nodes → wrong element clicked.
@@ -990,6 +1003,7 @@ class Locator {
         matches = [];
       }
       if (!matches.length) throw new Error("turbo-surf: locator matched no elements");
+      this._checkLiveCardinality(matches);
       const i =
         this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
       const target = matches[i];
@@ -1021,7 +1035,7 @@ class Locator {
   async fill(value, options = {}) {
     await this._waitActionable("fill", options);
     const text = String(value);
-    const match = this._all()[0];
+    const match = this._singleMatch();
     if (
       /^<input[\s>]/i.test(match?.html ?? "") &&
       native.attrOf(this._html, match.node, "type")?.toLowerCase() === "number" &&
@@ -1251,7 +1265,7 @@ class Locator {
     if (this._testId) {
       const { attribute, source, flags, root } = this._testId;
       const raw = await this._page._evalEngine(
-        `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `document.querySelectorAll(${JSON.stringify(root)})` : "[document]"}; const hits = new Set(); for (const root of roots) for (const el of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(el.getAttribute(${JSON.stringify(attribute)}))) hits.add(el); } const all = Array.from(document.querySelectorAll('*')); const matches = all.filter(el => hits.has(el)); const n = ${this._index ?? 0}; globalThis.__RESULT = String(all.indexOf(matches[n < 0 ? matches.length + n : n])); })();`,
+        `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `document.querySelectorAll(${JSON.stringify(root)})` : "[document]"}; const hits = new Set(); for (const root of roots) for (const el of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(el.getAttribute(${JSON.stringify(attribute)}))) hits.add(el); } const all = Array.from(document.querySelectorAll('*')); const matches = all.filter(el => hits.has(el)); if (${this._index == null} && matches.length > 1) throw new Error("strict mode violation: locator resolved to " + matches.length + " elements"); const n = ${this._index ?? 0}; globalThis.__RESULT = String(all.indexOf(matches[n < 0 ? matches.length + n : n])); })();`,
       );
       const idx = Number(raw);
       return Number.isInteger(idx) && idx >= 0 ? idx : null;
@@ -1277,6 +1291,7 @@ class Locator {
         } catch {
           matches = [];
         }
+        this._checkLiveCardinality(matches);
         const i =
           this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
         return matches[i]?.idx ?? null;
@@ -1284,7 +1299,7 @@ class Locator {
     }
     if (this._selector) {
       const raw = await this._page._evalEngine(
-        `(() => { const els = document.querySelectorAll(${JSON.stringify(this._selector)}); const n = ${this._index ?? 0}; const i = n < 0 ? els.length + n : n; const list = []; const all = document.querySelectorAll('*'); for (let k = 0; k < all.length; k++) if (all[k] === els[i]) { globalThis.__RESULT = String(k); return; } globalThis.__RESULT = ''; })();`,
+        `(() => { const els = document.querySelectorAll(${JSON.stringify(this._selector)}); if (${this._index == null} && els.length > 1) throw new Error("strict mode violation: locator resolved to " + els.length + " elements"); const n = ${this._index ?? 0}; const i = n < 0 ? els.length + n : n; const list = []; const all = document.querySelectorAll('*'); for (let k = 0; k < all.length; k++) if (all[k] === els[i]) { globalThis.__RESULT = String(k); return; } globalThis.__RESULT = ''; })();`,
       );
       const n = raw ? Number(raw) : NaN;
       return Number.isFinite(n) ? n : null;
@@ -1300,6 +1315,7 @@ class Locator {
       } catch {
         matches = [];
       }
+      this._checkLiveCardinality(matches);
       const i =
         this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
       return matches[i]?.idx ?? null;
@@ -1313,6 +1329,10 @@ class Locator {
 }
 
 // filter({ hasText, has, hasNot, hasNotText }) → JS predicate over a match.
+function strictLocatorError(count) {
+  return new Error(`strict mode violation: locator resolved to ${count} elements`);
+}
+
 function buildFilter(_page, opts) {
   const checks = [];
   if (opts.hasText != null) {
@@ -1500,11 +1520,12 @@ function typingInteractionScript(pick, value, replaceSelection = "__tsNs.replace
   } })();`;
 }
 
-function interactionScript(selector, index, kind, value, frameTyping = false) {
+function interactionScript(selector, index, kind, value, strict = false, frameTyping = false) {
   const sel = JSON.stringify(selector);
   const idx = JSON.stringify(index);
   const val = JSON.stringify(value ?? "");
   const pick = `const els = document.querySelectorAll(${sel});
+    if (${strict} && els.length > 1) throw new Error('strict mode violation: locator resolved to ' + els.length + ' elements');
     let __i = ${idx}; if (__i < 0) __i = els.length + __i;
     const el = els[__i];
     if (!el) { globalThis.__RESULT = "NO_MATCH"; }`;
@@ -1918,9 +1939,9 @@ class Frame {
     );
     return native.liveEvalEngine(this._session, `globalThis.__RESULT = ${expression};`);
   }
-  async _sessionDispatch(selector, index, kind, value) {
+  async _sessionDispatch(selector, index, kind, value, strict = false) {
     if (kind !== "isfocused") this._parentPage._actionSeq++;
-    const script = interactionScript(selector, index ?? 0, kind, value, true);
+    const script = interactionScript(selector, index ?? 0, kind, value, strict, true);
     const result =
       kind === "type"
         ? await this._typeWithCanonicalSelection(script)
@@ -2513,14 +2534,14 @@ class Page {
   _evalEngine(script) {
     return native.liveEvalEngine(this._session, script);
   }
-  async _sessionDispatch(selector, index, kind, value) {
+  async _sessionDispatch(selector, index, kind, value, strict = false) {
     // A new user interaction: responses produced by THIS action (and after) are "fresh"
     // for any waitForResponse paired with it; responses from before are stale. The
     // "isfocused" probe is a read, not an interaction — don't tag responses off it.
     if (kind !== "isfocused") this._actionSeq++;
     const r = await native.liveEvalEngine(
       this._session,
-      interactionScript(selector, index ?? 0, kind, value),
+      interactionScript(selector, index ?? 0, kind, value, strict),
     );
     await this._refreshFromSession();
     // Surface the NO_MATCH signal before draining so a binding-handler
@@ -4408,7 +4429,8 @@ class BaseExpect {
     const run = async () => {
       try {
         return !!(await thunk());
-      } catch {
+      } catch (error) {
+        if (/strict mode violation/i.test(error.message)) throw error;
         return false;
       }
     };

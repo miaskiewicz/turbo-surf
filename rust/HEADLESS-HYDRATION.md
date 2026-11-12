@@ -3,10 +3,30 @@
 "Headless hydration" in turbo-surf means two distinct things. Both are tracked
 here so the requirements are explicit.
 
-The current source-pinned validation and live outcomes are recorded in
+## Current rendering scope (v0.8.3)
+
+The implemented GPU bridge is described in [GPU-BRIDGE.md](../docs/GPU-BRIDGE.md).
+`gpu-metal` and `coretext` are optional consumer features, off in default shipped
+builds. MCP and NAPI install their compiled WebGL hooks; Python's feature
+forwarding alone does not install them. The native Chrome 154/155 SDK profile is
+an independent engine selection, not a GPU prerequisite or runtime GPU switch.
+
+Canonical browser-env implements CSS/Web Animations. Native geometry admits
+proven independent local boxes and isolated scroll extents, while affected
+animated targets/ancestors, descendant-dependent extents, nonzero-offset and
+other unsupported paths retain explicit rejection. This is not general animated
+layout/paint sampling. Reduced-motion media does not disable animations; a
+separate option is tracked in [#500](https://github.com/miaskiewicz/turbo-surf/issues/500).
+
+## Historical parity evidence
+
+The Google checkpoints and cohort counts below retain their recorded source,
+engine, date and outcome. They are not current v0.8.3 release acceptance receipts.
+
+The historical source-pinned validation and live outcomes are recorded in
 [FINDINGS.md](../harness/detection/FINDINGS.md) and
 [VALIDATION-LAST-RUN.json](../harness/detection/VALIDATION-LAST-RUN.json).
-The latest9304df9 capture has no accepted native SERP: both baselines finish
+The recorded9304df9 capture has no accepted native SERP: both baselines finish
 initial hydration with one pump inside the unchanged budget, save consent and
 submit real forms, then end429 with zero results. Interface-instrumented initial
 hydration still exhausts its budget. Both Chrome baselines stop after ineffective
@@ -15,7 +35,7 @@ capture reaches a SERP in one signed-out Chrome baseline. Dated checkpoints belo
 preserve their original evidence. Executing page JavaScript does not establish
 that Google accepted a native search. The October21 startup fix adds
 shared font programs, per-read ancestor snapshots, selector-first CSS matching
-and timer task checkpoints/nesting. Current full gates pass1,509 native and1,464
+and timer task checkpoints/nesting. That checkpoint’s full gates pass1,509 native and1,464
 stock Rust tests, strict checks, formatting and rebuilt addon consumers. Its latest
 homepage-only diagnostic completes HTTP200 hydration under the unchanged20-second
 budget in16.35s whole-run with957MB peak RSS including profiling. Broader timing,

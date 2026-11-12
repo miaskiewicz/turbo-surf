@@ -1,6 +1,6 @@
 # Chrome 155 parity runbook
 
-These commands document the verified setup and every opt-in. The latest frozen
+This runbook reproduces the dated Chrome 155 experimental profile. Its frozen
 Google capture uses9304df9, whose native/default gates pass1,509/1,464 Rust
 tests with strict checks, formatting and verified addon consumers. The later
 release-dependency candidate repeats those full Rust gates against the prepared
@@ -17,6 +17,13 @@ parity remain unresolved. Keep historical checkpoints tied to their recorded
 source/binary. See [PARITY-GAPS.md](./PARITY-GAPS.md),
 [FINDINGS.md](./FINDINGS.md), audio [issue27](https://github.com/miaskiewicz/turbo-surf/issues/27)
 and broader [issue28](https://github.com/miaskiewicz/turbo-surf/issues/28).
+
+For the current v0.8.3 GPU implementation, default shipping features, callback
+installation and fallback boundaries, read [GPU-BRIDGE.md](../../docs/GPU-BRIDGE.md).
+Metal/CoreText are separate from the source-built V8 profile. Ordinary release
+MCP/NAPI builds do not enable either GPU/text opt-in, and Python forwarding alone
+does not install guest WebGL hooks. Keep the counts/captures below historical;
+record fresh source/artifact/engine identities for a new acceptance run.
 
 Order: environment → verified SDK → all-feature binary → localhost controls → final gates → fresh comparison → evidence
 review. Run timed checks sequentially; do not overlap builds, Chrome collectors or other heavy workloads.
@@ -36,7 +43,7 @@ review. Run timed checks sequentially; do not overlap builds, Chrome collectors 
 | Independent signed-out Chrome | `--chrome-backend cdp --chrome-incognito --chrome-path ...`. | Created nondefault context, empty initial cookie state and captured actual browser/V8 versions. |
 | Genuine submission and bounded observation | `--require-native-form-navigation --no-form-fallback --observation-ms 2500`. | Correct focused query/trusted input, consent effects, real form commit and complete observation. |
 
-These switches enable the implemented comparison surfaces; they do not close the remaining Chrome parity gaps. The
+These experimental-profile switches enable the implemented comparison surfaces; they do not close the remaining Chrome parity gaps. The
 `detection_trace` example installs MCP raster/measurement/WebGL hooks through `initialize_render_hooks()`, without solver or `.env` initialization. Production `Session::new()` installs the same hooks. A custom embedder
 using `turbo-surf-render` directly must install the public measurement/raster/WebGL callbacks itself; compiling a raster
 feature alone does not wire those callbacks into an unrelated embedder. See

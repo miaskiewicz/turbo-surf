@@ -1,5 +1,13 @@
 # Exact V8 engine experiment
 
+This is an optional, source-built SDK experiment; the dated receipts below keep
+their original engine/source identities. It is separate from the current
+[GPU/render-hook bridge](../../../docs/GPU-BRIDGE.md). `gpu-metal`/`coretext`
+are off-by-default consumer features and do not require this SDK. Conversely,
+`native-sdk-frame-read` selects the SDK compatibility path, not GPU rendering;
+the build helper adds that forwarding feature for supported Surf members.
+Neither script publishes an SDK or changes default release build features.
+
 The published `deno_core 0.412.0` facade selects V8 15.0. The original Chrome 154.0.8037.98 oracle reported V8 `15.4.80.20`; installed Chrome has since updated to 155. Every run records its actual browser/V8 version. This isolated source build uses that actual official V8 tag; it does not change the version reported by an older engine. The C++/Rust SDK is ported from published rusty_v8 152.2.0 and records both versions separately.
 
 This remains an experimental macOS arm64 profile. On 2026-10-13 its native smoke, both SDK tests, all-feature render/MCP gate (330 tests) and release-addon gates (83 shim tests with one skip, 20 E2E tests) passed. Production Cargo defaults still use the published SDK. No engine artifact is published by these scripts.

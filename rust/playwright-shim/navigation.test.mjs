@@ -106,3 +106,142 @@ test("HTTP attachments emit binary downloads without replacing the live document
     if (downloadPath) await rm(dirname(downloadPath), { recursive: true, force: true });
   }
 });
+
+test("waitForURL keeps waiting for a later driver navigation within its timeout", async () => {
+  const page = shim.newPage();
+  let change;
+  try {
+    await page.setContent("<body>protected</body>");
+    const navigated = new Promise((resolve, reject) => {
+      change = setTimeout(() => {
+        page.evaluate(() => history.pushState({}, "", "#login")).then(resolve, reject);
+      }, 300);
+    });
+    await page.waitForURL("**#login", { timeout: 2000 });
+    await navigated;
+    assert.equal(page.url(), "about:blank#login");
+  } finally {
+    clearTimeout(change);
+    await page.close();
+  }
+});
+
+test("waitForURL honors zero timeout and URL predicate/RegExp overloads", async () => {
+  const page = shim.newPage();
+  let change;
+  try {
+    await page.setContent("<body>protected</body>");
+    const navigated = new Promise((resolve, reject) => {
+      change = setTimeout(
+        () => page.evaluate(() => history.pushState({}, "", "#ready")).then(resolve, reject),
+        100,
+      );
+    });
+    await page.waitForURL((url) => url.hash === "#ready", { timeout: 0, waitUntil: "commit" });
+    await navigated;
+    await page.waitForURL(/#ready$/, { timeout: 50 });
+  } finally {
+    clearTimeout(change);
+    await page.close();
+  }
+});
+
+test("waitForURL expires at its deadline and stops when the page closes", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent("<body>protected</body>");
+    const start = Date.now();
+    await assert.rejects(page.waitForURL("**#missing", { timeout: 120 }), { name: "TimeoutError" });
+    assert.ok(Date.now() - start >= 100);
+    const wait = page.waitForURL("**#missing", { timeout: 0 });
+    await page.close();
+    await assert.rejects(wait, /Page closed/);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a URL wait timeout leaves a pending host callback and sibling URL wait alive", async () => {
+  const page = shim.newPage();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let timer;
+  try {
+    await page.setContent("<body>protected</body>");
+    await page.exposeFunction("finishLogin", async () => {
+      await gate;
+      return "success";
+    });
+    await page._evalEngine(
+      "finishLogin().then(value => { globalThis.loginResult = value; history.pushState({}, '', '#login'); }); globalThis.__RESULT = ''; ",
+    );
+    const loser = page.waitForURL("**#missing", { timeout: 80 });
+    const winner = page.waitForURL("**#login", { timeout: 2000 });
+    timer = setTimeout(release, 200);
+    await assert.rejects(loser, { name: "TimeoutError" });
+    await winner;
+    assert.equal(await page.evaluate(() => globalThis.loginResult), "success");
+  } finally {
+    clearTimeout(timer);
+    release();
+    await page.close();
+  }
+});
+
+test("a URL timeout does not abort an unrelated routed request", async () => {
+  const server = createServer((request, response) =>
+    response.end(request.url === "/slow" ? "success" : "<body>protected</body>"),
+  );
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = shim.newPage();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let timer;
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    await page._ensureLive();
+    await page.route("**/slow", async (route) => {
+      await gate;
+      await route.continue();
+    });
+    await page._evalEngine(
+      "fetch('/slow').then(r => r.text()).then(value => { globalThis.loginResult = value; history.pushState({}, '', '#login'); }); globalThis.__RESULT = ''; ",
+    );
+    const loser = page.waitForURL("**#missing", { timeout: 80 });
+    const winner = page.waitForURL("**#login", { timeout: 2000 });
+    timer = setTimeout(release, 200);
+    await assert.rejects(loser, { name: "TimeoutError" });
+    await winner;
+    assert.equal(await page.evaluate(() => globalThis.loginResult), "success");
+  } finally {
+    clearTimeout(timer);
+    release();
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("waitForURL can start before a static driver navigation", async () => {
+  const server = createServer((_request, response) => response.end("<body>destination</body>"));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = shim.newPage();
+  let change;
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/destination`;
+    const navigated = new Promise((resolve, reject) => {
+      change = setTimeout(() => page.goto(url, { waitUntil: "commit" }).then(resolve, reject), 100);
+    });
+    await page.waitForURL(url, { timeout: 2000, waitUntil: "commit" });
+    await navigated;
+    assert.equal(page.url(), url);
+    assert.equal(page._live, false);
+  } finally {
+    clearTimeout(change);
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

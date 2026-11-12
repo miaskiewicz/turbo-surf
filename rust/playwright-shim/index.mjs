@@ -2634,7 +2634,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       true,
     );
   }
-  async _drainBindings(deadline = Infinity) {
+  async _drainBindings(deadline = Infinity, cancelOnTimeout = true) {
     if (this._session == null || this._draining) return;
     const handlers = this._mergedBindings();
     if (handlers.size === 0) return;
@@ -2649,8 +2649,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
         if (Date.now() >= deadline) {
           const error = new Error("Timeout exceeded while waiting for host bindings");
           error.name = "TimeoutError";
-          this._routeLifetime?.abort(error);
-          this._routeLifetime = undefined;
+          if (cancelOnTimeout) {
+            this._routeLifetime?.abort(error);
+            this._routeLifetime = undefined;
+          }
           throw error;
         }
         const calls = await this._takeBindingCalls();
@@ -3822,20 +3824,36 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (url instanceof RegExp) return url.test(u);
       return u.includes(String(url).replace(/\*\*/g, "").replace(/\*/g, ""));
     };
-    if (match(this._url)) return undefined;
-    // In a live session a navigation can be a MULTI-STEP client redirect (login →
-    // /post-login → /entity-select|/entity/{id}), each step a render that runs on the
-    // next drain. Pump the session — each refresh drains it — until the URL matches or
-    // we give up. (No session: the nav already ran synchronously, so just assert.)
-    if (this._live) {
-      const rounds = Math.max(1, Math.ceil((opts.timeout ?? 15000) / 1000));
-      for (let i = 0; i < rounds && !match(this._url); i++) {
-        await native.liveEvalEngine(this._session, "globalThis.__RESULT = location.href;");
-        await this._refreshFromSession();
+    const timeout =
+      opts.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 15000;
+    const deadline = timeout === 0 ? Infinity : Date.now() + timeout;
+    const timedOut = () =>
+      Object.assign(new Error(`turbo-surf: waitForURL(${url}) — current url is ${this._url}`), {
+        name: "TimeoutError",
+      });
+    for (;;) {
+      if (match(this._url)) return undefined;
+      if (this._closed) throw new Error("Page closed while waiting for URL");
+      if (Date.now() >= deadline) throw timedOut();
+      if (this._live && this._session != null) {
+        try {
+          // Observing a URL must not cancel requests owned by a concurrent action.
+          await this._drainBindings(deadline, false);
+          if (this._session != null) {
+            await this._collectSession(this._session, "globalThis.__RESULT = '';", true);
+            await this._refreshFromSession(true);
+          }
+          await this._drainBindings(deadline, false);
+        } catch (error) {
+          if (error.name === "TimeoutError" && Date.now() >= deadline) throw timedOut();
+          throw error;
+        }
       }
       if (match(this._url)) return undefined;
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, Math.min(20, deadline - Date.now()))),
+      );
     }
-    throw new Error(`turbo-surf: waitForURL(${url}) — current url is ${this._url}`);
   }
   async waitForSelector(selector, opts = {}) {
     const state = opts.state ?? "visible";

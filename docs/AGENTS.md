@@ -56,9 +56,11 @@ Every script that runs cargo sets a scratchpad-rooted `CARGO_TARGET_DIR`
 That keeps simultaneous sibling sessions from racing over `rust/target`, and
 survives a reboot only if the scratchpad does.
 
-The `rust/target` path in this checkout is a **dangling symlink** into another
-session's scratchpad. **Leave it alone.** Every agent script sets
-`CARGO_TARGET_DIR`, so nothing in this repo writes through that symlink.
+The checkout's `rust/target` may be a directory or a session-owned symlink.
+Inspect it before choosing a target; do not replace another session's target or
+assume that a path recorded in an old receipt is still valid. The wrappers set
+`CARGO_TARGET_DIR` explicitly. Coordinate exclusive ownership if intentionally
+sharing a cache, and keep acceptance/performance runs free of competing builds.
 
 ## Recording a Chrome 156 control
 
@@ -97,12 +99,15 @@ scripts/agent/coverage.sh turbo-surf-view
 The merged workspace floor lives in `rust/tarpaulin.toml` (`fail-under`).
 Never lower a floor to make a change land; raise coverage instead.
 
-## jsdom-media / transitions defaults in turbo-test's integration
+## Browser-environment compatibility modes
 
-turbo-test defaults to jsdom-style media + transitions in surf's integration
-layer; Chrome-correct media is an opt-in per `PageSessionOptions` flag. See
-`rust/crates/turbo-surf-render/src/lib.rs` for the knob and
-`feedback-turbo-test-jsdom-media-default` in memory for the rationale.
+Default Surf execution uses the Chrome-oriented browser environment. A consumer
+such as turbo-test can install its own compatibility policies through the pinned
+turbo-dom API; those are not global Surf defaults or undocumented
+`PageSessionOptions` flags. Inspect the current public options in
+`rust/crates/turbo-surf-render/src/runtime.rs` and the consumer's integration
+before documenting or selecting a mode. Build-time capabilities are listed in
+[BUILD-FEATURES.md](./BUILD-FEATURES.md).
 
 ## Pre-commit hook gotchas
 
@@ -112,8 +117,12 @@ layer; Chrome-correct media is an opt-in per `PageSessionOptions` flag. See
   keep exact bytes for source-bound oracle comparisons.
 - Biome refuses lockfiles; `package-lock.json` is filtered out of the staged
   set by the hook already.
-- The dangling `rust/target` symlink: covered above. Scripts here never write
-  through it.
+- An isolated worktree needs the locked JS toolchain for the hook too. Confirm
+  `npx --no-install` resolves the dependency version in `package-lock.json`;
+  it can otherwise select an unrelated cached tool. Install the locked dependencies
+  or temporarily link a verified matching dependency directory, and remove an
+  untracked temporary link before freezing a clean source receipt.
+- Existing target directories and session-owned symlinks are covered above.
 - Never bypass with `--no-verify`.
 
 ## Release

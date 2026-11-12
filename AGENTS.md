@@ -5,8 +5,9 @@ a **Rust engine** built on the [turbo-dom](https://github.com/miaskiewicz/turbo-
 crate. It fetches + parses + acts on pages with **no Chromium**. For JS-gated pages
 it runs the page's own scripts in a **true V8 isolate** (a `deno_core` runtime over
 the native rtdom DOM), never a browser. The npm package is a **thin launcher**
-(`cli.js`/`index.js`) that spawns the standalone Rust binary; Playwright/Chromium
-appear **only as dev tooling** (benchmark oracle).
+(`cli.js`/`index.js`) that spawns the standalone Rust binary. Playwright/Chromium
+serve as dev oracles and explicitly configured external solver/sidecar
+integrations; the default page engine does not launch a browser.
 
 Read this before changing code. The current docs are [`README.md`](./README.md),
 [`CHANGELOG.md`](./CHANGELOG.md), [`PUBLISHING.md`](./PUBLISHING.md), and the engine
@@ -73,7 +74,7 @@ CI also gates **line coverage** (`coverage` job over the `coverage-shard` matrix
 `rust/tarpaulin.toml` fail-under 93.0, then per-crate floors in `rust/coverage-floors.json` (the napi/py bindings are excluded);
 measured values, raised toward >= 99.5 by the coverage phase) and **cyclomatic complexity**
 (`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /
-`complexity:js`, one limit, no allow-list; report-only (`continue-on-error`) until the post-0.6.0 refactor, see
+`complexity:js`, one limit, no allow-list; blocking in the current workflow; see
 [`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md) for the commands, the floors and the
 backlog). Never lower a floor or raise the limit to pass a change.
 
@@ -104,7 +105,7 @@ backlog). Never lower a floor or raise the limit to pass a change.
 - **Hot-path discipline** (extract/visible): a single index loop over
   `query_selector_all` results, no per-element allocation beyond the result record.
 - **Honest behavior**: surface what can't be done (e.g. JS-only handlers are inert
-  on the no-JS path; pixel/render-only APIs throw a clear "no-browser engine"
+  on the no-JS path; unimplemented pixel/render APIs throw a clear unsupported-capability
   error) rather than silently no-op.
 - **The render isolate keeps the host heap unreachable from guest page JS** (a true
   V8 isolate, with a runaway-execution budget).
@@ -147,3 +148,9 @@ to ship/publish/release.
 - **Chrome parity setup:** [`harness/detection/CHROME-PARITY-RUNBOOK.md`](./harness/detection/CHROME-PARITY-RUNBOOK.md) (SDK, all-feature builds, opt-in flags, controls and evidence).
 - **Playwright drop-in:** [`rust/playwright-shim/LIMITATIONS.md`](./rust/playwright-shim/LIMITATIONS.md)
   (per-method coverage map).
+
+## Current capability guides
+
+- [`docs/BUILD-FEATURES.md`](./docs/BUILD-FEATURES.md) — defaults, feature forwarding, toolchains and release artifacts.
+- [`docs/GPU-BRIDGE.md`](./docs/GPU-BRIDGE.md) — optional Metal/CoreText hooks, SDK integration and binding-specific limits.
+- [`docs/SOLVERS.md`](./docs/SOLVERS.md) — solver configuration, external browser options and acceptance limits.

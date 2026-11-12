@@ -2,13 +2,13 @@
 
 > Native-speed, **browserless** web crawler + **MCP server** for AI agents — built
 > on [turbo-dom](https://github.com/miaskiewicz/turbo-dom). Fetch + parse + extract
-> + run page JS with no headless browser; 100×+ faster on server-rendered pages.
+> + run page JS in an isolated native engine.
 
 > Working on this repo? See [docs/AGENTS.md](./docs/AGENTS.md) for one-command wrappers around the common workflows (oracle launch, Chrome 156 control recording, addon build, identity/parity checks, coverage, release prep).
 
-turbo-surf is a single native (Rust) engine — no Chromium, no headless browser
-(it can still render a reasonably-representative **synthetic screenshot** on
-demand — see below):
+turbo-surf's default execution path is a native Rust engine with isolated V8 page
+scripts and an on-demand **synthetic screenshot** tier. Explicit browser solvers
+and browser sidecars are optional integrations; see [solver configuration](./docs/SOLVERS.md).
 
 - **A crawler** — point it at a domain and stream page records: indexed interactive
   elements, a link/form graph, an accessibility tree, markdown and plain-text views,
@@ -37,10 +37,10 @@ happy-dom). turbo-surf is unusual on four axes at once:
    `eval_js`/`inject_js` against the live render heap with a DOM-history trail,
    `screenshot` (PNG/SVG of the page or any DOM-history snapshot) + `set_viewport`,
    cookies/headers, `snapshot`, …) so an agent drives real pages over stdio with
-   **no browser and no glue code** — `npx turbo-surf-mcp`. Most crawlers are
+   **no browser and no glue code** — `npx --yes --package turbo-surf turbo-surf-mcp`. Most crawlers are
    libraries you wrap yourself; this one is an agent tool on day one.
 2. **Crawler + agent surface on one native engine.** The same engine bulk-crawls a
-   domain and serves the MCP tools — no browser anywhere in the stack. Its page API
+   domain and serves the MCP tools through the native execution path. Its page API
    is Playwright-shaped (the benchmark harness runs unmodified Playwright routines
    on it).
 3. **Its own DOM, not a browser's.** turbo-dom is a native + WASM HTML parser
@@ -82,8 +82,11 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-Status: **v0.8.2 — on turbo-dom 0.8.2**
-([npm](https://www.npmjs.com/package/turbo-surf)). The engine ships hardened
+Status: **v0.8.2 package metadata; v0.8.3 release candidate in progress**.
+This release branch pins the shared DOM crates to the exact revision recorded in
+[CHANGELOG.md](./CHANGELOG.md); the resolved DOM version is 0.8.3. This is not a
+claim that v0.8.3 has been published or that final integrated validation is green.
+The engine includes hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
 orchestration (global + per-host concurrency, token-bucket politeness, backoff/retry,
@@ -102,7 +105,7 @@ The npm package is a thin launcher that spawns the native binary:
 ```sh
 npm install -g turbo-surf   # provides the `turbo-surf-mcp` command
 # …or run without installing:
-npx -y turbo-surf
+npx --yes --package turbo-surf turbo-surf-mcp
 ```
 
 Node ≥ 20 to launch; the engine is a prebuilt per-platform native binary (no Node
@@ -116,18 +119,21 @@ tag ships the PyPI wheels.
 
 | Artifact | Registry | What it is | For |
 |---|---|---|---|
-| [`turbo-surf`](https://www.npmjs.com/package/turbo-surf) | **npm** | A thin launcher (`cli.js`/`index.js`) **+ prebuilt `turbo-surf-mcp` binaries** for each platform in `bin/` (darwin arm64, linux x64/arm64-gnu, win x64; Intel macOS builds from source). `npx` resolves the right one and spawns it. | Running the **MCP server** / CLI. No Rust toolchain, no Chromium, no Node hosting Rust. |
+| [`turbo-surf`](https://www.npmjs.com/package/turbo-surf) | **npm** | Launcher, Playwright facade and matching optional platform packages carrying the MCP executable and NAPI addon (darwin arm64, linux x64/arm64-gnu, win x64; Intel macOS builds from source). | MCP/CLI runs the executable; the Playwright facade loads the addon in-process. Prebuilt installs need no Rust toolchain or browser. |
 | [`turbo-surf`](https://pypi.org/project/turbo-surf/) | **PyPI** | A PyO3 binding, shipped as prebuilt abi3 wheels (CPython 3.8+) for Linux (x86_64/aarch64), macOS (arm64), Windows (x64). | Calling the engine **from Python** — `markdown`/`text`/`links`/`extract`/`render`/…. No Rust toolchain, no Chromium. |
 | `turbo-surf-core`, `-view`, `-page`, `-render`, `-mcp` | **crates.io** | The Rust crates, in dependency order (the screenshot tier is turbo-dom's `turbo-dom-raster`). | **Embedding** the engine in a Rust program. |
 
-The `turbo-surf-napi` cdylib and `turbo-surf-transform` crate are **not**
-published — napi is for the dev harness + the Playwright shim only. The Playwright
-shim (`rust/playwright-shim/`) is a dev/in-repo tool, not an npm artifact.
+The `turbo-surf-napi` and `turbo-surf-transform` Rust crates are not published
+to crates.io. The native addon is distributed in the npm platform packages, and
+the npm package includes the Playwright facade and `turbo-surf-test` command.
+See [the artifact matrix](./docs/BUILD-FEATURES.md) and
+[the addon loader](./rust/crates/turbo-surf-napi/README.md) for exact paths and
+source-build overrides.
 
 ## MCP server (agents)
 
 ```sh
-npx turbo-surf-mcp          # stdio MCP server (80 tools), e.g.:
+npx --yes --package turbo-surf turbo-surf-mcp   # stdio MCP server (80 tools), e.g.:
 # navigation:  goto, go_back, go_forward, reload, set_user_agent
 # content:     interactive_elements, accessibility_tree, aria_snapshot, markdown,
 #              text, html, links, requests, snapshot, query, get_by,
@@ -189,10 +195,10 @@ time you run it.
 the command Claude will spawn):
 
 ```sh
-claude mcp add turbo-surf -- npx -y turbo-surf
+claude mcp add turbo-surf -- npx --yes --package turbo-surf turbo-surf-mcp
 ```
 
-That writes the server into your Claude Code config. `npx -y turbo-surf`
+That writes the server into your Claude Code config. `npx --yes --package turbo-surf turbo-surf-mcp`
 resolves + spawns the native binary over stdio — one process, no Node hosting it,
 no browser.
 
@@ -215,7 +221,7 @@ user. To share it with a repo instead, add `--scope project` — that writes a
 // .mcp.json — committed; teammates get the server automatically
 {
   "mcpServers": {
-    "turbo-surf": { "command": "npx", "args": ["-y", "turbo-surf"] }
+    "turbo-surf": { "command": "npx", "args": ["--yes", "--package", "turbo-surf", "turbo-surf-mcp"] }
   }
 }
 ```
@@ -229,12 +235,12 @@ claude mcp add turbo-surf -- "$PWD/rust/target/release/turbo-surf-mcp"
 
 **Troubleshooting.** `command not found: claude` → install the Claude Code CLI.
 `npx` hangs the first run → it's downloading the binary; let it finish (or pre-warm
-with `npx -y turbo-surf` in a terminal, then Ctrl-C). Shows `✗ failed` in
+with `npx --yes --package turbo-surf turbo-surf-mcp` in a terminal, then Ctrl-C). Shows `✗ failed` in
 `claude mcp list` → run the command directly to see the error; on an unsupported
 platform there's no prebuilt binary (build from a checkout as above).
 
 **Other MCP clients** (Claude Desktop, Cursor, …) — point their MCP config's
-`command` at `npx` with args `["-y", "turbo-surf"]`, or at the binary path.
+`command` at `npx` with args `["--yes", "--package", "turbo-surf", "turbo-surf-mcp"]`, or at the binary path.
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
@@ -258,75 +264,63 @@ runs the Chrome identity battery (TLS/H2/headers/client hints/JS identity) and
 diffs Chrome against turbo-surf; a reported version change does not upgrade V8
 (the JS-engine gap stays recorded).
 
-### Quick start (anti-bot)
+### Quick start (challenge solvers)
 
-```bash
-# 1. (optional) real TLS/JA3 + HTTP-2 fingerprint — needs cmake + nasm + libclang
-cargo build --release -p turbo-surf-mcp --features impersonate
+The native engine runs without a solver. To configure one from a source checkout:
 
-# 2. (optional) enable a challenge solver — copy the template and fill ONE
+```sh
+cargo build --manifest-path rust/Cargo.toml --release -p turbo-surf-mcp
 cp .env.example .env
-#    then edit .env:  TURBO_SURF_SOLVER=akamai      # in-house, no key
-#                or:  TURBO_SURF_SOLVER=cloudflare  # in-house, no key
-#                or:  TURBO_SURF_SOLVER=hyper        + HYPER_API_KEY=...
-#                or:  TURBO_SURF_SOLVER=browser      + TURBO_SURF_BROWSER_CMD=...
-
-# 3. run — the MCP server / crawler auto-detects walls and solves them
-npx turbo-surf-mcp
+# Edit .env: choose TURBO_SURF_SOLVER and any required key/sidecar command.
+node cli.js
 ```
 
-That's it. With no `.env` you get the default Chrome identity and transport profile;
-set one `TURBO_SURF_SOLVER` to also clear challenge walls.
+The MCP setup loads `.env` without replacing process environment values. Explicit
+in-house solvers need no provider key. An unset or unknown selector auto-selects a
+real `HYPER_API_KEY` first, then `SCRAPFLY_API_KEY`; with neither, no solver is
+installed. Placeholder keys are ignored.
 
 ### Configuration reference
 
-All optional. Set in `.env` (auto-loaded) or the process env.
+| Variable | Behavior |
+| --- | --- |
+| `TURBO_SURF_SOLVER` | `cloudflare`, `awswaf`, `akamai`, `recaptcha`, `hyper`, `scrapfly`, or `browser`. |
+| `HYPER_API_KEY` | Key for the wired Akamai sensor-generation adapter. |
+| `SCRAPFLY_API_KEY` | Key for the external ASP scrape/cookie adapter. |
+| `TURBO_SURF_BROWSER_CMD` | Explicit browser solver command; also optional fallback when an in-house solve returns an error. |
+| `TURBO_SURF_PROXY` | Solver-adapter hint; setting it alone does not configure native replay transport. |
+| `TURBO_SURF_SENSOR_DIR` | Directory for accepted `analyze_akamai` candidates; default `akamai-sensors`. |
 
-| Variable | Values | What it does |
-|---|---|---|
-| `TURBO_SURF_SOLVER` | `cloudflare` · `awswaf` · `akamai` · `recaptcha` · `hyper` · `scrapfly` · `browser` | Pick the challenge solver. Unset = no solving (fingerprint only). `cloudflare`/`awswaf`/`akamai` are in-house (no key). |
-| `HYPER_API_KEY` | key | Hyper Solutions token API (Akamai/DataDome/Kasada). Used when solver=`hyper`. |
-| `SCRAPFLY_API_KEY` | key | Scrapfly ASP API (Cloudflare + fallback). Used when solver=`scrapfly`. |
-| `TURBO_SURF_BROWSER_CMD` | shell command | The hardened-headless sidecar to run for solver=`browser` (e.g. `node harness/browser-solver/solve.mjs`). When solver=`akamai`, also enables the browser fallback (see below). |
-| `TURBO_SURF_PROXY` | `http://user:pass@host:port` | Egress proxy. Optional egress proxy. Where a token is IP-bound, minting and replay must use the same egress. |
-| `TURBO_SURF_SENSOR_DIR` | path (default `akamai-sensors`) | Where `analyze_akamai`'s `retry` saves a working sensor (keyed by script hash + version). |
+See [SOLVERS.md](./docs/SOLVERS.md) for provider dispatch, placeholder-key handling,
+sidecar protocols, fallback triggers, and limitations. The in-house paths include
+experimental and structural fallbacks; configured solving and fixture success do
+not guarantee acceptance by a live challenge, CAPTCHA, or cookie replay.
 
-**Solver maturity** — `cloudflare` (managed/Iuam) and `awswaf` (common + targeted
-`challenge.js`) both run the challenge's **own JS in the V8 tier** (no browser) and
-are the most viable in-house solves. `akamai` is **experimental** (the live sensor
-crypto isn't reversed per-version yet). **All in-house solvers try themselves first,
-then fall back to the browser sidecar** when `TURBO_SURF_BROWSER_CMD` is set — so a
-failed self-solve still clears the wall. `hyper`/`scrapfly`/`browser` are the robust
-paths. CAPTCHA tiers (AWS `captcha`, CF Turnstile-interactive) aren't self-solvable
-and route straight to the sidecar.
+### Build features and GPU bridge
 
-Build feature (not env): **`impersonate`** is enabled by default for the MCP binary and swaps rustls → BoringSSL
-(`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`, `nasm` and `libclang`.
-The Chrome 154 transport sends real `trust_anchors` IDs by default, backed by the
-same Chromium root store used for certificate verification. `trust-anchors` is a
-compatibility feature alias. The reviewed named registry distributions preserve
-the pinned transport APIs and require Rust 1.98. Actual package and registry
-consumer checks are documented in [`PUBLISHING.md`](./PUBLISHING.md).
+[BUILD-FEATURES.md](./docs/BUILD-FEATURES.md) is the feature/default matrix for all
+eight crates, release artifacts, toolchains and platform requirements. Cargo
+features are additive: disabling a package's defaults does not necessarily disable
+defaults enabled through its dependencies.
 
-Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) runs the
-render tier's **WebGL on the real Apple GPU** — a live WebGL→wgpu→Metal bridge records the
-page's `gl.*` calls and executes them on the GPU, so `readPixels` returns genuine framebuffer
-pixels. Measured: a standard WebGL fingerprint draw is now **byte-identical to real Chrome**
-(same per-pixel RGBA and the same pixel hash — wgpu→Metal lands on the same result as Chrome's
-ANGLE→Metal on the same GPU). Canvas 2D `toDataURL` also rasterizes on the GPU (falls back to
-tiny-skia on any GPU error, so enabling it never regresses). Zero cost to the default build +
-the PyPI wheels (no `wgpu` unless enabled). Beats device-invariance/SwiftShader detection —
-the shared WebGL scene matched an exact hash. This does not establish arbitrary scene parity.
+- **`impersonate`**: BoringSSL-backed transport, enabled in stock MCP/NAPI builds.
+  The lower-level core can be built with its defaults disabled for rustls; consult
+  the dependency matrix before assuming a top-level flag changes the full graph.
+- **`gpu-metal`**: optional macOS wgpu/Metal replay for supported canvas/WebGL
+  operations. MCP and NAPI install the corresponding callbacks; Python's feature
+  forwarding alone does not install a guest WebGL callback.
+- **`coretext`**: optional macOS canvas-text rasterization. It is independent of
+  WebGL replay and does not establish Chrome PNG or arbitrary-scene pixel parity.
+- **`native-sdk-frame-read`**: a separate opt-in browser-environment capability;
+  enabling a feature does not install a Chrome SDK or make every SDK operation
+  available.
+- **`avif` / `jxl`**: enabled in stock screenshot-capable package builds; see the
+  matrix for individual crate defaults and decoder/build requirements.
 
-A second build feature **`--features coretext`** (macOS only, off by default) rasterizes canvas
-**text** through CoreText/CoreGraphics — the same system glyph stack Chrome's Skia uses on macOS —
-so `getImageData` over rendered text reads back like a real Mac Chrome (measured: `getImageData` on
-"Hello" 20px Arial matches Chrome's bounding box + average alpha exactly). Double OS-guarded
-(`cfg(macos)` + macOS-only Cargo deps); only text is swapped (shapes stay on tiny-skia), and it
-falls back to the vector glyph trace for a scaled/rotated text matrix. (Canvas-2D `toDataURL` still
-differs from Chrome's *hash*: that also needs Chrome's exact PNG-container/encoder, no shared final
-layer — but `getImageData` reads back the real rendered pixels, byte-identical for solids/shapes and
-now CoreText-matched for text.)
+The [GPU bridge guide](./docs/GPU-BRIDGE.md) distinguishes Metal replay, CoreText,
+SDK/frame integration, capability checks and fallback behavior. GPU/CoreText
+features are off in stock release artifacts. Historical matching fingerprint
+scenes are bounded measurements, not a general parity or fallback guarantee.
 
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
@@ -547,53 +541,17 @@ let opts = FetchOptions { profile: Some(&profile), ..Default::default() };
 let res = fetch_html("https://example.com/", opts).await?;
 ```
 
-**JS-challenge / PoW walls (Akamai, DataDome, Kasada, Cloudflare).** A fingerprint
-gets you past *consistency* checks, not the active canvas/WebGL/PoW gates. Plug a
-solver into the `ChallengeSolver` trait — the MCP session / crawl navigator
-auto-detect a wall, solve it, and replay the cleared cookies on the fast path.
-Inert until configured. Copy `.env.example` → `.env` and pick one:
+**Challenge solvers.** `ChallengeSolver` adapters can solve a detected challenge
+and return cookies for native replay. The wired choices, configuration precedence,
+experimental in-house behavior and explicit browser-sidecar exception are described
+in [SOLVERS.md](./docs/SOLVERS.md). Hyper's current adapter is Akamai-specific;
+provider product offerings do not imply that every vendor is wired here.
 
-- **Rented** (`TURBO_SURF_SOLVER=hyper|scrapfly` + `HYPER_API_KEY`/`SCRAPFLY_API_KEY`).
-  **Hyper** (`akm.hypersolutions.co/v2/sensor`, `x-api-key`) generates an Akamai
-  `sensor_data` payload; turbo-surf POSTs it to the target and harvests `_abck`
-  (Akamai lane wired; other vendors fall back). **Scrapfly** (`/scrape?asp=true&
-  render_js=true`) renders + returns cleared cookies (`result.cookies`). Both
-  matched to their real API docs.
-- **In-house, no key** (`TURBO_SURF_SOLVER=cloudflare`, `awswaf`, or `akamai`) —
-  solve it yourself, no third party. **Cloudflare** runs the challenge's *own* JS in
-  the V8 render tier to compute the answer (no reversing the math), then POSTs it and
-  harvests `cf_clearance`. **AWS WAF Bot Control** (the bot layer behind CloudFront /
-  ALB) does the same — runs `challenge.js` in V8 to mint the `aws-waf-token`; its
-  common tier clears on the minted token + fingerprint, the `captcha` tier routes to
-  the sidecar. **Akamai** is experimental (see below).
-- **Self-owned browser sidecar** (`TURBO_SURF_SOLVER=browser` +
-  `TURBO_SURF_BROWSER_CMD="node harness/browser-solver/solve.mjs"`) — drives a real
-  hardened headless Chromium just for the handshake, harvests the cookie, then
-  turbo-surf does the volume. Opt-in only (spawns a process); the browser stays a
-  dev-side sidecar, never in the engine. See
-  [`harness/browser-solver/`](./harness/browser-solver/README.md).
-
-**Akamai experimental flow (`analyze_akamai`).** Akamai's live `sensor_data` is
-per-version, obfuscated, and key-rotated, so the in-house solver isn't a guaranteed
-live bypass — it's a **recon → rebuild → test** loop you drive from MCP:
-
-```jsonc
-// 1. navigate to an Akamai-walled page first (goto), then:
-// MCP: analyze_akamai          → finds the live Akamai script, hashes it, probes
-//                                what it reads, builds candidate sensors per version
-{ }
-// MCP: analyze_akamai          → with retry: POST each candidate, test live
-{ "retry": true }               //   acceptance, and SAVE a working one locally
-```
-
-`retry` returns `accepted` (the version that cleared the wall, if any) and saves it
-to `TURBO_SURF_SENSOR_DIR`. None accepted = that script's encoding still needs
-reversing (the candidates are hash-seeded structural rebuilds). With
-`TURBO_SURF_BROWSER_CMD` set, a normal Akamai `goto` auto-falls-back to the browser
-sidecar when the in-house solve fails — so you stay unblocked while iterating.
-
-Set `TURBO_SURF_PROXY` so the token's IP/JA3 matches your egress (and build with
-`--features impersonate` so the replay JA3 matches the Chrome that minted it).
+**Akamai inspection (`analyze_akamai`).** The tool locates and hashes the challenge
+script and builds candidate sensors. `{"retry": true}` tests candidates and saves
+an accepted one under `TURBO_SURF_SENSOR_DIR`. No accepted candidate means no solve
+was established. An optional browser fallback runs only on the documented solve
+error path; it does not guarantee that the target accepts the replay.
 
 **Controllable render fingerprint.** Every render-tier `navigator` field has a
 default from the registry's default release and is overridable at runtime via the MCP `set_fingerprint`
@@ -642,30 +600,35 @@ cookies + real `setExtraHTTPHeaders`, and the full matcher set. Most of the surf
 is pure JS and never crosses into Rust; only genuine DOM/render semantics do (and
 an `expect(locator)` chain is batched into one crossing).
 
-`page.screenshot()` renders a **synthetic** image (PNG or SVG) from a native
+`page.screenshot()` renders a **synthetic** image (PNG, JPEG or SVG) from a native
 layout+paint of the current HTML — no browser, no Chromium. It's *reasonably
 representative*, not pixel-faithful (`position`/`z-index` are honored via CSS
 stacking order; `<img>` + `background-image` are fetched and painted —
-PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL + SVG, unknown formats fall back to a placeholder). `full_page`
+PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL + SVG, unknown formats fall back to a placeholder). `fullPage`
 grows to the content height. Runs only when asked, over any HTML snapshot; the
 viewport is configurable. See the `screenshot` MCP tool + `screenshot`/`screenshotSvg`
 napi functions.
 
-What a no-browser engine **physically can't do fails honestly** (it throws or
-no-ops — never a silent pass):
+The facade includes live DOM geometry and input, but remains a bounded browser
+replacement. Current behavior is summarized below; the per-method
+[coverage map](./rust/playwright-shim/LIMITATIONS.md) is authoritative.
 
-| Bucket | Examples | Behavior |
-|---|---|---|
-| Pixels / layout | `pdf`, `boundingBox`, element-level `locator.screenshot`, `toHaveScreenshot`, `toMatchSnapshot` | **throws** |
-| Input hardware | `hover`, `dragTo`, `mouse`/`keyboard`/`touchscreen` | **throws** |
-| Network interception | `route`, `routeFromHAR`, `unroute` | **throws** |
-| JS↔host bindings | `exposeFunction`, `exposeBinding` | **throws** |
-| Truly-async/time | `waitFor*`, live `console`/`request` events, timer-driven mutation | resolve/no-op on the static DOM |
-| Layout-only state | `viewportSize`, `emulateMedia`, frames | stored / collapse to self |
+| Surface | Current behavior |
+| --- | --- |
+| Geometry and media | Native bounding boxes, scrolling, viewport/media settings and live frame operations, subject to documented resource/layout admission. |
+| Input | Locator actions, keyboard, hover, mouse/touch and drag event paths operate on the live engine; physical input and compositor behavior are not provided. |
+| Network | Page-scoped fetch/XHR interception, callbacks and HAR playback; general document/resource interception and context routes have separate limits. |
+| JS↔host | `exposeFunction` and `exposeBinding` callbacks, including asynchronous replies. |
+| Waiting and events | Driven live-session timers, waiters and console/network events; static snapshots do not run a continuous background browser loop. |
+| Unavailable capture | PDF, video, element screenshots and visual snapshot assertions remain explicitly unsupported. Page screenshots use the native synthetic tier. |
 
-Full per-method coverage map: [`rust/playwright-shim/LIMITATIONS.md`](./rust/playwright-shim/LIMITATIONS.md).
-Best fit: **server-rendered and hydration-on-navigation** apps. A client-only SPA
-that paints entirely from JS after load (and never re-fetches) needs a real browser.
+Client-rendered applications can execute their own scripts in the V8 tier.
+Compatibility depends on the APIs and layout features the application uses, not
+on whether it is called an SPA. Synthetic screenshots are representative native
+renders; they are not browser compositor captures. Animation support remains
+separate from geometry on an animated target: unaffected local reads are scoped,
+while unsupported dependent reads still fail explicitly. A session-level
+animations on/off policy is a v0.8.4 follow-up ([#500](https://github.com/miaskiewicz/turbo-surf/issues/500)).
 
 ## Python
 
@@ -702,10 +665,10 @@ Fatal faults (malformed schema JSON, a render-tier failure) raise
 
 ## Benchmarks — pending re-run
 
-0.6.0 has not been re-benchmarked: the DOM, layout, raster and browser-environment code
-moved into the shared turbo-dom crates and the render tier moved engines in this release,
-so the earlier numbers no longer describe the shipped code. A re-run of all four turbo-*
-repos together is planned after the release. The last measured (pre-consolidation) runs
+Current release performance has not been established by the historical benchmarks.
+The 0.6.0 consolidation and subsequent engine changes invalidate using those numbers
+as a v0.8.3 speed claim. Current same-workload validation and profiling must identify
+the exact source, build profile, workload, passing case counts and timing conditions. The last measured (pre-consolidation) runs
 — the Playwright-routine comparison against Chromium/Firefox/WebKit and the
 crawler-vs-crawler races — are kept in
 [`docs/BENCHMARKS-history.md`](./docs/BENCHMARKS-history.md). Harnesses:
@@ -737,7 +700,7 @@ benchmarks (install `playwright` + `crawlee` ad-hoc for the competitor engines).
 
 PR CI (`.github/workflows/ci.yml`) runs on ubuntu:
 
-- **lint + test** on Node 20 and 22 (launcher lint, the Rust workspace, the Playwright shim).
+- **lint + test** on Node 22 (launcher lint, the Rust workspace, and Playwright shim).
 - **Coverage, blocking**: a sharded `cargo tarpaulin` (`coverage-shard` matrix: render,
   mcp, and core+view+page+transform), merged by the `coverage` job, which fails below the
   workspace `fail-under` (93.0, `rust/tarpaulin.toml`) or any per-crate floor in

@@ -31,6 +31,16 @@ pub(super) fn navigate<'s>(
     window: v8::Local<'s, v8::Object>,
     value: v8::Local<'s, v8::Value>,
 ) {
+    navigate_kind(scope, window, value, false, false);
+}
+
+fn navigate_kind<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+    value: v8::Local<'s, v8::Value>,
+    replace: bool,
+    reload: bool,
+) {
     let Some(text) = value.to_string(scope) else {
         return;
     };
@@ -129,7 +139,13 @@ pub(super) fn navigate<'s>(
             };
             let undefined = v8::undefined(scope);
             let scope = &mut v8::ContextScope::new(scope, target);
-            navigate.call(scope, undefined.into(), &[href.into()]);
+            let replace = v8::Boolean::new(scope, replace);
+            let reload = v8::Boolean::new(scope, reload);
+            navigate.call(
+                scope,
+                undefined.into(),
+                &[href.into(), replace.into(), reload.into()],
+            );
             return;
         }
         if let Some(state) = target.get_slot::<State>() {
@@ -213,6 +229,24 @@ fn href_set<'s>(
 fn replace<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
+    _result: v8::ReturnValue,
+) {
+    if args.length() == 0 {
+        type_error(scope, "A URL is required");
+        return;
+    }
+    let Some(state) = object_state(scope, args.this()) else {
+        type_error(scope, "Illegal invocation");
+        return;
+    };
+    if let Some(window) = state.window.to_local(scope) {
+        navigate_kind(scope, window, args.get(0), true, false);
+    }
+}
+
+fn assign<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     result: v8::ReturnValue,
 ) {
     if args.length() == 0 {
@@ -237,7 +271,7 @@ fn reload<'s>(
             return;
         };
         let url = v8::String::new(scope, &state.url.borrow()).unwrap();
-        navigate(scope, window, url.into());
+        navigate_kind(scope, window, url.into(), true, true);
     }
 }
 
@@ -740,7 +774,7 @@ pub(super) fn install(scope: &mut v8::PinScope, url: &str) {
         );
     }
     for (name, callback, length) in [
-        ("assign", v8::MapFnTo::map_fn_to(replace), 1),
+        ("assign", v8::MapFnTo::map_fn_to(assign), 1),
         ("reload", v8::MapFnTo::map_fn_to(reload), 0),
         ("replace", v8::MapFnTo::map_fn_to(replace), 1),
         ("toString", v8::MapFnTo::map_fn_to(href_get), 0),

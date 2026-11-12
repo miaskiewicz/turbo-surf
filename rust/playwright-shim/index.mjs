@@ -20,6 +20,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename } from "node:path";
 import { closeScreenshotScene, paintScreenshotScene } from "./screenshot-scene.mjs";
+import { historyUrl, syncHistory, traverseLive } from "./history-navigation.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
 import { equalValues } from "./equality.mjs";
@@ -2212,6 +2213,7 @@ class Page {
     this._requestState = native.requestStateNew?.(this._context._requestState);
     this._history = [];
     this._fwd = [];
+    this._historyCurrent = null;
     this._listeners = new Map();
     this._closed = false;
     this._session = null; // live JS session id (networkidle navigations), else null
@@ -2433,6 +2435,18 @@ class Page {
   async _refreshFromSession() {
     if (this._session == null) return;
     const previousUrl = this._url;
+    let historyNavigation = null;
+    let rscNavigation = false;
+    try {
+      const encoded = await native.liveEvalEngine(
+        this._session,
+        "globalThis.__RESULT = __tsNs.takeHistoryNavigation();",
+      );
+      historyNavigation = JSON.parse(encoded);
+    } catch {
+      /* A session terminated during navigation retains its last driver state. */
+    }
+    if (historyNavigation) syncHistory(this, historyNavigation);
     this._html = native.liveSerialize(this._session);
     try {
       const href = await native.liveEvalEngine(
@@ -2441,7 +2455,7 @@ class Page {
       );
       if (href) {
         const current = JSON.parse(href);
-        this._url = current.url;
+        this._url = historyNavigation?.url ?? current.url;
         this._requestContextId = current.id;
         this._requestFrames ??= new Map();
         if (current.id) this._requestFrames.set(current.id, this.mainFrame());
@@ -2458,7 +2472,11 @@ class Page {
         "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
       if (nav && pathOf(nav) !== this._loadedPath) {
-        this._url = this._resolveUrl(nav);
+        const target = this._resolveUrl(nav);
+        if (target !== historyNavigation?.url) {
+          this._url = target;
+          rscNavigation = true;
+        }
       }
     } catch {
       /* no pending rsc nav */
@@ -2468,7 +2486,7 @@ class Page {
     } catch {
       /* keep prior cookies */
     }
-    if (previousUrl !== this._url) this._emit("framenavigated", this);
+    if (!historyNavigation && previousUrl !== this._url) this._emit("framenavigated", this);
     if (this._html.includes("<iframe")) {
       const frames = await native.liveEvalEngine(
         this._session,
@@ -2488,20 +2506,15 @@ class Page {
     } else this._frameEntries = undefined;
     this._syncFrames();
     await this._drainNetworkEvents();
-    // The app navigated to a different route within the live session (a post-login
-    // redirect, router.push/replace). Our engine doesn't do Next's in-place RSC
-    // soft-nav, so re-LOAD that route as a fresh page (carrying cookies) — its own
-    // component tree mounts and its effects run. This follows a redirect CHAIN
-    // (login → /post-login → /entity/…) hop by hop, like a browser, bounded to avoid a
-    // misconfigured redirect loop.
-    if (
-      this._live &&
-      /^https?:/.test(this._url) &&
-      pathOf(this._url) !== this._loadedPath &&
-      this._navHops < 10
-    ) {
+    const admitted = historyNavigation?.crossDocument;
+    const needsDocument = admitted || rscNavigation;
+    if (this._live && /^https?:/.test(this._url) && needsDocument && this._navHops < 10) {
       this._navHops++;
-      await this._reopen(this._url);
+      if (admitted && !admitted.replace) {
+        this._history.push(this._historyCurrent ?? previousUrl);
+        this._fwd = [];
+      }
+      await this._reopen(admitted?.url ?? this._url);
     }
   }
 
@@ -2801,7 +2814,8 @@ class Page {
       ...opts,
       referer: opts?.referer ?? null,
     });
-    if (previous !== "about:blank") this._history.push(previous);
+    if (previous !== "about:blank") this._history.push(this._historyCurrent ?? previous);
+    this._historyCurrent = null;
     this._fwd = []; // a committed navigation invalidates the forward stack
     // `waitUntil:'networkidle'` (or a later waitForLoadState('networkidle')) opens a LIVE
     // session: hydrate the app to quiescence so an SPA's client-rendered content (forms,
@@ -2847,9 +2861,11 @@ class Page {
   async goBack(opts) {
     const prev = this._history.at(-1);
     if (prev == null) return null;
-    const current = this._url;
+    if (await traverseLive(this, prev, native)) return null;
+    const current = this._historyCurrent ?? this._url;
     this._autoHydrate = opts?.waitUntil !== "commit";
-    const response = await this._navigate(prev, undefined, undefined, opts);
+    const response = await this._navigate(historyUrl(prev), undefined, undefined, opts);
+    this._historyCurrent = null;
     this._history.pop();
     this._fwd.push(current);
     if (opts?.waitUntil === "networkidle") await this._openLiveSession();
@@ -2858,9 +2874,11 @@ class Page {
   async goForward(opts) {
     const next = this._fwd.at(-1);
     if (next == null) return null;
-    const current = this._url;
+    if (await traverseLive(this, next, native)) return null;
+    const current = this._historyCurrent ?? this._url;
     this._autoHydrate = opts?.waitUntil !== "commit";
-    const response = await this._navigate(next, undefined, undefined, opts);
+    const response = await this._navigate(historyUrl(next), undefined, undefined, opts);
+    this._historyCurrent = null;
     this._fwd.pop();
     this._history.push(current);
     if (opts?.waitUntil === "networkidle") await this._openLiveSession();

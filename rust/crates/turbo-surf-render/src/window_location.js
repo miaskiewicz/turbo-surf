@@ -14,6 +14,8 @@
     ErrorType = __exceptionTypeError;
   const Exception = DOMException,
     clone = globalThis.structuredClone,
+    stringify = JSON.stringify,
+    setPrototypeOf = Object.setPrototypeOf,
     hostTimeout = globalThis.setTimeout;
   const PopState = globalThis.PopStateEvent,
     HashChange = globalThis.HashChangeEvent;
@@ -141,7 +143,9 @@
     "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx".replace(/x/g, () =>
       ((Math.random() * 16) | 0).toString(16),
     );
+  let entrySerial = 0;
   const stamp = (entry, key, navState) => {
+    entry.hostId = ++entrySerial;
     entry.key = key || uid();
     entry.id = uid();
     entry.navState = navState;
@@ -151,6 +155,39 @@
   const entries = [stamp({ __proto__: null, url: seeded, serialized: null, scroll: "auto" })];
   let index = 0,
     stateObject = null;
+  const documentId = ops.op_history_document_id(__document);
+  const initialEntry = { __proto__: null, id: entries[0].hostId, url: seeded };
+  const changeList = () => apply(setPrototypeOf, null, [[], null]);
+  let changes = changeList(),
+    crossDocument = null;
+  const admitDocument = (href, replace = false) => {
+    crossDocument = { __proto__: null, url: href, replace };
+    ops.op_script_navigation_admitted(href);
+  };
+  // Driver-only metadata: entry identities never come from URL equality or guest getters.
+  __G.takeHistoryNavigation = () => {
+    const result = {
+      __proto__: null,
+      document: documentId,
+      initial: initialEntry,
+      changes,
+      crossDocument,
+      url: url(),
+      current: entries[index].hostId,
+    };
+    changes = changeList();
+    crossDocument = null;
+    return apply(stringify, null, [result]);
+  };
+  __G.traverseHistoryEntry = (id) => {
+    for (let at = 0; at < entries.length; at++) {
+      if (entries[at].hostId === id) {
+        traverseTo(at);
+        return true;
+      }
+    }
+    return false;
+  };
   const activeEntry = () => entries[index];
   const appendEntry = (entry) => {
     apply(arraySplice, entries, [index + 1, entries.length - index - 1]);
@@ -205,14 +242,15 @@
     if (nativeHref) {
       ops.op_location_seed(href);
     } else current = href;
-    ops.op_script_navigation_admitted(href);
+    admitDocument(href, replace);
   }
   // The native cross-origin Location (native engine) navigates this document through its
   // own Location: same-document fragments, session history and the sandbox check
   // (turbo-surf#84).
   ops.op_set_host_capabilities({
     __proto__: null,
-    navigateLocation: (href) => navigate(href, false),
+    navigateLocation: (href, replace, reload) =>
+      reload ? admitDocument(href, true) : navigate(href, replace),
   });
   const resolve = (value, operation) => {
     const target = parse(value, documentBase());
@@ -304,7 +342,7 @@
       0,
       function () {
         checkLocation(this);
-        ops.op_script_navigation_admitted(url());
+        admitDocument(url(), true);
       },
       { writable: false, configurable: false },
     );
@@ -520,8 +558,6 @@
     else entries[index] = entry;
     if (target !== url()) {
       moveTo(target);
-      // The session driver follows a changed document URL as it does any script navigation.
-      ops.op_script_navigation_admitted(target);
     }
     stateObject = deserialize(serialized);
     navigationHooks.committed(kind, from, pending);
@@ -585,7 +621,7 @@
     checkHistory(this);
     delta = +delta | 0;
     // go(0) reloads the document, which the engine admits as a navigation to its URL.
-    if (delta === 0) ops.op_script_navigation_admitted(url());
+    if (delta === 0) admitDocument(url(), true);
     else traverse(delta);
   });
   for (const name of ["pushState", "replaceState"])
@@ -817,6 +853,9 @@
       return pending;
     },
     committed(kind, from, pending) {
+      apply(arrayPush, changes, [
+        { __proto__: null, kind, id: activeEntry().hostId, url: activeEntry().url },
+      ]);
       fire(
         navigation,
         new ChangeEvent("currententrychange", { navigationType: kind, from: entryObject(from) }),
@@ -870,7 +909,6 @@
       stateObject = null;
       if (href !== url()) {
         moveTo(href);
-        ops.op_script_navigation_admitted(href);
       }
     } else if (pending.navState !== undefined) from.navState = pending.navState;
     navigationHooks.committed(kind, from, pending);
@@ -959,7 +997,7 @@
     });
     if (!pending) return exposed(result);
     if (pending.intercepted) commitIntercepted("reload", url(), pending);
-    else ops.op_script_navigation_admitted(url());
+    else admitDocument(url(), true);
     return exposed(result);
   });
   const traverseResult = (target, options, message) => {

@@ -8503,6 +8503,12 @@ fn op_window_media_state(scope: &mut v8::PinScope, window: v8::Local<v8::Object>
     }
 }
 
+#[op2]
+#[string]
+fn op_history_document_id(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> String {
+    turbo_dom_browser_env::host_internals::document_id_of(scope, document).to_string()
+}
+
 #[op2(nofast)]
 fn op_script_navigation_admitted(scope: &mut v8::PinScope, #[string] target: String) {
     script_navigation::record(
@@ -8621,6 +8627,7 @@ deno_core::extension!(
         op_user_activation_navigator,
         op_user_activation_read,
         op_script_navigation_admitted,
+        op_history_document_id,
         op_capture_runtime_core,
         op_set_host_capabilities,
         op_form_data_entries,

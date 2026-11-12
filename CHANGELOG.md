@@ -4,7 +4,7 @@
 
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.3` revision
-`5478441f18e6968718d7c1238f484a0ac2e5206f` (producer PR #489). The dependency graph
+`a5a667bd5b3e65bec99c74165c1cc0660535d455` ([producer PR #489](https://github.com/miaskiewicz/turbo-dom/pull/489)). The dependency graph
 continues to use one `turbo-dom-v8` 150.4.1. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.
@@ -20,6 +20,9 @@ branch.
   text, or accessible-name snapshots. Successful assertions reuse their observed
   value instead of making extra queries to construct unused errors (#461, #486,
   #487).
+- Skip redundant document/cookie refreshes after acknowledged read-only collectors,
+  while invalidating synchronization for real DOM, cookie, navigation, child-frame,
+  scheduled task and event changes (#297).
 - Avoid repeated idle DOM-signature scans after scalar evaluations, stop completed
   watchdogs promptly, and skip unchanged stylesheet host reads (#463, #484, #309).
 - Use an ordered, early-terminating title search. Consumer coverage verifies large
@@ -36,6 +39,9 @@ branch.
 
 ### Locators and accessibility
 
+- Use one canonical live selector plan for extended `:visible` actions and compose
+  scoped `has`/`hasNot`, text and visibility filters without dropping earlier
+  filters (#349, #328).
 - Preserve chained `first`/`last`/`nth` selections, indexed ancestor scopes, nested
   `:scope`, and parents created through `getBy*` locators (#472, #473, #474, #475).
 - Match regular-expression test IDs and keep placeholder, alternative-text, and
@@ -126,10 +132,16 @@ branch.
 - Preserve redirect response chains, status text, complete response headers, and
   binary response bodies. Header helpers expose the expected normalized and raw
   forms (#399, #398, #400, #338).
+- Publish response headers before body completion, including during initial and
+  form navigation. Body reads await their own completion; unread bodies, failures,
+  cancellation, and console handles retain correct lifecycle and ownership (#483).
 - Emit transport failures as `requestfailed`, not fabricated successful responses.
   Response waits reject on timeout, only observe newly delivered events, use URL
   glob semantics and await async predicates; native polling uses a lower floor
   (#407, #308, #354, #355, #296).
+- Execute request routes through actual host callbacks, including fulfilled and
+  fetched responses, while preserving CSP, cancellation, deadlines, and genuine
+  host dependencies in module initialization (#320).
 - Apply route registration changes to live sessions, traverse fallback handlers,
   remove obsolete interceptors, and honor XHR abort/continue outcomes (#322, #324).
 - Emit HTTP attachment downloads, reject missed download waits, keep commit-mode
@@ -205,6 +217,9 @@ branch.
 
 ### Diagnostics and explicit limitations
 
+- Deliver console events with live argument handles, correct source locations and
+  frame ownership, and bounded native retention that releases evicted arguments
+  (#404).
 - Send page script/module/frame/timer diagnostics to stderr and emit uncaught page
   exceptions as `pageerror`. Context-isolation regressions avoid nested registrar
   deadlocks (#302, #406, #299).

@@ -211,3 +211,34 @@ test("frame helper state ignores replaced guest intrinsics and inherited setters
     await page.close();
   }
 });
+
+test("handle evaluation preserves sparse array argument lengths", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent("<body>arrays</body>");
+    const handle = await page.evaluateHandle(() => ({ marker: true }));
+    try {
+      const values = [handle];
+      values.length = 4;
+      assert.deepEqual(
+        await page.evaluate(
+          ({ values }) => [values.length, values[0].marker, Object.keys(values)],
+          { values },
+        ),
+        [4, true, ["0", "1", "2", "3"]],
+      );
+      const empty = [];
+      empty.length = 3;
+      const length = await page.evaluateHandle((value) => value.length, empty);
+      try {
+        assert.equal(await length.jsonValue(), 3);
+      } finally {
+        await length.dispose();
+      }
+    } finally {
+      await handle.dispose();
+    }
+  } finally {
+    await page.close();
+  }
+});

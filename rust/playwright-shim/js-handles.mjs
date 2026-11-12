@@ -58,7 +58,10 @@ function argumentExpression(value, owner) {
     const name = `v${references.size}`;
     references.set(value, name);
     declarations.push(`const ${name}=${Array.isArray(value) ? "[]" : "{}"};`);
-    for (const [key, entry] of Object.entries(value)) {
+    const entries = Array.isArray(value)
+      ? Array.from({ length: value.length }, (_, index) => [String(index), value[index]])
+      : Object.entries(value);
+    for (const [key, entry] of entries) {
       const expression = visit(entry);
       declarations.push(
         `Object.defineProperty(${name},${JSON.stringify(key)},{value:${expression},writable:true,configurable:true,enumerable:true});`,

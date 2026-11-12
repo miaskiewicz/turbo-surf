@@ -248,8 +248,10 @@ npm launcher) reads a `playwright.config.{ts,mts,js,mjs,cjs}` and runs each
 project as its own `node --import register.mjs --test` sweep:
 
 ```sh
-npx turbo-surf-test               # auto-detects playwright.config.*
-npx turbo-surf-test --config pw.config.mjs --project chrome --reporter list
+npx --yes --package turbo-surf turbo-surf-test
+npx --yes --package turbo-surf turbo-surf-test --config pw.config.mjs --project chrome --reporter list
+# In a source checkout, use the exact local runner instead:
+node rust/playwright-shim/bin/turbo-surf-test.mjs --config pw.config.mjs
 ```
 
 - **`projects`** — each one runs serially; `project.use` is merged over the
@@ -257,6 +259,11 @@ npx turbo-surf-test --config pw.config.mjs --project chrome --reporter list
   `TURBO_SHIM_*` env (so `baseURL`/`locale`/`userAgent`/`testIdAttribute`
   land in `BrowserContext` and the `baseURL` fixture). `testInfo.project`
   reports the project name + merged `use`.
+- **`workers`** — positive integers or integer percentages control file
+  concurrency. The default is 50% of logical CPUs, rounded down with a minimum
+  of one; a project limit cannot exceed the global cap. The runner forwards the
+  resolved value to Node's `--test-concurrency`. This is a config option, not a
+  supported `--workers` CLI argument.
 - **`reporter`** — `list`/`spec`/`tap`/`dot` map to node:test's built-ins;
   `html` captures TAP and writes a minimal `playwright-report.html` (override
   path with `[['html', { outputFile: … }]]`).

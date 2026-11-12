@@ -42,6 +42,8 @@ branch.
   reads, and read viewport client dimensions directly under the existing overlay
   scrollbar policy. Animated targets, ancestors, and uncertain scroll or layout
   dependencies retain resource admission checks (#498).
+- Classify vendor-prefixed transforms and SVG stroke-dash animation properties
+  by their parsed types when proving independent rectangle reads (#498).
 - Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
   exceptions, maintain NodeIterator's root and reference cursor, and honor idle
   callback timeout and deadline behavior (#449, #450, #451, #452).

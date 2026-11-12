@@ -1726,10 +1726,15 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   const sel = JSON.stringify(selector);
   const idx = JSON.stringify(index);
   const val = JSON.stringify(value ?? "");
-  const pick = `const els = document.querySelectorAll(${sel});
+  const remoteHandle = selector && typeof selector === "object" ? selector.__remoteHandle : null;
+  const selection = Number.isInteger(remoteHandle)
+    ? `[__tsNs.remoteHandleGet(${remoteHandle})]`
+    : `document.querySelectorAll(${sel})`;
+  const pick = `const els = ${selection};
     if (${strict} && els.length > 1) throw new Error('strict mode violation: locator resolved to ' + els.length + ' elements');
     let __i = ${idx}; if (__i < 0) __i = els.length + __i;
     const el = els[__i];
+    if (${Number.isInteger(remoteHandle)} && el && !el.isConnected) throw new Error('Element is not attached to the DOM');
     if (!el) { globalThis.__RESULT = "NO_MATCH"; }`;
   if (kind === "type")
     return typingInteractionScript(
@@ -2066,11 +2071,12 @@ class Frame {
         const states = __tsNs.shimFrameHelperStates ??= new WeakMap();
         helperState = states.get(child.document);
         if (!helperState) { helperState = {}; states.set(child.document, helperState); }
+        helperState.remoteHandleGet = __tsNs.remoteHandleGet;
         // Compile the existing surf helpers in the child so their document and
         // intrinsics belong to that realm rather than closing over the host.
         const names = ['tcGetBy', 'tcQuerySelector', 'tcResolveScoped', 'tcApplyHover'];
         const prelude = names.map(name => '__G[' + JSON.stringify(name) + '] = (' + __tsNs[name].toString() + ');').join('');
-        code = 'const __G = arguments[0]; const __tsNs = __G;' + prelude + code;
+        code = '"use strict"; const __G = arguments[0]; const __tsNs = __G;' + prelude + code;
       }
       return child.Function(code)(helperState);
     })()`;

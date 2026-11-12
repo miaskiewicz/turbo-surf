@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { makeKeyboard } from "./keyboard.mjs";
 import {
   decodeEvaluationValue,
   encodeEvaluationValue,
@@ -73,7 +74,9 @@ export async function handleEvaluation(owner, script, arg, retain = false) {
     ? `({id:__tsNs.remoteHandleRetain(owner,value),kind:value instanceof owner.Element?'element':'value'})`
     : `(${encodeEvaluationValue.toString()})(value)`;
   const body = `(async()=>{try{const owner=${window};const value=await (${evaluator})(${argument});return JSON.stringify({value:${resultExpression}});}catch(error){return JSON.stringify({error:(${encodeEvaluationError.toString()})(error)});}})()`;
-  const raw = await native.liveEvalEngineExpression(page._session, body);
+  const raw = page._mergedBindings().size
+    ? await page._evaluateWithBindings(body)
+    : await native.liveEvalEngineExpression(page._session, body);
   await page._refreshFromSession();
   await page._drainBindings();
   const result = JSON.parse(raw);
@@ -139,9 +142,9 @@ export class JSHandle {
     item.disposed = true;
     const page = pageOf(item.owner);
     if (!page._closed && page._session === item.session)
-      await native.liveEvalEngine(
+      await native.liveEvalEngineExpression(
         item.session,
-        `__tsNs.remoteHandleDispose(${item.id});globalThis.__RESULT='';`,
+        `(__tsNs.remoteHandleDispose(${item.id}), '')`,
       );
   }
   toString() {
@@ -181,34 +184,58 @@ export class ElementHandle extends JSHandle {
   isHidden() {
     return this.isVisible().then((value) => !value);
   }
-  async _action(name, args) {
+  async _action(kind, value, options = {}) {
     const item = state(this);
-    const index = await this.evaluate((element) => {
-      if (!element.isConnected) throw new Error("Element is not attached to the DOM");
-      return Array.from(document.querySelectorAll("*")).indexOf(element);
-    });
-    if (index < 0) throw new Error("Element is not attached to the DOM");
-    return item.owner
-      .locator("*")
-      .nth(index)
-      [name](...args);
+    if ((kind === "click" || kind === "fill") && !options.force) {
+      const deadline = options.timeout === 0 ? Infinity : Date.now() + (options.timeout ?? 30000);
+      for (;;) {
+        const enabled = await this.evaluate(
+          (element, kind) =>
+            !element.matches(":disabled") &&
+            element.getAttribute("aria-disabled") !== "true" &&
+            (kind !== "fill" || !element.readOnly),
+          kind,
+        );
+        if (enabled && (await this.isVisible())) break;
+        if (Date.now() >= deadline)
+          throw Object.assign(new Error("Timeout waiting for ElementHandle to be actionable"), {
+            name: "TimeoutError",
+          });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    return item.owner._sessionDispatch({ __remoteHandle: item.id }, 0, kind, value);
   }
-  click(...args) {
-    return this._action("click", args);
+  async click(options = {}) {
+    const item = state(this),
+      page = pageOf(item.owner),
+      before = page._url;
+    const result = await this._action("click", options, options);
+    if (
+      (!options.button || options.button === "left") &&
+      result !== "PREVENTED" &&
+      page._url === before
+    ) {
+      const href = await this.evaluate((element) => element.closest("a[href]")?.href ?? null);
+      if (href) await item.owner._followIntent({ action: "navigate", url: href });
+    }
   }
-  fill(...args) {
-    return this._action("fill", args);
+  fill(value, options) {
+    return this._action("fill", String(value), options);
   }
-  focus(...args) {
-    return this._action("focus", args);
+  focus() {
+    return this._action("focus");
   }
-  press(...args) {
-    return this._action("press", args);
+  async press(key) {
+    const item = state(this);
+    await this.focus();
+    return (item.owner.keyboard ?? makeKeyboard(item.owner)).press(key);
   }
-  check(...args) {
-    return this._action("check", args);
+
+  check() {
+    return this._action("check");
   }
-  uncheck(...args) {
-    return this._action("uncheck", args);
+  uncheck() {
+    return this._action("uncheck");
   }
 }

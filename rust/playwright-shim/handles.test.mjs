@@ -74,3 +74,53 @@ test("handles enforce session and frame ownership and survive same-document muta
     await other.close();
   }
 });
+
+test("handle evaluations service host bindings while awaiting guest promises", async () => {
+  const page = shim.newPage();
+  try {
+    await page.exposeFunction("echo", (value) => value + 1);
+    await page.setContent("<body>ready</body>");
+    const handle = await page.evaluateHandle(() => ({ value: 3 }));
+    assert.equal(await handle.evaluate(async (object) => await echo(object.value)), 4);
+    await handle.dispose();
+  } finally {
+    await page.close();
+  }
+});
+
+test("ElementHandle actions keep the retained node when microtasks reorder its siblings", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent("<button id=target>target</button>");
+    const handle = await page.locator("#target").elementHandle();
+    await page.evaluate(() => {
+      globalThis.clicked = [];
+      document.addEventListener("click", (event) => clicked.push(event.target.id));
+      const target = document.querySelector("#target");
+      Object.defineProperty(target, "isConnected", {
+        configurable: true,
+        get() {
+          queueMicrotask(() => {
+            if (document.querySelector("#other")) return;
+            const other = document.createElement("button");
+            other.id = "other";
+            other.textContent = "other";
+            document.body.prepend(other);
+          });
+          return true;
+        },
+      });
+    });
+    await handle.click();
+    assert.deepEqual(await page.evaluate(() => clicked), ["target"]);
+    assert.equal(await page.locator("#other").count(), 1);
+    await page.evaluate(() => {
+      delete document.querySelector("#target").isConnected;
+      document.querySelector("#target").remove();
+    });
+    await assert.rejects(handle.click({ force: true }), /attached/);
+    await handle.dispose();
+  } finally {
+    await page.close();
+  }
+});

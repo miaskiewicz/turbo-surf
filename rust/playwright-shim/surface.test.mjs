@@ -4883,3 +4883,20 @@ test("Single-target locator reads actions and negated assertions enforce strictn
     await p.close();
   }
 });
+
+test("Text array assertions compare ordered collections and subsequences (#332)", async () => {
+  const p = newPage();
+  try {
+    await p.setContent("<ul><li> one </li><li>two</li><li>three</li></ul>");
+    const rows = p.locator("li");
+    await expect(rows).toHaveText(["one", /^two$/, "three"]);
+    await expect(rows).toContainText(["on", /three/]);
+    await assert.rejects(expect(rows).toHaveText(["one", "two"], { timeout: 0 }));
+    await assert.rejects(expect(rows).toHaveText(["two", "one", "three"], { timeout: 0 }));
+    await assert.rejects(expect(rows).toContainText(["three", "one"], { timeout: 0 }));
+    await expect(p.locator(".missing")).toHaveText([]);
+    await expect(rows.first()).toHaveText("one");
+  } finally {
+    await p.close();
+  }
+});

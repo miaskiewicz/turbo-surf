@@ -4545,7 +4545,16 @@ class LocatorExpect extends BaseExpect {
     }, opts);
     this._ok(pass, `expected count ${n}, got ${got}`);
   }
+  async _textArrayAssertion(expected, options, contains) {
+    let got;
+    const pass = await this._retry(async () => {
+      got = options?.useInnerText ? await this._v.allInnerTexts() : await this._v.allTextContents();
+      return textCollectionMatches(expected, got, contains);
+    }, options);
+    this._ok(pass, `expected texts ${json(expected)}, got ${json(got)}`);
+  }
   async toHaveText(s, opts) {
+    if (Array.isArray(s)) return this._textArrayAssertion(s, opts, false);
     let got;
     const test = () => {
       const t = (got = normWs(this._snap().text ?? ""));
@@ -4554,6 +4563,7 @@ class LocatorExpect extends BaseExpect {
     this._ok(await this._retry(test, opts), `expected text ${s}, got "${got}"`);
   }
   async toContainText(s, opts) {
+    if (Array.isArray(s)) return this._textArrayAssertion(s, opts, true);
     let got;
     const test = () => {
       const t = (got = normWs(this._snap().text ?? ""));
@@ -4895,6 +4905,26 @@ class ValueExpect extends BaseExpect {
   }
   toHaveScreenshot = UNSUPPORTED("toHaveScreenshot", PIXEL);
   toMatchSnapshot = UNSUPPORTED("toMatchSnapshot", PIXEL);
+}
+
+function textCollectionMatches(expected, actual, contains) {
+  const matches = (want, got) => {
+    if (want instanceof RegExp) {
+      want.lastIndex = 0;
+      return want.test(got);
+    }
+    const text = normWs(got);
+    const target = normWs(want);
+    return contains ? text.includes(target) : text === target;
+  };
+  if (!contains)
+    return (
+      actual.length === expected.length &&
+      expected.every((want, index) => matches(want, actual[index]))
+    );
+  let index = 0;
+  for (const got of actual) if (index < expected.length && matches(expected[index], got)) index++;
+  return index === expected.length;
 }
 
 function classMatches(expected, actual, contains) {

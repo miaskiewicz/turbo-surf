@@ -43,3 +43,38 @@ async fn legacy_event_creation_survives_integrated_bootstrap() {
     page.close();
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn title_reads_and_writes_preserve_document_order_with_large_unrelated_body() {
+    let html = format!(
+        "<!doctype html><head><title> First\n title </title><title>Second</title></head><body>{}",
+        "<div><span>Payroll row</span><b>123.45</b></div>".repeat(5_000)
+    );
+    let mut page = page(&html).await;
+    let actual = evaluate(
+        &mut page,
+        r#"(() => {
+      const values=[];
+      for(let index=0;index<80;index++) {
+        if(document.title!=='First title')throw Error('initial title');
+      }
+      const first=document.querySelector('title');
+      first.remove();values.push(document.title);
+      document.body.prepend(first);values.push(document.title);
+      document.head.querySelector('title').remove();values.push(document.title);
+      document.title=' Updated\t title ';values.push(document.title,first.textContent);
+      return values;
+    })()"#,
+    )
+    .await;
+    assert_eq!(
+        actual,
+        json!([
+            "Second",
+            "Second",
+            "First title",
+            "Updated title",
+            " Updated\t title "
+        ])
+    );
+    page.close();
+}

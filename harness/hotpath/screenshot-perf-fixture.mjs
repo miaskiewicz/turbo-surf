@@ -4,7 +4,7 @@ export async function withScreenshotImageSite(native, run) {
   const png = native.screenshot("<body style='margin:0;background:red'>", 3, 2);
   const requests = [];
   const server = createServer((request, response) => {
-    if (request.url.startsWith("/image/")) {
+    if (request.url.startsWith("/image/") || request.url === "/__proto__") {
       requests.push(request.url);
       response.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
       response.end(png);
@@ -22,4 +22,11 @@ export async function withScreenshotImageSite(native, run) {
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+}
+
+export function screenshotRowDocument(count) {
+  return (
+    "<!doctype html><style>body{margin:0}.row{width:100px;height:10px;background:red}.row:nth-child(even){background:blue}</style>" +
+    "<div class=row></div>".repeat(count)
+  );
 }

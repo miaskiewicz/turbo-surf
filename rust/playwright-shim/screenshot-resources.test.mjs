@@ -85,3 +85,20 @@ test("capture resource planning preserves pixels, unknown intrinsic dependencies
     assert.ok(plan(source).pixelUrls.includes("0.png"), style);
   }
 });
+
+test("resident image keys preserve URL strings without invoking object prototype setters", async () => {
+  await withScreenshotImageSite(native, async ({ url, requests }) => {
+    const page = newPage();
+    try {
+      await page.goto(url, { waitUntil: "commit" });
+      await page.setContent("<img src='__proto__' width='3' height='2'>");
+      await page.screenshot({ externalCss: false });
+      assert.equal(Object.hasOwn(page._imageCache.images, "__proto__"), true);
+      assert.equal(Object.getPrototypeOf(page._imageCache.images), null);
+      await page.screenshot({ externalCss: false });
+      assert.deepEqual(requests, ["/__proto__"]);
+    } finally {
+      await page.close();
+    }
+  });
+});

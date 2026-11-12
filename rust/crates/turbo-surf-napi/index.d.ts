@@ -255,3 +255,21 @@ export function screenshotCaptureSvg(
   optionsJson?: string,
   metadataJson?: string,
 ): string;
+
+/** An owned immutable layout/image snapshot. Close it to release retained resources. */
+export class ScreenshotScene {
+  constructor(
+    html: string,
+    css: string,
+    images: Record<string, Buffer>,
+    width: number,
+    height: number,
+    optionsJson?: string,
+    metadataJson?: string,
+  );
+  readonly paintCount: number;
+  readonly closed: boolean;
+  png(): Buffer;
+  svg(): string;
+  close(): void;
+}

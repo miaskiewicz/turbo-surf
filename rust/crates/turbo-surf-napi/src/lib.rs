@@ -11,8 +11,10 @@ mod screenshot_options;
 mod screenshot_output;
 pub use screenshot_options::{screenshot_capture, screenshot_capture_svg};
 mod screenshot_resources;
+mod screenshot_scene;
 pub use screenshot_output::{screenshot_crop, screenshot_jpeg};
 pub use screenshot_resources::screenshot_capture_resources;
+pub use screenshot_scene::ScreenshotScene;
 mod session;
 mod upload_mime;
 // Re-export the live-session napi free functions so they're reachable from the crate

@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename } from "node:path";
+import { closeScreenshotScene, paintScreenshotScene } from "./screenshot-scene.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
 import { equalValues } from "./equality.mjs";
@@ -2694,6 +2695,7 @@ class Page {
     // blank page instead of a "builder error for url (about:blank)" from the net layer.
     if (/^about:/i.test(url)) {
       this._imageCache = undefined;
+      closeScreenshotScene(this);
       this._closeSession();
       this._html = "<html><head></head><body></body></html>";
       this._url = url;
@@ -2758,6 +2760,7 @@ class Page {
       throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
     }
     this._imageCache = undefined;
+    closeScreenshotScene(this);
     this._closeSession(); // only a committed response replaces the active document
     this._html = r.html;
     this._documentResponse = {
@@ -2967,6 +2970,7 @@ class Page {
 
   async setContent(html) {
     this._imageCache = undefined;
+    closeScreenshotScene(this);
     for (const frame of (this._frames ?? []).toReversed()) {
       frame._detached = true;
       this._emit("framedetached", frame);
@@ -3619,6 +3623,7 @@ class Page {
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
     this._imageCache = undefined;
+    closeScreenshotScene(this);
     this._closed = true;
     const position = this._context._pages.indexOf(this);
     if (position >= 0) this._context._pages.splice(position, 1);
@@ -3666,12 +3671,16 @@ class Page {
       optionsJson,
       html,
     );
-    let out = asSvg
-      ? Buffer.from(
-          native.screenshotCaptureSvg(html, css, images, width, height, optionsJson, metadataJson),
-          "utf8",
-        )
-      : native.screenshotCapture(html, css, images, width, height, optionsJson, metadataJson);
+    let out = paintScreenshotScene(this, native, {
+      html,
+      css,
+      images,
+      width,
+      height,
+      optionsJson,
+      metadataJson,
+      asSvg,
+    });
     if (opts.clip) out = cropScreenshot(out, opts.clip, asSvg, deviceScale, opts.fullPage === true);
     if (type === "jpeg") out = native.screenshotJpeg(out, opts.quality);
     if (opts.path) await writeFile(opts.path, out);
@@ -3689,7 +3698,7 @@ class Page {
     const requestState = this._requestState,
       cookies = this._cookies;
     const key = `${url}\u0000${html}`;
-    if (this._imageCache?.key !== key) this._imageCache = { key, images: {} };
+    if (this._imageCache?.key !== key) this._imageCache = { key, images: Object.create(null) };
     const images = this._imageCache.images;
     const selected = [...new Set(refs.slice(0, 60))];
     const entries = await mapBounded(selected, 8, async (ref) => {

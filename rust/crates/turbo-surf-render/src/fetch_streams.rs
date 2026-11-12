@@ -14,6 +14,7 @@ struct Jobs {
 pub(super) struct Job {
     pub cancel: watch::Sender<bool>,
     pub policy: crate::runtime::FetchPolicySnapshot,
+    pub frame: super::RequestFrameMetadata,
     upload: std::sync::Mutex<Option<turbo_surf_core::upload_body::UploadBody>>,
     upload_sender: std::sync::Mutex<Option<turbo_surf_core::upload_body::UploadSender>>,
     graceful_upload_abort: std::sync::atomic::AtomicBool,
@@ -49,10 +50,29 @@ pub(super) async fn install(job: &Job, body: ResponseBody) -> bool {
     true
 }
 #[op2(fast)]
-pub(super) fn op_fetch_prepare(
-    scope: &mut v8::PinScope,
+pub(super) fn op_fetch_prepare<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
-    document: v8::Local<v8::Object>,
+    document: v8::Local<'s, v8::Object>,
+) -> Result<u32, JsErrorBox> {
+    prepare(scope, state, document, None)
+}
+
+#[op2(fast)]
+pub(super) fn op_fetch_prepare_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &mut OpState,
+    document: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+) -> Result<u32, JsErrorBox> {
+    prepare(scope, state, document, Some(host))
+}
+
+fn prepare<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &mut OpState,
+    document: v8::Local<'s, v8::Object>,
+    host: Option<v8::Local<'s, v8::Object>>,
 ) -> Result<u32, JsErrorBox> {
     if !crate::browser_env::is_light_document_node(scope, document) {
         return Err(JsErrorBox::type_error("Fetch document unavailable"));
@@ -61,6 +81,7 @@ pub(super) fn op_fetch_prepare(
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::type_error("Fetch realm unavailable"))?;
     let policy = crate::runtime::snapshot_fetch_policy(context);
+    let frame = super::request_frame_metadata(scope, context, host);
     if !state.has::<Jobs>() {
         state.put(Jobs::default())
     }
@@ -81,6 +102,7 @@ pub(super) fn op_fetch_prepare(
         Arc::new(Job {
             cancel,
             policy,
+            frame,
             upload: std::sync::Mutex::new(None),
             upload_sender: std::sync::Mutex::new(None),
             graceful_upload_abort: std::sync::atomic::AtomicBool::new(false),

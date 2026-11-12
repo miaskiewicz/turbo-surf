@@ -2234,9 +2234,15 @@ class Page {
     try {
       const href = await native.liveEvalEngine(
         this._session,
-        "globalThis.__RESULT = location.href;",
+        "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
       );
-      if (href) this._url = href;
+      if (href) {
+        const current = JSON.parse(href);
+        this._url = current.url;
+        this._requestContextId = current.id;
+        this._requestFrames ??= new Map();
+        if (current.id) this._requestFrames.set(current.id, this.mainFrame());
+      }
     } catch {
       /* keep prior url */
     }
@@ -2268,7 +2274,7 @@ class Page {
         __tsNs.shimFrameNext ??= 1;
         const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
           if (!ids.has(el)) ids.set(el, __tsNs.shimFrameNext++);
-          const entry = { node: ids.get(el), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
+          const entry = { node: ids.get(el), contextId: __tsNs.requestContextId?.(el.contentWindow), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
           try { entry.url = el.contentWindow.location.href; if (el.contentDocument) { entry.html = el.contentDocument.documentElement?.outerHTML || ""; entry.live = true; entry.children = walk(el.contentDocument, entry.path); } } catch (_) {}
           return entry;
         });
@@ -2344,7 +2350,7 @@ class Page {
         this._emit("pageerror", error);
         continue;
       }
-      const resp = makeNetResponse(e);
+      const resp = makeNetResponse(e, this._requestFrame(e));
       resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
       this._emit("request", resp.request());
       if (e.status === 0) {
@@ -2357,6 +2363,24 @@ class Page {
     }
     if (this._recentResponses.length > 100)
       this._recentResponses.splice(0, this._recentResponses.length - 100);
+  }
+
+  _requestFrame(entry) {
+    const context = entry.context;
+    if (!context) return this.mainFrame();
+    const metadata = context.frame;
+    const path = metadata?.path;
+    if (path?.length === 0) return this.mainFrame();
+    if (!context.navigation && metadata?.contextId) {
+      const known = this._requestFrames?.get(metadata.contextId);
+      if (known) return known;
+    }
+    if (context.navigation && !path) return null;
+    if (path)
+      return (
+        this._frames?.find((frame) => JSON.stringify(frame._path) === JSON.stringify(path)) ?? null
+      );
+    return this._requestFrames?.get(metadata?.contextId) ?? null;
   }
 
   // Follow an in-app navigation: load `url` fresh (fetch + hydrate) WITHOUT resetting the
@@ -2373,6 +2397,8 @@ class Page {
     }
     this._frames = [];
     this._frameEntries = undefined;
+    this._requestFrames = undefined;
+    this._requestContextId = undefined;
     if (this._session != null) {
       try {
         native.liveClose(this._session);
@@ -2501,6 +2527,18 @@ class Page {
       throw error;
     }
     const r = JSON.parse(raw);
+    const response = makeResponse(r);
+    for (const hop of r.requests ?? []) {
+      const entry = {
+        ...hop,
+        context: { navigation: true, resourceType: "document", frame: { path: [] } },
+      };
+      const request = makeCapturedRequest(entry, this.mainFrame(), () =>
+        hop.url === r.finalUrl ? response : null,
+      );
+      if (hop.url === r.finalUrl) response.request = () => request;
+      this._emit("request", request);
+    }
     const attachment = attachmentRecord(r);
     if (attachment) {
       if (r.cookies !== this._cookies) this._context._setCookies(r.cookies);
@@ -2526,7 +2564,7 @@ class Page {
     this._emit("framenavigated", this);
     this._emit("load");
     this._emit("domcontentloaded");
-    return makeResponse(r);
+    return response;
   }
   _remainingNavigationTimeout(opts, started) {
     const timeout =
@@ -2934,6 +2972,11 @@ class Page {
         frame._name = meta.name;
         frame._path = meta.path ?? [...(parent._path ?? []), index];
         frame._frameEntries = meta.children;
+        frame._requestContextId = meta.contextId;
+        if (meta.contextId) {
+          this._requestFrames ??= new Map();
+          this._requestFrames.set(meta.contextId, frame);
+        }
         next.push(frame);
         visit(frame);
       }
@@ -3835,22 +3878,12 @@ function makeResponse(r, ensureOpen = () => {}) {
 
 // A Playwright-like Response built from a captured live-app fetch (net-log entry),
 // for `page.on('response')` subscribers.
-function makeNetResponse(e) {
+function makeCapturedRequest(e, frame, response = () => null) {
   const requestHeaders = Object.fromEntries(
     Object.entries(e.request?.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
   );
   const postData = e.request?.bodyBytes == null ? null : Buffer.from(e.request.bodyBytes);
-  const entries = e.headers ?? (e.contentType ? [["content-type", e.contentType]] : []);
-  const all = {};
-  for (const [key, value] of entries) {
-    const name = key.toLowerCase();
-    all[name] =
-      all[name] === undefined
-        ? value
-        : `${all[name]}${name === "set-cookie" ? "\n" : ", "}${value}`;
-  }
-  let response = null;
-  const req = {
+  return {
     url: () => e.url,
     method: () => e.method || "GET",
     headers: () => ({ ...requestHeaders }),
@@ -3860,12 +3893,31 @@ function makeNetResponse(e) {
     postData: () => postData?.toString("utf8") ?? null,
     postDataBuffer: () => (postData == null ? null : Buffer.from(postData)),
     postDataJSON: () => (postData == null ? null : JSON.parse(postData.toString("utf8"))),
-    resourceType: () => "fetch",
-    failure: () => (e.status === 0 ? { errorText: e.error || "net::ERR_FAILED" } : null),
-    async response() {
-      return e.status > 0 ? response : null;
+    resourceType: () => e.context?.resourceType ?? "fetch",
+    isNavigationRequest: () => !!e.context?.navigation,
+    frame() {
+      if (!frame) throw new Error("Request frame is unavailable");
+      return frame;
     },
+    async response() {
+      return e.status === 0 ? null : response();
+    },
+    failure: () => (e.status === 0 ? { errorText: e.error || "net::ERR_FAILED" } : null),
   };
+}
+
+function makeNetResponse(e, frame) {
+  const entries = e.headers ?? (e.contentType ? [["content-type", e.contentType]] : []);
+  const all = {};
+  for (const [key, value] of entries) {
+    const name = key.toLowerCase();
+    all[name] =
+      all[name] === undefined
+        ? value
+        : `${all[name]}${name === "set-cookie" ? "\n" : ", "}${value}`;
+  }
+  let response;
+  const req = makeCapturedRequest(e, frame, () => response);
   response = {
     url: () => e.url,
     status: () => e.status,

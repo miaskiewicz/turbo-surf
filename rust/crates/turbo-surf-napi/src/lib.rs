@@ -1045,6 +1045,25 @@ async fn do_fetch_headers(
                 turbo_surf_render::DocumentResponseMetadata::from_request(200, context, target);
             true
         };
+    let request_hops = std::sync::Mutex::new(Vec::<Value>::new());
+    let request_body = body_bytes
+        .as_ref()
+        .map(|bytes| bytes.to_vec())
+        .or_else(|| body.as_ref().map(|body| body.as_bytes().to_vec()));
+    let request_method = method.as_deref().unwrap_or("GET").to_ascii_uppercase();
+    let before_request = |_context: RequestContext,
+                          target: String,
+                          method: String,
+                          headers: BTreeMap<String, String>|
+     -> turbo_surf_core::net::BeforeRequestFuture {
+        let body = (method == request_method)
+            .then(|| request_body.clone())
+            .flatten();
+        request_hops.lock().unwrap().push(
+            json!({"url":target,"method":method,"request":{"headers":headers,"bodyBytes":body}}),
+        );
+        Box::pin(async { Ok(()) })
+    };
     let opts = FetchOptions {
         http_credentials: auth_credentials.as_ref(),
         max_bytes: max_bytes.map(|bytes| bytes as usize),
@@ -1067,6 +1086,7 @@ async fn do_fetch_headers(
         headers,
         context: Some(context),
         response_policy: Some(&response_policy),
+        before_request: Some(&before_request),
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_partition,
@@ -1095,6 +1115,7 @@ async fn do_fetch_headers(
         "redirected": res.redirected,
         "contentType": res.content_type,
         "cookies": cookie_state,
+        "requests": request_hops.into_inner().unwrap(),
     })
     .to_string())
 }

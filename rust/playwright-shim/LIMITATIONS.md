@@ -116,6 +116,12 @@ module/fetch/XHR requests and screenshot assets. This preserves per-origin `Acce
 negotiation and HTTP-client state when a live runtime is replaced. Navigation/resource
 headers, referrer/Origin and credentials use explicit request contexts. This is not
 complete CORS enforcement or browser redirect/permissions-policy behavior.
+Captured requests retain authored/context headers and buffered POST bytes. Native
+navigation tracing emits each redirect-hop request; `isNavigationRequest()` distinguishes
+document navigations from subresources, and `frame()` uses captured native frame identity
+and document paths rather than URL matching. Delivery still follows the native log drain.
+Intermediate redirect response events and header-time notification remain tracked in
+#399 and #483; streamed upload bodies are not retained by the request snapshot.
 `page.request()` and `BrowserContext.request()` share the parent context's cookie jar
 (reads + `Set-Cookie` writeback, #230) but still don't retain the `Accept-CH` hint state,
 and concurrent live resource requests merge cookie writes/deletions rather than replacing

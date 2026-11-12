@@ -2816,6 +2816,108 @@ struct ParsedFetchBody {
     headers: std::collections::BTreeMap<String, String>,
 }
 
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RequestFrameMetadata {
+    context_id: u32,
+    path: Option<Vec<u32>>,
+}
+
+pub(super) fn request_frame_metadata<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    host: Option<v8::Local<'s, v8::Object>>,
+) -> RequestFrameMetadata {
+    let mut path = request_context_path(scope, context);
+    if let Some(host) = host {
+        path = path.and_then(|mut path| {
+            path.push(request_frame_index(scope, host)?);
+            Some(path)
+        });
+    }
+    RequestFrameMetadata {
+        context_id: context
+            .get_slot::<CspHandle>()
+            .map_or(0, |handle| handle.id),
+        path,
+    }
+}
+
+fn request_context_path<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+) -> Option<Vec<u32>> {
+    let mut path = Vec::new();
+    for _ in 0..64 {
+        let Some(parent) = context.get_slot::<FrameParent>() else {
+            path.reverse();
+            return Some(path);
+        };
+        let parent = parent.0.to_local(scope)?;
+        let host = context.get_slot::<FrameHost>()?.0.to_local(scope)?;
+        path.push(request_frame_index(scope, host)?);
+        context = parent;
+    }
+    None
+}
+
+fn request_frame_index<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    host: v8::Local<'s, v8::Object>,
+) -> Option<u32> {
+    use turbo_dom_browser_env::host_internals::{enter_document_of, handle_of, with_tree};
+    let _document = enter_document_of(scope, host);
+    let handle = handle_of(scope, host)?;
+    with_tree(|tree| {
+        tree.query_selector_all("iframe")
+            .iter()
+            .position(|candidate| *candidate == handle)
+    })?
+    .and_then(|index| u32::try_from(index).ok())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchEventContext {
+    frame: RequestFrameMetadata,
+    navigation: bool,
+    resource_type: String,
+}
+
+impl FetchEventContext {
+    fn capture(
+        job: Option<&std::sync::Arc<fetch_streams::Job>>,
+        init: &serde_json::Value,
+        destination: Destination,
+    ) -> Self {
+        let frame = job
+            .map(|job| job.frame.clone())
+            .unwrap_or_else(|| RequestFrameMetadata {
+                context_id: init
+                    .get("csp")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or_default() as u32,
+                path: None,
+            });
+        Self {
+            frame,
+            navigation: destination == Destination::Iframe,
+            resource_type: match destination {
+                Destination::Empty
+                    if init.get("initiator").and_then(serde_json::Value::as_str)
+                        == Some("xmlhttprequest") =>
+                {
+                    "xhr"
+                }
+                Destination::Empty => "fetch",
+                Destination::Iframe => "document",
+                _ => destination.as_str(),
+            }
+            .to_owned(),
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FetchRequestMetadata {
@@ -2979,6 +3081,7 @@ async fn run_stream_fetch_branch(
     response_received: &std::sync::atomic::AtomicBool,
     policy_blocked: &std::sync::atomic::AtomicBool,
     crossed_origin: &std::sync::atomic::AtomicBool,
+    event_context: &FetchEventContext,
 ) -> FetchOut {
     let request_metadata = FetchRequestMetadata::from_options(&opts);
     let response = {
@@ -3021,6 +3124,7 @@ async fn run_stream_fetch_branch(
         "ok": out.ok,
         "method": method.unwrap_or("GET"),
         "request": request_metadata,
+        "context": event_context,
         "contentType": out.content_type,
         "headers": out.raw_headers,
         "statusText": out.status_text,
@@ -3501,6 +3605,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         .request_headers(headers);
     let source = init.get("source").and_then(|s| s.as_str()).unwrap_or(&base);
     let destination = parse_fetch_destination(&init);
+    let event_context = FetchEventContext::capture(cancel_job.as_ref(), &init, destination);
     let csp = init.get("csp").and_then(|id| id.as_u64()).and_then(|id| {
         state
             .borrow()
@@ -3697,6 +3802,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
             &response_received,
             &policy_blocked,
             &crossed_origin,
+            &event_context,
         )
         .await;
     }
@@ -3785,7 +3891,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     };
     jar_rc.borrow_mut().merge_request_changes(local);
     fetch_streams::release(&mut state.borrow_mut(), cancel_id);
-    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"request":request_metadata,"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text,"error":failure_error});
+    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"request":request_metadata,"context":event_context,"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text,"error":failure_error});
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
     if log.0.len() == 1000 {
@@ -8528,6 +8634,7 @@ deno_core::extension!(
         op_cookie_get,
         op_cookie_set,
         fetch_streams::op_fetch_prepare,
+        fetch_streams::op_fetch_prepare_frame,
         fetch_streams::op_fetch_upload_start,
         fetch_streams::op_fetch_upload_write,
         fetch_streams::op_fetch_upload_finish,
@@ -8671,6 +8778,8 @@ let __markDocumentInteractive;
 // Interface records use a native, isolate-owned ephemeron map. Same-origin
 // borrowed methods accept foreign-realm objects without exposing a brand setter.
 const __stringify = JSON.stringify, __String = String;
+__G.requestContextId = window => ops.op_csp_context(window);
+__G.requestFrameSnapshot = () => __stringify({__proto__:null,url:location.href,id:ops.op_csp_context(globalThis)});
 // Intrinsics captured at install time (turbo-surf#87): engine code on the document
 // load and node insertion paths calls these, never a builtin it looks up at run time
 // (a page can replace any prototype method, accessor or static, and install index
@@ -12933,9 +13042,12 @@ __G.domSig = (() => {
       else {
         const url = record.navigationURL || resolveFrameUrl(el);
         if (url && url !== "about:blank") {
-          const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(__document):undefined});
+          const cancelId = /^https?:/.test(url) ? ops.op_fetch_prepare_frame(__document,el) : 0;
+          const init = __stringify({__proto__:null,cancel_id:cancelId,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(__document):undefined});
           const request = record.navigationRequest; record.navigationRequest = "";
-          const response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init);
+          let response;
+          try { response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init); }
+          finally { if (cancelId) ops.op_fetch_release(cancelId); }
           if (request && ops.op_form_navigation_blocked(request) && record.epoch === epoch) { record.loaded = true; return; }
           if (record.epoch !== epoch || !frameConnected(el)) return;
           html = response.body || ""; responseId = response.frame_document || 0;

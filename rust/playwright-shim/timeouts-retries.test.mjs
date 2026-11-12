@@ -78,7 +78,7 @@ test("nested suite plans keep identity and overrides independent of registration
 });
 
 test("a synchronous runaway body is terminated at the configured deadline", () => {
-  const r = suite(`test('cpu',()=>{mark('entered');while(true){};});`, { timeout: 35 });
+  const r = suite(`test('cpu',({},info)=>{mark('entered');info.setTimeout(35);while(true){};});`);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.equal(r.events, "entered\n");
   assert.match(r.stdout + r.stderr, /Timeout.*35ms/i);
@@ -91,8 +91,17 @@ test("worker cleanup failure fails the run and keeps nested diagnostics", () => 
 
 test("runtime timeout updates can extend or disable the current deadline", () => {
   const r = suite(
-    `test.describe.configure({timeout:35});test('extend',async()=>{test.setTimeout(300);await new Promise(r=>setTimeout(r,80));mark('extended');});test('disable',async({},info)=>{info.setTimeout(0);await new Promise(r=>setTimeout(r,80));mark('disabled');});test('slow',async({},info)=>{info.slow();await new Promise(r=>setTimeout(r,65));mark('slow');});`,
+    `test('extend',async()=>{test.setTimeout(35);test.setTimeout(300);await new Promise(r=>setTimeout(r,80));mark('extended');});test('disable',async({},info)=>{info.setTimeout(35);info.setTimeout(0);await new Promise(r=>setTimeout(r,80));mark('disabled');});test('slow',async({},info)=>{info.setTimeout(35);info.slow();await new Promise(r=>setTimeout(r,65));mark('slow');});`,
   );
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(r.events, "extended\ndisabled\nslow\n");
+});
+
+test("worker dispatch scheduling does not consume the test execution budget", () => {
+  const r = suite(
+    `if(process.env.TURBO_PW_ATTEMPT_WORKER==='1')process.prependListener('message',m=>{if(m.kind==='run'){const end=Date.now()+90;while(Date.now()<end){}}});test('dispatch',()=>mark('ran'));`,
+    { timeout: 35 },
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.events, "ran\n");
 });

@@ -17,11 +17,12 @@ process.on("message", (message) => {
       return;
     }
     if (message.kind !== "run") return;
+    process.send({ kind: "started", startedAt: Date.now() });
     try {
       const result = await __attemptWorker.run(message);
-      process.send({ kind: "result", ...result });
+      process.send({ kind: "result", ...result, finishedAt: Date.now() });
     } catch (error) {
-      process.send({ kind: "result", error: serializeError(error) });
+      process.send({ kind: "result", error: serializeError(error), finishedAt: Date.now() });
     }
   });
 });

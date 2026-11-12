@@ -91,31 +91,35 @@ export async function closeAttemptProcesses() {
 
 function runAttempt(worker, id, retry, timeout) {
   return new Promise((resolve, reject) => {
-    const started = Date.now();
+    let started;
     let timer;
+    const expire = (message = `Timeout ${timeout}ms exceeded while running test`) => {
+      const error = new Error(message);
+      error.name = "TimeoutError";
+      worker.timedOut = true;
+      cleanup();
+      worker.child.kill("SIGKILL");
+      reject(error);
+    };
     const reset = (value) => {
       clearTimeout(timer);
       timeout = validateTimeout(value);
-      if (timeout)
-        timer = setTimeout(
-          () => {
-            const error = new Error(`Timeout ${timeout}ms exceeded while running test`);
-            error.name = "TimeoutError";
-            worker.timedOut = true;
-            cleanup();
-            worker.child.kill("SIGKILL");
-            reject(error);
-          },
-          Math.max(1, timeout - (Date.now() - started)),
-        );
+      if (timeout) timer = setTimeout(expire, Math.max(1, timeout - (Date.now() - started)));
     };
     const message = (msg) => {
+      if (msg.kind === "started") {
+        started = msg.startedAt;
+        reset(timeout);
+      }
       if (msg.kind === "timeout") reset(msg.timeout);
       if (msg.kind === "result") {
+        if (timeout && msg.finishedAt - started > timeout) {
+          expire();
+          return;
+        }
         cleanup();
-        if (msg.error) {
-          reject(restoreError(msg.error));
-        } else resolve(msg);
+        if (msg.error) reject(restoreError(msg.error));
+        else resolve(msg);
       }
     };
     const exit = () => {
@@ -129,10 +133,12 @@ function runAttempt(worker, id, retry, timeout) {
     }
     worker.child.on("message", message);
     worker.child.once("exit", exit);
-    reset(timeout);
+    // Bound an unresponsive dispatcher separately from the actual test budget.
+    timer = setTimeout(() => expire("Test attempt worker dispatch timed out"), 30000);
     worker.child.send({ kind: "run", id, retry, timeout });
   });
 }
+
 async function executeQueued(plan, t, options) {
   const entry = process.argv[1];
   if (!entry) throw new Error("Isolated Playwright tests require a test file entry point");

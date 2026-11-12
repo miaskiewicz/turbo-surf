@@ -11,6 +11,7 @@ pub(crate) struct CaptureOptions {
     pub full_page: bool,
     pub system_fonts: bool,
     pub device_scale: f64,
+    omit_background: bool,
     mask_indices: Vec<usize>,
     mask_color: String,
 }
@@ -21,6 +22,7 @@ impl Default for CaptureOptions {
             full_page: false,
             system_fonts: false,
             device_scale: 1.0,
+            omit_background: false,
             mask_indices: Vec::new(),
             mask_color: "#ff00ff".into(),
         }
@@ -48,6 +50,7 @@ impl CaptureOptions {
         options.system_fonts = self.system_fonts;
         options.device_scale = self.device_scale;
         options.image_metadata = metadata;
+        options.omit_background = self.omit_background;
         options
     }
 
@@ -196,9 +199,9 @@ mod tests {
             .iter()
             .position(|node| tree.get_attribute(*node, "id") == Some("secret"))
             .unwrap();
-        let config = CaptureOptions::from_json(
-            &format!(r##"{{"maskIndices":[{index}],"maskColor":"#00ff00"}}"##),
-        )
+        let config = CaptureOptions::from_json(&format!(
+            r##"{{"maskIndices":[{index}],"maskColor":"#00ff00"}}"##
+        ))
         .unwrap();
         let metadata =
             crate::image_metadata::parse_metadata(r#"{"missing":{"width":20,"height":140}}"#)

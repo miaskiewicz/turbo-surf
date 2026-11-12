@@ -114,3 +114,27 @@ test("full-page capture includes positioned overflow and viewport minimum (#468)
     await p.close();
   }
 });
+test("omitBackground preserves transparent canvas and authored background pixels (#464)", async () => {
+  const p = newPage({ viewport: { width: 100, height: 80 } });
+  try {
+    await p.setContent(RECTANGLES);
+    const opaque = pngPixels(await p.screenshot());
+    assert.deepEqual(opaque.pixel(90, 70), [255, 255, 255, 255]);
+    const transparent = pngPixels(await p.screenshot({ omitBackground: true }));
+    assert.deepEqual(
+      await p.screenshot({ type: "jpeg", omitBackground: true }),
+      await p.screenshot({ type: "jpeg" }),
+    );
+    const svg = (await p.screenshot({ type: "svg", omitBackground: true })).toString();
+    assert.match(svg, /fill-opacity="0.000"/);
+    assert.deepEqual(transparent.pixel(90, 70), [0, 0, 0, 0]);
+    assert.deepEqual(transparent.pixel(15, 15), [255, 0, 0, 255]);
+    await p.setContent(
+      "<style>html,body{margin:0}body{background:rgb(0,128,0);height:80px}</style>",
+    );
+    const authored = pngPixels(await p.screenshot({ omitBackground: true }));
+    assert.deepEqual(authored.pixel(90, 70), [0, 128, 0, 255]);
+  } finally {
+    await p.close();
+  }
+});

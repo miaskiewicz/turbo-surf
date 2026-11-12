@@ -3652,6 +3652,7 @@ class Page {
       fullPage: opts.fullPage === true,
       maskIndices,
       maskColor: opts.maskColor ?? "#ff00ff",
+      omitBackground: type !== "jpeg" && opts.omitBackground === true,
       systemFonts: opts.systemFonts === true,
     });
     const { css, images, metadataJson } = await captureAssets(

@@ -40,7 +40,11 @@ function fixture() {
       return s === "*" ? all : s === "#scope" ? [root] : [];
     },
   };
-  const context = vm.createContext({ document, __G: {} });
+  const context = vm.createContext({
+    document,
+    __G: {},
+    getComputedStyle: () => ({ visibility: "visible" }),
+  });
   vm.runInContext(runtime.slice(start, end), context);
   return { context, outsideReads: () => outsideReads };
 }

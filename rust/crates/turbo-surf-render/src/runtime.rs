@@ -17196,11 +17196,21 @@ fn hydrate_pass(rt: &mut JsRuntime) -> Result<v8::Global<v8::Value>, String> {
 /// complexity gate.
 async fn run_post_load_hydration_pumps(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     const MAX_PUMPS: usize = 500;
+    // Host callbacks can only settle after this actor yields back to its driver.
     for round in 0..MAX_PUMPS {
+        if crate::shim_bindings::pending(rt) {
+            return Ok(());
+        }
         hydrate_pass(rt)?;
         drain_event_loop(rt).await?;
+        if crate::shim_bindings::pending(rt) {
+            return Ok(());
+        }
         drain_module_scripts(rt, base).await?;
         drain_event_loop(rt).await?;
+        if crate::shim_bindings::pending(rt) {
+            return Ok(());
+        }
         rt.op_state()
             .borrow_mut()
             .borrow_mut::<HydrationProgress>()

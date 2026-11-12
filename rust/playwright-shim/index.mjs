@@ -2467,9 +2467,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const entry = this._routeHandlers.get(data.id);
     if (!entry) throw new Error("Route registration is no longer available");
     const document = source.frame === this ? "document" : source.frame._realmExpression("document");
-    const allowed = await native.liveEvalEngine(
+    const allowed = await native.liveEvalEngineExpression(
       this._session,
-      `globalThis.__RESULT = String(__tsNs.shimAuthorizeRoute(${document}, ${JSON.stringify(data.request.url)}));`,
+      `String(__tsNs.shimAuthorizeRoute(${document}, ${JSON.stringify(data.request.url)}))`,
     );
     if (allowed !== "true") throw new TypeError("Failed to fetch");
     if (!data.request.overriddenHeaders)

@@ -118,3 +118,35 @@ async fn late_driver_scripts_update_live_children_and_future_realms_without_reru
     assert_eq!(after[2], 1);
     assert_eq!(after[3], 0);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn post_load_host_dependency_yields_before_repeating_hydration_passes() {
+    let mut page = page(
+        r#"<body><script>
+      addEventListener('load', () => setTimeout(() => {
+        globalThis.postLoadResult = hostWait();
+      }, 0));
+    </script>"#,
+    )
+    .await;
+    assert_eq!(
+        page.hydration_diagnostics().progress.phase,
+        HydrationPhase::PostLoadHydration
+    );
+    assert_eq!(
+        page.hydration_diagnostics().progress.completed_pumps,
+        0,
+        "post-load hydration must yield as soon as an actual host callback is pending"
+    );
+    page.eval_engine("__tsNs.finishHost('ready');globalThis.__RESULT='';")
+        .await
+        .unwrap();
+    assert_eq!(
+        page.eval_expression("postLoadResult").await.unwrap(),
+        "ready"
+    );
+    assert_eq!(
+        page.hydration_diagnostics().progress.phase,
+        HydrationPhase::Complete
+    );
+}

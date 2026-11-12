@@ -19,9 +19,12 @@ test("request events retain redirect navigation and the actual originating frame
     }
     if (request.url === "/landing")
       response.end(
-        '<body><iframe src="/child"></iframe><iframe src="/child"></iframe><script>fetch("/main-api").then(r=>r.text())</script></body>',
+        '<body><iframe style="width:210px;height:120px" src="/child"></iframe><iframe style="width:230px;height:130px" src="/child"></iframe><script>fetch("/main-api").then(r=>r.text())</script></body>',
       );
-    else if (request.url === "/child") response.end("<title>child</title>");
+    else if (request.url === "/child")
+      response.end(
+        "<title>child</title><script>window.initialViewport=[innerWidth,innerHeight]</script>",
+      );
     else response.end("ok");
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -53,6 +56,10 @@ test("request events retain redirect navigation and the actual originating frame
     const frames = page.childFrames();
     assert.equal(frames.length, 2);
     for (let index = 0; index < frames.length; index++) {
+      assert.deepEqual(
+        await frames[index].evaluate(() => window.initialViewport),
+        index === 0 ? [210, 120] : [230, 130],
+      );
       await frames[index].evaluate(
         async (url) => {
           await (await fetch(url)).text();

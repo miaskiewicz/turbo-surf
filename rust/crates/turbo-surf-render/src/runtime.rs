@@ -13080,15 +13080,16 @@ __G.domSig = (() => {
     if (!record || record.owner !== globalThis || record.started || !frameConnected(el) || !ops.op_window_active(__document)) return;
     record.started = true;
     const epoch = record.epoch;
-    let window = frameRealm(el);
-    if (!window) { fireIframeLoad(el, epoch); return; }
     __pendingFetchCount++;
-    let frameUrl = record.metadata.url;
     try {
-      // Insertion creates the initial empty document synchronously. Navigation
-      // commits on a later microtask, so srcdoc cannot appear during appendChild.
+      // Navigation starts after trusted bootstrap finishes installing the owner's
+      // geometry. Creating a replacement frame sooner can read its owner's
+      // uncaptured native viewport while configuring Window dimensions.
       await undefined;
       if (record.epoch !== epoch || !frameConnected(el)) return;
+      let window = frameRealm(el);
+      if (!window) { fireIframeLoad(el, epoch); return; }
+      let frameUrl = record.metadata.url;
       let html = "", responseId = 0;
       const srcdoc = record.navigationURL ? null : frameSrcdocOf(el);
       const blank = srcdoc === null && (record.navigationURL ? record.navigationURL === "about:blank" : !frameSrcOf(el) || frameSrcOf(el) === "about:blank");

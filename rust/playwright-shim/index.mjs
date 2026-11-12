@@ -1095,11 +1095,16 @@ class Locator {
     if (options.force) return;
     const deadline = Date.now() + (options.timeout ?? 30000);
     do {
-      const state = await this._liveRead((element) => ({
-        enabled: !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true",
-        editable: !element.readOnly,
-      }));
-      if (state?.enabled && (kind !== "fill" || state.editable) && (await this.isVisible())) return;
+      const live = this._page._live;
+      const state = live
+        ? await this._liveRead((element) => ({
+            enabled:
+              !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true",
+            editable: !element.readOnly,
+          }))
+        : this._snapshot();
+      const visible = live ? await this.isVisible() : state?.visible;
+      if (state?.enabled && (kind !== "fill" || state.editable) && visible) return;
       if (Date.now() >= deadline) break;
       await this._page._redrain();
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -3394,7 +3399,6 @@ class Page {
   }
   async _waitForDownload(opts = {}) {
     const timeout = opts.timeout ?? 30000;
-    await this._ensureLive();
     const start = Date.now();
     while (timeout === 0 || Date.now() - start < timeout) {
       if (this._closed) throw new Error("page is closed");

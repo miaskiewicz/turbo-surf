@@ -57,7 +57,9 @@ test("HTTP attachments emit binary downloads without replacing the live document
       response.setHeader("content-type", "application/octet-stream");
       response.end(bytes);
     } else
-      response.end('<body data-keep="yes"><a id="download" href="/attachment">Download</a></body>');
+      response.end(
+        '<body data-keep="yes"><a id="download" href="/attachment">Download</a><a id="hidden" style="display:none" href="/attachment">Hidden</a><button id="disabled" disabled>Disabled</button></body>',
+      );
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}/`;
@@ -83,6 +85,16 @@ test("HTTP attachments emit binary downloads without replacing the live document
       (error) => error.name === "TimeoutError",
     );
     await page.goto(origin, { waitUntil: "commit" });
+    await assert.rejects(
+      page.locator("#hidden").click({ timeout: 30 }),
+      (error) => error.name === "TimeoutError",
+    );
+    await assert.rejects(
+      page.locator("#disabled").click({ timeout: 30 }),
+      (error) => error.name === "TimeoutError",
+    );
+    assert.equal(page._live, false);
+    assert.equal(attachmentRequests, 1);
     const staticWaiting = page.waitForEvent("download", { timeout: 300 });
     await page.locator("#download").click();
     assert.equal((await staticWaiting).suggestedFilename(), "fíxture.bin");

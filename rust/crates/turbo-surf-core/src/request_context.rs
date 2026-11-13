@@ -389,7 +389,7 @@ pub fn trustworthy(url: &str) -> bool {
 }
 
 #[derive(Clone, Default)]
-pub struct ClientHints(Arc<HintState>);
+pub struct ClientHints(Arc<HintState>, crate::network_conditions::NetworkConditions);
 
 impl std::fmt::Debug for ClientHints {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -414,6 +414,20 @@ struct HintState {
 }
 
 impl ClientHints {
+    /// A browser context owns connectivity; API contexts share transport identity
+    /// and cookies while keeping an independent online state.
+    pub fn with_independent_network_conditions(&self) -> Self {
+        Self(self.0.clone(), Default::default())
+    }
+    pub fn network_conditions(&self) -> crate::network_conditions::NetworkConditions {
+        self.1.clone()
+    }
+    pub fn is_offline(&self) -> bool {
+        self.1.is_offline()
+    }
+    pub fn set_offline(&self, offline: bool) -> bool {
+        self.1.set_offline(offline)
+    }
     /// Configure a trusted host transport while preserving per-runtime pools and hints.
     /// Manual redirect admission is enforced after this builder factory returns.
     pub fn with_client_builder(
@@ -422,23 +436,29 @@ impl ClientHints {
             + Sync
             + 'static,
     ) -> Self {
-        Self(Arc::new(HintState {
-            builder: Some(Arc::new(builder)),
-            ..Default::default()
-        }))
+        Self(
+            Arc::new(HintState {
+                builder: Some(Arc::new(builder)),
+                ..Default::default()
+            }),
+            Default::default(),
+        )
     }
     /// A transport that trusts `der` (an embedder or test CA) on top of the default
     /// roots, for every request of the session: fetches through the builder above and
     /// `wss:` sockets through [`ClientHints::trust_anchor`]. Verification stays on.
     pub fn with_trust_anchor(der: Vec<u8>) -> Self {
         let anchor = der.clone();
-        Self(Arc::new(HintState {
-            builder: Some(Arc::new(move || {
-                crate::net::client_builder_with_trust(&anchor)
-            })),
-            trust_anchor: Some(der),
-            ..Default::default()
-        }))
+        Self(
+            Arc::new(HintState {
+                builder: Some(Arc::new(move || {
+                    crate::net::client_builder_with_trust(&anchor)
+                })),
+                trust_anchor: Some(der),
+                ..Default::default()
+            }),
+            Default::default(),
+        )
     }
     /// The session's extra DER trust anchor, when it was configured with one.
     pub fn trust_anchor(&self) -> Option<&[u8]> {

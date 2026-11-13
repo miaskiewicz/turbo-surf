@@ -21,6 +21,8 @@ export function fetchBytes(
 /** Create/close origin-scoped client-hint state shared by a browsing context. */
 /** Derive a tab sharing a parent's local storage, HTTP cache and client hints. */
 export function requestStateNew(parentContextId?: number): number;
+export function requestStateNewApi(parentContextId?: number): number;
+export function requestStateSetOffline(id: number, offline: boolean): void;
 export function requestStateClose(id: number): void;
 /** Replace host-owned per-tab browser emulation options. */
 export function requestStateConfigure(id: number, optionsJson: string): void;

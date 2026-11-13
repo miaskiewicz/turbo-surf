@@ -135,8 +135,9 @@ Closing the session cancels owned transport and rejects pending body promises. T
 event queue is bounded and reports overflow instead of leaving body promises unresolved.
 Streamed upload bodies are not retained by the request snapshot.
 `page.request()` and `BrowserContext.request()` share the parent context's cookie jar
-(reads + `Set-Cookie` writeback, #230) but still don't retain the `Accept-CH` hint state,
-and concurrent live resource requests merge cookie writes/deletions rather than replacing
+(reads + `Set-Cookie` writeback, #230) and native transport identity, while browser
+`setOffline` does not affect API request contexts. Concurrent live resource requests
+merge cookie writes/deletions rather than replacing
 the whole jar. A bare `request.newContext()` (unbound) keeps its empty-jar behavior.
 HttpOnly cookies remain available to HTTP and storage state,
 while page JS cannot read, create or overwrite them through `document.cookie`.
@@ -229,7 +230,7 @@ an animation-toggle option is future work ([#500](https://github.com/miaskiewicz
 | `setDefaultTimeout` | ⚠️ | Inherited by request/response waits; page and explicit settings take precedence. `0` disables their timeout. Other action deadlines remain partial. |
 | `grantPermissions`, `clearPermissions`, `setGeolocation` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
 | `on/off/once`, `waitForEvent` | ⚠️ | Actual owned `newPage`/`close` events and subscribed page network events, with predicates and deadlines. Auxiliary popup contexts remain unsupported (#326); commit-only navigation response events are not collected. |
-| `setOffline` | ❌ | Enabling offline emulation (including `newContext({ offline: true })`) rejects with a clear unsupported error; online mode is allowed. |
+| `setOffline` | ✅ | Native per-context conditions, also supported by `newContext({ offline: true })`. New transport sends fail after HTTP cache lookup; already-started HTTP responses continue. Owned tabs/frames receive trusted online/offline events and live `navigator.onLine`. API request contexts remain online independently; no native POST replay. Established WebSocket frames wait for reconnect on the same socket. |
 | `tracing`, `recordVideo`, `use.trace`, `use.video` | ❌ | Tracing methods and enabled recording options reject with a clear no-browser engine error. Explicit trace/video `off` modes are accepted; `page.video()` returns null without recording. |
 | `route`, `unroute`, `routeFromHAR`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |
 | `exposeBinding`, `exposeFunction` | ⚠️ | Bindings apply to current and future pages across navigations; guest promises receive serialized host results or errors. |

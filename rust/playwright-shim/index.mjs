@@ -50,13 +50,6 @@ const PIXEL = "no-browser engine (no rendering surface)";
 const INPUT = "no synthetic input devices (static DOM, no pointer/keyboard hardware)";
 const NETIO = "no in-process network interception";
 
-function requireOfflineSupport(offline) {
-  if (offline)
-    throw new Error(
-      "turbo-surf: offline emulation is unavailable in the native context network layer",
-    );
-}
-
 function cookieMatchesUrl(cookie, url) {
   const domain = String(cookie.domain ?? "")
     .toLowerCase()
@@ -4918,7 +4911,8 @@ class BrowserContext {
         UNSUPPORTED(`tracing.${method}`, "no-browser engine has no Playwright trace recorder"),
       ]),
     );
-    requireOfflineSupport(merged.offline);
+    if (merged.offline !== undefined && typeof merged.offline !== "boolean")
+      throw new Error("offline must be a boolean");
     this._maxResponseBytes = responseBudget(merged.maxResponseBytes);
     const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
@@ -4955,6 +4949,7 @@ class BrowserContext {
     this._geolocation = merged.geolocation ?? null;
     this._timezoneId = merged.timezoneId ?? null;
     this._offline = merged.offline ?? false;
+    if (this._offline) native.requestStateSetOffline(this._requestState, true);
     this._screen = merged.screen ?? null;
     this._initScripts = [];
     this._bindings = new Map();
@@ -5052,8 +5047,20 @@ class BrowserContext {
   async clearPermissions() {}
   async setGeolocation() {}
   async setOffline(offline) {
-    requireOfflineSupport(offline);
-    this._offline = false;
+    if (typeof offline !== "boolean") throw new Error("offline must be a boolean");
+    const update = async () => {
+      if (this._closed) throw new Error("browser context is closed");
+      if (this._offline === offline) return;
+      native.requestStateSetOffline(this._requestState, offline);
+      this._offline = offline;
+      for (const page of this._pages) {
+        if (!page._closed && page._session != null)
+          await native.liveEvalEngine(page._session, "__tsNs.syncNetworkState();", true);
+      }
+    };
+    const pending = (this._offlineUpdate ?? Promise.resolve()).then(update);
+    this._offlineUpdate = pending.catch(() => {});
+    await pending;
   }
   on(event, fn) {
     if (typeof fn !== "function") throw new TypeError("Event listener must be a function");
@@ -6567,7 +6574,7 @@ export const request = {
             cookies = JSON.stringify(JSON.parse(text).cookies ?? []);
           })
         : Promise.resolve();
-    const requestState = native.requestStateNew?.(bc?._requestState);
+    const requestState = native.requestStateNewApi(bc?._requestState);
     let disposed = false;
     const responses = new Set();
     const ensureOpen = () => {

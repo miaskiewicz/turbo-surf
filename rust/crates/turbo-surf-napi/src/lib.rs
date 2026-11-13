@@ -893,12 +893,31 @@ pub fn request_state_storage(id: u32) -> Result<String> {
 }
 
 #[napi]
+pub fn request_state_set_offline(id: u32, offline: bool) -> Result<()> {
+    request_state(Some(id))?.client_hints.set_offline(offline);
+    Ok(())
+}
+
+#[napi]
+pub fn request_state_new_api(parent_context_id: Option<u32>) -> Result<u32> {
+    new_request_state(parent_context_id, true)
+}
+
+#[napi]
 pub fn request_state_new(parent_context_id: Option<u32>) -> Result<u32> {
+    new_request_state(parent_context_id, false)
+}
+
+fn new_request_state(parent_context_id: Option<u32>, independent_network: bool) -> Result<u32> {
     let state = match parent_context_id {
         Some(parent) => {
             let parent = request_state(Some(parent))?;
             RequestState {
-                client_hints: parent.client_hints,
+                client_hints: if independent_network {
+                    parent.client_hints.with_independent_network_conditions()
+                } else {
+                    parent.client_hints
+                },
                 storage: parent.storage.new_tab().map_err(Error::from_reason)?,
             }
         }

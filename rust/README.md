@@ -174,6 +174,15 @@ loaders. Native denial errors and blocked script/module console diagnostics omit
 URL queries; explicit network logs/traces retain their documented request
 metadata and should not be printed with secret-bearing URLs.
 
+Browser-context offline conditions are separate from host authorization. Shared
+`ClientHints` state carries connectivity into tabs and frames; API request contexts
+fork connectivity while retaining their transport identity. Offline mode fails
+new native sends after fresh HTTP-cache admission, leaves already-started HTTP
+responses running, and does not queue or replay HTTP writes. The host-origin
+policy still applies before cache admission and every hop. The Playwright shim
+also updates `navigator.onLine` and trusted online/offline events; established
+WebSocket frames wait for reconnection on the same socket.
+
 ## Tier 2 — `turbo-surf-page`
 
 `TurboNavigator` implements `crawl::Navigator` — fetches via `net::fetch_html`,

@@ -149,16 +149,16 @@ test("a missed web-first assertion hydrates default navigation while commit stay
   }
 });
 
-test("unsupported offline emulation rejects instead of silently leaving networking online", async () => {
-  const context = new shim.BrowserContext();
+test("native offline emulation toggles initial and existing context connectivity", async () => {
+  const context = new shim.BrowserContext({ offline: true });
   try {
-    await assert.rejects(context.setOffline(true), /offline emulation.*unavailable/i);
+    const page = await context.newPage();
+    await page.goto("about:blank");
+    assert.equal(await page.evaluate(() => navigator.onLine), false);
     await context.setOffline(false);
-    assert.equal(context._offline, false);
-    assert.throws(
-      () => new shim.BrowserContext({ offline: true }),
-      /offline emulation.*unavailable/i,
-    );
+    assert.equal(await page.evaluate(() => navigator.onLine), true);
+    await context.setOffline(true);
+    assert.equal(await page.evaluate(() => navigator.onLine), false);
   } finally {
     await context.close();
   }

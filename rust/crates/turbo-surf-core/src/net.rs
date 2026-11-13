@@ -823,6 +823,7 @@ pub fn client_builder() -> http::ClientBuilder {
 #[derive(Clone)]
 pub struct ReportClient {
     legacy: http::Client,
+    network: Option<crate::network_conditions::NetworkConditions>,
     #[cfg(not(feature = "impersonate"))]
     modern: ModernReportClient,
 }
@@ -859,6 +860,7 @@ fn report_https_client(der: Option<&[u8]>) -> Result<ModernReportClient, HttpErr
 }
 pub fn build_report_client() -> ReportClient {
     ReportClient {
+        network: None,
         legacy: build_browser_client(),
         #[cfg(not(feature = "impersonate"))]
         modern: report_https_client(None).expect("native report TLS roots"),
@@ -889,6 +891,7 @@ fn with_trust(builder: http::ClientBuilder, der: &[u8]) -> Result<http::ClientBu
 /// Report client with an embedder-supplied DER trust anchor; verification remains enabled.
 pub fn report_client_with_trust(der: &[u8]) -> Result<ReportClient, HttpError> {
     Ok(ReportClient {
+        network: None,
         legacy: client_builder_with_trust(der)?
             .build()
             .map_err(|error| err(error, ErrorCode::Network))?,
@@ -900,6 +903,19 @@ pub struct ReportResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
 }
+impl ReportClient {
+    /// Retain the configured transport/trust while binding an owned context.
+    pub fn with_network_conditions(
+        &self,
+        network: crate::network_conditions::NetworkConditions,
+    ) -> Self {
+        Self {
+            network: Some(network),
+            ..self.clone()
+        }
+    }
+}
+
 /// Send raw native bytes and discard the response at header arrival. Modern
 /// reports use controlled Hyper headers because reqwest always supplies Accept.
 pub async fn send_report_request(
@@ -911,6 +927,11 @@ pub async fn send_report_request(
     modern: bool,
 ) -> Result<ReportResponse, HttpError> {
     check_host_network_policy(url)?;
+    if let Some(network) = &client.network {
+        network
+            .check()
+            .map_err(|message| HttpError::new(message, ErrorCode::Network))?;
+    }
     let trace_id = crate::http_trace::next_id();
     crate::http_trace::record(
         || serde_json::json!({"event":"request","id":trace_id.0,"url":url,"method":method,"explicit_headers":headers,"body_bytes":body,"destination":"report","headerScope":"native report headers; transport-added headers absent"}),
@@ -1022,6 +1043,7 @@ struct Outgoing<'a> {
     upload: Option<crate::upload_body::UploadBody>,
     /// A Critical-CH restart, which has its own measured header order.
     restart: bool,
+    network: Option<crate::network_conditions::NetworkConditions>,
 }
 
 // One transport seam for every hop.
@@ -1031,6 +1053,11 @@ fn check_host_network_policy(url: &str) -> Result<(), HttpError> {
 
 async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, HttpError> {
     check_host_network_policy(hop.url)?;
+    if let Some(network) = &hop.network {
+        network
+            .check()
+            .map_err(|message| HttpError::new(message, ErrorCode::Network))?;
+    }
     let Outgoing {
         method,
         url,
@@ -1039,6 +1066,7 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
         body_bytes,
         upload,
         restart,
+        network,
     } = hop;
     let m = http::Method::from_bytes(method.as_bytes()).map_err(|e| err(e, ErrorCode::Network))?;
     // Without impersonation a streaming upload is forced onto HTTP/2 below.
@@ -1086,7 +1114,7 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
         method,
         streaming_upload || body.is_some() || body_bytes.is_some(),
     );
-    let mut result = send_with_stale_recovery(req, retry).await;
+    let mut result = send_with_stale_recovery(req, retry, network.as_ref()).await;
     if let Ok(response) = &result {
         remember_protocol(url, response.version());
     }
@@ -1130,11 +1158,18 @@ fn bodyless_read_retry(
 async fn send_with_stale_recovery(
     request: http::RequestBuilder,
     retry: Option<http::RequestBuilder>,
+    network: Option<&crate::network_conditions::NetworkConditions>,
 ) -> http::Result<http::Response> {
     // A peer can expire an idle socket while an embedder parks its runtime.
     // A reset can follow a consumed request, so only bodyless reads are replayed.
     match (request.send().await, retry) {
-        (Err(error), Some(retry)) if stale_connection_error(&error) => retry.send().await,
+        (Err(error), Some(retry))
+            if stale_connection_error(&error)
+                && !network
+                    .is_some_and(crate::network_conditions::NetworkConditions::is_offline) =>
+        {
+            retry.send().await
+        }
         (result, _) => result,
     }
 }
@@ -1760,6 +1795,9 @@ async fn send_and_revalidate<'a, 'b>(
             body_bytes: &hop.body_bytes,
             upload: opts.upload_body.take(),
             restart,
+            network: opts
+                .client_hints
+                .map(crate::request_context::ClientHints::network_conditions),
         },
     )
     .await?;
@@ -2515,6 +2553,9 @@ async fn follow_auto(
             body_bytes: &opts.body_bytes,
             upload: None,
             restart: false,
+            network: opts
+                .client_hints
+                .map(crate::request_context::ClientHints::network_conditions),
         },
     )
     .await?;
@@ -2754,6 +2795,9 @@ async fn fetch_typed_bytes_direct(
             body_bytes: &opts.body_bytes,
             upload: None,
             restart: false,
+            network: opts
+                .client_hints
+                .map(crate::request_context::ClientHints::network_conditions),
         },
     )
     .await?;
@@ -2947,6 +2991,7 @@ mod tests {
                 body_bytes: &Some(b"hello".to_vec()),
                 upload: None,
                 restart: false,
+                network: None,
             },
         )
         .await
@@ -3973,6 +4018,7 @@ mod edge_tests {
                     body_bytes: &None,
                     upload: None,
                     restart: false,
+                    network: None,
                 },
             )
             .await

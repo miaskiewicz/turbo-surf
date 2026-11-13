@@ -137,19 +137,23 @@ pub(super) fn op_ws_open<'s>(
         .map(|ua| ua.0.clone())
         .filter(|ua| !ua.is_empty())
         .unwrap_or_else(|| profile.user_agent.clone());
-    let (handle, events) = websocket::open(WsRequest {
-        url,
-        origin,
-        protocols,
-        user_agent,
-        accept_language: profile.accept_language.to_owned(),
-        cookie,
-        // The session's anchor, as its https fetches trust it (#188).
-        trust_anchor: state
-            .try_borrow::<ClientHints>()
-            .and_then(ClientHints::trust_anchor)
-            .map(<[u8]>::to_vec),
-    });
+    let network = state.borrow::<ClientHints>().network_conditions();
+    let (handle, events) = websocket::open_with_network_conditions(
+        WsRequest {
+            url,
+            origin,
+            protocols,
+            user_agent,
+            accept_language: profile.accept_language.to_owned(),
+            cookie,
+            // The session's anchor, as its https fetches trust it (#188).
+            trust_anchor: state
+                .try_borrow::<ClientHints>()
+                .and_then(ClientHints::trust_anchor)
+                .map(<[u8]>::to_vec),
+        },
+        network,
+    );
     let transports = transports(state);
     transports.next += 1;
     let id = transports.next;

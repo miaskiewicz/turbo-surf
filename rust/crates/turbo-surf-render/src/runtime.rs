@@ -7078,6 +7078,38 @@ fn op_run_local_timers<'s>(
         .unwrap_or(0)
 }
 
+#[op2(fast)]
+fn op_network_online(state: &mut OpState) -> bool {
+    !state.borrow::<ClientHints>().is_offline()
+}
+
+#[op2(nofast, reentrant)]
+fn op_sync_network_state(scope: &mut v8::PinScope) -> u32 {
+    let frames = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    let current = scope.get_current_context();
+    let mut contexts = vec![v8::Global::new(scope, current)];
+    contexts.extend(frames);
+    let mut fired = 0;
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameRetired>().is_some() {
+            continue;
+        }
+        let active = &mut v8::ContextScope::new(scope, context);
+        if let Some(callback) = host_capability(active, context, "deliverNetworkState") {
+            let receiver = v8::undefined(active);
+            if let Some(value) = callback.call(active, receiver.into(), &[]) {
+                fired += value.uint32_value(active).unwrap_or(0);
+            }
+        }
+    }
+    fired
+}
+
 #[op2(fast, reentrant)]
 fn op_run_frame_timers(scope: &mut v8::PinScope) -> u32 {
     run_frame_timers(scope, 5000)
@@ -8731,6 +8763,8 @@ deno_core::extension!(
         op_timer_agent_task_base,
         op_run_local_timers,
         op_run_frame_timers,
+        op_network_online,
+        op_sync_network_state,
         op_engine_task_scope,
         op_frame_pending,
         op_queue_frame_script,
@@ -9427,6 +9461,7 @@ const __navData = {
     const val = has ? __navData[name] : (Object.prototype.hasOwnProperty.call(GET_STUB, name) ? GET_STUB[name] : {});
     const getter = Object.getOwnPropertyDescriptor({get [name]() {
       if (this !== navigator) throw new TypeError("Illegal invocation");
+      if (name === "onLine") return ops.op_network_online();
       return val;
     }}, name).get;
     def(name, { get: getter, enumerable: true, configurable: true });
@@ -9750,6 +9785,17 @@ const __queueTimerTask = (fn, due, sequence) => {
   ops.op_driver_sync_changed();
   __timerPush({__proto__:null,id:0,fn,source:null,due,delay:0,nesting:0,repeat:false,args:[],sequence});
 };
+let __observedNetworkOnline=ops.op_network_online();
+const __deliverNetworkState=()=>{
+  const online=ops.op_network_online();
+  if(online===__observedNetworkOnline)return 0;
+  __observedNetworkOnline=online;
+  const event=new __hostEvent(online?'online':'offline',{__proto__:null});
+  ops.op_event_trust(event,-1);ops.op_dispatch_host_event(event,globalThis);
+  return 1;
+};
+ops.op_set_host_capabilities({deliverNetworkState:__deliverNetworkState});
+__G.syncNetworkState=()=>ops.op_sync_network_state();
 globalThis.setTimeout=(handler,delay=0,...args)=>__createTimer("setTimeout",false,handler,delay,args);
 globalThis.setInterval=(handler,delay=0,...args)=>__createTimer("setInterval",true,handler,delay,args);
 globalThis.clearTimeout=(id)=>{
@@ -9964,7 +10010,8 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
   return fired;
 };
 __G.runTimers = (max=100000) => {
-  let fired=ops.op_storage_events();
+  let fired=__G.isFrame?0:ops.op_sync_network_state();
+  fired+=ops.op_storage_events();
   if(fired)return fired;
   fired=ops.op_run_local_timers(__timerDocument,max);
   if(!__G.isFrame)fired+=ops.op_run_frame_timers();

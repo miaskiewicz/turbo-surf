@@ -114,11 +114,20 @@ enum Outbound {
 /// Starts connecting on the current tokio runtime; events arrive on the receiver,
 /// which reports `None` once the connection task is gone.
 pub fn open(request: WsRequest) -> (WsHandle, UnboundedReceiver<WsEvent>) {
+    open_with_network_conditions(request, Default::default())
+}
+
+/// Browser-owned connectivity affects new handshakes and pauses established
+/// frame delivery; changing it never opens or replays a different connection.
+pub fn open_with_network_conditions(
+    request: WsRequest,
+    network: crate::network_conditions::NetworkConditions,
+) -> (WsHandle, UnboundedReceiver<WsEvent>) {
     let (commands, outbound) = unbounded_channel();
     let (events_tx, events) = unbounded_channel();
     let loopback = commands.clone();
     let task = tokio::spawn(async move {
-        run(request, loopback, outbound, events_tx).await;
+        run(request, loopback, outbound, events_tx, network).await;
     });
     (WsHandle { commands, task }, events)
 }
@@ -128,11 +137,19 @@ async fn run(
     loopback: UnboundedSender<Outbound>,
     outbound: UnboundedReceiver<Outbound>,
     events: UnboundedSender<WsEvent>,
+    network: crate::network_conditions::NetworkConditions,
 ) {
+    if crate::network_policy::check(&request.url).is_err() || network.check().is_err() {
+        let _ = events.send(WsEvent::Failed);
+        return;
+    }
     let Ok((stream, accepted, leftover)) = handshake(&request).await else {
         let _ = events.send(WsEvent::Failed);
         return;
     };
+    if network.is_offline() {
+        network.wait_online().await;
+    }
     let deflate = frame::parse_extensions(&accepted.extensions).ok().flatten();
     let _ = events.send(WsEvent::Open(accepted));
     let (read, write) = tokio::io::split(stream);
@@ -140,12 +157,14 @@ async fn run(
     let closing = Arc::new(AtomicBool::new(false));
     let close_sent = Arc::new(Notify::new());
     let session = Session {
+        network: network.clone(),
         events: events.clone(),
         loopback,
         closing: closing.clone(),
         close_sent: close_sent.clone(),
     };
     let writer = Writer {
+        network,
         deflater: deflate.and_then(Deflater::new),
         events,
         closing,
@@ -483,6 +502,7 @@ async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> std::io::Result<Raw
 
 /// The read side: reports units and answers pings and close frames.
 struct Session {
+    network: crate::network_conditions::NetworkConditions,
     events: UnboundedSender<WsEvent>,
     loopback: UnboundedSender<Outbound>,
     closing: Arc<AtomicBool>,
@@ -505,6 +525,9 @@ impl Session {
                 result = read_frame(&mut reader) => result,
                 _ = &mut close_deadline => return self.abnormal(),
             };
+            if self.network.is_offline() {
+                self.network.wait_online().await;
+            }
             let unit = match frame {
                 Ok(raw) => assembler.accept(raw),
                 Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
@@ -573,6 +596,7 @@ impl Session {
 
 /// The write side: frames, masks and (when negotiated) compresses outbound messages.
 struct Writer {
+    network: crate::network_conditions::NetworkConditions,
     deflater: Option<Deflater>,
     events: UnboundedSender<WsEvent>,
     closing: Arc<AtomicBool>,
@@ -586,6 +610,9 @@ impl Writer {
         mut outbound: UnboundedReceiver<Outbound>,
     ) {
         while let Some(item) = outbound.recv().await {
+            if self.network.is_offline() {
+                self.network.wait_online().await;
+            }
             if self.closing.load(Ordering::SeqCst) {
                 continue;
             }

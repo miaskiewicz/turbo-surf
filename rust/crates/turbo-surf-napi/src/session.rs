@@ -210,10 +210,11 @@ fn read_query(t: &Tree, root: Handle, args: &Value) -> std::result::Result<Strin
 // holds only `Send` command channels keyed by id.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use tokio::sync::mpsc::UnboundedSender as MpscSender;
 use turbo_surf_render::{
+    AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryHostServices, AuxiliaryPageEventLog,
     PageSession, PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS,
 };
 
@@ -225,6 +226,12 @@ enum LiveJob {
         SyncSender<std::result::Result<String, String>>,
     ),
     Resize(u32, u32, SyncSender<std::result::Result<String, String>>),
+    Navigate(
+        String,
+        String,
+        String,
+        SyncSender<std::result::Result<String, String>>,
+    ),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
     EngineCollect(String, SyncSender<std::result::Result<String, String>>),
@@ -235,22 +242,308 @@ enum LiveJob {
         SyncSender<std::result::Result<String, String>>,
     ),
     ExpressionTracked(String, SyncSender<std::result::Result<String, String>>),
-    Serialize(SyncSender<String>),
-    Cookies(SyncSender<String>),
-    SetCookies(String, SyncSender<()>),
+    Serialize(SyncSender<std::result::Result<String, String>>),
+    Cookies(SyncSender<std::result::Result<String, String>>),
+    SetCookies(String, SyncSender<std::result::Result<(), String>>),
+    ConfigureTarget(
+        AuxiliaryBootstrap,
+        SyncSender<std::result::Result<(), String>>,
+    ),
     CleanupNetwork,
-    Close(SyncSender<()>),
+    Close(SyncSender<std::result::Result<(), String>>),
+}
+
+impl LiveJob {
+    fn requires_live_target(&self) -> bool {
+        !matches!(self, Self::Close(_) | Self::CleanupNetwork)
+    }
+
+    fn reject(self, error: String) {
+        match self {
+            Self::Content(_, _, _, reply)
+            | Self::Resize(_, _, reply)
+            | Self::Navigate(_, _, _, reply)
+            | Self::Eval(_, reply)
+            | Self::EngineEval(_, reply)
+            | Self::EngineCollect(_, reply)
+            | Self::EngineRead(_, reply)
+            | Self::Expression(_, _, reply)
+            | Self::ExpressionTracked(_, reply)
+            | Self::Serialize(reply)
+            | Self::Cookies(reply) => {
+                let _ = reply.send(Err(error));
+            }
+            Self::SetCookies(_, reply) | Self::ConfigureTarget(_, reply) | Self::Close(reply) => {
+                let _ = reply.send(Err(error));
+            }
+            Self::CleanupNetwork => {}
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum LiveTarget {
+    LegacyRoot,
+    Auxiliary(u64),
+}
+
+impl LiveTarget {
+    fn with_auxiliary<T>(
+        self,
+        operation: impl FnOnce(u64) -> std::result::Result<T, String>,
+    ) -> std::result::Result<T, String> {
+        match self {
+            Self::Auxiliary(target) => operation(target),
+            Self::LegacyRoot => {
+                Err("Auxiliary contexts are unsupported by this actual root context".into())
+            }
+        }
+    }
+}
+
+fn initialized_root_target(session: &mut PageSession) -> std::result::Result<LiveTarget, String> {
+    match session.auxiliary_event_log().capability() {
+        AuxiliaryCapability::Supported => session.auxiliary_root_id().map(LiveTarget::Auxiliary),
+        AuxiliaryCapability::Unsupported { .. } => Ok(LiveTarget::LegacyRoot),
+        AuxiliaryCapability::Pending => {
+            Err("Actual root auxiliary capability was not resolved before initialization".into())
+        }
+    }
+}
+
+async fn poll_actor_work(
+    session: &mut PageSession,
+    legacy: bool,
+) -> std::result::Result<String, String> {
+    if legacy {
+        session.eval("").await
+    } else {
+        session.poll_owned_work().await
+    }
+}
+
+enum LiveMessage {
+    Target {
+        target: LiveTarget,
+        job: LiveJob,
+    },
+    Shutdown(SyncSender<()>),
+    ConfigureContext(
+        AuxiliaryBootstrap,
+        SyncSender<std::result::Result<(), String>>,
+    ),
+}
+
+fn run_target_job<T>(
+    runtime: &tokio::runtime::Runtime,
+    mut cancellation: tokio::sync::watch::Receiver<bool>,
+    future: impl std::future::Future<Output = std::result::Result<T, String>>,
+) -> std::result::Result<T, String> {
+    runtime.block_on(async {
+        let closed = async {
+            loop {
+                if *cancellation.borrow_and_update() {
+                    return;
+                }
+                if cancellation.changed().await.is_err() {
+                    return;
+                }
+            }
+        };
+        tokio::select! {
+            biased;
+            () = closed => Err("Native auxiliary target closed".into()),
+            result = future => result,
+        }
+    })
+}
+
+struct LiveActor {
+    id: u32,
+    tx: MpscSender<LiveMessage>,
+    network: turbo_surf_render::NetworkEventLog,
+    auxiliary: AuxiliaryPageEventLog,
+    opening: AtomicBool,
+    started: AtomicBool,
+    closing_calls: AtomicUsize,
+    finished: Arc<(Mutex<bool>, Condvar)>,
+    cancellations: Arc<Mutex<HashMap<LiveTarget, tokio::sync::watch::Sender<bool>>>>,
 }
 
 struct LiveConnection {
-    tx: MpscSender<LiveJob>,
-    network: turbo_surf_render::NetworkEventLog,
+    actor: Arc<LiveActor>,
+    target: LiveTarget,
 }
+
+static ACTORS: OnceLock<Mutex<HashMap<u32, Arc<LiveActor>>>> = OnceLock::new();
 static LIVE: OnceLock<Mutex<HashMap<u32, LiveConnection>>> = OnceLock::new();
 static LIVE_NEXT: AtomicU32 = AtomicU32::new(1);
 
 fn live_registry() -> &'static Mutex<HashMap<u32, LiveConnection>> {
     LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn actor_registry() -> &'static Mutex<HashMap<u32, Arc<LiveActor>>> {
+    ACTORS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn live_actor(id: u32) -> Result<Arc<LiveActor>> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    if let Some(connection) = live.get(&id) {
+        return Ok(connection.actor.clone());
+    }
+    drop(live);
+    actor_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("actor registry poisoned"))?
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| Error::from_reason("no such live actor"))
+}
+
+struct ActiveActorClose(Arc<LiveActor>);
+
+impl ActiveActorClose {
+    fn new(actor: Arc<LiveActor>) -> Self {
+        actor.closing_calls.fetch_add(1, Ordering::AcqRel);
+        Self(actor)
+    }
+}
+
+impl Drop for ActiveActorClose {
+    fn drop(&mut self) {
+        self.0.closing_calls.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct OpeningActorGuard {
+    actor: Arc<LiveActor>,
+    committed: bool,
+}
+
+impl Drop for OpeningActorGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.actor.network.close();
+            if !self.actor.started.load(Ordering::Acquire) {
+                finish_actor_without_session(&self.actor);
+            } else {
+                let (reply, _) = sync_channel(1);
+                let _ = self.actor.tx.send(LiveMessage::Shutdown(reply));
+            }
+        }
+    }
+}
+
+fn finish_actor_without_session(actor: &LiveActor) {
+    LiveWorkerCleanup {
+        id: actor.id,
+        network: actor.network.clone(),
+        auxiliary: actor.auxiliary.clone(),
+        finished: actor.finished.clone(),
+    }
+    .finish();
+}
+
+fn prepare_live_actor(
+    reserved: Option<u32>,
+) -> Result<(
+    Arc<LiveActor>,
+    tokio::sync::mpsc::UnboundedReceiver<LiveMessage>,
+    OpeningActorGuard,
+)> {
+    let id = reserved.unwrap_or_else(|| LIVE_NEXT.fetch_add(1, Ordering::Relaxed));
+    let network = if reserved.is_some() {
+        opening_networks()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::from_reason("Invalid opening network log"))?
+    } else {
+        turbo_surf_render::NetworkEventLog::default()
+    };
+    if network.is_closed() {
+        return Err(Error::from_reason("Page session closed"));
+    }
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let actor = Arc::new(LiveActor {
+        id,
+        tx,
+        network,
+        auxiliary: AuxiliaryPageEventLog::default(),
+        opening: AtomicBool::new(true),
+        started: AtomicBool::new(false),
+        closing_calls: AtomicUsize::new(0),
+        finished: Arc::new((Mutex::new(false), Condvar::new())),
+        cancellations: Arc::new(Mutex::new(HashMap::new())),
+    });
+    let mut actors = actor_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("actor registry poisoned"))?;
+    if actors.contains_key(&id) {
+        return Err(Error::from_reason("opening actor already registered"));
+    }
+    actors.insert(id, actor.clone());
+    let guard = OpeningActorGuard {
+        actor: actor.clone(),
+        committed: false,
+    };
+    Ok((actor, rx, guard))
+}
+
+fn wait_for_actor_cleanup(actor: &LiveActor) -> Result<()> {
+    let (finished, changed) = &*actor.finished;
+    let finished = finished
+        .lock()
+        .map_err(|_| Error::from_reason("actor completion poisoned"))?;
+    let (finished, _) = changed
+        .wait_timeout_while(finished, std::time::Duration::from_secs(5), |done| !*done)
+        .map_err(|_| Error::from_reason("actor completion poisoned"))?;
+    if !*finished {
+        return Err(Error::from_reason(
+            "live actor close exceeded cleanup deadline",
+        ));
+    }
+    Ok(())
+}
+
+struct LiveWorkerCleanup {
+    id: u32,
+    network: turbo_surf_render::NetworkEventLog,
+    auxiliary: AuxiliaryPageEventLog,
+    finished: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl LiveWorkerCleanup {
+    fn finish(&mut self) {
+        self.network.close();
+        self.auxiliary.close();
+        if let Ok(mut live) = live_registry().lock() {
+            live.retain(|_, connection| connection.actor.id != self.id);
+        }
+        if let Ok(mut actors) = actor_registry().lock() {
+            actors.remove(&self.id);
+        }
+        if let Ok(mut opening) = opening_networks().lock() {
+            if let Some(log) = opening.remove(&self.id) {
+                log.close();
+            }
+        }
+        let (finished, changed) = &*self.finished;
+        if let Ok(mut finished) = finished.lock() {
+            *finished = true;
+            changed.notify_all();
+        }
+    }
+}
+
+impl Drop for LiveWorkerCleanup {
+    fn drop(&mut self) {
+        self.finish();
+    }
 }
 
 static OPENING_NETWORKS: OnceLock<Mutex<HashMap<u32, turbo_surf_render::NetworkEventLog>>> =
@@ -263,7 +556,11 @@ fn network_log(id: u32) -> Result<turbo_surf_render::NetworkEventLog> {
         .lock()
         .map_err(|_| Error::from_reason("session registry poisoned"))?;
     if let Some(connection) = live.get(&id) {
-        return Ok(connection.network.clone());
+        return Ok(connection.actor.network.clone());
+    }
+    drop(live);
+    if let Ok(actor) = live_actor(id) {
+        return Ok(actor.network.clone());
     }
     opening_networks()
         .lock()
@@ -288,8 +585,24 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
         .lock()
         .map_err(|_| "session registry poisoned")?;
     let tx = reg.get(&id).ok_or("no such live session")?;
-    tx.tx
-        .send(job)
+    if tx.actor.opening.load(Ordering::Acquire) {
+        return Err("live actor is opening".into());
+    }
+    if tx.actor.network.is_closed() {
+        return Err("live actor is closed".into());
+    }
+    tx.actor
+        .cancellations
+        .lock()
+        .map_err(|_| "actor cancellation registry poisoned")?
+        .entry(tx.target)
+        .or_insert_with(|| tokio::sync::watch::channel(false).0);
+    tx.actor
+        .tx
+        .send(LiveMessage::Target {
+            target: tx.target,
+            job,
+        })
         .map_err(|_| "live session worker gone".to_string())
 }
 
@@ -297,6 +610,8 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
 /// Async (hydration fetches chunks from a possibly same-process server, so Node's loop
 /// must stay free).
 pub struct LiveOpenTask {
+    receiver: Option<tokio::sync::mpsc::UnboundedReceiver<LiveMessage>>,
+    opening_guard: OpeningActorGuard,
     max_resource_bytes: Option<u32>,
     initial_timeout_ms: Option<u32>,
     window_timer_mode: WindowTimerMode,
@@ -317,8 +632,19 @@ impl Task for LiveOpenTask {
     type JsValue = u32;
 
     fn compute(&mut self) -> Result<u32> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LiveJob>();
-        let (open_tx, open_rx) = sync_channel::<std::result::Result<(), String>>(1);
+        let actor = self.opening_guard.actor.clone();
+        let mut rx = self
+            .receiver
+            .take()
+            .ok_or_else(|| Error::from_reason("live actor already started"))?;
+        actor.started.store(true, Ordering::Release);
+        if actor.network.is_closed() {
+            finish_actor_without_session(&actor);
+            return Err(Error::from_reason("Page session closed"));
+        }
+        let tx = actor.tx.clone();
+        let (open_tx, open_rx) =
+            sync_channel::<std::result::Result<(LiveTarget, AuxiliaryPageEventLog), String>>(1);
         let html = std::mem::take(&mut self.html);
         let base = std::mem::take(&mut self.base_url);
         let cookies = std::mem::take(&mut self.cookies);
@@ -327,17 +653,8 @@ impl Task for LiveOpenTask {
         let storage = self.storage.clone();
         let response = self.response.clone();
         let reserved = response.host_network_log;
-        let id = reserved.unwrap_or_else(|| LIVE_NEXT.fetch_add(1, Ordering::Relaxed));
-        let network = if reserved.is_some() {
-            opening_networks()
-                .lock()
-                .map_err(|_| Error::from_reason("session registry poisoned"))?
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| Error::from_reason("Invalid opening network log"))?
-        } else {
-            turbo_surf_render::NetworkEventLog::default()
-        };
+        let id = actor.id;
+        let network = actor.network.clone();
         let worker_network = network.clone();
         let init_script = std::mem::take(&mut self.init_script);
         let engine_init_script = std::mem::take(&mut self.engine_init_script);
@@ -345,7 +662,25 @@ impl Task for LiveOpenTask {
         let window_timer_mode = self.window_timer_mode;
         let viewport = response.viewport;
         let max_resource_bytes = self.max_resource_bytes;
-        thread::spawn(move || {
+        let worker_cancellations = actor.cancellations.clone();
+        let auxiliary = actor.auxiliary.clone();
+        let worker_actor = actor.clone();
+        let auxiliary_policy = self.response.auxiliary_policy.unwrap_or_default();
+        let root_bootstrap = AuxiliaryBootstrap {
+            init_script: self.response.page_init_script.clone(),
+            engine_init_script: self.response.page_engine_init_script.clone(),
+        };
+        let auxiliary_bootstrap = AuxiliaryBootstrap {
+            init_script: self.response.auxiliary_init_script.clone(),
+            engine_init_script: self.response.auxiliary_engine_init_script.clone(),
+        };
+        let spawned = thread::Builder::new().spawn(move || {
+            let mut cleanup = LiveWorkerCleanup {
+                id,
+                network: worker_network.clone(),
+                auxiliary: auxiliary.clone(),
+                finished: worker_actor.finished.clone(),
+            };
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -356,8 +691,8 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            let mut session = match rt.block_on(
-                PageSession::open_with_document_response_and_host_services(
+            let (mut session, root_target) = match rt.block_on(
+                PageSession::open_with_document_response_and_auxiliary_services(
                     &html,
                     &base,
                     &cookies,
@@ -377,9 +712,15 @@ impl Task for LiveOpenTask {
                     },
                     &engine_init_script,
                     Some(worker_network.clone()),
+                    AuxiliaryHostServices {
+                        bootstrap: auxiliary_bootstrap,
+                        root_bootstrap,
+                        events: auxiliary,
+                        policy: auxiliary_policy,
+                    },
                 ),
             ) {
-                Ok(s) => {
+                Ok(mut s) => {
                     if worker_network.is_closed() {
                         s.close();
                         let _ = open_tx.send(Err("Page session closed".into()));
@@ -392,26 +733,40 @@ impl Task for LiveOpenTask {
                         let _ = open_tx.send(Err(format!("navigation timeout after {timeout}ms")));
                         return;
                     }
-                    let _ = open_tx.send(Ok(()));
-                    s
+                    let root = match initialized_root_target(&mut s) {
+                        Ok(root) => root,
+                        Err(error) => {
+                            s.close();
+                            let _ = open_tx.send(Err(error));
+                            return;
+                        }
+                    };
+                    let auxiliary = s.auxiliary_event_log();
+                    cleanup.auxiliary = auxiliary.clone();
+                    worker_actor.opening.store(false, Ordering::Release);
+                    let _ = open_tx.send(Ok((root, auxiliary)));
+                    (s, root)
                 }
                 Err(e) => {
                     let _ = open_tx.send(Err(e));
                     return;
                 }
             };
-            let mut storage_work = false;
+            let legacy = root_target == LiveTarget::LegacyRoot;
+            let mut storage_work = session.has_pending_auxiliary_work();
             loop {
                 enum Ready {
-                    Job(Option<LiveJob>),
+                    Job(Option<LiveMessage>),
                     Storage,
                 }
-                let ready = if storage_work {
+                let ready = if !legacy && !session.has_owned_pages() {
+                    Ready::Job(rt.block_on(rx.recv()))
+                } else if storage_work {
                     rt.block_on(async {
                         tokio::select! {
                             biased;
                             job = rx.recv() => Ready::Job(job),
-                            _ = session.eval("") => Ready::Storage,
+                            _ = poll_actor_work(&mut session, legacy) => Ready::Storage,
                         }
                     })
                 } else {
@@ -424,7 +779,7 @@ impl Task for LiveOpenTask {
                         }
                     })
                 };
-                let job = match ready {
+                let message = match ready {
                     Ready::Job(Some(job)) => job,
                     Ready::Job(None) => break,
                     Ready::Storage => {
@@ -438,69 +793,276 @@ impl Task for LiveOpenTask {
                 // must not poll the runtime or advance the page event loop.
                 let _runtime_context = rt.enter();
                 session.flush_network_disposals();
+                let (target, job) = match message {
+                    LiveMessage::Target { target, job } => (target, job),
+                    LiveMessage::ConfigureContext(bootstrap, reply) => {
+                        let result = if worker_network.is_closed() {
+                            Err("live actor is closed".into())
+                        } else {
+                            session.configure_auxiliary_bootstrap(bootstrap)
+                        };
+                        let _ = reply.send(result);
+                        continue;
+                    }
+                    LiveMessage::Shutdown(reply) => {
+                        session.close();
+                        cleanup.finish();
+                        let _ = reply.send(());
+                        break;
+                    }
+                };
+                let primary_result = match target {
+                    LiveTarget::LegacyRoot => Ok(true),
+                    LiveTarget::Auxiliary(id) => session.target_is_primary(id),
+                };
+                let primary = match primary_result {
+                    Ok(primary) => primary,
+                    Err(error) if job.requires_live_target() => {
+                        job.reject(error);
+                        continue;
+                    }
+                    Err(_) => false,
+                };
+                let cancellation = worker_cancellations
+                    .lock()
+                    .unwrap()
+                    .entry(target)
+                    .or_insert_with(|| tokio::sync::watch::channel(false).0)
+                    .subscribe();
+                if *cancellation.borrow() && job.requires_live_target() {
+                    job.reject("Native auxiliary target closed".into());
+                    continue;
+                }
                 match job {
                     LiveJob::Content(html, wait_until, timeout, reply) => {
-                        let result = rt.block_on(session.set_content(&html, &wait_until, timeout));
+                        let result = if primary {
+                            run_target_job(
+                                &rt,
+                                cancellation.clone(),
+                                session.set_content(&html, &wait_until, timeout),
+                            )
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                run_target_job(
+                                    &rt,
+                                    cancellation.clone(),
+                                    session.set_target_content(
+                                        native_target,
+                                        &html,
+                                        &wait_until,
+                                        timeout,
+                                    ),
+                                )
+                            })
+                        };
                         storage_work |= wait_until == "domcontentloaded" && result.is_ok();
                         let _ = reply.send(result);
                     }
+                    LiveJob::Navigate(url, history, options, reply) => {
+                        let _ = reply.send(target.with_auxiliary(|native_target| {
+                            run_target_job(
+                                &rt,
+                                cancellation.clone(),
+                                session.navigate_target_with_options(
+                                    native_target,
+                                    &url,
+                                    &history,
+                                    &options,
+                                ),
+                            )
+                        }));
+                    }
+                    LiveJob::ConfigureTarget(bootstrap, reply) => {
+                        let _ = reply.send(target.with_auxiliary(|native_target| {
+                            session.configure_target_bootstrap(native_target, bootstrap)
+                        }));
+                    }
                     LiveJob::CleanupNetwork => {}
                     LiveJob::Resize(width, height, reply) => {
-                        let result = rt
-                            .block_on(session.set_viewport(width, height))
-                            .map(|_| String::new());
+                        let result = if primary {
+                            run_target_job(
+                                &rt,
+                                cancellation.clone(),
+                                session.set_viewport(width, height),
+                            )
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                run_target_job(
+                                    &rt,
+                                    cancellation.clone(),
+                                    session.resize_target(native_target, width, height),
+                                )
+                            })
+                        }
+                        .map(|_| String::new());
                         let _ = reply.send(result);
                     }
                     LiveJob::Eval(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval(&script)));
+                        let _ = reply.send(if primary {
+                            run_target_job(&rt, cancellation.clone(), session.eval(&script))
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                run_target_job(
+                                    &rt,
+                                    cancellation.clone(),
+                                    session.eval_target_script(native_target, &script),
+                                )
+                            })
+                        });
                     }
                     LiveJob::EngineEval(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval_engine(&script)));
+                        let _ = reply.send(if primary {
+                            run_target_job(&rt, cancellation.clone(), session.eval_engine(&script))
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                run_target_job(
+                                    &rt,
+                                    cancellation.clone(),
+                                    session.eval_target_engine(native_target, &script, false),
+                                )
+                            })
+                        });
                     }
                     LiveJob::EngineCollect(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.collect_engine(&script)));
+                        let _ = reply.send(if primary {
+                            run_target_job(
+                                &rt,
+                                cancellation.clone(),
+                                session.collect_engine(&script),
+                            )
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                run_target_job(
+                                    &rt,
+                                    cancellation.clone(),
+                                    session.eval_target_engine(native_target, &script, true),
+                                )
+                            })
+                        });
                     }
                     LiveJob::EngineRead(script, reply) => {
-                        let _ = reply.send(session.read_engine(&script));
+                        let _ = reply.send(if primary {
+                            session.read_engine(&script)
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                session.read_target_engine(native_target, &script)
+                            })
+                        });
                     }
                     LiveJob::Expression(script, engine, reply) => {
-                        let result = if engine {
-                            rt.block_on(session.eval_engine_expression(&script))
+                        let result = if !primary {
+                            target.with_auxiliary(|native_target| {
+                                run_target_job(
+                                    &rt,
+                                    cancellation.clone(),
+                                    session.eval_target_expression(
+                                        native_target,
+                                        &script,
+                                        engine,
+                                        false,
+                                    ),
+                                )
+                            })
+                        } else if engine {
+                            run_target_job(
+                                &rt,
+                                cancellation.clone(),
+                                session.eval_engine_expression(&script),
+                            )
                         } else {
-                            rt.block_on(session.eval_expression(&script))
+                            run_target_job(
+                                &rt,
+                                cancellation.clone(),
+                                session.eval_expression(&script),
+                            )
                         };
                         let _ = reply.send(result);
                     }
                     LiveJob::ExpressionTracked(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval_expression_tracked(&script)));
+                        let _ = reply.send(if primary {
+                            run_target_job(
+                                &rt,
+                                cancellation.clone(),
+                                session.eval_expression_tracked(&script),
+                            )
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                run_target_job(
+                                    &rt,
+                                    cancellation.clone(),
+                                    session.eval_target_expression_tracked(native_target, &script),
+                                )
+                            })
+                        });
                     }
                     LiveJob::Serialize(reply) => {
-                        let _ = reply.send(session.serialize_for_driver());
+                        let _ = reply.send(if primary {
+                            Ok(session.serialize_for_driver())
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                session.serialize_target_for_driver(native_target)
+                            })
+                        });
                     }
                     LiveJob::SetCookies(cookies, reply) => {
                         session.set_cookies(&cookies);
-                        let _ = reply.send(());
+                        let _ = reply.send(Ok(()));
                     }
                     LiveJob::Cookies(reply) => {
-                        let _ = reply.send(session.cookies_for_driver());
+                        let _ = reply.send(if primary {
+                            Ok(session.cookies_for_driver())
+                        } else {
+                            target.with_auxiliary(|native_target| {
+                                session.cookies_target_for_driver(native_target)
+                            })
+                        });
                     }
                     LiveJob::Close(reply) => {
-                        session.close();
-                        let _ = reply.send(());
-                        break;
+                        if target == LiveTarget::LegacyRoot {
+                            session.close();
+                            cleanup.finish();
+                            let _ = reply.send(Ok(()));
+                            break;
+                        }
+                        match target
+                            .with_auxiliary(|native_target| session.close_target(native_target))
+                        {
+                            Ok(alive) => {
+                                if !alive {
+                                    session.close();
+                                    cleanup.finish();
+                                    let _ = reply.send(Ok(()));
+                                    break;
+                                }
+                                let _ = reply.send(Ok(()));
+                            }
+                            Err(error) => {
+                                let _ = reply.send(Err(error));
+                            }
+                        }
                     }
                 }
+                storage_work |= session.has_pending_auxiliary_work();
             }
         });
+        if let Err(error) = spawned {
+            finish_actor_without_session(&actor);
+            return Err(Error::from_reason(format!(
+                "live actor thread could not start: {error}"
+            )));
+        }
         let opened = open_rx
             .recv()
             .map_err(|_| "live session thread died during open".to_owned())
             .and_then(|value| value);
-        if let Err(error) = opened {
-            opening_networks().lock().unwrap().remove(&id);
-            network.close();
-            return Err(Error::from_reason(error));
-        }
+        let (root, auxiliary) = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                opening_networks().lock().unwrap().remove(&id);
+                network.close();
+                return Err(Error::from_reason(error));
+            }
+        };
         let mut live = live_registry()
             .lock()
             .map_err(|_| Error::from_reason("session registry poisoned"))?;
@@ -509,11 +1071,35 @@ impl Task for LiveOpenTask {
             .map_err(|_| Error::from_reason("session registry poisoned"))?;
         if network.is_closed() || reserved.is_some() && !opening.contains_key(&id) {
             let (reply, _) = sync_channel(1);
-            let _ = tx.send(LiveJob::Close(reply));
+            let _ = tx.send(LiveMessage::Shutdown(reply));
             return Err(Error::from_reason("Page session closed"));
         }
-        live.insert(id, LiveConnection { tx, network });
+        let auxiliary_root = match root {
+            LiveTarget::Auxiliary(id) => Some(id.to_string()),
+            LiveTarget::LegacyRoot => None,
+        };
+        debug_assert_eq!(actor.auxiliary.root(), auxiliary_root);
+        debug_assert_eq!(auxiliary.root(), actor.auxiliary.root());
+        if auxiliary_root
+            .as_deref()
+            .and_then(|id| actor.auxiliary.info(id))
+            .is_some_and(|info| info.closed)
+        {
+            opening.remove(&id);
+            self.opening_guard.committed = true;
+            return Err(Error::from_reason(
+                "Page target closed during initialization",
+            ));
+        }
+        live.insert(
+            id,
+            LiveConnection {
+                actor,
+                target: root,
+            },
+        );
         opening.remove(&id);
+        self.opening_guard.committed = true;
         Ok(id)
     }
 
@@ -542,7 +1128,11 @@ pub fn live_open(
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
     crate::ensure_render_init();
     let state = crate::request_state(request_state_id)?;
+    let response = crate::document_response::parse(document_response)?;
+    let (_, receiver, opening_guard) = prepare_live_actor(response.host_network_log)?;
     Ok(AsyncTask::new(LiveOpenTask {
+        receiver: Some(receiver),
+        opening_guard,
         max_resource_bytes,
         initial_timeout_ms: timeout_ms.filter(|timeout| *timeout > 0),
         window_timer_mode: if real_time_timers.unwrap_or(false) {
@@ -550,7 +1140,7 @@ pub fn live_open(
         } else {
             WindowTimerMode::Virtual
         },
-        response: crate::document_response::parse(document_response)?,
+        response,
         init_script: init_script.unwrap_or_default(),
         engine_init_script: engine_init_script.unwrap_or_default(),
         html,
@@ -857,7 +1447,8 @@ pub fn live_serialize(id: u32) -> Result<String> {
     let (reply, rx) = sync_channel(1);
     live_send(id, LiveJob::Serialize(reply)).map_err(Error::from_reason)?;
     rx.recv()
-        .map_err(|_| Error::from_reason("live session dropped serialize reply"))
+        .map_err(|_| Error::from_reason("live session dropped serialize reply"))?
+        .map_err(Error::from_reason)
 }
 
 /// The live session's cookies (storageState JSON) — carries the session a later
@@ -867,7 +1458,8 @@ pub fn live_cookies(id: u32) -> Result<String> {
     let (reply, rx) = sync_channel(1);
     live_send(id, LiveJob::Cookies(reply)).map_err(Error::from_reason)?;
     rx.recv()
-        .map_err(|_| Error::from_reason("live session dropped cookies reply"))
+        .map_err(|_| Error::from_reason("live session dropped cookies reply"))?
+        .map_err(Error::from_reason)
 }
 
 /// Replace the live context cookie jar without reopening its document.
@@ -876,12 +1468,18 @@ pub fn live_set_cookies(id: u32, cookies: String) -> Result<()> {
     let (reply, rx) = sync_channel(1);
     live_send(id, LiveJob::SetCookies(cookies, reply)).map_err(Error::from_reason)?;
     rx.recv()
-        .map_err(|_| Error::from_reason("live session dropped cookie update reply"))
+        .map_err(|_| Error::from_reason("live session dropped cookie update reply"))?
+        .map_err(Error::from_reason)
 }
 
-/// Close a live session: reset the binding, drop the isolate, unregister (sync).
+/// Close one actual target; only its final actor close returns a lifecycle snapshot.
 #[napi]
-pub fn live_close(id: u32) -> Result<()> {
+pub fn live_close(id: u32) -> Result<Option<String>> {
+    if live_actor(id).is_ok_and(|actor| actor.opening.load(Ordering::Acquire)) {
+        return Err(Error::from_reason(
+            "live actor is opening; use actor close to cancel initialization",
+        ));
+    }
     let (tx, opening) = {
         let mut live = live_registry()
             .lock()
@@ -895,11 +1493,305 @@ pub fn live_close(id: u32) -> Result<()> {
         log.close();
     }
     if let Some(connection) = tx {
-        connection.network.close();
+        let _closing = ActiveActorClose::new(connection.actor.clone());
+        connection
+            .actor
+            .cancellations
+            .lock()
+            .unwrap()
+            .entry(connection.target)
+            .or_insert_with(|| tokio::sync::watch::channel(false).0)
+            .send_replace(true);
         let (reply, rx) = sync_channel(1);
-        if connection.tx.send(LiveJob::Close(reply)).is_ok() {
-            let _ = rx.recv();
+        if connection
+            .actor
+            .tx
+            .send(LiveMessage::Target {
+                target: connection.target,
+                job: LiveJob::Close(reply),
+            })
+            .is_ok()
+        {
+            rx.recv()
+                .map_err(|_| Error::from_reason("live session dropped close reply"))?
+                .map_err(Error::from_reason)?;
+        }
+        if connection.actor.auxiliary.is_closed() {
+            return Ok(Some(auxiliary_snapshot(&connection.actor).to_string()));
         }
     }
-    Ok(())
+    Ok(None)
+}
+
+/// Inspect and drain the one actor-owned lifecycle queue, including pre-open events.
+#[napi]
+pub fn live_auxiliary_state(id: u32) -> Result<String> {
+    Ok(auxiliary_snapshot(live_actor(id)?.as_ref()).to_string())
+}
+
+fn auxiliary_snapshot(actor: &LiveActor) -> serde_json::Value {
+    let revision = actor.auxiliary.revision().to_string();
+    serde_json::json!({
+        "revision": revision,
+        "capability": actor.auxiliary.capability(),
+        "actor": actor.id,
+        "root": actor.auxiliary.root(),
+        "pages": actor.auxiliary.pages(),
+        "events": actor.auxiliary.take(),
+        "closed": actor.auxiliary.is_closed(),
+        "opening": actor.opening.load(Ordering::Acquire),
+    })
+}
+
+fn parse_auxiliary_target(target: &str) -> Result<u64> {
+    let id = target
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid native auxiliary target"))?;
+    if id.to_string() != target {
+        return Err(Error::from_reason("Invalid native auxiliary target"));
+    }
+    Ok(id)
+}
+
+/// Adopt only an actual live producer target into an idempotent numeric alias.
+#[napi]
+pub fn live_auxiliary_adopt(id: u32, target: String) -> Result<u32> {
+    let actor = live_actor(id)?;
+    let native_target = LiveTarget::Auxiliary(parse_auxiliary_target(&target)?);
+    let mut live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    if actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .get(&native_target)
+        .is_some_and(|cancel| *cancel.borrow())
+    {
+        return Err(Error::from_reason("Native auxiliary target is closing"));
+    }
+    if actor.auxiliary.is_closed() || actor.auxiliary.info(&target).is_none_or(|info| info.closed) {
+        return Err(Error::from_reason(
+            "No live native auxiliary target in this actor",
+        ));
+    }
+    if let Some((&alias, _)) = live.iter().find(|(_, connection)| {
+        connection.actor.id == actor.id && connection.target == native_target
+    }) {
+        return Ok(alias);
+    }
+    let alias = if actor.auxiliary.root().as_deref() == Some(target.as_str()) {
+        actor.id
+    } else {
+        LIVE_NEXT.fetch_add(1, Ordering::Relaxed)
+    };
+    live.insert(
+        alias,
+        LiveConnection {
+            actor,
+            target: native_target,
+        },
+    );
+    Ok(alias)
+}
+
+/// Wait without queueing behind a page that is itself waiting for transport IO.
+#[napi]
+pub fn live_auxiliary_wait(env: Env, id: u32, revision: Option<String>) -> Result<napi::JsObject> {
+    // Capture the trusted log before returning to JS: an immediate close may
+    // unregister the actor before the asynchronous waiter starts polling.
+    let actor = live_actor(id)?;
+    let observed = match revision {
+        Some(revision) => {
+            let parsed = revision
+                .parse::<u64>()
+                .map_err(|_| Error::from_reason("Invalid auxiliary revision"))?;
+            if parsed.to_string() != revision {
+                return Err(Error::from_reason("Invalid auxiliary revision"));
+            }
+            parsed
+        }
+        None => actor.auxiliary.revision(),
+    };
+    env.spawn_future(async move {
+        let closed = actor.auxiliary.wait_for_revision(observed).await;
+        Ok(
+            if closed && actor.closing_calls.load(Ordering::Acquire) == 0 {
+                serde_json::json!({"closed": true, "finalState": auxiliary_snapshot(&actor)})
+            } else {
+                serde_json::json!({"closed": closed})
+            }
+            .to_string(),
+        )
+    })
+}
+
+/// Tear down all actual targets, including auxiliaries not yet adopted by the host.
+#[napi]
+pub fn live_actor_close(id: u32) -> Result<Option<String>> {
+    let actor = match live_actor(id) {
+        Ok(actor) => actor,
+        Err(error) if error.reason == "no such live actor" => {
+            if let Some(log) = opening_networks()
+                .lock()
+                .map_err(|_| Error::from_reason("session registry poisoned"))?
+                .remove(&id)
+            {
+                log.close();
+            }
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
+    let _closing = ActiveActorClose::new(actor.clone());
+    actor.network.close();
+    if !actor.started.load(Ordering::Acquire) {
+        finish_actor_without_session(&actor);
+        return Ok(Some(auxiliary_snapshot(&actor).to_string()));
+    }
+    for cancellation in actor.cancellations.lock().unwrap().values() {
+        cancellation.send_replace(true);
+    }
+    let (reply, _) = sync_channel(1);
+    let _ = actor.tx.send(LiveMessage::Shutdown(reply));
+    wait_for_actor_cleanup(&actor)?;
+    Ok(Some(auxiliary_snapshot(&actor).to_string()))
+}
+
+pub struct LiveNavigateTask {
+    id: u32,
+    url: String,
+    history: String,
+    options: String,
+}
+
+#[napi]
+impl Task for LiveNavigateTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(
+            self.id,
+            LiveJob::Navigate(
+                std::mem::take(&mut self.url),
+                self.history.clone(),
+                std::mem::take(&mut self.options),
+                reply,
+            ),
+        )
+        .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live target dropped navigation reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Navigate the same actual target in its owning isolate, retaining WindowProxy identity.
+#[napi]
+pub fn live_navigate_target(
+    id: u32,
+    url: String,
+    history: Option<String>,
+    options: Option<String>,
+) -> Result<AsyncTask<LiveNavigateTask>> {
+    let history = history.unwrap_or_else(|| "push".into());
+    if !matches!(history.as_str(), "push" | "replace" | "back" | "forward") {
+        return Err(Error::from_reason("Invalid auxiliary history operation"));
+    }
+    Ok(AsyncTask::new(LiveNavigateTask {
+        id,
+        url,
+        history,
+        options: options.unwrap_or_else(|| "{}".into()),
+    }))
+}
+
+pub struct LiveConfigureTask {
+    actor: Arc<LiveActor>,
+    target: Option<LiveTarget>,
+    bootstrap: AuxiliaryBootstrap,
+}
+
+#[napi]
+impl Task for LiveConfigureTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> {
+        if self.actor.opening.load(Ordering::Acquire) {
+            return Err(Error::from_reason("live actor is opening"));
+        }
+        if self.actor.network.is_closed() {
+            return Err(Error::from_reason("live actor is closed"));
+        }
+        let (reply, rx) = sync_channel(1);
+        let bootstrap = std::mem::take(&mut self.bootstrap);
+        let message = if let Some(target) = self.target {
+            self.actor
+                .cancellations
+                .lock()
+                .map_err(|_| Error::from_reason("actor cancellation registry poisoned"))?
+                .entry(target)
+                .or_insert_with(|| tokio::sync::watch::channel(false).0);
+            LiveMessage::Target {
+                target,
+                job: LiveJob::ConfigureTarget(bootstrap, reply),
+            }
+        } else {
+            LiveMessage::ConfigureContext(bootstrap, reply)
+        };
+        self.actor
+            .tx
+            .send(message)
+            .map_err(|_| Error::from_reason("live actor worker gone"))?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live actor dropped bootstrap reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Replace context-only initialization for future actual auxiliary documents.
+#[napi]
+pub fn live_auxiliary_configure(
+    id: u32,
+    init_script: String,
+    engine_init_script: String,
+) -> Result<AsyncTask<LiveConfigureTask>> {
+    Ok(AsyncTask::new(LiveConfigureTask {
+        actor: live_actor(id)?,
+        target: None,
+        bootstrap: AuxiliaryBootstrap {
+            init_script,
+            engine_init_script,
+        },
+    }))
+}
+
+/// Retain Page-only initialization for this target's own future navigation.
+#[napi]
+pub fn live_target_configure(
+    id: u32,
+    init_script: String,
+    engine_init_script: String,
+) -> Result<AsyncTask<LiveConfigureTask>> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    let connection = live
+        .get(&id)
+        .ok_or_else(|| Error::from_reason("no such live session"))?;
+    Ok(AsyncTask::new(LiveConfigureTask {
+        actor: connection.actor.clone(),
+        target: Some(connection.target),
+        bootstrap: AuxiliaryBootstrap {
+            init_script,
+            engine_init_script,
+        },
+    }))
 }

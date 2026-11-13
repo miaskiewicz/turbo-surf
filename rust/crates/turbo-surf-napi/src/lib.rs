@@ -21,12 +21,13 @@ mod upload_mime;
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
 pub use session::{
-    live_close, live_cookies, live_eval, live_eval_engine, live_eval_engine_expression,
-    live_eval_expression, live_eval_expression_tracked, live_network_log,
-    live_network_log_acknowledge, live_network_log_create, live_network_log_discard_handles,
-    live_network_log_publish_intercepted, live_network_log_wait, live_network_log_wake, live_open,
-    live_read_engine, live_read_engine_async, live_resize, live_serialize, live_set_content,
-    live_set_cookies,
+    live_actor_close, live_auxiliary_adopt, live_auxiliary_configure, live_auxiliary_state,
+    live_auxiliary_wait, live_close, live_cookies, live_eval, live_eval_engine,
+    live_eval_engine_expression, live_eval_expression, live_eval_expression_tracked,
+    live_navigate_target, live_network_log, live_network_log_acknowledge, live_network_log_create,
+    live_network_log_discard_handles, live_network_log_publish_intercepted, live_network_log_wait,
+    live_network_log_wake, live_open, live_read_engine, live_read_engine_async, live_resize,
+    live_serialize, live_set_content, live_set_cookies, live_target_configure,
 };
 
 use napi::bindgen_prelude::*;

@@ -100,8 +100,8 @@ export function liveSerialize(id: number): string;
 /** The live session's cookies (storageState JSON), incl. HttpOnly session cookies. */
 export function liveCookies(id: number): string;
 export function liveSetCookies(id: number, cookies: string): void;
-/** Close a live session (reset binding, drop isolate, unregister). */
-export function liveClose(id: number): void;
+/** Close this actual target; final actor close returns its trusted lifecycle snapshot JSON. */
+export function liveClose(id: number): string | null;
 
 /** Transform TS/JSX source → classic JS (swc). */
 export function transform(src: string, ts: boolean, jsx: boolean): string;
@@ -305,3 +305,20 @@ export function liveSetContent(
 ): Promise<string>;
 
 export function liveNetworkLogPublishIntercepted(id: number, header: string, body: Buffer): void;
+
+/** One lifecycle consumer per actor; target IDs are trusted decimal strings. */
+export function liveAuxiliaryState(id: number): string;
+/** Idempotently alias an existing producer target in the same actor. */
+export function liveAuxiliaryAdopt(id: number, target: string): number;
+/** Resolve with JSON {closed:boolean,finalState?:object}; finalState retains the final actual lifecycle events after actor removal. */
+export function liveAuxiliaryWait(id: number, revision?: string): Promise<string>;
+/** Close every target and release the shared actor; return final lifecycle snapshot JSON, or null if already gone. */
+export function liveActorClose(id: number): string | null;
+
+/** Navigate the alias' actual target inside its existing actor. */
+export function liveNavigateTarget(id: number, url: string, history?: "push" | "replace" | "back" | "forward", optionsJson?: string): Promise<string>;
+
+/** Replace context-only bootstrap for later auxiliary documents; no guest evaluation. */
+export function liveAuxiliaryConfigure(actor: number, initScript: string, engineInitScript: string): Promise<void>;
+/** Replace Page-only bootstrap for this actual target's own later navigation. */
+export function liveTargetConfigure(id: number, initScript: string, engineInitScript: string): Promise<void>;

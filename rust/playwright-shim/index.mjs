@@ -3066,12 +3066,16 @@ return String(globalThis.__RESULT ?? ""); })()`,
   _updateDialogPolicy() {
     const session = this._session ?? this._openingNetworkId;
     if (this._closed || session == null || !native.liveDialogConfigure) return;
-    native.liveDialogConfigure(session, Boolean(this._listeners.get("dialog")?.length));
-    native.liveDialogConfigure(
-      session,
-      Boolean(this._context._listeners.get("dialog")?.length),
-      true,
-    );
+    const pageEnabled = Boolean(this._listeners.get("dialog")?.length);
+    const contextEnabled = Boolean(this._context._listeners.get("dialog")?.length);
+    // A new broker already auto-dismisses dialogs. Unrelated event subscriptions
+    // must not configure native UI policy or require a live dialog channel.
+    if (!pageEnabled && !contextEnabled && this._nativeDialogPolicy == null) return;
+    const policy = JSON.stringify([session, pageEnabled, contextEnabled]);
+    if (policy === this._nativeDialogPolicy) return;
+    native.liveDialogConfigure(session, pageEnabled);
+    native.liveDialogConfigure(session, contextEnabled, true);
+    this._nativeDialogPolicy = policy;
   }
 
   _receiveDialog(entry) {

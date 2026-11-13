@@ -6795,6 +6795,12 @@ fn op_native_window_proxy() -> bool {
     true
 }
 
+#[op2]
+fn op_producer_window_proxy(scope: &mut v8::PinScope) -> bool {
+    let context = scope.get_current_context();
+    turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context)
+}
+
 #[op2(fast)]
 fn op_window_message_pending(state: &mut OpState) -> bool {
     !state.borrow::<FrameContexts>().messages.is_empty()
@@ -8816,6 +8822,7 @@ deno_core::extension!(
         op_window_media_state,
         op_window_message_pending,
         op_native_window_proxy,
+        op_producer_window_proxy,
         auxiliary_host::op_auxiliary_anchor_default,
         op_native_location_installed,
         op_location_navigation_sandboxed,
@@ -13341,10 +13348,15 @@ __G.domSig = (() => {
       ops.op_dispatch_host_event(event, el);
     }, 0);
   };
+  // The producer's Window interceptors derive these properties from native children.
+  const producerFrameProperties = ops.op_producer_window_proxy();
   let frameCount = globalThis.length || 0;
-  for (let i = 0; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
-  globalThis.length = 0; globalThis.frames = globalThis;
+  if (!producerFrameProperties) {
+    for (let i = 0; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
+    globalThis.length = 0; globalThis.frames = globalThis;
+  }
   const refreshFrameTree = () => {
+    if (producerFrameProperties) return;
     const windows = ops.op_window_child_frames(__document);
     for (let i = windows.length; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
     for (let index = 0; index < windows.length; index++) {
@@ -13403,7 +13415,7 @@ __G.domSig = (() => {
   __G.executeFrameModule = index => {const element=__frameScriptElements[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
   // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
   __G.configureFrame = (metadata, parentWin, hostEl) => {
-    for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
+    if (!producerFrameProperties) for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
       const getter=__documentFunction(function(){if(!ops.op_surf_is_window(this))throw new __exceptionTypeError("Illegal invocation");const value=read(this);return name==="frameElement"?value:frameWindowView(value);},"get "+name,0);
       Object.defineProperty(globalThis,name,{__proto__:null,get:getter,configurable:true,enumerable:true});
     }
@@ -13414,7 +13426,7 @@ __G.domSig = (() => {
     __documentRuntimeState.contentType = metadata.contentType || "text/html";
     __initializeDocumentBase();
     __documentRuntimeState.referrer = ops.op_document_referrer(__document);
-    globalThis.frames = globalThis;
+    if (!producerFrameProperties) globalThis.frames = globalThis;
     installFrameFactory(globalThis, document, metadata.depth + 1);
   };
   function fireFrameEvent(target, type, bubbles) {

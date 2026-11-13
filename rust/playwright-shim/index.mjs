@@ -1959,7 +1959,7 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
     // must NOT also perform the browser default action (e.g. navigate an <a href="#">
     // whose React onClick toggles state) — that would reload and wipe the new state.
     const nativeDefault = button === 0 && !clickEv.defaultPrevented &&
-      typeof __tsNs.dispatchAnchorDefault === "function" && __tsNs.dispatchAnchorDefault(el);
+      typeof __tsNs.dispatchAnchorDefault === "function" && __tsNs.dispatchAnchorDefault(el, clickEv);
     globalThis.__RESULT = clickEv.defaultPrevented ? "PREVENTED" : nativeDefault ? "NATIVE_DEFAULT" : "OK";
   } })();`;
 }
@@ -4839,9 +4839,10 @@ function makeMouse(page) {
       await run(`(() => {
         const t = ${targetExpr()};
         if (!t) return;
-        const accepted = t.dispatchEvent(new MouseEvent(${JSON.stringify(state.button === 0 ? "click" : "auxclick")}, ${base()}));
+        const clickEvent = new MouseEvent(${JSON.stringify(state.button === 0 ? "click" : "auxclick")}, ${base()});
+        const accepted = t.dispatchEvent(clickEvent);
         if (accepted && ${state.button === 0} && typeof __tsNs.dispatchAnchorDefault === "function")
-          __tsNs.dispatchAnchorDefault(t);
+          __tsNs.dispatchAnchorDefault(t, clickEvent);
       })();`);
     }
   }

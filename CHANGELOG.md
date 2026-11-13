@@ -11,6 +11,18 @@ branch.
 
 ### Engine and performance
 
+- Implement native per-context offline conditions after cache lookup, preserving
+  already-started HTTP responses and independent API request contexts. Owned
+  frames receive trusted connectivity events; established WebSocket frames wait
+  for reconnection (#508).
+- Yield Node while asynchronous locator reads wait for the native actor, without
+  pumping unrelated host callbacks or relaxing read deadlines (#515, #517).
+- Recognize native and supported ARIA disabled states, including inherited state
+  and explicit overrides, in locator actionability and assertions (#514).
+- Honor request/response waiter timeout defaults, explicit overrides and zero;
+  isolate worker-hook deadlines from test bodies while preserving the shared
+  beforeEach/body budget (#513, #516).
+
 - Use wall-clock timer deadlines in Playwright shim sessions so consecutive
   keystrokes preserve editor character queries instead of expiring future
   callbacks between digits. Direct native callers retain virtual timers unless
@@ -306,9 +318,9 @@ branch.
 - Send page script/module/frame/timer diagnostics to stderr and emit uncaught page
   exceptions as `pageerror`. Context-isolation regressions avoid nested registrar
   deadlocks (#302, #406, #299).
-- Reject unsupported reporter configurations, offline emulation, and trace/video
-  recording requests explicitly instead of silently ignoring them or inventing
-  artifacts (#455, #306, #465).
+- Reject unsupported reporter configurations and trace/video recording requests
+  explicitly instead of silently ignoring them or inventing artifacts (#455, #465).
+  Offline emulation now uses native context conditions (#306, #508).
 
 ## [0.8.2] - 2026-11-10
 

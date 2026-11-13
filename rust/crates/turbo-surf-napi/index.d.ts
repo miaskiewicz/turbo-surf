@@ -87,7 +87,12 @@ export function liveEvalExpressionTracked(id: number, expression: string): Promi
 /** Reserve the host transport queue before initial hydration. */
 export function liveNetworkLogCreate(): number;
 export function liveDialogConfigure(id: number, enabled: boolean, contextWide?: boolean): void;
-export function liveDialogRespond(id: number, dialog: string, accepted: boolean, promptText?: number[]): void;
+export function liveDialogRespond(
+  id: number,
+  dialog: string,
+  accepted: boolean,
+  promptText?: number[],
+): void;
 export function liveDialogCancel(id: number): void;
 /** Drain {entries, revision} without entering a body-awaiting isolate. */
 export function liveNetworkLog(id: number): Promise<string>;
@@ -321,12 +326,25 @@ export function liveAuxiliaryWait(id: number, revision?: string): Promise<string
 export function liveActorClose(id: number): string | null;
 
 /** Navigate the alias' actual target inside its existing actor. */
-export function liveNavigateTarget(id: number, url: string, history?: "push" | "replace" | "back" | "forward", optionsJson?: string): Promise<string>;
+export function liveNavigateTarget(
+  id: number,
+  url: string,
+  history?: "push" | "replace" | "back" | "forward",
+  optionsJson?: string,
+): Promise<string>;
 
 /** Replace context-only bootstrap for later auxiliary documents; no guest evaluation. */
-export function liveAuxiliaryConfigure(actor: number, initScript: string, engineInitScript: string): Promise<void>;
+export function liveAuxiliaryConfigure(
+  actor: number,
+  initScript: string,
+  engineInitScript: string,
+): Promise<void>;
 /** Replace Page-only bootstrap for this actual target's own later navigation. */
-export function liveTargetConfigure(id: number, initScript: string, engineInitScript: string): Promise<void>;
+export function liveTargetConfigure(
+  id: number,
+  initScript: string,
+  engineInitScript: string,
+): Promise<void>;
 
 /** Send-only actual actor location/permission update; does not execute page JavaScript. */
 export declare function liveActorConfigureEmulation(actor: number, optionsJson: string): void;

@@ -3312,6 +3312,20 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
     if let Some(res) = call_sync_session_tool(session, name, args) {
         return res;
     }
+    boxed_tool_call(session, name, args).await
+}
+
+// Construct large dispatch state before polling it, so the construction frame
+// does not occupy the same stack as a nested V8 runtime initialization.
+fn boxed_tool_call<'a>(
+    session: &'a mut Session,
+    name: &'a str,
+    args: &'a Value,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<Value, String>> + 'a>> {
+    Box::pin(call_async_tool(session, name, args))
+}
+
+async fn call_async_tool(session: &mut Session, name: &str, args: &Value) -> Result<Value, String> {
     let sel = || arg_str(args, "selector").ok_or_else(|| format!("{name}: missing 'selector'"));
     let val = || arg_str(args, "value").unwrap_or("").to_string();
     let script = || arg_str(args, "script").ok_or_else(|| format!("{name}: missing 'script'"));

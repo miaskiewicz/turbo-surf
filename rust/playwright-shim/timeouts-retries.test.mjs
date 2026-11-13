@@ -105,3 +105,50 @@ test("worker dispatch scheduling does not consume the test execution budget", ()
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(r.events, "ran\n");
 });
+
+test("worker hook timeout override does not leak into the following test body", () => {
+  const r = suite(
+    `test.beforeAll(async()=>{test.setTimeout(1000);mark('hook');await new Promise(r=>setTimeout(r,150));});test('body',async({},info)=>{mark('body:'+info.timeout);await new Promise(r=>setTimeout(r,250));mark('late');});`,
+    { timeout: 100 },
+  );
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.events, "hook\nbody:100\n");
+  assert.match(r.stdout + r.stderr, /Timeout.*100ms/i);
+});
+
+test("time spent in an extended worker hook does not consume the test body budget", () => {
+  const r = suite(
+    `test.beforeAll(async()=>{test.setTimeout(1000);await new Promise(r=>setTimeout(r,150));mark('hook');});test('body',async({},info)=>{mark('body:'+info.timeout);await new Promise(r=>setTimeout(r,40));mark('done');});`,
+    { timeout: 100 },
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.events, "hook\nbody:100\ndone\n");
+});
+
+test("separate worker hooks each retain their configured timeout budget", () => {
+  const r = suite(
+    `test.beforeAll(async()=>{await new Promise(r=>setTimeout(r,70));mark('first');});test.beforeAll(async()=>{await new Promise(r=>setTimeout(r,70));mark('second');});test('body',()=>mark('body'));`,
+    { timeout: 100 },
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.events, "first\nsecond\nbody\n");
+});
+
+test("beforeEach and the body share one elapsed test budget", () => {
+  const r = suite(
+    `test.beforeEach(async()=>{await new Promise(r=>setTimeout(r,70));mark('before');});test('body',async()=>{mark('body');await new Promise(r=>setTimeout(r,70));mark('late');});`,
+    { timeout: 100 },
+  );
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.events, "before\nbody\n");
+  assert.match(r.stdout + r.stderr, /Timeout.*100ms/i);
+});
+
+test("beforeEach runtime timeout updates persist through the body", () => {
+  const r = suite(
+    `test.beforeEach(async()=>{test.setTimeout(500);await new Promise(r=>setTimeout(r,100));mark('before');});test('body',async({},info)=>{mark('body:'+info.timeout);await new Promise(r=>setTimeout(r,100));mark('done');});`,
+    { timeout: 100 },
+  );
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.events, "before\nbody:500\ndone\n");
+});

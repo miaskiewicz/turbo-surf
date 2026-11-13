@@ -244,7 +244,9 @@ Test callbacks run in a persistent subprocess per test file. Successful tests
 share module state and worker fixtures. Failed attempts restart that process;
 `testInfo.retry` identifies the fresh attempt. Config/project `timeout` and
 `retries`, `test.describe.configure`, and runtime `test.setTimeout` /
-`testInfo.setTimeout` are honored (zero disables the test deadline).
+`testInfo.setTimeout` are honored (zero disables the test deadline). Each `beforeAll`
+hook and the test start a separate budget; `beforeEach` and the body share the
+test budget, including runtime updates.
 A deadline terminates the subprocess, including synchronous runaway code, before
 any retry starts. A terminated process cannot run remaining JavaScript cleanup;
 ordinary failures await fixture and hook cleanup before restarting.

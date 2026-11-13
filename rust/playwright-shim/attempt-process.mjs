@@ -114,9 +114,9 @@ function runAttempt(worker, id, retry, timeout) {
       if (timeout) timer = setTimeout(expire, Math.max(1, timeout - (Date.now() - started)));
     };
     const message = (msg) => {
-      if (msg.kind === "started") {
+      if (msg.kind === "started" || msg.kind === "phase") {
         started = msg.startedAt;
-        reset(timeout);
+        reset(msg.kind === "phase" ? msg.timeout : timeout);
       }
       if (msg.kind === "timeout") reset(msg.timeout);
       if (msg.kind === "result") {

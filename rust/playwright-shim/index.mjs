@@ -6187,8 +6187,14 @@ async function finishAttempt(plan, fixtures, info, errors) {
   }
 }
 
+function startAttemptPhase(info) {
+  if (workerAttempt)
+    process.send?.({ kind: "phase", startedAt: Date.now(), timeout: info.timeout });
+}
+
 async function executeAttempt(plan, t) {
   const info = makeTestInfo(plan.name);
+  startAttemptPhase(info);
   if (plan.expectedFailure) info.expectedStatus = "failed";
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
   const fixtures = await openFixtures(plan.baseDefs, defs, info, (error) =>
@@ -6218,6 +6224,7 @@ async function executeAttempt(plan, t) {
 
 async function invokeWorkerHook(fn, plan) {
   const info = makeTestInfo("worker hook");
+  startAttemptPhase(info);
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
   const fixtures = await openFixtures(plan.baseDefs, defs, info, undefined, true);
   const scope = plan.frames.at(-1) ?? rootSkipScope;

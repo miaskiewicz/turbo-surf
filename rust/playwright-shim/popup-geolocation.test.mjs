@@ -4,8 +4,9 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import test, { after } from "node:test";
 import { pathToFileURL } from "node:url";
 
-const shimSource = process.env.TURBO_SURF_TEST_SHIM;
-if (!shimSource) throw new Error("Select the actual combined popup shim with TURBO_SURF_TEST_SHIM");
+const shimSource = process.env.TURBO_SURF_TEST_SHIM
+  ? pathToFileURL(process.env.TURBO_SURF_TEST_SHIM).href
+  : new URL("./index.mjs", import.meta.url).href;
 const server = createServer((request, response) => {
   response.setHeader("content-type", "text/html");
   response.end(
@@ -17,7 +18,16 @@ const server = createServer((request, response) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 process.env.TURBO_SURF_ALLOWED_ORIGINS = JSON.stringify([origin]);
-const { chromium } = await import(pathToFileURL(shimSource).href);
+let shim;
+try {
+  shim = await import(shimSource);
+} catch (error) {
+  await new Promise((resolve) => server.close(resolve));
+  if (!String(error.message).includes("no prebuilt binary")) throw error;
+  console.log("popup geolocation: native addon not built, skipping");
+  process.exit(0);
+}
+const { chromium } = shim;
 after(() => new Promise((resolve) => server.close(resolve)));
 
 const permission = () =>

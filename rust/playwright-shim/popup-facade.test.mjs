@@ -9,6 +9,7 @@ try {
   ({ BrowserContext } = await import("./index.mjs"));
 } catch (error) {
   await fixture.close();
+  if (!String(error.message).includes("no prebuilt binary")) throw error;
   console.log("shim: native addon not built, skipping —", error.message);
   process.exit(0);
 }

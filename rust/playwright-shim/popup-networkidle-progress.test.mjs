@@ -4,7 +4,16 @@ import { createPopupFixture } from "./fixtures/popup-app.mjs";
 
 const fixture = await createPopupFixture();
 process.env.TURBO_SURF_ALLOWED_ORIGINS = JSON.stringify([fixture.origin]);
-const { BrowserContext } = await import(process.env.TURBO_SURF_TEST_SHIM || "./index.mjs");
+let shim;
+try {
+  shim = await import(process.env.TURBO_SURF_TEST_SHIM || "./index.mjs");
+} catch (error) {
+  await fixture.close();
+  if (!String(error.message).includes("no prebuilt binary")) throw error;
+  console.log("popup network idle: native addon not built, skipping");
+  process.exit(0);
+}
+const { BrowserContext } = shim;
 
 test(
   "target networkidle advances a delayed fetch and its DOM continuation",

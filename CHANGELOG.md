@@ -11,6 +11,12 @@ branch.
 
 ### Engine and performance
 
+- Preserve the reached interaction state when a watchdog terminates native DOM
+  signature sampling, while retaining errors for genuine namespace exceptions
+  and missing helpers (#498).
+- Let concurrent URL observers advance host callbacks without waiting for
+  unrelated response bodies; losing observers retain their deadline without
+  aborting sibling requests (#498).
 - Recover once from a reset or broken pipe when sending a bodyless `GET` or
   `HEAD` through a stale pooled connection, preserving the configured transport.
   Requests with bodies, uploads, other methods, and unrelated errors are not

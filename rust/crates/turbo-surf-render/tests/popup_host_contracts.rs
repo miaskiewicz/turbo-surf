@@ -46,10 +46,10 @@ async fn active_and_lifetime_limits_preserve_named_reuse_and_release_closed_page
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_failed_context_init_rolls_back_active_admission_and_preserves_the_opener() {
+async fn a_failed_driver_bootstrap_rolls_back_admission_and_preserves_the_opener() {
     let services = AuxiliaryHostServices {
         bootstrap: AuxiliaryBootstrap {
-            init_script: "throw new Error('owned-init-fault')".into(),
+            engine_init_script: "throw new Error('owned-driver-fault')".into(),
             ..Default::default()
         },
         policy: AuxiliaryResourcePolicy {
@@ -61,7 +61,7 @@ async fn a_failed_context_init_rolls_back_active_admission_and_preserves_the_ope
     };
     let mut page = fixture::open("https://popup.test", services).await;
     let error = page.eval_expression("(()=>{try{window.open('', 'bad');return 'not rejected'}catch(error){return error.message}})()").await.unwrap();
-    assert!(error.contains("owned-init-fault"), "{error}");
+    assert!(error.contains("owned-driver-fault"), "{error}");
     assert_eq!(
         page.auxiliary_event_log()
             .pages()

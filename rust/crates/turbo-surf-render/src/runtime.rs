@@ -6795,7 +6795,7 @@ fn op_native_window_proxy() -> bool {
     true
 }
 
-#[op2]
+#[op2(fast)]
 fn op_producer_window_proxy(scope: &mut v8::PinScope) -> bool {
     let context = scope.get_current_context();
     turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context)

@@ -356,3 +356,57 @@ async fn native_history_limit_rejects_growth_without_blocking_replacement_or_bac
         .unwrap_err()
         .contains("out of range"));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn redirected_post_becomes_get_and_keeps_real_response_hop_identity() {
+    let server = fixture::Server::start().await;
+    let mut page = fixture::open(&server.origin, Default::default()).await;
+    let target = fixture::child(&mut page).await;
+    page.drain_network_log();
+    let options =
+        json!({"method":"POST","bodyBytes":[0,128,255],"contentType":"application/octet-stream"})
+            .to_string();
+    let receipt: Value = serde_json::from_str(
+        &page
+            .navigate_target_with_options(target, &server.url("/redirect"), "replace", &options)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    fixture::settle(&mut page).await;
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        (&*requests[0].method, &*requests[0].target),
+        ("POST", "/redirect")
+    );
+    assert_eq!(requests[0].body, [0, 128, 255]);
+    assert_eq!(
+        (&*requests[1].method, &*requests[1].target),
+        ("GET", "/one")
+    );
+    assert!(requests[1].body.is_empty());
+    assert_eq!(receipt["finalUrl"], server.url("/one"));
+    assert_eq!(receipt["status"], 200);
+    let records: Value = serde_json::from_str(&page.drain_network_log()).unwrap();
+    let rows = records.as_array().unwrap();
+    let redirected = rows
+        .iter()
+        .find(|row| row["event"] == "response" && row["status"] == 303)
+        .unwrap();
+    let final_hop = rows
+        .iter()
+        .find(|row| row["event"] == "response" && row["id"] == receipt["requestId"])
+        .unwrap();
+    assert_eq!(final_hop["redirectFrom"], redirected["id"]);
+    assert_eq!(final_hop["status"], 200);
+    assert!(rows.iter().any(|row| row["event"] == "responsebody"
+        && row["id"] == redirected["id"]
+        && row["bodyUnavailable"] == true));
+    assert_eq!(
+        page.eval_target_expression(target, "document.title", false, false)
+            .await
+            .unwrap(),
+        "one"
+    );
+}

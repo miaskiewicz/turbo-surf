@@ -996,9 +996,14 @@ class Locator {
     await this._prepareQuery();
     const index = await this._resolveLiveIdx();
     if (index == null) return null;
-    return this._page.evaluate(
-      `(${fn.toString()})(document.querySelectorAll("*")[${index}],${JSON.stringify(arg ?? null)})`,
-    );
+    // Pure DOM reads must not await unrelated exposed host callbacks.
+    const result = this._page._readEngine(`
+      try { return {value: (${encodeEvaluationValue.toString()})(
+        (${fn.toString()})(document.querySelectorAll("*")[${index}],${JSON.stringify(arg ?? null)}))}; }
+      catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
+    `);
+    if (result.error) throw decodeEvaluationError(result.error);
+    return decodeEvaluationValue(result.value);
   }
   async inputValue() {
     await this._prepareQuery();

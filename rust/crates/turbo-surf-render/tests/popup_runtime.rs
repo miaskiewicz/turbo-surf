@@ -92,3 +92,26 @@ async fn native_window_frame_accessors_survive_bootstrap_and_track_independent_c
     })()"#).await.unwrap();
     assert_eq!(result, "[true,true,true,true,true]");
 }
+
+#[tokio::test]
+async fn blank_popup_inherits_frozen_base_without_changing_visible_location() {
+    use turbo_surf_render::PageSession;
+    let mut session = PageSession::open(
+        "<!doctype html><base href='https://popup.test/assets/'>",
+        "https://popup.test/opener/index.html",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let result = session.eval_expression(r#"(() => {
+        const child = window.open('', 'inherited-base');
+        const initial = child.location.href === 'about:blank' && child.document.URL === 'about:blank';
+        const request = new child.Request('./child');
+        const base = child.document.baseURI;
+        document.querySelector('base').href = 'https://popup.test/changed/';
+        return JSON.stringify([initial, request.url, base, child.document.baseURI]);
+    })()"#).await.unwrap();
+    assert_eq!(result, "[true,\"https://popup.test/assets/child\",\"https://popup.test/assets/\",\"https://popup.test/assets/\"]");
+}

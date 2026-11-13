@@ -1,15 +1,15 @@
 //! Quiescence heuristics retain the live session's existing budget semantics.
-use turbo_surf_render::PageSession;
+use turbo_surf_render::{PageSession, DEFAULT_RENDER_BUDGET_MS};
 
-async fn page() -> PageSession {
-    PageSession::open("<body></body>", "https://quiescence.test/", "", "", 200)
+async fn page(budget: u64) -> PageSession {
+    PageSession::open("<body></body>", "https://quiescence.test/", "", "", budget)
         .await
         .unwrap()
 }
 
 #[tokio::test]
 async fn watchdog_during_dom_signature_preserves_reached_interaction_state() {
-    let mut page = page().await;
+    let mut page = page(200).await;
     let reached = page
         .eval_engine(
             "__tsNs.domSig=()=>{while(true){}};document.body.dataset.reached='yes';globalThis.__RESULT='landed';globalThis.signatureTimer=setInterval(()=>{},0);",
@@ -34,7 +34,8 @@ async fn watchdog_during_dom_signature_preserves_reached_interaction_state() {
 
 #[tokio::test]
 async fn dom_signature_exception_remains_an_error() {
-    let mut page = page().await;
+    // Error controls must reach the helper rather than race the watchdog.
+    let mut page = page(DEFAULT_RENDER_BUDGET_MS).await;
     let error = page
         .eval_engine(
             "__tsNs.domSig=()=>{throw new Error('signature fixture rejected')};globalThis.signatureTimer=setInterval(()=>{},0);",
@@ -46,7 +47,7 @@ async fn dom_signature_exception_remains_an_error() {
 
 #[tokio::test]
 async fn missing_dom_signature_remains_an_error() {
-    let mut page = page().await;
+    let mut page = page(DEFAULT_RENDER_BUDGET_MS).await;
     let error = page
         .eval_engine("__tsNs.domSig=undefined;globalThis.signatureTimer=setInterval(()=>{},0);")
         .await

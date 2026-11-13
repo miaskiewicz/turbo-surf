@@ -1506,12 +1506,69 @@ pub async fn live_network_log(id: u32) -> Result<String> {
 /// Host decisions share the native transport hub without taking the isolate actor.
 #[napi]
 pub fn live_network_log_publish_intercepted(id: u32, header: String, body: Buffer) -> Result<()> {
-    let header: serde_json::Value = serde_json::from_str(&header)
+    let mut header: serde_json::Value = serde_json::from_str(&header)
         .map_err(|_| Error::from_reason("Invalid intercepted response"))?;
     if !header.is_object() {
         return Err(Error::from_reason("Invalid intercepted response"));
     }
+    if let Some(target) = intercepted_page_owner(id)? {
+        stamp_intercepted_owner(&mut header, &target)?;
+    }
     network_log(id)?.publish_intercepted_response(header, &body);
+    Ok(())
+}
+
+fn intercepted_page_owner(id: u32) -> Result<Option<String>> {
+    let connection = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?
+        .get(&id)
+        .map(|connection| (connection.actor.clone(), connection.target));
+    if let Some((actor, target)) = connection {
+        return match target {
+            LiveTarget::LegacyRoot => Ok(None),
+            LiveTarget::Auxiliary(target) => verified_intercepted_owner(&actor, target.to_string()),
+        };
+    }
+    let actor = live_actor(id)?;
+    if actor.id != id || !actor.opening.load(Ordering::Acquire) {
+        return Err(Error::from_reason("Intercepted response target is closed"));
+    }
+    match actor.auxiliary.capability() {
+        AuxiliaryCapability::Unsupported { .. } => Ok(None),
+        AuxiliaryCapability::Supported => {
+            let root = actor.auxiliary.root().ok_or_else(|| {
+                Error::from_reason("Intercepted response root is not initialized")
+            })?;
+            verified_intercepted_owner(&actor, root)
+        }
+        AuxiliaryCapability::Pending => Err(Error::from_reason(
+            "Intercepted response owner is not initialized",
+        )),
+    }
+}
+
+fn verified_intercepted_owner(actor: &LiveActor, target: String) -> Result<Option<String>> {
+    if actor.auxiliary.is_closed() || actor.auxiliary.info(&target).is_none_or(|info| info.closed) {
+        return Err(Error::from_reason("Intercepted response target is closed"));
+    }
+    Ok(Some(target))
+}
+
+fn stamp_intercepted_owner(header: &mut serde_json::Value, target: &str) -> Result<()> {
+    let context = header
+        .as_object_mut()
+        .ok_or_else(|| Error::from_reason("Invalid intercepted response"))?
+        .entry("context")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| Error::from_reason("Invalid intercepted response context"))?;
+    let frame = context
+        .entry("frame")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| Error::from_reason("Invalid intercepted response frame"))?;
+    frame.insert("pageId".to_owned(), target.into());
     Ok(())
 }
 
@@ -1990,4 +2047,38 @@ pub fn live_target_configure(
             engine_init_script,
         },
     }))
+}
+
+#[cfg(test)]
+mod intercepted_owner_tests {
+    use super::stamp_intercepted_owner;
+
+    #[test]
+    fn authoritative_alias_replaces_supplied_owner_and_preserves_frame_identity() {
+        let mut header = serde_json::json!({"context":{"resourceType":"fetch","frame":{"pageId":"forged","path":[0,1],"contextId":42}}});
+        stamp_intercepted_owner(&mut header, "actual-child").unwrap();
+        assert_eq!(header["context"]["frame"]["pageId"], "actual-child");
+        assert_eq!(
+            header["context"]["frame"]["path"],
+            serde_json::json!([0, 1])
+        );
+        assert_eq!(header["context"]["frame"]["contextId"], 42);
+    }
+
+    #[test]
+    fn missing_context_receives_only_verified_owner() {
+        let mut header = serde_json::json!({"status":200});
+        stamp_intercepted_owner(&mut header, "actual-root").unwrap();
+        assert_eq!(header["context"]["frame"]["pageId"], "actual-root");
+    }
+
+    #[test]
+    fn malformed_frame_metadata_is_rejected_without_panicking() {
+        for mut header in [
+            serde_json::json!({"context":"invalid"}),
+            serde_json::json!({"context":{"frame":[]}}),
+        ] {
+            assert!(stamp_intercepted_owner(&mut header, "actual-root").is_err());
+        }
+    }
 }

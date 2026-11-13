@@ -847,7 +847,14 @@ impl PageSession {
                     expression.to_owned()
                 };
                 let value = execute_target(&mut self.rt, target, &source, engine)?;
-                let completion = self.rt.resolve(value.clone());
+                // Promise observers must belong to the live target realm: a backing
+                // replacement can leave JsRuntime's original main context detached.
+                let completion = {
+                    deno_core::scope!(scope, self.rt);
+                    let context = context(scope, target)?;
+                    let scope = &mut v8::ContextScope::new(scope, context);
+                    JsRuntime::scoped_resolve(scope, value.clone())
+                };
                 execute_target(&mut self.rt, target, "__tsNs.resetTimerBudget();", true)?;
                 drain_event_loop_until_completion(&mut self.rt, None, Some(&value)).await?;
                 let value = self

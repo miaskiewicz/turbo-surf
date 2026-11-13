@@ -11,7 +11,7 @@ const __baseLocal = __G.domAccessor("localName", false, "Element");
 const __baseNamespace = __G.domAccessor("namespaceURI", false, "Element");
 const __baseRows = __interfaceMap("Document.frozen-base");
 const __baseLocation = globalThis.location;
-const __baseLocationHref = ops.op_native_location_installed()
+const __baseLocationHref = ops.op_native_location_installed(__document)
   ? () => ops.op_document_location_url(__document)
   : Object.getOwnPropertyDescriptor(__baseLocation, "href").get;
 __documentRuntimeState.baseFallback = () => {

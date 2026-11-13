@@ -198,6 +198,7 @@ fn initialize<'s>(
     )));
     context.set_slot(Rc::new(BootstrapDepth(0)));
     install_hyperlink_handler(context);
+    window_proxy::install_location(scope, "about:blank");
     install_environment(scope, core).map_err(JsErrorBox::generic)?;
     let core = core
         .to_object(scope)
@@ -206,7 +207,6 @@ fn initialize<'s>(
     crate::crypto_backend::install(scope, core, secure).map_err(JsErrorBox::generic)?;
     crate::audio_backend::install(scope, core).map_err(JsErrorBox::generic)?;
     crate::geometry_backend::install(scope, core).map_err(JsErrorBox::generic)?;
-    window_proxy::install_location(scope, "about:blank");
     binding::install_auxiliary_window_hooks(context, hooks());
     binding::capture_auxiliary_window_exception(scope, context);
     crate::browser_env::finish_key_order(scope);
@@ -317,8 +317,13 @@ pub(super) fn ready<'s>(
     target: v8::Local<'s, v8::Context>,
     _request: &binding::OpenRequest,
 ) -> binding::AuxiliaryReadyAction {
+    v8::tc_scope!(let scope, scope);
     auxiliary_pages::publish(scope);
     if let Err(error) = run_context_bootstrap(scope, target) {
+        if scope.has_caught() {
+            scope.rethrow();
+            return binding::AuxiliaryReadyAction::Abort;
+        }
         if let Some(message) = v8::String::new(scope, &error) {
             let error = v8::Exception::error(scope, message);
             scope.throw_exception(error);

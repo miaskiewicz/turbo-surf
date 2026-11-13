@@ -34,6 +34,43 @@ pub(super) fn navigate<'s>(
     navigate_kind(scope, window, value, false, false);
 }
 
+fn supported_navigation_scheme(url: &ModuleSpecifier) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        || (url.scheme() == "about" && url.as_str() == "about:blank")
+}
+
+fn queue_auxiliary_navigation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+    url: &ModuleSpecifier,
+    replace: bool,
+) -> bool {
+    if !JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .enabled
+    {
+        return false;
+    }
+    use turbo_dom_browser_env::host_internals::auxiliary_context_identity;
+    let (Some(target), Some(source_id)) = (
+        auxiliary_context_identity(target),
+        auxiliary_context_identity(source),
+    ) else {
+        return false;
+    };
+    auxiliary_pages::queue_navigation(
+        scope,
+        target.id,
+        source_id.id,
+        source,
+        url.to_string(),
+        replace,
+    );
+    true
+}
+
 fn navigate_kind<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
@@ -76,9 +113,7 @@ fn navigate_kind<'s>(
         named_exception(scope, "Invalid navigation URL", "SyntaxError");
         return;
     };
-    if !matches!(url.scheme(), "http" | "https" | "about")
-        || (url.scheme() == "about" && url.as_str() != "about:blank")
-    {
+    if !supported_navigation_scheme(&url) {
         named_exception(
             scope,
             "This navigation scheme is not supported",
@@ -86,26 +121,8 @@ fn navigate_kind<'s>(
         );
         return;
     }
-    if JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<auxiliary_pages::Pages>()
-        .enabled
-    {
-        use turbo_dom_browser_env::host_internals::auxiliary_context_identity;
-        if let (Some(target), Some(source_id)) = (
-            auxiliary_context_identity(target),
-            auxiliary_context_identity(source),
-        ) {
-            auxiliary_pages::queue_navigation(
-                scope,
-                target.id,
-                source_id.id,
-                source,
-                url.to_string(),
-                replace || reload,
-            );
-            return;
-        }
+    if queue_auxiliary_navigation(scope, source, target, &url, replace || reload) {
+        return;
     }
     driver_sync::changed(&mut JsRuntime::op_state_from(scope).borrow_mut());
     let Some(host) = target.get_slot::<FrameHost>() else {
@@ -209,7 +226,57 @@ fn navigation_allowed<'s>(
     if top_navigation_permitted(source, target) && has_context_ancestor(scope, source, target) {
         return true;
     }
-    has_context_ancestor(scope, target, source)
+    has_context_ancestor(scope, target, source) || opener_navigation_related(scope, source, target)
+}
+
+fn opener_navigation_related<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+) -> bool {
+    use turbo_dom_browser_env::host_internals::auxiliary_context_identity;
+    let (Some(source_id), Some(target_id)) = (
+        auxiliary_context_identity(source),
+        auxiliary_context_identity(target),
+    ) else {
+        return false;
+    };
+    if source_id.closed || target_id.closed || source.get_slot::<FrameRetired>().is_some() {
+        return false;
+    }
+    // Only the producer's current opener links confer cross-origin navigation
+    // authority. Immutable creation metadata must not revive a severed opener.
+    opener_chain_contains(scope, target, source_id.id)
+        || opener_chain_contains(scope, source, target_id.id)
+}
+
+fn opener_chain_contains<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+    expected: turbo_dom_browser_env::host_internals::AuxiliaryContextId,
+) -> bool {
+    use turbo_dom_browser_env::host_internals::{
+        auxiliary_context_identity, auxiliary_context_opener,
+    };
+    for _ in 0..64 {
+        let Some(opener) = auxiliary_context_opener(scope, context) else {
+            return false;
+        };
+        let Some(owner) = opener.get_creation_context(scope) else {
+            return false;
+        };
+        let Some(identity) = auxiliary_context_identity(owner) else {
+            return false;
+        };
+        if identity.closed {
+            return false;
+        }
+        if identity.id == expected {
+            return true;
+        }
+        context = owner;
+    }
+    false
 }
 
 pub(super) fn window_set<'s>(
@@ -858,8 +925,8 @@ pub(super) fn get<'s>(
         .and_then(|state| state.object.to_local(scope))
 }
 
-pub(super) fn installed(scope: &mut v8::PinScope) -> bool {
-    scope.get_current_context().get_slot::<State>().is_some()
+pub(super) fn installed(context: v8::Local<v8::Context>) -> bool {
+    context.get_slot::<State>().is_some()
 }
 pub(super) fn seed(scope: &mut v8::PinScope, url: &str) {
     if let Some(state) = scope.get_current_context().get_slot::<State>() {

@@ -2237,12 +2237,14 @@ fn op_queue_classic_script<'s>(
     {
         return Err(JsErrorBox::generic("script context is not same-origin"));
     }
+    let caller = v8::Global::new(scope, caller);
+    let caller_context = v8::Local::new(scope, &caller);
+    let scope = &mut v8::ContextScope::new(scope, caller_context);
     let resolver = v8::PromiseResolver::new(scope)
         .ok_or_else(|| JsErrorBox::generic("script completion allocation failed"))?;
     let promise = resolver.get_promise(scope);
     let element = (!in_shadow_tree).then(|| v8::Global::new(scope, element));
     let context = v8::Global::new(scope, context);
-    let caller = v8::Global::new(scope, caller);
     let queue = state.borrow_mut::<ClassicScripts>();
     let located = if inline && !code.is_empty() {
         if let Some((start, _)) = queue
@@ -6045,6 +6047,12 @@ fn finish_frame_document_install<'s>(
     let core = v8::Local::new(scope, core);
 
     install_frame_document_location(scope, global, url, metadata);
+    let metadata_location = metadata
+        .get("location")
+        .and_then(|value| value.as_str())
+        .unwrap_or("about:blank")
+        .to_string();
+    window_proxy::install_location(scope, &metadata_location);
     let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
     context.set_slot(Rc::new(BootstrapDepth(depth)));
     install_frame_environment_marker(scope, context)?;
@@ -6054,11 +6062,6 @@ fn finish_frame_document_install<'s>(
     window_proxy::capture_exception(scope);
     install_frame_environment_marker(scope, context)?;
     metadata["base"] = serde_json::Value::String(document_base);
-    let metadata_location = metadata
-        .get("location")
-        .and_then(|value| value.as_str())
-        .unwrap_or("about:blank")
-        .to_string();
     let json = v8::String::new(scope, &metadata.to_string()).unwrap();
     let metadata = v8::json::parse(scope, json).unwrap();
     call_frame_helper(
@@ -6067,7 +6070,6 @@ fn finish_frame_document_install<'s>(
         &[metadata, parent_window.into(), host.into()],
     )
     .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
-    window_proxy::install_location(scope, &metadata_location);
     crate::browser_env::finish_key_order(scope);
     auxiliary_host::finish_nested_navigation(
         scope,
@@ -6453,8 +6455,7 @@ fn op_frame_set_document<'s>(
         // realm/tree. A token change on the same context would turn those old
         // Function/document handles into access to the replacement origin.
         let previous = context;
-        retire_frame_tree(scope, previous);
-        let window = allocate_frame(scope, parent, Some(previous), false)?;
+        let window = replace_frame_context(scope, parent, previous)?;
         context = window.get_creation_context(scope).unwrap();
         replaced = Some(previous);
     }
@@ -6616,7 +6617,7 @@ fn op_frame_set_document<'s>(
     };
     let result = configure();
     if result.is_err() {
-        retire_failed_frame_tree(scope, context);
+        retire_failed_frame_navigation(scope, context, replaced);
     }
     result
 }
@@ -6812,8 +6813,10 @@ fn op_location_navigation_sandboxed(
 }
 
 #[op2(fast)]
-fn op_native_location_installed(scope: &mut v8::PinScope) -> bool {
-    window_proxy::location_installed(scope)
+fn op_native_location_installed(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(window_proxy::location_installed)
 }
 
 #[op2(fast)]
@@ -6917,7 +6920,7 @@ fn op_create_frame<'s>(
 }
 
 fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'s, v8::Context>) {
-    retire_frame_tree_impl(scope, previous, true);
+    retire_frame_tree_impl(scope, previous, true, false);
 }
 
 // Failed initialization has no published document or runnable guest task. Stop
@@ -6926,14 +6929,50 @@ fn retire_failed_frame_tree<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
 ) {
-    retire_frame_tree_impl(scope, previous, false);
+    retire_frame_tree_impl(scope, previous, false, false);
+}
+
+// Navigation retires the old document and its descendants, but transfers the
+// navigating root's browsing-context identity to its replacement WindowProxy.
+fn replace_frame_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    previous: v8::Local<'s, v8::Context>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    retire_frame_tree_impl(scope, previous, true, true);
+    allocate_frame(scope, parent, Some(previous), false).inspect_err(|_| {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, previous);
+    })
+}
+
+fn retire_failed_frame_navigation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    current: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+) {
+    retire_failed_frame_tree(scope, current);
+    if let Some(previous) = previous {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, previous);
+    }
+}
+
+fn retire_frame_identity<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    preserved: Option<v8::Local<'s, v8::Context>>,
+) {
+    if preserved != Some(context) {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, context);
+    }
 }
 
 fn retire_frame_tree_impl<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
     call_helpers: bool,
+    preserve_identity: bool,
 ) {
+    let preserved = preserve_identity.then_some(previous);
     previous.set_slot(Rc::new(FrameDirectRetirement));
     let contexts = JsRuntime::op_state_from(scope)
         .borrow()
@@ -6962,7 +7001,7 @@ fn retire_frame_tree_impl<'s>(
                 crate::message_ports::retire_context(scope, context);
                 blob_urls::retire_context(scope, context);
                 storage_events::retire(context);
-                turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, context);
+                retire_frame_identity(scope, context, preserved);
                 turbo_dom_browser_env::host_internals::retire_context(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
@@ -7364,6 +7403,7 @@ fn op_queue_frame_script<'s>(
             .ok_or_else(|| JsErrorBox::generic("frame script document unavailable"))?;
         v8::Global::new(scope, document)
     };
+    let scope = &mut v8::ContextScope::new(scope, caller_local);
     let resolver = v8::PromiseResolver::new(scope)
         .ok_or_else(|| JsErrorBox::generic("frame script completion allocation failed"))?;
     let promise = resolver.get_promise(scope);
@@ -9720,7 +9760,7 @@ globalThis.chrome = globalThis.chrome || {
   csi: function () { return {}; },
   app: { isInstalled: false },
 };
-globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
+if (!globalThis.location) globalThis.location = { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
 // Storage areas live in the host and are keyed by the actual Window's origin.
 // Private IDs remain attached to retained Storage objects across navigation.
 const __storageApply=Reflect.apply,__storageCharCode=String.prototype.charCodeAt,__storageGetters=__recordCreate(null);
@@ -13512,7 +13552,7 @@ __G.domSig = (() => {
     }
     __G.setDocumentReadyState("loading");
     globalThis.origin = metadata.origin;
-    location.href = metadata.location;
+    if (!ops.op_native_location_installed(__document)) location.href = metadata.location;
     __documentRuntimeState.frame = metadata;
     __documentRuntimeState.contentType = metadata.contentType || "text/html";
     __initializeDocumentBase();

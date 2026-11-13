@@ -566,12 +566,12 @@ fn install_response_environment<'s>(
     url: &str,
     bootstrap: &AuxiliaryBootstrap,
 ) -> Result<(), String> {
+    window_proxy::install_location(scope, url);
     install_environment(scope, core.into())?;
     let secure = secure_context(scope);
     crate::crypto_backend::install(scope, core, secure)?;
     crate::audio_backend::install(scope, core)?;
     crate::geometry_backend::install(scope, core)?;
-    window_proxy::install_location(scope, url);
     binding::capture_auxiliary_window_exception(scope, current);
     crate::browser_env::finish_key_order(scope);
     run_navigation_init(scope, current, bootstrap)?;

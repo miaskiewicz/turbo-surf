@@ -367,3 +367,53 @@ test("replacement document timers join the actor's native window queue", { timeo
     );
   }),
 );
+
+test(
+  "replacement history and frame snapshots use the same native Location",
+  { timeout: 10000 },
+  () =>
+    fixture(async ({ open, base }) => {
+      const root = await open();
+      await native.liveNavigateTarget(root, base + "history-first", "push");
+      await native.liveNavigateTarget(root, base + "history-replacement", "push");
+      const history = JSON.parse(
+        await native.liveEvalEngine(
+          root,
+          "globalThis.__RESULT=__tsNs.takeHistoryNavigation();",
+          true,
+        ),
+      );
+      const snapshot = JSON.parse(
+        await native.liveEvalEngine(
+          root,
+          "globalThis.__RESULT=__tsNs.requestFrameSnapshot();",
+          true,
+        ),
+      );
+      assert.equal(history.initial.url, base + "history-replacement");
+      assert.equal(history.url, base + "history-replacement");
+      assert.equal(snapshot.url, history.url);
+    }),
+);
+
+test(
+  "replacement target engine evaluation preserves fulfillment and rejection",
+  { timeout: 10000 },
+  () =>
+    fixture(async ({ open, base }) => {
+      const root = await open();
+      await native.liveNavigateTarget(root, base + "promise-replacement", "push");
+      assert.equal(
+        await native.liveEvalEngine(root, "globalThis.__RESULT='live-target';", false),
+        "live-target",
+      );
+      assert.equal(
+        await native.liveEvalEngineExpression(root, "Promise.resolve('fulfilled-target')"),
+        "fulfilled-target",
+      );
+      await assert.rejects(
+        native.liveEvalEngineExpression(root, "Promise.reject(new Error('target-rejection'))"),
+        /target-rejection/,
+      );
+    }),
+);

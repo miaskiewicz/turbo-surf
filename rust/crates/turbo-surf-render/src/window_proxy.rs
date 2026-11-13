@@ -719,8 +719,8 @@ pub(super) fn context<'s>(
     context
 }
 
-pub(super) fn location_installed(scope: &mut v8::PinScope) -> bool {
-    location::installed(scope)
+pub(super) fn location_installed(context: v8::Local<v8::Context>) -> bool {
+    location::installed(context)
 }
 pub(super) fn seed_location(scope: &mut v8::PinScope, url: &str) {
     let context = scope.get_current_context();

@@ -134,6 +134,11 @@ async fn serve(
 
 fn response(path: &str) -> (&'static str, &'static str, Vec<u8>) {
     match path {
+        "/sandbox-navigation" => (
+            "200 Fixture",
+            "Content-Type: text/html\r\nContent-Security-Policy: sandbox allow-scripts allow-same-origin allow-popups\r\n",
+            b"<!doctype html><title>sandbox</title>".to_vec(),
+        ),
         "/redirect" => ("303 See Other", "Location: /one\r\n", Vec::new()),
         "/attachment" => ("200 Fixture", "Content-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=owned.bin\r\n", vec![0, 255, 65, 10]),
         "/coop" => ("200 Fixture", "Content-Type: text/html\r\nCross-Origin-Opener-Policy: same-origin\r\n", b"<!doctype html><title>isolated</title>".to_vec()),

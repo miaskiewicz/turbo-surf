@@ -23,7 +23,7 @@
     arraySplice = Array.prototype.splice,
     indexOf = String.prototype.indexOf,
     slice = String.prototype.slice;
-  const nativeLocation = ops.op_native_location_installed();
+  const nativeLocation = ops.op_native_location_installed(__document);
   const realm = globalThis;
   const string = (value) => {
     if (typeof value === "symbol") throw new ErrorType("Cannot convert a Symbol to a string");

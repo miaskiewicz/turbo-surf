@@ -73,7 +73,10 @@ Live `PageSession` calls retain the app's V8 isolate and drain timers, microtask
 network work when driven. Shim sessions use wall-clock timer deadlines, so driving
 an action does not fast-forward future debounce or editor-expiry callbacks. The
 native addon retains virtual timers when callers omit its opt-in. A `networkidle` navigation opens a session immediately;
-actions can hydrate on demand unless navigation used `waitUntil:"commit"`. Static
+actions, evaluation, readiness waits and web-first assertions can hydrate on demand.
+`waitUntil:"commit"` returns the raw destination response without opening a live
+session, even with passive observers; it does not disable later JavaScript. Raw
+content inspection stays static until an operation requests execution. Static
 snapshot paths have no background app event loop. Live assertions can re-drain the
 session, but timing and waiting are not the same as a continuously running browser.
 

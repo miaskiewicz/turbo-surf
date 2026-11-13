@@ -2411,7 +2411,7 @@ class Page {
     this._session = null; // live JS session id (networkidle navigations), else null
     this._loadedPath = null; // path the live DOM was loaded at (to detect in-app nav)
     this._navHops = 0; // auto-followed redirects since the last user navigation
-    this._autoHydrate = true; // hydrate-on-demand unless a goto opted out (commit)
+    this._autoHydrate = true; // execution permission is independent of navigation waiting
     this._actionSeq = 0; // bumps per real user interaction; tags drained responses so
     // waitForResponse can tell a fresh response from one that drained in an earlier step
   }
@@ -2420,8 +2420,8 @@ class Page {
     return this._session != null;
   }
 
-  // Hydrate-on-demand: open a live session if one isn't up (and the last navigation
-  // didn't opt out via waitUntil:'commit'). Idempotent — at most one hydration per doc.
+  // Hydrate on demand independently of the navigation wait milestone.
+  // Idempotent — at most one execution session per document.
   async _ensureLive() {
     if (this._closed) throw new Error("page is closed");
     if (!this._live && this._autoHydrate !== false) await this._openLiveSession();
@@ -3349,7 +3349,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const started = Date.now();
     const previous = this._url;
     this._navHops = 0; // user navigation — reset the redirect-follow budget
-    this._autoHydrate = opts?.waitUntil !== "commit"; // 'commit' = inspect raw shell
     const resp = await this._navigate(this._resolveUrl(url), undefined, undefined, {
       ...opts,
       referer: opts?.referer ?? null,
@@ -3373,6 +3372,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     else if (
       !this._live &&
       this._autoHydrate !== false &&
+      opts?.waitUntil !== "commit" &&
       (this._listeners.has("pageerror") ||
         this._listeners.has("console") ||
         this._listeners.has("response") ||
@@ -3390,7 +3390,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // re-opens a LIVE session so a client-rendered SPA re-hydrates (its forms/dashboards
     // re-appear); without this the reloaded doc stays the raw un-hydrated shell and reads
     // (e.g. a settings select's value) see an empty DOM.
-    this._autoHydrate = opts?.waitUntil !== "commit";
     const resp = await this._navigate(this._url, undefined, undefined, {
       ...opts,
       referer: opts?.referer ?? this._documentResponse?.referrer ?? null,
@@ -3404,7 +3403,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (prev == null) return null;
     if (await traverseLive(this, prev, native)) return null;
     const current = this._historyCurrent ?? this._url;
-    this._autoHydrate = opts?.waitUntil !== "commit";
     const response = await this._navigate(historyUrl(prev), undefined, undefined, opts);
     this._historyCurrent = null;
     this._history.pop();
@@ -3417,7 +3415,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (next == null) return null;
     if (await traverseLive(this, next, native)) return null;
     const current = this._historyCurrent ?? this._url;
-    this._autoHydrate = opts?.waitUntil !== "commit";
     const response = await this._navigate(historyUrl(next), undefined, undefined, opts);
     this._historyCurrent = null;
     this._fwd.pop();

@@ -11,6 +11,11 @@ branch.
 
 ### Engine and performance
 
+- Keep on-demand JavaScript available after `waitUntil: "commit"` navigation,
+  reload and history replacement, while preserving the immediate raw-response
+  path and explicit static-only execution permission. Later actions, evaluation
+  and web-first assertions can hydrate client-rendered data (#520).
+
 - Reuse native geometry across query targets only when the actual styled scene
   passed strict resource admission. Preserve all document, stylesheet, viewport,
   composition, image and font freshness keys and target-specific animation

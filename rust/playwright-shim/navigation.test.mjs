@@ -84,6 +84,7 @@ test("HTTP attachments emit binary downloads without replacing the live document
       page.waitForEvent("download", { timeout: 30 }),
       (error) => error.name === "TimeoutError",
     );
+    page._autoHydrate = false; // Explicitly exercise the static-only download path.
     await page.goto(origin, { waitUntil: "commit" });
     await assert.rejects(
       page.locator("#hidden").click({ timeout: 30 }),

@@ -64,3 +64,31 @@ async fn persistent_root_publishes_actual_capability_and_shared_actor_child() {
     );
     assert!(!session.close_target(child_id).unwrap());
 }
+
+#[tokio::test]
+async fn native_window_frame_accessors_survive_bootstrap_and_track_independent_children() {
+    use turbo_surf_render::PageSession;
+    let mut session = PageSession::open(
+        "<!doctype html><title>Frames</title>",
+        "https://popup.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let result = session.eval_expression(r#"(() => {
+        const empty = window.length === 0 && window.frames === window;
+        const frame = document.createElement('iframe');
+        document.body.appendChild(frame);
+        const root = window.length === 1 && window[0] === frame.contentWindow;
+        const child = window.open('', 'independent');
+        const independent = child.length === 0 && child.frames === child;
+        const nested = child.document.createElement('iframe');
+        child.document.body.appendChild(nested);
+        const isolated = child.length === 1 && child[0] === nested.contentWindow && window.length === 1;
+        frame.remove();
+        return JSON.stringify([empty, root, independent, isolated, window.length === 0 && child.length === 1]);
+    })()"#).await.unwrap();
+    assert_eq!(result, "[true,true,true,true,true]");
+}

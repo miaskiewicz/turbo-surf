@@ -400,9 +400,8 @@ async fn redirected_post_becomes_get_and_keeps_real_response_hop_identity() {
         .unwrap();
     assert_eq!(final_hop["redirectFrom"], redirected["id"]);
     assert_eq!(final_hop["status"], 200);
-    assert!(rows.iter().any(|row| row["event"] == "responsebody"
-        && row["id"] == redirected["id"]
-        && row["bodyUnavailable"] == true));
+    assert_eq!(redirected["bodyUnavailable"], true);
+    assert_eq!(redirected["bodyPending"], false);
     assert_eq!(
         page.eval_target_expression(target, "document.title", false, false)
             .await

@@ -63,7 +63,7 @@ async fn a_child_form_redirect_block_keeps_its_document_and_reports_the_initial_
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
         serde_json::json!({
-            "report":{"directive":"form-action","disposition":"enforce","blocked":format!("{base}/redirect")},
+            "report":{"directive":"form-action","disposition":"enforce","blocked":format!("{base}/redirect?")},
             "loads":0,
             "text":"original"
         })

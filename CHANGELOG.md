@@ -11,6 +11,10 @@ branch.
 
 ### Engine and performance
 
+- Enforce an optional immutable host-origin allowlist before native cache access,
+  redirects, resource/module loads, reports, and WebSocket connections. Invalid
+  configured policies fail closed; challenge helpers are disabled under the
+  restriction and denied resource diagnostics redact URL queries (#505).
 - Construct asynchronous MCP dispatch state on the heap before polling it,
   preserving stack headroom for cold V8 initialization without changing thread
   stack sizes, execution budgets, or synchronous read paths (#501).
@@ -82,6 +86,8 @@ branch.
 
 ### Locators and accessibility
 
+- Expose `Locator.page()` with stable owning-Page identity for direct, derived,
+  and nested-frame locators (#503).
 - Use one canonical live selector plan for extended `:visible` actions and compose
   scoped `has`/`hasNot`, text and visibility filters without dropping earlier
   filters (#349, #328).
@@ -168,6 +174,9 @@ branch.
 
 ### HTTP requests, responses, and downloads
 
+- Apply XHR body conversion before discarding GET/HEAD payload bytes in routed
+  requests, preserving synchronous conversion errors, POST bodies and caller
+  headers while keeping Fetch's body restrictions strict (#504).
 - Retain native connection pools across API requests while bypassing browser HTTP
   cache reuse for those requests (#485).
 - Preserve standalone cookie jars and cached `page.request` / `context.request`

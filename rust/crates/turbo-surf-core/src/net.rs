@@ -1115,20 +1115,30 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
         streaming_upload || body.is_some() || body_bytes.is_some(),
     );
     let mut result = send_with_stale_recovery(req, retry, network.as_ref()).await;
-    if let Ok(response) = &result {
+    finish_transport_response(&mut result, url, method, trace_id);
+    result.map_err(|e| transport_error(&e, url))
+}
+
+fn finish_transport_response(
+    result: &mut http::Result<http::Response>,
+    url: &str,
+    method: &str,
+    trace_id: crate::http_trace::RequestId,
+) {
+    if let Ok(response) = &*result {
         remember_protocol(url, response.version());
     }
     if method == "HEAD" {
-        if let Ok(response) = &mut result {
+        if let Ok(response) = &mut *result {
             response.extensions_mut().insert(HeadResponse);
         }
     }
     if trace_id.0 != 0 {
-        if let Ok(res) = &mut result {
+        if let Ok(res) = &mut *result {
             res.extensions_mut().insert(trace_id);
         }
     }
-    crate::http_trace::record(|| match &result {
+    crate::http_trace::record(|| match &*result {
         Ok(res) => serde_json::json!({
             "event": "response", "id":trace_id.0, "url": url, "final_url": final_url(res),
             "status": res.status().as_u16(),
@@ -1140,7 +1150,6 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
             serde_json::json!({ "event": "error", "id":trace_id.0, "url": url, "error": e.to_string() })
         }
     });
-    result.map_err(|e| transport_error(&e, url))
 }
 
 fn bodyless_read_retry(

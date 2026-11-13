@@ -4,7 +4,7 @@ import { createPopupFixture } from "./fixtures/popup-app.mjs";
 
 const fixture = await createPopupFixture();
 process.env.TURBO_SURF_ALLOWED_ORIGINS = JSON.stringify([fixture.origin]);
-const { BrowserContext } = await import("./index.mjs");
+const { BrowserContext } = await import(process.env.TURBO_SURF_TEST_SHIM || "./index.mjs");
 
 test(
   "target networkidle advances a delayed fetch and its DOM continuation",
@@ -23,14 +23,14 @@ test(
           globalThis.__idleContinuationDone = true;
         });
       }, 100);
-      globalThis.__RESULT = globalThis.__idleContinuationDone;
+      return globalThis.__idleContinuationDone;
     `),
         false,
       );
       await page.waitForLoadState("networkidle", { timeout: 3000 });
       // This read deliberately cannot advance timers or Promise jobs and mask a stalled observer.
       assert.deepEqual(
-        page._readEngine(`globalThis.__RESULT = {
+        page._readEngine(`return {
       done: globalThis.__idleContinuationDone,
       result: document.body.getAttribute('data-idle-result')
     };`),

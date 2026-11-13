@@ -363,6 +363,7 @@ struct LiveActor {
     tx: MpscSender<LiveMessage>,
     network: turbo_surf_render::NetworkEventLog,
     auxiliary: AuxiliaryPageEventLog,
+    emulation: turbo_surf_render::ContextEmulationHandle,
     opening: AtomicBool,
     started: AtomicBool,
     closing_calls: AtomicUsize,
@@ -401,6 +402,16 @@ fn live_actor(id: u32) -> Result<Arc<LiveActor>> {
         .get(&id)
         .cloned()
         .ok_or_else(|| Error::from_reason("no such live actor"))
+}
+
+pub(crate) fn actor_context_emulation(
+    id: u32,
+) -> Result<turbo_surf_render::ContextEmulationHandle> {
+    let actor = live_actor(id)?;
+    if actor.network.is_closed() {
+        return Err(Error::from_reason("live actor is closed"));
+    }
+    Ok(actor.emulation.clone())
 }
 
 struct ActiveActorClose(Arc<LiveActor>);
@@ -449,6 +460,7 @@ fn finish_actor_without_session(actor: &LiveActor) {
 
 fn prepare_live_actor(
     reserved: Option<u32>,
+    emulation: turbo_surf_render::ContextEmulationHandle,
 ) -> Result<(
     Arc<LiveActor>,
     tokio::sync::mpsc::UnboundedReceiver<LiveMessage>,
@@ -474,6 +486,7 @@ fn prepare_live_actor(
         tx,
         network,
         auxiliary: AuxiliaryPageEventLog::default(),
+        emulation,
         opening: AtomicBool::new(true),
         started: AtomicBool::new(false),
         closing_calls: AtomicUsize::new(0),
@@ -1270,7 +1283,10 @@ pub fn live_open(
     crate::ensure_render_init();
     let state = crate::request_state(request_state_id)?;
     let response = crate::document_response::parse(document_response)?;
-    let (_, receiver, opening_guard) = prepare_live_actor(response.host_network_log)?;
+    let (_, receiver, opening_guard) = prepare_live_actor(
+        response.host_network_log,
+        state.storage.context_emulation_handle(),
+    )?;
     Ok(AsyncTask::new(LiveOpenTask {
         receiver: Some(receiver),
         opening_guard,

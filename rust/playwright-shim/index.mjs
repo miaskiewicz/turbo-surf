@@ -44,6 +44,7 @@ import {
 import { makeKeyboard } from "./keyboard.mjs";
 import { scheduleBindingDrain, throwBindingDrainError } from "./binding-drain.mjs";
 import { captureAssets } from "./screenshot-resources.mjs";
+import { configureActorGeolocation } from "./context-emulation-forwarding.mjs";
 import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
 import { LiveActorHub } from "./actor-hub.mjs";
 import { NativeLoadState } from "./native-load-state.mjs";
@@ -5429,6 +5430,7 @@ class BrowserContext {
   }
   async _syncEmulation() {
     this._configureNative();
+    configureActorGeolocation(native, this._actors, this._geolocation, this._permissionGrants);
     for (const page of this._pages) {
       if (!page._closed && page._session != null)
         await native.liveEvalEngine(page._session, "__tsNs.syncNetworkState();", true);

@@ -327,3 +327,6 @@ export function liveNavigateTarget(id: number, url: string, history?: "push" | "
 export function liveAuxiliaryConfigure(actor: number, initScript: string, engineInitScript: string): Promise<void>;
 /** Replace Page-only bootstrap for this actual target's own later navigation. */
 export function liveTargetConfigure(id: number, initScript: string, engineInitScript: string): Promise<void>;
+
+/** Send-only actual actor location/permission update; does not execute page JavaScript. */
+export declare function liveActorConfigureEmulation(actor: number, optionsJson: string): void;

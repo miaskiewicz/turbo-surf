@@ -4,7 +4,9 @@
 //! (driven on napi's tokio runtime). The thin `@playwright/test` shim (task #10)
 //! composes these; `goto` = `fetchHtml` then view calls on the cached HTML.
 
+mod context_emulation;
 mod document_response;
+pub use context_emulation::live_actor_configure_emulation;
 mod image_metadata;
 mod parse_cache;
 mod screenshot_options;

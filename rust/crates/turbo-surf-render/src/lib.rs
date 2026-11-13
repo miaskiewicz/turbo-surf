@@ -20,6 +20,7 @@ mod audio_fft;
 mod audio_timeline;
 mod browser_emulation;
 mod compression_dictionary_dom;
+mod context_emulation_handle;
 mod context_ownership;
 mod crypto_backend;
 mod crypto_clone;
@@ -73,6 +74,7 @@ mod web_fonts;
 mod web_streams_backend;
 mod window_named_properties;
 
+pub use context_emulation_handle::ContextEmulationHandle;
 pub use document_response::DocumentResponseMetadata;
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
 pub use runtime::{

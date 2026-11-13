@@ -7855,6 +7855,9 @@ impl BrowserStorage {
         self.with_emulation(|options| options.animations)
     }
 
+    pub fn context_emulation_handle(&self) -> crate::ContextEmulationHandle {
+        crate::ContextEmulationHandle::new(self.4.clone())
+    }
     pub fn configure_emulation(&self, json: &str) -> Result<(), String> {
         let mut options: crate::browser_emulation::BrowserEmulation =
             serde_json::from_str(json).map_err(|e| e.to_string())?;

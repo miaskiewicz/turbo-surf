@@ -307,7 +307,7 @@ source under the named `turbo-surf-*` dependency family. Core and render consume
 those published packages through seven explicit Cargo aliases; the transport
 and Deno families have no root source overrides. This integration branch does
 still patch the four turbo-dom crates to
-`25f59eac79993c5851f39ed75c3c233d0df96a6b`; remove that development patch only
+`8ec4e23f0d254359df86d631bafd36f38aee4d35`; remove that development patch only
 after the matching registry prerequisites are available and verified.
 
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile

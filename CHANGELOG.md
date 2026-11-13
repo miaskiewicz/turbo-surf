@@ -11,6 +11,10 @@ branch.
 
 ### Engine and performance
 
+- Recover once from a reset or broken pipe when sending a bodyless `GET` or
+  `HEAD` through a stale pooled connection, preserving the configured transport.
+  Requests with bodies, uploads, other methods, and unrelated errors are not
+  replayed. Preserve nested transport error causes for diagnosis (#498).
 - Scope `offsetTop`, `offsetLeft`, and `offsetParent` resource checks to the
   queried box dependencies, so unrelated transform animations do not break
   Popper positioning or Autocomplete option measurements. Animated targets,

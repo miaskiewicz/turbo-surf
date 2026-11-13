@@ -2634,7 +2634,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       true,
     );
   }
-  async _drainBindings(deadline = Infinity, cancelOnTimeout = true) {
+  async _drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
     if (this._session == null || this._draining) return;
     const handlers = this._mergedBindings();
     if (handlers.size === 0) return;
@@ -2674,7 +2674,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
         if (!pending.size && !calls.length) {
           if (changed && !advanced && !this._contentCollecting) {
             advanced = true;
-            await native.liveEvalEngine(this._session, "globalThis.__RESULT = '';");
+            // Observers advance one turn; actions retain full settlement.
+            await this._collectSession(this._session, "globalThis.__RESULT = '';", collect);
             continue;
           }
           break;
@@ -3838,12 +3839,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (this._live && this._session != null) {
         try {
           // Observing a URL must not cancel requests owned by a concurrent action.
-          await this._drainBindings(deadline, false);
+          await this._drainBindings(deadline, false, true);
           if (this._session != null) {
             await this._collectSession(this._session, "globalThis.__RESULT = '';", true);
             await this._refreshFromSession(true);
           }
-          await this._drainBindings(deadline, false);
+          await this._drainBindings(deadline, false, true);
         } catch (error) {
           if (error.name === "TimeoutError" && Date.now() >= deadline) throw timedOut();
           throw error;

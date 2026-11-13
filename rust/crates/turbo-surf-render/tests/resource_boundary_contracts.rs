@@ -12,7 +12,7 @@ async fn reversed_container_ranges_keep_inclusive_and_exclusive_boundaries() {
     let mut page = open(
         "<!doctype html><style>
         #container{container-type:size;width:300px;height:200px}
-        #container>div{width:10px;height:10px}
+        :where(#container)>div{width:10px;height:10px}
         @container (400px > width > 200px){#inside{width:70px}}
         @container (300px >= width >= 300px){#equal{width:70px}}
         @container (300px > width > 200px){#excluded{width:70px}}

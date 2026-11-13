@@ -174,7 +174,7 @@ jobs:
           key: napi
       - name: Install
         run: npm ci
-      - name: Playwright shim + E2E tests
+      - name: Playwright shim + E2E tests (local Cargo addon)
         run: npm run test:playwright
       - name: Detection tests
         run: npm run test:detection

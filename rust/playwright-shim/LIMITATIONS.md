@@ -61,7 +61,8 @@ surfaces remain unavailable or approximate:
   a subset of text-editing defaults, not full browser editing behavior. Enter
   and printable keypress events expose legacy character codes used by React
   `onKeyPress`; canceling keydown suppresses keypress, and canceling keypress
-  suppresses the editing default while preserving keyup.
+  suppresses the editing default while preserving keyup. Control/Meta command
+  chords omit keypress and preserve the select-all editing default.
 - **Network interception** — page-scoped fetch/XHR routes run host callbacks,
   including fulfill, continue/fallback overrides, abort and `route.fetch()`.
   Registration updates current and future sessions. General document/resource

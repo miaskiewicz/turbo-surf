@@ -74,3 +74,34 @@ for (const canceledType of ["keydown", "keypress"]) {
     });
   });
 }
+
+test("command chords omit keypress and preserve select-all editing", async () => {
+  await withInput(async (page) => {
+    await page.locator("#input").fill("08112026");
+    await page.evaluate(() => {
+      window.events = [];
+      for (const type of ["keypress", "beforeinput"])
+        document.addEventListener(type, (event) => events.push(event.type));
+    });
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("Control+Enter");
+    await page.keyboard.press("Meta+Enter");
+    assert.deepEqual(await page.evaluate(() => events), []);
+    assert.equal(await page.locator("#input").inputValue(), "08112026");
+    await page.keyboard.type("12122026");
+    assert.equal(await page.locator("#input").inputValue(), "12122026");
+  });
+});
+
+test("Shift+Enter preserves its printable legacy keypress", async () => {
+  await withInput(async (page) => {
+    await page.evaluate(() => {
+      window.events = [];
+      document.addEventListener("keypress", (event) =>
+        events.push([event.key, event.charCode, event.which, event.shiftKey]),
+      );
+    });
+    await page.keyboard.press("Shift+Enter");
+    assert.deepEqual(await page.evaluate(() => events), [["Enter", 13, 13, true]]);
+  });
+});

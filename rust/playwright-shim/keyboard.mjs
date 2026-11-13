@@ -73,7 +73,7 @@ export function makeKeyboard(page) {
       const element = document.activeElement || document.body || document.documentElement;
       const options = {...${JSON.stringify(options)}, bubbles: true, cancelable: true, view: globalThis};
       let allowed = element.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, options));
-      if (allowed && ${JSON.stringify(type)} === 'keydown' && (options.key.length === 1 || options.key === 'Enter')) {
+      if (allowed && ${JSON.stringify(type)} === 'keydown' && !options.ctrlKey && !options.metaKey && (options.key.length === 1 || options.key === 'Enter')) {
         const charCode = options.key === 'Enter' ? 13 : options.key.charCodeAt(0);
         allowed = element.dispatchEvent(new KeyboardEvent('keypress', {...options, charCode, keyCode: charCode}));
       }

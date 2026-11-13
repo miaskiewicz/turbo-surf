@@ -13,7 +13,8 @@ branch.
 
 - Dispatch React-compatible Enter and printable `keypress` events with legacy
   character codes, preserving cancellation and keyup ordering so chat inputs
-  using `onKeyPress` can submit (#506).
+  using `onKeyPress` can submit. Command chords omit keypress while retaining
+  select-all editing defaults (#506).
 
 - Enforce an optional immutable host-origin allowlist before native cache access,
   redirects, resource/module loads, reports, and WebSocket connections. Invalid

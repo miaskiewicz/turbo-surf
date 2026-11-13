@@ -1,4 +1,13 @@
 const __permissionStatusRecords = __interfaceMap("PermissionStatus");
+const __permissionStatusLive = new Set(),
+  __permissionStatusWeakRef = WeakRef;
+const __permissionStatusDereference = WeakRef.prototype.deref,
+  __permissionStatusEach = Set.prototype.forEach.bind(__permissionStatusLive),
+  __permissionStatusDelete = Set.prototype.delete.bind(__permissionStatusLive),
+  __permissionStatusAdd = Set.prototype.add.bind(__permissionStatusLive);
+const __permissionStatusSize = Object.getOwnPropertyDescriptor(Set.prototype, "size").get.bind(
+  __permissionStatusLive,
+);
 const __permissionStatusTarget = globalThis.EventTarget,
   __permissionStatusDefine = Object.defineProperty,
   __permissionStatusSetPrototype = Object.setPrototypeOf,
@@ -13,11 +22,13 @@ const __permissionStatusRecord = (receiver) => {
 };
 const __permissionStatusState = (state) => {
   if (!ops.op_window_active(state.document)) return state.lastState;
+  const configured = ops.op_context_emulation(state.document, state.feature);
+  if (!configured.active) return state.lastState;
   state.lastState =
     ops.op_permissions_policy(state.document, state.feature, "", 4) &&
     !ops.op_permissions_policy(state.document, state.feature, "", 2)
       ? "denied"
-      : state.baseState;
+      : configured.permission || state.baseState;
   return state.lastState;
 };
 class PermissionStatus extends __permissionStatusTarget {
@@ -101,6 +112,37 @@ const __createPermissionStatus = (name, baseState) => {
     listener: null,
   };
   __permissionStatusRecords.set(status, state);
-  __permissionStatusState(state);
+  state.notifiedState = __permissionStatusState(state);
+  __permissionStatusAdd(new __permissionStatusWeakRef(status));
   return status;
+};
+
+const __refreshPermissionStatus = (reference) => {
+  const status = __permissionStatusApply(__permissionStatusDereference, reference, []);
+  if (!status) {
+    __permissionStatusDelete(reference);
+    return 0;
+  }
+  const state = __permissionStatusRecord(status),
+    next = __permissionStatusState(state);
+  if (next === state.notifiedState) return 0;
+  state.notifiedState = next;
+  __queueTimerTask(
+    () => {
+      if (!ops.op_window_active(state.document)) return;
+      const event = new __hostEvent("change", { __proto__: null });
+      ops.op_event_trust(event, -1);
+      ops.op_dispatch_host_event(event, status);
+    },
+    __timerNow(),
+    ops.op_task_sequence(),
+  );
+  return 1;
+};
+const __refreshPermissionStatuses = () => {
+  let changed = 0;
+  __permissionStatusEach((reference) => {
+    changed += __refreshPermissionStatus(reference);
+  });
+  return changed;
 };

@@ -27,6 +27,7 @@ mod csp_reporting;
 mod document_facts;
 mod document_response;
 mod fetch_cors;
+mod geolocation_config;
 mod geometry_backend;
 mod indexed_db;
 mod integrity;

@@ -38,6 +38,11 @@ import { makeKeyboard } from "./keyboard.mjs";
 import { scheduleBindingDrain, throwBindingDrainError } from "./binding-drain.mjs";
 import { captureAssets } from "./screenshot-resources.mjs";
 import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
+import {
+  contextGeolocation,
+  contextPermissionGrant,
+  mergePermissionGrant,
+} from "./geolocation-options.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -4178,6 +4183,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
         locale: this._context._locale,
         extraHTTPHeaders: this._context._headers,
         httpCredentials: this._context._httpCredentials,
+        geolocation: this._context._geolocation,
+        permissions: this._context._permissionGrants,
       }),
     );
   }
@@ -4929,6 +4936,8 @@ class BrowserContext {
     this._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
     this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
     this._cookies = JSON.stringify(cookies);
+    const permissionGrant = contextPermissionGrant(merged.permissions ?? []);
+    const geolocation = contextGeolocation(merged.geolocation);
     this._requestState = native.requestStateNew?.();
     const origins = merged.storageState?.origins ?? [];
     if (origins.length) {
@@ -4947,14 +4956,15 @@ class BrowserContext {
       merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
     // Capture-only remaining per-project `use` keys so a suite that reads them
     // from the context (via a getter or in-suite introspection) sees the real
-    // project value. The engine doesn't act on HTTPS/permissions/geolocation
-    // today — these are present so a project's config doesn't silently vanish.
+    // project value. Timezone and HTTPS settings retain their current capability
+    // limits; permission and location options are applied through native context state.
     this._httpCredentials = merged.httpCredentials ?? null;
     this._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
     this._colorScheme = merged.colorScheme ?? null;
     this._reducedMotion = merged.reducedMotion ?? null;
     this._permissions = merged.permissions ?? [];
-    this._geolocation = merged.geolocation ?? null;
+    this._geolocation = geolocation;
+    this._permissionGrants = permissionGrant.permissions.length ? [permissionGrant] : [];
     this._timezoneId = merged.timezoneId ?? null;
     this._offline = merged.offline ?? false;
     if (this._offline) native.requestStateSetOffline(this._requestState, true);
@@ -4969,7 +4979,9 @@ class BrowserContext {
       this._reducedMotion ||
       this._locale ||
       Object.keys(this._headers).length ||
-      this._httpCredentials
+      this._httpCredentials ||
+      this._geolocation ||
+      this._permissionGrants.length
     )
       this._configureNative();
   }
@@ -4982,6 +4994,8 @@ class BrowserContext {
         locale: this._locale,
         extraHTTPHeaders: this._headers,
         httpCredentials: this._httpCredentials,
+        geolocation: this._geolocation,
+        permissions: this._permissionGrants,
       }),
     );
     for (const page of this._pages) if (!page._closed) page._configureNative();
@@ -5051,9 +5065,29 @@ class BrowserContext {
   async setDefaultNavigationTimeout(timeout) {
     this._navigationTimeout = timeout;
   }
-  async grantPermissions() {}
-  async clearPermissions() {}
-  async setGeolocation() {}
+  async _syncEmulation() {
+    this._configureNative();
+    for (const page of this._pages) {
+      if (!page._closed && page._session != null)
+        await native.liveEvalEngine(page._session, "__tsNs.syncNetworkState();", true);
+    }
+  }
+  async grantPermissions(permissions, options = {}) {
+    if (this._closed) throw new Error("browser context is closed");
+    const grant = contextPermissionGrant(permissions, options);
+    this._permissionGrants = mergePermissionGrant(this._permissionGrants, grant);
+    await this._syncEmulation();
+  }
+  async clearPermissions() {
+    if (this._closed) throw new Error("browser context is closed");
+    this._permissionGrants = [];
+    await this._syncEmulation();
+  }
+  async setGeolocation(geolocation) {
+    if (this._closed) throw new Error("browser context is closed");
+    this._geolocation = contextGeolocation(geolocation);
+    await this._syncEmulation();
+  }
   async setOffline(offline) {
     if (typeof offline !== "boolean") throw new Error("offline must be a boolean");
     const update = async () => {

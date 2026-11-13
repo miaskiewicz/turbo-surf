@@ -11,6 +11,9 @@ branch.
 
 ### Engine and performance
 
+- Construct asynchronous MCP dispatch state on the heap before polling it,
+  preserving stack headroom for cold V8 initialization without changing thread
+  stack sizes, execution budgets, or synchronous read paths (#501).
 - Preserve the reached interaction state when a watchdog terminates native DOM
   signature sampling, while retaining errors for genuine namespace exceptions
   and missing helpers (#498).
@@ -247,6 +250,10 @@ branch.
 
 ### Test runner and fixtures
 
+- Bind the build-and-test Playwright gate to an immutable snapshot of its freshly
+  built Cargo addon, so an older optional platform package cannot shadow the
+  current binary. Hash final signed bytes, preserve explicit artifact overrides,
+  and retain production loading and bare-test skip behavior (#502).
 - Execute the CLI through npm bin symlinks, load TypeScript suites, exit completed
   HTML-report runs, and reject unsupported runtime capability combinations
   (#305, #300).

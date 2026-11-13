@@ -18,6 +18,12 @@ and bounds each Node suite with `timeout --signal=KILL 600`; macOS needs a
 compatible `timeout` command available. Node 22 supports the detection raw-CDP
 collector's native WebSocket API. Chrome remains optional development tooling.
 
+The build-and-test gate selects an immutable snapshot of the freshly built Cargo
+addon through `TURBO_SURF_NAPI_PATH`, preserving an explicit harness override.
+Snapshot names hash the final signed bytes. This prevents an installed optional
+platform package from shadowing the local build; production package resolution
+and the bare `test:shim` / `test:e2e` missing-addon skip behavior stay unchanged.
+
 Use an isolated `CARGO_TARGET_DIR` for concurrent work and the matching addon
 output when running shim tests; do not reuse a test candidate's build directory.
 Default, feature-specific and native SDK builds are distinct configurations; see

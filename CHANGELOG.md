@@ -11,6 +11,11 @@ branch.
 
 ### Engine and performance
 
+- Use wall-clock timer deadlines in Playwright shim sessions so consecutive
+  keystrokes preserve editor character queries instead of expiring future
+  callbacks between digits. Direct native callers retain virtual timers unless
+  they opt in (#512).
+
 - Dispatch React-compatible Enter and printable `keypress` events with legacy
   character codes, preserving cancellation and keyup ordering so chat inputs
   using `onKeyPress` can submit. Command chords omit keypress while retaining

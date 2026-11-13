@@ -70,7 +70,9 @@ surfaces remain unavailable or approximate:
   See the method rows below for the narrower replay semantics.
 
 Live `PageSession` calls retain the app's V8 isolate and drain timers, microtasks and
-network work when driven. A `networkidle` navigation opens a session immediately;
+network work when driven. Shim sessions use wall-clock timer deadlines, so driving
+an action does not fast-forward future debounce or editor-expiry callbacks. The
+native addon retains virtual timers when callers omit its opt-in. A `networkidle` navigation opens a session immediately;
 actions can hydrate on demand unless navigation used `waitUntil:"commit"`. Static
 snapshot paths have no background app event loop. Live assertions can re-drain the
 session, but timing and waiting are not the same as a continuously running browser.

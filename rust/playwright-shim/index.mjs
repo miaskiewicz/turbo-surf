@@ -2801,6 +2801,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
         timeoutMs,
         this._context._maxResponseBytes,
         this._engineInitScriptSource(),
+        // Browser editing must not expire future timers between consecutive keys.
+        true,
       );
       if (this._closed || this._openingSession !== opening) {
         native.liveClose(session);

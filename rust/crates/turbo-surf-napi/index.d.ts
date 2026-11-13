@@ -53,6 +53,7 @@ export function hydrate(
 /** documentResponse is host JSON {status, referrer, headers: [[name, value], ...], viewport?: [width, height], hostNetworkLog?: number}.
  * initScript runs in the guest global before authored scripts.
  * engineInitScript is an optional driver-only body with the private __tsNs namespace.
+ * realTimeTimers waits for wall-clock deadlines; omitted/false keeps crawler virtual time.
  * Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
  * real DOM events into the running app. Returns a session id. */
 export function liveOpen(
@@ -66,6 +67,7 @@ export function liveOpen(
   timeoutMs?: number,
   maxResourceBytes?: number,
   engineInitScript?: string,
+  realTimeTimers?: boolean,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;

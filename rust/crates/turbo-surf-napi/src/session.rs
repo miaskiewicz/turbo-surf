@@ -213,7 +213,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc::UnboundedSender as MpscSender;
-use turbo_surf_render::{PageSession, PageSessionOptions, DEFAULT_RENDER_BUDGET_MS};
+use turbo_surf_render::{
+    PageSession, PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS,
+};
 
 enum LiveJob {
     Content(
@@ -297,6 +299,7 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
 pub struct LiveOpenTask {
     max_resource_bytes: Option<u32>,
     initial_timeout_ms: Option<u32>,
+    window_timer_mode: WindowTimerMode,
     response: crate::document_response::DocumentResponse,
     init_script: String,
     engine_init_script: String,
@@ -339,6 +342,7 @@ impl Task for LiveOpenTask {
         let init_script = std::mem::take(&mut self.init_script);
         let engine_init_script = std::mem::take(&mut self.engine_init_script);
         let initial_timeout_ms = self.initial_timeout_ms;
+        let window_timer_mode = self.window_timer_mode;
         let viewport = response.viewport;
         let max_resource_bytes = self.max_resource_bytes;
         thread::spawn(move || {
@@ -369,7 +373,7 @@ impl Task for LiveOpenTask {
                         max_resource_bytes: max_resource_bytes.map(|bytes| bytes as usize),
                         initial_hydration_budget_ms: initial_timeout_ms.map(u64::from),
                         viewport,
-                        ..Default::default()
+                        window_timer_mode,
                     },
                     &engine_init_script,
                     Some(worker_network.clone()),
@@ -529,6 +533,7 @@ pub fn live_open(
     timeout_ms: Option<u32>,
     max_resource_bytes: Option<u32>,
     engine_init_script: Option<String>,
+    real_time_timers: Option<bool>,
 ) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
@@ -537,6 +542,11 @@ pub fn live_open(
     Ok(AsyncTask::new(LiveOpenTask {
         max_resource_bytes,
         initial_timeout_ms: timeout_ms.filter(|timeout| *timeout > 0),
+        window_timer_mode: if real_time_timers.unwrap_or(false) {
+            WindowTimerMode::RealTime
+        } else {
+            WindowTimerMode::Virtual
+        },
         response: crate::document_response::parse(document_response)?,
         init_script: init_script.unwrap_or_default(),
         engine_init_script: engine_init_script.unwrap_or_default(),

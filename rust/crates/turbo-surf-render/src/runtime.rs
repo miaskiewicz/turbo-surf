@@ -15473,10 +15473,11 @@ fn namespace_call(
     if let Some(value) = call_frame_helper(scope, name, &values) {
         return Ok(v8::Global::new(scope, value));
     }
-    if !scope.is_execution_terminating() {
-        if let Some(error) = scope.exception() {
-            return Err(error.to_rust_string_lossy(scope));
-        }
+    if scope.is_execution_terminating() {
+        return Err(format!("Namespace function {name} execution terminated"));
+    }
+    if let Some(error) = scope.exception() {
+        return Err(error.to_rust_string_lossy(scope));
     }
     Err(format!("Namespace function {name} failed"))
 }

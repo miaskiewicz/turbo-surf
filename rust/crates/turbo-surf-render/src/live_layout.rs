@@ -23,6 +23,8 @@ pub(crate) struct LiveTreeInput {
     /// tree version, recorded under the source budgets at capture time.
     pub(crate) capture: LiveCapture,
     pub(crate) resource_query: Option<crate::live_layout_resources::Query>,
+    pub(crate) completed_animations: crate::live_layout_resources::CompletedAnimations,
+    pub(crate) cacheable_effects: bool,
     pub(crate) composition: Option<crate::live_layout_composed::Composition>,
 }
 
@@ -32,6 +34,8 @@ impl LiveTreeInput {
         Self {
             capture: LiveCapture::empty(document_id, tree_version),
             resource_query: None,
+            completed_animations: Default::default(),
+            cacheable_effects: true,
             composition: None,
         }
     }
@@ -85,6 +89,8 @@ pub(crate) fn capture_composed_tree(
     Ok(LiveTreeInput {
         capture,
         resource_query: None,
+        completed_animations: Default::default(),
+        cacheable_effects: true,
         composition: Some(composition),
     })
 }
@@ -395,8 +401,12 @@ fn snapshot_pass(
         &LiveOptions { layout_scale },
         |styled| {
             let styles = crate::live_layout_zoom::apply(styled, document);
-            let query_independent =
-                crate::live_layout_resources::validate(styled, rules, input.resource_query)?;
+            let query_independent = crate::live_layout_resources::validate_with_lifecycle(
+                styled,
+                rules,
+                input.resource_query,
+                &input.completed_animations,
+            )?;
             let containers = crate::live_container_queries::Containers::collect(styled, document);
             Ok((styles, containers, query_independent))
         },

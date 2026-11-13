@@ -5,9 +5,9 @@ use crate::live_layout_composed::Composition;
 use crate::live_stylesheets::SheetSnapshot;
 use std::collections::HashSet;
 use turbo_dom_browser_env::host_internals::{
-    cascade_policy, current_document_context, current_document_id, document_id_of,
-    enter_document_of, handle_of, host_composed_children, interface_record, is_browsing_context,
-    is_connected, with_tree, wrap, Handle, Tree,
+    cascade_policy, css_effect_lifecycle, current_document_context, current_document_id,
+    document_id_of, enter_document_of, handle_of, host_composed_children, interface_record,
+    is_browsing_context, is_connected, with_tree, wrap, Handle, Tree,
 };
 
 /// The receiver a capture was taken from, so a stale capture can be taken again.
@@ -98,7 +98,15 @@ fn capture_kind<'s>(
     // Ordinary documents use the same native matched cascade as shadow scopes.
     // Falling back here loses functional selector arguments and specificity.
     let composed = connected && browsing_context;
-    let tree = capture_tree(scope, document_id, composed, &mut graph)?;
+    // Canonical CSS synchronization can invalidate style epochs: sample before capture.
+    let (completed_animations, cacheable_effects) = if composed {
+        animation_admission(scope, &graph)
+    } else {
+        (Default::default(), true)
+    };
+    let mut tree = capture_tree(scope, document_id, composed, &mut graph)?;
+    tree.completed_animations = completed_animations;
+    tree.cacheable_effects = cacheable_effects;
     let owner_context = current_document_context(scope);
     let sheets = if composed {
         capture_sheets(scope, root, document_id, &graph, &sheets)?
@@ -116,6 +124,46 @@ fn capture_kind<'s>(
         sheets,
         range: None,
     })
+}
+// These observations live only inside this synchronous capture. Playback methods
+// need not mutate the tree, so any effect (or unavailable proof) forbids reuse.
+fn animation_admission(
+    scope: &mut v8::PinScope<'_, '_>,
+    graph: &Composition,
+) -> (crate::live_layout_resources::CompletedAnimations, bool) {
+    let elements = with_tree(|tree| {
+        graph
+            .children
+            .keys()
+            .copied()
+            .filter(|handle| tree.node_type_id(*handle) == 1)
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+    let mut completed = crate::live_layout_resources::CompletedAnimations::new();
+    let mut cacheable = true;
+    let document_id = current_document_id();
+    for handle in elements {
+        let element = wrap(scope, handle);
+        let Some(snapshot) = css_effect_lifecycle(scope, element) else {
+            cacheable = false;
+            continue;
+        };
+        if !snapshot.animation_names.is_empty()
+            || !snapshot.effects.is_empty()
+            || snapshot.unsupported
+        {
+            cacheable = false;
+        }
+        if snapshot.document_id == document_id
+            && snapshot.element == handle
+            && !snapshot.animation_names.is_empty()
+            && snapshot.allows_underlying_geometry()
+        {
+            completed.insert(handle, snapshot.animation_names);
+        }
+    }
+    (completed, cacheable)
 }
 /// The live tree input: a composed document gets the UA rules matched in each of
 /// its scopes and the composed tree; anything else an empty tree.

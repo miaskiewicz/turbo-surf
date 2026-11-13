@@ -787,7 +787,7 @@ fn resolve_layout<'s>(
         cache
             .borrow()
             .iter()
-            .find(|entry| entry.key.admits(&key))
+            .find(|entry| tree.cacheable_effects && entry.key.admits(&key))
             .map(|entry| entry.snapshot.clone())
     });
     drop(key_timer);
@@ -867,10 +867,12 @@ fn resolve_layout<'s>(
             if cache.len() == 4 {
                 cache.pop_front();
             }
-            cache.push_back(CacheEntry {
-                key,
-                snapshot: snapshot.clone(),
-            });
+            if tree.cacheable_effects {
+                cache.push_back(CacheEntry {
+                    key,
+                    snapshot: snapshot.clone(),
+                });
+            }
         });
         snapshot
     };

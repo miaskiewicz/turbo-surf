@@ -337,15 +337,18 @@ fn element_path<'a>(
     false
 }
 
-/// Whether the actual styled scene is admitted without a target-specific exception.
-pub(crate) fn validate(
+pub(crate) type CompletedAnimations =
+    std::collections::HashMap<turbo_dom_parser::rtdom::tree::Handle, Vec<String>>;
+
+pub(crate) fn validate_with_lifecycle(
     nodes: &[StyledNode],
     rules: &[crate::live_stylesheets::ActiveRule],
     requested: Option<Query>,
+    completed: &CompletedAnimations,
 ) -> Result<bool, String> {
     let definitions = Definitions::collect(rules);
     // Only a full strict success permits sharing this layout across query targets.
-    let strict = validate_nodes(nodes, &definitions);
+    let strict = validate_nodes(nodes, &definitions, completed);
     if strict.is_ok() {
         return Ok(true);
     }
@@ -366,6 +369,7 @@ pub(crate) fn validate(
         query.kind,
         &mut Vec::new(),
         &mut Seen::new(),
+        completed,
     )?;
     Ok(false)
 }
@@ -377,6 +381,7 @@ fn validate_rect_nodes<'a>(
     kind: QueryKind,
     path: &mut Vec<&'a turbo_dom_layout::StyledElement>,
     seen: &mut Seen<'a>,
+    completed: &CompletedAnimations,
 ) -> Result<(), String> {
     for node in nodes {
         let StyledNode::Element(element) = node else {
@@ -388,17 +393,36 @@ fn validate_rect_nodes<'a>(
             continue;
         }
         path.push(element);
-        validate_style_for_rect(&element.style, definitions, seen, || {
-            independent_effect(path, requested, kind)
-        })?;
-        validate_rect_nodes(&element.children, definitions, requested, kind, path, seen)?;
+        validate_style_with_lifecycle(
+            &element.style,
+            definitions,
+            seen,
+            element
+                .source
+                .and_then(|source| completed.get(&source))
+                .is_some_and(|names| completed_names_match(&element.style, names)),
+            || independent_effect(path, requested, kind),
+        )?;
+        validate_rect_nodes(
+            &element.children,
+            definitions,
+            requested,
+            kind,
+            path,
+            seen,
+            completed,
+        )?;
         path.pop();
     }
     Ok(())
 }
 
 type Seen<'a> = std::collections::HashSet<(&'static str, &'a str)>;
-fn validate_nodes(nodes: &[StyledNode], definitions: &Definitions) -> Result<(), String> {
+fn validate_nodes(
+    nodes: &[StyledNode],
+    definitions: &Definitions,
+    completed: &CompletedAnimations,
+) -> Result<(), String> {
     if definitions.fonts.is_empty() && definitions.animations.is_empty() {
         return Ok(());
     }
@@ -413,12 +437,22 @@ fn validate_nodes(nodes: &[StyledNode], definitions: &Definitions) -> Result<(),
         {
             continue;
         }
-        validate_style(&element.style, definitions, &mut seen)?;
+        validate_style_with_lifecycle(
+            &element.style,
+            definitions,
+            &mut seen,
+            element
+                .source
+                .and_then(|source| completed.get(&source))
+                .is_some_and(|names| completed_names_match(&element.style, names)),
+            || false,
+        )?;
         pending.extend(element.children.iter());
     }
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_style<'a>(
     style: &'a ComputedStyle,
     definitions: &Definitions,
@@ -426,10 +460,20 @@ fn validate_style<'a>(
 ) -> Result<(), String> {
     validate_style_for_rect(style, definitions, seen, || false)
 }
+#[cfg(test)]
 fn validate_style_for_rect<'a>(
     style: &'a ComputedStyle,
     definitions: &Definitions,
     seen: &mut Seen<'a>,
+    independent: impl Fn() -> bool,
+) -> Result<(), String> {
+    validate_style_with_lifecycle(style, definitions, seen, false, independent)
+}
+fn validate_style_with_lifecycle<'a>(
+    style: &'a ComputedStyle,
+    definitions: &Definitions,
+    seen: &mut Seen<'a>,
+    completed: bool,
     independent: impl Fn() -> bool,
 ) -> Result<(), String> {
     if !definitions.fonts.is_empty() {
@@ -458,18 +502,14 @@ fn validate_style_for_rect<'a>(
             }
         }
     }
-    if !definitions.animations.is_empty() {
+    if !definitions.animations.is_empty() && !completed {
         validate_animations(style, definitions, independent)?;
     }
     Ok(())
 }
-fn validate_animations(
-    style: &ComputedStyle,
-    definitions: &Definitions,
-    independent: impl Fn() -> bool,
-) -> Result<(), String> {
+fn animation_properties() -> [(&'static str, PropertyId<'static>); 4] {
     use lightningcss::vendor_prefix::VendorPrefix;
-    for (name, id) in [
+    [
         (
             "animation-name",
             PropertyId::AnimationName(VendorPrefix::None),
@@ -483,26 +523,55 @@ fn validate_animations(
             "-webkit-animation",
             PropertyId::Animation(VendorPrefix::WebKit),
         ),
-    ] {
+    ]
+}
+fn declared_animation_names(id: PropertyId, value: &str) -> Result<Vec<String>, String> {
+    let property = Property::parse_string(id, value, ParserOptions::default())
+        .map_err(|_| "native layout cannot prove an animation definition unused")?;
+    let names = match property {
+        Property::AnimationName(names, _) => names.into_iter().collect::<Vec<_>>(),
+        Property::Animation(animations, _) => animations
+            .into_iter()
+            .map(|animation| animation.name)
+            .collect(),
+        _ => return Err("native layout cannot prove an animation definition unused".into()),
+    };
+    Ok(names
+        .into_iter()
+        .filter_map(|name| match name {
+            AnimationName::None => None,
+            AnimationName::Ident(name) => Some(name.0.to_string()),
+            AnimationName::String(name) => Some(name.0.to_string()),
+        })
+        .collect())
+}
+// Native scoped cascade and canonical effect input must identify the same effects.
+// Missing or disagreeing producer style data is never a completion certificate.
+fn completed_names_match(style: &ComputedStyle, completed: &[String]) -> bool {
+    let mut matched = false;
+    for (name, id) in animation_properties() {
         let Some(value) = style.get(name) else {
             continue;
         };
-        let property = Property::parse_string(id, value, ParserOptions::default())
-            .map_err(|_| "native layout cannot prove an animation definition unused")?;
-        let names = match property {
-            Property::AnimationName(names, _) => names.into_iter().collect::<Vec<_>>(),
-            Property::Animation(animations, _) => animations
-                .into_iter()
-                .map(|animation| animation.name)
-                .collect(),
-            _ => return Err("native layout cannot prove an animation definition unused".into()),
+        if declared_animation_names(id, value).is_ok_and(|names| names == completed) {
+            matched = true;
+        } else {
+            return false;
+        }
+    }
+    matched && !completed.is_empty()
+}
+fn validate_animations(
+    style: &ComputedStyle,
+    definitions: &Definitions,
+    independent: impl Fn() -> bool,
+) -> Result<(), String> {
+    for (name, id) in animation_properties() {
+        let Some(value) = style.get(name) else {
+            continue;
         };
-        for name in names {
-            let used = match name {
-                AnimationName::None => continue,
-                AnimationName::Ident(name) => name.0.to_string(),
-                AnimationName::String(name) => name.0.to_string(),
-            };
+        let names = declared_animation_names(id, value)?;
+        for used in names {
             if definitions.animations.get(&used).is_some_and(|frames| {
                 !constant_animation(style, frames)
                     && !(paint_or_transform_only(style, frames) && independent())
@@ -526,6 +595,23 @@ mod definition_tests {
             resource: Some(definition(source).unwrap()),
             containers: Vec::new(),
         }])
+    }
+
+    #[test]
+    fn completed_effect_names_cannot_waive_a_different_scoped_animation() {
+        let scoped = ComputedStyle::from_pairs([("animation", "local 100s")]);
+        assert!(!completed_names_match(&scoped, &["outer".into()]));
+        assert!(!completed_names_match(&scoped, &[]));
+        assert!(completed_names_match(&scoped, &["local".into()]));
+        let multiple = ComputedStyle::from_pairs([("animation-name", "first,second")]);
+        assert!(!completed_names_match(
+            &multiple,
+            &["second".into(), "first".into()]
+        ));
+        assert!(completed_names_match(
+            &multiple,
+            &["first".into(), "second".into()]
+        ));
     }
 
     #[test]

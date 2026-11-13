@@ -151,8 +151,13 @@ Geometry admission is scoped to the source and purpose of a read. Unaffected
 boxes and leaf scroll extents can be read despite unrelated animations. An
 animated query or ancestor, animated descendants contributing to an extent,
 nonzero scrolling and uncertain scrollbar gutters retain strict checks. Actual
-point hit-testing also stays strict. This does not advance animation timelines;
-an animation-toggle option is future work ([#500](https://github.com/miaskiewicz/turbo-surf/issues/500), v0.8.4).
+point hit-testing also stays strict. Fresh canonical per-element lifecycle proof
+can admit underlying geometry after matching finite CSS animations complete
+without fill; it does not advance the timeline or sample active transforms.
+Playback changes revoke the proof even without DOM mutation. Missing or
+mismatched lifecycle data, including scoped shadow stylesheet effects tracked in
+[turbo-dom #509](https://github.com/miaskiewicz/turbo-dom/issues/509), stays strict.
+An animation-toggle option is future work ([#500](https://github.com/miaskiewicz/turbo-surf/issues/500), v0.8.4).
 
 ## Page
 

@@ -12,6 +12,12 @@ branch.
 
 ### Engine and performance
 
+- Admit underlying native geometry for an element only when fresh canonical CSS
+  effect state proves its matching declared animations completed without fill.
+  Playback changes invalidate reuse; active, paused, infinite, filling, unknown
+  and mismatched effects keep their guards. Scoped shadow stylesheet lifecycle
+  remains strict pending turbo-dom #509 (#511).
+
 - Keep on-demand JavaScript available after `waitUntil: "commit"` navigation,
   reload and history replacement, while preserving the immediate raw-response
   path and explicit static-only execution permission. Later actions, evaluation

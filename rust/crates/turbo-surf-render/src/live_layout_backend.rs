@@ -1796,6 +1796,7 @@ fn offset<'s>(
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let mut input = crate::live_layout_dom::capture(scope, receiver)?;
+    set_resource_query(&mut input, QueryKind::LocalBox);
     let position = if !input.connected || !input.browsing_context {
         turbo_dom_layout::cssom_view::metrics::OffsetPosition {
             left: 0,

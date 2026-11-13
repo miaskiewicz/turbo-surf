@@ -294,7 +294,11 @@ impl Pages {
     }
 }
 
-pub(super) fn register_root(scope: &mut v8::PinScope, context: v8::Local<v8::Context>, url: &str) {
+pub(super) fn register_root<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    url: &str,
+) {
     let identity = auxiliary_context_identity(context).expect("installed native root identity");
     let root_bootstrap = JsRuntime::op_state_from(scope)
         .borrow()

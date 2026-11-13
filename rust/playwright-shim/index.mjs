@@ -574,6 +574,10 @@ class Locator {
     this._filterSpec = opts.filterSpec ?? null;
   }
 
+  page() {
+    return this._page instanceof Frame ? this._page.page() : this._page;
+  }
+
   // The scope chain a CHILD of this locator inherits: our chain plus this locator's own
   // base selector, index, and (serializable) filter.
   _childScope() {

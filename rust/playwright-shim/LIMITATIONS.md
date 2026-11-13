@@ -184,6 +184,7 @@ an animation-toggle option is future work ([#500](https://github.com/miaskiewicz
 | Method | Status | Notes |
 |---|---|---|
 | `first`, `last`, `nth`, `filter`, `and`, `or`, `all`, `count` | ✅ | Pure JS over the resolved match set. |
+| `page` | ✅ | Returns the owning Page synchronously, including for derived and frame locators; does not resolve the DOM. |
 | `locator` (nesting) | ✅ | CSS parents, indexed/filtered ancestors, `:scope`, and role/text/label parents retain their descendant scope for reads and live actions. |
 | `getByRole/Text/Label/TestId/Placeholder/AltText/Title` | ⚠️ | Role/text/label/placeholder/alt/title children preserve parent scope, including indexed ancestors. Regex test IDs support matching and live actions. Open-shadow-root piercing remains unsupported (#476). |
 | `textContent`, `innerText`, `innerHTML`, `allTextContents`, `allInnerTexts` | ✅ | |

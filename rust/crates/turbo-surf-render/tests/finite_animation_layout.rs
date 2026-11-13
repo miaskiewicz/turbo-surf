@@ -122,7 +122,7 @@ async fn declaration_restarts_and_other_ancestors_keep_their_guards() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn unknown_shadow_stylesheet_effects_keep_their_geometry_guard() {
+async fn active_shadow_stylesheet_effects_keep_their_geometry_guard() {
     let actual = observe(
         r#"(async()=>{
           document.getElementById('message').style.animation='none';
@@ -132,17 +132,54 @@ async fn unknown_shadow_stylesheet_effects_keep_their_geometry_guard() {
             const root=host.attachShadow({mode});
             root.innerHTML='<style>@keyframes local{from{transform:translateY(8px)}to{transform:translateY(0)}}div{animation:local 100s!important}button{width:32px;height:32px;padding:0;border:0}</style><div><button>Vote</button></div>';
             const message=root.querySelector('div');
-            await Promise.all(message.getAnimations().map(animation=>animation.finished));
+            const animations=message.getAnimations();
+            await Promise.all(animations.map(animation=>animation.ready));
             const target=root.querySelector('button');
-            try{target.getBoundingClientRect();results.push('admitted');}
-            catch(error){results.push(error.message.includes('animation resource'));}
+            let guarded=false;
+            try{target.getBoundingClientRect();}
+            catch(error){guarded=error.message.includes('animation resource');}
+            results.push([animations.length,animations[0]?.playState,guarded]);
           }
           return results;
         })()"#,
     ).await;
-    // Canonical shadow-stylesheet lifecycle input is unavailable here; never
-    // interpret the absent effect list as permission from another element.
-    assert_eq!(actual, serde_json::json!([true, true]));
+    // Scoped effects are now canonically discoverable. Active effects must still
+    // reject geometry; waiting for their 100-second completion would test another phase.
+    assert_eq!(
+        actual,
+        serde_json::json!([[1, "running", true], [1, "running", true]])
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn completed_shadow_effects_admit_geometry_and_restart_revokes_the_proof() {
+    let actual = observe(
+        r#"(async()=>{
+          document.getElementById('message').style.animation='none';
+          const results=[];
+          for(const mode of ['open','closed']){
+            const host=document.createElement('section');document.body.append(host);
+            const root=host.attachShadow({mode});
+            root.innerHTML='<style>@keyframes local{from{transform:translateY(8px)}to{transform:translateY(0)}}div{animation:local 64ms}button{width:32px;height:32px;padding:0;border:0}</style><div><button>Vote</button></div>';
+            const message=root.querySelector('div'),target=root.querySelector('button');
+            const animations=message.getAnimations();
+            await Promise.all(animations.map(animation=>animation.finished));
+            let jobs=0;queueMicrotask(()=>jobs++);
+            const rect=target.getBoundingClientRect();
+            const checkpointJobs=jobs;
+            message.style.animation='local 100s';
+            let restartGuarded=false;
+            try{target.getBoundingClientRect();}
+            catch(error){restartGuarded=error.message.includes('animation resource');}
+            results.push([animations.length,rect.width,rect.height,checkpointJobs,restartGuarded]);
+          }
+          return results;
+        })()"#,
+    ).await;
+    assert_eq!(
+        actual,
+        serde_json::json!([[1, 32, 32, 0, true], [1, 32, 32, 0, true]])
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

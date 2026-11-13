@@ -28,3 +28,16 @@ test("a real new document resets prior load and closure rejects its wait", async
   page.emit("close");
   await assert.rejects(waiting, /closed/);
 });
+
+test("private realm bootstrap can record milestones without publishing page events", () => {
+  const page = new EventEmitter();
+  const events = [];
+  page.on("load", () => events.push("load"));
+  const state = new NativeLoadState(page);
+  state.observe("load", { emit: false });
+  assert.deepEqual(events, []);
+  state.reset();
+  state.observe("load");
+  state.observe("load");
+  assert.deepEqual(events, ["load"]);
+});

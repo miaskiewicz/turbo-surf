@@ -8,10 +8,12 @@ export class NativeLoadState {
   reset() {
     this.states = new Set();
   }
-  observe(kind) {
+  observe(kind, { emit = true } = {}) {
     const event = kind === "domContentLoaded" ? "domcontentloaded" : "load";
+    const repeated = this.states.has(event);
     this.states.add(event);
     if (event === "load") this.states.add("domcontentloaded");
+    if (!emit || repeated) return;
     this.page._emit ? this.page._emit(event, this.page) : this.page.emit(event, this.page);
   }
   async wait(state, options) {

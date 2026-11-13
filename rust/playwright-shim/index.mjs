@@ -3772,15 +3772,19 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (!this._live) {
       const previous = this._html;
       this._html = "";
+      this._initializingForSetContent = true;
       try {
         await this._openLiveSession(opts.timeout);
       } catch (error) {
         this._html = previous;
         throw error;
+      } finally {
+        this._initializingForSetContent = false;
       }
     }
     this._imageCache = undefined;
     closeScreenshotScene(this);
+    if (this._auxiliaryActor) this._nativeLoad().reset();
     let failure;
     try {
       this._html = await native.liveSetContent(
@@ -3805,8 +3809,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
       throw failure;
     }
     this._contentLoadPending = waitUntil === "domcontentloaded";
-    this._emit("domcontentloaded");
-    if (!this._contentLoadPending) this._emit("load");
+    if (this._auxiliaryActor) await this._actorHub.drain();
+    else {
+      this._emit("domcontentloaded");
+      if (!this._contentLoadPending) this._emit("load");
+    }
   }
 
   // --- page-level actions (selector shortcuts) ---
@@ -4095,6 +4102,22 @@ return String(globalThis.__RESULT ?? ""); })()`,
   async waitForTimeout(ms) {
     await new Promise((r) => setTimeout(r, Math.min(ms ?? 0, 50)));
   }
+  async _advanceUrlWait(deadline, timedOut) {
+    try {
+      // Observing a URL must not cancel requests owned by a concurrent action.
+      await this._drainBindings(deadline, false, true);
+      if (this._session != null) {
+        await this._collectSession(this._session, "globalThis.__RESULT = '';", true);
+        await this._refreshFromSession(true);
+      }
+      await this._drainBindings(deadline, false, true);
+    } catch (error) {
+      if (this._closed) throw new Error("Page closed while waiting for URL", { cause: error });
+      if (error.name === "TimeoutError" && Date.now() >= deadline) throw timedOut();
+      throw error;
+    }
+  }
+
   async waitForURL(url, opts = {}) {
     // Playwright accepts a string (glob), RegExp, or a predicate fn(URL)=>bool.
     const match = (u) => {
@@ -4120,18 +4143,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (this._closed) throw new Error("Page closed while waiting for URL");
       if (Date.now() >= deadline) throw timedOut();
       if (this._live && this._session != null) {
-        try {
-          // Observing a URL must not cancel requests owned by a concurrent action.
-          await this._drainBindings(deadline, false, true);
-          if (this._session != null) {
-            await this._collectSession(this._session, "globalThis.__RESULT = '';", true);
-            await this._refreshFromSession(true);
-          }
-          await this._drainBindings(deadline, false, true);
-        } catch (error) {
-          if (error.name === "TimeoutError" && Date.now() >= deadline) throw timedOut();
-          throw error;
-        }
+        await this._advanceUrlWait(deadline, timedOut);
       }
       if (match(this._url)) return undefined;
       await new Promise((resolve) =>
@@ -5297,7 +5309,8 @@ class BrowserContext {
         if (source) source._emit("popup", child);
       },
       navigated: (target, event) => target._didNativeNavigate(event),
-      lifecycle: (target, event) => target._nativeLoad().observe(event.kind),
+      lifecycle: (target, event) =>
+        target._nativeLoad().observe(event.kind, { emit: !target._initializingForSetContent }),
       closed: (target) => target._didNativeClose(),
       network: (target, entry, previous) =>
         target._consumeNetworkEvents(

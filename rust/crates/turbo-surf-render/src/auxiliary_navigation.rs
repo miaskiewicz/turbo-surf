@@ -749,6 +749,7 @@ impl PageSession {
         }
         self.rt.v8_isolate().perform_microtask_checkpoint();
         let completed = std::future::poll_fn(|cx| {
+            let host_task = background_work::ready_tasks(&mut self.rt)?;
             let ready = {
                 let shared = self.rt.op_state();
                 let mut shared = shared.borrow_mut();
@@ -770,7 +771,7 @@ impl PageSession {
             let settled = loads.iter().any(|(target, promise)| {
                 !matches!(promise_result(&mut self.rt, *target, promise), Ok(false))
             });
-            if !ready.is_empty() || settled {
+            if !ready.is_empty() || settled || host_task || has_pending_frame_work(&self.rt) {
                 Poll::Ready(Ok(ready))
             } else {
                 Poll::Pending

@@ -8,7 +8,7 @@ struct BackgroundTurn {
     timer: Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
 }
 
-fn ready_tasks(rt: &mut JsRuntime) -> Result<bool, String> {
+pub(super) fn ready_tasks(rt: &mut JsRuntime) -> Result<bool, String> {
     #[cfg(turbo_surf_native_proxy)]
     if drive_pending_module_stage(rt)? {
         return Ok(true);

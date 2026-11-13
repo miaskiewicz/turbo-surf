@@ -202,7 +202,7 @@ function validateResourceTagOptions(kind, opts) {
 
 // --- page.route helpers ---------------------------------------------------
 // Normalize a route pattern + fulfill payload into a JSON-serializable record.
-// `patternKey` is the original user pattern as a string so `unroute` can match.
+// `patternKey` preserves predicate identity, or the string/RegExp source for unroute.
 // Convert one HAR entry (Playwright / Chrome DevTools format) into the same
 // route record normalizeRoute produces. Matches the entry's URL exactly: the
 // init-script's globToRegex anchors non-wildcard patterns, so the request URL
@@ -241,17 +241,22 @@ function harEntryToRoute(entry) {
 
 function normalizeRoute(pattern, handler) {
   const isRegex = pattern instanceof RegExp;
-  if (!isRegex && typeof pattern !== "string")
-    throw new TypeError("Route pattern must be a string or RegExp");
+  const isPredicate = typeof pattern === "function";
+  if (!isRegex && !isPredicate && typeof pattern !== "string")
+    throw new TypeError("Route pattern must be a string, RegExp, or URL predicate");
   if (typeof handler !== "function") throw new TypeError("Route handler must be a function");
   return {
-    kind: isRegex ? "regex" : "glob",
-    pattern: isRegex ? pattern.source : String(pattern),
+    kind: isPredicate ? "predicate" : isRegex ? "regex" : "glob",
+    pattern: isPredicate ? null : isRegex ? pattern.source : String(pattern),
     flags: isRegex ? pattern.flags : "",
-    patternKey: isRegex ? pattern.source : String(pattern),
+    patternKey: isPredicate ? pattern : isRegex ? pattern.source : String(pattern),
     id: randomUUID(),
     handler,
   };
+}
+
+function matchesHostRoutePredicate({ kind, patternKey }, url) {
+  return kind !== "predicate" || patternKey(new URL(url));
 }
 
 // Build an init script that monkey-patches `fetch` (and XMLHttpRequest for the
@@ -312,6 +317,8 @@ function buildRouteInitScript(routes, bindingName) {
       // route table from the end.
       for (let i = start; i >= 0; i--) {
         const r = table[i];
+        // Predicate callbacks remain in the host; this is only a candidate.
+        if (r.kind === "predicate") return r;
         for (const u of urls) {
           try {
             if (r.kind === "regex") {
@@ -361,7 +368,7 @@ function buildRouteInitScript(routes, bindingName) {
       const signal = request.signal;
       const originalUrl = request.url;
       while (route) {
-        const decision = await routeDecision(invokeHost({id:route.id, request}), signal, request.requestId);
+        const decision = await routeDecision(invokeHost({id:route.id, request, matchUrl:originalUrl}), signal, request.requestId);
         if (decision.request) request = decision.request;
         if (decision.action !== "fallback") return {...decision, request};
         route = find(originalUrl, chain.indexOf(route) - 1, chain);
@@ -2494,6 +2501,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       `String(__tsNs.shimAuthorizeRoute(${document}, ${JSON.stringify(data.request.url)}))`,
     );
     if (allowed !== "true") throw new TypeError("Failed to fetch");
+    if (!matchesHostRoutePredicate(entry, data.matchUrl ?? data.request.url))
+      return { action: "fallback" };
     if (!data.request.overriddenHeaders)
       data = {
         ...data,
@@ -4373,7 +4382,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // An optional handler removes only that registration, preserving older matches.
   async unroute(urlPattern, handler) {
     if (!this._routes) return;
-    const key = urlPattern instanceof RegExp ? urlPattern.source : String(urlPattern);
+    const key =
+      typeof urlPattern === "function"
+        ? urlPattern
+        : urlPattern instanceof RegExp
+          ? urlPattern.source
+          : String(urlPattern);
     this._routes = this._routes.filter(
       (r) => r.patternKey !== key || (handler && r.handler !== handler),
     );

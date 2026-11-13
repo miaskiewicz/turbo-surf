@@ -1101,7 +1101,23 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
             serde_json::json!({ "event": "error", "id":trace_id.0, "url": url, "error": e.to_string() })
         }
     });
-    result.map_err(|e| err(format!("{e} (url: {url})"), ErrorCode::Network))
+    result.map_err(|e| transport_error(&e, url))
+}
+
+fn transport_error(error: &(dyn std::error::Error + 'static), url: &str) -> HttpError {
+    let mut message = error.to_string();
+    let mut cause = error.source();
+    // Transport Display implementations may include only their first wrapper.
+    for _ in 0..16 {
+        let Some(current) = cause else { break };
+        let detail = current.to_string();
+        if !message.ends_with(&detail) {
+            message.push_str(": ");
+            message.push_str(&detail);
+        }
+        cause = current.source();
+    }
+    err(format!("{message} (url: {url})"), ErrorCode::Network)
 }
 
 fn apply_headers(
@@ -2713,6 +2729,32 @@ pub async fn fetch_typed_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transport_failure_preserves_underlying_cause() {
+        #[derive(Debug)]
+        struct Transport(std::io::Error);
+        impl std::fmt::Display for Transport {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("client error (SendRequest)")
+            }
+        }
+        impl std::error::Error for Transport {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        let failure = Transport(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "fixture peer reset",
+        ));
+        let error = super::transport_error(&failure, "http://localhost/script.js");
+        assert!(error
+            .message
+            .contains("client error (SendRequest): fixture peer reset"));
+        assert!(error.message.ends_with("(url: http://localhost/script.js)"));
+        assert_eq!(error.code, super::ErrorCode::Network);
+    }
+
     #[test]
     fn protocol_memory_drops_priority_only_for_http1_origins() {
         let url = "https://protocol-memory.test/a";

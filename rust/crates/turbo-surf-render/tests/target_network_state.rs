@@ -195,3 +195,35 @@ async fn native_image_loading_is_owned_until_transport_and_decode_finish() {
     assert_eq!(log.target_network_state(&target)["pendingRequests"], 0);
     page.close();
 }
+
+#[tokio::test]
+async fn queued_native_form_is_busy_before_the_actor_starts_its_request() {
+    let mut page = PageSession::open(
+        "<form id='form' action='/next'></form>",
+        "http://127.0.0.1:1/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let root = page.auxiliary_root_id().unwrap();
+    let log = page.network_event_log();
+    page.eval_target_expression(
+        root,
+        "document.querySelector('#form').requestSubmit(); 'queued'",
+        false,
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        log.target_network_state(&root.to_string())["pendingNavigation"],
+        true
+    );
+    page.close();
+    assert_eq!(
+        log.target_network_state(&root.to_string())["pendingNavigation"],
+        false
+    );
+}

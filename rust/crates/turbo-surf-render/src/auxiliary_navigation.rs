@@ -897,7 +897,7 @@ impl PageSession {
             noreferrer: false,
             replace: false,
             snapshot,
-            activity: None,
+            activity: pending.activity,
         };
         let generation = start(&mut self.rt, navigation, HistoryMode::Push, self.budget_ms)?;
         self.wait_target_navigation(generation, self.budget_ms)

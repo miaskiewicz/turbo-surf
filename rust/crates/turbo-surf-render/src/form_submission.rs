@@ -15,6 +15,7 @@ struct Payload {
 
 pub(super) struct Pending {
     pub target: Option<u64>,
+    pub activity: Option<crate::network_activity::RequestActivity>,
     pub plan: form_navigation::Submission,
     pub source: String,
     pub user_activation: bool,
@@ -229,8 +230,16 @@ fn navigate<'s>(
     let policy = handle.policy.borrow();
     // A later submission replaces the earlier pending navigation before any wire IO.
     let state = JsRuntime::op_state_from(scope);
+    let target = auxiliary_pages::top_level_identity(scope, navigable).map(|id| id.0);
+    let activity = target.map(|target| {
+        state
+            .borrow()
+            .borrow::<NetworkLog>()
+            .begin_page_navigation(&target.to_string())
+    });
     state.borrow_mut().borrow_mut::<Queue>().0 = Some(Pending {
-        target: auxiliary_pages::top_level_identity(scope, navigable).map(|id| id.0),
+        target,
+        activity,
         plan,
         source,
         user_activation: host_user_activation(context),

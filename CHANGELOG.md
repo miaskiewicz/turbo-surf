@@ -5,8 +5,9 @@
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`b1f604013287382ca2cc82c823603199027df4ea` ([producer animation issue #507](https://github.com/miaskiewicz/turbo-dom/issues/507)). The dependency graph
-continues to use one `turbo-dom-v8` 150.4.1. Combined release validation is still in
+`397dc639c2b60eed5824a3c72b6c4630ef1f9186`. The dependency graph uses one
+`turbo-dom-v8` 150.4.2 from the exact WindowProxy candidate
+`0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.
 
@@ -31,7 +32,8 @@ branch.
   effect state proves its matching declared animations completed without fill.
   Playback changes invalidate reuse; active, paused, infinite, filling, unknown
   and mismatched effects keep their guards. Scoped shadow stylesheet lifecycle
-  remains strict pending turbo-dom #509 (#511).
+  uses the producer's canonical scoped-sheet discovery, while unknown or
+  mismatched effect proofs remain strict (#511; turbo-dom #509).
 
 - Keep on-demand JavaScript available after `waitUntil: "commit"` navigation,
   reload and history replacement, while preserving the immediate raw-response

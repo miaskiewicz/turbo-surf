@@ -51,6 +51,9 @@ use stock_engine::{code_generation, frame_modules};
 
 use frame_modules::op_frame_module;
 
+#[path = "context_geolocation.rs"]
+mod context_geolocation;
+
 #[path = "microtask_queue.rs"]
 mod microtask_queue;
 use microtask_queue::op_install_microtask_queue;
@@ -4738,7 +4741,7 @@ fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::In
         .map(tokio::time::Instant::from_std)
 }
 
-fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimerTurn {
+fn window_timer_contexts(rt: &JsRuntime) -> Vec<v8::Global<v8::Context>> {
     let mut contexts = vec![rt.main_context()];
     contexts.extend(
         rt.op_state()
@@ -4748,6 +4751,11 @@ fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimer
             .iter()
             .cloned(),
     );
+    contexts
+}
+
+fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimerTurn {
+    let contexts = window_timer_contexts(rt);
     deno_core::scope!(scope, rt);
     // Earliest deadline first; equal deadlines in agent-wide queueing order.
     let mut next: Option<((f64, f64), v8::Local<v8::Context>)> = None;
@@ -4757,6 +4765,7 @@ fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimer
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
+        let _ = call_frame_helper(active, "deliverEmulationState", &[]);
         let Some(key) = call_frame_helper(active, "timerNextDue", &[])
             .and_then(|value| timer_order_key(active, value))
         else {
@@ -7187,10 +7196,12 @@ fn op_sync_network_state(scope: &mut v8::PinScope) -> u32 {
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
-        if let Some(callback) = host_capability(active, context, "deliverNetworkState") {
-            let receiver = v8::undefined(active);
-            if let Some(value) = callback.call(active, receiver.into(), &[]) {
-                fired += value.uint32_value(active).unwrap_or(0);
+        for name in ["deliverNetworkState", "deliverEmulationState"] {
+            if let Some(callback) = host_capability(active, context, name) {
+                let receiver = v8::undefined(active);
+                if let Some(value) = callback.call(active, receiver.into(), &[]) {
+                    fired += value.uint32_value(active).unwrap_or(0);
+                }
             }
         }
     }
@@ -7819,13 +7830,20 @@ impl Default for BrowserStorage {
 }
 impl BrowserStorage {
     pub fn configure_emulation(&self, json: &str) -> Result<(), String> {
-        let options: crate::browser_emulation::BrowserEmulation =
+        let mut options: crate::browser_emulation::BrowserEmulation =
             serde_json::from_str(json).map_err(|e| e.to_string())?;
         options.validate()?;
-        *self
-            .4
-            .write()
-            .map_err(|_| "Context preferences unavailable")? = options;
+        let changed = {
+            let mut current = self
+                .4
+                .write()
+                .map_err(|_| "Context preferences unavailable")?;
+            options.changed = current.changed.clone();
+            let changed = options.changed.clone();
+            *current = options;
+            changed
+        };
+        changed.notify_waiters();
         Ok(())
     }
     pub fn http_credentials(&self) -> Option<turbo_surf_core::http_auth::Credentials> {
@@ -9011,6 +9029,7 @@ deno_core::extension!(
         op_csp_context,
         op_csp_base_url,
         op_permissions_policy,
+        context_geolocation::op_context_emulation,
         op_document_feature_enabled,
         op_private_token_issuer,
         op_private_token_query,
@@ -10275,6 +10294,7 @@ __defineDocumentAccessor("currentScript", state => state.currentScript);
 "##,
     include_str!("permissions_policy.js"),
     include_str!("permission_status.js"),
+    include_str!("geolocation.js"),
     include_str!("privacy_sandbox.js"),
     r##"
 
@@ -16103,7 +16123,7 @@ fn drain_next_background_resource_task(
 /// going, a shared storage inbox wakes the host future, or long-lived unref'd
 /// sockets / event streams keep the awaited operation live.
 fn should_keep_pending(
-    rt: &JsRuntime,
+    rt: &mut JsRuntime,
     storage_waiter: &Option<crate::storage_inbox::Waiter>,
     completion: Option<&v8::Global<v8::Value>>,
     await_window_timer: bool,
@@ -16115,6 +16135,9 @@ fn should_keep_pending(
     }
     let settled = matches!(result, std::task::Poll::Ready(Ok(())));
     if completion.is_some() && storage_waiter.is_some() && settled {
+        return true;
+    }
+    if completion.is_some() && settled && context_geolocation::observing(rt) {
         return true;
     }
     completion.is_some() && settled && network_transports::live(&rt.op_state().borrow())
@@ -16502,6 +16525,12 @@ async fn drain_event_loop_until_completion(
         std::pin::Pin<Box<tokio::time::Sleep>>,
     )> = None;
     let storage_waiter = storage_events::waiter(&rt.op_state().borrow());
+    let emulation_changed = rt
+        .op_state()
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .with_emulation(|options| options.changed.clone());
+    let mut emulation_waiter = Box::pin(emulation_changed.clone().notified_owned());
     // Even a synchronous result ends a script job. Observer and Promise
     // microtasks must run before the operation-completion shortcut can return.
     rt.v8_isolate().perform_microtask_checkpoint();
@@ -16538,6 +16567,11 @@ async fn drain_event_loop_until_completion(
             continue;
         }
         let result = std::future::poll_fn(|cx| {
+            context_geolocation::register_change_waiter(
+                &mut emulation_waiter,
+                &emulation_changed,
+                cx,
+            );
             if let Some(waiter) = &storage_waiter {
                 waiter.register(cx);
             }

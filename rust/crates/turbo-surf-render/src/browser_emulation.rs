@@ -8,6 +8,11 @@ pub(crate) struct BrowserEmulation {
     pub(crate) color_scheme: Option<String>,
     pub(crate) reduced_motion: Option<String>,
     pub(crate) locale: Option<String>,
+    pub(crate) geolocation: Option<crate::geolocation_config::Geolocation>,
+    #[serde(default)]
+    pub(crate) permissions: Vec<crate::geolocation_config::PermissionGrant>,
+    #[serde(skip)]
+    pub(crate) changed: std::sync::Arc<tokio::sync::Notify>,
     #[serde(default, rename = "extraHTTPHeaders")]
     pub(crate) extra_http_headers: std::collections::BTreeMap<String, String>,
     pub(crate) http_credentials: Option<turbo_surf_core::http_auth::Credentials>,
@@ -56,6 +61,12 @@ impl BrowserEmulation {
             .is_some_and(|s| !["reduce", "no-preference"].contains(&s))
         {
             return Err("Invalid reducedMotion".into());
+        }
+        if let Some(position) = &self.geolocation {
+            position.validate()?;
+        }
+        for grant in &self.permissions {
+            grant.validate()?;
         }
         if let Some(credentials) = &self.http_credentials {
             credentials.validate()?;

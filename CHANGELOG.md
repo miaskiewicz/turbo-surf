@@ -15,6 +15,9 @@ branch.
 - Finish keyboard events without waiting for unrelated exposed host callbacks.
   Keep those callbacks running with their real guest values/errors and retain
   collection failures, frame ownership, key ordering and editing defaults (#518).
+- Apply configured geolocation and origin-scoped permission grants to live
+  documents. Deliver asynchronous position callbacks, watch updates and
+  permission changes; enforce document policy and retire canceled watches (#391).
 
 - Keep the original native geometry admission/cache path first. Inspect fresh
   canonical effect state only for actual animation-resource blockers, recapture

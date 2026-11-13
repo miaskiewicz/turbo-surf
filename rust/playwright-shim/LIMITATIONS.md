@@ -242,7 +242,7 @@ An animation-toggle option is future work ([#500](https://github.com/miaskiewicz
 |---|---|---|
 | `newPage`, `pages`, `cookies`, `addCookies`, `clearCookies`, `storageState`, `addInitScript`, `setExtraHTTPHeaders`, `browser`, `request`, `close` | ✅ | |
 | `setDefaultTimeout` | ⚠️ | Inherited by request/response waits; page and explicit settings take precedence. `0` disables their timeout. Other action deadlines remain partial. |
-| `grantPermissions`, `clearPermissions`, `setGeolocation` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
+| `grantPermissions`, `clearPermissions`, `setGeolocation` | ✅ | Host-owned global/origin permission grants and configured coordinates. Geolocation delivers asynchronous position/error callbacks and watch updates; clearing a watch stops delivery. Native secure-context and Permissions Policy checks apply to each actual document. No physical location sensor or permission prompt UI. |
 | `on/off/once`, `waitForEvent` | ⚠️ | Actual owned `newPage`/`close` events and subscribed page network events, with predicates and deadlines. Auxiliary popup contexts remain unsupported (#326); commit-only navigation response events are not collected. |
 | `setOffline` | ✅ | Native per-context conditions, also supported by `newContext({ offline: true })`. New transport sends fail after HTTP cache lookup; already-started HTTP responses continue. Owned tabs/frames receive trusted online/offline events and live `navigator.onLine`. API request contexts remain online independently; no native POST replay. Established WebSocket frames wait for reconnect on the same socket. |
 | `tracing`, `recordVideo`, `use.trace`, `use.video` | ❌ | Tracing methods and enabled recording options reject with a clear no-browser engine error. Explicit trace/video `off` modes are accepted; `page.video()` returns null without recording. |
@@ -329,3 +329,20 @@ web servers start; the package's launcher remains available on Node.js 20+.
 `evaluateHandle`, `waitForFunction`, `waitForSelector` and locator `elementHandle` return genuine realm-owned handles. Handle access can open a retained realm after `waitUntil: "commit"`; values are not copied into JSON wrappers. `jsonValue()` serializes the current value, while `getProperty`, `getProperties` and `evaluateHandle` retain new references. Dispose handles when no longer needed. Passing a handle to a different page or frame rejects. Element reads preserve the exact node even after detachment; actions reject detached nodes.
 
 Console argument handles belong to the emitting frame. The native queue retains up to 1000 undelivered messages; eviction releases their argument references. Delivered argument handles remain live until disposed or their execution context is destroyed. Messages drained without a console listener release their references automatically.
+
+### Configured geolocation
+
+`newContext({ permissions: ["geolocation"], geolocation: { latitude: 40, longitude: -74 } })`
+applies the grant and coordinates before page scripts. Accuracy defaults to zero.
+`grantPermissions(names, { origin })` accumulates grants for that origin;
+`clearPermissions()` removes all configured grants. `setGeolocation(null)` makes
+the configured sensor unavailable. Coordinates and grants remain private to the
+context and update existing live tabs and frames.
+
+Without a grant, `permissions.query({ name: "geolocation" })` reports `prompt`
+(or `denied` when a secure-context or Permissions Policy check blocks it).
+This engine has no prompt UI: position requests without a grant asynchronously
+report `PERMISSION_DENIED`; granted requests without coordinates report
+`POSITION_UNAVAILABLE`. A zero acquisition timeout reports `TIMEOUT`. Watches
+observe configured position changes, not a physical device, and stop on
+permission denial, explicit cancellation or document retirement.

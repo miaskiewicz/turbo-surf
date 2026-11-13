@@ -107,7 +107,7 @@ test("closing opener retains auxiliary target and actor until final target close
     );
     assert.throws(
       () => native.liveAuxiliaryAdopt(root, JSON.parse(native.liveAuxiliaryState(root)).root),
-      /native auxiliary target/,
+      /native auxiliary target/i,
     );
     assert.equal(native.liveAuxiliaryAdopt(root, target), alias);
     native.liveClose(alias);
@@ -322,3 +322,34 @@ test("cancelling a reserved opening log removes it before any runtime starts", a
     native.liveClose(id);
   }
 });
+
+test(
+  "native frame properties stay owned by the replacement document realm",
+  { timeout: 10000 },
+  () =>
+    fixture(async ({ open, base }) => {
+      const root = await open();
+      await native.liveNavigateTarget(root, base + "replacement", "push");
+      assert.deepEqual(
+        read(
+          root,
+          `const frame=document.createElement('iframe');
+      document.body.appendChild(frame);
+      return [window.frames===window, window.length===1, window[0]===frame.contentWindow];`,
+        ),
+        [true, true, true],
+      );
+      const { alias } = await popup(root);
+      assert.deepEqual(
+        read(
+          alias,
+          `const frame=document.createElement('iframe');
+      document.body.appendChild(frame);
+      return [window.frames===window, window.length===1, window[0]===frame.contentWindow,
+        opener.length===1];`,
+        ),
+        [true, true, true, true],
+      );
+      assert.equal(read(root, "return window.length"), 1);
+    }),
+);

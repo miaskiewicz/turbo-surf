@@ -22,6 +22,8 @@ mod auxiliary_host;
 mod auxiliary_navigation;
 #[path = "auxiliary_policy.rs"]
 mod auxiliary_policy;
+#[path = "auxiliary_storage.rs"]
+mod auxiliary_storage;
 pub use auxiliary_policy::AuxiliaryResourcePolicy;
 #[path = "auxiliary_pages.rs"]
 mod auxiliary_pages;
@@ -6798,9 +6800,10 @@ fn op_native_window_proxy() -> bool {
 }
 
 #[op2(fast)]
-fn op_producer_window_proxy(scope: &mut v8::PinScope) -> bool {
-    let context = scope.get_current_context();
-    turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context)
+fn op_producer_window_proxy(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document.get_creation_context(scope).is_some_and(|context| {
+        turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context)
+    })
 }
 
 #[op2(fast)]
@@ -8103,12 +8106,11 @@ fn storage_area(
     }
     let origin = window_origin(scope, context);
     let source = if unpartitioned {
-        &origin
+        origin.clone()
     } else {
-        &state.borrow::<Base>().0
+        auxiliary_storage::site_source(scope, state, context)?
     };
-    let site =
-        turbo_surf_core::request_context::schemeful_site(source).unwrap_or_else(|| source.clone());
+    let site = turbo_surf_core::request_context::schemeful_site(&source).unwrap_or(source);
     let partition = context
         .get_slot::<CspHandle>()
         .and_then(|handle| handle.partition.clone())
@@ -8116,7 +8118,7 @@ fn storage_area(
     if !state.has::<BrowserStorage>() {
         state.put(BrowserStorage::default());
     }
-    let backing = state.borrow::<BrowserStorage>().clone();
+    let backing = auxiliary_storage::backing(scope, state, context)?;
     let key = StorageKey {
         partition,
         site,
@@ -13367,15 +13369,12 @@ __G.domSig = (() => {
       ops.op_dispatch_host_event(event, el);
     }, 0);
   };
-  // The producer's Window interceptors derive these properties from native children.
-  const producerFrameProperties = ops.op_producer_window_proxy();
+  // Native length/frames are read-only; same-origin indices still use the host's child table.
+  const producerFrameProperties = ops.op_producer_window_proxy(__document);
   let frameCount = globalThis.length || 0;
-  if (!producerFrameProperties) {
-    for (let i = 0; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
-    globalThis.length = 0; globalThis.frames = globalThis;
-  }
+  for (let i = 0; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
+  if (!producerFrameProperties) { globalThis.length = 0; globalThis.frames = globalThis; }
   const refreshFrameTree = () => {
-    if (producerFrameProperties) return;
     const windows = ops.op_window_child_frames(__document);
     for (let i = windows.length; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
     for (let index = 0; index < windows.length; index++) {
@@ -13384,7 +13383,8 @@ __G.domSig = (() => {
         configurable: true, get() { return frameWindowView(window); }
       });
     }
-    frameCount = windows.length; globalThis.length = frameCount;
+    frameCount = windows.length;
+    if (!producerFrameProperties) globalThis.length = frameCount;
   };
 
   // Compile in the child's V8 context, preserving its global lexical bindings and

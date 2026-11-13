@@ -52,46 +52,7 @@ fn navigate_kind<'s>(
     if target.get_slot::<FrameRetired>().is_some() {
         return;
     }
-    // Sandboxing constrains even same-origin descendants; origin permission
-    // cannot grant a sandboxed frame authority over the top-level document.
-    if crate::runtime::sandbox_blocks_top_navigation(source, target) {
-        deny(scope);
-        return;
-    }
-    let mut ancestor = target;
-    let mut allowed = source
-        .get_security_token(scope)
-        .strict_equals(target.get_security_token(scope));
-    if !allowed
-        && target.get_slot::<FrameParent>().is_none()
-        && source.get_slot::<FrameSandbox>().is_some_and(|flags| {
-            flags.top_navigation_without_activation_permitted
-                && !flags.top_navigation_without_activation_blocked
-        })
-    {
-        let mut ancestor = source;
-        while let Some(parent) = ancestor.get_slot::<FrameParent>() {
-            let Some(parent) = parent.0.to_local(scope) else {
-                break;
-            };
-            ancestor = parent;
-            if ancestor == target {
-                allowed = true;
-                break;
-            }
-        }
-    }
-    while !allowed {
-        let Some(parent) = ancestor.get_slot::<FrameParent>() else {
-            break;
-        };
-        let Some(parent) = parent.0.to_local(scope) else {
-            break;
-        };
-        ancestor = parent;
-        allowed = ancestor == source;
-    }
-    if !allowed {
+    if !navigation_allowed(scope, source, target) {
         deny(scope);
         return;
     }
@@ -199,6 +160,56 @@ fn navigate_kind<'s>(
         undefined.into(),
         &[host.into(), url.into(), source_url.into()],
     );
+}
+
+fn has_context_ancestor<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+    expected: v8::Local<'s, v8::Context>,
+) -> bool {
+    while let Some(parent) = context.get_slot::<FrameParent>() {
+        let Some(parent) = parent.0.to_local(scope) else {
+            break;
+        };
+        context = parent;
+        if context == expected {
+            return true;
+        }
+    }
+    false
+}
+
+fn top_navigation_permitted(
+    source: v8::Local<v8::Context>,
+    target: v8::Local<v8::Context>,
+) -> bool {
+    target.get_slot::<FrameParent>().is_none()
+        && source.get_slot::<FrameSandbox>().is_some_and(|flags| {
+            flags.top_navigation_without_activation_permitted
+                && !flags.top_navigation_without_activation_blocked
+        })
+}
+
+fn navigation_allowed<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+) -> bool {
+    // Sandboxing constrains even same-origin descendants; origin permission
+    // cannot grant a sandboxed frame authority over the top-level document.
+    if crate::runtime::sandbox_blocks_top_navigation(source, target) {
+        return false;
+    }
+    if source
+        .get_security_token(scope)
+        .strict_equals(target.get_security_token(scope))
+    {
+        return true;
+    }
+    if top_navigation_permitted(source, target) && has_context_ancestor(scope, source, target) {
+        return true;
+    }
+    has_context_ancestor(scope, target, source)
 }
 
 pub(super) fn window_set<'s>(

@@ -186,6 +186,7 @@ fn initialize<'s>(
             });
     }
     context.set_slot(Rc::new(FrameDocumentUrl(source_url)));
+    auxiliary_storage::install_new(scope, context, source, !request.noopener)?;
     let namespace = crate::browser_env::engine_namespace(scope)
         .ok_or_else(|| JsErrorBox::generic("Native auxiliary environment namespace unavailable"))?;
     let key = v8::String::new(scope, "isAuxiliary").unwrap();

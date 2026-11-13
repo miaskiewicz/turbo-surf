@@ -325,7 +325,7 @@ fn fetch_job(
 }
 
 fn start(
-    rt: &mut JsRuntime,
+    rt: &mut OwnedRuntime,
     navigation: auxiliary_pages::Navigation,
     mode: HistoryMode,
     budget_ms: u64,
@@ -499,6 +499,8 @@ fn install_response_backing<'s>(
     install_document_facts(scope, facts);
     current.set_slot(Rc::new(FrameDocumentLocation(response.final_url.clone())));
     current.set_slot(Rc::new(FrameDocumentUrl(response.final_url.clone())));
+    auxiliary_storage::carry_navigation(scope, previous, current)
+        .map_err(|error| error.to_string())?;
     current.set_slot(Rc::new(FrameScriptPolicy::from_html_units(
         &units,
         &response.final_url,
@@ -536,15 +538,7 @@ fn install_response_backing<'s>(
     }
     // Commit identity before ENV can initialize actual nested frame sources.
     auxiliary_pages::committed(scope, previous, current, &response.final_url, isolated)?;
-    install_environment(scope, core.into())?;
-    let secure = secure_context(scope);
-    crate::crypto_backend::install(scope, core, secure)?;
-    crate::audio_backend::install(scope, core)?;
-    crate::geometry_backend::install(scope, core)?;
-    window_proxy::install_location(scope, &response.final_url);
-    binding::capture_auxiliary_window_exception(scope, current);
-    crate::browser_env::finish_key_order(scope);
-    run_navigation_init(scope, current, &bootstrap)?;
+    install_response_environment(scope, current, core, &response.final_url, &bootstrap)?;
     auxiliary_pages::retire_owned_resources(scope, previous);
     if let Some(retired) = previous.get_slot::<CspHandle>() {
         JsRuntime::op_state_from(scope)
@@ -554,6 +548,25 @@ fn install_response_backing<'s>(
             .remove(&retired.id);
     }
     Ok(v8::Global::new(scope, current))
+}
+
+fn install_response_environment<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    current: v8::Local<'s, v8::Context>,
+    core: v8::Local<'s, v8::Object>,
+    url: &str,
+    bootstrap: &AuxiliaryBootstrap,
+) -> Result<(), String> {
+    install_environment(scope, core.into())?;
+    let secure = secure_context(scope);
+    crate::crypto_backend::install(scope, core, secure)?;
+    crate::audio_backend::install(scope, core)?;
+    crate::geometry_backend::install(scope, core)?;
+    window_proxy::install_location(scope, url);
+    binding::capture_auxiliary_window_exception(scope, current);
+    crate::browser_env::finish_key_order(scope);
+    run_navigation_init(scope, current, bootstrap)?;
+    Ok(())
 }
 
 fn attachment(response: &FetchResult) -> bool {

@@ -641,6 +641,7 @@ pub(super) fn retire_owned_resources<'s>(
     crate::message_ports::retire_context(scope, context);
     blob_urls::retire_context(scope, context);
     storage_events::retire(context);
+    auxiliary_storage::retire(context);
     context.set_slot(Rc::new(FrameRetired));
 }
 

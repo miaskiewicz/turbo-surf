@@ -3326,8 +3326,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     this._url = event.url;
     this._loadedPath = pathOf(event.url);
-    if (!this._actorHub.opening) this._html = native.liveSerialize(this._session);
-    this._syncFrames();
+    if (this._actorHub.canReadTarget(this._targetId)) {
+      if (!this._actorHub.opening) this._html = native.liveSerialize(this._session);
+      this._syncFrames();
+    }
     this._emit("framenavigated", this);
   }
 

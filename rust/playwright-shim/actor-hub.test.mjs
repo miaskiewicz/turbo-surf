@@ -589,3 +589,42 @@ test("an unsupported actual root retains an ordinary Page without fake auxiliary
   assert.equal(unsupported, 1);
   assert.deepEqual(f.adopted, []);
 });
+
+test("hard-close ACK disables native reads before pending navigation callbacks replay", async () => {
+  const f = fixture();
+  f.callbacks.navigated = (page, event) => {
+    assert.equal(f.hub.canReadTarget(page.id), false);
+    f.emitted.push(["navigated", page.id, event.url]);
+  };
+  f.native.liveActorClose = () =>
+    JSON.stringify({
+      actor: 7,
+      capability: { kind: "supported" },
+      root: "100",
+      pages: [],
+      events: [{ kind: "closed", target: "100" }],
+      closed: true,
+    });
+  f.hub.pending = Promise.resolve().then(() =>
+    f.hub.applyState({
+      actor: 7,
+      capability: { kind: "supported" },
+      root: "100",
+      pages: [],
+      events: [{ kind: "navigated", target: "100", url: "https://fixture.test/queued" }],
+      closed: false,
+    }),
+  );
+  await f.hub.close();
+  assert.deepEqual(f.emitted, [
+    ["navigated", "100", "https://fixture.test/queued"],
+    ["closed", "100"],
+  ]);
+});
+
+test("retired target metadata prevents native reads without closing live siblings", () => {
+  const f = fixture();
+  f.hub._rememberPages({ pages: [child({ closed: true })] });
+  assert.equal(f.hub.canReadTarget("200"), false);
+  assert.equal(f.hub.canReadTarget("100"), true);
+});

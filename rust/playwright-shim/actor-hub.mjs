@@ -134,6 +134,7 @@ export class LiveActorHub {
 
   async applyState(state) {
     this._acceptIdentity(state);
+    if (state.closed) this.nativeClosed = true;
     const overflow = state.events.find((event) => event.kind === "overflow");
     if (overflow) throw new Error(overflow.message);
     if (this.capability !== "supported") {
@@ -171,6 +172,10 @@ export class LiveActorHub {
     if (event.kind === "closed") await this.closeTarget(event.target);
     if (event.kind === "navigated") await this.callbacks.navigated(page, event);
     if (["domContentLoaded", "load"].includes(event.kind)) this.callbacks.lifecycle(page, event);
+  }
+
+  canReadTarget(target) {
+    return this.active && !this.nativeClosed && !this.info.get(target)?.closed;
   }
 
   retire(target) {
@@ -335,6 +340,7 @@ export class LiveActorHub {
 
   async _closeActor() {
     const finalState = decoded(this.native.liveActorClose(this.actor));
+    this.nativeClosed = true;
     if (finalState) this._rememberPages(finalState);
     const pending = this.pending;
     if (pending) await pending.catch(() => {});

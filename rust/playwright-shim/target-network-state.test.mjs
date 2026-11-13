@@ -125,6 +125,10 @@ test(
       await navigation;
       // The native command acknowledges commit before the retained actor pumps load.
       await native.liveEvalEngine(root, "");
+      const deadline = performance.now() + 3000;
+      while (state(root).pendingNavigation && performance.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
       assert.equal(state(root).pendingNavigation, false);
       assert.equal(state(root).pendingRequests, 0);
     }),

@@ -68,7 +68,8 @@ export function makeKeyboard(page) {
       altKey: has("Alt"),
       metaKey: has("Meta"),
     };
-    const result = await page._sessionEval(`(() => {
+    const result = await page._sessionEval(
+      `(() => {
       ${keyboardDefaultsSource()}
       const element = document.activeElement || document.body || document.documentElement;
       const options = {...${JSON.stringify(options)}, bubbles: true, cancelable: true, view: globalThis};
@@ -79,7 +80,9 @@ export function makeKeyboard(page) {
       }
       if (allowed && ${!canceled.has(definition.code) || type === "keydown"}) applyKeyboardDefault(element, options, ${JSON.stringify(type)}, __tsNs.replaceControlSelection);
       globalThis.__RESULT = allowed ? 'OK' : 'CANCELED';
-    })()`);
+    })()`,
+      { waitForBindings: false },
+    );
     if (type === "keydown" && result === "CANCELED") canceled.add(definition.code);
     else canceled.delete(definition.code);
   };
@@ -114,6 +117,7 @@ export function makeKeyboard(page) {
       await page._ensureLive();
       await page._sessionEval(
         `(() => { ${keyboardDefaultsSource()} editKeyboardText(document.activeElement, ${JSON.stringify(String(text))}, "insertText", __tsNs.replaceControlSelection); })()`,
+        { waitForBindings: false },
       );
     },
   };

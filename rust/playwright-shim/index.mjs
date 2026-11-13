@@ -35,6 +35,7 @@ import {
   evaluationArgument,
 } from "./evaluation-codec.mjs";
 import { makeKeyboard } from "./keyboard.mjs";
+import { scheduleBindingDrain, throwBindingDrainError } from "./binding-drain.mjs";
 import { captureAssets } from "./screenshot-resources.mjs";
 import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
 import { LiveActorHub } from "./actor-hub.mjs";
@@ -2257,10 +2258,11 @@ class Frame {
     await this._parentPage._drainBindings();
     return result;
   }
-  async _sessionEval(script) {
+  async _sessionEval(script, { waitForBindings = true } = {}) {
     const result = await this._evalEngine(script);
     await this._parentPage._refreshFromSession();
-    await this._parentPage._drainBindings();
+    if (waitForBindings) await this._parentPage._drainBindings();
+    else scheduleBindingDrain(this._parentPage);
     return result;
   }
   _redrain() {
@@ -2705,6 +2707,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     );
   }
   async _drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
+    throwBindingDrainError(this);
     if (this._auxiliaryActor)
       return this._actorHub.drainBindings(deadline, cancelOnTimeout, collect);
     return this._drainOwnBindings(deadline, cancelOnTimeout, collect);
@@ -3339,11 +3342,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
   // Run arbitrary JS in the live isolate, then refresh the Page snapshot. Backs the
   // keyboard (key-event dispatch) and other live-only side effects.
-  async _sessionEval(script) {
+  async _sessionEval(script, { waitForBindings = true } = {}) {
     if (this._session == null) return undefined;
     const r = await native.liveEvalEngine(this._session, script);
     await this._refreshFromSession();
-    await this._drainBindings();
+    if (waitForBindings) await this._drainBindings();
+    else scheduleBindingDrain(this);
     return r;
   }
   get _cookies() {

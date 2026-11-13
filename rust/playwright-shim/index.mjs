@@ -37,6 +37,8 @@ import {
 import { makeKeyboard } from "./keyboard.mjs";
 import { captureAssets } from "./screenshot-resources.mjs";
 import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
+import { LiveActorHub } from "./actor-hub.mjs";
+import { waitForEmitterEvent } from "./event-waiter.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -49,6 +51,7 @@ const UNSUPPORTED = (api, why) => async () => {
 const PIXEL = "no-browser engine (no rendering surface)";
 const INPUT = "no synthetic input devices (static DOM, no pointer/keyboard hardware)";
 const NETIO = "no in-process network interception";
+const nativeResponseIds = new WeakMap();
 
 function cookieMatchesUrl(cookie, url) {
   const domain = String(cookie.domain ?? "")
@@ -1369,7 +1372,7 @@ class Locator {
       // follow that anchor intent. Native form activation already owns submit
       // events, validation and cancellation. For a JS button (Inert
       // intent) or a handled click (PREVENTED) the dispatch already did the work.
-      if (this._page._url === urlBefore && r !== "PREVENTED") {
+      if (this._page._url === urlBefore && r !== "PREVENTED" && r !== "NATIVE_DEFAULT") {
         const n = this._node();
         if (n != null) {
           const intent = JSON.parse(native.clickNode(this._page._html, n, this._page._url));
@@ -1953,7 +1956,9 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
     // Report whether the app handled the click (preventDefault). If it did, the shim
     // must NOT also perform the browser default action (e.g. navigate an <a href="#">
     // whose React onClick toggles state) — that would reload and wipe the new state.
-    globalThis.__RESULT = clickEv.defaultPrevented ? "PREVENTED" : "OK";
+    const nativeDefault = button === 0 && !clickEv.defaultPrevented &&
+      typeof __tsNs.dispatchAnchorDefault === "function" && __tsNs.dispatchAnchorDefault(el);
+    globalThis.__RESULT = clickEv.defaultPrevented ? "PREVENTED" : nativeDefault ? "NATIVE_DEFAULT" : "OK";
   } })();`;
 }
 
@@ -2420,10 +2425,15 @@ class Page {
     return this._session != null;
   }
 
+  get _auxiliaryActor() {
+    return this._actorHub?.capability === "supported";
+  }
+
   // Hydrate on demand independently of the navigation wait milestone.
   // Idempotent — at most one execution session per document.
   async _ensureLive() {
     if (this._closed) throw new Error("page is closed");
+    if (this._actorHub?.opening) await this._actorHub.ready;
     if (!this._live && this._autoHydrate !== false) await this._openLiveSession();
   }
 
@@ -2432,6 +2442,31 @@ class Page {
   _initScriptSource() {
     const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
     return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
+  }
+
+  _pageInitScriptSource() {
+    return (this._initScripts ?? []).map((source) => `try{ ${source} }catch(e){}`).join("\n");
+  }
+
+  _pageEngineInitScriptSource() {
+    const names = [...(this._bindings?.keys() ?? [])];
+    if (this._routeHandlers?.size) names.push(this._routeBindingName);
+    return (
+      buildExposeInitScript(names, this._routeBindingName) + "\n" + (this._routeInitScript ?? "")
+    );
+  }
+
+  async _configureTargetBootstrap() {
+    if (!this._actorHub) return;
+    await this._actorHub.ready;
+    if (this._actorHub.capability === "unsupported") return;
+    if (!this._auxiliaryActor) throw new Error("Native auxiliary capability is pending");
+    if (this._closed || this._session == null) throw new Error("Page is closed");
+    await native.liveTargetConfigure(
+      this._session,
+      this._pageInitScriptSource(),
+      this._pageEngineInitScriptSource(),
+    );
   }
 
   _engineInitScriptSource() {
@@ -2443,6 +2478,7 @@ class Page {
   }
   async _installNativeBindings() {
     if (!this._live) return;
+    await this._configureTargetBootstrap();
     const engine = this._engineInitScriptSource();
     await native.liveEvalEngine(
       this._session,
@@ -2668,6 +2704,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
     );
   }
   async _drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
+    if (this._auxiliaryActor)
+      return this._actorHub.drainBindings(deadline, cancelOnTimeout, collect);
+    return this._drainOwnBindings(deadline, cancelOnTimeout, collect);
+  }
+  async _drainOwnBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
     if (this._session == null || this._draining) return;
     const handlers = this._mergedBindings();
     if (handlers.size === 0) return;
@@ -2772,6 +2813,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   _openLiveSession(timeoutMs) {
     if (this._closed) throw new Error("Page session closed");
     if (this._openingSession) return this._openingSession.promise;
+    if (this._auxiliaryActor && this._session != null) return Promise.resolve();
     if (this._session != null) this._closeSession();
     const opening = { id: native.liveNetworkLogCreate() };
     this._openingSession = opening;
@@ -2780,20 +2822,59 @@ return String(globalThis.__RESULT ?? ""); })()`,
     opening.promise = this._startLiveSession(timeoutMs, opening);
     return opening.promise;
   }
+  _liveDocumentMetadata(opening) {
+    return JSON.stringify({
+      ...this._documentResponse,
+      hostNetworkLog: opening.id,
+      auxiliaryPolicy: this._context._auxiliaryPolicy,
+      viewport: [this._viewport.width, this._viewport.height],
+      auxiliaryInitScript: this._context._initScripts
+        .map((source) => `try{ ${source} }catch(e){}`)
+        .join("\n"),
+      auxiliaryEngineInitScript: buildExposeInitScript([...this._context._bindings.keys()]),
+      pageInitScript: this._pageInitScriptSource(),
+      pageEngineInitScript: this._pageEngineInitScriptSource(),
+    });
+  }
+
+  async _observeActorOpen(opened, opening) {
+    opened.catch(() => {});
+    if (native.liveAuxiliaryState) await this._context._attachActor(this, opening.id, true);
+  }
+
+  async _completeActorOpen(session) {
+    if (!native.liveAuxiliaryState) return;
+    this._actorHub.opening = false;
+    await this._context._attachActor(this, session);
+  }
+
+  async _failedActorOpen(opening) {
+    const actor = this._actorHub;
+    if (actor) {
+      try {
+        await actor.drain();
+      } catch {}
+      if (actor.capability === "supported") {
+        if (this._targetId != null) await actor.closeTarget(this._targetId);
+        return;
+      }
+      actor.releaseRoot(new Error("Root initialization failed"));
+      this._actorHub = null;
+    }
+    if (native.liveActorClose) native.liveActorClose(opening.id);
+    else native.liveClose(opening.id);
+  }
+
   async _startLiveSession(timeoutMs, opening) {
     const started = Date.now();
     try {
-      const session = await native.liveOpen(
+      const opened = native.liveOpen(
         this._html,
         this._url,
         this._cookies,
         this._context._userAgent ?? undefined,
         this._requestState,
-        JSON.stringify({
-          ...this._documentResponse,
-          hostNetworkLog: opening.id,
-          viewport: [this._viewport.width, this._viewport.height],
-        }),
+        this._liveDocumentMetadata(opening),
         this._initScriptSource(),
         timeoutMs,
         this._context._maxResponseBytes,
@@ -2801,11 +2882,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
         // Browser editing must not expire future timers between consecutive keys.
         true,
       );
+      await this._observeActorOpen(opened, opening);
+      const session = await opened;
       if (this._closed || this._openingSession !== opening) {
         native.liveClose(session);
         throw new Error("Page session closed");
       }
       this._session = session;
+      await this._completeActorOpen(session);
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);
       await this._refreshFromSession(true);
@@ -2816,8 +2900,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
     } catch (error) {
       if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
-      if (this._session === opening.id) this._closeSession();
-      else native.liveClose(opening.id);
+      await this._failedActorOpen(opening);
       if (this._openingSession === opening) this._failPendingNetworkResponses(error.message);
       throw error;
     } finally {
@@ -2893,7 +2976,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._syncFrames();
     await this._drainNetworkEvents();
     const admitted = historyNavigation?.crossDocument;
-    const needsDocument = admitted || rscNavigation;
+    const needsDocument = (!this._auxiliaryActor && admitted) || rscNavigation;
     if (this._live && /^https?:/.test(this._url) && needsDocument && this._navHops < 10) {
       this._navHops++;
       if (admitted && !admitted.replace) {
@@ -2946,7 +3029,16 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // Drain the live app's network log and emit Playwright `response` events. Tests
   // subscribe with `page.on('response', …)` to capture API payloads (the payroll
   // period, employments lists). Each entry → a minimal Response (url/status/json/text).
+  _useActorPump() {
+    if (this._actorHub && this._actorHub.capability !== "unsupported") {
+      this._stopNetworkPump();
+      this._actorHub.start();
+      return true;
+    }
+    return Boolean(native.liveAuxiliaryState && this._openingSession && !this._actorHub);
+  }
   _updateNetworkPump() {
+    if (this._useActorPump()) return;
     const session = this._session ?? this._openingNetworkId;
     const needed =
       session != null &&
@@ -2965,6 +3057,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const pump = { session, active: true, wake: "0" };
     this._networkPump = pump;
     this._pumpNetworkEvents(pump).catch(() => {});
+  }
+  _stopNetworkPump() {
+    if (!this._networkPump) return;
+    this._networkPump.active = false;
+    try {
+      native.liveNetworkLogWake(this._networkPump.session);
+    } catch {}
+    this._networkPump = null;
   }
   async _pumpNetworkEvents(pump) {
     try {
@@ -2985,6 +3085,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
   async _drainNetworkEvents() {
+    if (this._actorHub && this._actorHub.capability !== "unsupported")
+      return this._actorHub.drain();
+    if (native.liveAuxiliaryState && this._openingSession && !this._actorHub) return;
     if (this._networkDrain) return this._networkDrain;
     this._networkDrain = this._readNetworkEvents();
     try {
@@ -3011,59 +3114,77 @@ return String(globalThis.__RESULT ?? ""); })()`,
     } catch {
       return;
     }
-    this._recentResponses = this._recentResponses ?? [];
-    let previousHop = null;
-    const discardedConsoleHandles = [];
-    for (const e of entries) {
-      if ((this._session ?? this._openingNetworkId) !== session) break;
-      if (e.event === "console") {
-        if (this._listeners.get("console")?.length) this._emit("console", consoleMessage(this, e));
-        else discardedConsoleHandles.push(...e.args.map((argument) => argument.id));
-        continue;
-      }
-      if (e.event === "networkoverflow") {
-        this._failPendingNetworkResponses(e.message);
-        this._emit("pageerror", new Error(e.message));
-        continue;
-      }
-      if (e.event === "responsebody") {
-        this._finishNetworkResponse(e);
-        continue;
-      }
-      if (e.event === "pageerror") {
-        const error = new Error(e.message);
-        error.name = e.name;
-        if (e.stack) error.stack = e.stack;
+    this._consumeNetworkEvents(entries, session);
+    if (revision != null && (this._session ?? this._openingNetworkId) === session)
+      native.liveNetworkLogAcknowledge(session, revision);
+  }
+
+  _consumeNetworkControl(entry, discardedConsoleHandles) {
+    switch (entry.event) {
+      case "console":
+        if (this._listeners.get("console")?.length)
+          this._emit("console", consoleMessage(this, entry));
+        else discardedConsoleHandles.push(...entry.args.map((argument) => argument.id));
+        return true;
+      case "networkoverflow":
+        this._failPendingNetworkResponses(entry.message);
+        this._emit("pageerror", new Error(entry.message));
+        return true;
+      case "responsebody":
+        this._finishNetworkResponse(entry);
+        return true;
+      case "pageerror": {
+        const error = new Error(entry.message);
+        error.name = entry.name;
+        if (entry.stack) error.stack = entry.stack;
         this._emit("pageerror", error);
-        continue;
+        return true;
       }
-      const { response: resp, lifecycle } = this._captureNetworkResponse(e);
-      if (
-        e.redirectHop > 0 &&
-        previousHop &&
-        previousHop.status() >= 300 &&
-        previousHop.status() < 400
-      ) {
-        requestRedirects.get(resp.request()).from = previousHop.request();
-        requestRedirects.get(previousHop.request()).to = resp.request();
-      }
-      previousHop = resp;
-      resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
-      this._emit("request", resp.request());
-      if (e.status === 0) {
-        this._emit("requestfailed", resp.request());
-        continue;
-      }
-      this._recentResponses.push(resp);
-      this._emit("response", resp);
-      if (!lifecycle) this._emit("requestfinished", resp.request());
+      default:
+        return false;
+    }
+  }
+
+  _emitNetworkResponse(entry, previousHop) {
+    const { response, lifecycle } = this._captureNetworkResponse(entry);
+    if (
+      entry.redirectHop > 0 &&
+      previousHop &&
+      previousHop.status() >= 300 &&
+      previousHop.status() < 400
+    ) {
+      requestRedirects.get(response.request()).from = previousHop.request();
+      requestRedirects.get(previousHop.request()).to = response.request();
+    }
+    response._seq = this._actionSeq;
+    this._emit("request", response.request());
+    if (entry.status === 0) this._emit("requestfailed", response.request());
+    else {
+      this._recentResponses.push(response);
+      this._emit("response", response);
+      if (!lifecycle) this._emit("requestfinished", response.request());
+    }
+    return response;
+  }
+
+  _discardConsoleHandles(session, handles) {
+    if (!handles.length || (this._session ?? this._openingNetworkId) !== session) return;
+    if (this._actorHub?.opening) (this._openingConsoleDiscards ??= []).push(...handles);
+    else native.liveNetworkLogDiscardHandles(session, JSON.stringify(handles));
+  }
+
+  _consumeNetworkEvents(entries, session, previousHop = null) {
+    this._recentResponses ??= [];
+    const discardedConsoleHandles = [];
+    for (const entry of entries) {
+      if ((this._session ?? this._openingNetworkId) !== session) break;
+      if (!this._consumeNetworkControl(entry, discardedConsoleHandles))
+        previousHop = this._emitNetworkResponse(entry, previousHop);
     }
     if (this._recentResponses.length > 100)
       this._recentResponses.splice(0, this._recentResponses.length - 100);
-    if (discardedConsoleHandles.length && (this._session ?? this._openingNetworkId) === session)
-      native.liveNetworkLogDiscardHandles(session, JSON.stringify(discardedConsoleHandles));
-    if (revision != null && (this._session ?? this._openingNetworkId) === session)
-      native.liveNetworkLogAcknowledge(session, revision);
+    this._discardConsoleHandles(session, discardedConsoleHandles);
+    return previousHop;
   }
 
   _failPendingNetworkResponses(message) {
@@ -3102,6 +3223,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       lifecycle.promise.catch(() => {});
     }
     const response = makeNetResponse(entry, this._requestFrame(entry), lifecycle);
+    nativeResponseIds.set(response, entry.id);
     if (!lifecycle) return { response };
     lifecycle.response = response;
     (this._responseBodies ??= new Map()).set(entry.id, lifecycle);
@@ -3138,10 +3260,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // redirect-hop budget or pushing history (it's the app navigating, not the user).
   async _reopen(url) {
     await this._navigate(this._resolveUrl(url));
-    await this._openLiveSession();
+    if (!this._actorHub) await this._openLiveSession();
   }
 
   _closeSession() {
+    if (this._auxiliaryActor) {
+      this._actorHub.closeTarget(this._targetId).catch((error) => this._emit("pageerror", error));
+      return;
+    }
+    if (this._actorHub) {
+      this._actorHub.releaseRoot();
+      this._actorHub = null;
+    }
     this._routeLifetime?.abort(new Error("Route's page has been closed or navigated"));
     this._routeLifetime = undefined;
     this._routeRequests = undefined;
@@ -3227,6 +3357,119 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return base ? new URL(url, base).href : url;
   }
 
+  async opener() {
+    if (!this._auxiliaryActor) return null;
+    if (this._actorHub.active) await this._actorHub.drain();
+    const target = this._creationSource ?? this._actorHub.info.get(this._targetId)?.sourcePage;
+    const opener = this._actorHub.page(target);
+    return opener && !opener.isClosed() ? opener : null;
+  }
+
+  _didNativeNavigate(event) {
+    if (this._closed || this._session == null) return;
+    const previous = this._url;
+    if (!this._driverNavigation && previous !== "about:blank" && previous !== event.url) {
+      this._history.push(this._historyCurrent ?? previous);
+      this._fwd = [];
+    }
+    this._url = event.url;
+    this._loadedPath = pathOf(event.url);
+    if (!this._actorHub.opening) this._html = native.liveSerialize(this._session);
+    this._syncFrames();
+    this._emit("framenavigated", this);
+  }
+
+  _navigationMilestone(opts) {
+    const controller = new AbortController();
+    const timeout =
+      opts.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000;
+    const event = opts.waitUntil === "domcontentloaded" ? "domcontentloaded" : "load";
+    const milestone =
+      opts.waitUntil === "commit"
+        ? null
+        : waitForEmitterEvent(this, event, { timeout, signal: controller.signal });
+    milestone?.catch(() => {});
+    return { controller, milestone };
+  }
+
+  async _navigateActorTarget(url, method, body, opts = {}) {
+    if (opts.waitUntil === "networkidle")
+      throw new Error(
+        "Native target networkidle requires target-scoped pending-navigation and resource evidence",
+      );
+    const { controller, milestone } = this._navigationMilestone(opts);
+    this._driverNavigation = true;
+    try {
+      const receipt = JSON.parse(
+        await native.liveNavigateTarget(
+          this._session,
+          url,
+          opts._historyMode ?? "push",
+          JSON.stringify({
+            method: method ?? "GET",
+            body,
+            contentType: opts._contentType,
+            referer: opts.referer ?? this._url,
+            timeoutMs:
+              opts.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+            waitUntil: opts.waitUntil ?? "load",
+          }),
+        ),
+      );
+      if (receipt.attachment) {
+        const attachment = attachmentRecord(receipt);
+        if (!attachment) throw new Error("Native attachment navigation omitted its disposition");
+        this._recordDownload(attachment);
+        throw new DownloadNavigationError();
+      }
+      await this._actorHub.drain();
+      await this._refreshFromSession(true);
+      if (milestone) await milestone;
+      if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
+      const response = this._recentResponses?.findLast(
+        (value) => String(nativeResponseIds.get(value)) === String(receipt.requestId),
+      );
+      if (!response)
+        throw new Error("Native navigation completed without an owned navigation response");
+      return response;
+    } finally {
+      controller.abort(new Error("Navigation event wait ended"));
+      this._driverNavigation = false;
+    }
+  }
+
+  _didNativeClose() {
+    if (this._nativeClosePublished) return null;
+    const session = this._session ?? this._openingNetworkId;
+    if (this._closed && session == null && !this._auxiliaryActor) return null;
+    const deferred = Boolean(this._actorHub?.opening && session != null);
+    const finalState = session == null || deferred ? null : native.liveClose(session);
+    if (deferred) (this._actorHub.retiringAliases ??= new Set()).add(session);
+    this._nativeClosePublished = true;
+    this._session = null;
+    this._openingSession = null;
+    this._openingNetworkId = null;
+    this._closed = true;
+    this._routeLifetime?.abort(new Error("Route's page has been closed"));
+    this._routeLifetime = undefined;
+    this._failPendingNetworkResponses("Page closed");
+    if (this._requestState != null) native.requestStateClose(this._requestState);
+    this._requestState = undefined;
+    this._imageCache = undefined;
+    closeScreenshotScene(this);
+    for (const frame of this._frames ?? []) {
+      frame._detached = true;
+      this._emit("framedetached", frame);
+    }
+    this._frames = [];
+    const position = this._context._pages.indexOf(this);
+    if (position >= 0) this._context._pages.splice(position, 1);
+    this._routeHandlers?.clear();
+    this._routes = [];
+    this._emit("close", this);
+    return finalState;
+  }
+
   _navigationReferrerPolicy() {
     const valid = new Set([
       "no-referrer",
@@ -3248,6 +3491,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   async _navigate(url, method, body, opts) {
     if (this._closed) throw new Error("page is closed");
+    if (this._actorHub?.opening) {
+      try {
+        await this._actorHub.ready;
+      } catch {}
+      if (this._closed) throw new Error("Page is closed");
+    }
+    if (this._auxiliaryActor && this._session != null)
+      return this._navigateActorTarget(url, method, body, opts);
     // `about:blank` (and other about: URLs) are not network resources — a browser shows an
     // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
     // blank page instead of a "builder error for url (about:blank)" from the net layer.
@@ -3393,6 +3644,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const resp = await this._navigate(this._url, undefined, undefined, {
       ...opts,
       referer: opts?.referer ?? this._documentResponse?.referrer ?? null,
+      _historyMode: "replace",
     });
     if (opts?.waitUntil === "networkidle")
       await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
@@ -3403,7 +3655,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (prev == null) return null;
     if (await traverseLive(this, prev, native)) return null;
     const current = this._historyCurrent ?? this._url;
-    const response = await this._navigate(historyUrl(prev), undefined, undefined, opts);
+    const response = await this._navigate(historyUrl(prev), undefined, undefined, {
+      ...opts,
+      _historyMode: "back",
+    });
     this._historyCurrent = null;
     this._history.pop();
     this._fwd.push(current);
@@ -3415,7 +3670,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (next == null) return null;
     if (await traverseLive(this, next, native)) return null;
     const current = this._historyCurrent ?? this._url;
-    const response = await this._navigate(historyUrl(next), undefined, undefined, opts);
+    const response = await this._navigate(historyUrl(next), undefined, undefined, {
+      ...opts,
+      _historyMode: "forward",
+    });
     this._historyCurrent = null;
     this._fwd.pop();
     this._history.push(current);
@@ -3493,7 +3751,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       ),
     );
     if (tracked.needsSync) await this._refreshFromSession();
-    else if (tracked.events) await this._drainNetworkEvents();
+    else if (tracked.events || this._auxiliaryActor) await this._drainNetworkEvents();
     const result = JSON.parse(tracked.value);
     if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
@@ -3526,9 +3784,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return this._html;
   }
   async addInitScript(script, arg) {
-    // No reload pipeline to inject before; run it now over the current DOM.
-    this._context._initScripts.push(evalSource(script, arg));
-    if (this._html) await this.render(evalSource(script, arg));
+    if (this._closed) throw new Error("Page is closed");
+    (this._initScripts ??= []).push(evalSource(script, arg));
+    if (this._live) await this._installNativeBindings();
   }
 
   async setContent(html, opts = {}) {
@@ -3604,15 +3862,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
   async hover(selector) {
     return this.locator(selector).hover();
   }
-  async click(selector) {
-    const intent = JSON.parse(native.click(this._html, selector, this._url));
-    return this._followIntent(intent);
+  async click(selector, options) {
+    return this.locator(selector).click(options);
   }
-  async dblclick(selector) {
-    return this.click(selector);
+  async dblclick(selector, options) {
+    return this.locator(selector).dblclick(options);
   }
   async tap(selector) {
-    return this.click(selector);
+    return this.locator(selector).tap();
   }
   async press(selector, key) {
     return this.locator(selector).press(key);
@@ -3633,6 +3890,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
   async _submit(intent) {
+    if (this._auxiliaryActor)
+      return this._navigateActorTarget(intent.url, intent.method, intent.body, {
+        _contentType: intent.contentType,
+      });
     const method = intent.method === "GET" ? null : intent.method;
     const r = JSON.parse(
       await native.fetchWithCookies(
@@ -3940,43 +4201,41 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     return makeResponse({ status: 200, finalUrl: this._url });
   }
-  // waitForEvent dispatches on name: 'download' drains the live isolate's
-  // __downloads buffer; 'response' / 'request' / 'requestfinished' resolve from
-  // the same listener bus the native-log drain feeds (#218/#222). Unknown names
-  // resolve to undefined — matches the pre-fix no-op for off-spec names.
-  async waitForEvent(event, opts) {
-    const timeout = (opts && typeof opts === "object" && opts.timeout) || 30000;
-    if (["response", "request", "requestfinished", "requestfailed"].includes(event)) {
-      const predicate =
-        opts && typeof opts === "object" && typeof opts.predicate === "function"
-          ? opts.predicate
-          : () => true;
-      return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          this.off(event, onEvt);
-          if (poll) clearInterval(poll);
-          resolve(undefined);
-        }, timeout);
-        const onEvt = (payload) => {
-          try {
-            if (!predicate(payload)) return;
-          } catch {
-            return;
-          }
-          clearTimeout(timer);
-          if (poll) clearInterval(poll);
-          this.off(event, onEvt);
-          resolve(payload);
-        };
-        this.on(event, onEvt);
-        // Same as waitForResponse / waitForRequest: poll unconditionally.
-        const poll = setInterval(() => {
-          this._drainNetworkEvents().catch(() => {});
-        }, 50);
-      });
-    }
-    if (event !== "download") return undefined;
-    return this._waitForDownload(opts);
+  _waitForPopup(opts) {
+    if (this._actorHub?.capability === "unsupported")
+      throw new Error("Native popup contexts are unavailable for this root profile");
+    const controller = new AbortController();
+    const unsupported = () =>
+      controller.abort(new Error("Native popup contexts are unavailable for this root profile"));
+    this.on("__auxiliaryUnsupported", unsupported);
+    const options = typeof opts === "function" ? { predicate: opts } : opts;
+    return waitForEmitterEvent(
+      this,
+      "popup",
+      { ...options, signal: controller.signal },
+      this._defaultTimeout ?? this._context._defaultTimeout ?? 30000,
+    ).finally(() => this.off("__auxiliaryUnsupported", unsupported));
+  }
+
+  async waitForEvent(event, opts = {}) {
+    if (this._closed) throw new Error("Page is closed");
+    if (event === "download") return this._waitForDownload(opts);
+    if (event === "popup") return this._waitForPopup(opts);
+    const supported = [
+      ...NETWORK_EVENTS,
+      "popup",
+      "load",
+      "domcontentloaded",
+      "framenavigated",
+      "close",
+    ];
+    if (!supported.includes(event)) throw new Error(`Unsupported Page event: ${event}`);
+    return waitForEmitterEvent(
+      this,
+      event,
+      opts,
+      this._defaultTimeout ?? this._context._defaultTimeout ?? 30000,
+    );
   }
   _recordDownload(entry) {
     const download = makeDownload(entry);
@@ -4126,6 +4385,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return this.off(event, fn);
   }
   _emit(event, payload) {
+    if (payload === undefined && ["load", "domcontentloaded", "close"].includes(event))
+      payload = this;
     if (event === "framedetached") {
       const requests = this._routeRequests?.get(payload);
       for (const controller of requests?.values() ?? [])
@@ -4230,7 +4491,17 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return this._closed;
   }
   async close() {
+    if (native.liveAuxiliaryState) {
+      try {
+        await (this._actorHub?.ready ?? this._openingSession?.promise);
+      } catch {}
+    }
     if (this._closed) return;
+    if (this._auxiliaryActor) {
+      await this._actorHub.closeTarget(this._targetId);
+      if (this._ownsContext) await this._context.close();
+      return;
+    }
     this._closeSession();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
@@ -4542,7 +4813,10 @@ function makeMouse(page) {
     if (wasPressed) {
       await run(`(() => {
         const t = ${targetExpr()};
-        if (t) t.dispatchEvent(new MouseEvent(${JSON.stringify(state.button === 0 ? "click" : "auxclick")}, ${base()}));
+        if (!t) return;
+        const accepted = t.dispatchEvent(new MouseEvent(${JSON.stringify(state.button === 0 ? "click" : "auxclick")}, ${base()}));
+        if (accepted && ${state.button === 0} && typeof __tsNs.dispatchAnchorDefault === "function")
+          __tsNs.dispatchAnchorDefault(t);
       })();`);
     }
   }
@@ -4938,6 +5212,7 @@ class BrowserContext {
     // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
     this._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
     this._headers = merged.extraHTTPHeaders ?? {};
+    this._auxiliaryPolicy = merged.auxiliaryPolicy;
     this._viewport = merged.viewport ?? { width: 1280, height: 720 };
     this._testIdAttribute =
       merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
@@ -4958,6 +5233,7 @@ class BrowserContext {
     this._initScripts = [];
     this._bindings = new Map();
     this._pages = [];
+    this._actors = new Map();
     this._listeners = new Map();
     this._pageEventListeners = new WeakMap();
     if (
@@ -4996,6 +5272,89 @@ class BrowserContext {
     this._emit("page", p);
     return p;
   }
+  _createActorHub(page, state) {
+    const actor = new LiveActorHub(native, state, page, {
+      actorClosed: (actor) => this._actors.delete(actor),
+      unsupported: () => {
+        page._updateNetworkPump();
+        page._emit("__auxiliaryUnsupported");
+      },
+      root: (target) => {
+        page._targetId = target;
+      },
+      create: (info, alias) => this._adoptNativePage(actor, info, alias),
+      created: (child, event) => {
+        this._emit("page", child);
+        const source = actor.page(event.sourcePage);
+        if (source) source._emit("popup", child);
+      },
+      navigated: (target, event) => target._didNativeNavigate(event),
+      lifecycle: (target, event) =>
+        target._emit(event.kind === "domContentLoaded" ? "domcontentloaded" : "load", target),
+      closed: (target) => target._didNativeClose(),
+      network: (target, entry, previous) =>
+        target._consumeNetworkEvents(
+          [entry],
+          target._session ?? target._openingNetworkId,
+          previous,
+        ),
+      failure: (error) => {
+        for (const target of actor.pages.values())
+          if (!target._closed) {
+            target._failPendingNetworkResponses(error.message);
+            target._emit("pageerror", error);
+          }
+      },
+    });
+    return actor;
+  }
+
+  async _attachActor(page, session, opening = false) {
+    let actor = page._actorHub;
+    let initial;
+    if (!actor) {
+      initial = JSON.parse(native.liveAuxiliaryState(session));
+      actor = this._createActorHub(page, initial);
+      this._actors.set(initial.actor, actor);
+    }
+    actor.opening = opening;
+    page._actorHub = actor;
+    page._targetId = actor.root;
+    page._stopNetworkPump();
+    if (initial) await actor.initialize(initial);
+    else await actor.drain();
+    if (!opening) {
+      for (const alias of actor.retiringAliases ?? []) native.liveClose(alias);
+      actor.retiringAliases?.clear();
+      for (const target of new Set([page, ...actor.pages.values()])) {
+        if (target._closed || target._session == null) continue;
+        target._html = native.liveSerialize(target._session);
+        if (target._openingConsoleDiscards?.length)
+          native.liveNetworkLogDiscardHandles(
+            target._session,
+            JSON.stringify(target._openingConsoleDiscards.splice(0)),
+          );
+      }
+    }
+    actor.start();
+  }
+
+  _adoptNativePage(actor, info, alias) {
+    if (this._closed && !info.closed) throw new Error("Browser context is closed");
+    const page = new Page(this);
+    page._actorHub = actor;
+    page._targetId = info.target;
+    page._creationSource = info.sourcePage;
+    page._session = alias;
+    page._url = info.url;
+    page._closed = info.closed;
+    page._hydrated = alias != null;
+    if (alias != null && !actor.opening) page._html = native.liveSerialize(alias);
+    this._pages.push(page);
+    for (const event of NETWORK_EVENTS) this._syncPageEvent(event);
+    return page;
+  }
+
   pages() {
     return [...this._pages];
   }
@@ -5034,8 +5393,24 @@ class BrowserContext {
       ),
     );
   }
+  async _syncAuxiliaryBootstrap() {
+    const guest = this._initScripts.map((source) => `try{ ${source} }catch(e){}`).join("\n");
+    const engine = buildExposeInitScript([...this._bindings.keys()]);
+    for (const actor of this._actors.values()) {
+      if (!actor.active) continue;
+      await actor.ready;
+      if (actor.capability === "unsupported") continue;
+      if (actor.capability !== "supported")
+        throw new Error("Native auxiliary capability is pending");
+      if (this._closed) throw new Error("Browser context is closed");
+      await native.liveAuxiliaryConfigure(actor.actor, guest, engine);
+    }
+  }
   async addInitScript(script, arg) {
+    if (this._closed) throw new Error("Browser context is closed");
     this._initScripts.push(evalSource(script, arg));
+    await this._syncAuxiliaryBootstrap();
+    for (const page of this._pages) if (page._live) await page._installNativeBindings();
   }
   async setExtraHTTPHeaders(headers) {
     this._headers = { ...headers };
@@ -5171,12 +5546,20 @@ class BrowserContext {
   async close() {
     if (this._closed) return;
     this._closed = true;
-    for (const page of this.pages()) await page.close();
+    const outcomes = await Promise.allSettled(
+      [...this._actors.values()].map((actor) => actor.close()),
+    );
+    this._actors.clear();
+    outcomes.push(...(await Promise.allSettled(this.pages().map((page) => page.close()))));
     await this._requestCtx?.dispose();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
     this._browser?._forgetContext(this);
     this._emit("close", this);
+    const errors = outcomes
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason);
+    if (errors.length) throw new AggregateError(errors, "Browser context cleanup failed");
   }
   route = UNSUPPORTED("context.route", NETIO);
   routeFromHAR = UNSUPPORTED("context.routeFromHAR", NETIO);
@@ -5192,6 +5575,7 @@ class BrowserContext {
   async exposeBinding(name, fn, _options) {
     await this._assertBindingAvailable(name);
     this._bindings.set(String(name), { fn, isBinding: true });
+    await this._syncAuxiliaryBootstrap();
     for (const page of this._pages) {
       if (page._live) {
         await page._installNativeBindings();
@@ -5201,6 +5585,7 @@ class BrowserContext {
   async exposeFunction(name, fn) {
     await this._assertBindingAvailable(name);
     this._bindings.set(String(name), { fn, isBinding: false });
+    await this._syncAuxiliaryBootstrap();
     for (const page of this._pages) {
       if (page._live) {
         await page._installNativeBindings();

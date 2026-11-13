@@ -3,6 +3,7 @@ export function consoleMessage(page, entry) {
   const session = page._session ?? page._openingNetworkId;
   const resolveOwner = async () => {
     await page._openingSession?.promise;
+    if (page._actorHub?.opening) await page._actorHub.ready;
     if (page._closed || page._session !== session)
       throw new Error("Console argument execution context was destroyed");
     const find = () =>

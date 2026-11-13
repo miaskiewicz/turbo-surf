@@ -21,6 +21,12 @@ a claim that its final release gates have passed. The default renderer is Rust/V
 Chrome/Playwright are development oracles. An explicitly selected browser solver is
 a separate optional path. See [build features](../../docs/BUILD-FEATURES.md).
 
+Native auxiliary targets use actual native `domcontentloaded` and `load` milestones.
+For these targets, `networkidle` navigation and `waitForLoadState('networkidle')`
+currently reject explicitly: target-scoped pending-navigation and resource
+quiescence evidence is required. Ordinary legacy-root hydration retains its
+existing `networkidle` behavior.
+
 ## Response-size budget
 
 The default response-body limit remains 8 MiB. For development applications with

@@ -936,7 +936,7 @@ class Locator {
   async count() {
     await this._prepareQuery();
     if (this._needsQuery())
-      return this._page._readEngine(`return (${this._liveElementsExpression()}).length;`);
+      return this._page._readEngineAsync(`return (${this._liveElementsExpression()}).length;`);
     if (!this._needsQuery() && this._count && !this._filter && this._scope.length === 0) {
       const count = this._count(this._page._html);
       if (this._index == null) return count;
@@ -990,7 +990,7 @@ class Locator {
     const index = await this._resolveLiveIdx();
     if (index == null) return null;
     // Pure DOM reads must not await unrelated exposed host callbacks.
-    const result = this._page._readEngine(`
+    const result = await this._page._readEngineAsync(`
       try { return {value: (${encodeEvaluationValue.toString()})(
         (${fn.toString()})(document.querySelectorAll("*")[${index}],${JSON.stringify(arg ?? null)}))}; }
       catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
@@ -1006,7 +1006,7 @@ class Locator {
   }
   async isVisible() {
     await this._prepareQuery();
-    if (this._node() == null) return false;
+    if (!this._page._live && this._node() == null) return false;
     await this._page._ensureLive();
     return !!(await this._liveRead(renderedVisibility));
   }
@@ -1526,7 +1526,7 @@ class Locator {
     await this._prepareQuery();
     if (this._page._session == null) return null;
     if (this._needsQuery()) {
-      const indices = this._page._readEngine(`
+      const indices = await this._page._readEngineAsync(`
         const matches = ${this._liveElementsExpression()};
         const positions = new Map(Array.from(document.querySelectorAll('*'), (element, index) => [element, index]));
         return matches.map(element => positions.get(element));
@@ -2206,6 +2206,10 @@ class Frame {
   _readEngine(script) {
     const expression = this._realmExpression(`(() => { ${script} })()`, true);
     return JSON.parse(native.liveReadEngine(this._session, `return ${expression};`));
+  }
+  async _readEngineAsync(script) {
+    const expression = this._realmExpression(`(() => { ${script} })()`, true);
+    return JSON.parse(await native.liveReadEngineAsync(this._session, `return ${expression};`));
   }
   _evalEngine(script) {
     const expression = this._realmExpression(
@@ -3170,6 +3174,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // re-render), then refresh the Page snapshot. `kind` is "click" | "fill".
   _readEngine(script) {
     return JSON.parse(native.liveReadEngine(this._session, script));
+  }
+  async _readEngineAsync(script) {
+    return JSON.parse(await native.liveReadEngineAsync(this._session, script));
   }
   _evalEngine(script) {
     return native.liveEvalEngine(this._session, script);

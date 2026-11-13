@@ -77,6 +77,8 @@ export function liveEval(id: number, script: string): Promise<string>;
 export function liveEvalEngine(id: number, script: string, collect?: boolean): Promise<string>;
 /** Bounded synchronous engine query; JSON-encode its return without draining the event loop. */
 export function liveReadEngine(id: number, script: string): string;
+/** Same non-pumping query, yielding Node while the native actor is busy. */
+export function liveReadEngineAsync(id: number, script: string): Promise<string>;
 /** Await an expression’s actual native Promise completion. */
 export function liveEvalEngineExpression(id: number, expression: string): Promise<string>;
 export function liveEvalExpression(id: number, expression: string): Promise<string>;

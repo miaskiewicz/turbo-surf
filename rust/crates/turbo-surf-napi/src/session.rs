@@ -814,6 +814,40 @@ pub fn live_read_engine(id: u32, script: String) -> Result<String> {
         .map_err(Error::from_reason)
 }
 
+/// A non-pumping engine read whose actor queue wait leaves Node available for IO.
+pub struct LiveReadTask {
+    id: u32,
+    script: String,
+}
+
+#[napi]
+impl Task for LiveReadTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(
+            self.id,
+            LiveJob::EngineRead(std::mem::take(&mut self.script), reply),
+        )
+        .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live session dropped engine read reply"))?
+            .map_err(Error::from_reason)
+    }
+
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Read the live realm without pumping it, asynchronously waiting for the actor.
+#[napi]
+pub fn live_read_engine_async(id: u32, script: String) -> AsyncTask<LiveReadTask> {
+    AsyncTask::new(LiveReadTask { id, script })
+}
+
 /// Serialize the live DOM to HTML (sync — no network).
 #[napi]
 pub fn live_serialize(id: u32) -> Result<String> {

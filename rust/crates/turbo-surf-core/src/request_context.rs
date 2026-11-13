@@ -467,7 +467,12 @@ impl ClientHints {
     pub(crate) fn manual_client(
         &self,
     ) -> Result<crate::http_backend::Client, crate::net::HttpError> {
-        let runtime = tokio::runtime::Handle::current().id();
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| crate::net::HttpError {
+                message: "HTTP transport requires an entered Tokio runtime".into(),
+                code: crate::net::ErrorCode::Network,
+            })?
+            .id();
         let mut client = self.0.client.lock().unwrap_or_else(|e| e.into_inner());
         if client.as_ref().is_none_or(|(owner, _)| *owner != runtime) {
             let created = if let Some(builder) = &self.0.builder {
@@ -488,7 +493,12 @@ impl ClientHints {
     pub(crate) fn upload_client(
         &self,
     ) -> Result<crate::http_backend::Client, crate::net::HttpError> {
-        let runtime = tokio::runtime::Handle::current().id();
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| crate::net::HttpError {
+                message: "HTTP transport requires an entered Tokio runtime".into(),
+                code: crate::net::ErrorCode::Network,
+            })?
+            .id();
         let mut client = self
             .0
             .upload_client
@@ -1060,6 +1070,19 @@ mod configured_transport_tests {
     use super::ClientHints;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    #[test]
+    fn transport_without_runtime_returns_an_error_instead_of_panicking() {
+        let hints = ClientHints::default();
+        for result in [hints.manual_client(), hints.upload_client()] {
+            let error = result.err().expect("transport must require a runtime");
+            assert_eq!(error.code, crate::net::ErrorCode::Network);
+            assert_eq!(
+                error.message,
+                "HTTP transport requires an entered Tokio runtime"
+            );
+        }
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn configured_transport_factory_reuses_only_the_current_runtime_pool() {

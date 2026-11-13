@@ -434,6 +434,9 @@ impl Task for LiveOpenTask {
                         continue;
                     }
                 };
+                // Synchronous guest callbacks may create transports, but a read
+                // must not poll the runtime or advance the page event loop.
+                let _runtime_context = rt.enter();
                 session.flush_network_disposals();
                 match job {
                     LiveJob::Content(html, wait_until, timeout, reply) => {

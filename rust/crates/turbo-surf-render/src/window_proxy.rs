@@ -1,5 +1,6 @@
 //! Native frame proxy and Location host services over the producer V8 ABI.
 use super::*;
+use turbo_dom_browser_env::host_internals::NamedMutationResult;
 #[path = "frame_location.rs"]
 mod location;
 
@@ -341,16 +342,19 @@ fn cached_function_with_data<'s>(
     Some(function)
 }
 
-fn cross_set<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
+fn cross_set<'s, 'i, T: 'static>(
+    scope: &mut v8::PinScope<'s, 'i>,
     name: v8::Local<'s, v8::Name>,
     value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    mut result: v8::ReturnValue<()>,
-) -> v8::Intercepted {
+    mut result: v8::ReturnValue<T>,
+) -> v8::Intercepted
+where
+    for<'cb> v8::ReturnValue<'cb, T>: NamedMutationResult,
+{
     if !name.is_symbol() && name.to_rust_string_lossy(scope) == "location" {
         location::navigate(scope, args.holder(), value);
-        result.set_bool(true);
+        result.set_success(true);
     } else {
         deny(scope);
     }

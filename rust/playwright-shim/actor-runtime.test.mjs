@@ -25,15 +25,20 @@ for (const asynchronous of [false, true]) {
       import {createServer} from 'node:http';
       const native=createRequire(import.meta.url)(${JSON.stringify(loader)});
       let requests=0;
-      const server=createServer((req,res)=>{requests++;res.end('ready')});
+      let response, requestArrived;
+      const requested=new Promise(resolve=>{requestArrived=resolve});
+      // Background IO may progress independently; keep the body pending during the read.
+      const server=createServer((req,res)=>{requests++;response=res;requestArrived()});
       await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
       const base='http://127.0.0.1:'+server.address().port+'/';
       const id=await native.liveOpen('<body><iframe srcdoc="&lt;p&gt;child&lt;/p&gt;"></iframe>',base,'[]','');
       try {
         const read=script=>native.${asynchronous ? "liveReadEngineAsync" : "liveReadEngine"}(id,script);
         assert.deepEqual(JSON.parse(await read("globalThis.timerRan=false;setTimeout(()=>{timerRan=true},0);globalThis.fetchDone=false;globalThis.pendingRead=fetch('/read').then(r=>r.text()).then(value=>{fetchDone=true;return value});return [timerRan,document.querySelector('iframe').contentDocument.body.textContent]")),[false,'child']);
+        await requested;
         await new Promise(resolve=>setTimeout(resolve,30));
         assert.deepEqual(JSON.parse(await read('return [timerRan,fetchDone]')),[false,false]);
+        response.end('ready');
         assert.equal(await native.liveEvalEngineExpression(id,'pendingRead'),'ready');
         assert.equal(requests,1);
       } finally {

@@ -30,6 +30,8 @@ mod auxiliary_pages;
 #[cfg(turbo_surf_native_proxy)]
 #[path = "code_generation.rs"]
 mod code_generation;
+#[path = "dialog_ops.rs"]
+mod dialog_ops;
 #[path = "driver_sync.rs"]
 mod driver_sync;
 pub use auxiliary_pages::{
@@ -4300,6 +4302,7 @@ struct FrameSandbox {
     top_navigation_without_activation_blocked: bool,
     forms_blocked: bool,
     popups_blocked: bool,
+    modals_blocked: bool,
     /// The sandboxed pointer lock browsing context flag (no `allow-pointer-lock`).
     pointer_lock_blocked: bool,
     top_navigation_without_activation_permitted: bool,
@@ -4317,6 +4320,7 @@ impl FrameSandbox {
             self.storage_access_blocked |= policy.blocks_storage_access();
             self.forms_blocked |= policy.blocks_form_submission();
             self.popups_blocked |= policy.blocks_auxiliary_open();
+            self.modals_blocked |= policy.blocks_modal_dialogs();
             self.pointer_lock_blocked |= policy.blocks_pointer_lock();
             self.top_navigation_without_activation_blocked |=
                 policy.blocks_top_navigation_without_activation();
@@ -4339,6 +4343,7 @@ impl FrameSandbox {
             storage_access_blocked: inherited.storage_access_blocked,
             forms_blocked: inherited.forms_blocked,
             popups_blocked: inherited.popups_blocked,
+            modals_blocked: inherited.modals_blocked,
             pointer_lock_blocked: inherited.pointer_lock_blocked,
             top_navigation_without_activation_blocked: inherited
                 .top_navigation_without_activation_blocked,
@@ -4351,6 +4356,7 @@ impl FrameSandbox {
             let tokens = attribute.to_ascii_lowercase();
             let tokens = tokens.split_ascii_whitespace().collect::<Vec<_>>();
             flags.popups_blocked |= !tokens.contains(&"allow-popups");
+            flags.modals_blocked |= !tokens.contains(&"allow-modals");
             flags.opaque |= !tokens.contains(&"allow-same-origin");
             flags.origin_restricted |= !tokens.contains(&"allow-same-origin");
             flags.scripts_blocked |= !tokens.contains(&"allow-scripts");
@@ -9018,6 +9024,7 @@ deno_core::extension!(
         op_page_diagnostic,
         op_page_lifecycle,
         op_console_message,
+        dialog_ops::op_dialog,
         network_transports::op_connect_allowed,
         network_transports::op_ws_open,
         network_transports::op_ws_send_text,
@@ -10313,6 +10320,7 @@ ops.op_set_host_capabilities({setCurrentScript:__G.setCurrentScript});
 __defineDocumentAccessor("fonts", state => state.fonts);
 __defineDocumentAccessor("currentScript", state => state.currentScript);
 "##,
+    include_str!("dialogs.js"),
     include_str!("permissions_policy.js"),
     include_str!("permission_status.js"),
     include_str!("geolocation.js"),

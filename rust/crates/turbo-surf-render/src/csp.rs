@@ -427,6 +427,15 @@ impl Policy {
             })
         })
     }
+    pub fn blocks_modal_dialogs(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-modals"))
+            })
+        })
+    }
     pub fn blocks_top_navigation_without_activation(&self) -> bool {
         self.policies.iter().any(|policy| {
             policy.get("sandbox").is_some_and(|tokens| {
@@ -1221,6 +1230,14 @@ mod tests {
         assert!(parse("sandbox allow-scripts allow-same-origin").blocks_auxiliary_open());
         assert!(!parse("sandbox ALLOW-POPUPS").blocks_auxiliary_open());
         assert!(parse("sandbox allow-popups, sandbox allow-scripts").blocks_auxiliary_open());
+    }
+    #[test]
+    fn modal_sandbox_tokens_intersect() {
+        let parse = |header: &str| Policy::new("https://example.test", [header.into()]);
+        assert!(!parse("script-src 'self'").blocks_modal_dialogs());
+        assert!(parse("sandbox allow-scripts allow-same-origin").blocks_modal_dialogs());
+        assert!(!parse("sandbox ALLOW-MODALS").blocks_modal_dialogs());
+        assert!(parse("sandbox allow-modals, sandbox allow-scripts").blocks_modal_dialogs());
     }
 
     #[test]

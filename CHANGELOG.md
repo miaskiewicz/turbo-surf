@@ -18,6 +18,9 @@ branch.
 - Apply configured geolocation and origin-scoped permission grants to live
   documents. Deliver asynchronous position callbacks, watch updates and
   permission changes; enforce document policy and retire canceled watches (#391).
+- Pause native alert/confirm/prompt execution for a host Dialog accept/dismiss
+  response, with no-listener auto-dismiss, page ownership and close cancellation.
+  Host replies bypass the blocked isolate command queue (#405).
 
 - Keep the original native geometry admission/cache path first. Inspect fresh
   canonical effect state only for actual animation-resource blockers, recapture

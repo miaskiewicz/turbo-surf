@@ -21,6 +21,7 @@ pub struct NetworkEventLog {
     lost: Arc<AtomicBool>,
     cancellations: Arc<Mutex<Vec<CancellationOwner>>>,
     activity: crate::network_activity::NetworkActivity,
+    dialogs: crate::DialogBroker,
 }
 pub(crate) struct NetworkWorldGuard(NetworkEventLog);
 impl Drop for NetworkWorldGuard {
@@ -59,6 +60,9 @@ impl NetworkEventLog {
             "revision":state.revision, "error":state.error})
     }
 
+    pub fn dialogs(&self) -> crate::DialogBroker {
+        self.dialogs.clone()
+    }
     pub(crate) fn retain_host_bodies(&self) {
         self.host_bodies.store(true, Ordering::Release);
     }
@@ -213,6 +217,7 @@ impl NetworkEventLog {
         self.closed.load(Ordering::Acquire)
     }
     pub fn close(&self) {
+        self.dialogs.close();
         self.closed.store(true, Ordering::Release);
         self.wake();
         for cancel in self

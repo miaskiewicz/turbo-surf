@@ -86,6 +86,9 @@ export function liveEvalExpression(id: number, expression: string): Promise<stri
 export function liveEvalExpressionTracked(id: number, expression: string): Promise<string>;
 /** Reserve the host transport queue before initial hydration. */
 export function liveNetworkLogCreate(): number;
+export function liveDialogConfigure(id: number, enabled: boolean, contextWide?: boolean): void;
+export function liveDialogRespond(id: number, dialog: string, accepted: boolean, promptText?: number[]): void;
+export function liveDialogCancel(id: number): void;
 /** Drain {entries, revision} without entering a body-awaiting isolate. */
 export function liveNetworkLog(id: number): Promise<string>;
 /** Wait for a transport event or an explicit pump wake; returns {wake, closed}. */

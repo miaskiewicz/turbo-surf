@@ -21,6 +21,7 @@ import {
   createJSHandle,
 } from "./js-handles.mjs";
 import { consoleMessage } from "./console-message.mjs";
+import { dialogMessage, dialogReplyUnits } from "./dialog.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -2307,6 +2308,7 @@ const NETWORK_EVENTS = [
   "requestfailed",
   "pageerror",
   "console",
+  "dialog",
 ];
 class Page {
   constructor(context) {
@@ -2948,6 +2950,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return Boolean(native.liveAuxiliaryState && this._openingSession && !this._actorHub);
   }
   _updateNetworkPump() {
+    this._updateDialogPolicy();
     if (this._useActorPump()) return;
     const session = this._session ?? this._openingNetworkId;
     const needed =
@@ -3031,6 +3034,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   _consumeNetworkControl(entry, discardedConsoleHandles) {
     switch (entry.event) {
+      case "dialog":
+        this._receiveDialog(entry);
+        return true;
       case "console":
         if (this._listeners.get("console")?.length)
           this._emit("console", consoleMessage(this, entry));
@@ -3052,6 +3058,34 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
       default:
         return false;
+    }
+  }
+
+  _updateDialogPolicy() {
+    const session = this._session ?? this._openingNetworkId;
+    if (this._closed || session == null || !native.liveDialogConfigure) return;
+    native.liveDialogConfigure(session, Boolean(this._listeners.get("dialog")?.length));
+    native.liveDialogConfigure(
+      session,
+      Boolean(this._context._listeners.get("dialog")?.length),
+      true,
+    );
+  }
+
+  _receiveDialog(entry) {
+    const session = this._session ?? this._openingNetworkId;
+    const respond = ({ id, accepted, promptText }) =>
+      native.liveDialogRespond(session, id, accepted, dialogReplyUnits(promptText));
+    const dialog = dialogMessage(this, entry, respond);
+    if (!this._listeners.get("dialog")?.length) {
+      dialog.dismiss().catch((error) => this._emit("pageerror", error));
+      return;
+    }
+    try {
+      this._emit("dialog", dialog);
+    } catch (error) {
+      dialog.dismiss().catch(() => {});
+      throw error;
     }
   }
 
@@ -4444,6 +4478,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return this._closed;
   }
   async close() {
+    const dialogSession = this._session ?? this._openingNetworkId;
+    if (!this._closed && dialogSession != null && native.liveDialogCancel)
+      native.liveDialogCancel(dialogSession);
     if (native.liveAuxiliaryState) {
       try {
         await (this._actorHub?.ready ?? this._openingSession?.promise);

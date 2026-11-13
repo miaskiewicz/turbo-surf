@@ -569,6 +569,76 @@ fn network_log(id: u32) -> Result<turbo_surf_render::NetworkEventLog> {
         .cloned()
         .ok_or_else(|| Error::from_reason("no such live session"))
 }
+
+fn dialog_owner(id: u32) -> Result<Option<String>> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    Ok(live.get(&id).map(|connection| match connection.target {
+        LiveTarget::LegacyRoot => "legacy-root".to_owned(),
+        LiveTarget::Auxiliary(target) => target.to_string(),
+    }))
+}
+
+/// Configure a host listener without entering the owning (possibly paused) isolate.
+#[napi]
+pub fn live_dialog_configure(id: u32, enabled: bool, context_wide: Option<bool>) -> Result<()> {
+    let broker = network_log(id)?.dialogs();
+    let result = if context_wide.unwrap_or(false) {
+        broker.configure_context(enabled)
+    } else if live_actor(id).is_ok_and(|actor| actor.id != id) {
+        broker.configure(
+            &dialog_owner(id)?.ok_or_else(|| Error::from_reason("Dialog target closed"))?,
+            enabled,
+        )
+    } else {
+        broker.configure_primary(enabled)
+    };
+    result.map_err(Error::from_reason)
+}
+
+/// A reply must bypass the ordinary actor queue: guest JavaScript is paused in it.
+#[napi]
+pub fn live_dialog_respond(
+    id: u32,
+    dialog: String,
+    accepted: bool,
+    prompt_text: Option<Vec<u16>>,
+) -> Result<()> {
+    let parsed = dialog
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid dialog ID"))?;
+    if parsed.to_string() != dialog {
+        return Err(Error::from_reason("Invalid dialog ID"));
+    }
+    let broker = network_log(id)?.dialogs();
+    let reply = turbo_surf_render::DialogReply {
+        accepted,
+        prompt_text,
+    };
+    match dialog_owner(id)? {
+        Some(owner) => broker.respond(&owner, parsed, reply),
+        None => broker.respond_primary(parsed, reply),
+    }
+    .map_err(Error::from_reason)
+}
+#[napi]
+pub fn live_dialog_cancel(id: u32) -> Result<()> {
+    let broker = match network_log(id) {
+        Ok(log) => log.dialogs(),
+        Err(error) if error.reason == "no such live session" => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if live_actor(id).is_ok_and(|actor| actor.id != id) {
+        broker.cancel_owner(
+            &dialog_owner(id)?.ok_or_else(|| Error::from_reason("Dialog target closed"))?,
+        );
+    } else {
+        broker.cancel_primary();
+    }
+    Ok(())
+}
+
 /// Reserve a host event queue before initial hydration starts.
 #[napi]
 pub fn live_network_log_create() -> Result<u32> {
@@ -1564,6 +1634,11 @@ pub fn live_close(id: u32) -> Result<Option<String>> {
     }
     if let Some(connection) = tx {
         let _closing = ActiveActorClose::new(connection.actor.clone());
+        let owner = match connection.target {
+            LiveTarget::LegacyRoot => "legacy-root".to_owned(),
+            LiveTarget::Auxiliary(target) => target.to_string(),
+        };
+        connection.actor.network.dialogs().cancel_owner(&owner);
         connection
             .actor
             .cancellations

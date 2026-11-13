@@ -16,7 +16,6 @@ function fixture() {
         snapshots.shift() ?? {
           actor: 7,
           capability: { kind: "supported" },
-          capability: { kind: "supported" },
           root: "100",
           pages: [],
           events: [],
@@ -55,7 +54,7 @@ function fixture() {
   };
   const hub = new LiveActorHub(
     native,
-    { actor: 7, capability: { kind: "supported" }, capability: { kind: "supported" }, root: "100" },
+    { actor: 7, capability: { kind: "supported" }, root: "100" },
     root,
     callbacks,
   );
@@ -75,7 +74,6 @@ test("adopts trusted child identities once and does not repeat the root Page eve
   f.snapshots.push({
     actor: 7,
     capability: { kind: "supported" },
-    capability: { kind: "supported" },
     root: "100",
     pages: [child()],
     events: [
@@ -93,7 +91,6 @@ test("adopts lifecycle before routing HTTP and routes body completions by reques
   const f = fixture();
   f.snapshots.push({
     actor: 7,
-    capability: { kind: "supported" },
     capability: { kind: "supported" },
     root: "100",
     pages: [child()],
@@ -120,7 +117,6 @@ test("a genuine created-and-retired target is published closed without allocatin
   f.snapshots.push({
     actor: 7,
     capability: { kind: "supported" },
-    capability: { kind: "supported" },
     root: "100",
     pages: [child({ closed: true })],
     events: [
@@ -143,7 +139,6 @@ test("COOP navigation preserves the Page identity instead of reporting Page clos
   const f = fixture();
   f.snapshots.push({
     actor: 7,
-    capability: { kind: "supported" },
     capability: { kind: "supported" },
     root: "100",
     pages: [child()],
@@ -173,7 +168,6 @@ test("serializes competing consumers of the one actor lifecycle and network logs
           JSON.stringify({
             actor: 7,
             capability: { kind: "supported" },
-            capability: { kind: "supported" },
             root: "100",
             pages: [],
             events: [],
@@ -194,7 +188,6 @@ test("hard close uses the immutable actor token after its root Page was closed",
   const f = fixture();
   f.snapshots.push({
     actor: 7,
-    capability: { kind: "supported" },
     capability: { kind: "supported" },
     root: "100",
     pages: [child()],
@@ -280,7 +273,6 @@ test("lifecycle waits retain the observed native revision across root installati
   await f.hub.applyState({
     actor: 7,
     capability: { kind: "supported" },
-    capability: { kind: "supported" },
     root: "100",
     revision: "8",
     pages: [],
@@ -294,7 +286,6 @@ test("lifecycle waits retain the observed native revision across root installati
       closed: true,
       finalState: {
         actor: 7,
-        capability: { kind: "supported" },
         capability: { kind: "supported" },
         root: "100",
         revision: "9",
@@ -313,7 +304,7 @@ test("a snapshot for another actor cannot assign the opening root or its revisio
   const f = fixture();
   const hub = new LiveActorHub(
     f.native,
-    { actor: 7, capability: { kind: "supported" }, capability: { kind: "pending" }, root: null },
+    { actor: 7, capability: { kind: "pending" }, root: null },
     f.root,
     f.callbacks,
   );
@@ -332,7 +323,6 @@ test("actor readiness survives a root navigation failure while a genuine child r
     f.native,
     {
       actor: 7,
-      capability: { kind: "supported" },
       capability: { kind: "pending" },
       root: null,
       opening: true,
@@ -348,7 +338,6 @@ test("actor readiness survives a root navigation failure while a genuine child r
   assert.equal(ready, false);
   await hub.applyState({
     actor: 7,
-    capability: { kind: "supported" },
     capability: { kind: "supported" },
     root: "100",
     opening: false,
@@ -381,7 +370,6 @@ test("closing from a creation listener preserves queued genuine creations withou
     JSON.stringify({
       actor: 7,
       capability: { kind: "supported" },
-      capability: { kind: "supported" },
       root: "100",
       pages: [child({ closed: true }), { ...second, closed: true }],
       events: [
@@ -393,7 +381,6 @@ test("closing from a creation listener preserves queued genuine creations withou
     });
   await f.hub.initialize({
     actor: 7,
-    capability: { kind: "supported" },
     capability: { kind: "supported" },
     root: "100",
     pages: [child(), second],
@@ -421,7 +408,6 @@ test("native lifecycle overflow fails honestly without allocating a replacement 
     f.hub.applyState({
       actor: 7,
       capability: { kind: "supported" },
-      capability: { kind: "supported" },
       root: "100",
       pages: [],
       events: [{ kind: "overflow", message: "native auxiliary event budget exceeded" }],
@@ -436,7 +422,6 @@ test("retired Page facades are not strongly owned by a surviving actor", async (
   const f = fixture();
   await f.hub.applyState({
     actor: 7,
-    capability: { kind: "supported" },
     capability: { kind: "supported" },
     root: "100",
     pages: [child()],
@@ -545,7 +530,6 @@ test("pending actual-root capability holds the consuming HTTP queue until native
     f.native,
     {
       actor: 7,
-      capability: { kind: "pending" },
       root: null,
       capability: { kind: "pending" },
       opening: true,
@@ -556,7 +540,6 @@ test("pending actual-root capability holds the consuming HTTP queue until native
   f.native.liveAuxiliaryState = async () =>
     JSON.stringify({
       actor: 7,
-      capability: { kind: "pending" },
       root: null,
       capability: { kind: "pending" },
       pages: [],
@@ -583,7 +566,6 @@ test("an unsupported actual root retains an ordinary Page without fake auxiliary
     f.native,
     {
       actor: 7,
-      capability: { kind: "pending" },
       root: null,
       capability: { kind: "pending" },
       opening: true,
@@ -593,7 +575,6 @@ test("an unsupported actual root retains an ordinary Page without fake auxiliary
   );
   await hub.applyState({
     actor: 7,
-    capability: { kind: "pending" },
     root: null,
     capability: { kind: "unsupported" },
     opening: false,

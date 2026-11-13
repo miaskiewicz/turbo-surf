@@ -11,6 +11,12 @@ branch.
 
 ### Engine and performance
 
+- Scope `offsetTop`, `offsetLeft`, and `offsetParent` resource checks to the
+  queried box dependencies, so unrelated transform animations do not break
+  Popper positioning or Autocomplete option measurements. Animated targets,
+  ancestors, and layout-changing effects retain strict admission checks (#498).
+- Add opt-in, diagnostic-only Page/Locator operation timings for auth profiling;
+  correctness and comparative speed runs remain uninstrumented.
 - Keep native runtime initialization state off nested MCP dispatch frames,
   preserving stack headroom during official Deno extension loading.
 - Prepare nested CSS rules in their original tree scopes, including conditional

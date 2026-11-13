@@ -224,7 +224,8 @@ an animation-toggle option is future work ([#500](https://github.com/miaskiewicz
 | Method | Status | Notes |
 |---|---|---|
 | `newPage`, `pages`, `cookies`, `addCookies`, `clearCookies`, `storageState`, `addInitScript`, `setExtraHTTPHeaders`, `browser`, `request`, `close` | ✅ | |
-| `grantPermissions`, `clearPermissions`, `setGeolocation`, `setDefaultTimeout`, `on/off/once` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
+| `grantPermissions`, `clearPermissions`, `setGeolocation`, `setDefaultTimeout` | ⚠️ | No-op / registry (no browser to permission or geo-locate). |
+| `on/off/once`, `waitForEvent` | ⚠️ | Actual owned `newPage`/`close` events and subscribed page network events, with predicates and deadlines. Auxiliary popup contexts remain unsupported (#326); commit-only navigation response events are not collected. |
 | `setOffline` | ❌ | Enabling offline emulation (including `newContext({ offline: true })`) rejects with a clear unsupported error; online mode is allowed. |
 | `tracing`, `recordVideo`, `use.trace`, `use.video` | ❌ | Tracing methods and enabled recording options reject with a clear no-browser engine error. Explicit trace/video `off` modes are accepted; `page.video()` returns null without recording. |
 | `route`, `unroute`, `routeFromHAR`, `newCDPSession`, `tracing` | ❌ | Throws / n/a. Page-scoped `page.route(fulfill)` works — see the Page table. |

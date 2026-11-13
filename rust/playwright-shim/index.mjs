@@ -3737,6 +3737,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
   mainFrame() {
     return this;
   }
+  page() {
+    return this;
+  }
   name() {
     return "";
   }
@@ -4816,6 +4819,7 @@ function makeNetResponse(e, frame, lifecycle) {
       return JSON.parse(e.body ?? "null");
     },
     request: () => req,
+    frame: () => req.frame(),
     async finished() {
       await lifecycle?.promise;
       return null;
@@ -4934,6 +4938,7 @@ class BrowserContext {
     this._bindings = new Map();
     this._pages = [];
     this._listeners = new Map();
+    this._pageEventListeners = new WeakMap();
     if (
       this._colorScheme ||
       this._reducedMotion ||
@@ -4966,6 +4971,8 @@ class BrowserContext {
     if (this._closed) throw new Error("browser context is closed");
     const p = new Page(this);
     this._pages.push(p);
+    for (const event of NETWORK_EVENTS) this._syncPageEvent(event);
+    this._emit("page", p);
     return p;
   }
   pages() {
@@ -5025,16 +5032,91 @@ class BrowserContext {
     this._offline = false;
   }
   on(event, fn) {
+    if (typeof fn !== "function") throw new TypeError("Event listener must be a function");
     const arr = this._listeners.get(event) ?? [];
     arr.push(fn);
     this._listeners.set(event, arr);
+    this._syncPageEvent(event);
     return this;
   }
-  off() {
+  off(event, fn) {
+    const arr = this._listeners.get(event);
+    const index =
+      arr?.findLastIndex((listener) => listener === fn || listener.listener === fn) ?? -1;
+    if (index >= 0) this._listeners.set(event, [...arr.slice(0, index), ...arr.slice(index + 1)]);
+    this._syncPageEvent(event);
     return this;
   }
   once(event, fn) {
-    return this.on(event, fn);
+    const once = (payload) => {
+      this.off(event, once);
+      fn.call(this, payload);
+    };
+    once.listener = fn;
+    return this.on(event, once);
+  }
+  _emit(event, payload) {
+    for (const fn of this._listeners.get(event) ?? []) fn.call(this, payload);
+  }
+  _syncPageEvent(event) {
+    if (!NETWORK_EVENTS.includes(event)) return;
+    for (const page of this._pages) {
+      let listeners = this._pageEventListeners.get(page);
+      if (!listeners) {
+        listeners = new Map();
+        this._pageEventListeners.set(page, listeners);
+      }
+      const previous = listeners.get(event);
+      const needed = this._listeners.get(event)?.length > 0;
+      if (needed && !previous) {
+        const listener = (payload) => this._emit(event, payload);
+        listeners.set(event, listener);
+        page.on(event, listener);
+      } else if (!needed && previous) {
+        page.off(event, previous);
+        listeners.delete(event);
+      }
+    }
+  }
+  waitForEvent(event, options = {}) {
+    if (this._closed) return Promise.reject(new Error("Browser context is closed"));
+    const predicate = typeof options === "function" ? options : (options.predicate ?? (() => true));
+    const timeout = typeof options === "function" ? 30000 : (options.timeout ?? 30000);
+    return new Promise((resolve, reject) => {
+      let timer;
+      let settled = false;
+      const finish = (error, payload, failed = error != null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.off(event, onEvent);
+        this.off("close", onClose);
+        if (failed) reject(error);
+        else resolve(payload);
+      };
+      const onEvent = async (payload) => {
+        try {
+          if (await predicate(payload)) finish(null, payload);
+        } catch (error) {
+          finish(error, undefined, true);
+        }
+      };
+      const onClose = () => {
+        if (event !== "close") finish(new Error("Browser context closed while waiting for event"));
+      };
+      this.on(event, onEvent);
+      this.on("close", onClose);
+      if (timeout !== 0)
+        timer = setTimeout(
+          () =>
+            finish(
+              Object.assign(new Error(`Timeout waiting for context event: ${event}`), {
+                name: "TimeoutError",
+              }),
+            ),
+          timeout,
+        );
+    });
   }
   get request() {
     // Lazy: build one APIRequestContext per BrowserContext, bound to its
@@ -5059,6 +5141,7 @@ class BrowserContext {
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
     this._browser?._forgetContext(this);
+    this._emit("close", this);
   }
   route = UNSUPPORTED("context.route", NETIO);
   routeFromHAR = UNSUPPORTED("context.routeFromHAR", NETIO);

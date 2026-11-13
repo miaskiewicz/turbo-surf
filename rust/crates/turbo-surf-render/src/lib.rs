@@ -46,6 +46,7 @@ mod live_layout_scoped;
 mod live_layout_supports;
 mod live_layout_zoom;
 mod live_stylesheets;
+mod locator_dom;
 mod message_ports;
 mod network_activity;
 mod network_events;

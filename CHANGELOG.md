@@ -136,6 +136,13 @@ branch.
 
 ### Locators and accessibility
 
+- Pierce actual open shadow roots for live CSS and getBy locators, including
+  nested roots, scoped accessible names and actions targeting the original node.
+  Mutation invalidates the trusted locator index; closed roots remain opaque and
+  XPath keeps physical-tree semantics. Metadata reads avoid application custom
+  element construction, and shadow anchor fallback honors the document base URL
+  (#476).
+
 - Expose `Locator.page()` with stable owning-Page identity for direct, derived,
   and nested-frame locators (#503).
 - Use one canonical live selector plan for extended `:visible` actions and compose

@@ -14,7 +14,12 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
-import { handleEvaluation, hasJSHandles, ensureHandleSession } from "./js-handles.mjs";
+import {
+  handleEvaluation,
+  hasJSHandles,
+  ensureHandleSession,
+  createJSHandle,
+} from "./js-handles.mjs";
 import { consoleMessage } from "./console-message.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
@@ -548,7 +553,7 @@ function responseBudget(value) {
 }
 
 function renderedVisibility(element) {
-  for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+  for (let ancestor = element; ancestor; ancestor = __tsNs.tcLocatorParent(ancestor)) {
     if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
       return false;
   }
@@ -623,6 +628,7 @@ class Locator {
 
   _needsQuery() {
     return (
+      (this._page._live && this._page._locatorHasShadow) ||
       !!this._querySource ||
       !!this._selector?.includes(":visible") ||
       !!this._parent?._needsQuery() ||
@@ -635,8 +641,15 @@ class Locator {
       await this._page._ensureLive();
       if (!this._page._live) throw new Error("Extended locator queries require a live document");
     }
+    if (this._page._live)
+      this._page._locatorHasShadow = await this._page._readEngineAsync(
+        "return __tsNs.tcLocatorHasShadow();",
+      );
   }
   _queryRecords() {
+    return this._page._locatorHasShadow ? this._shadowQueryRecords() : this._lightQueryRecords();
+  }
+  _lightQueryRecords() {
     const marker = `data-turbo-surf-query-${randomUUID()}`;
     const result = this._page._readEngine(`
       const matches = ${this._liveElementsExpression()};
@@ -658,6 +671,25 @@ class Locator {
     }
     return ordered;
   }
+  _shadowQueryRecords() {
+    const marker = `data-turbo-surf-query-${randomUUID()}`;
+    const result = this._page._readEngine(`
+      const matches = ${this._liveElementsExpression()};
+      const all = __tsNs.tcLocatorAll();
+      const positions = new Map(all.map((element, index) => [element, index]));
+      const snapshots = __tsNs.tcLocatorSnapshots(matches, ${JSON.stringify(marker)});
+      return {...snapshots, indices: matches.map(element => positions.get(element)), text: matches.map(element => element.textContent)};
+    `);
+    this._queryHtml = result.html[result.membership[0]] ?? "";
+    this._queryBaseURL = result.baseURL;
+    return result.indices.map((index, order) => {
+      const html = result.html[result.membership[order]];
+      const record = JSON.parse(native.query(html, `[${marker}="${order}"]`, "css"))[0];
+      if (!record) throw new Error("Locator metadata cannot represent this element");
+      return { ...record, idx: index, liveText: result.text[order] };
+    });
+  }
+
   _all() {
     if (this._needsQuery()) return this._queryRecords();
     let m;
@@ -789,41 +821,24 @@ class Locator {
     }
     if (this._selector) {
       const roots = this._parent ? this._parent._liveElementsExpression(context) : `[${context}]`;
-      return `(${orderedLocatorElements.toString()})(${roots}.flatMap(root => Array.from(${!isXPathSelector(this._selector) ? `(${queryVisibleSelector.toString()})(root, ${JSON.stringify(this._selector.replace(/^css=/, ""))}, ${renderedVisibility.toString()})` : `__tsNs.tcQuerySelector(root, ${JSON.stringify(this._selector)})`})))`;
+      return `(${orderedLocatorElements.toString()})(${roots}.flatMap(root => Array.from(${!isXPathSelector(this._selector) ? `(${queryVisibleSelector.toString()})(root, ${JSON.stringify(this._selector.replace(/^css=/, ""))}, ${renderedVisibility.toString()}, __tsNs.tcLocatorHasShadow() ? __tsNs.tcLocatorDom : undefined)` : `__tsNs.tcQuerySelector(root, ${JSON.stringify(this._selector)})`})))`;
     }
     if (this._testId) {
       const { attribute, source, flags, root } = this._testId;
-      return `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `(${context}).querySelectorAll(${JSON.stringify(root)})` : `[${context}]`}; const matches = []; for (const root of roots) for (const element of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(element.getAttribute(${JSON.stringify(attribute)}))) matches.push(element); } return (${orderedLocatorElements.toString()})(matches); })()`;
+      return `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `__tsNs.tcLocatorQuery(${context}, ${JSON.stringify(root)})` : `[${context}]`}; const matches = []; for (const root of roots) for (const element of __tsNs.tcLocatorQuery(root, ${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(element.getAttribute(${JSON.stringify(attribute)}))) matches.push(element); } return (${orderedLocatorElements.toString()})(matches); })()`;
     }
     if (this._getBy) {
       const g = this._getBy;
-      return `(() => { __tsNs.tcGetBy(${JSON.stringify(g.kind)}, ${JSON.stringify(g.value)}, ${JSON.stringify(g.name)}, null, ${JSON.stringify(g.options ?? {})}); const all = Array.from(document.querySelectorAll('*')); const roots = ${g.root ? `Array.from((${context}).querySelectorAll(${JSON.stringify(g.root)}))` : `[${context}]`}; return JSON.parse(globalThis.__RESULT).map(match => all[match.idx]).filter(element => roots.some(root => root !== element && root.contains(element))); })()`;
+      return `(() => { __tsNs.tcGetBy(${JSON.stringify(g.kind)}, ${JSON.stringify(g.value)}, ${JSON.stringify(g.name)}, null, ${JSON.stringify(g.options ?? {})}); const all = Array.from(__tsNs.tcLocatorAll()); const roots = ${g.root ? `__tsNs.tcLocatorQuery(${context}, ${JSON.stringify(g.root)})` : `[${context}]`}; return JSON.parse(globalThis.__RESULT).map(match => all[match.idx]).filter(element => roots.some(root => root !== element && __tsNs.tcLocatorContains(root, element))); })()`;
     }
     throw new Error("Custom locator expressions cannot be composed in a live DOM");
   }
   _liveElementsExpression(context = "document") {
     let source = this._liveBaseExpression(context);
     if (this._parent && !this._selector)
-      source = `(() => { const roots = ${this._parent._liveElementsExpression(context)}; return ${source}.filter(element => roots.some(root => root !== element && root.contains(element))); })()`;
+      source = `(() => { const roots = ${this._parent._liveElementsExpression(context)}; return ${source}.filter(element => roots.some(root => root !== element && __tsNs.tcLocatorContains(root, element))); })()`;
     if (this._queryFilter) {
-      const opts = this._queryFilter;
-      const checks = [];
-      for (const key of ["hasText", "hasNotText"]) {
-        const value = opts[key];
-        if (value == null) continue;
-        const check =
-          value instanceof RegExp
-            ? `new RegExp(${JSON.stringify(value.source)}, ${JSON.stringify(value.flags)}).test(element.textContent || '')`
-            : `String(element.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(${JSON.stringify(String(value).replace(/\s+/g, " ").trim().toLowerCase())})`;
-        checks.push(key === "hasNotText" ? `!(${check})` : check);
-      }
-      for (const key of ["has", "hasNot"])
-        if (opts[key]) {
-          const check = `(${opts[key]._liveElementsExpression("element")}).length > 0`;
-          checks.push(key === "hasNot" ? `!(${check})` : check);
-        }
-      if (opts.visible != null)
-        checks.push(`(${renderedVisibility.toString()})(element) === ${!!opts.visible}`);
+      const checks = this._liveQueryChecks();
       source = `${source}.filter(element => ${checks.length ? checks.join(" && ") : "true"})`;
     }
     if (this._filter) {
@@ -835,6 +850,27 @@ class Locator {
     if (this._index != null)
       source = `(() => { const matches = ${source}; const index = ${this._index}; const found = matches[index < 0 ? matches.length + index : index]; return found ? [found] : []; })()`;
     return source;
+  }
+  _liveQueryChecks() {
+    const opts = this._queryFilter;
+    const checks = [];
+    for (const key of ["hasText", "hasNotText"]) {
+      const value = opts[key];
+      if (value == null) continue;
+      const check =
+        value instanceof RegExp
+          ? `new RegExp(${JSON.stringify(value.source)}, ${JSON.stringify(value.flags)}).test(element.textContent || '')`
+          : `String(element.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(${JSON.stringify(String(value).replace(/\s+/g, " ").trim().toLowerCase())})`;
+      checks.push(key === "hasNotText" ? `!(${check})` : check);
+    }
+    for (const key of ["has", "hasNot"])
+      if (opts[key]) {
+        const check = `(${opts[key]._liveElementsExpression("element")}).length > 0`;
+        checks.push(key === "hasNot" ? `!(${check})` : check);
+      }
+    if (opts.visible != null)
+      checks.push(`(${renderedVisibility.toString()})(element) === ${!!opts.visible}`);
+    return checks;
   }
   // When this locator (or an ancestor) was indexed via `.nth(i)`, a CSS-concat selector can't
   // express "the i-th match's subtree" — return the scope CHAIN so the child drives via
@@ -1003,7 +1039,7 @@ class Locator {
     // Pure DOM reads must not await unrelated exposed host callbacks.
     const result = await this._page._readEngineAsync(`
       try { return {value: (${encodeEvaluationValue.toString()})(
-        (${fn.toString()})(document.querySelectorAll("*")[${index}],${JSON.stringify(arg ?? null)}))}; }
+        (${fn.toString()})(__tsNs.tcLocatorAll()[${index}],${JSON.stringify(arg ?? null)}))}; }
       catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
     `);
     if (result.error) throw decodeEvaluationError(result.error);
@@ -1064,7 +1100,7 @@ class Locator {
           );
     if (index == null) return null;
     const script = `globalThis.__RESULT = (() => {
-      try { const element = document.querySelectorAll('*')[${index}];
+      try { const element = ${live ? "__tsNs.tcLocatorAll()" : "document.querySelectorAll('*')"}[${index}];
         return JSON.stringify({value: element ? (${fn.toString()})(element) : null});
       } catch (error) { return JSON.stringify({error: String(error.message)}); }
     })()`;
@@ -1127,38 +1163,27 @@ class Locator {
     return n == null ? null : JSON.parse(native.nodeSnapshot(this._html, n));
   }
   async evaluate(fn, arg) {
-    await this._prepareQuery();
-    await this._page._ensureLive();
-    const index = await this._resolveLiveIdx();
-    if (index == null) throw new Error("turbo-surf: locator matched no elements");
-    return this._page.evaluate(
-      `(${fn.toString()})(document.querySelectorAll('*')[${index}], ${evaluationArgument(arg)})`,
-    );
+    const handle = await this.elementHandle();
+    if (!handle) throw new Error("turbo-surf: locator matched no elements");
+    try {
+      return await handle.evaluate(fn, arg);
+    } finally {
+      await handle.dispose();
+    }
   }
   async evaluateAll(fn, arg) {
     await this._prepareQuery();
     await this._page._ensureLive();
-    let indices;
-    if (!this._needsQuery() && this._selector && !this._filter && this._scope.length === 0) {
-      const raw = await this._page._evalEngine(`(() => {
-        const all = Array.from(document.querySelectorAll('*'));
-        const positions = new Map(all.map((element, index) => [element, index]));
-        let matches = Array.from(document.querySelectorAll(${JSON.stringify(this._selector)}));
-        const n = ${this._index ?? "null"};
-        if (n != null) matches = [matches[n < 0 ? matches.length + n : n]].filter(Boolean);
-        globalThis.__RESULT = JSON.stringify(matches.map(element => positions.get(element)));
-      })()`);
-      indices = JSON.parse(raw);
-    } else if (this._needsQuery()) {
-      indices = this._all().map((element) => element.idx);
-    } else {
-      const all = JSON.parse(native.query(this._html, "*", "css"));
-      const positions = new Map(all.map((element, index) => [element.node, index]));
-      indices = this._all().map((element) => positions.get(element.node));
+    const descriptor = await this._page._readEngineAsync(`
+      const elements = ${this._liveElementsExpression()};
+      return {id: __tsNs.remoteHandleRetain(globalThis, elements), kind: 'value'};
+    `);
+    const handle = createJSHandle(this._page, descriptor);
+    try {
+      return await handle.evaluate(fn, arg);
+    } finally {
+      await handle.dispose();
     }
-    return this._page.evaluate(
-      `(() => { const all = document.querySelectorAll('*'); return (${fn.toString()})(${JSON.stringify(indices)}.map(index => all[index]), ${evaluationArgument(arg)}); })()`,
-    );
   }
   async ariaSnapshot() {
     await this._prepareQuery();
@@ -1180,50 +1205,13 @@ class Locator {
   // just mutate the static HTML snapshot.
   async _driveLive(kind, value) {
     await this._prepareQuery();
-    if (this._hasComposite()) {
-      const index = await this._resolveLiveIdx();
-      if (index == null) throw new Error("turbo-surf: locator matched no elements");
-      return this._page._sessionDispatch("*", index, kind, value);
-    }
-    if (this._testId) {
-      const idx = await this._resolveLiveIdx();
-      if (idx == null) throw new Error("turbo-surf: locator matched no elements");
-      return this._page._sessionDispatch("*", idx, kind, value);
-    }
-    // nth-aware scope chain: a CSS selector can't target "the i-th match's subtree", so walk
-    // the chain in the live isolate and dispatch on the matched element's global index.
     if (
-      this._scope &&
-      (this._scope.some((s) => s.idx != null || s.filter != null || s.getBy != null) ||
-        this._parent ||
-        hasSelectorEngine(this._selector)) &&
-      this._page._session != null
-    ) {
-      const leaf = this._selector
-        ? { selector: this._selector }
-        : this._getBy
-          ? { getBy: this._getBy }
-          : null;
-      if (leaf) {
-        const raw = await this._page._evalEngine(
-          `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
-        );
-        let matches = [];
-        try {
-          matches = JSON.parse(raw);
-        } catch {
-          matches = [];
-        }
-        this._checkLiveCardinality(matches);
-        const i =
-          this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-        const target = matches[i];
-        if (!target || target.idx == null)
-          throw new Error("turbo-surf: locator matched no elements");
-        return this._page._sessionDispatch("*", target.idx, kind, value);
-      }
-    }
-    if (this._selector)
+      this._selector &&
+      !this._hasComposite() &&
+      !this._parent &&
+      this._scope.length === 0 &&
+      !hasSelectorEngine(this._selector)
+    )
       return this._page._sessionDispatch(
         this._selector,
         this._index ?? 0,
@@ -1231,31 +1219,9 @@ class Locator {
         value,
         this._index == null,
       );
-    // getByRole/getByText/getByLabel: resolve the match IN the live isolate so the index is
-    // a LIVE `querySelectorAll('*')` position (the same context we dispatch into). Resolving
-    // over a re-serialized snapshot can reorder portal'd nodes → wrong element clicked.
-    if (this._getBy && this._page._session != null) {
-      const g = this._getBy;
-      const raw = await this._page._evalEngine(
-        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)},${JSON.stringify(g.options ?? {})});`,
-      );
-      let matches = [];
-      try {
-        matches = JSON.parse(raw);
-      } catch {
-        matches = [];
-      }
-      if (!matches.length) throw new Error("turbo-surf: locator matched no elements");
-      this._checkLiveCardinality(matches);
-      const i =
-        this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-      const target = matches[i];
-      if (!target || target.idx == null) throw new Error("turbo-surf: locator matched no elements");
-      return this._page._sessionDispatch("*", target.idx, kind, value);
-    }
-    const m = this._all();
-    if (!m.length || m[0].idx == null) throw new Error("turbo-surf: locator matched no elements");
-    return this._page._sessionDispatch("*", m[0].idx, kind, value);
+    const index = await this._resolveLiveIdx();
+    if (index == null) throw new Error("turbo-surf: locator matched no elements");
+    return this._page._sessionDispatch("*", index, kind, value);
   }
   async _waitActionable(kind, options = {}) {
     await this._prepareQuery();
@@ -1344,7 +1310,7 @@ class Locator {
           native.evaluateEngine(
             this._html,
             `
-          const values = (${selectOptionOperation.toString()})(document.querySelectorAll('*')[${index}], ${JSON.stringify(choices)}, true);
+          const values = (${selectOptionOperation.toString()})(__tsNs.tcLocatorAll()[${index}], ${JSON.stringify(choices)}, true);
           return JSON.stringify({ values, html: (${serializeDocumentType.toString()})(document) + document.documentElement.outerHTML });`,
           ),
         );
@@ -1383,7 +1349,10 @@ class Locator {
       if (this._page._url === urlBefore && r !== "PREVENTED" && r !== "NATIVE_DEFAULT") {
         const n = this._node();
         if (n != null) {
-          const intent = JSON.parse(native.clickNode(this._page._html, n, this._page._url));
+          const baseURL = this._needsQuery()
+            ? (this._queryBaseURL ?? this._page._url)
+            : this._page._url;
+          const intent = JSON.parse(native.clickNode(this._html, n, baseURL));
           if (intent.action === "navigate") return this._page._followIntent(intent);
         }
       }
@@ -1440,6 +1409,7 @@ class Locator {
     // Then actually poll for the requested state (Playwright defaults to 'visible'),
     // re-pumping the live app between tries — so the wait reflects reality instead of
     // resolving immediately (which masked "the element/modal never appeared").
+    await this._prepareQuery();
     const state = opts.state ?? "visible";
     const timeout = opts.timeout ?? 5000;
     const ok = () => {
@@ -1451,7 +1421,10 @@ class Locator {
     };
     if (!this._page._live) return undefined; // static page: best-effort, no polling surface
     const start = Date.now();
-    while (!ok() && Date.now() - start < timeout) await this._page._redrain();
+    while (!ok() && Date.now() - start < timeout) {
+      await this._page._redrain();
+      await this._prepareQuery();
+    }
     if (!ok()) throw new Error(`turbo-surf: waitFor(state=${state}) timed out`);
     return undefined;
   }
@@ -1460,7 +1433,7 @@ class Locator {
     await this._prepareQuery();
     await this._page._ensureLive();
     return this._readElement((element) => {
-      for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+      for (let ancestor = element; ancestor; ancestor = __tsNs.tcLocatorParent(ancestor)) {
         if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
           return null;
       }
@@ -1484,10 +1457,11 @@ class Locator {
     await this._prepareQuery();
     const index = await this._resolveLiveIdx();
     if (index == null) return null;
-    return this._page.evaluateHandle(
-      (index) => document.querySelectorAll("*")[index] ?? null,
-      index,
-    );
+    const descriptor = await this._page._readEngineAsync(`
+      const element = __tsNs.tcLocatorAll()[${index}];
+      return {id: __tsNs.remoteHandleRetain(globalThis, element), kind: 'element'};
+    `);
+    return createJSHandle(this._page, descriptor);
   }
 
   // Hover has no rendering effect here, but JS hover handlers (menu-open) are real.
@@ -1531,87 +1505,18 @@ class Locator {
     await this._page._sessionEval(dragScript(src, dst));
   }
 
-  // Resolve this locator to the live `querySelectorAll('*')` index of its first match.
+  // Resolve against the same trusted open-shadow index used by input dispatch.
   // Returns null when the locator matches nothing. Used by dragTo and page.dragAndDrop.
   async _resolveLiveIdx() {
     await this._prepareQuery();
     if (this._page._session == null) return null;
-    if (this._needsQuery()) {
-      const indices = await this._page._readEngineAsync(`
-        const matches = ${this._liveElementsExpression()};
-        const positions = new Map(Array.from(document.querySelectorAll('*'), (element, index) => [element, index]));
-        return matches.map(element => positions.get(element));
-      `);
-      this._checkLiveCardinality(indices);
-      return indices[0] ?? null;
-    }
-    if (this._hasComposite()) {
-      const raw = await this._page._evalEngine(
-        `(() => { const matches = ${this._liveElementsExpression()}; const all = Array.from(document.querySelectorAll('*')); const indices = new Map(all.map((element,index) => [element,index])); globalThis.__RESULT = JSON.stringify(matches.map(element => ({idx:indices.get(element)}))); })()`,
-      );
-      const matches = JSON.parse(raw);
-      this._checkLiveCardinality(matches);
-      return matches[0]?.idx ?? null;
-    }
-    if (this._testId) {
-      const { attribute, source, flags, root } = this._testId;
-      const raw = await this._page._evalEngine(
-        `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `document.querySelectorAll(${JSON.stringify(root)})` : "[document]"}; const hits = new Set(); for (const root of roots) for (const el of root.querySelectorAll(${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(el.getAttribute(${JSON.stringify(attribute)}))) hits.add(el); } const all = Array.from(document.querySelectorAll('*')); const matches = all.filter(el => hits.has(el)); if (${this._index == null} && matches.length > 1) throw new Error("strict mode violation: locator resolved to " + matches.length + " elements"); const n = ${this._index ?? 0}; globalThis.__RESULT = String(all.indexOf(matches[n < 0 ? matches.length + n : n])); })();`,
-      );
-      const idx = Number(raw);
-      return Number.isInteger(idx) && idx >= 0 ? idx : null;
-    }
-    if (
-      (this._scope &&
-        this._scope.some((s) => s.idx != null || s.filter != null || s.getBy != null)) ||
-      this._parent ||
-      hasSelectorEngine(this._selector)
-    ) {
-      const leaf = this._selector
-        ? { selector: this._selector }
-        : this._getBy
-          ? { getBy: this._getBy }
-          : null;
-      if (leaf) {
-        const raw = await this._page._evalEngine(
-          `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
-        );
-        let matches = [];
-        try {
-          matches = JSON.parse(raw);
-        } catch {
-          matches = [];
-        }
-        this._checkLiveCardinality(matches);
-        const i =
-          this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-        return matches[i]?.idx ?? null;
-      }
-    }
-    if (this._selector) {
-      const raw = await this._page._evalEngine(
-        `(() => { const els = document.querySelectorAll(${JSON.stringify(this._selector)}); if (${this._index == null} && els.length > 1) throw new Error("strict mode violation: locator resolved to " + els.length + " elements"); const n = ${this._index ?? 0}; const i = n < 0 ? els.length + n : n; const list = []; const all = document.querySelectorAll('*'); for (let k = 0; k < all.length; k++) if (all[k] === els[i]) { globalThis.__RESULT = String(k); return; } globalThis.__RESULT = ''; })();`,
-      );
-      const n = raw ? Number(raw) : NaN;
-      return Number.isFinite(n) ? n : null;
-    }
-    if (this._getBy) {
-      const g = this._getBy;
-      const raw = await this._page._evalEngine(
-        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)},${JSON.stringify(g.options ?? {})});`,
-      );
-      let matches = [];
-      try {
-        matches = JSON.parse(raw);
-      } catch {
-        matches = [];
-      }
-      this._checkLiveCardinality(matches);
-      const i =
-        this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-      return matches[i]?.idx ?? null;
-    }
-    return null;
+    const indices = await this._page._readEngineAsync(`
+      const matches = ${this._liveElementsExpression()};
+      const positions = new Map(__tsNs.tcLocatorAll().map((element, index) => [element, index]));
+      return matches.map(element => positions.get(element));
+    `);
+    this._checkLiveCardinality(indices);
+    return indices[0] ?? null;
   }
 
   // --- unsupported (no rendering surface / no input hardware) → honest throws ---
@@ -1622,7 +1527,7 @@ class Locator {
 // filter({ hasText, has, hasNot, hasNotText }) → JS predicate over a match.
 function orderedLocatorElements(elements) {
   const selected = new Set(elements);
-  return Array.from(document.querySelectorAll("*")).filter((element) => selected.has(element));
+  return __tsNs.tcLocatorAll().filter((element) => selected.has(element));
 }
 
 function strictLocatorError(count) {
@@ -1790,26 +1695,29 @@ function typingInteractionScript(pick, value, replaceSelection = "__tsNs.replace
   } })();`;
 }
 
-function interactionScript(selector, index, kind, value, strict = false, frameTyping = false) {
+function interactionTarget(selector, index, strict) {
   const sel = JSON.stringify(selector);
   const idx = JSON.stringify(index);
-  const val = JSON.stringify(value ?? "");
   const remoteHandle = selector && typeof selector === "object" ? selector.__remoteHandle : null;
   const selection = Number.isInteger(remoteHandle)
     ? `[__tsNs.remoteHandleGet(${remoteHandle},globalThis)]`
-    : `document.querySelectorAll(${sel})`;
-  const pick = `const els = ${selection};
+    : `__tsNs.tcQuerySelector(document, ${sel})`;
+  return `const els = ${selection};
     if (${strict} && els.length > 1) throw new Error('strict mode violation: locator resolved to ' + els.length + ' elements');
     let __i = ${idx}; if (__i < 0) __i = els.length + __i;
     const el = els[__i];
     if (${Number.isInteger(remoteHandle)} && el && !el.isConnected) throw new Error('Element is not attached to the DOM');
     if (!el) { globalThis.__RESULT = "NO_MATCH"; }`;
-  if (kind === "type")
-    return typingInteractionScript(
-      pick,
-      val,
-      frameTyping ? "__tsNs.replaceFrameControlSelection" : undefined,
-    );
+}
+
+function typingDriver(frameTyping) {
+  return frameTyping ? "__tsNs.replaceFrameControlSelection" : undefined;
+}
+
+function interactionScript(selector, index, kind, value, strict = false, frameTyping = false) {
+  const val = JSON.stringify(value ?? "");
+  const pick = interactionTarget(selector, index, strict);
+  if (kind === "type") return typingInteractionScript(pick, val, typingDriver(frameTyping));
   if (kind === "fill") return fillInteractionScript(pick, val);
   if (kind === "check" || kind === "uncheck") {
     const on = kind === "check";
@@ -1888,7 +1796,7 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   }
   if (kind === "isfocused") {
     return `(() => { ${pick} else {
-      globalThis.__RESULT = document.activeElement === el ? "true" : "false";
+      globalThis.__RESULT = el.getRootNode().activeElement === el ? "true" : "false";
     } })();`;
   }
   if (kind === "hover") {
@@ -2138,17 +2046,9 @@ class Frame {
       let code = ${JSON.stringify(`return (${source});`)};
       let helperState;
       if (${helpers}) {
-        helperState = __tsNs.remoteHandleFrameState(child.document);
-        helperState.remoteHandleGet = __tsNs.remoteHandleGet;
-        // Compile the existing surf helpers in the child so their document and
-        // intrinsics belong to that realm rather than closing over the host.
-        const names = ['tcGetBy', 'tcQuerySelector', 'tcResolveScoped', 'tcApplyHover'];
-        let prelude = '';
-        for (let index = 0; index < names.length; index++) {
-          const name = names[index];
-          prelude += '__G.' + name + ' = (' + __tsNs.remoteHandleFunctionSource(__tsNs[name]) + ');';
-        }
-        code = '"use strict"; const __G = arguments[0]; const __tsNs = __G;' + prelude + code;
+        helperState = __tsNs.shimBindingNamespace(child);
+        if (!helperState) throw new Error('turbo-surf: frame is detached');
+        code = '"use strict"; const __G = arguments[0]; const __tsNs = __G;' + code;
       }
       return (${helpers} ? __tsNs.remoteHandleCompile(child, code) : child.Function(code))(helperState);
     })()`;
@@ -4202,6 +4102,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
   async waitForSelector(selector, opts = {}) {
+    await this._prepareQuery();
     const state = opts.state ?? "visible";
     if (!["attached", "detached", "hidden", "visible"].includes(state)) {
       throw new Error(`Unsupported selector wait state: ${state}`);
@@ -5009,14 +4910,14 @@ function cropScreenshot(png, clip, asSvg, deviceScale = 1, fullPage = false) {
   );
 }
 
-// Drag `srcIdx` to `dstIdx` (live `querySelectorAll('*')` positions). Fires the
+// Drag `srcIdx` to `dstIdx` (trusted locator-index positions). Fires the
 // full pointer+mouse sequence on source then target, plus the HTML5 drag/drop
 // lifecycle (dragstart on source → dragenter/dragover on target → drop on target
 // → dragend on source), all sharing one DataTransfer so a real app's handlers
 // can set/read types and data. No compositor, so no OS drag image (#227).
 function dragScript(srcIdx, dstIdx) {
   return `(() => {
-    const all = document.querySelectorAll('*');
+    const all = __tsNs.tcLocatorAll();
     const src = all[${srcIdx}];
     const dst = all[${dstIdx}];
     if (!src || !dst) { globalThis.__RESULT = "NO_MATCH"; return; }
@@ -5761,7 +5662,8 @@ class BaseExpect {
         return false;
       }
     };
-    await this._v?._prepareQuery?.();
+    const prepare = () => this._v?._prepareQuery?.();
+    await prepare();
     let pass = await run();
     while ((this._neg ? pass : !pass) && Date.now() - start < timeout) {
       if (!page) break;
@@ -5769,10 +5671,12 @@ class BaseExpect {
         if (page._autoHydrate === false) break;
         await page._ensureLive();
         if (!page._live) break;
+        await prepare();
         pass = await run();
         continue;
       }
       await page._redrain();
+      await prepare();
       pass = await run();
     }
     return pass;
@@ -5849,9 +5753,9 @@ class LocatorExpect extends BaseExpect {
       await locator._page._ensureLive();
       const index = await locator._resolveLiveIdx();
       if (index == null) return false;
-      return locator._page.evaluate(
-        ({ index, viewport, ratio }) => {
-          const rect = document.querySelectorAll("*")[index].getBoundingClientRect();
+      return locator.evaluate(
+        (element, { viewport, ratio }) => {
+          const rect = element.getBoundingClientRect();
           const width = Math.max(0, Math.min(rect.right, viewport.width) - Math.max(rect.left, 0));
           const height = Math.max(
             0,
@@ -5860,7 +5764,7 @@ class LocatorExpect extends BaseExpect {
           const area = rect.width * rect.height;
           return area > 0 && width * height > 0 && (width * height) / area >= ratio;
         },
-        { index, viewport: locator._page.viewportSize(), ratio },
+        { viewport: locator._page.viewportSize(), ratio },
       );
     }, opts);
     this._ok(pass, "expected element to be in viewport");
@@ -5985,13 +5889,10 @@ class LocatorExpect extends BaseExpect {
       await locator._page._ensureLive();
       const index = await locator._resolveLiveIdx();
       if (index == null) return false;
-      got = await locator._page.evaluate(
-        ({ index, name }) => {
-          const value = document.querySelectorAll("*")[index][name];
-          return { type: typeof value, value };
-        },
-        { index, name },
-      );
+      got = await locator.evaluate((element, name) => {
+        const value = element[name];
+        return { type: typeof value, value };
+      }, name);
       return got?.type === typeof value && (value === undefined || deepEqual(got.value, value));
     }, opts);
     this._ok(pass, `expected property ${name} to equal ${json(value)}, got ${json(got)}`);

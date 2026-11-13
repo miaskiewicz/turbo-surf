@@ -27,7 +27,9 @@ lto = "thin"
 
 # Tested DOM v0.8.4 animation handoff; retain exact reviewed Git provenance.
 [patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "b1f604013287382ca2cc82c823603199027df4ea" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "b1f604013287382ca2cc82c823603199027df4ea" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "b1f604013287382ca2cc82c823603199027df4ea" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "b1f604013287382ca2cc82c823603199027df4ea" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "46b1dcc939a033d09fb5708eb517fde49af56771" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "46b1dcc939a033d09fb5708eb517fde49af56771" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "46b1dcc939a033d09fb5708eb517fde49af56771" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "46b1dcc939a033d09fb5708eb517fde49af56771" }
+
+turbo-dom-v8 = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "0cfe2c3a405ce33809c23afd7dd30a05fab3f06c" }

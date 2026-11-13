@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserEmulation {
+    #[serde(default)]
+    pub(crate) animations: crate::AnimationPolicy,
     pub(crate) color_scheme: Option<String>,
     pub(crate) reduced_motion: Option<String>,
     pub(crate) locale: Option<String>,

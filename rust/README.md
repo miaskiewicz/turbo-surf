@@ -7,10 +7,10 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
-requires `turbo-dom` 0.8 and turbo-dom-layout / -raster / -browser-env 0.8.2.
-The v0.8.3 integration branch pins those four crates to turbo-dom commit
-`ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6` through the workspace
-`[patch.crates-io]` table, resolving all four to version 0.8.3;
+requires all four turbo-dom crates at version 0.8.4. The release candidate pins them
+to producer commit `46b1dcc939a033d09fb5708eb517fde49af56771` through the workspace
+`[patch.crates-io]` table. The one `turbo-dom-v8` 150.4.2 is pinned to
+`0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`;
 published-release validation must use the registry graph. Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
 original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
 mutation batches and bounded storage collection (the per-release history is in
@@ -78,8 +78,8 @@ name alone does not establish hardware use, native-SDK identity or pixel parity.
 ## Registry dependency identity
 
 The seven direct Rust dependency aliases retain the existing source/API names.
-The Deno 0.x.1 family and `turbo-dom-v8` resolve from crates.io. The four
-turbo-dom 0.8-family crates currently use the integration pin described above. The
+The Deno 0.x.1 family resolves from crates.io. The four turbo-dom 0.8-family
+crates and the single V8 binding use the exact integration pins described above. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):
 
@@ -90,7 +90,7 @@ from turbo-dom):
 | `turbo-surf-btls-sys` | 0.5.6 | transport native dependency |
 | `turbo-surf-btls` | 0.5.6 | transport dependency |
 | `turbo-surf-tokio-btls` | 0.5.6 | transport runtime dependency |
-| `turbo-dom-v8` | 150.4.1 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
+| `turbo-dom-v8` | 150.4.2 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
 | `turbo-surf-deno-v8` | 0.4.1 | `v8` (the shared facade) |
 | `turbo-surf-serde-v8` | 0.321.1 | shared value conversion |
 | `turbo-surf-deno-core` | 0.412.1 | `deno_core` |

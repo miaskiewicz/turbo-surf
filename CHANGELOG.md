@@ -5,12 +5,16 @@
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`b1f604013287382ca2cc82c823603199027df4ea` ([producer animation issue #507](https://github.com/miaskiewicz/turbo-dom/issues/507)). The dependency graph
-continues to use one `turbo-dom-v8` 150.4.1. Combined release validation is still in
+`46b1dcc939a033d09fb5708eb517fde49af56771` ([producer animation presentation #511](https://github.com/miaskiewicz/turbo-dom/issues/511)). The dependency graph
+uses one `turbo-dom-v8` 150.4.2 at the exact tested candidate
+`0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.
 
 ### Engine and performance
+
+- Pierce open shadow roots for CSS and getBy locators, retaining real action
+  targets, tree-scoped accessible names and asynchronous actor reads (#476).
 
 - Finish keyboard events without waiting for unrelated exposed host callbacks.
   Keep those callbacks running with their real guest values/errors and retain
@@ -18,6 +22,11 @@ branch.
 - Apply configured geolocation and origin-scoped permission grants to live
   documents. Deliver asynchronous position callbacks, watch updates and
   permission changes; enforce document policy and retire canceled watches (#391).
+- Add an explicit enabled/disabled animation presentation policy across Rust,
+  NAPI, Playwright contexts and MCP render mode configuration. Disabled canonical
+  effects use underlying styles while their genuine timing, events and promises,
+  application timers and frame callbacks continue. Fresh producer suppression
+  proof is distinct from enabled-mode finite completion (#500).
 
 - Keep the original native geometry admission/cache path first. Inspect fresh
   canonical effect state only for actual animation-resource blockers, recapture

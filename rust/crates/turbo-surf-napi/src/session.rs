@@ -370,6 +370,7 @@ impl Task for LiveOpenTask {
                     response.metadata,
                     None,
                     PageSessionOptions {
+                        animation_policy: None,
                         max_resource_bytes: max_resource_bytes.map(|bytes| bytes as usize),
                         initial_hydration_budget_ms: initial_timeout_ms.map(u64::from),
                         viewport,

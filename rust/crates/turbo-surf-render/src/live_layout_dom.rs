@@ -143,16 +143,29 @@ pub(crate) fn observe_animation_candidates(
         let Some(snapshot) = snapshot else {
             continue;
         };
-        if snapshot.document_id == document_id
-            && snapshot.element == handle
-            && !snapshot.animation_names.is_empty()
+        if snapshot.document_id != document_id
+            || snapshot.element != handle
+            || !snapshot.allows_underlying_geometry()
+        {
+            continue;
+        }
+        let proof = if snapshot.presentation_suppressed {
+            // This producer policy suppresses all canonical effect composition,
+            // including effects scoped to shadow stylesheets. It is distinct from
+            // inferring enabled-mode completion from missing canonical names.
+            crate::live_layout_resources::AnimationGeometryProof::PresentationSuppressed
+        } else if !snapshot.animation_names.is_empty()
             && names
                 .iter()
                 .all(|name| snapshot.animation_names.contains(name))
-            && snapshot.allows_underlying_geometry()
         {
-            completed.insert(handle, snapshot.animation_names);
-        }
+            crate::live_layout_resources::AnimationGeometryProof::CompletedNonFilling(
+                snapshot.animation_names,
+            )
+        } else {
+            continue;
+        };
+        completed.insert(handle, proof);
     }
     Ok(completed)
 }

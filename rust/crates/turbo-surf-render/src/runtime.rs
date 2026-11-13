@@ -4471,13 +4471,16 @@ pub enum WindowTimerMode {
 /// Host-owned policy installed before any document or frame script executes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PageSessionOptions {
+    /// Explicit per-runtime override; otherwise inherit the browsing profile's
+    /// animation presentation policy. Installed before every Window's scripts.
+    pub animation_policy: Option<crate::AnimationPolicy>,
     /// Initial host-owned layout viewport, installed before page scripts.
     pub viewport: Option<[u32; 2]>,
     /// Optional response-body byte cap for page resources and module graphs.
     pub max_resource_bytes: Option<usize>,
     pub window_timer_mode: WindowTimerMode,
     /// Cap this initial hydration without shortening later operation budgets.
-    /// Consumed on open; automatic form destinations inherit only the timer mode.
+    /// Consumed on open; later document navigations retain the other session options.
     pub initial_hydration_budget_ms: Option<u64>,
 }
 
@@ -7728,6 +7731,19 @@ impl Default for BrowserStorage {
     }
 }
 impl BrowserStorage {
+    /// Select presentation for future sessions without replacing other preferences.
+    pub fn set_animation_policy(&self, policy: crate::AnimationPolicy) -> Result<(), String> {
+        self.4
+            .write()
+            .map_err(|_| "Context preferences unavailable")?
+            .animations = policy;
+        Ok(())
+    }
+
+    pub fn animation_policy(&self) -> crate::AnimationPolicy {
+        self.with_emulation(|options| options.animations)
+    }
+
     pub fn configure_emulation(&self, json: &str) -> Result<(), String> {
         let mut options: crate::browser_emulation::BrowserEmulation =
             serde_json::from_str(json).map_err(|e| e.to_string())?;
@@ -8586,6 +8602,7 @@ fn install_environment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Value>,
 ) -> Result<(), String> {
+    crate::animation_policy::install(scope)?;
     // A navigation can be interrupted while trusted bootstrap is compiling. The
     // retained WindowProxy must never expose bootstrap-only host capabilities.
     v8::tc_scope!(let scope, scope);
@@ -15306,6 +15323,11 @@ fn make_runtime_with_storage_and_options(
     state.put(driver_sync::Revision::default());
     state.put(blob_store);
     state.put(form_submission::Queue::default());
+    state.put(crate::animation_policy::Selected(
+        options
+            .animation_policy
+            .unwrap_or(storage.animation_policy()),
+    ));
     state.put(storage);
     state.put(ResponseHeaders::default());
     state.put(crate::DocumentResponseMetadata::default());
@@ -18133,6 +18155,14 @@ impl PageSession {
         engine_init_script: &str,
         event_log: Option<crate::NetworkEventLog>,
     ) -> Result<Self, String> {
+        let options = PageSessionOptions {
+            animation_policy: Some(
+                options
+                    .animation_policy
+                    .unwrap_or(storage.animation_policy()),
+            ),
+            ..options
+        };
         crate::live_layout_backend::initialize_system_fonts_async().await?;
         let mut rt = make_runtime_with_storage_and_options(
             base,

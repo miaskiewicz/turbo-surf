@@ -20,6 +20,7 @@ import {
   ensureHandleSession,
   createJSHandle,
 } from "./js-handles.mjs";
+import { animationPolicy } from "./animation-policy.mjs";
 import { consoleMessage } from "./console-message.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
@@ -4080,6 +4081,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._requestState,
       JSON.stringify({
         colorScheme: this._media?.colorScheme ?? this._context._colorScheme,
+        animations: this._context._animations,
         reducedMotion: this._media?.reducedMotion ?? this._context._reducedMotion,
         locale: this._context._locale,
         extraHTTPHeaders: this._context._headers,
@@ -4802,6 +4804,19 @@ function makeDownload(entry) {
 // ---------------------------------------------------------------------------
 // BrowserContext
 // ---------------------------------------------------------------------------
+function hasContextPreferences(context) {
+  return (
+    context._animations === "disabled" ||
+    context._colorScheme ||
+    context._reducedMotion ||
+    context._locale ||
+    Object.keys(context._headers).length ||
+    context._httpCredentials ||
+    context._geolocation ||
+    context._permissionGrants.length
+  );
+}
+
 class BrowserContext {
   constructor(opts = {}, browser = null) {
     this._closed = false;
@@ -4818,6 +4833,7 @@ class BrowserContext {
     }
     const merged = { ...projectUse, ...opts };
     validateArtifactOptions(merged);
+    this._animations = animationPolicy(merged.animations);
     this._deviceScaleFactor = merged.deviceScaleFactor ?? 1;
     if (!Number.isFinite(this._deviceScaleFactor) || this._deviceScaleFactor <= 0)
       throw new Error("deviceScaleFactor must be finite and positive");
@@ -4875,22 +4891,14 @@ class BrowserContext {
     this._pages = [];
     this._listeners = new Map();
     this._pageEventListeners = new WeakMap();
-    if (
-      this._colorScheme ||
-      this._reducedMotion ||
-      this._locale ||
-      Object.keys(this._headers).length ||
-      this._httpCredentials ||
-      this._geolocation ||
-      this._permissionGrants.length
-    )
-      this._configureNative();
+    if (hasContextPreferences(this)) this._configureNative();
   }
   _configureNative() {
     native.requestStateConfigure(
       this._requestState,
       JSON.stringify({
         colorScheme: this._colorScheme,
+        animations: this._animations,
         reducedMotion: this._reducedMotion,
         locale: this._locale,
         extraHTTPHeaders: this._headers,

@@ -42,7 +42,10 @@ function fixture() {
   };
   const context = vm.createContext({
     document,
-    __G: {},
+    __G: {
+      tcLocatorAll: () => all,
+      tcLocatorQuery: (root, selector) => root.querySelectorAll(selector),
+    },
     getComputedStyle: () => ({ visibility: "visible" }),
   });
   vm.runInContext(runtime.slice(start, end), context);

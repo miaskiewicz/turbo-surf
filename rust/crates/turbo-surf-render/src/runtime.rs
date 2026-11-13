@@ -8826,6 +8826,8 @@ deno_core::extension!(
         op_storage_id,
         op_dispatch_host_event,
         op_host_pointer,
+        crate::locator_dom::op_locator_revision,
+        crate::locator_dom::op_locator_has_shadow,
         crate::stream_transfers::op_stream_transfer_install,
         crate::web_streams_backend::op_web_abort_bind,
         crate::web_streams_backend::op_web_abort_listener,
@@ -12820,6 +12822,9 @@ __G.takeModuleScript = function () {
   __G.currentModuleEl = null;
   __G.moduleDescriptor = "";
 };
+"##,
+    include_str!("locator_dom.js"),
+    r##"
 // getByRole/getByText/getByLabel resolved IN the LIVE isolate, returning each match's
 // document-order index (querySelectorAll('*') position) so the Playwright shim can dispatch
 // on `*`[idx] in the SAME context. The shim used to resolve these over a re-serialized
@@ -12833,14 +12838,14 @@ __G.tcGetBy = function (kind, value, name, root, options) {
   // `idx` is always the GLOBAL document-order position (so the shim dispatches on `*`[idx]).
   // `root` scopes matching to within elements matching that selector (descendant-or-self) —
   // backs `parentLocator.getByRole/getByText/getByLabel(...)`.
-  const all = Array.prototype.slice.call(document.querySelectorAll("*"));
+  const all = __G.tcLocatorAll();
   let inScope = null;
   if (root) {
     inScope = new Set();
-    const roots = Array.prototype.slice.call(document.querySelectorAll(root));
+    const roots = __G.tcLocatorQuery(document, root);
     for (let ri = 0; ri < roots.length; ri++) {
       inScope.add(roots[ri]);
-      const sub = roots[ri].querySelectorAll("*");
+      const sub = __G.tcLocatorQuery(roots[ri], "*");
       for (let si = 0; si < sub.length; si++) inScope.add(sub[si]);
     }
   }
@@ -12871,7 +12876,7 @@ __G.tcGetBy = function (kind, value, name, root, options) {
   };
   const accName = (el) => {
     const refs = attr(el, 'aria-labelledby').trim().split(/\s+/).filter(Boolean)
-      .map((id) => document.getElementById(id)).filter(Boolean);
+      .map((id) => __G.tcLocatorById(el, id)).filter(Boolean);
     if (refs.length) return refs.map(referenceName).filter(Boolean).join(' ');
     const label = normalizeName(attr(el, 'aria-label'));
     if (label) return label;
@@ -12907,22 +12912,20 @@ __G.tcGetBy = function (kind, value, name, root, options) {
   } else if (kind === "label") {
     const seen = new Set();
     const push = (el) => { if (el && !seen.has(el)) { seen.add(el); hits.push(el); } };
-    for (const lab of document.querySelectorAll("label")) {
+    for (const lab of __G.tcLocatorQuery(document, "label")) {
       if (!valueMatch((lab.textContent || "").trim())) continue;
-      const forId = attr(lab, "for");
-      if (forId) push(document.getElementById(forId));
+      push(__G.tcLocatorLabelControl(lab));
       const id = attr(lab, "id");
-      if (id) for (const t of document.querySelectorAll('[aria-labelledby~="' + id + '"]')) push(t);
-      push(lab.querySelector("input,select,textarea"));
+      if (id) for (const t of __G.tcLocatorLightQuery(lab, '[aria-labelledby~="' + id + '"]')) push(t);
     }
-    for (const el of document.querySelectorAll("[aria-label]")) if (valueMatch(attr(el, "aria-label"))) push(el);
+    for (const el of __G.tcLocatorQuery(document, "[aria-label]")) if (valueMatch(attr(el, "aria-label"))) push(el);
   } else if (kind === "text") {
     // Leaf-text match: the element's text matches AND no descendant element also matches
     // (so we target the tightest node, like turbo-surf-view's by_text).
     for (const el of all) {
       if (!valueMatch((el.textContent || "").trim())) continue;
       let childMatch = false;
-      for (const c of el.querySelectorAll("*")) { if (valueMatch((c.textContent || "").trim())) { childMatch = true; break; } }
+      for (const c of __G.tcLocatorQuery(el, "*")) { if (valueMatch((c.textContent || "").trim())) { childMatch = true; break; } }
       if (!childMatch) hits.push(el);
     }
   }
@@ -12932,7 +12935,7 @@ __G.tcGetBy = function (kind, value, name, root, options) {
     if (options.includeHidden) return true;
     const visibility = getComputedStyle(el).visibility;
     if (visibility === 'hidden' || visibility === 'collapse') return false;
-    for (let current = el; current && current.nodeType === 1; current = current.parentElement) {
+    for (let current = el; current && current.nodeType === 1; current = __G.tcLocatorParent(current)) {
       if (current.hasAttribute('hidden') || attr(current, 'aria-hidden') === 'true' || getComputedStyle(current).display === 'none') return false;
     }
     return true;
@@ -12945,7 +12948,7 @@ __G.tcGetBy = function (kind, value, name, root, options) {
 __G.tcQuerySelector = function (root, selector) {
   let expression = String(selector).trimStart();
   const xpath = /^(?:xpath=|\/|\.\.?\/|\.\.?$|\()/.test(expression);
-  if (!xpath) return root.querySelectorAll(expression.replace(/^css=/, ""));
+  if (!xpath) return __G.tcLocatorQuery(root, expression.replace(/^css=/, ""));
   expression = expression.replace(/^xpath=/, "");
   if (root.nodeType !== 9 && expression.startsWith("/")) expression = "." + expression;
   const doc = root.nodeType === 9 ? root : root.ownerDocument;
@@ -12970,10 +12973,10 @@ __G.tcResolveScoped = function (scope, leaf) {
     const s = scope[si];
     let next = [];
     if (s.getBy) {
-      const all = Array.prototype.slice.call(document.querySelectorAll("*"));
+      const all = __G.tcLocatorAll();
       __G.tcGetBy(s.getBy.kind, s.getBy.value, s.getBy.name, s.getBy.root, s.getBy.options);
       const matches = JSON.parse(globalThis.__RESULT).map((hit) => all[hit.idx]);
-      next = matches.filter((el) => cur.some((root) => root === document || (root !== el && root.contains(el))));
+      next = matches.filter((el) => cur.some((root) => root === document || (root !== el && __G.tcLocatorContains(root, el))));
     } else for (let ci = 0; ci < cur.length; ci++) {
       let m;
       try {
@@ -13000,7 +13003,7 @@ __G.tcResolveScoped = function (scope, leaf) {
     }
     cur = next;
   }
-  const all = Array.prototype.slice.call(document.querySelectorAll("*"));
+  const all = __G.tcLocatorAll();
   const indices = new Map(all.map((el, idx) => [el, idx]));
   if (leaf && leaf.selector) {
     let res = [];

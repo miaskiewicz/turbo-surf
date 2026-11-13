@@ -10,6 +10,9 @@ export class LiveActorHub {
     this.capability = identity.capability?.kind ?? "pending";
     this.capabilityReason = identity.capability?.reason;
     this.heldEvents = [];
+    this.capability = identity.capability?.kind ?? "pending";
+    this.capabilityReason = identity.capability?.reason;
+    this.heldEvents = [];
     this.rootPage = this.root == null ? rootPage : null;
     this.pages = new Map(this.root == null ? [] : [[this.root, rootPage]]);
     this.callbacks = callbacks;
@@ -91,6 +94,45 @@ export class LiveActorHub {
       if (this.info.get(info.target)?.closed && !info.closed) continue;
       this.info.set(info.target, info);
     }
+  }
+
+  _acceptCapability(state) {
+    const capability = state.capability?.kind ?? this.capability;
+    if (state.capability != null && !state.capability.kind)
+      throw new Error("Invalid native auxiliary capability descriptor");
+    if (state.capability?.reason) this.capabilityReason = state.capability.reason;
+    if (!["pending", "supported", "unsupported"].includes(capability))
+      throw new Error("Invalid native auxiliary capability");
+    if (this.capability !== "pending" && capability !== this.capability)
+      throw new Error("Native root capability changed");
+    const unsupported = this.capability === "pending" && capability === "unsupported";
+    this.capability = capability;
+    if (unsupported) {
+      this.callbacks.unsupported?.();
+      this.native.liveNetworkLogWake?.(this.actor);
+    }
+  }
+
+  _acceptIdentity(state) {
+    if (state.actor !== this.actor || (this.root != null && state.root !== this.root))
+      throw new Error("Native auxiliary actor identity changed");
+    if (state.revision != null && BigInt(state.revision) >= BigInt(this.revision ?? "0"))
+      this.revision = state.revision;
+    this._acceptCapability(state);
+    if (state.opening === false && !state.closed) {
+      this.opening = false;
+      this._resolveReady();
+    }
+  }
+
+  _acceptRoot(target) {
+    if (this.root != null || target == null) return;
+    this.root = target;
+    this.pages.set(this.root, this.rootPage);
+    this.published.add(this.root);
+    this.callbacks.root?.(this.root);
+    this.callbacks.root = undefined;
+    this.rootPage = null;
   }
 
   _acceptCapability(state) {
@@ -316,6 +358,15 @@ export class LiveActorHub {
 
   _failed(error) {
     if (this.active && !this.closing) this.callbacks.failure(error);
+  }
+
+  releaseRoot(error = new Error("Root execution session replaced")) {
+    if (this.capability === "supported")
+      throw new Error("Cannot release an owned auxiliary actor as a legacy root");
+    this.active = false;
+    this._rejectReady(error);
+    this.rootPage = null;
+    this.callbacks.actorClosed?.(this.actor);
   }
 
   releaseRoot(error = new Error("Root execution session replaced")) {

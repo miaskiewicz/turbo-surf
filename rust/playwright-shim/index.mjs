@@ -38,6 +38,7 @@ import { makeKeyboard } from "./keyboard.mjs";
 import { captureAssets } from "./screenshot-resources.mjs";
 import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
 import { LiveActorHub } from "./actor-hub.mjs";
+import { NativeLoadState } from "./native-load-state.mjs";
 import { waitForEmitterEvent } from "./event-waiter.mjs";
 
 const require = createRequire(import.meta.url);
@@ -3365,8 +3366,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return opener && !opener.isClosed() ? opener : null;
   }
 
+  _nativeLoad() {
+    return (this._nativeLoadState ??= new NativeLoadState(this));
+  }
+
   _didNativeNavigate(event) {
     if (this._closed || this._session == null) return;
+    this._nativeLoad().reset();
     const previous = this._url;
     if (!this._driverNavigation && previous !== "about:blank" && previous !== event.url) {
       this._history.push(this._historyCurrent ?? previous);
@@ -4088,7 +4094,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // SPA's own scripts having run; the shim has one "settled" tier (a live
   // session with the authored scripts drained), so treat them the same and
   // hydrate if we aren't live yet.
-  async waitForLoadState(state = "load") {
+  async waitForLoadState(state = "load", options = {}) {
+    if (this._auxiliaryActor) {
+      if (!["load", "domcontentloaded", "networkidle"].includes(state))
+        throw new Error(`Unsupported load state: ${state}`);
+      await this._actorHub.drain();
+      await this._nativeLoad().wait(state === "networkidle" ? "load" : state, {
+        timeout:
+          options.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+      });
+      if (state === "networkidle") await native.liveEvalEngine(this._session, "");
+      return;
+    }
     if (this._contentLoadPending && state !== "domcontentloaded") {
       const collecting = this._contentCollecting;
       this._contentCollecting = true;
@@ -4202,8 +4219,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return makeResponse({ status: 200, finalUrl: this._url });
   }
   _waitForPopup(opts) {
+    if (!native.liveAuxiliaryState)
+      throw new Error("Native auxiliary Page transport is unavailable");
     if (this._actorHub?.capability === "unsupported")
-      throw new Error("Native popup contexts are unavailable for this root profile");
+      throw new Error(
+        `Native popup contexts are unavailable: ${this._actorHub.capabilityReason ?? "unsupported root profile"}`,
+      );
     const controller = new AbortController();
     const unsupported = () =>
       controller.abort(new Error("Native popup contexts are unavailable for this root profile"));
@@ -5289,8 +5310,7 @@ class BrowserContext {
         if (source) source._emit("popup", child);
       },
       navigated: (target, event) => target._didNativeNavigate(event),
-      lifecycle: (target, event) =>
-        target._emit(event.kind === "domContentLoaded" ? "domcontentloaded" : "load", target),
+      lifecycle: (target, event) => target._nativeLoad().observe(event.kind),
       closed: (target) => target._didNativeClose(),
       network: (target, entry, previous) =>
         target._consumeNetworkEvents(

@@ -130,3 +130,37 @@ test("a genuine popup created before root liveOpen completes receives one owned 
     await context.close();
   }
 });
+
+test("configured native popup budgets deny allocation without inventing Pages", async () => {
+  const context = new BrowserContext({ auxiliaryPolicy: { maxPages: 1, maxCreations: 2 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(fixture.origin, { waitUntil: "networkidle" });
+    let creations = 0;
+    context.on("page", () => {
+      creations++;
+    });
+    assert.deepEqual(
+      await page.evaluate(() => ({
+        first: window.open("about:blank", "first") !== null,
+        full: window.open("about:blank", "second") !== null,
+      })),
+      { first: true, full: false },
+    );
+    assert.equal(context.pages().length, 2);
+    await context
+      .pages()
+      .find((target) => target !== page)
+      .close();
+    assert.equal(await page.evaluate(() => window.open("about:blank", "second") !== null), true);
+    await context
+      .pages()
+      .find((target) => target !== page)
+      .close();
+    assert.equal(await page.evaluate(() => window.open("about:blank", "third") === null), true);
+    assert.equal(context.pages().length, 1);
+    assert.equal(creations, 2);
+  } finally {
+    await context.close();
+  }
+});

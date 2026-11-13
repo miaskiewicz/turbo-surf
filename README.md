@@ -82,10 +82,10 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-Status: **v0.8.2 package metadata; v0.8.3 release candidate in progress**.
+Status: **v0.8.4 release candidate in progress**.
 This release branch pins the shared DOM crates to the exact revision recorded in
-[CHANGELOG.md](./CHANGELOG.md); the resolved DOM version is 0.8.3. This is not a
-claim that v0.8.3 has been published or that final integrated validation is green.
+[CHANGELOG.md](./CHANGELOG.md); the resolved DOM version is 0.8.4. This is not a
+claim that v0.8.4 has been published or that final integrated validation is green.
 Registry install commands select published artifacts; use a source build and its
 local launcher/runner to exercise this unreleased candidate.
 The engine includes hardened

@@ -40,6 +40,12 @@ or a workflow ships a mismatched version. Bump to the SAME `X.Y.Z`:
   five exact Surf dependency requirements (its turbo-dom / turbo-dom-raster pins
   must equal the locked versions; `scripts/check-versions.py` checks both)
 
+Unpublished release candidates may keep source-backed optional platform lock records
+(version, OS, CPU and license) without registry URLs or integrity values. Do not
+copy the previous release's tarball integrity onto a new version. Require normal
+isolated `npm ci` to pass, then verify the actual published platform payloads and
+record their real integrity metadata as part of release verification.
+
 Compiled core/MCP constants and NAPI/Python version functions use
 `env!("CARGO_PKG_VERSION")`; they follow the workspace version automatically.
 
@@ -301,7 +307,7 @@ source under the named `turbo-surf-*` dependency family. Core and render consume
 those published packages through seven explicit Cargo aliases; the transport
 and Deno families have no root source overrides. This integration branch does
 still patch the four turbo-dom crates to
-`ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6`; remove that development patch only
+`25f59eac79993c5851f39ed75c3c233d0df96a6b`; remove that development patch only
 after the matching registry prerequisites are available and verified.
 
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile
@@ -344,7 +350,7 @@ their existing versions and preserves all other lock records apart from the
 core/render dependency references. The previously tested Git candidates remain
 dated provenance, not current dependency metadata. Since the turbo-dom
 consolidation, layout comes from `turbo-dom-layout` and the screenshot tier
-from `turbo-dom-raster`; the current manifests require 0.8.2 and the integration
+from `turbo-dom-raster`; the current manifests require 0.8.4 and the integration
 branch resolves them through the development patch above. turbo-surf no longer
 depends on turbo-html2pdf.
 

@@ -58,7 +58,10 @@ surfaces remain unavailable or approximate:
   and hit-testing use native layout and its admission limits.
   Without a live session every input call is a clean no-op. `keyboard` dispatches
   key events when a live session exists and is a no-op otherwise; it provides
-  a subset of text-editing defaults, not full browser editing behavior.
+  a subset of text-editing defaults, not full browser editing behavior. Enter
+  and printable keypress events expose legacy character codes used by React
+  `onKeyPress`; canceling keydown suppresses keypress, and canceling keypress
+  suppresses the editing default while preserving keyup.
 - **Network interception** — page-scoped fetch/XHR routes run host callbacks,
   including fulfill, continue/fallback overrides, abort and `route.fetch()`.
   Registration updates current and future sessions. General document/resource

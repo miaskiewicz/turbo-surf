@@ -11,6 +11,10 @@ branch.
 
 ### Engine and performance
 
+- Dispatch React-compatible Enter and printable `keypress` events with legacy
+  character codes, preserving cancellation and keyup ordering so chat inputs
+  using `onKeyPress` can submit (#506).
+
 - Enforce an optional immutable host-origin allowlist before native cache access,
   redirects, resource/module loads, reports, and WebSocket connections. Invalid
   configured policies fail closed; challenge helpers are disabled under the

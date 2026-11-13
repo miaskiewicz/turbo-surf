@@ -26,6 +26,11 @@ const punctuation = {
   "`": "Backquote",
 };
 
+function legacyKeyCode(key) {
+  if (key === "Enter") return 13;
+  return /^[a-z0-9]$/i.test(key) ? key.toUpperCase().charCodeAt(0) : 0;
+}
+
 function keyDefinition(input, pressed) {
   const name = aliases[input] ?? input;
   let key = name;
@@ -37,7 +42,12 @@ function keyDefinition(input, pressed) {
   if (/^(Shift|Control|Alt|Meta)(Left|Right)$/.test(name)) key = name.replace(/(Left|Right)$/, "");
   if (/^[a-z]$/.test(key) && (pressed.has("ShiftLeft") || pressed.has("ShiftRight")))
     key = key.toUpperCase();
-  return { key, code, location: code.endsWith("Right") ? 2 : code.endsWith("Left") ? 1 : 0 };
+  return {
+    key,
+    code,
+    keyCode: legacyKeyCode(key),
+    location: code.endsWith("Right") ? 2 : code.endsWith("Left") ? 1 : 0,
+  };
 }
 
 export function makeKeyboard(page) {
@@ -63,8 +73,10 @@ export function makeKeyboard(page) {
       const element = document.activeElement || document.body || document.documentElement;
       const options = {...${JSON.stringify(options)}, bubbles: true, cancelable: true, view: globalThis};
       let allowed = element.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, options));
-      if (allowed && ${JSON.stringify(type)} === 'keydown' && options.key.length === 1)
-        allowed = element.dispatchEvent(new KeyboardEvent('keypress', options));
+      if (allowed && ${JSON.stringify(type)} === 'keydown' && (options.key.length === 1 || options.key === 'Enter')) {
+        const charCode = options.key === 'Enter' ? 13 : options.key.charCodeAt(0);
+        allowed = element.dispatchEvent(new KeyboardEvent('keypress', {...options, charCode, keyCode: charCode}));
+      }
       if (allowed && ${!canceled.has(definition.code) || type === "keydown"}) applyKeyboardDefault(element, options, ${JSON.stringify(type)}, __tsNs.replaceControlSelection);
       globalThis.__RESULT = allowed ? 'OK' : 'CANCELED';
     })()`);

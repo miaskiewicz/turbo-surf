@@ -4013,12 +4013,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
   async waitForResponse(matcher, opts = {}) {
     const test = networkWaitMatcher(matcher, this._context._baseURL);
+    const timeout = opts.timeout ?? this._defaultTimeout ?? this._context._defaultTimeout ?? 30000;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.off("response", onResp);
-        if (poll) clearInterval(poll);
-        reject(Object.assign(new Error("Timeout waiting for response"), { name: "TimeoutError" }));
-      }, opts.timeout ?? 15000);
+      const timer =
+        timeout === 0
+          ? null
+          : setTimeout(() => {
+              this.off("response", onResp);
+              if (poll) clearInterval(poll);
+              reject(
+                Object.assign(new Error("Timeout waiting for response"), { name: "TimeoutError" }),
+              );
+            }, timeout);
       const onResp = async (resp) => {
         try {
           if (!(await test(resp))) return;
@@ -4049,12 +4055,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
   async waitForRequest(matcher, opts = {}) {
     const test = networkWaitMatcher(matcher, this._context._baseURL);
+    const timeout = opts.timeout ?? this._defaultTimeout ?? this._context._defaultTimeout ?? 30000;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.off("request", onReq);
-        if (poll) clearInterval(poll);
-        reject(Object.assign(new Error("Timeout waiting for request"), { name: "TimeoutError" }));
-      }, opts.timeout ?? 15000);
+      const timer =
+        timeout === 0
+          ? null
+          : setTimeout(() => {
+              this.off("request", onReq);
+              if (poll) clearInterval(poll);
+              reject(
+                Object.assign(new Error("Timeout waiting for request"), { name: "TimeoutError" }),
+              );
+            }, timeout);
       const onReq = async (req) => {
         try {
           if (!(await test(req))) return;
@@ -4139,7 +4151,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     this._viewport = { ...size };
   }
-  setDefaultTimeout() {}
+  setDefaultTimeout(timeout) {
+    this._defaultTimeout = timeout;
+  }
   setDefaultNavigationTimeout(timeout) {
     this._navigationTimeout = timeout;
   }
@@ -4902,6 +4916,7 @@ class BrowserContext {
     const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
+    this._defaultTimeout = merged.actionTimeout;
     this._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
     this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
     this._cookies = JSON.stringify(cookies);
@@ -5020,7 +5035,9 @@ class BrowserContext {
     this._headers = { ...headers };
     this._configureNative();
   }
-  async setDefaultTimeout() {}
+  setDefaultTimeout(timeout) {
+    this._defaultTimeout = timeout;
+  }
   async setDefaultNavigationTimeout(timeout) {
     this._navigationTimeout = timeout;
   }

@@ -159,11 +159,13 @@ struct Fetched {
 }
 type FetchFuture = Pin<Box<dyn Future<Output = Result<Fetched, String>>>>;
 struct Job {
+    activity: crate::network_activity::RequestActivity,
     generation: u64,
     future: FetchFuture,
     history: HistoryMode,
 }
 struct Loading {
+    _activity: crate::network_activity::RequestActivity,
     generation: u64,
     promise: v8::Global<v8::Value>,
     phase: LoadPhase,
@@ -358,6 +360,11 @@ fn start(
     {
         return Err("Native target session history limit exceeded".into());
     }
+    let activity = navigation.activity.clone().unwrap_or_else(|| {
+        shared
+            .borrow::<NetworkLog>()
+            .begin_page_navigation(&target.0.to_string())
+    });
     cancel(&mut shared, target.0);
     let future = fetch_job(&shared, navigation, frame, budget_ms);
     let state = self::state(&mut shared);
@@ -383,6 +390,7 @@ fn start(
     state.jobs.insert(
         target.0,
         Job {
+            activity,
             generation,
             future,
             history: mode,
@@ -613,6 +621,7 @@ fn commit_fetched(
     state.loading.insert(
         target,
         Loading {
+            _activity: job.activity.clone(),
             generation: job.generation,
             promise,
             phase: LoadPhase::Parsing,
@@ -854,6 +863,7 @@ impl PageSession {
                     noreferrer: false,
                     replace: false,
                     snapshot,
+                    activity: None,
                 },
                 mode,
             )
@@ -887,6 +897,7 @@ impl PageSession {
             noreferrer: false,
             replace: false,
             snapshot,
+            activity: None,
         };
         let generation = start(&mut self.rt, navigation, HistoryMode::Push, self.budget_ms)?;
         self.wait_target_navigation(generation, self.budget_ms)

@@ -10,9 +10,6 @@ export class LiveActorHub {
     this.capability = identity.capability?.kind ?? "pending";
     this.capabilityReason = identity.capability?.reason;
     this.heldEvents = [];
-    this.capability = identity.capability?.kind ?? "pending";
-    this.capabilityReason = identity.capability?.reason;
-    this.heldEvents = [];
     this.rootPage = this.root == null ? rootPage : null;
     this.pages = new Map(this.root == null ? [] : [[this.root, rootPage]]);
     this.callbacks = callbacks;

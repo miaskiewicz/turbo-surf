@@ -16,15 +16,17 @@ is the authoritative map of what is **supported**, what is a **no-op**, and what
 faithfully emulated is described below; some compatibility surfaces are stored values
 or no-ops rather than complete browser implementations.
 
-This describes the current v0.8.3 release candidate source, not a published release or
+This describes the current v0.8.4 release candidate source, not a published release or
 a claim that its final release gates have passed. The default renderer is Rust/V8;
 Chrome/Playwright are development oracles. An explicitly selected browser solver is
 a separate optional path. See [build features](../../docs/BUILD-FEATURES.md).
 
 Native auxiliary targets use actual native `domcontentloaded` and `load` milestones.
 For these targets, `networkidle` navigation and `waitForLoadState('networkidle')`
-currently reject explicitly: target-scoped pending-navigation and resource
-quiescence evidence is required. Ordinary legacy-root hydration retains its
+require the load milestone followed by 500 ms without target-owned navigation,
+request-body work, or native network activity. Activity in another Page does not
+reset this target's quiet interval. Closed targets and unavailable native evidence
+reject rather than report idle. Ordinary legacy-root hydration retains its
 existing `networkidle` behavior.
 
 ## Response-size budget

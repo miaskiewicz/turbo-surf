@@ -308,6 +308,8 @@ export function liveNetworkLogPublishIntercepted(id: number, header: string, bod
 
 /** One lifecycle consumer per actor; target IDs are trusted decimal strings. */
 export function liveAuxiliaryState(id: number): string;
+/** Trusted target activity: pendingRequests, pendingNavigation, target revision, closed and error. */
+export function liveTargetNetworkState(id: number): string;
 /** Idempotently alias an existing producer target in the same actor. */
 export function liveAuxiliaryAdopt(id: number, target: string): number;
 /** Resolve with JSON {closed:boolean,finalState?:object}; finalState retains the final actual lifecycle events after actor removal. */

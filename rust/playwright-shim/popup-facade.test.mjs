@@ -87,16 +87,10 @@ test("closing the opener leaves its native actor's child usable for requests and
       await child.evaluate(() => fetch("/presign").then((response) => response.text())),
       "/document?kind=presigned",
     );
-    await assert.rejects(
-      child.waitForLoadState("networkidle"),
-      /networkidle requires target-scoped/,
-    );
-    await assert.rejects(
-      child.goto(`${fixture.origin}/document?kind=after-opener`, { waitUntil: "networkidle" }),
-      /networkidle requires target-scoped/,
-    );
+    await child.waitForLoadState("networkidle", { timeout: 2000 });
     const response = await child.goto(`${fixture.origin}/document?kind=after-opener`, {
-      waitUntil: "load",
+      waitUntil: "networkidle",
+      timeout: 2000,
     });
     assert.equal(response.status(), 200);
     assert.equal(response.frame().page(), child);

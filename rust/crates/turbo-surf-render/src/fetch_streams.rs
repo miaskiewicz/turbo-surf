@@ -15,6 +15,7 @@ pub(super) struct Job {
     pub cancel: Arc<watch::Sender<bool>>,
     pub policy: crate::runtime::FetchPolicySnapshot,
     pub frame: super::RequestFrameMetadata,
+    activity: crate::network_activity::RequestActivity,
     upload: std::sync::Mutex<Option<turbo_surf_core::upload_body::UploadBody>>,
     upload_sender: std::sync::Mutex<Option<turbo_surf_core::upload_body::UploadSender>>,
     graceful_upload_abort: std::sync::atomic::AtomicBool,
@@ -50,6 +51,7 @@ pub(super) async fn install(job: &Job, body: ResponseBody) -> bool {
         log.extend_from_slice(bytes);
     });
     let event = job.event.lock().unwrap().clone();
+    let activity = job.activity.clone();
     let body = if let Some((log, id)) = event {
         let bytes = job.log_bytes.clone();
         let finished = job.log_finished.clone();
@@ -57,6 +59,7 @@ pub(super) async fn install(job: &Job, body: ResponseBody) -> bool {
             job.cancel.subscribe(),
             observer,
             Arc::new(move |result| {
+                activity.finish();
                 if finished.swap(true, std::sync::atomic::Ordering::AcqRel) {
                     return;
                 }
@@ -115,6 +118,7 @@ fn prepare<'s>(
     }
     sweep_state(scope, state);
     let event_log = state.borrow::<super::NetworkLog>().clone();
+    let activity = event_log.begin_page_request(frame.page_id.as_deref());
     let jobs = state.borrow_mut::<Jobs>();
     if jobs.active.len() >= 256 {
         return Err(JsErrorBox::range_error("Too many active fetch bodies"));
@@ -134,6 +138,7 @@ fn prepare<'s>(
             cancel,
             policy,
             frame,
+            activity,
             upload: std::sync::Mutex::new(None),
             upload_sender: std::sync::Mutex::new(None),
             graceful_upload_abort: std::sync::atomic::AtomicBool::new(false),
@@ -209,6 +214,7 @@ pub(super) fn op_fetch_abort(state: &mut OpState, id: u32) {
     };
     jobs.owners.remove(&id);
     jobs.bodies.remove(&id);
+    job.activity.finish();
     let sender = job.upload_sender.lock().unwrap().take();
     if let Some(sender) = sender {
         job.graceful_upload_abort
@@ -257,6 +263,7 @@ pub(super) fn op_fetch_cancel(state: &mut OpState, id: u32) {
     cancel(&job);
 }
 fn cancel(job: &Job) {
+    job.activity.finish();
     job.cancel.send_replace(true);
     if let Some(sender) = job.upload_sender.lock().unwrap().take() {
         sender.abort(turbo_surf_core::net::HttpError {
@@ -379,6 +386,7 @@ fn finish_log(state: &mut OpState, id: u32, job: &Job, incomplete: bool) {
     if job.event.lock().unwrap().is_some() {
         return;
     }
+    job.activity.finish();
     job.log_finished
         .store(true, std::sync::atomic::Ordering::Release);
     let bytes = std::mem::take(&mut *job.log_bytes.lock().unwrap());
@@ -436,6 +444,7 @@ pub(super) fn refresh_logs(state: &mut OpState) {
             entry["bodyIncomplete"] = (!complete.unwrap_or(false)).into();
         }
         if complete.is_some() {
+            job.activity.finish();
             job.log_finished
                 .store(true, std::sync::atomic::Ordering::Release);
         }
@@ -448,7 +457,9 @@ pub(super) fn op_fetch_release(state: &mut OpState, id: u32) {
 pub(super) fn release(state: &mut OpState, id: u32) {
     unregister_log(state, id);
     if let Some(jobs) = state.try_borrow_mut::<Jobs>() {
-        jobs.active.remove(&id);
+        if let Some(job) = jobs.active.remove(&id) {
+            job.activity.finish();
+        }
         jobs.owners.remove(&id);
         jobs.bodies.remove(&id);
     }

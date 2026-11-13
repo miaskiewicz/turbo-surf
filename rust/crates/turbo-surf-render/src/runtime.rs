@@ -200,6 +200,7 @@ impl Drop for OwnedRuntime {
 /// ES modules) hydrates. Carries the page base + shared cookie jar so module fetches
 /// are same-origin + session-authenticated like page fetches.
 struct NetModuleLoader {
+    network: ModuleNetworkLog,
     max_resource_bytes: Option<usize>,
     base: String,
     source: String,
@@ -1984,7 +1985,9 @@ impl ModuleLoader for NetModuleLoader {
         );
         let blob_store = self.blob_store.clone();
         let blob_key = blob_urls::module_key(&self.source, opaque_origin, &self.csp);
+        let activity = self.network.0.borrow().begin_context_request(self.csp.id);
         ModuleLoadResponse::Async(Box::pin(async move {
+            let _activity = activity;
             let mut local = jar.borrow().fork_for_request();
             let mut headers = context_headers;
             if !ua.is_empty() {
@@ -2123,6 +2126,8 @@ struct FetchOut {
 }
 
 type NetworkLog = crate::NetworkEventLog;
+#[derive(Clone)]
+struct ModuleNetworkLog(Rc<RefCell<NetworkLog>>);
 
 #[op2(reentrant)]
 fn op_page_diagnostic(
@@ -4083,6 +4088,10 @@ async fn op_load_image(
     csp: u32,
     #[string] context_json: String,
 ) -> ImageOut {
+    let _activity = state
+        .borrow()
+        .borrow::<NetworkLog>()
+        .begin_context_request(csp);
     let (base, jar, ua, hints) = {
         let state = state.borrow();
         (
@@ -8675,11 +8684,28 @@ fn op_route_promise_rejection(
         || miss()
 }
 
+fn register_network_activity_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) {
+    let target = auxiliary_pages::top_level_identity(scope, context);
+    let shared = JsRuntime::op_state_from(scope);
+    let state = shared.borrow();
+    let log = state.borrow::<NetworkLog>();
+    if let Some(loader) = state.try_borrow::<ModuleNetworkLog>() {
+        *loader.0.borrow_mut() = log.clone();
+    }
+    if let (Some(target), Some(csp)) = (target, context.get_slot::<CspHandle>()) {
+        log.register_network_context(csp.id, &target.0.to_string());
+    }
+}
+
 fn install_environment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Value>,
 ) -> Result<(), String> {
     let context = scope.get_current_context();
+    register_network_activity_context(scope, context);
     let core_object = core
         .to_object(scope)
         .ok_or("Native runtime core unavailable")?;
@@ -15310,6 +15336,7 @@ fn make_runtime_with_storage_and_options(
         turbo_surf_core::request_context::origin(base).is_none(),
     ));
     let csp = CspHandle::new(base, &[], "");
+    let module_network = ModuleNetworkLog(Rc::new(RefCell::new(NetworkLog::default())));
     #[cfg(turbo_surf_native_proxy)]
     let module_stages = ModuleStages::default();
     let mut rt = JsRuntime::new(RuntimeOptions {
@@ -15351,6 +15378,7 @@ fn make_runtime_with_storage_and_options(
             }
         })),
         module_loader: Some(Rc::new(NetModuleLoader {
+            network: module_network.clone(),
             max_resource_bytes: options.max_resource_bytes,
             base: base.to_string(),
             source: base.to_string(),
@@ -15416,7 +15444,8 @@ fn make_runtime_with_storage_and_options(
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put(ResourceBudget(options.max_resource_bytes));
-    let network = NetworkLog::default();
+    let network = module_network.0.borrow().clone();
+    state.put(module_network);
     state.put(network.own_world());
     state.put(network);
     state.put(driver_sync::Revision::default());

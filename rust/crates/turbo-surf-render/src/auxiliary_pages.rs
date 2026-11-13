@@ -252,6 +252,7 @@ pub(super) struct Navigation {
     pub noreferrer: bool,
     pub replace: bool,
     pub snapshot: auxiliary_navigation::SourceSnapshot,
+    pub activity: Option<crate::network_activity::RequestActivity>,
 }
 
 #[derive(Clone, Default)]
@@ -300,6 +301,7 @@ pub(super) fn register_root(scope: &mut v8::PinScope, context: v8::Local<v8::Con
         .borrow::<Pages>()
         .root_bootstrap
         .clone();
+    register_network_activity_context(scope, context);
     let log = event_log(&JsRuntime::op_state_from(scope).borrow());
     *log.0.root.lock().unwrap() = Some(identity.id.0.to_string());
     log.0.targets.lock().unwrap().insert(
@@ -345,6 +347,7 @@ pub(super) fn admitted(
 ) {
     let state = JsRuntime::op_state_from(scope);
     let mut state = state.borrow_mut();
+    let network = state.borrow::<NetworkLog>().clone();
     let pages = state.borrow_mut::<Pages>();
     if request.new_context {
         pages.targets.insert(
@@ -372,6 +375,7 @@ pub(super) fn admitted(
             noreferrer: request.noreferrer,
             replace: false,
             snapshot,
+            activity: Some(network.begin_page_navigation(&request.target_id.0.to_string())),
         });
         auxiliary_navigation::cancel(&mut state, request.target_id.0);
     }
@@ -445,6 +449,7 @@ pub(super) fn lifecycle(scope: &mut v8::PinScope, context: v8::Local<v8::Context
 pub(super) fn publish(scope: &mut v8::PinScope) {
     let state = JsRuntime::op_state_from(scope);
     let mut state = state.borrow_mut();
+    let network = state.borrow::<NetworkLog>().clone();
     let pages = state.borrow_mut::<Pages>();
     let mut created = Vec::new();
     let mut rejected = Vec::new();
@@ -470,6 +475,9 @@ pub(super) fn publish(scope: &mut v8::PinScope) {
         if identity.id.0 != *id {
             rejected.push(target.context.clone());
             return false;
+        }
+        if let Some(csp) = context.get_slot::<CspHandle>() {
+            network.register_network_context(csp.id, &id.to_string());
         }
         target.published = true;
         created.push(AuxiliaryPageEvent::Created {
@@ -516,6 +524,7 @@ pub(super) fn queue_navigation(
     };
     let state = JsRuntime::op_state_from(scope);
     let mut state = state.borrow_mut();
+    let network = state.borrow::<NetworkLog>().clone();
     let pages = state.borrow_mut::<Pages>();
     if pages.events.is_closed()
         || pages.events.overflowed()
@@ -536,6 +545,7 @@ pub(super) fn queue_navigation(
         noreferrer: false,
         replace,
         snapshot,
+        activity: Some(network.begin_page_navigation(&target.0.to_string())),
     });
     auxiliary_navigation::cancel(&mut state, target.0);
     true

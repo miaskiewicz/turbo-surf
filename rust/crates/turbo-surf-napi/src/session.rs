@@ -1593,6 +1593,40 @@ pub fn live_close(id: u32) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// Observe one real target without entering the actor or consuming transport events.
+#[napi]
+pub fn live_target_network_state(id: u32) -> Result<String> {
+    let (actor, target) = {
+        let live = live_registry()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        let connection = live
+            .get(&id)
+            .ok_or_else(|| Error::from_reason("no such live session"))?;
+        let target = connection
+            .target
+            .with_auxiliary(Ok)
+            .map_err(Error::from_reason)?;
+        (connection.actor.clone(), target)
+    };
+    let info = actor
+        .auxiliary
+        .info(&target.to_string())
+        .ok_or_else(|| Error::from_reason("Native target ownership is unavailable"))?;
+    let mut state = actor.network.target_network_state(&target.to_string());
+    let cancelling = actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .get(&LiveTarget::Auxiliary(target))
+        .is_some_and(|cancel| *cancel.borrow());
+    state["closed"] = (info.closed || cancelling || actor.auxiliary.is_closed()).into();
+    if actor.opening.load(Ordering::Acquire) {
+        state["pendingNavigation"] = true.into();
+    }
+    Ok(state.to_string())
+}
+
 /// Inspect and drain the one actor-owned lifecycle queue, including pre-open events.
 #[napi]
 pub fn live_auxiliary_state(id: u32) -> Result<String> {

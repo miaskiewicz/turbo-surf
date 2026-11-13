@@ -40,6 +40,7 @@ import { captureAssets } from "./screenshot-resources.mjs";
 import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
 import { LiveActorHub } from "./actor-hub.mjs";
 import { NativeLoadState } from "./native-load-state.mjs";
+import { waitForTargetNetworkIdle } from "./target-network-idle.mjs";
 import { waitForEmitterEvent } from "./event-waiter.mjs";
 import {
   contextGeolocation,
@@ -3394,10 +3395,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._emit("framenavigated", this);
   }
 
+  _navigationTimeoutFor(options) {
+    return options.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000;
+  }
+
+  _remainingTargetIdleTimeout(options, started) {
+    const timeout = this._navigationTimeoutFor(options);
+    return timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started));
+  }
+
   _navigationMilestone(opts) {
     const controller = new AbortController();
-    const timeout =
-      opts.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000;
+    const timeout = this._navigationTimeoutFor(opts);
     const event = opts.waitUntil === "domcontentloaded" ? "domcontentloaded" : "load";
     const milestone =
       opts.waitUntil === "commit"
@@ -3408,10 +3417,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _navigateActorTarget(url, method, body, opts = {}) {
-    if (opts.waitUntil === "networkidle")
-      throw new Error(
-        "Native target networkidle requires target-scoped pending-navigation and resource evidence",
-      );
+    const navigationStarted = performance.now();
     const { controller, milestone } = this._navigationMilestone(opts);
     this._driverNavigation = true;
     try {
@@ -3425,8 +3431,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
             body,
             contentType: opts._contentType,
             referer: opts.referer ?? this._url,
-            timeoutMs:
-              opts.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+            timeoutMs: this._navigationTimeoutFor(opts),
             waitUntil: opts.waitUntil ?? "load",
           }),
         ),
@@ -3440,6 +3445,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
       await this._actorHub.drain();
       await this._refreshFromSession(true);
       if (milestone) await milestone;
+      if (opts.waitUntil === "networkidle")
+        await this._waitForTargetNetworkIdle(
+          this._remainingTargetIdleTimeout(opts, navigationStarted),
+        );
       if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
       const response = this._recentResponses?.findLast(
         (value) => String(nativeResponseIds.get(value)) === String(receipt.requestId),
@@ -3451,6 +3460,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
       controller.abort(new Error("Navigation event wait ended"));
       this._driverNavigation = false;
     }
+  }
+
+  async _waitForTargetNetworkIdle(timeout) {
+    await waitForTargetNetworkIdle(() => JSON.parse(native.liveTargetNetworkState(this._session)), {
+      timeout,
+    });
   }
 
   _didNativeClose() {
@@ -3465,6 +3480,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._openingSession = null;
     this._openingNetworkId = null;
     this._closed = true;
+    this._releaseNativePageResources();
+    return finalState;
+  }
+
+  _releaseNativePageResources() {
     this._routeLifetime?.abort(new Error("Route's page has been closed"));
     this._routeLifetime = undefined;
     this._failPendingNetworkResponses("Page closed");
@@ -3482,7 +3502,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._routeHandlers?.clear();
     this._routes = [];
     this._emit("close", this);
-    return finalState;
   }
 
   _navigationReferrerPolicy() {
@@ -4107,12 +4126,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (this._auxiliaryActor) {
       if (!["load", "domcontentloaded", "networkidle"].includes(state))
         throw new Error(`Unsupported load state: ${state}`);
+      const started = performance.now();
       await this._actorHub.drain();
       await this._nativeLoad().wait(state === "networkidle" ? "load" : state, {
-        timeout:
-          options.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+        timeout: this._navigationTimeoutFor(options),
       });
-      if (state === "networkidle") await native.liveEvalEngine(this._session, "");
+      if (state === "networkidle")
+        await this._waitForTargetNetworkIdle(this._remainingTargetIdleTimeout(options, started));
       return;
     }
     if (this._contentLoadPending && state !== "domcontentloaded") {

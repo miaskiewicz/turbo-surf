@@ -11,6 +11,10 @@ branch.
 
 ### Engine and performance
 
+- Reuse native geometry across query targets only when the actual styled scene
+  passed strict resource admission. Preserve all document, stylesheet, viewport,
+  composition, image and font freshness keys and target-specific animation
+  rejection when strict admission is unavailable (#519).
 - Implement native per-context offline conditions after cache lookup, preserving
   already-started HTTP responses and independent API request contexts. Owned
   frames receive trusted connectivity events; established WebSocket frames wait

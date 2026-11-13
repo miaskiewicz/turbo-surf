@@ -337,21 +337,27 @@ fn element_path<'a>(
     false
 }
 
+/// Whether the actual styled scene is admitted without a target-specific exception.
 pub(crate) fn validate(
     nodes: &[StyledNode],
     rules: &[crate::live_stylesheets::ActiveRule],
     requested: Option<Query>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let definitions = Definitions::collect(rules);
+    // Only a full strict success permits sharing this layout across query targets.
+    let strict = validate_nodes(nodes, &definitions);
+    if strict.is_ok() {
+        return Ok(true);
+    }
     if definitions.animations.is_empty() {
-        return validate_nodes(nodes, &definitions);
+        return strict.map(|()| true);
     }
     let Some(query) = requested else {
-        return validate_nodes(nodes, &definitions);
+        return strict.map(|()| true);
     };
     let mut path = Vec::new();
     if !element_path(nodes, query.source, &mut path) {
-        return validate_nodes(nodes, &definitions);
+        return strict.map(|()| true);
     }
     validate_rect_nodes(
         nodes,
@@ -360,7 +366,8 @@ pub(crate) fn validate(
         query.kind,
         &mut Vec::new(),
         &mut Seen::new(),
-    )
+    )?;
+    Ok(false)
 }
 
 fn validate_rect_nodes<'a>(

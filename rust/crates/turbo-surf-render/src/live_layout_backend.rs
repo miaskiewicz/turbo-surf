@@ -44,8 +44,20 @@ pub(crate) async fn initialize_system_fonts_async() -> Result<(), String> {
 
 #[derive(PartialEq)]
 struct CacheKey {
-    realm: u64,
+    state: LayoutStateKey,
     resource_query: Option<Query>,
+}
+
+impl CacheKey {
+    fn admits(&self, requested: &Self) -> bool {
+        self.state == requested.state
+            && (self.resource_query.is_none() || self.resource_query == requested.resource_query)
+    }
+}
+
+#[derive(PartialEq)]
+struct LayoutStateKey {
+    realm: u64,
     document: u32,
     version: u64,
     width: u32,
@@ -743,37 +755,39 @@ fn resolve_layout<'s>(
         resolver: &resolver,
         body_height: None,
     };
-    let key = CacheKey {
-        realm: viewport.realm,
+    let mut key = CacheKey {
         resource_query: tree.resource_query,
-        document: tree.document_id(),
-        version: tree.capture.tree_version,
-        width: viewport.width.to_bits(),
-        height: viewport.height.to_bits(),
-        layout_scale: viewport.layout_scale.to_bits(),
-        host: viewport.host,
-        rules,
-        composition: tree
-            .composition
-            .as_ref()
-            .map_or_else(Vec::new, |graph| graph.cache_edges()),
-        inline_policy: tree.composition.as_ref().map_or_else(Vec::new, |graph| {
-            let mut rows = graph
-                .inline_overrides
-                .iter()
-                .map(|(handle, text)| (handle.raw(), text.clone()))
-                .collect::<Vec<_>>();
-            rows.sort_by_key(|(handle, _)| *handle);
-            rows
-        }),
-        images: image_epoch,
-        fonts: font_epoch,
+        state: LayoutStateKey {
+            realm: viewport.realm,
+            document: tree.document_id(),
+            version: tree.capture.tree_version,
+            width: viewport.width.to_bits(),
+            height: viewport.height.to_bits(),
+            layout_scale: viewport.layout_scale.to_bits(),
+            host: viewport.host,
+            rules,
+            composition: tree
+                .composition
+                .as_ref()
+                .map_or_else(Vec::new, |graph| graph.cache_edges()),
+            inline_policy: tree.composition.as_ref().map_or_else(Vec::new, |graph| {
+                let mut rows = graph
+                    .inline_overrides
+                    .iter()
+                    .map(|(handle, text)| (handle.raw(), text.clone()))
+                    .collect::<Vec<_>>();
+                rows.sort_by_key(|(handle, _)| *handle);
+                rows
+            }),
+            images: image_epoch,
+            fonts: font_epoch,
+        },
     };
     let cached = LAYOUT_CACHE.with(|cache| {
         cache
             .borrow()
             .iter()
-            .find(|entry| entry.key == key)
+            .find(|entry| entry.key.admits(&key))
             .map(|entry| entry.snapshot.clone())
     });
     drop(key_timer);
@@ -791,14 +805,14 @@ fn resolve_layout<'s>(
         // made the capture current and nothing since mutates the tree (rule
         // activation is read-only), so the capture's provenance still describes it.
         let _dom = turbo_dom_browser_env::host_internals::enter_document_of(scope, input.document);
-        let (snapshot, styles) = turbo_dom_browser_env::host_internals::with_tree(|live| {
+        let resolved = turbo_dom_browser_env::host_internals::with_tree(|live| {
             if live.version != tree.capture.tree_version {
                 return Err(String::from("native layout tree changed during layout"));
             }
             crate::live_layout::layout_active_rules_resolved(
                 live,
                 tree,
-                &key.rules,
+                &key.state.rules,
                 viewport.layout_scale,
                 &SnapshotInputs {
                     width: viewport.width,
@@ -810,6 +824,11 @@ fn resolve_layout<'s>(
             )
         })
         .ok_or("native layout document is unavailable")??;
+        if resolved.query_independent {
+            // The actual styled scene passed strict admission, without the target's
+            // animation-independence exception. Its geometry is safe for other reads.
+            key.resource_query = None;
+        }
         drop(layout_timer);
         // Native Range boundaries follow the original DOM. Unassigned light
         // children and inactive fallback nodes are connected but lack flat boxes.
@@ -831,8 +850,8 @@ fn resolve_layout<'s>(
                         .collect()
                 });
         let snapshot = std::rc::Rc::new(LayoutView {
-            snapshot,
-            styles,
+            snapshot: resolved.snapshot,
+            styles: resolved.styles,
             omitted,
             quirks: tree.capture.quirks,
             body: tree.capture.body,
@@ -841,8 +860,10 @@ fn resolve_layout<'s>(
         });
         LAYOUT_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
-            cache
-                .retain(|entry| entry.key.realm != key.realm || entry.key.document != key.document);
+            cache.retain(|entry| {
+                entry.key.state.realm != key.state.realm
+                    || entry.key.state.document != key.state.document
+            });
             if cache.len() == 4 {
                 cache.pop_front();
             }

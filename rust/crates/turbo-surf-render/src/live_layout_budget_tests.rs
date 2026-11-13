@@ -86,7 +86,7 @@ fn layout(
         &inputs,
         &mut Diagnostics::default(),
     )
-    .map(|(snapshot, _)| snapshot)
+    .map(|resolved| resolved.snapshot)
 }
 
 fn body(tree: &Tree) -> Handle {

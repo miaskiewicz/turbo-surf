@@ -393,6 +393,21 @@ function buildRouteInitScript(routes, bindingName) {
     }
     if (typeof globalThis.XMLHttpRequest === "function") {
       const OrigXHR = globalThis.XMLHttpRequest;
+      const bodyBrands = [
+        Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get,
+        Object.getOwnPropertyDescriptor(Blob.prototype,"size").get,
+        FormData.prototype.entries,
+        Object.getOwnPropertyDescriptor(URLSearchParams.prototype,"size")?.get || URLSearchParams.prototype.toString,
+        Object.getOwnPropertyDescriptor(Document.prototype,"URL").get,
+      ];
+      const xhrBody = value => {
+        if(value==null || typeof value==="string" || ArrayBuffer.isView(value)) return value;
+        for(const brand of bodyBrands) {
+          try { Reflect.apply(brand,value,[]); return value; } catch {}
+        }
+        if(typeof value==="symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+        return String(value);
+      };
       function MockXHR() {
         this._mocked = null;
         this._real = null;
@@ -440,7 +455,10 @@ function buildRouteInitScript(routes, bindingName) {
         this._mocked = find(this._url, chain.length - 1, chain);
         if (this._mocked) {
           const self = this;
-          requestRecord(new URL(this._url, location.href).href, {method:this._method,body,headers:this._reqHeaders}, "xhr").then(request => runRouteChain(this._mocked, request, chain).finally(()=>finishRequest(request))).then(({ fulfilled, action, request }) => {
+          // XHR converts its BodyInit before discarding GET/HEAD payload bytes.
+          const converted = xhrBody(body), method = String(this._method), normalized = method.toUpperCase();
+          const payload = normalized === "GET" || normalized === "HEAD" ? null : converted;
+          requestRecord(new URL(this._url, location.href).href, {method,body:payload,headers:this._reqHeaders}, "xhr").then(request => runRouteChain(this._mocked, request, chain).finally(()=>finishRequest(request))).then(({ fulfilled, action, request }) => {
             if (action === "abort") {
               self.readyState = 4;
               self.status = 0;

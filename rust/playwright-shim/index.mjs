@@ -4140,7 +4140,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
   async waitForSelector(selector, opts = {}) {
-    await this._prepareQuery();
     const state = opts.state ?? "visible";
     if (!["attached", "detached", "hidden", "visible"].includes(state)) {
       throw new Error(`Unsupported selector wait state: ${state}`);

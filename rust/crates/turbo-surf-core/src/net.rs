@@ -1075,7 +1075,12 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
             "headerScope": "application headers including context and hints; transport-added headers absent",
         })
     });
-    let mut result = req.send().await;
+    let retry = bodyless_read_retry(
+        &req,
+        method,
+        streaming_upload || body.is_some() || body_bytes.is_some(),
+    );
+    let mut result = send_with_stale_recovery(req, retry).await;
     if let Ok(response) = &result {
         remember_protocol(url, response.version());
     }
@@ -1102,6 +1107,45 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
         }
     });
     result.map_err(|e| transport_error(&e, url))
+}
+
+fn bodyless_read_retry(
+    request: &http::RequestBuilder,
+    method: &str,
+    has_body: bool,
+) -> Option<http::RequestBuilder> {
+    if matches!(method, "GET" | "HEAD") && !has_body {
+        request.try_clone()
+    } else {
+        None
+    }
+}
+
+async fn send_with_stale_recovery(
+    request: http::RequestBuilder,
+    retry: Option<http::RequestBuilder>,
+) -> http::Result<http::Response> {
+    // A peer can expire an idle socket while an embedder parks its runtime.
+    // A reset can follow a consumed request, so only bodyless reads are replayed.
+    match (request.send().await, retry) {
+        (Err(error), Some(retry)) if stale_connection_error(&error) => retry.send().await,
+        (result, _) => result,
+    }
+}
+
+fn stale_connection_error(error: &http::Error) -> bool {
+    std::iter::successors(Some(error as &(dyn std::error::Error + 'static)), |error| {
+        error.source()
+    })
+    .take(16)
+    .any(|error| {
+        error.downcast_ref::<std::io::Error>().is_some_and(|cause| {
+            matches!(
+                cause.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+            )
+        })
+    })
 }
 
 fn transport_error(error: &(dyn std::error::Error + 'static), url: &str) -> HttpError {
@@ -2729,6 +2773,31 @@ pub async fn fetch_typed_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stale_read_recovery_never_clones_mutating_requests_or_uploads() {
+        let client = super::build_client();
+        for method in ["GET", "HEAD"] {
+            let request = client.request(
+                super::http::Method::from_bytes(method.as_bytes()).unwrap(),
+                "http://localhost/read",
+            );
+            assert!(super::bodyless_read_retry(&request, method, false).is_some());
+            assert!(super::bodyless_read_retry(&request, method, true).is_none());
+        }
+        for method in ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"] {
+            let request = client.request(
+                super::http::Method::from_bytes(method.as_bytes()).unwrap(),
+                "http://localhost/write",
+            );
+            assert!(super::bodyless_read_retry(&request, method, false).is_none());
+        }
+        let (_sender, upload) = crate::upload::upload_channel(8);
+        let request = client
+            .get("http://localhost/stream")
+            .body(upload.into_body().unwrap());
+        assert!(super::bodyless_read_retry(&request, "GET", true).is_none());
+    }
+
     #[test]
     fn transport_failure_preserves_underlying_cause() {
         #[derive(Debug)]

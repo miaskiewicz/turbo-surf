@@ -5,7 +5,7 @@
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`8ec4e23f0d254359df86d631bafd36f38aee4d35` ([producer animation issue #507](https://github.com/miaskiewicz/turbo-dom/issues/507)). The dependency graph
+`b1f604013287382ca2cc82c823603199027df4ea` ([producer animation issue #507](https://github.com/miaskiewicz/turbo-dom/issues/507)). The dependency graph
 continues to use one `turbo-dom-v8` 150.4.1. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.

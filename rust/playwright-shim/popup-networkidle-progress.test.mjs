@@ -17,7 +17,9 @@ test(
       assert.equal(
         page._readEngine(`
       globalThis.__idleContinuationDone = false;
+      globalThis.__idleTimerFired = false;
       setTimeout(() => {
+        globalThis.__idleTimerFired = true;
         fetch('/presign').then(response => response.text()).then(value => {
           document.body.setAttribute('data-idle-result', value);
           globalThis.__idleContinuationDone = true;
@@ -29,12 +31,17 @@ test(
       );
       await page.waitForLoadState("networkidle", { timeout: 3000 });
       // This read deliberately cannot advance timers or Promise jobs and mask a stalled observer.
+      const observed = page._readEngine(`return {
+        timer: globalThis.__idleTimerFired,
+        done: globalThis.__idleContinuationDone,
+        result: document.body.getAttribute('data-idle-result')
+      };`);
       assert.deepEqual(
-        page._readEngine(`return {
-      done: globalThis.__idleContinuationDone,
-      result: document.body.getAttribute('data-idle-result')
-    };`),
-        { done: true, result: "/document?kind=presigned" },
+        {
+          ...observed,
+          requests: fixture.requests.filter((request) => request.path === "/presign").length,
+        },
+        { timer: true, done: true, result: "/document?kind=presigned", requests: 1 },
       );
     } finally {
       await context.close();

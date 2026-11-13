@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 import tomllib
 
+from window_proxy_compat import verify_window_proxy_alias
+
 
 # SDK directory: (verified SDK package, verified SDK version, alias package, alias version)
 ALIASES = {'deno_core': ('deno_core', '0.412.0', 'turbo-surf-deno-core', '0.412.1'),
@@ -113,9 +115,15 @@ def frame_read_arguments(arguments, source):
     return ['--features', FRAME_READ_FEATURE] if any(members.get(name) for name in names) else []
 
 
-def sdk_config(source, sdk, workspace):
+def sdk_config(source, sdk, workspace, native_alias_version="150.4.0"):
     """Use renamed registry identities only when the current Surf manifest does."""
     source, sdk, workspace = (Path(p).resolve() for p in [source, sdk, workspace])
+    if native_alias_version not in {'150.4.0', '150.4.2'}:
+        raise ValueError('Unsupported native SDK alias version')
+    if native_alias_version == '150.4.2':
+        verify_window_proxy_alias(sdk)
+    aliases = dict(ALIASES)
+    aliases['v8-exact'] = (*ALIASES['v8-exact'][:3], native_alias_version)
     renderer = tomllib.loads((source / 'rust/crates/turbo-surf-render/Cargo.toml').read_text())
     core = renderer['dependencies']['deno_core']
     package = core.get('package', 'deno_core') if isinstance(core, dict) else 'deno_core'
@@ -136,7 +144,7 @@ def sdk_config(source, sdk, workspace):
         raise ValueError('Refusing a linked SDK alias directory')
     root.mkdir(parents=True, exist_ok=True)
     records = {}
-    for directory, (old, version, name, alias_version) in ALIASES.items():
+    for directory, (old, version, name, alias_version) in aliases.items():
         original = sdk / directory
         raw = (original / 'Cargo.toml').read_bytes()
         parsed = tomllib.loads(raw.decode())
@@ -175,7 +183,7 @@ def sdk_config(source, sdk, workspace):
     config = root / 'cargo-config.toml'
     write_owned(config, '[patch.crates-io]\n' + ''.join(
         json.dumps(name) + ' = { path = ' + json.dumps(str(root / directory)) + ' }\n'
-        for directory, (_, _, name, _) in ALIASES.items()))
+        for directory, (_, _, name, _) in aliases.items()))
     write_owned(root / 'metadata-bridge.json', json.dumps({
         'scope': 'Metadata aliases only; original SDK source and manifests are unchanged.',
         'manifests': records,

@@ -12,6 +12,10 @@ branch.
 
 ### Engine and performance
 
+- Finish keyboard events without waiting for unrelated exposed host callbacks.
+  Keep those callbacks running with their real guest values/errors and retain
+  collection failures, frame ownership, key ordering and editing defaults (#518).
+
 - Keep the original native geometry admission/cache path first. Inspect fresh
   canonical effect state only for actual animation-resource blockers, recapture
   before the bounded final pass, and never cache lifecycle-waived views. Opt-in

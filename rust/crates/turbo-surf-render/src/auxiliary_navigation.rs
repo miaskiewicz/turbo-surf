@@ -298,6 +298,7 @@ fn fetch_job(
                     response_policy: Some(&response_policy),
                     response_observer: Some(&observer),
                     max_redirects: Some(20),
+                    allow_attachments: true,
                     now: cookie_now(),
                     ..Default::default()
                 },

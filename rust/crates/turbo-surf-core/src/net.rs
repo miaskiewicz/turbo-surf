@@ -455,6 +455,8 @@ pub struct FetchOptions<'a> {
     pub upload_body: Option<crate::upload_body::UploadBody>,
     pub max_bytes: Option<usize>,
     pub allow_non_html: bool,
+    /// Admit download responses without admitting other non-HTML documents.
+    pub allow_attachments: bool,
     pub max_redirects: Option<usize>,
     /// Explicit Fetch redirect semantics; None preserves legacy max_redirects behavior.
     pub redirect: Option<RedirectMode>,
@@ -1473,7 +1475,12 @@ fn ingest_set_cookie(opts: &mut FetchOptions, res: &http::Response, final_url: &
 
 fn gate_html_type(opts: &FetchOptions, res: &http::Response) -> Result<(), HttpError> {
     let ct = header_value(res, "content-type");
-    if !opts.allow_non_html && !is_html_type(&ct) {
+    let attachment = opts.allow_attachments
+        && header_value(res, "content-disposition")
+            .split(';')
+            .next()
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("attachment"));
+    if !opts.allow_non_html && !attachment && !is_html_type(&ct) {
         return Err(HttpError::new(
             format!("non-HTML content-type: {ct}"),
             ErrorCode::NotHtml,

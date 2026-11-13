@@ -179,6 +179,9 @@ branch.
 
 ### HTTP requests, responses, and downloads
 
+- Match `Page.route` URL predicates in the host, preserving captured closures,
+  fallback ordering, original-URL matching, and unroute identity without exposing
+  host callbacks to page JavaScript (#507).
 - Apply XHR body conversion before discarding GET/HEAD payload bytes in routed
   requests, preserving synchronous conversion errors, POST bodies and caller
   headers while keeping Fetch's body restrictions strict (#504).
@@ -220,6 +223,9 @@ branch.
 
 ### Context state
 
+- Observe genuine context page, close, and network events with predicate/deadline
+  waiters and lazy page subscriptions; expose the captured response frame. Popup
+  creation remains deferred rather than returning a fabricated page (#509).
 - Normalize URL-form cookies for native jars; replace cookie identities rather than
   append duplicates; filter cookie reads and removals by URL and identity; propagate
   clearing into live pages (#314, #315, #422, #423, #424).

@@ -439,6 +439,10 @@ Interface wrappers change observable function identity and cover selected interf
 baseline still uses CDP and emulation. Inspector inventories record compiled sources; HTTP diagnostics record application
 traffic. None alone proves that every JavaScript operation or every wire-level transport difference was observed.
 
+The layout profile's `animationInspection` stage counts actual canonical lifecycle
+queries. Scenes admitted by the original native resource policy should make zero
+queries; layout-build/cache-hit counts alone do not measure pre-cache capture work.
+
 `--native-cpu-profile` writes private Inspector `cpu-profile.json` and host `layout-profile.json` under native isolate
 inventories, initial hydration only. Check profiler acknowledgements/errors; host spans overlap and cannot be summed. Cold
 font initialization precedes guest profiling. There is no runner `--host-profile` flag; external OS sampling is a separate

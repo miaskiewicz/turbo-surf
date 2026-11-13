@@ -10,6 +10,7 @@ use std::time::Instant;
 #[serde(rename_all = "camelCase")]
 pub(crate) enum Stage {
     Capture,
+    AnimationInspection,
     Composition,
     TreeSnapshot,
     Stylesheets,

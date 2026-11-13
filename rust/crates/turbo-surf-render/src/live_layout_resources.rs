@@ -340,6 +340,114 @@ fn element_path<'a>(
 pub(crate) type CompletedAnimations =
     std::collections::HashMap<turbo_dom_parser::rtdom::tree::Handle, Vec<String>>;
 
+pub(crate) struct AnimationNeedsLifecycle {
+    pub(crate) targets: CompletedAnimations,
+    pub(crate) rejection: String,
+}
+pub(crate) enum Admission {
+    Accepted(bool),
+    NeedsLifecycle(AnimationNeedsLifecycle),
+}
+enum AnimationRejection {
+    Unproven(String),
+    UnsafeName(String),
+}
+impl AnimationRejection {
+    fn message(self) -> String {
+        match self {
+            Self::Unproven(reason) => reason,
+            Self::UnsafeName(name) => {
+                format!("native live layout animation resource is unsupported: {name}")
+            }
+        }
+    }
+}
+
+pub(crate) fn validate_or_request(
+    nodes: &[StyledNode],
+    rules: &[crate::live_stylesheets::ActiveRule],
+    requested: Option<Query>,
+    completed: &CompletedAnimations,
+    observed: bool,
+) -> Result<Admission, String> {
+    match validate_with_lifecycle(nodes, rules, requested, completed) {
+        Ok(strict) => Ok(Admission::Accepted(strict)),
+        Err(rejection) if !observed => {
+            let definitions = Definitions::collect(rules);
+            let mut path = Vec::new();
+            let requested = match requested {
+                Some(query) => {
+                    if !element_path(nodes, query.source, &mut path) {
+                        return Err(rejection);
+                    }
+                    Some((path, query.kind))
+                }
+                None => None,
+            };
+            let mut candidates = LifecycleCandidates {
+                definitions: &definitions,
+                requested,
+                fonts: Seen::new(),
+                targets: Default::default(),
+            };
+            candidates.collect(nodes, &mut Vec::new())?;
+            if candidates.targets.is_empty() {
+                return Err(rejection);
+            }
+            Ok(Admission::NeedsLifecycle(AnimationNeedsLifecycle {
+                targets: candidates.targets,
+                rejection,
+            }))
+        }
+        Err(rejection) => Err(rejection),
+    }
+}
+
+struct LifecycleCandidates<'a> {
+    definitions: &'a Definitions,
+    requested: Option<(Vec<&'a turbo_dom_layout::StyledElement>, QueryKind)>,
+    fonts: Seen<'a>,
+    targets: CompletedAnimations,
+}
+impl<'a> LifecycleCandidates<'a> {
+    fn collect(
+        &mut self,
+        nodes: &'a [StyledNode],
+        path: &mut Vec<&'a turbo_dom_layout::StyledElement>,
+    ) -> Result<(), String> {
+        for node in nodes {
+            let StyledNode::Element(element) = node else {
+                continue;
+            };
+            if turbo_dom_layout::layout::value::display_of(&element.style)
+                == turbo_dom_layout::layout::value::Display::None
+            {
+                continue;
+            }
+            path.push(element);
+            validate_font_style(&element.style, self.definitions, &mut self.fonts)?;
+            let independent = || {
+                self.requested
+                    .as_ref()
+                    .is_some_and(|(requested, kind)| independent_effect(path, requested, *kind))
+            };
+            match validate_animations(&element.style, self.definitions, independent) {
+                Ok(()) => {}
+                Err(AnimationRejection::Unproven(reason)) => return Err(reason),
+                Err(AnimationRejection::UnsafeName(name)) => {
+                    let source = element
+                        .source
+                        .ok_or("native animation source is unavailable")?;
+                    self.targets.entry(source).or_default().push(name);
+                }
+            }
+            self.collect(&element.children, path)?;
+            path.pop();
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn validate_with_lifecycle(
     nodes: &[StyledNode],
     rules: &[crate::live_stylesheets::ActiveRule],
@@ -476,6 +584,18 @@ fn validate_style_with_lifecycle<'a>(
     completed: bool,
     independent: impl Fn() -> bool,
 ) -> Result<(), String> {
+    validate_font_style(style, definitions, seen)?;
+    if !definitions.animations.is_empty() && !completed {
+        validate_animations(style, definitions, independent)
+            .map_err(AnimationRejection::message)?;
+    }
+    Ok(())
+}
+fn validate_font_style<'a>(
+    style: &'a ComputedStyle,
+    definitions: &Definitions,
+    seen: &mut Seen<'a>,
+) -> Result<(), String> {
     if !definitions.fonts.is_empty() {
         for (name, id) in [
             ("font-family", PropertyId::FontFamily),
@@ -501,9 +621,6 @@ fn validate_style_with_lifecycle<'a>(
                 }
             }
         }
-    }
-    if !definitions.animations.is_empty() && !completed {
-        validate_animations(style, definitions, independent)?;
     }
     Ok(())
 }
@@ -565,20 +682,18 @@ fn validate_animations(
     style: &ComputedStyle,
     definitions: &Definitions,
     independent: impl Fn() -> bool,
-) -> Result<(), String> {
+) -> Result<(), AnimationRejection> {
     for (name, id) in animation_properties() {
         let Some(value) = style.get(name) else {
             continue;
         };
-        let names = declared_animation_names(id, value)?;
+        let names = declared_animation_names(id, value).map_err(AnimationRejection::Unproven)?;
         for used in names {
             if definitions.animations.get(&used).is_some_and(|frames| {
                 !constant_animation(style, frames)
                     && !(paint_or_transform_only(style, frames) && independent())
             }) {
-                return Err(format!(
-                    "native live layout animation resource is unsupported: {used}"
-                ));
+                return Err(AnimationRejection::UnsafeName(used));
             }
         }
     }

@@ -95,6 +95,13 @@ async fn many_distinct_static_targets_share_one_strictly_admitted_layout() {
     assert_eq!(profile["stages"]["layout"]["calls"], 1);
     assert_eq!(profile["cacheMisses"], 1);
     assert_eq!(profile["cacheHits"], 11);
+    assert_eq!(
+        profile["stages"]["animationInspection"]["calls"]
+            .as_u64()
+            .unwrap_or(0),
+        0,
+        "original-safe native geometry must not enter canonical lifecycle inspection"
+    );
     page.close();
 }
 
@@ -118,6 +125,12 @@ async fn mutations_and_cssom_changes_invalidate_the_shared_strict_layout() {
     assert_eq!(profile["stages"]["layout"]["calls"], 3);
     assert_eq!(profile["cacheMisses"], 3);
     assert_eq!(profile["cacheHits"], 3);
+    assert_eq!(
+        profile["stages"]["animationInspection"]["calls"]
+            .as_u64()
+            .unwrap_or(0),
+        0
+    );
     page.close();
 }
 
@@ -174,5 +187,32 @@ async fn activating_an_animation_invalidates_a_previous_strict_certificate() {
     );
     assert_eq!(profile["stages"]["layout"]["calls"], 4);
     assert_eq!(profile["cacheHits"], 0);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn geometry_safe_constant_effects_need_no_lifecycle_permission() {
+    let _environment = PROFILE_ENV.lock().await;
+    let mut html = String::from("<!doctype html><style>@keyframes pulse{from{opacity:.2}to{opacity:1}}input{box-sizing:border-box;width:40px;height:20px;animation:pulse 1s infinite}</style><body>");
+    for index in 0..12 {
+        html.push_str(&format!("<input id=target-{index}>"));
+    }
+    html.push_str("<script>globalThis.widths=Array.from(document.querySelectorAll('input'),element=>element.getBoundingClientRect().width)</script>");
+    let (mut page, profile, _directory) = profiled_page("constant-effect", &html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        serde_json::to_string(&vec![40; 12]).unwrap()
+    );
+    assert_eq!(
+        profile["stages"]["animationInspection"]["calls"]
+            .as_u64()
+            .unwrap_or(0),
+        0,
+        "a native geometry-safe animation must keep the original no-probe path"
+    );
+    assert_eq!(profile["stages"]["layout"]["calls"], 1);
+    assert_eq!(profile["cacheHits"], 11);
     page.close();
 }

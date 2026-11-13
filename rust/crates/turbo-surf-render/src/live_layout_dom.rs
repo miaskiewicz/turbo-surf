@@ -98,15 +98,7 @@ fn capture_kind<'s>(
     // Ordinary documents use the same native matched cascade as shadow scopes.
     // Falling back here loses functional selector arguments and specificity.
     let composed = connected && browsing_context;
-    // Canonical CSS synchronization can invalidate style epochs: sample before capture.
-    let (completed_animations, cacheable_effects) = if composed {
-        animation_admission(scope, &graph)
-    } else {
-        (Default::default(), true)
-    };
-    let mut tree = capture_tree(scope, document_id, composed, &mut graph)?;
-    tree.completed_animations = completed_animations;
-    tree.cacheable_effects = cacheable_effects;
+    let tree = capture_tree(scope, document_id, composed, &mut graph)?;
     let owner_context = current_document_context(scope);
     let sheets = if composed {
         capture_sheets(scope, root, document_id, &graph, &sheets)?
@@ -125,45 +117,44 @@ fn capture_kind<'s>(
         range: None,
     })
 }
-// These observations live only inside this synchronous capture. Playback methods
-// need not mutate the tree, so any effect (or unavailable proof) forbids reuse.
-fn animation_admission(
+// Called only after pure native admission identifies actual animation blockers,
+// outside every live-tree borrow. Proof lives through one fresh final capture.
+pub(crate) fn observe_animation_candidates(
     scope: &mut v8::PinScope<'_, '_>,
-    graph: &Composition,
-) -> (crate::live_layout_resources::CompletedAnimations, bool) {
-    let elements = with_tree(|tree| {
-        graph
-            .children
-            .keys()
-            .copied()
-            .filter(|handle| tree.node_type_id(*handle) == 1)
-            .collect::<Vec<_>>()
-    })
-    .unwrap_or_default();
-    let mut completed = crate::live_layout_resources::CompletedAnimations::new();
-    let mut cacheable = true;
+    input: &NativeLayoutInput<'_>,
+    request: &crate::live_layout_resources::AnimationNeedsLifecycle,
+) -> Result<crate::live_layout_resources::CompletedAnimations, String> {
+    let _dom = enter_document_of(scope, input.document);
     let document_id = current_document_id();
-    for handle in elements {
+    let mut completed = crate::live_layout_resources::CompletedAnimations::new();
+    for (&handle, names) in &request.targets {
+        if scope.is_execution_terminating() {
+            return Err("native CSS lifecycle inspection execution terminated".into());
+        }
         let element = wrap(scope, handle);
-        let Some(snapshot) = css_effect_lifecycle(scope, element) else {
-            cacheable = false;
+        let _inspection = crate::layout_profile::Timer::new(
+            scope,
+            crate::layout_profile::Stage::AnimationInspection,
+        );
+        let snapshot = css_effect_lifecycle(scope, element);
+        if scope.is_execution_terminating() {
+            return Err("native CSS lifecycle inspection execution terminated".into());
+        }
+        let Some(snapshot) = snapshot else {
             continue;
         };
-        if !snapshot.animation_names.is_empty()
-            || !snapshot.effects.is_empty()
-            || snapshot.unsupported
-        {
-            cacheable = false;
-        }
         if snapshot.document_id == document_id
             && snapshot.element == handle
             && !snapshot.animation_names.is_empty()
+            && names
+                .iter()
+                .all(|name| snapshot.animation_names.contains(name))
             && snapshot.allows_underlying_geometry()
         {
             completed.insert(handle, snapshot.animation_names);
         }
     }
-    (completed, cacheable)
+    Ok(completed)
 }
 /// The live tree input: a composed document gets the UA rules matched in each of
 /// its scopes and the composed tree; anything else an empty tree.

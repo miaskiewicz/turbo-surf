@@ -11,6 +11,11 @@ use turbo_dom_parser::rtdom::Tree;
 
 pub(crate) use turbo_dom_layout::live::source_id;
 
+pub(crate) enum LayoutAttempt<T> {
+    Ready(T),
+    AnimationNeedsLifecycle(crate::live_layout_resources::AnimationNeedsLifecycle),
+}
+
 pub(crate) struct ResolvedLayout {
     pub(crate) snapshot: LayoutSnapshot,
     pub(crate) styles: turbo_dom_layout::cssom_view::scroll::SourceStyles,
@@ -25,6 +30,7 @@ pub(crate) struct LiveTreeInput {
     pub(crate) resource_query: Option<crate::live_layout_resources::Query>,
     pub(crate) completed_animations: crate::live_layout_resources::CompletedAnimations,
     pub(crate) cacheable_effects: bool,
+    pub(crate) lifecycle_observed: bool,
     pub(crate) composition: Option<crate::live_layout_composed::Composition>,
 }
 
@@ -36,6 +42,7 @@ impl LiveTreeInput {
             resource_query: None,
             completed_animations: Default::default(),
             cacheable_effects: true,
+            lifecycle_observed: false,
             composition: None,
         }
     }
@@ -91,6 +98,7 @@ pub(crate) fn capture_composed_tree(
         resource_query: None,
         completed_animations: Default::default(),
         cacheable_effects: true,
+        lifecycle_observed: false,
         composition: Some(composition),
     })
 }
@@ -214,6 +222,7 @@ pub(crate) fn layout_rules_resolved(
     Ok((resolved.snapshot, resolved.styles))
 }
 
+#[cfg(test)]
 pub(crate) fn layout_active_rules_resolved(
     tree: &Tree,
     input: &LiveTreeInput,
@@ -222,6 +231,20 @@ pub(crate) fn layout_active_rules_resolved(
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
 ) -> Result<ResolvedLayout, String> {
+    match layout_active_rules_attempt(tree, input, rules, layout_scale, inputs, diagnostics)? {
+        LayoutAttempt::Ready(layout) => Ok(layout),
+        LayoutAttempt::AnimationNeedsLifecycle(request) => Err(request.rejection),
+    }
+}
+
+pub(crate) fn layout_active_rules_attempt(
+    tree: &Tree,
+    input: &LiveTreeInput,
+    rules: &[crate::live_stylesheets::ActiveRule],
+    layout_scale: f32,
+    inputs: &SnapshotInputs,
+    diagnostics: &mut Diagnostics,
+) -> Result<LayoutAttempt<ResolvedLayout>, String> {
     crate::live_layout_neutral::validate(tree, input, rules)?;
     let qualified = rules
         .iter()
@@ -251,7 +274,7 @@ pub(crate) fn layout_active_rules_resolved(
         .collect();
     let mut passes = 0;
     loop {
-        let (snapshot, (styles, containers, query_independent)) = snapshot_pass(
+        let pass = snapshot_pass(
             tree,
             input,
             &qualified,
@@ -261,13 +284,19 @@ pub(crate) fn layout_active_rules_resolved(
             inputs,
             diagnostics,
         )?;
+        let (snapshot, (styles, containers, query_independent)) = match pass {
+            LayoutAttempt::Ready(pass) => pass,
+            LayoutAttempt::AnimationNeedsLifecycle(request) => {
+                return Ok(LayoutAttempt::AnimationNeedsLifecycle(request))
+            }
+        };
         let resolved = ResolvedLayout {
             snapshot,
             styles,
             query_independent,
         };
         if !conditional {
-            return Ok(resolved);
+            return Ok(LayoutAttempt::Ready(resolved));
         }
         let boxes = containers.boxes(&resolved.snapshot);
         let next = qualified
@@ -283,7 +312,7 @@ pub(crate) fn layout_active_rules_resolved(
         passes += 1;
         // An unchanged selection means this pass's snapshot is final: no extra pass.
         if next == selected {
-            return Ok(resolved);
+            return Ok(LayoutAttempt::Ready(resolved));
         }
         // Containment keeps a container's size independent of its contents, so each
         // pass settles one more level of nested containers: as many passes as the
@@ -299,7 +328,7 @@ pub(crate) fn layout_active_rules_resolved(
                     turbo_dom_layout::Span::default(),
                 );
             }
-            return Ok(resolved);
+            return Ok(LayoutAttempt::Ready(resolved));
         }
         selected = next;
     }
@@ -330,6 +359,15 @@ fn select(
     }
 }
 
+type StyledSnapshot = (
+    LayoutSnapshot,
+    (
+        turbo_dom_layout::cssom_view::scroll::SourceStyles,
+        crate::live_container_queries::Containers,
+        bool,
+    ),
+);
+
 #[allow(clippy::too_many_arguments)]
 fn snapshot_pass(
     tree: &Tree,
@@ -340,17 +378,7 @@ fn snapshot_pass(
     layout_scale: f32,
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
-) -> Result<
-    (
-        LayoutSnapshot,
-        (
-            turbo_dom_layout::cssom_view::scroll::SourceStyles,
-            crate::live_container_queries::Containers,
-            bool,
-        ),
-    ),
-    String,
-> {
+) -> Result<LayoutAttempt<StyledSnapshot>, String> {
     debug_assert_eq!(qualified.len(), selected.len());
     let graph = input
         .composition
@@ -395,25 +423,39 @@ fn snapshot_pass(
         inline_declarations: &crate::live_layout_scoped::inline_declarations,
     };
     let document = input.document_id();
-    turbo_dom_layout::live::snapshot(
+    let mut lifecycle_request = None;
+    let result = turbo_dom_layout::live::snapshot(
         &style,
         &input.capture,
         &LiveOptions { layout_scale },
         |styled| {
             let styles = crate::live_layout_zoom::apply(styled, document);
-            let query_independent = crate::live_layout_resources::validate_with_lifecycle(
+            let query_independent = match crate::live_layout_resources::validate_or_request(
                 styled,
                 rules,
                 input.resource_query,
                 &input.completed_animations,
-            )?;
+                input.lifecycle_observed,
+            )? {
+                crate::live_layout_resources::Admission::Accepted(strict) => strict,
+                crate::live_layout_resources::Admission::NeedsLifecycle(request) => {
+                    let rejection = request.rejection.clone();
+                    lifecycle_request = Some(request);
+                    return Err(rejection);
+                }
+            };
             let containers = crate::live_container_queries::Containers::collect(styled, document);
             Ok((styles, containers, query_independent))
         },
         inputs,
         diagnostics,
-    )
-    .map_err(|error| error.to_string())
+    );
+    if let Some(request) = lifecycle_request {
+        return Ok(LayoutAttempt::AnimationNeedsLifecycle(request));
+    }
+    result
+        .map(LayoutAttempt::Ready)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -684,6 +684,9 @@ fn refresh<'s>(
 ) -> Result<(), String> {
     #[cfg(test)]
     recapture_tests::after_capture(scope);
+    if input.tree.lifecycle_observed && !crate::live_layout_dom::is_current(scope, input)? {
+        return Err("native layout capture changed after lifecycle inspection".into());
+    }
     for _ in 0..RECAPTURE_LIMIT {
         if crate::live_layout_dom::is_current(scope, input)? {
             return Ok(());
@@ -731,6 +734,40 @@ fn resolve_layout<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     input: &mut crate::live_layout_dom::NativeLayoutInput<'s>,
     viewport: &Viewport,
+) -> Result<std::rc::Rc<LayoutView>, String> {
+    let mut request = None;
+    let first = resolve_layout_once(scope, input, viewport, &mut request);
+    let Some(request) = request else {
+        return first;
+    };
+    let completed = crate::live_layout_dom::observe_animation_candidates(scope, input, &request)?;
+    if completed.is_empty() {
+        return Err(request.rejection);
+    }
+    // Synchronizing canonical CSS can invalidate style epochs. No old native
+    // capture or persistent completion permission survives into this final pass.
+    let fresh = crate::live_layout_dom::recapture(scope, input)?;
+    if fresh.tree.document_id() != input.tree.document_id()
+        || !fresh.connected
+        || !fresh.browsing_context
+    {
+        return Err("native layout source left its document during lifecycle inspection".into());
+    }
+    let query = input.tree.resource_query;
+    *input = fresh;
+    input.tree.resource_query = query;
+    input.tree.completed_animations = completed;
+    input.tree.cacheable_effects = false;
+    input.tree.lifecycle_observed = true;
+    // Observed input cannot request a second inspection round.
+    resolve_layout_once(scope, input, viewport, &mut None)
+}
+
+fn resolve_layout_once<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    input: &mut crate::live_layout_dom::NativeLayoutInput<'s>,
+    viewport: &Viewport,
+    lifecycle_request: &mut Option<crate::live_layout_resources::AnimationNeedsLifecycle>,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
     refresh(scope, input)?;
     if input
@@ -809,7 +846,7 @@ fn resolve_layout<'s>(
             if live.version != tree.capture.tree_version {
                 return Err(String::from("native layout tree changed during layout"));
             }
-            crate::live_layout::layout_active_rules_resolved(
+            crate::live_layout::layout_active_rules_attempt(
                 live,
                 tree,
                 &key.state.rules,
@@ -824,6 +861,14 @@ fn resolve_layout<'s>(
             )
         })
         .ok_or("native layout document is unavailable")??;
+        let resolved = match resolved {
+            crate::live_layout::LayoutAttempt::Ready(layout) => layout,
+            crate::live_layout::LayoutAttempt::AnimationNeedsLifecycle(request) => {
+                let rejection = request.rejection.clone();
+                *lifecycle_request = Some(request);
+                return Err(rejection);
+            }
+        };
         if resolved.query_independent {
             // The actual styled scene passed strict admission, without the target's
             // animation-independence exception. Its geometry is safe for other reads.

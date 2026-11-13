@@ -12,6 +12,11 @@ branch.
 
 ### Engine and performance
 
+- Keep the original native geometry admission/cache path first. Inspect fresh
+  canonical effect state only for actual animation-resource blockers, recapture
+  before the bounded final pass, and never cache lifecycle-waived views. Opt-in
+  layout profiles count these inspections separately (#522).
+
 - Admit underlying native geometry for an element only when fresh canonical CSS
   effect state proves its matching declared animations completed without fill.
   Playback changes invalidate reuse; active, paused, infinite, filling, unknown

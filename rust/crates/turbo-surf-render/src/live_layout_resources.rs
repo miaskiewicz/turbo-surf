@@ -337,11 +337,29 @@ fn element_path<'a>(
     false
 }
 
-pub(crate) type CompletedAnimations =
+pub(crate) type AnimationTargets =
     std::collections::HashMap<turbo_dom_parser::rtdom::tree::Handle, Vec<String>>;
 
+#[derive(Clone, Debug)]
+pub(crate) enum AnimationGeometryProof {
+    CompletedNonFilling(Vec<String>),
+    PresentationSuppressed,
+}
+
+impl AnimationGeometryProof {
+    fn allows_style(&self, style: &ComputedStyle) -> bool {
+        match self {
+            Self::CompletedNonFilling(names) => completed_names_match(style, names),
+            Self::PresentationSuppressed => true,
+        }
+    }
+}
+
+pub(crate) type CompletedAnimations =
+    std::collections::HashMap<turbo_dom_parser::rtdom::tree::Handle, AnimationGeometryProof>;
+
 pub(crate) struct AnimationNeedsLifecycle {
-    pub(crate) targets: CompletedAnimations,
+    pub(crate) targets: AnimationTargets,
     pub(crate) rejection: String,
 }
 pub(crate) enum Admission {
@@ -407,7 +425,7 @@ struct LifecycleCandidates<'a> {
     definitions: &'a Definitions,
     requested: Option<(Vec<&'a turbo_dom_layout::StyledElement>, QueryKind)>,
     fonts: Seen<'a>,
-    targets: CompletedAnimations,
+    targets: AnimationTargets,
 }
 impl<'a> LifecycleCandidates<'a> {
     fn collect(
@@ -508,7 +526,7 @@ fn validate_rect_nodes<'a>(
             element
                 .source
                 .and_then(|source| completed.get(&source))
-                .is_some_and(|names| completed_names_match(&element.style, names)),
+                .is_some_and(|proof| proof.allows_style(&element.style)),
             || independent_effect(path, requested, kind),
         )?;
         validate_rect_nodes(
@@ -552,7 +570,7 @@ fn validate_nodes(
             element
                 .source
                 .and_then(|source| completed.get(&source))
-                .is_some_and(|names| completed_names_match(&element.style, names)),
+                .is_some_and(|proof| proof.allows_style(&element.style)),
             || false,
         )?;
         pending.extend(element.children.iter());

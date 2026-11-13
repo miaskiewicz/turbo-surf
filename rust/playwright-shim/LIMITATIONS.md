@@ -165,7 +165,10 @@ without fill; it does not advance the timeline or sample active transforms.
 Playback changes revoke the proof even without DOM mutation. Missing or
 mismatched lifecycle data, including scoped shadow stylesheet effects tracked in
 [turbo-dom #509](https://github.com/miaskiewicz/turbo-dom/issues/509), stays strict.
-An animation-toggle option is future work ([#500](https://github.com/miaskiewicz/turbo-surf/issues/500), v0.8.4).
+The explicit context option `animations: "disabled"` uses underlying presentation
+through the canonical engine policy. Animation clocks, events, promises and ordinary
+JavaScript callbacks keep running. See [animation policy](../../docs/ANIMATION-POLICY.md)
+for lifetime, inheritance and surface contracts; the enabled-mode limits above remain.
 
 ## Page
 

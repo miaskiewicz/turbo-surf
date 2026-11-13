@@ -298,6 +298,13 @@ sidecar protocols, fallback triggers, and limitations. The in-house paths includ
 experimental and structural fallbacks; configured solving and fixture success do
 not guarantee acceptance by a live challenge, CAPTCHA, or cookie replay.
 
+### Animation presentation
+
+Contexts can select `animations: "disabled"` for deterministic underlying effect
+presentation while preserving ordinary callbacks and canonical animation lifecycle.
+The default is `enabled`. Rust, NAPI and MCP configuration share the same policy;
+see [ANIMATION-POLICY.md](./docs/ANIMATION-POLICY.md).
+
 ### Build features and GPU bridge
 
 [BUILD-FEATURES.md](./docs/BUILD-FEATURES.md) is the feature/default matrix for all

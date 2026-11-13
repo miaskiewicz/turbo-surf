@@ -10,6 +10,8 @@
 // (live_layout_dom, compression_dictionary_dom) use its `host_internals`.
 use turbo_dom_browser_env::browser_env;
 
+mod animation_policy;
+pub use animation_policy::AnimationPolicy;
 mod audio_backend;
 mod audio_buffer;
 mod audio_dsp;

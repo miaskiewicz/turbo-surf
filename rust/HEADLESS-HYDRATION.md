@@ -15,8 +15,10 @@ Canonical browser-env implements CSS/Web Animations. Native geometry admits
 proven independent local boxes and isolated scroll extents, while affected
 animated targets/ancestors, descendant-dependent extents, nonzero-offset and
 other unsupported paths retain explicit rejection. This is not general animated
-layout/paint sampling. Reduced-motion media does not disable animations; a
-separate option is tracked in [#500](https://github.com/miaskiewicz/turbo-surf/issues/500).
+layout/paint sampling. Reduced-motion media does not disable animations. The explicit
+[animation presentation policy](../docs/ANIMATION-POLICY.md) can suppress canonical
+effect presentation per session while preserving timing, events, promises and
+ordinary JavaScript callbacks.
 
 ## Historical parity evidence
 

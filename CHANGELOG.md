@@ -22,6 +22,11 @@ branch.
 - Pause native alert/confirm/prompt execution for a host Dialog accept/dismiss
   response, with no-listener auto-dismiss, page ownership and close cancellation.
   Host replies bypass the blocked isolate command queue (#405).
+- Add an explicit enabled/disabled animation presentation policy across Rust,
+  NAPI, Playwright contexts and MCP render mode configuration. Disabled canonical
+  effects use underlying styles while their genuine timing, events and promises,
+  application timers and frame callbacks continue. Fresh producer suppression
+  proof is distinct from enabled-mode finite completion (#500).
 
 - Keep the original native geometry admission/cache path first. Inspect fresh
   canonical effect state only for actual animation-resource blockers, recapture

@@ -29,6 +29,7 @@ use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
 mod enid;
+mod render_policy;
 use enid::{EnidCache, EnidCookie};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -3149,7 +3150,7 @@ pub fn tools() -> Value {
              vendor, languages, hardwareConcurrency, deviceMemory, chromeMajor, \
              connection, userAgentData, screen, devicePixelRatio). {} resets.",
         ),
-        ("set_mode", "Set JS render mode (no-js | fast | secure)"),
+        ("set_mode", "Set JS render mode (no-js | fast | secure), optionally animations (enabled | disabled) for future render sessions"),
         (
             "render",
             "Run the page's own scripts (or a given script) + re-render",
@@ -3278,8 +3279,7 @@ fn call_sync_session_tool(
             json!({ "ok": true })
         }
         "set_mode" => {
-            session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
-            json!({ "mode": session.mode })
+            return Some(render_policy::set_mode(session, args));
         }
         "set_bypass_consent" => {
             // Toggle consent-wall cookie seeding (google/youtube interstitial).

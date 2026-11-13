@@ -79,8 +79,8 @@ name alone does not establish hardware use, native-SDK identity or pixel parity.
 ## Registry dependency identity
 
 The seven direct Rust dependency aliases retain the existing source/API names.
-The Deno 0.x.1 family and `turbo-dom-v8` resolve from crates.io. The four
-turbo-dom 0.8-family crates currently use the integration pin described above. The
+The Deno 0.x.1 family resolves from crates.io. The four turbo-dom 0.8-family
+crates and the single V8 binding use the exact integration pins described above. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):
 

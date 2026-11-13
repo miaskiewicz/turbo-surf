@@ -142,6 +142,13 @@ fn initialize<'s>(
     core: v8::Local<'s, v8::Value>,
     request: &binding::OpenRequest,
 ) -> Result<(), JsErrorBox> {
+    let fallback_base = {
+        let scope = &mut v8::ContextScope::new(outer, source);
+        call_frame_helper(scope, "documentBaseURL", &[])
+            .map(|base| base.to_rust_string_lossy(scope))
+            .ok_or_else(|| JsErrorBox::generic("Auxiliary creator base URL unavailable"))?
+    };
+    context.set_slot(Rc::new(AuxiliaryFallbackBase(fallback_base)));
     let scope = &mut v8::ContextScope::new(outer, context);
     inherit_parent_csp(scope, context, source);
     auxiliary_navigation::inherit_opener_policy(scope, context, source);
@@ -407,4 +414,60 @@ pub(super) fn op_auxiliary_anchor_default(
     event: v8::Local<v8::Object>,
 ) -> bool {
     binding::hyperlink_activation_handled(scope, event)
+}
+
+pub(super) fn finish_nested_navigation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    metadata_location: &str,
+) -> Result<(), JsErrorBox> {
+    if turbo_dom_browser_env::host_internals::auxiliary_context_identity(parent).is_some() {
+        if let Some(previous) = previous.filter(|previous| {
+            turbo_dom_browser_env::host_internals::auxiliary_context_identity(*previous).is_some()
+        }) {
+            if !turbo_dom_browser_env::host_internals::commit_auxiliary_navigation(
+                scope,
+                previous,
+                context,
+                metadata_location,
+            ) {
+                return Err(JsErrorBox::generic(
+                    "Native nested navigation identity commit failed",
+                ));
+            }
+        } else {
+            let name = crate::browser_env::node_attribute(scope, host, "name").unwrap_or_default();
+            install_nested(scope, context, parent, metadata_location, &name)
+                .map_err(JsErrorBox::generic)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn install_root_document_html(
+    scope: &mut v8::PinScope,
+    html: &str,
+    source_positions: bool,
+) {
+    if JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .enabled
+    {
+        if source_positions {
+            turbo_dom_browser_env::host_internals::initialize_root_auxiliary_utf16_source_positions(
+                scope,
+                &html.encode_utf16().collect::<Vec<_>>(),
+            );
+        } else {
+            turbo_dom_browser_env::host_internals::initialize_root_auxiliary_document(scope, html);
+        }
+    } else if source_positions {
+        crate::browser_env::install_with_html_source_positions(scope, html);
+    } else {
+        crate::browser_env::install_html(scope, html);
+    }
 }

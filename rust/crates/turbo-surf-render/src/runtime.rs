@@ -4265,6 +4265,7 @@ fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32, Opt
 #[derive(Default)]
 struct FrameContextMarker;
 struct FrameDocumentUrl(String);
+struct AuxiliaryFallbackBase(String);
 struct FrameDocumentLocation(String);
 struct FrameDocumentSourceUrl(String);
 struct FrameDepth(u32);
@@ -6024,20 +6025,8 @@ fn finish_frame_document_install<'s>(
     context.set_slot(Rc::new(BootstrapDepth(depth)));
     install_frame_environment_marker(scope, context)?;
     install_environment(scope, core).map_err(JsErrorBox::generic)?;
-    let secure = secure_context(scope);
-    let crypto_core = core
-        .to_object(scope)
-        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
-    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
-    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    if parent
-        .remove_slot::<FailFrameInitializationForTesting>()
-        .is_some()
-    {
-        parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
-        return Err(JsErrorBox::generic("injected frame initialization failure"));
-    }
+    install_frame_native_backends(scope, core)?;
+    check_frame_initialization_failure(parent)?;
     window_proxy::capture_exception(scope);
     install_frame_environment_marker(scope, context)?;
     metadata["base"] = serde_json::Value::String(document_base);
@@ -6056,28 +6045,41 @@ fn finish_frame_document_install<'s>(
     .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
     window_proxy::install_location(scope, &metadata_location);
     crate::browser_env::finish_key_order(scope);
-    if turbo_dom_browser_env::host_internals::auxiliary_context_identity(parent).is_some() {
-        if let Some(previous) = previous.filter(|previous| {
-            turbo_dom_browser_env::host_internals::auxiliary_context_identity(*previous).is_some()
-        }) {
-            if !turbo_dom_browser_env::host_internals::commit_auxiliary_navigation(
-                scope,
-                previous,
-                context,
-                &metadata_location,
-            ) {
-                return Err(JsErrorBox::generic(
-                    "Native nested navigation identity commit failed",
-                ));
-            }
-        } else {
-            let name = crate::browser_env::node_attribute(scope, host, "name").unwrap_or_default();
-            auxiliary_host::install_nested(scope, context, parent, &metadata_location, &name)
-                .map_err(JsErrorBox::generic)?;
-        }
-    }
+    auxiliary_host::finish_nested_navigation(
+        scope,
+        context,
+        previous,
+        parent,
+        host,
+        &metadata_location,
+    )?;
     run_frame_init_script(scope)?;
     Ok(global)
+}
+
+fn install_frame_native_backends<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    core: v8::Local<'s, v8::Value>,
+) -> Result<(), JsErrorBox> {
+    let secure = secure_context(scope);
+    let crypto_core = core
+        .to_object(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    Ok(())
+}
+
+fn check_frame_initialization_failure(parent: v8::Local<v8::Context>) -> Result<(), JsErrorBox> {
+    if parent
+        .remove_slot::<FailFrameInitializationForTesting>()
+        .is_some()
+    {
+        parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
+        return Err(JsErrorBox::generic("injected frame initialization failure"));
+    }
+    Ok(())
 }
 
 /// Pick the right HTML installer for this frame: srcdoc uses the srcdoc path,
@@ -7611,6 +7613,15 @@ fn op_frame_owner_metadata(
 
 #[op2]
 #[string]
+fn op_auxiliary_fallback_base(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> String {
+    document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<AuxiliaryFallbackBase>())
+        .map_or_else(String::new, |base| base.0.clone())
+}
+
+#[op2]
+#[string]
 fn op_document_request_source(
     scope: &mut v8::PinScope,
     state: &mut OpState,
@@ -8655,6 +8666,13 @@ fn install_environment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Value>,
 ) -> Result<(), String> {
+    let context = scope.get_current_context();
+    let core_object = core
+        .to_object(scope)
+        .ok_or("Native runtime core unavailable")?;
+    let core_handle = crate::context_ownership::object(scope, core_object)
+        .ok_or("Native runtime core ownership interrupted")?;
+    context.set_slot(Rc::new(RuntimeCore(core_handle)));
     // A navigation can be interrupted while trusted bootstrap is compiling. The
     // retained WindowProxy must never expose bootstrap-only host capabilities.
     v8::tc_scope!(let scope, scope);
@@ -8913,6 +8931,7 @@ deno_core::extension!(
         op_document_referrer,
         op_frame_referrer_policy,
         op_document_request_source,
+        op_auxiliary_fallback_base,
         op_frame_owner_metadata,
         op_frame_owner_window,
         op_document_cookie_site,
@@ -15551,23 +15570,7 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         });
         // Chrome's interface key order is applied once Surf's own interfaces exist too.
         crate::browser_env::defer_key_order(&mut scope);
-        if JsRuntime::op_state_from(&scope)
-            .borrow()
-            .borrow::<auxiliary_pages::Pages>()
-            .enabled
-        {
-            if source_positions {
-                turbo_dom_browser_env::host_internals::initialize_root_auxiliary_utf16_source_positions(&mut scope, &html.encode_utf16().collect::<Vec<_>>());
-            } else {
-                turbo_dom_browser_env::host_internals::initialize_root_auxiliary_document(
-                    &mut scope, html,
-                );
-            }
-        } else if source_positions {
-            crate::browser_env::install_with_html_source_positions(&mut scope, html);
-        } else {
-            crate::browser_env::install_html(&mut scope, html);
-        }
+        auxiliary_host::install_root_document_html(&mut scope, html, source_positions);
         // Canvas `measureText` resolves `ctx.font` against the faces live layout uses
         // (turbo-dom#237); a page opened before font discovery keeps the bundled faces.
         if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {

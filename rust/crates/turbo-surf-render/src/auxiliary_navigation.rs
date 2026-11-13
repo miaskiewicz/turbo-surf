@@ -330,6 +330,7 @@ fn start(
     mode: HistoryMode,
     budget_ms: u64,
 ) -> Result<u64, String> {
+    let _activation = rt.activation_key().enter();
     let target = navigation.target;
     let (frame, current_url) = {
         deno_core::scope!(scope, rt);

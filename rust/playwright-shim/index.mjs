@@ -5164,7 +5164,9 @@ function hasContextPreferences(context) {
     context._reducedMotion ||
     context._locale ||
     Object.keys(context._headers).length ||
-    context._httpCredentials
+    context._httpCredentials ||
+    context._geolocation ||
+    context._permissionGrants.length
   );
 }
 

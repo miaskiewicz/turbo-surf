@@ -13,6 +13,17 @@ branch.
 
 ### Engine and performance
 
+- Add real native popup Pages, named-window reuse, opener ownership, context
+  bootstrap inheritance and retained child operation after opener closure. Keep
+  actual Window identities, Location/history, caller promise realms and document
+  lifecycle events correct across root and iframe replacement (#326).
+- Observe network idle from each actual Page's native HTTP/navigation activity,
+  including pre-header and streamed-body work, while naturally progressing due
+  real timers and callbacks without advancing virtual clocks or waiting on
+  unrelated sibling requests (#326).
+- Admit explicit attachment responses for native target navigation while keeping
+  other non-HTML document responses rejected and preserving the original page.
+
 - Pierce open shadow roots for CSS and getBy locators, retaining real action
   targets, tree-scoped accessible names and asynchronous actor reads (#476).
 

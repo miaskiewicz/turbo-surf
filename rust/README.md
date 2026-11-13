@@ -147,6 +147,33 @@ Direct ports of the JS modules, same behavior and edge cases:
   `Navigator` trait (tier-2 `Page` implements it).
 - `cache` / `measure` — `ResponseCache` (304/storageState) and crawl summaries.
 
+### Host origin restrictions
+
+Set `TURBO_SURF_ALLOWED_ORIGINS` before starting the host process to restrict
+Surf's native networking to a JSON array of exact origins, for example
+`["http://localhost:3000","http://localhost:3301","https://auth.example.test"]`.
+The policy is captured on first native use and cannot be changed by page code or
+later environment changes. With the variable absent, ordinary browsing is
+unchanged. A present empty array denies all network origins; malformed JSON,
+non-Unicode values, wildcards, credentials, paths, queries or fragments in entries
+fail closed. Scheme, canonical host and effective port must match; `ws:`/`wss:`
+origins require their own explicit entries.
+
+Admission runs before native cache access, DNS/socket connection and every
+redirect hop, including scripts/modules, frames, images, stylesheets, fonts,
+fetch/XHR/CORS preflights, screenshot asset fetches, native reports and WebSocket
+handshakes. Existing CSP, CORS, mixed-content and TLS checks still apply. Local
+`data:`/`blob:` resources retain their existing scheme/security handling.
+Challenge solvers and browser sidecars are disabled while this restriction is
+configured because their independent clients cannot enforce the same hop policy.
+
+This constrains Surf's native transports, rather than acting as an OS firewall.
+Host-side Node/Python code and separate provider services require their own
+network restrictions. `Page.route()` alone does not cover native resource
+loaders. Native denial errors and blocked script/module console diagnostics omit
+URL queries; explicit network logs/traces retain their documented request
+metadata and should not be printed with secret-bearing URLs.
+
 ## Tier 2 — `turbo-surf-page`
 
 `TurboNavigator` implements `crawl::Navigator` — fetches via `net::fetch_html`,

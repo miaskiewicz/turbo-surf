@@ -227,6 +227,7 @@ impl ChallengeSolver for CloudflareSolver {
     }
 
     async fn solve(&self, ch: &Challenge, _ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         // Fetch the interstitial and lift its challenge parameters.
         let page = self
             .client

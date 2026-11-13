@@ -910,6 +910,7 @@ pub async fn send_report_request(
     body: Vec<u8>,
     modern: bool,
 ) -> Result<ReportResponse, HttpError> {
+    check_host_network_policy(url)?;
     let trace_id = crate::http_trace::next_id();
     crate::http_trace::record(
         || serde_json::json!({"event":"request","id":trace_id.0,"url":url,"method":method,"explicit_headers":headers,"body_bytes":body,"destination":"report","headerScope":"native report headers; transport-added headers absent"}),
@@ -1024,7 +1025,12 @@ struct Outgoing<'a> {
 }
 
 // One transport seam for every hop.
+fn check_host_network_policy(url: &str) -> Result<(), HttpError> {
+    crate::network_policy::check(url).map_err(|message| HttpError::new(message, ErrorCode::Network))
+}
+
 async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, HttpError> {
+    check_host_network_policy(hop.url)?;
     let Outgoing {
         method,
         url,
@@ -2250,6 +2256,7 @@ fn check_request_policy(
     hop: &Hop,
     redirects: usize,
 ) -> Result<(), HttpError> {
+    check_host_network_policy(&hop.url)?;
     if opts
         .request_policy
         .is_some_and(|allowed| !allowed(&hop.url, redirects > 0))
@@ -2522,12 +2529,14 @@ async fn follow_auto(
 /// round-trip, fetch-spec method rewrite); otherwise reqwest auto-follows
 /// (cap 20). Content-type gate, byte cap, and charset decode mirror the JS.
 pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchResult, HttpError> {
+    check_host_network_policy(url)?;
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     match opts.max_redirects {
         Some(n) => follow_manually(&mut opts, url, n, max_bytes).await,
         // Negotiated hints and browser context must be re-derived for every
         // redirect origin; a backend's automatic follow cannot do that.
-        None if opts.upload_body.is_some()
+        None if crate::network_policy::configured()
+            || opts.upload_body.is_some()
             || opts.redirect.is_some()
             || opts.http_cache.is_some()
             || opts.dictionary_store.is_some()
@@ -2553,6 +2562,7 @@ pub async fn fetch_stream(
     url: &str,
     mut opts: FetchOptions<'_>,
 ) -> Result<StreamingResult, HttpError> {
+    check_host_network_policy(url)?;
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     let redirects = opts.max_redirects.unwrap_or(20);
     let (res, final_url, redirected) = follow_manually_response(&mut opts, url, redirects).await?;
@@ -2677,7 +2687,8 @@ pub struct FetchedBytes {
 /// True when any option on `opts` forces the manual redirect / cache / policy
 /// path instead of letting the reqwest client follow redirects on its own.
 fn needs_manual_redirect_path(opts: &FetchOptions<'_>) -> bool {
-    opts.redirect.is_some()
+    crate::network_policy::configured()
+        || opts.redirect.is_some()
         || opts.max_redirects.is_some()
         || opts.http_cache.is_some()
         || opts.dictionary_store.is_some()
@@ -2764,6 +2775,7 @@ pub async fn fetch_typed_bytes(
     url: &str,
     mut opts: FetchOptions<'_>,
 ) -> Result<FetchedBytes, HttpError> {
+    check_host_network_policy(url)?;
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     if needs_manual_redirect_path(&opts) {
         return fetch_typed_bytes_manual(&mut opts, url, max_bytes).await;

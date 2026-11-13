@@ -28,6 +28,7 @@ pub mod http_auth;
 mod http_trace;
 pub mod measure;
 pub mod net;
+pub mod network_policy;
 pub mod recaptcha;
 pub mod referrer_policy;
 pub mod request_context;

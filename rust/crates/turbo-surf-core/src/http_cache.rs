@@ -505,6 +505,54 @@ mod tests {
         }
     }
     #[test]
+    fn host_origin_policy_precedes_prepopulated_cache_admission() {
+        const CHILD: &str = "SURF_CACHED_ORIGIN_POLICY_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "http_cache::tests::host_origin_policy_precedes_prepopulated_cache_admission",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("TURBO_SURF_ALLOWED_ORIGINS", "[]")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let cache = HttpCache::default();
+        cache.store(entry(&[("cache-control", "max-age=3600".into())]));
+        assert!(cache
+            .lookup("partition", "https://cache.test/", &BTreeMap::new())
+            .is_some());
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let result = crate::net::fetch_html(
+                    "https://cache.test/",
+                    crate::net::FetchOptions {
+                        http_cache: Some(&cache),
+                        cache_mode: CacheMode::ForceCache,
+                        cache_partition: "partition".into(),
+                        ..Default::default()
+                    },
+                )
+                .await;
+                assert!(
+                    result.is_err(),
+                    "host policy must refuse an already cached response"
+                );
+            });
+    }
+
+    #[test]
     fn clear_site_data_is_trusted_origin_scoped_and_prevents_old_body_stores() {
         let cache = HttpCache::default();
         let old = entry(&[("cache-control", "max-age=3600".into())]);

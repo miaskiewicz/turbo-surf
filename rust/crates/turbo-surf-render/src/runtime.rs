@@ -1890,7 +1890,13 @@ impl ModuleLoader for NetModuleLoader {
             .get(referrer)
             .map(|source| source.base.as_str())
             .unwrap_or(referrer);
-        resolve_import(specifier, referrer).map_err(|e| JsErrorBox::generic(e.to_string()))
+        let resolved =
+            resolve_import(specifier, referrer).map_err(|e| JsErrorBox::generic(e.to_string()))?;
+        if matches!(resolved.scheme(), "http" | "https") {
+            turbo_surf_core::network_policy::check(resolved.as_str())
+                .map_err(JsErrorBox::generic)?;
+        }
+        Ok(resolved)
     }
 
     fn load(
@@ -2085,6 +2091,7 @@ struct FetchOut {
     script_errors_muted: bool,
     response_received: bool,
     policy_blocked: bool,
+    host_policy_blocked: bool,
     cross_origin: bool,
     body_bytes: Vec<u8>,
     headers: Vec<(String, String)>,
@@ -3280,7 +3287,9 @@ async fn stream_response_to_out(
         },
         Some(Err(error)) => FetchOut {
             response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
-            policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+            policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed)
+                || turbo_surf_core::network_policy::is_denial(&error.to_string()),
+            host_policy_blocked: turbo_surf_core::network_policy::is_denial(&error.to_string()),
             cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
             final_url: target.to_string(),
             body: error.to_string(),
@@ -3584,6 +3593,7 @@ fn fetch_response_to_out(args: FetchResponseOut<'_>) -> FetchOut {
         }),
         response_received: true,
         policy_blocked: false,
+        host_policy_blocked: false,
         cross_origin: cross,
         body_bytes: r.body_bytes,
         headers: crate::fetch_cors::exposed_headers(context, r.headers, cross),
@@ -3631,7 +3641,9 @@ fn fetch_error_to_out(args: FetchErrorOut<'_>) -> FetchOut {
         integrity_blocked: error == "Response failed integrity validation"
             || error == "Script response failed integrity validation",
         response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
-        policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+        policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed)
+            || turbo_surf_core::network_policy::is_denial(&error),
+        host_policy_blocked: turbo_surf_core::network_policy::is_denial(&error),
         cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
         body_bytes: Vec::new(),
         headers: Vec::new(),
@@ -10264,6 +10276,10 @@ const __bodyByteTag=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8A
 const __bodyByteChunk=value=>__baseApply(__bodyByteTag,value,[])==="Uint8Array";
 const __fetchFailures=__interfaceMap("Fetch.failure");
 const __resourceFailure=error=>__fetchFailures.get(error);
+const __hostPolicyFailure=error=>__resourceFailure(error)?.hostPolicyBlocked||["Network origin blocked by host policy","Invalid host network origin policy"].some(message=>__String(error).includes(message));
+const __resourceDiagnosticSource=(source,error)=>__hostPolicyFailure(error)?"blocked origin":source;
+const __resourceDiagnosticError=error=>__hostPolicyFailure(error)?"Network origin blocked by host policy":error;
+
 // Private body and interface state. Public members are receiver-checked Web-IDL
 // accessors; body reads consume once and retain the identity of their stream.
 {
@@ -10495,7 +10511,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
     if(uploadError&&!isAborted()){ops.op_fetch_cancel(cancelId);finish();throw new __exceptionTypeError("Failed to fetch");}
   }
   if(r.aborted||isAborted()){ops.op_fetch_cancel(cancelId);finish();throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");}
-  if (!r.status) {ops.op_fetch_cancel(cancelId);finish();const error=new __exceptionTypeError("Failed to fetch");__fetchFailures.set(error,{policyBlocked:r.policy_blocked,integrityBlocked:r.integrity_blocked,started:!r.policy_blocked,crossOrigin:r.cross_origin,responseReceived:r.response_received});throw error;}
+  if (!r.status) {ops.op_fetch_cancel(cancelId);finish();const error=new __exceptionTypeError("Failed to fetch");__fetchFailures.set(error,{policyBlocked:r.policy_blocked,hostPolicyBlocked:r.host_policy_blocked,integrityBlocked:r.integrity_blocked,started:!r.policy_blocked,crossOrigin:r.cross_origin,responseReceived:r.response_received});throw error;}
   const crossOrigin = r.cross_origin;
   const responseType = o.redirect==="manual"&&[301,302,303,307,308].includes(r.status)?"opaqueredirect":crossOrigin && (o.mode || "cors") === "no-cors" && !o.destination ? "opaque" : crossOrigin && (o.mode || "cors") === "cors" ? "cors" : "basic";
   const headers = (r.headers || []).filter(([name]) => !["set-cookie", "set-cookie2"].includes(name.toLowerCase()));
@@ -12452,7 +12468,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
       waiter.error = error;
       if (!__moduleStaging) __completeModuleWaiter(waiter, false, null);
       else if (waiter.done && waiter.ready) __reportModuleError(waiter, null);
-      __print("module error (" + specifier + "): " + error + "\n");
+      __print("module error (" + __resourceDiagnosticSource(specifier,error) + "): " + __resourceDiagnosticError(error) + "\n");
     });
     return __trackResource(gate);
   }
@@ -12508,7 +12524,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
     if (src) __fireScriptEvent(el, "load");
   } catch (e) {
     if(src)__fireScriptEvent(el,downloaded?"load":"error");
-    __print("script error (" + (src || "inline") + "): " + e + "\n");
+    __print("script error (" + __resourceDiagnosticSource(src || "inline",e) + "): " + __resourceDiagnosticError(e) + "\n");
   }
 };
 function __startResourceScript(element, prepared) {

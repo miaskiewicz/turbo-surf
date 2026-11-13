@@ -214,6 +214,7 @@ pub fn handshake_head(request: &WsRequest, url: &url::Url, key: &str) -> String 
 async fn handshake(
     request: &WsRequest,
 ) -> Result<(Box<dyn Io>, WsAccepted, Vec<u8>), ProtocolError> {
+    crate::network_policy::check(&request.url).map_err(ProtocolError)?;
     let url = url::Url::parse(&request.url).map_err(|_| ProtocolError("invalid URL"))?;
     let key = base64::engine::general_purpose::STANDARD.encode(random::<16>());
     let head = handshake_head(request, &url, &key);

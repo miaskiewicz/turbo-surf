@@ -27,6 +27,8 @@ mod auxiliary_storage;
 pub use auxiliary_policy::AuxiliaryResourcePolicy;
 #[path = "auxiliary_pages.rs"]
 mod auxiliary_pages;
+#[path = "background_work.rs"]
+mod background_work;
 #[cfg(turbo_surf_native_proxy)]
 #[path = "code_generation.rs"]
 mod code_generation;

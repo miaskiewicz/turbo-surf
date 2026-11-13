@@ -227,3 +227,163 @@ async fn queued_native_form_is_busy_before_the_actor_starts_its_request() {
         false
     );
 }
+
+fn background_string(page: &mut PageSession, root: u64, source: &str) -> String {
+    serde_json::from_str(&page.read_target_engine(root, source).unwrap()).unwrap()
+}
+
+async fn realtime_page(base: &str) -> PageSession {
+    use turbo_surf_core::request_context::ClientHints;
+    use turbo_surf_render::{
+        BrowserStorage, DocumentResponseMetadata, PageSessionOptions, WindowTimerMode,
+    };
+    PageSession::open_with_document_response_and_options(
+        "<body>root</body>",
+        base,
+        "",
+        "",
+        5000,
+        "",
+        ClientHints::default(),
+        &[],
+        BrowserStorage::default(),
+        DocumentResponseMetadata::default(),
+        None,
+        PageSessionOptions {
+            window_timer_mode: WindowTimerMode::RealTime,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn background_turn_waits_for_real_timer_and_can_be_interrupted() {
+    let mut page = realtime_page("http://127.0.0.1:1/").await;
+    let root = page.auxiliary_root_id().unwrap();
+    page.read_target_engine(
+        root,
+        "globalThis.done=false;setTimeout(()=>{globalThis.done=true},100);return '';",
+    )
+    .unwrap();
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_millis(20),
+        page.poll_background_work()
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        background_string(&mut page, root, "return String(globalThis.done)"),
+        "false"
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        page.poll_background_work(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        background_string(&mut page, root, "return String(globalThis.done)"),
+        "true"
+    );
+    page.close();
+}
+
+#[tokio::test]
+async fn background_turns_progress_timer_fetch_and_body_continuation() {
+    let mut server = HeldResponse::new().await;
+    let mut page = realtime_page(&server.url).await;
+    let root = page.auxiliary_root_id().unwrap();
+    server.headers.take().unwrap().send(()).unwrap();
+    server.body.take().unwrap().send(()).unwrap();
+    let source = format!("globalThis.done='';setTimeout(()=>{{fetch({:?}).then(response=>response.text()).then(body=>{{globalThis.done=body}})}},100);return '';", server.url);
+    page.read_target_engine(root, &source).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while background_string(&mut page, root, "return globalThis.done") != "abcdef" {
+            page.poll_background_work().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        page.network_event_log()
+            .target_network_state(&root.to_string())["pendingRequests"],
+        0
+    );
+    page.close();
+}
+
+#[tokio::test]
+async fn background_wait_never_advances_the_virtual_timer_clock() {
+    let mut page = PageSession::open("<body>root</body>", "http://127.0.0.1:1/", "", "", 5000)
+        .await
+        .unwrap();
+    let root = page.auxiliary_root_id().unwrap();
+    page.read_target_engine(
+        root,
+        "globalThis.done=false;setTimeout(()=>{globalThis.done=true},10000);return '';",
+    )
+    .unwrap();
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_millis(30),
+        page.poll_background_work()
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        background_string(&mut page, root, "return String(globalThis.done)"),
+        "false"
+    );
+    page.close();
+}
+
+#[tokio::test]
+async fn held_child_io_does_not_prevent_the_openers_real_timer() {
+    let mut server = HeldResponse::new().await;
+    let mut page = realtime_page(&server.url).await;
+    let root = page.auxiliary_root_id().unwrap();
+    page.read_target_engine(root, "window.open('about:blank','held-child');return '';")
+        .unwrap();
+    let child = page
+        .auxiliary_event_log()
+        .pages()
+        .into_iter()
+        .find(|page| page.source_page.as_deref() == Some(root.to_string().as_str()))
+        .unwrap()
+        .target
+        .parse::<u64>()
+        .unwrap();
+    page.read_target_engine(
+        child,
+        &format!(
+            "fetch({:?}).then(response=>response.text());return '';",
+            server.url
+        ),
+    )
+    .unwrap();
+    page.read_target_engine(
+        root,
+        "globalThis.done=false;setTimeout(()=>{globalThis.done=true},100);return '';",
+    )
+    .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while background_string(&mut page, root, "return String(globalThis.done)") != "true" {
+            page.poll_background_work().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert!(server.requested.try_recv().is_ok());
+    let log = page.network_event_log();
+    assert_eq!(
+        log.target_network_state(&child.to_string())["pendingRequests"],
+        1
+    );
+    assert_eq!(
+        log.target_network_state(&root.to_string())["pendingRequests"],
+        0
+    );
+    page.close();
+}

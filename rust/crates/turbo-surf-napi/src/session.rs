@@ -318,7 +318,7 @@ async fn poll_actor_work(
     if legacy {
         session.eval("").await
     } else {
-        session.poll_owned_work().await
+        session.poll_background_work().await
     }
 }
 
@@ -936,7 +936,7 @@ fn run_actor_loop(
         }
         let ready = if !legacy && !session.has_owned_pages() {
             Ready::Job(rt.block_on(rx.recv()))
-        } else if storage_work {
+        } else if storage_work || !legacy {
             rt.block_on(async {
                 tokio::select! {
                     biased;

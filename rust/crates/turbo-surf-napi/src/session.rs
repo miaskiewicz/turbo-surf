@@ -606,6 +606,361 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
         .map_err(|_| "live session worker gone".to_string())
 }
 
+struct TargetWorker<'a> {
+    rt: &'a tokio::runtime::Runtime,
+    session: &'a mut PageSession,
+    target: LiveTarget,
+    primary: bool,
+    cancellation: tokio::sync::watch::Receiver<bool>,
+    final_close: &'a mut Option<SyncSender<std::result::Result<(), String>>>,
+    storage_work: &'a mut bool,
+}
+
+impl TargetWorker<'_> {
+    fn execute(&mut self, job: LiveJob) -> bool {
+        match job {
+            LiveJob::Content(html, wait_until, timeout, reply) => {
+                let result = if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.set_content(&html, &wait_until, timeout),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.set_target_content(
+                                native_target,
+                                &html,
+                                &wait_until,
+                                timeout,
+                            ),
+                        )
+                    })
+                };
+                *self.storage_work |= wait_until == "domcontentloaded" && result.is_ok();
+                let _ = reply.send(result);
+            }
+            LiveJob::Navigate(url, history, options, reply) => {
+                let _ = reply.send(self.target.with_auxiliary(|native_target| {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.navigate_target_with_options(
+                            native_target,
+                            &url,
+                            &history,
+                            &options,
+                        ),
+                    )
+                }));
+            }
+            LiveJob::ConfigureTarget(bootstrap, reply) => {
+                let _ = reply.send(self.target.with_auxiliary(|native_target| {
+                    self.session
+                        .configure_target_bootstrap(native_target, bootstrap)
+                }));
+            }
+            LiveJob::CleanupNetwork => {}
+            LiveJob::Resize(width, height, reply) => {
+                let result = if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.set_viewport(width, height),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.resize_target(native_target, width, height),
+                        )
+                    })
+                }
+                .map(|_| String::new());
+                let _ = reply.send(result);
+            }
+            LiveJob::Serialize(reply) => {
+                let _ = reply.send(if self.primary {
+                    Ok(self.session.serialize_for_driver())
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session.serialize_target_for_driver(native_target)
+                    })
+                });
+            }
+            LiveJob::SetCookies(cookies, reply) => {
+                self.session.set_cookies(&cookies);
+                let _ = reply.send(Ok(()));
+            }
+            LiveJob::Cookies(reply) => {
+                let _ = reply.send(if self.primary {
+                    Ok(self.session.cookies_for_driver())
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session.cookies_target_for_driver(native_target)
+                    })
+                });
+            }
+            LiveJob::Close(reply) => return self.close(reply),
+            job => self.execute_script(job),
+        }
+        true
+    }
+    fn execute_script(&mut self, job: LiveJob) {
+        match job {
+            LiveJob::Eval(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.eval_target_script(native_target, &script),
+                        )
+                    })
+                });
+            }
+            LiveJob::EngineEval(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_engine(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session
+                                .eval_target_engine(native_target, &script, false),
+                        )
+                    })
+                });
+            }
+            LiveJob::EngineCollect(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.collect_engine(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session
+                                .eval_target_engine(native_target, &script, true),
+                        )
+                    })
+                });
+            }
+            LiveJob::EngineRead(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    self.session.read_engine(&script)
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session.read_target_engine(native_target, &script)
+                    })
+                });
+            }
+            LiveJob::Expression(script, engine, reply) => {
+                let result = if !self.primary {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.eval_target_expression(
+                                native_target,
+                                &script,
+                                engine,
+                                false,
+                            ),
+                        )
+                    })
+                } else if engine {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_engine_expression(&script),
+                    )
+                } else {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_expression(&script),
+                    )
+                };
+                let _ = reply.send(result);
+            }
+            LiveJob::ExpressionTracked(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_expression_tracked(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session
+                                .eval_target_expression_tracked(native_target, &script),
+                        )
+                    })
+                });
+            }
+            _ => unreachable!("control jobs are dispatched before script jobs"),
+        }
+    }
+    fn close(&mut self, reply: SyncSender<std::result::Result<(), String>>) -> bool {
+        if self.target == LiveTarget::LegacyRoot {
+            *self.final_close = Some(reply);
+            return false;
+        }
+        match self
+            .target
+            .with_auxiliary(|native_target| self.session.close_target(native_target))
+        {
+            Ok(alive) => {
+                if !alive {
+                    *self.final_close = Some(reply);
+                    return false;
+                }
+                let _ = reply.send(Ok(()));
+            }
+            Err(error) => {
+                let _ = reply.send(Err(error));
+            }
+        }
+
+        true
+    }
+}
+
+fn run_actor_loop(
+    rt: &tokio::runtime::Runtime,
+    mut session: PageSession,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<LiveMessage>,
+    root_target: LiveTarget,
+    actor: &LiveActor,
+    cleanup: &mut LiveWorkerCleanup,
+) {
+    let legacy = root_target == LiveTarget::LegacyRoot;
+    let mut storage_work = session.has_pending_auxiliary_work();
+    loop {
+        enum Ready {
+            Job(Option<LiveMessage>),
+            Storage,
+        }
+        let ready = if !legacy && !session.has_owned_pages() {
+            Ready::Job(rt.block_on(rx.recv()))
+        } else if storage_work {
+            rt.block_on(async {
+                tokio::select! {
+                    biased;
+                    job = rx.recv() => Ready::Job(job),
+                    _ = poll_actor_work(&mut session, legacy) => Ready::Storage,
+                }
+            })
+        } else {
+            let signal = session.storage_event_signal();
+            rt.block_on(async {
+                tokio::select! {
+                    biased;
+                    job = rx.recv() => Ready::Job(job),
+                    () = signal => Ready::Storage,
+                }
+            })
+        };
+        let message = match ready {
+            Ready::Job(Some(job)) => job,
+            Ready::Job(None) => break,
+            Ready::Storage => {
+                // Drive continuations while IO is pending, but let host
+                // commands interrupt the drain (Close cancels transport).
+                storage_work = !storage_work;
+                continue;
+            }
+        };
+        // Synchronous guest callbacks may create transports, but a read
+        // must not poll the runtime or advance the page event loop.
+        let _runtime_context = rt.enter();
+        session.flush_network_disposals();
+        let (target, job) = match message {
+            LiveMessage::Target { target, job } => (target, job),
+            LiveMessage::ConfigureContext(bootstrap, reply) => {
+                let result = if actor.network.is_closed() {
+                    Err("live actor is closed".into())
+                } else {
+                    session.configure_auxiliary_bootstrap(bootstrap)
+                };
+                let _ = reply.send(result);
+                continue;
+            }
+            LiveMessage::Shutdown(reply) => {
+                session.close();
+                cleanup.finish();
+                let _ = reply.send(());
+                break;
+            }
+        };
+        let primary_result = match target {
+            LiveTarget::LegacyRoot => Ok(true),
+            LiveTarget::Auxiliary(id) => session.target_is_primary(id),
+        };
+        let primary = match primary_result {
+            Ok(primary) => primary,
+            Err(error) if job.requires_live_target() => {
+                job.reject(error);
+                continue;
+            }
+            Err(_) => false,
+        };
+        let cancellation = actor
+            .cancellations
+            .lock()
+            .unwrap()
+            .entry(target)
+            .or_insert_with(|| tokio::sync::watch::channel(false).0)
+            .subscribe();
+        if *cancellation.borrow() && job.requires_live_target() {
+            job.reject("Native auxiliary target closed".into());
+            continue;
+        }
+        let mut final_close = None;
+        let mut worker = TargetWorker {
+            rt,
+            session: &mut session,
+            target,
+            primary,
+            cancellation,
+            final_close: &mut final_close,
+            storage_work: &mut storage_work,
+        };
+        if !worker.execute(job) {
+            session.close();
+            cleanup.finish();
+            if let Some(reply) = final_close {
+                let _ = reply.send(Ok(()));
+            }
+            break;
+        }
+        storage_work |= session.has_pending_auxiliary_work();
+    }
+}
+
 /// Spawn a session thread, hydrate the page on it, and register it. Returns the id.
 /// Async (hydration fetches chunks from a possibly same-process server, so Node's loop
 /// must stay free).
@@ -662,7 +1017,6 @@ impl Task for LiveOpenTask {
         let window_timer_mode = self.window_timer_mode;
         let viewport = response.viewport;
         let max_resource_bytes = self.max_resource_bytes;
-        let worker_cancellations = actor.cancellations.clone();
         let auxiliary = actor.auxiliary.clone();
         let worker_actor = actor.clone();
         let auxiliary_policy = self.response.auxiliary_policy.unwrap_or_default();
@@ -691,7 +1045,7 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            let (mut session, root_target) = match rt.block_on(
+            let (session, root_target) = match rt.block_on(
                 PageSession::open_with_document_response_and_auxiliary_services(
                     &html,
                     &base,
@@ -752,298 +1106,14 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            let legacy = root_target == LiveTarget::LegacyRoot;
-            let mut storage_work = session.has_pending_auxiliary_work();
-            loop {
-                enum Ready {
-                    Job(Option<LiveMessage>),
-                    Storage,
-                }
-                let ready = if !legacy && !session.has_owned_pages() {
-                    Ready::Job(rt.block_on(rx.recv()))
-                } else if storage_work {
-                    rt.block_on(async {
-                        tokio::select! {
-                            biased;
-                            job = rx.recv() => Ready::Job(job),
-                            _ = poll_actor_work(&mut session, legacy) => Ready::Storage,
-                        }
-                    })
-                } else {
-                    let signal = session.storage_event_signal();
-                    rt.block_on(async {
-                        tokio::select! {
-                            biased;
-                            job = rx.recv() => Ready::Job(job),
-                            () = signal => Ready::Storage,
-                        }
-                    })
-                };
-                let message = match ready {
-                    Ready::Job(Some(job)) => job,
-                    Ready::Job(None) => break,
-                    Ready::Storage => {
-                        // Drive continuations while IO is pending, but let host
-                        // commands interrupt the drain (Close cancels transport).
-                        storage_work = !storage_work;
-                        continue;
-                    }
-                };
-                // Synchronous guest callbacks may create transports, but a read
-                // must not poll the runtime or advance the page event loop.
-                let _runtime_context = rt.enter();
-                session.flush_network_disposals();
-                let (target, job) = match message {
-                    LiveMessage::Target { target, job } => (target, job),
-                    LiveMessage::ConfigureContext(bootstrap, reply) => {
-                        let result = if worker_network.is_closed() {
-                            Err("live actor is closed".into())
-                        } else {
-                            session.configure_auxiliary_bootstrap(bootstrap)
-                        };
-                        let _ = reply.send(result);
-                        continue;
-                    }
-                    LiveMessage::Shutdown(reply) => {
-                        session.close();
-                        cleanup.finish();
-                        let _ = reply.send(());
-                        break;
-                    }
-                };
-                let primary_result = match target {
-                    LiveTarget::LegacyRoot => Ok(true),
-                    LiveTarget::Auxiliary(id) => session.target_is_primary(id),
-                };
-                let primary = match primary_result {
-                    Ok(primary) => primary,
-                    Err(error) if job.requires_live_target() => {
-                        job.reject(error);
-                        continue;
-                    }
-                    Err(_) => false,
-                };
-                let cancellation = worker_cancellations
-                    .lock()
-                    .unwrap()
-                    .entry(target)
-                    .or_insert_with(|| tokio::sync::watch::channel(false).0)
-                    .subscribe();
-                if *cancellation.borrow() && job.requires_live_target() {
-                    job.reject("Native auxiliary target closed".into());
-                    continue;
-                }
-                match job {
-                    LiveJob::Content(html, wait_until, timeout, reply) => {
-                        let result = if primary {
-                            run_target_job(
-                                &rt,
-                                cancellation.clone(),
-                                session.set_content(&html, &wait_until, timeout),
-                            )
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                run_target_job(
-                                    &rt,
-                                    cancellation.clone(),
-                                    session.set_target_content(
-                                        native_target,
-                                        &html,
-                                        &wait_until,
-                                        timeout,
-                                    ),
-                                )
-                            })
-                        };
-                        storage_work |= wait_until == "domcontentloaded" && result.is_ok();
-                        let _ = reply.send(result);
-                    }
-                    LiveJob::Navigate(url, history, options, reply) => {
-                        let _ = reply.send(target.with_auxiliary(|native_target| {
-                            run_target_job(
-                                &rt,
-                                cancellation.clone(),
-                                session.navigate_target_with_options(
-                                    native_target,
-                                    &url,
-                                    &history,
-                                    &options,
-                                ),
-                            )
-                        }));
-                    }
-                    LiveJob::ConfigureTarget(bootstrap, reply) => {
-                        let _ = reply.send(target.with_auxiliary(|native_target| {
-                            session.configure_target_bootstrap(native_target, bootstrap)
-                        }));
-                    }
-                    LiveJob::CleanupNetwork => {}
-                    LiveJob::Resize(width, height, reply) => {
-                        let result = if primary {
-                            run_target_job(
-                                &rt,
-                                cancellation.clone(),
-                                session.set_viewport(width, height),
-                            )
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                run_target_job(
-                                    &rt,
-                                    cancellation.clone(),
-                                    session.resize_target(native_target, width, height),
-                                )
-                            })
-                        }
-                        .map(|_| String::new());
-                        let _ = reply.send(result);
-                    }
-                    LiveJob::Eval(script, reply) => {
-                        let _ = reply.send(if primary {
-                            run_target_job(&rt, cancellation.clone(), session.eval(&script))
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                run_target_job(
-                                    &rt,
-                                    cancellation.clone(),
-                                    session.eval_target_script(native_target, &script),
-                                )
-                            })
-                        });
-                    }
-                    LiveJob::EngineEval(script, reply) => {
-                        let _ = reply.send(if primary {
-                            run_target_job(&rt, cancellation.clone(), session.eval_engine(&script))
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                run_target_job(
-                                    &rt,
-                                    cancellation.clone(),
-                                    session.eval_target_engine(native_target, &script, false),
-                                )
-                            })
-                        });
-                    }
-                    LiveJob::EngineCollect(script, reply) => {
-                        let _ = reply.send(if primary {
-                            run_target_job(
-                                &rt,
-                                cancellation.clone(),
-                                session.collect_engine(&script),
-                            )
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                run_target_job(
-                                    &rt,
-                                    cancellation.clone(),
-                                    session.eval_target_engine(native_target, &script, true),
-                                )
-                            })
-                        });
-                    }
-                    LiveJob::EngineRead(script, reply) => {
-                        let _ = reply.send(if primary {
-                            session.read_engine(&script)
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                session.read_target_engine(native_target, &script)
-                            })
-                        });
-                    }
-                    LiveJob::Expression(script, engine, reply) => {
-                        let result = if !primary {
-                            target.with_auxiliary(|native_target| {
-                                run_target_job(
-                                    &rt,
-                                    cancellation.clone(),
-                                    session.eval_target_expression(
-                                        native_target,
-                                        &script,
-                                        engine,
-                                        false,
-                                    ),
-                                )
-                            })
-                        } else if engine {
-                            run_target_job(
-                                &rt,
-                                cancellation.clone(),
-                                session.eval_engine_expression(&script),
-                            )
-                        } else {
-                            run_target_job(
-                                &rt,
-                                cancellation.clone(),
-                                session.eval_expression(&script),
-                            )
-                        };
-                        let _ = reply.send(result);
-                    }
-                    LiveJob::ExpressionTracked(script, reply) => {
-                        let _ = reply.send(if primary {
-                            run_target_job(
-                                &rt,
-                                cancellation.clone(),
-                                session.eval_expression_tracked(&script),
-                            )
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                run_target_job(
-                                    &rt,
-                                    cancellation.clone(),
-                                    session.eval_target_expression_tracked(native_target, &script),
-                                )
-                            })
-                        });
-                    }
-                    LiveJob::Serialize(reply) => {
-                        let _ = reply.send(if primary {
-                            Ok(session.serialize_for_driver())
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                session.serialize_target_for_driver(native_target)
-                            })
-                        });
-                    }
-                    LiveJob::SetCookies(cookies, reply) => {
-                        session.set_cookies(&cookies);
-                        let _ = reply.send(Ok(()));
-                    }
-                    LiveJob::Cookies(reply) => {
-                        let _ = reply.send(if primary {
-                            Ok(session.cookies_for_driver())
-                        } else {
-                            target.with_auxiliary(|native_target| {
-                                session.cookies_target_for_driver(native_target)
-                            })
-                        });
-                    }
-                    LiveJob::Close(reply) => {
-                        if target == LiveTarget::LegacyRoot {
-                            session.close();
-                            cleanup.finish();
-                            let _ = reply.send(Ok(()));
-                            break;
-                        }
-                        match target
-                            .with_auxiliary(|native_target| session.close_target(native_target))
-                        {
-                            Ok(alive) => {
-                                if !alive {
-                                    session.close();
-                                    cleanup.finish();
-                                    let _ = reply.send(Ok(()));
-                                    break;
-                                }
-                                let _ = reply.send(Ok(()));
-                            }
-                            Err(error) => {
-                                let _ = reply.send(Err(error));
-                            }
-                        }
-                    }
-                }
-                storage_work |= session.has_pending_auxiliary_work();
-            }
+            run_actor_loop(
+                &rt,
+                session,
+                &mut rx,
+                root_target,
+                &worker_actor,
+                &mut cleanup,
+            );
         });
         if let Err(error) = spawned {
             finish_actor_without_session(&actor);

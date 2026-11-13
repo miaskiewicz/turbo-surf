@@ -106,6 +106,32 @@ pub(crate) fn dispose(scope: &mut v8::PinScope, id: u32) {
         }
     }
 }
+pub(crate) fn retire_context(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    let owners = scope
+        .get_slot::<Handles>()
+        .map(|handles| {
+            handles
+                .owners
+                .iter()
+                .map(|(id, owner)| (*id, owner.clone()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let retired = owners
+        .into_iter()
+        .filter_map(|(id, owner)| (owner.to_local(scope) == Some(context)).then_some(id))
+        .collect::<Vec<_>>();
+    if let Some(handles) = scope.get_slot_mut::<Handles>() {
+        for id in retired {
+            handles.owners.remove(&id);
+        }
+    }
+    if let Some(key) = key(scope) {
+        let global = context.global(scope);
+        global.delete_private(scope, key);
+    }
+}
+
 #[op2(fast)]
 fn op_remote_handle_count(scope: &mut v8::PinScope) -> u32 {
     scope.get_slot::<Handles>().map_or(0, |handles| {

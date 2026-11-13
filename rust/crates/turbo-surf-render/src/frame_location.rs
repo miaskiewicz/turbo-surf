@@ -44,7 +44,8 @@ fn navigate_kind<'s>(
     let Some(text) = value.to_string(scope) else {
         return;
     };
-    let source = scope.get_entered_or_microtask_context();
+    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let source = v8::Local::new(scope, source);
     let Some(target) = window.get_creation_context(scope) else {
         return;
     };
@@ -123,6 +124,27 @@ fn navigate_kind<'s>(
             "NotSupportedError",
         );
         return;
+    }
+    if JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .enabled
+    {
+        use turbo_dom_browser_env::host_internals::auxiliary_context_identity;
+        if let (Some(target), Some(source_id)) = (
+            auxiliary_context_identity(target),
+            auxiliary_context_identity(source),
+        ) {
+            auxiliary_pages::queue_navigation(
+                scope,
+                target.id,
+                source_id.id,
+                source,
+                url.to_string(),
+                replace || reload,
+            );
+            return;
+        }
     }
     driver_sync::changed(&mut JsRuntime::op_state_from(scope).borrow_mut());
     let Some(host) = target.get_slot::<FrameHost>() else {
@@ -482,7 +504,7 @@ fn cross_set<'s>(
     name: v8::Local<'s, v8::Name>,
     value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    mut result: v8::ReturnValue<v8::Boolean>,
+    mut result: v8::ReturnValue<()>,
 ) -> v8::Intercepted {
     if !name.is_symbol() && name.to_rust_string_lossy(scope) == "href" {
         if let Some(state) = object_state(scope, args.holder()) {

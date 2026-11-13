@@ -399,6 +399,16 @@ impl Policy {
         }
         restrictions
     }
+    pub fn blocks_auxiliary_open(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-popups"))
+            })
+        })
+    }
+
     pub fn blocks_form_submission(&self) -> bool {
         self.policies.iter().any(|policy| {
             policy.get("sandbox").is_some_and(|tokens| {
@@ -1202,6 +1212,15 @@ mod tests {
             "https://a.test/",
             false
         ));
+    }
+
+    #[test]
+    fn popup_sandbox_tokens_intersect() {
+        let parse = |header: &str| Policy::new("https://example.test", [header.into()]);
+        assert!(!parse("script-src 'self'").blocks_auxiliary_open());
+        assert!(parse("sandbox allow-scripts allow-same-origin").blocks_auxiliary_open());
+        assert!(!parse("sandbox ALLOW-POPUPS").blocks_auxiliary_open());
+        assert!(parse("sandbox allow-popups, sandbox allow-scripts").blocks_auxiliary_open());
     }
 
     #[test]

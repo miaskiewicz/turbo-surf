@@ -1,10 +1,9 @@
-//! Genuine V8 WindowProxy support, compiled only with the verified native SDK.
+//! Native frame proxy and Location host services over the producer V8 ABI.
 use super::*;
 #[path = "frame_location.rs"]
 mod location;
 
 struct Proxy(v8::Weak<v8::Object>);
-struct Document(v8::Weak<v8::Value>);
 struct Origin(v8::Weak<v8::Value>);
 struct ExceptionConstructor(v8::Weak<v8::Function>);
 struct LexicalOwner(v8::Weak<v8::Object>);
@@ -163,54 +162,6 @@ pub(super) fn failed_access(
     deny(scope);
 }
 
-fn document_get(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
-    mut result: v8::ReturnValue,
-) {
-    let source = scope.get_current_context();
-    let lexical = source
-        .get_slot::<LexicalOwner>()
-        .and_then(|owner| owner.0.to_local(scope));
-    let target = if lexical.is_some_and(|owner| owner.strict_equals(args.this().into())) {
-        source
-            .get_slot::<Proxy>()
-            .and_then(|proxy| proxy.0.to_local(scope))
-    } else {
-        Some(args.this())
-    };
-    let Some(target) = target else {
-        return;
-    };
-    let Some(active) = target.get_creation_context(scope) else {
-        return;
-    };
-    if !active.global(scope).strict_equals(target.into()) {
-        let message = v8::String::new(scope, "Illegal invocation").unwrap();
-        let error = v8::Exception::type_error(scope, message);
-        scope.throw_exception(error);
-        return;
-    }
-    if !source
-        .get_security_token(scope)
-        .strict_equals(active.get_security_token(scope))
-    {
-        deny(scope);
-        return;
-    }
-    let document = active
-        .get_slot::<Document>()
-        .and_then(|document| document.0.to_local(scope))
-        .or_else(|| {
-            let name = v8::String::new(scope, "turbo-dom.ownership.window-document")?;
-            let key = v8::Private::for_api(scope, Some(name));
-            active.global(scope).get_private(scope, key)
-        });
-    if let Some(document) = document {
-        result.set(document);
-    }
-}
-
 fn closed_get(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -234,21 +185,15 @@ pub(super) fn install_document(scope: &mut v8::PinScope) {
     let global = context.global(scope);
     let native_name = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
     let native_key = v8::Private::for_api(scope, Some(native_name));
-    let Some(document) = global.get_private(scope, native_key) else {
+    let Some(_document) = global.get_private(scope, native_key) else {
         return;
     };
-    let key = v8::String::new(scope, "document").unwrap();
     let origin = context.get_security_token(scope);
-    for (name, value) in [
-        ("document", document),
-        ("origin", origin),
-        ("proxy", global.into()),
-    ] {
+    for (name, value) in [("origin", origin), ("proxy", global.into())] {
         if retain_owned(scope, name, value).is_none() {
             return;
         }
     }
-    context.set_slot(Rc::new(Document(v8::Weak::new(scope, document))));
     context.set_slot(Rc::new(Origin(v8::Weak::new(scope, origin))));
     context.set_slot(Rc::new(Proxy(v8::Weak::new(scope, global))));
     let Some(closed) = v8::Function::builder(closed_get)
@@ -267,20 +212,8 @@ pub(super) fn install_document(scope: &mut v8::PinScope) {
     if global.define_property(scope, name.into(), &descriptor) != Some(true) {
         return;
     }
-    let getter = v8::Function::builder(document_get)
-        .constructor_behavior(v8::ConstructorBehavior::Throw)
-        .build(scope)
-        .unwrap();
-    let name = v8::String::new(scope, "get document").unwrap();
-    getter.set_name(name);
-    let undefined = v8::undefined(scope);
-    let mut descriptor = v8::PropertyDescriptor::new_from_get_set(getter.into(), undefined.into());
-    descriptor.set_enumerable(true);
-    descriptor.set_configurable(false);
-    assert_eq!(
-        global.define_property(scope, key.into(), &descriptor),
-        Some(true)
-    );
+    // The producer alone owns the nonconfigurable native document guard.
+    turbo_dom_browser_env::host_internals::install_auxiliary_window_document_guard(scope, context);
 }
 
 pub(super) fn synchronize_origins(scope: &mut v8::PinScope, active: v8::Local<v8::Context>) {
@@ -413,7 +346,7 @@ fn cross_set<'s>(
     name: v8::Local<'s, v8::Name>,
     value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    mut result: v8::ReturnValue<v8::Boolean>,
+    mut result: v8::ReturnValue<()>,
 ) -> v8::Intercepted {
     if !name.is_symbol() && name.to_rust_string_lossy(scope) == "location" {
         location::navigate(scope, args.holder(), value);
@@ -560,6 +493,13 @@ fn cross_property_get(
     if let Some(value) = cross_value(scope, target, &property) {
         result.set(value);
     }
+}
+
+pub(super) fn protected_location<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    target: v8::Local<'s, v8::Context>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    location::get(scope, target)
 }
 
 pub(super) fn install_location(scope: &mut v8::PinScope, url: &str) {

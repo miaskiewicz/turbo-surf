@@ -25,6 +25,7 @@ struct Socket {
     events: Events,
     jar: Jar,
     cookie_url: String,
+    owner: v8::Weak<v8::Context>,
 }
 
 /// Open sockets plus the EventSource streams that asked to be counted as live.
@@ -33,6 +34,7 @@ pub(super) struct NetworkTransports {
     next: u32,
     sockets: HashMap<u32, Socket>,
     holds: usize,
+    document_holds: HashMap<u64, (v8::Weak<v8::Context>, usize)>,
 }
 
 /// Whether a transport may still deliver events to a waiting evaluation.
@@ -164,6 +166,7 @@ pub(super) fn op_ws_open<'s>(
             events: Rc::new(RefCell::new(Some(events))),
             jar,
             cookie_url,
+            owner: v8::Weak::new(scope, context),
         },
     );
     id
@@ -297,12 +300,58 @@ fn event_out(event: WsEvent) -> WsOut {
     }
 }
 
-/// An EventSource stream counts as live from construction until it is CLOSED.
-#[op2(fast)]
-pub(super) fn op_net_transport_hold(state: &mut OpState, live: bool) {
-    hold(state, live);
+/// EventSource liveness belongs to its actual creating document, not the actor.
+#[op2(fast, reentrant)]
+pub(super) fn op_net_transport_hold(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+    live: bool,
+) {
+    let Some(context) = document.get_creation_context(scope) else {
+        return;
+    };
+    let id = turbo_dom_browser_env::host_internals::document_id_of(scope, document);
+    let transports = transports(state);
+    if live {
+        let (_, count) = transports
+            .document_holds
+            .entry(id)
+            .or_insert_with(|| (v8::Weak::new(scope, context), 0));
+        *count += 1;
+        transports.holds += 1;
+    } else if let Some((_, count)) = transports.document_holds.get_mut(&id) {
+        *count = count.saturating_sub(1);
+        transports.holds = transports.holds.saturating_sub(1);
+        if *count == 0 {
+            transports.document_holds.remove(&id);
+        }
+    }
 }
 
+pub(super) fn retire_context(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    let state = deno_core::JsRuntime::op_state_from(scope);
+    let mut state = state.borrow_mut();
+    let Some(transports) = state.try_borrow_mut::<NetworkTransports>() else {
+        return;
+    };
+    transports
+        .sockets
+        .retain(|_, socket| socket.owner.to_local(scope) != Some(context));
+    let retired = transports
+        .document_holds
+        .iter()
+        .filter_map(|(id, (owner, count))| {
+            (owner.to_local(scope) == Some(context)).then_some((*id, *count))
+        })
+        .collect::<Vec<_>>();
+    for (id, count) in retired {
+        transports.document_holds.remove(&id);
+        transports.holds = transports.holds.saturating_sub(count);
+    }
+}
+
+#[cfg(test)]
 fn hold(state: &mut OpState, live: bool) {
     let transports = transports(state);
     if live {

@@ -126,3 +126,26 @@ test("exposed function registrations reject page and context name collisions", a
     await page.close();
   }
 });
+
+test("disabled reads and assertions honor MUI ARIA scope controls and live changes", async () => {
+  const page = newPage();
+  try {
+    // Installed MUI 7.3.5 Select renders its disabled control as this ARIA div.
+    await page.setContent(
+      '<div id="scope" role="combobox" aria-disabled="true">Filed location</div><div aria-disabled="true"><button id="inherited">Save</button><div aria-disabled="false"><button id="override">Edit</button></div></div><div id="generic" disabled>Text</div>',
+    );
+    assert.equal(await page.locator("#scope").isDisabled(), true);
+    await expect(page.locator("#scope")).toBeDisabled({ timeout: 0 });
+    await expect(page.locator("#inherited")).toBeDisabled({ timeout: 0 });
+    await expect(page.locator("#override")).toBeEnabled({ timeout: 0 });
+    await expect(page.locator("#generic")).toBeEnabled({ timeout: 0 });
+    await page._ensureLive();
+    await page._sessionEval(
+      "document.querySelector('#scope').setAttribute('aria-disabled', 'false')",
+    );
+    assert.equal(await page.locator("#scope").isEnabled(), true);
+    await expect(page.locator("#scope")).toBeEnabled({ timeout: 0 });
+  } finally {
+    await page.close();
+  }
+});

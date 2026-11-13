@@ -26,9 +26,110 @@ pub fn input_value_of(tree: &Tree, h: Handle) -> String {
     tree.get_attribute(h, "value").unwrap_or("").to_string()
 }
 
-/// Not `disabled`.
+/// Native form-control disabled state plus supported ARIA disabled semantics.
 pub fn is_enabled(tree: &Tree, h: Handle) -> bool {
-    tree.get_attribute(h, "disabled").is_none()
+    !natively_disabled(tree, h) && !aria_disabled(tree, h)
+}
+
+fn natively_disabled(tree: &Tree, h: Handle) -> bool {
+    let tag = tree.tag_name(h).unwrap_or_default();
+    if ![
+        "BUTTON", "INPUT", "SELECT", "TEXTAREA", "OPTION", "OPTGROUP",
+    ]
+    .contains(&tag.as_str())
+    {
+        return false;
+    }
+    if tree.get_attribute(h, "disabled").is_some() {
+        return true;
+    }
+    let mut ancestor = tree.parent(h);
+    while let Some(parent) = ancestor {
+        let parent_tag = tree.tag_name(parent).unwrap_or_default();
+        if tag == "OPTION"
+            && parent_tag == "OPTGROUP"
+            && tree.get_attribute(parent, "disabled").is_some()
+        {
+            return true;
+        }
+        if parent_tag == "FIELDSET" && tree.get_attribute(parent, "disabled").is_some() {
+            let legend = tree
+                .children(parent)
+                .into_iter()
+                .find(|child| tree.tag_name(*child).as_deref() == Some("LEGEND"));
+            return !legend.is_some_and(|legend| descendant_of(tree, h, legend));
+        }
+        ancestor = tree.parent(parent);
+    }
+    false
+}
+
+fn descendant_of(tree: &Tree, h: Handle, ancestor: Handle) -> bool {
+    let mut node = Some(h);
+    while let Some(current) = node {
+        if current == ancestor {
+            return true;
+        }
+        node = tree.parent(current);
+    }
+    false
+}
+
+fn aria_disabled(tree: &Tree, h: Handle) -> bool {
+    const ROLES: &[&str] = &[
+        "application",
+        "button",
+        "composite",
+        "gridcell",
+        "group",
+        "input",
+        "link",
+        "menuitem",
+        "scrollbar",
+        "separator",
+        "tab",
+        "checkbox",
+        "columnheader",
+        "combobox",
+        "grid",
+        "listbox",
+        "menu",
+        "menubar",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "option",
+        "radio",
+        "radiogroup",
+        "row",
+        "rowheader",
+        "searchbox",
+        "select",
+        "slider",
+        "spinbutton",
+        "switch",
+        "tablist",
+        "textbox",
+        "toolbar",
+        "tree",
+        "treegrid",
+        "treeitem",
+    ];
+    if !ROLES.contains(&crate::aria::role_of(tree, h).as_str()) {
+        return false;
+    }
+    let mut node = Some(h);
+    while let Some(current) = node {
+        if let Some(value) = tree.get_attribute(current, "aria-disabled") {
+            if value.eq_ignore_ascii_case("true") {
+                return true;
+            }
+            if value.eq_ignore_ascii_case("false") {
+                return false;
+            }
+        }
+        node = tree.parent(current);
+    }
+    false
 }
 
 /// Native checkbox/radio or supported ARIA checked state.
@@ -156,6 +257,30 @@ mod tests {
         assert!(is_editable(&tree, first(&tree, "#a")));
         assert!(!is_editable(&tree, first(&tree, "#b"))); // disabled
         assert!(!is_editable(&tree, first(&tree, "#d"))); // readonly
+    }
+
+    #[test]
+    fn disabled_state_matches_native_and_aria_controls() {
+        let tree = Tree::parse("<div id='mui' role='combobox' aria-disabled='true'></div><div aria-disabled='true'><button id='inherited'>Save</button><div aria-disabled='false'><div id='override' role='combobox'></div></div><div id='generic'>Text</div></div><div id='attribute' disabled></div><input id='native' disabled aria-disabled='false'><div id='uppercase' role='button' aria-disabled='TRUE'></div><div id='invalid' role='button' aria-disabled='invalid'></div><fieldset disabled><legend><input id='legend'></legend><input id='fieldset'></fieldset><select><optgroup disabled><option id='option'>One</option></optgroup></select>");
+        for selector in [
+            "#mui",
+            "#inherited",
+            "#native",
+            "#uppercase",
+            "#fieldset",
+            "#option",
+        ] {
+            assert!(
+                !is_enabled(&tree, first(&tree, selector)),
+                "{selector} must be disabled"
+            );
+        }
+        for selector in ["#override", "#generic", "#attribute", "#invalid", "#legend"] {
+            assert!(
+                is_enabled(&tree, first(&tree, selector)),
+                "{selector} must be enabled"
+            );
+        }
     }
 
     #[test]

@@ -20,14 +20,17 @@ mod audio_fft;
 mod audio_timeline;
 mod browser_emulation;
 mod compression_dictionary_dom;
+mod context_emulation_handle;
 mod context_ownership;
 mod crypto_backend;
 mod crypto_clone;
 mod crypto_hybrid;
 mod csp;
 mod csp_reporting;
+mod dialog_broker;
 mod document_facts;
 mod document_response;
+pub use dialog_broker::{DialogBroker, DialogKind, DialogReply, DialogRequest};
 mod fetch_cors;
 mod geolocation_config;
 mod geometry_backend;
@@ -50,6 +53,7 @@ mod live_layout_zoom;
 mod live_stylesheets;
 mod locator_dom;
 mod message_ports;
+mod network_activity;
 mod network_events;
 pub use network_events::NetworkEventLog;
 mod permissions_policy;
@@ -70,6 +74,7 @@ mod web_fonts;
 mod web_streams_backend;
 mod window_named_properties;
 
+pub use context_emulation_handle::ContextEmulationHandle;
 pub use document_response::DocumentResponseMetadata;
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
 pub use runtime::{
@@ -78,7 +83,9 @@ pub use runtime::{
     render_capture_cookies_with_response_headers, render_html, render_html_async, render_hydrate,
     render_hydrate_with_budget, render_page, render_page_pooled, render_page_with_budget,
     run_engine_with_dom, run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn,
-    set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, BrowserStorage, HydrationDiagnostics,
+    set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, AuxiliaryBootstrap,
+    AuxiliaryCapability, AuxiliaryHostServices, AuxiliaryPageEvent, AuxiliaryPageEventLog,
+    AuxiliaryPageInfo, AuxiliaryResourcePolicy, BrowserStorage, HydrationDiagnostics,
     HydrationPhase, HydrationProgress, NavigationActivationSnapshot, PageSession,
     PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };

@@ -108,7 +108,7 @@
         timer: 0,
       };
       apply(stateSet, states, [target, record]);
-      ops.op_net_transport_hold(true);
+      ops.op_net_transport_hold(__document, true);
       connect(target, record);
       return target;
     },
@@ -118,7 +118,7 @@
   const shut = (record) => {
     if (record.readyState === 2) return false;
     record.readyState = 2;
-    ops.op_net_transport_hold(false);
+    ops.op_net_transport_hold(__document, false);
     return true;
   };
   // "Fail the connection": CLOSED for good, one error event.

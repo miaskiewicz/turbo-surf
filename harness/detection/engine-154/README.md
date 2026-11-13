@@ -104,3 +104,36 @@ The source-pinned Chrome CSP collector disables DevTools' default unsafe-eval
 bypass. Exact native controls cover enforced/report-only policies, direct and
 indirect eval, Function/AsyncFunction/GeneratorFunction, sample truncation,
 directive fallback/intersection, live meta changes and actual task-quota recovery.
+
+
+### Explicit WindowProxy compatibility for a 150.4.2 consumer
+
+The default SDK alias remains `150.4.0`. A consumer requiring `~150.4.2` can
+prepare a separate SDK with `prepare.py --window-proxy-compat --profile 154`
+(or `155`), then request `build.py --native-alias-version 150.4.2`. This changes
+only the alias identity and adds the `FORK_WINDOW_PROXY` source capability marker;
+it does not replace the upstream `152.2.0` Rust SDK or the selected native engine.
+Do not run this compatibility preparation over the generated default150 fork.
+
+The opt-in checks the reviewed upstream SDK identity, exact pinned 154/155
+profile revision, six source hashes after the existing `sdk.patch` and
+`code_generation.patch`, and exactly one definition of each WindowProxy method,
+callback type and C++ wrapper, plus the genuine root template’s immutable
+prototype, constructor, internal-field and ContextOptions surfaces. It refuses
+partial, duplicate or altered sources.
+The marker is appended once; repeat preparation verifies it. Its source hashes
+and selected profile are retained in `provenance.json`; requesting the new alias
+checks that record before any build. New source/header revisions need a new
+reviewed contract, rather than silently accepting changed layouts.
+
+Keep the SDK's C++ `NamedPropertyHandlerConfiguration` and
+`IndexedPropertyHandlerConfiguration` constructors. The default150 public indexed
+configuration has `index_of` before `data`; both pinned 154 and 155 headers also
+have `iterable_to_list` between them. Copying the default150 fork's Rust POD mirror
+would shift fields and is not supported. The callback AccessType order agrees,
+but that alone does not establish ABI compatibility.
+
+These preparation/unit checks are **source evidence only**. Each selected SDK
+still needs its own full build/link, native WindowProxy tests and Surf integration
+gates before accepting popup support. Default150 archive tests do not establish
+154/155 results. No producer pin, default feature or published artifact is changed.

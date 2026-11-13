@@ -5,8 +5,8 @@
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`46b1dcc939a033d09fb5708eb517fde49af56771` ([producer animation presentation #511](https://github.com/miaskiewicz/turbo-dom/issues/511)). The dependency graph
-uses one `turbo-dom-v8` 150.4.2 at the exact tested candidate
+`628e3efeb6cc90e233411cc608debc9a85729dd6`. The dependency graph uses one
+`turbo-dom-v8` 150.4.2 from the exact WindowProxy candidate
 `0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.
@@ -22,6 +22,9 @@ branch.
 - Apply configured geolocation and origin-scoped permission grants to live
   documents. Deliver asynchronous position callbacks, watch updates and
   permission changes; enforce document policy and retire canceled watches (#391).
+- Pause native alert/confirm/prompt execution for a host Dialog accept/dismiss
+  response, with no-listener auto-dismiss, page ownership and close cancellation.
+  Host replies bypass the blocked isolate command queue (#405).
 - Add an explicit enabled/disabled animation presentation policy across Rust,
   NAPI, Playwright contexts and MCP render mode configuration. Disabled canonical
   effects use underlying styles while their genuine timing, events and promises,
@@ -37,7 +40,8 @@ branch.
   effect state proves its matching declared animations completed without fill.
   Playback changes invalidate reuse; active, paused, infinite, filling, unknown
   and mismatched effects keep their guards. Scoped shadow stylesheet lifecycle
-  remains strict pending turbo-dom #509 (#511).
+  uses the producer's canonical scoped-sheet discovery, while unknown or
+  mismatched effect proofs remain strict (#511; turbo-dom #509).
 
 - Keep on-demand JavaScript available after `waitUntil: "commit"` navigation,
   reload and history replacement, while preserving the immediate raw-response

@@ -16,10 +16,18 @@ is the authoritative map of what is **supported**, what is a **no-op**, and what
 faithfully emulated is described below; some compatibility surfaces are stored values
 or no-ops rather than complete browser implementations.
 
-This describes the current v0.8.3 release candidate source, not a published release or
+This describes the current v0.8.4 release candidate source, not a published release or
 a claim that its final release gates have passed. The default renderer is Rust/V8;
 Chrome/Playwright are development oracles. An explicitly selected browser solver is
 a separate optional path. See [build features](../../docs/BUILD-FEATURES.md).
+
+Native auxiliary targets use actual native `domcontentloaded` and `load` milestones.
+For these targets, `networkidle` navigation and `waitForLoadState('networkidle')`
+require the load milestone followed by 500 ms without target-owned navigation,
+request-body work, or native network activity. Activity in another Page does not
+reset this target's quiet interval. Closed targets and unavailable native evidence
+reject rather than report idle. Ordinary legacy-root hydration retains its
+existing `networkidle` behavior.
 
 ## Response-size budget
 
@@ -179,7 +187,7 @@ for lifetime, inheritance and surface contracts; the enabled-mode limits above r
 | `setContent` | ⚠️ | Native host replacement preserves the Window, document, prototypes, bindings, and document listeners; parser scripts retain CSP admission and resource/load scheduling. Supports `load`, `domcontentloaded`, and `networkidle` waits with deadlines. Compatibility mode is retained; guest `document.open/write/close` remains unsupported. |
 | `storageState`, `addCookies`, `context`, `request` | ✅ | |
 | `waitForLoadState`, `waitForTimeout`, `waitForURL`, `waitForSelector`, `waitForFunction`, `waitForResponse`, `waitForRequest`, `waitForNavigation`, `waitForEvent` | ⚠️ | `waitForLoadState('load'\|'domcontentloaded'\|'networkidle')` all hydrate the SPA (one "settled" tier). `waitForResponse` / `waitForRequest` short-circuit on the native-log drain (#218/#222); their timeout precedence is explicit option, page default, context default / configured `actionTimeout`, then 30s (`0` disables the timeout). `waitForNavigation` polls for a URL change. `waitForEvent` handles `'response'/'request'/'requestfinished'/'download'`. `waitForSelector` checks the current snapshot. `waitForURL` and `waitForFunction` drain/poll a live session. No browser event loop. |
-| `on`, `once`, `off`, `addListener`, `removeListener` | ⚠️ | Registry; lifecycle events fire, and captured live fetch/XHR request/response events are emitted when drained. Console events expose type, text, source location and live argument handles. Native dialogs remain unsupported. |
+| `on`, `once`, `off`, `addListener`, `removeListener` | ⚠️ | Registry; lifecycle events fire, and captured live fetch/XHR request/response events are emitted when drained. Console events expose type, text, source location and live argument handles. `alert`, `confirm`, and `prompt` emit a Dialog with actual Page ownership; accept/dismiss resumes the paused native handler. No-listener dialogs auto-dismiss. Page/context listeners apply before initial scripts; close cancels pending dialogs. Native beforeunload dialogs remain unsupported. |
 | `mainFrame`, `frame`, `frames`, `frameLocator` | ✅ | `mainFrame` returns the host page (the page implements the Frame surface). `frames()` retains nested native frame identity and detach state; `frame(name)` / `frame({name,url})` find a child; `frameLocator('iframe[...]')` scopes the locator chain to the child document. Live hydration loads src/srcdoc frames; snapshot reads reflect the last drain. |
 | `viewportSize`, `setViewportSize` | ✅ | Stored, and the viewport now drives `page.screenshot()` layout width/height. |
 | `setDefaultTimeout`, `setDefaultNavigationTimeout` | ⚠️ | The general default applies to request/response waits; navigation defaults configure navigation deadlines. Other action deadlines remain partial. |

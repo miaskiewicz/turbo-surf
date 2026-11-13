@@ -20,6 +20,8 @@ pub struct NetworkEventLog {
     disposals: Arc<Mutex<Vec<u32>>>,
     lost: Arc<AtomicBool>,
     cancellations: Arc<Mutex<Vec<CancellationOwner>>>,
+    activity: crate::network_activity::NetworkActivity,
+    dialogs: crate::DialogBroker,
 }
 pub(crate) struct NetworkWorldGuard(NetworkEventLog);
 impl Drop for NetworkWorldGuard {
@@ -30,6 +32,37 @@ impl Drop for NetworkWorldGuard {
     }
 }
 impl NetworkEventLog {
+    pub(crate) fn register_network_context(&self, context: u32, target: &str) {
+        self.activity.register_context(context, target);
+    }
+    pub(crate) fn begin_context_request(
+        &self,
+        context: u32,
+    ) -> crate::network_activity::RequestActivity {
+        self.activity.begin_context(context)
+    }
+    pub(crate) fn begin_page_request(
+        &self,
+        target: Option<&str>,
+    ) -> crate::network_activity::RequestActivity {
+        self.activity.begin(target)
+    }
+    pub(crate) fn begin_page_navigation(
+        &self,
+        target: &str,
+    ) -> crate::network_activity::RequestActivity {
+        self.activity.begin_navigation(target)
+    }
+    /// Read host-owned target activity without entering or waking a V8 isolate.
+    pub fn target_network_state(&self, target: &str) -> serde_json::Value {
+        let state = self.activity.snapshot(target);
+        serde_json::json!({"pendingRequests":state.requests, "pendingNavigation":state.navigation,
+            "revision":state.revision, "error":state.error})
+    }
+
+    pub fn dialogs(&self) -> crate::DialogBroker {
+        self.dialogs.clone()
+    }
     pub(crate) fn retain_host_bodies(&self) {
         self.host_bodies.store(true, Ordering::Release);
     }
@@ -184,6 +217,7 @@ impl NetworkEventLog {
         self.closed.load(Ordering::Acquire)
     }
     pub fn close(&self) {
+        self.dialogs.close();
         self.closed.store(true, Ordering::Release);
         self.wake();
         for cancel in self

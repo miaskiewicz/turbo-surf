@@ -14,6 +14,8 @@ struct Payload {
 }
 
 pub(super) struct Pending {
+    pub target: Option<u64>,
+    pub activity: Option<crate::network_activity::RequestActivity>,
     pub plan: form_navigation::Submission,
     pub source: String,
     pub user_activation: bool,
@@ -228,7 +230,16 @@ fn navigate<'s>(
     let policy = handle.policy.borrow();
     // A later submission replaces the earlier pending navigation before any wire IO.
     let state = JsRuntime::op_state_from(scope);
+    let target = auxiliary_pages::top_level_identity(scope, navigable).map(|id| id.0);
+    let activity = target.map(|target| {
+        state
+            .borrow()
+            .borrow::<NetworkLog>()
+            .begin_page_navigation(&target.to_string())
+    });
     state.borrow_mut().borrow_mut::<Queue>().0 = Some(Pending {
+        target,
+        activity,
         plan,
         source,
         user_activation: host_user_activation(context),
@@ -695,6 +706,19 @@ impl PageSession {
             let Some(pending) = pending else {
                 return Ok(());
             };
+            if self
+                .rt
+                .op_state()
+                .borrow()
+                .borrow::<auxiliary_pages::Pages>()
+                .enabled
+            {
+                let target = pending
+                    .target
+                    .ok_or("Form navigation has no native owned Page identity")?;
+                self.navigate_form_target(target, pending).await?;
+                continue;
+            }
             let (jar, ua, hints, storage, init_script) = {
                 let state = self.rt.op_state();
                 let state = state.borrow();
@@ -779,6 +803,17 @@ impl PageSession {
                 .clone();
             let network = self.network_event_log();
             network.push(serde_json::json!({"kind":"navigation","initiator":"form","url":pending.plan.url,"final_url":response.final_url,"status":response.status,"method":pending.plan.method,"response_received":true}));
+            let auxiliary = {
+                let state = self.rt.op_state();
+                let state = state.borrow();
+                let pages = state.borrow::<auxiliary_pages::Pages>();
+                AuxiliaryHostServices {
+                    bootstrap: pages.bootstrap.clone(),
+                    root_bootstrap: pages.root_bootstrap.clone(),
+                    events: pages.events.clone(),
+                    policy: pages.policy,
+                }
+            };
             let mut next = PageSession::open_with_document_response_unfollowed(
                 &response.html,
                 &response.final_url,
@@ -794,6 +829,7 @@ impl PageSession {
                 self.options,
                 &engine_init_script,
                 Some(network),
+                auxiliary,
             )
             .await?;
             next.navigation_count = self

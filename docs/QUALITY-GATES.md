@@ -98,18 +98,17 @@ value as tests land; never lower one to pass a change.
   `excluded` in `rust/coverage-floors.json`): the Node and Python bindings. Their code runs
   only inside `node` (the Playwright shim and detection suites) and `python` (the wheel
   tests) processes, which tarpaulin does not instrument, and they have no Rust tests.
-- **`turbo-surf-render/src/window_proxy.rs`, `frame_location.rs`, `frame_ancestors.rs`,
-  `code_generation.rs`, `frame_modules.rs`** (`exclude-files`; `stock_engine.rs` holds their
-  stock-SDK stand-ins): compiled only under `cfg(turbo_surf_native_proxy)`, which
-  `turbo-surf-render/build.rs` sets for `TURBO_SURF_ENGINE=154|155`. That engine is a V8
-  compiled from source at a pinned Chromium revision (`harness/detection/engine-154`,
-  `engine-155`: network checkout, the Chromium toolchain, several GB of caches and hours of
-  build on macOS arm64); no prebuilt artifact is published, so CI cannot build it and the
-  default build has no lines to cover in these files. They are gated in that configuration
-  instead: every engine build run by the helper executes the native WindowProxy/security
-  regressions and the frame suites (`tests/frame_modules.rs`, `iframe_default_layout.rs`,
-  `sandbox_forms.rs` and the `cfg(turbo_surf_native_proxy)` cases elsewhere) before it is
-  accepted.
+- **`turbo-surf-render/src/code_generation.rs`, `frame_modules.rs`**
+  (`exclude-files`; `stock_engine.rs` holds their stock-SDK stand-ins): compiled only
+  under `cfg(turbo_surf_native_proxy)`, which `turbo-surf-render/build.rs` sets for
+  `TURBO_SURF_ENGINE=154|155`. Those source-built SDK profiles require their own
+  native code-generation and frame-module gates before acceptance.
+
+`window_proxy.rs`, `frame_location.rs` and `frame_ancestors.rs` are compiled by the
+v0.8.4 default popup engine and are included in its line coverage. Their earlier
+SDK-only exclusions no longer apply. Retain the measured source and feature graph
+with each report; historical measurements below do not establish coverage for the
+new shared paths.
 
 ### Native-engine render coverage (manual, not in CI)
 

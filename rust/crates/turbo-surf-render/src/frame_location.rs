@@ -34,6 +34,43 @@ pub(super) fn navigate<'s>(
     navigate_kind(scope, window, value, false, false);
 }
 
+fn supported_navigation_scheme(url: &ModuleSpecifier) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        || (url.scheme() == "about" && url.as_str() == "about:blank")
+}
+
+fn queue_auxiliary_navigation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+    url: &ModuleSpecifier,
+    replace: bool,
+) -> bool {
+    if !JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .enabled
+    {
+        return false;
+    }
+    use turbo_dom_browser_env::host_internals::auxiliary_context_identity;
+    let (Some(target), Some(source_id)) = (
+        auxiliary_context_identity(target),
+        auxiliary_context_identity(source),
+    ) else {
+        return false;
+    };
+    auxiliary_pages::queue_navigation(
+        scope,
+        target.id,
+        source_id.id,
+        source,
+        url.to_string(),
+        replace,
+    );
+    true
+}
+
 fn navigate_kind<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
@@ -44,53 +81,15 @@ fn navigate_kind<'s>(
     let Some(text) = value.to_string(scope) else {
         return;
     };
-    let source = scope.get_entered_or_microtask_context();
+    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let source = v8::Local::new(scope, source);
     let Some(target) = window.get_creation_context(scope) else {
         return;
     };
     if target.get_slot::<FrameRetired>().is_some() {
         return;
     }
-    // Sandboxing constrains even same-origin descendants; origin permission
-    // cannot grant a sandboxed frame authority over the top-level document.
-    if crate::runtime::sandbox_blocks_top_navigation(source, target) {
-        deny(scope);
-        return;
-    }
-    let mut ancestor = target;
-    let mut allowed = source
-        .get_security_token(scope)
-        .strict_equals(target.get_security_token(scope));
-    if !allowed
-        && target.get_slot::<FrameParent>().is_none()
-        && source.get_slot::<FrameSandbox>().is_some_and(|flags| {
-            flags.top_navigation_without_activation_permitted
-                && !flags.top_navigation_without_activation_blocked
-        })
-    {
-        let mut ancestor = source;
-        while let Some(parent) = ancestor.get_slot::<FrameParent>() {
-            let Some(parent) = parent.0.to_local(scope) else {
-                break;
-            };
-            ancestor = parent;
-            if ancestor == target {
-                allowed = true;
-                break;
-            }
-        }
-    }
-    while !allowed {
-        let Some(parent) = ancestor.get_slot::<FrameParent>() else {
-            break;
-        };
-        let Some(parent) = parent.0.to_local(scope) else {
-            break;
-        };
-        ancestor = parent;
-        allowed = ancestor == source;
-    }
-    if !allowed {
+    if !navigation_allowed(scope, source, target) {
         deny(scope);
         return;
     }
@@ -114,14 +113,15 @@ fn navigate_kind<'s>(
         named_exception(scope, "Invalid navigation URL", "SyntaxError");
         return;
     };
-    if !matches!(url.scheme(), "http" | "https" | "about")
-        || (url.scheme() == "about" && url.as_str() != "about:blank")
-    {
+    if !supported_navigation_scheme(&url) {
         named_exception(
             scope,
             "This navigation scheme is not supported",
             "NotSupportedError",
         );
+        return;
+    }
+    if queue_auxiliary_navigation(scope, source, target, &url, replace || reload) {
         return;
     }
     driver_sync::changed(&mut JsRuntime::op_state_from(scope).borrow_mut());
@@ -177,6 +177,106 @@ fn navigate_kind<'s>(
         undefined.into(),
         &[host.into(), url.into(), source_url.into()],
     );
+}
+
+fn has_context_ancestor<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+    expected: v8::Local<'s, v8::Context>,
+) -> bool {
+    while let Some(parent) = context.get_slot::<FrameParent>() {
+        let Some(parent) = parent.0.to_local(scope) else {
+            break;
+        };
+        context = parent;
+        if context == expected {
+            return true;
+        }
+    }
+    false
+}
+
+fn top_navigation_permitted(
+    source: v8::Local<v8::Context>,
+    target: v8::Local<v8::Context>,
+) -> bool {
+    target.get_slot::<FrameParent>().is_none()
+        && source.get_slot::<FrameSandbox>().is_some_and(|flags| {
+            flags.top_navigation_without_activation_permitted
+                && !flags.top_navigation_without_activation_blocked
+        })
+}
+
+fn navigation_allowed<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+) -> bool {
+    // Sandboxing constrains even same-origin descendants; origin permission
+    // cannot grant a sandboxed frame authority over the top-level document.
+    if crate::runtime::sandbox_blocks_top_navigation(source, target) {
+        return false;
+    }
+    if source
+        .get_security_token(scope)
+        .strict_equals(target.get_security_token(scope))
+    {
+        return true;
+    }
+    if top_navigation_permitted(source, target) && has_context_ancestor(scope, source, target) {
+        return true;
+    }
+    has_context_ancestor(scope, target, source) || opener_navigation_related(scope, source, target)
+}
+
+fn opener_navigation_related<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+) -> bool {
+    use turbo_dom_browser_env::host_internals::auxiliary_context_identity;
+    let (Some(source_id), Some(target_id)) = (
+        auxiliary_context_identity(source),
+        auxiliary_context_identity(target),
+    ) else {
+        return false;
+    };
+    if source_id.closed || target_id.closed || source.get_slot::<FrameRetired>().is_some() {
+        return false;
+    }
+    // Only the producer's current opener links confer cross-origin navigation
+    // authority. Immutable creation metadata must not revive a severed opener.
+    opener_chain_contains(scope, target, source_id.id)
+        || opener_chain_contains(scope, source, target_id.id)
+}
+
+fn opener_chain_contains<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+    expected: turbo_dom_browser_env::host_internals::AuxiliaryContextId,
+) -> bool {
+    use turbo_dom_browser_env::host_internals::{
+        auxiliary_context_identity, auxiliary_context_opener,
+    };
+    for _ in 0..64 {
+        let Some(opener) = auxiliary_context_opener(scope, context) else {
+            return false;
+        };
+        let Some(owner) = opener.get_creation_context(scope) else {
+            return false;
+        };
+        let Some(identity) = auxiliary_context_identity(owner) else {
+            return false;
+        };
+        if identity.closed {
+            return false;
+        }
+        if identity.id == expected {
+            return true;
+        }
+        context = owner;
+    }
+    false
 }
 
 pub(super) fn window_set<'s>(
@@ -482,7 +582,7 @@ fn cross_set<'s>(
     name: v8::Local<'s, v8::Name>,
     value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    mut result: v8::ReturnValue<v8::Boolean>,
+    mut result: v8::ReturnValue<()>,
 ) -> v8::Intercepted {
     if !name.is_symbol() && name.to_rust_string_lossy(scope) == "href" {
         if let Some(state) = object_state(scope, args.holder()) {
@@ -825,8 +925,8 @@ pub(super) fn get<'s>(
         .and_then(|state| state.object.to_local(scope))
 }
 
-pub(super) fn installed(scope: &mut v8::PinScope) -> bool {
-    scope.get_current_context().get_slot::<State>().is_some()
+pub(super) fn installed(context: v8::Local<v8::Context>) -> bool {
+    context.get_slot::<State>().is_some()
 }
 pub(super) fn seed(scope: &mut v8::PinScope, url: &str) {
     if let Some(state) = scope.get_current_context().get_slot::<State>() {

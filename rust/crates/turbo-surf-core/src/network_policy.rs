@@ -41,18 +41,23 @@ impl Policy {
     }
 }
 
+fn validate_origin_entry(value: &str) -> Result<(), ()> {
+    let (_, authority) = value.split_once("://").ok_or(())?;
+    if value.trim() != value
+        || value.chars().any(char::is_control)
+        || value.contains('\\')
+        || authority
+            .find('/')
+            .is_some_and(|index| &authority[index..] != "/")
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
 fn origin(value: &str, entry: bool) -> Result<String, ()> {
     if entry {
-        let (_, authority) = value.split_once("://").ok_or(())?;
-        if value.trim() != value
-            || value.chars().any(char::is_control)
-            || value.contains('\\')
-            || authority
-                .find('/')
-                .is_some_and(|index| &authority[index..] != "/")
-        {
-            return Err(());
-        }
+        validate_origin_entry(value)?;
     }
     let url = url::Url::parse(value).map_err(|_| ())?;
     let valid = matches!(url.scheme(), "http" | "https" | "ws" | "wss")

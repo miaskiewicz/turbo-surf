@@ -9,3 +9,11 @@ test("experimental SDK workspaces preserve production Cargo locks and current so
     { stdio: "pipe", timeout: 30000 },
   );
 });
+
+test("SDK WindowProxy compatibility verifies source identity before exposing a new alias", () => {
+  execFileSync(
+    "python3",
+    [fileURLToPath(new URL("./engine-154/test_window_proxy_compat.py", import.meta.url))],
+    { stdio: "pipe", timeout: 30000 },
+  );
+});

@@ -13,27 +13,45 @@
 //! Isolate-owned cleanup disposes native handles before V8 invalidation, including
 //! cached runtimes and independent sessions; an entry point never resets its peer.
 
-#[cfg(turbo_surf_native_proxy)]
 #[path = "window_proxy.rs"]
 mod window_proxy;
 
+#[path = "auxiliary_host.rs"]
+mod auxiliary_host;
+#[path = "auxiliary_navigation.rs"]
+mod auxiliary_navigation;
+#[path = "auxiliary_policy.rs"]
+mod auxiliary_policy;
+#[path = "auxiliary_storage.rs"]
+mod auxiliary_storage;
+pub use auxiliary_policy::AuxiliaryResourcePolicy;
+#[path = "auxiliary_pages.rs"]
+mod auxiliary_pages;
+#[path = "background_work.rs"]
+mod background_work;
 #[cfg(turbo_surf_native_proxy)]
 #[path = "code_generation.rs"]
 mod code_generation;
+#[path = "dialog_ops.rs"]
+mod dialog_ops;
 #[path = "driver_sync.rs"]
 mod driver_sync;
+pub use auxiliary_pages::{
+    AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryHostServices, AuxiliaryPageEvent,
+    AuxiliaryPageEventLog, AuxiliaryPageInfo,
+};
 
 #[cfg(turbo_surf_native_proxy)]
 #[path = "frame_modules.rs"]
 mod frame_modules;
 
-// The stock SDK has no native WindowProxy, per-frame module loader or code-generation
-// callback: same-named stand-ins keep every call site unconditional.
+// Per-frame module loading and code-generation admission remain profile capabilities.
+// WindowProxy/Location host services use the producer native ABI in every profile.
 #[cfg(not(turbo_surf_native_proxy))]
 #[path = "stock_engine.rs"]
 mod stock_engine;
 #[cfg(not(turbo_surf_native_proxy))]
-use stock_engine::{code_generation, frame_modules, window_proxy};
+use stock_engine::{code_generation, frame_modules};
 
 use frame_modules::op_frame_module;
 
@@ -186,6 +204,7 @@ impl Drop for OwnedRuntime {
 /// ES modules) hydrates. Carries the page base + shared cookie jar so module fetches
 /// are same-origin + session-authenticated like page fetches.
 struct NetModuleLoader {
+    network: ModuleNetworkLog,
     max_resource_bytes: Option<usize>,
     base: String,
     source: String,
@@ -1970,7 +1989,9 @@ impl ModuleLoader for NetModuleLoader {
         );
         let blob_store = self.blob_store.clone();
         let blob_key = blob_urls::module_key(&self.source, opaque_origin, &self.csp);
+        let activity = self.network.0.borrow().begin_context_request(self.csp.id);
         ModuleLoadResponse::Async(Box::pin(async move {
+            let _activity = activity;
             let mut local = jar.borrow().fork_for_request();
             let mut headers = context_headers;
             if !ua.is_empty() {
@@ -2109,23 +2130,55 @@ struct FetchOut {
 }
 
 type NetworkLog = crate::NetworkEventLog;
+#[derive(Clone)]
+struct ModuleNetworkLog(Rc<RefCell<NetworkLog>>);
 
-#[op2]
-fn op_page_diagnostic(state: &mut OpState, #[serde] entry: serde_json::Value) {
-    let log = state.borrow_mut::<NetworkLog>();
-    log.push(entry);
+#[op2(reentrant)]
+fn op_page_diagnostic(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    owner: v8::Local<v8::Object>,
+    #[serde] mut entry: serde_json::Value,
+) {
+    let Some(context) = owner.get_creation_context(scope) else {
+        return;
+    };
+    if context.get_slot::<FrameRetired>().is_some() {
+        return;
+    }
+    entry["context"] = serde_json::json!({"frame":request_frame_metadata(scope, context, None)});
+    state.borrow::<NetworkLog>().push(entry);
 }
 
-#[op2]
+#[op2(reentrant)]
 fn op_console_message(
     scope: &mut v8::PinScope,
     state: &mut OpState,
-    #[serde] entry: serde_json::Value,
+    owner: v8::Local<v8::Object>,
+    #[serde] mut entry: serde_json::Value,
 ) {
+    let Some(context) = owner.get_creation_context(scope) else {
+        return;
+    };
+    if context.get_slot::<FrameRetired>().is_some() {
+        return;
+    }
+    entry["context"] = serde_json::json!({"frame":request_frame_metadata(scope, context, None)});
     let log = state.borrow::<NetworkLog>().clone();
     log.push(entry);
     for id in log.take_disposals() {
         crate::remote_handles::dispose(scope, id);
+    }
+}
+
+#[op2(fast, reentrant)]
+fn op_page_lifecycle(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    #[string] phase: &str,
+) {
+    if let Some(context) = document.get_creation_context(scope) {
+        auxiliary_pages::lifecycle(scope, context, phase);
     }
 }
 
@@ -2184,12 +2237,14 @@ fn op_queue_classic_script<'s>(
     {
         return Err(JsErrorBox::generic("script context is not same-origin"));
     }
+    let caller = v8::Global::new(scope, caller);
+    let caller_context = v8::Local::new(scope, &caller);
+    let scope = &mut v8::ContextScope::new(scope, caller_context);
     let resolver = v8::PromiseResolver::new(scope)
         .ok_or_else(|| JsErrorBox::generic("script completion allocation failed"))?;
     let promise = resolver.get_promise(scope);
     let element = (!in_shadow_tree).then(|| v8::Global::new(scope, element));
     let context = v8::Global::new(scope, context);
-    let caller = v8::Global::new(scope, caller);
     let queue = state.borrow_mut::<ClassicScripts>();
     let located = if inline && !code.is_empty() {
         if let Some((start, _)) = queue
@@ -2844,6 +2899,8 @@ struct ParsedFetchBody {
 pub(super) struct RequestFrameMetadata {
     context_id: u32,
     path: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    page_id: Option<String>,
 }
 
 pub(super) fn request_frame_metadata<'s>(
@@ -2859,6 +2916,7 @@ pub(super) fn request_frame_metadata<'s>(
         });
     }
     RequestFrameMetadata {
+        page_id: auxiliary_pages::top_level_identity(scope, context).map(|id| id.0.to_string()),
         context_id: context
             .get_slot::<CspHandle>()
             .map_or(0, |handle| handle.id),
@@ -2921,6 +2979,7 @@ impl FetchEventContext {
                     .and_then(serde_json::Value::as_u64)
                     .unwrap_or_default() as u32,
                 path: None,
+                page_id: None,
             });
         Self {
             frame,
@@ -4035,6 +4094,10 @@ async fn op_load_image(
     csp: u32,
     #[string] context_json: String,
 ) -> ImageOut {
+    let _activity = state
+        .borrow()
+        .borrow::<NetworkLog>()
+        .begin_context_request(csp);
     let (base, jar, ua, hints) = {
         let state = state.borrow();
         (
@@ -4222,6 +4285,7 @@ fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32, Opt
 #[derive(Default)]
 struct FrameContextMarker;
 struct FrameDocumentUrl(String);
+struct AuxiliaryFallbackBase(String);
 struct FrameDocumentLocation(String);
 struct FrameDocumentSourceUrl(String);
 struct FrameDepth(u32);
@@ -4241,6 +4305,8 @@ struct FrameSandbox {
     storage_access_blocked: bool,
     top_navigation_without_activation_blocked: bool,
     forms_blocked: bool,
+    popups_blocked: bool,
+    modals_blocked: bool,
     /// The sandboxed pointer lock browsing context flag (no `allow-pointer-lock`).
     pointer_lock_blocked: bool,
     top_navigation_without_activation_permitted: bool,
@@ -4257,6 +4323,8 @@ impl FrameSandbox {
             self.origin_restricted |= origin;
             self.storage_access_blocked |= policy.blocks_storage_access();
             self.forms_blocked |= policy.blocks_form_submission();
+            self.popups_blocked |= policy.blocks_auxiliary_open();
+            self.modals_blocked |= policy.blocks_modal_dialogs();
             self.pointer_lock_blocked |= policy.blocks_pointer_lock();
             self.top_navigation_without_activation_blocked |=
                 policy.blocks_top_navigation_without_activation();
@@ -4278,6 +4346,8 @@ impl FrameSandbox {
             scripts_blocked: inherited.scripts_blocked,
             storage_access_blocked: inherited.storage_access_blocked,
             forms_blocked: inherited.forms_blocked,
+            popups_blocked: inherited.popups_blocked,
+            modals_blocked: inherited.modals_blocked,
             pointer_lock_blocked: inherited.pointer_lock_blocked,
             top_navigation_without_activation_blocked: inherited
                 .top_navigation_without_activation_blocked,
@@ -4289,6 +4359,8 @@ impl FrameSandbox {
             flags.document_domain_blocked = true;
             let tokens = attribute.to_ascii_lowercase();
             let tokens = tokens.split_ascii_whitespace().collect::<Vec<_>>();
+            flags.popups_blocked |= !tokens.contains(&"allow-popups");
+            flags.modals_blocked |= !tokens.contains(&"allow-modals");
             flags.opaque |= !tokens.contains(&"allow-same-origin");
             flags.origin_restricted |= !tokens.contains(&"allow-same-origin");
             flags.scripts_blocked |= !tokens.contains(&"allow-scripts");
@@ -4693,14 +4765,7 @@ fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::In
 
 fn window_timer_contexts(rt: &JsRuntime) -> Vec<v8::Global<v8::Context>> {
     let mut contexts = vec![rt.main_context()];
-    contexts.extend(
-        rt.op_state()
-            .borrow()
-            .borrow::<FrameContexts>()
-            .contexts
-            .iter()
-            .cloned(),
-    );
+    contexts.extend(secondary_window_contexts(&rt.op_state().borrow()));
     contexts
 }
 
@@ -5234,20 +5299,14 @@ fn op_shim_binding_scripts(
 }
 
 fn run_frame_init_script(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
-    let engine_source = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .engine_init_script
-        .clone();
+    let context = scope.get_current_context();
+    let bootstrap = auxiliary_pages::bootstrap_for_context(scope, context);
+    let engine_source = bootstrap.engine_init_script;
     if !engine_source.is_empty() {
         crate::browser_env::run_engine_script(scope, &engine_source)
             .ok_or_else(|| JsErrorBox::generic("frame driver init script failed"))?;
     }
-    let source = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .init_script
-        .clone();
+    let source = bootstrap.init_script;
     if source.is_empty() {
         return Ok(());
     }
@@ -5894,6 +5953,7 @@ fn queue_window_message<'s>(
 /// a struct beats a 9-arg function for readability.
 struct FrameDocumentInstall<'s, 'a> {
     context: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
     parent: v8::Local<'s, v8::Context>,
     parent_window: v8::Local<'s, v8::Object>,
     host: v8::Local<'s, v8::Object>,
@@ -5956,6 +6016,7 @@ fn finish_frame_document_install<'s>(
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     let FrameDocumentInstall {
         context,
+        previous,
         parent,
         parent_window,
         host,
@@ -5986,32 +6047,21 @@ fn finish_frame_document_install<'s>(
     let core = v8::Local::new(scope, core);
 
     install_frame_document_location(scope, global, url, metadata);
-    let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
-    context.set_slot(Rc::new(BootstrapDepth(depth)));
-    install_frame_environment_marker(scope, context)?;
-    install_environment(scope, core).map_err(JsErrorBox::generic)?;
-    let secure = secure_context(scope);
-    let crypto_core = core
-        .to_object(scope)
-        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
-    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
-    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    if parent
-        .remove_slot::<FailFrameInitializationForTesting>()
-        .is_some()
-    {
-        parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
-        return Err(JsErrorBox::generic("injected frame initialization failure"));
-    }
-    window_proxy::capture_exception(scope);
-    install_frame_environment_marker(scope, context)?;
-    metadata["base"] = serde_json::Value::String(document_base);
     let metadata_location = metadata
         .get("location")
         .and_then(|value| value.as_str())
         .unwrap_or("about:blank")
         .to_string();
+    window_proxy::install_location(scope, &metadata_location);
+    let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
+    context.set_slot(Rc::new(BootstrapDepth(depth)));
+    install_frame_environment_marker(scope, context)?;
+    install_environment(scope, core).map_err(JsErrorBox::generic)?;
+    install_frame_native_backends(scope, core)?;
+    check_frame_initialization_failure(parent)?;
+    window_proxy::capture_exception(scope);
+    install_frame_environment_marker(scope, context)?;
+    metadata["base"] = serde_json::Value::String(document_base);
     let json = v8::String::new(scope, &metadata.to_string()).unwrap();
     let metadata = v8::json::parse(scope, json).unwrap();
     call_frame_helper(
@@ -6020,10 +6070,42 @@ fn finish_frame_document_install<'s>(
         &[metadata, parent_window.into(), host.into()],
     )
     .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
-    window_proxy::install_location(scope, &metadata_location);
     crate::browser_env::finish_key_order(scope);
+    auxiliary_host::finish_nested_navigation(
+        scope,
+        context,
+        previous,
+        parent,
+        host,
+        &metadata_location,
+    )?;
     run_frame_init_script(scope)?;
     Ok(global)
+}
+
+fn install_frame_native_backends<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    core: v8::Local<'s, v8::Value>,
+) -> Result<(), JsErrorBox> {
+    let secure = secure_context(scope);
+    let crypto_core = core
+        .to_object(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    Ok(())
+}
+
+fn check_frame_initialization_failure(parent: v8::Local<v8::Context>) -> Result<(), JsErrorBox> {
+    if parent
+        .remove_slot::<FailFrameInitializationForTesting>()
+        .is_some()
+    {
+        parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
+        return Err(JsErrorBox::generic("injected frame initialization failure"));
+    }
+    Ok(())
 }
 
 /// Pick the right HTML installer for this frame: srcdoc uses the srcdoc path,
@@ -6373,8 +6455,7 @@ fn op_frame_set_document<'s>(
         // realm/tree. A token change on the same context would turn those old
         // Function/document handles into access to the replacement origin.
         let previous = context;
-        retire_frame_tree(scope, previous);
-        let window = allocate_frame(scope, parent, Some(previous), false)?;
+        let window = replace_frame_context(scope, parent, previous)?;
         context = window.get_creation_context(scope).unwrap();
         replaced = Some(previous);
     }
@@ -6522,6 +6603,7 @@ fn op_frame_set_document<'s>(
             scope,
             FrameDocumentInstall {
                 context,
+                previous: replaced,
                 parent,
                 parent_window,
                 host,
@@ -6535,7 +6617,7 @@ fn op_frame_set_document<'s>(
     };
     let result = configure();
     if result.is_err() {
-        retire_failed_frame_tree(scope, context);
+        retire_failed_frame_navigation(scope, context, replaced);
     }
     result
 }
@@ -6731,21 +6813,22 @@ fn op_location_navigation_sandboxed(
 }
 
 #[op2(fast)]
-fn op_native_location_installed(scope: &mut v8::PinScope) -> bool {
-    #[cfg(turbo_surf_native_proxy)]
-    {
-        window_proxy::location_installed(scope)
-    }
-    #[cfg(not(turbo_surf_native_proxy))]
-    {
-        let _ = scope;
-        false
-    }
+fn op_native_location_installed(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(window_proxy::location_installed)
 }
 
 #[op2(fast)]
 fn op_native_window_proxy() -> bool {
-    cfg!(turbo_surf_native_proxy)
+    true
+}
+
+#[op2(fast)]
+fn op_producer_window_proxy(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document.get_creation_context(scope).is_some_and(|context| {
+        turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context)
+    })
 }
 
 #[op2(fast)]
@@ -6837,7 +6920,7 @@ fn op_create_frame<'s>(
 }
 
 fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'s, v8::Context>) {
-    retire_frame_tree_impl(scope, previous, true);
+    retire_frame_tree_impl(scope, previous, true, false);
 }
 
 // Failed initialization has no published document or runnable guest task. Stop
@@ -6846,14 +6929,50 @@ fn retire_failed_frame_tree<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
 ) {
-    retire_frame_tree_impl(scope, previous, false);
+    retire_frame_tree_impl(scope, previous, false, false);
+}
+
+// Navigation retires the old document and its descendants, but transfers the
+// navigating root's browsing-context identity to its replacement WindowProxy.
+fn replace_frame_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    previous: v8::Local<'s, v8::Context>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    retire_frame_tree_impl(scope, previous, true, true);
+    allocate_frame(scope, parent, Some(previous), false).inspect_err(|_| {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, previous);
+    })
+}
+
+fn retire_failed_frame_navigation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    current: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+) {
+    retire_failed_frame_tree(scope, current);
+    if let Some(previous) = previous {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, previous);
+    }
+}
+
+fn retire_frame_identity<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    preserved: Option<v8::Local<'s, v8::Context>>,
+) {
+    if preserved != Some(context) {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, context);
+    }
 }
 
 fn retire_frame_tree_impl<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
     call_helpers: bool,
+    preserve_identity: bool,
 ) {
+    let preserved = preserve_identity.then_some(previous);
     previous.set_slot(Rc::new(FrameDirectRetirement));
     let contexts = JsRuntime::op_state_from(scope)
         .borrow()
@@ -6876,10 +6995,13 @@ fn retire_frame_tree_impl<'s>(
                     crate::script_inventory::retire_frame(scope, context);
                 }
                 crate::shim_bindings::retire(context);
+                crate::remote_handles::retire_context(scope, context);
                 fetch_streams::retire_context(scope, context);
+                network_transports::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
                 blob_urls::retire_context(scope, context);
                 storage_events::retire(context);
+                retire_frame_identity(scope, context, preserved);
                 turbo_dom_browser_env::host_internals::retire_context(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
@@ -7004,10 +7126,21 @@ fn initialize_new_frame<'s>(
     let scope = &mut v8::ContextScope::new(outer, context);
     inherit_parent_csp(scope, context, parent);
     crate::browser_env::defer_key_order(scope);
-    crate::browser_env::install_independent_html(
-        scope,
-        "<!DOCTYPE html><html><head></head><body></body></html>",
-    );
+    if JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .enabled
+    {
+        turbo_dom_browser_env::host_internals::initialize_auxiliary_document(
+            scope,
+            "<!DOCTYPE html><html><head></head><body></body></html>",
+        );
+    } else {
+        crate::browser_env::install_independent_html(
+            scope,
+            "<!DOCTYPE html><html><head></head><body></body></html>",
+        );
+    }
     install_css_authorization(scope)?;
     let facts = DocumentFacts::inherited(scope, context, parent);
     install_document_facts(scope, facts);
@@ -7037,6 +7170,13 @@ fn initialize_new_frame<'s>(
     crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
     window_proxy::capture_exception(scope);
     crate::browser_env::finish_key_order(scope);
+    if turbo_dom_browser_env::host_internals::auxiliary_context_identity(parent).is_some() {
+        auxiliary_host::install_nested(scope, context, parent, "about:blank", "")
+            .map_err(JsErrorBox::generic)?;
+    }
+    if turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some() {
+        turbo_dom_browser_env::host_internals::run_auxiliary_init_scripts(scope, context);
+    }
     run_frame_init_script(scope)?;
     // Host capabilities are passed privately and never installed on the global.
     Ok(())
@@ -7097,11 +7237,7 @@ fn op_network_online(state: &mut OpState) -> bool {
 
 #[op2(nofast, reentrant)]
 fn op_sync_network_state(scope: &mut v8::PinScope) -> u32 {
-    let frames = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .contexts
-        .clone();
+    let frames = secondary_window_contexts(&JsRuntime::op_state_from(scope).borrow());
     let current = scope.get_current_context();
     let mut contexts = vec![v8::Global::new(scope, current)];
     contexts.extend(frames);
@@ -7129,12 +7265,14 @@ fn op_run_frame_timers(scope: &mut v8::PinScope) -> u32 {
     run_frame_timers(scope, 5000)
 }
 
+fn secondary_window_contexts(state: &OpState) -> Vec<v8::Global<v8::Context>> {
+    let mut contexts = state.borrow::<FrameContexts>().contexts.clone();
+    contexts.extend(auxiliary_pages::contexts(state));
+    contexts
+}
+
 fn run_frame_timers(scope: &mut v8::PinScope, max: u32) -> u32 {
-    let frames = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .contexts
-        .clone();
+    let frames = secondary_window_contexts(&JsRuntime::op_state_from(scope).borrow());
     let mut fired = 0;
     for context in frames {
         let context = v8::Local::new(scope, context);
@@ -7153,6 +7291,7 @@ fn run_frame_timers(scope: &mut v8::PinScope, max: u32) -> u32 {
 
 #[op2(fast, reentrant)]
 fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
+    let root = scope.get_current_context();
     let frames = JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<FrameContexts>()
@@ -7161,7 +7300,9 @@ fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
     let mut pending = 0;
     for context in frames {
         let context = v8::Local::new(scope, context);
-        if context.get_slot::<FrameRetired>().is_some() {
+        if context.get_slot::<FrameRetired>().is_some()
+            || !auxiliary_pages::in_target_tree(scope, context, root)
+        {
             continue;
         }
         let scope = &mut v8::ContextScope::new(scope, context);
@@ -7262,6 +7403,7 @@ fn op_queue_frame_script<'s>(
             .ok_or_else(|| JsErrorBox::generic("frame script document unavailable"))?;
         v8::Global::new(scope, document)
     };
+    let scope = &mut v8::ContextScope::new(scope, caller_local);
     let resolver = v8::PromiseResolver::new(scope)
         .ok_or_else(|| JsErrorBox::generic("frame script completion allocation failed"))?;
     let promise = resolver.get_promise(scope);
@@ -7538,6 +7680,15 @@ fn op_frame_owner_metadata(
 
 #[op2]
 #[string]
+fn op_auxiliary_fallback_base(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> String {
+    document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<AuxiliaryFallbackBase>())
+        .map_or_else(String::new, |base| base.0.clone())
+}
+
+#[op2]
+#[string]
 fn op_document_request_source(
     scope: &mut v8::PinScope,
     state: &mut OpState,
@@ -7744,6 +7895,9 @@ impl BrowserStorage {
         self.with_emulation(|options| options.animations)
     }
 
+    pub fn context_emulation_handle(&self) -> crate::ContextEmulationHandle {
+        crate::ContextEmulationHandle::new(self.4.clone())
+    }
     pub fn configure_emulation(&self, json: &str) -> Result<(), String> {
         let mut options: crate::browser_emulation::BrowserEmulation =
             serde_json::from_str(json).map_err(|e| e.to_string())?;
@@ -8039,12 +8193,11 @@ fn storage_area(
     }
     let origin = window_origin(scope, context);
     let source = if unpartitioned {
-        &origin
+        origin.clone()
     } else {
-        &state.borrow::<Base>().0
+        auxiliary_storage::site_source(scope, state, context)?
     };
-    let site =
-        turbo_surf_core::request_context::schemeful_site(source).unwrap_or_else(|| source.clone());
+    let site = turbo_surf_core::request_context::schemeful_site(&source).unwrap_or(source);
     let partition = context
         .get_slot::<CspHandle>()
         .and_then(|handle| handle.partition.clone())
@@ -8052,7 +8205,7 @@ fn storage_area(
     if !state.has::<BrowserStorage>() {
         state.put(BrowserStorage::default());
     }
-    let backing = state.borrow::<BrowserStorage>().clone();
+    let backing = auxiliary_storage::backing(scope, state, context)?;
     let key = StorageKey {
         partition,
         site,
@@ -8598,10 +8751,34 @@ fn op_route_promise_rejection(
         || miss()
 }
 
+fn register_network_activity_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) {
+    let target = auxiliary_pages::top_level_identity(scope, context);
+    let shared = JsRuntime::op_state_from(scope);
+    let state = shared.borrow();
+    let log = state.borrow::<NetworkLog>();
+    if let Some(loader) = state.try_borrow::<ModuleNetworkLog>() {
+        *loader.0.borrow_mut() = log.clone();
+    }
+    if let (Some(target), Some(csp)) = (target, context.get_slot::<CspHandle>()) {
+        log.register_network_context(csp.id, &target.0.to_string());
+    }
+}
+
 fn install_environment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Value>,
 ) -> Result<(), String> {
+    let context = scope.get_current_context();
+    register_network_activity_context(scope, context);
+    let core_object = core
+        .to_object(scope)
+        .ok_or("Native runtime core unavailable")?;
+    let core_handle = crate::context_ownership::object(scope, core_object)
+        .ok_or("Native runtime core ownership interrupted")?;
+    context.set_slot(Rc::new(RuntimeCore(core_handle)));
     crate::animation_policy::install(scope)?;
     // A navigation can be interrupted while trusted bootstrap is compiling. The
     // retained WindowProxy must never expose bootstrap-only host capabilities.
@@ -8770,6 +8947,8 @@ deno_core::extension!(
         op_window_media_state,
         op_window_message_pending,
         op_native_window_proxy,
+        op_producer_window_proxy,
+        auxiliary_host::op_auxiliary_anchor_default,
         op_native_location_installed,
         op_location_navigation_sandboxed,
         op_location_object,
@@ -8861,6 +9040,7 @@ deno_core::extension!(
         op_document_referrer,
         op_frame_referrer_policy,
         op_document_request_source,
+        op_auxiliary_fallback_base,
         op_frame_owner_metadata,
         op_frame_owner_window,
         op_document_cookie_site,
@@ -8904,7 +9084,9 @@ deno_core::extension!(
         op_shim_binding_bag,
         op_shim_binding_namespace,
         op_page_diagnostic,
+        op_page_lifecycle,
         op_console_message,
+        dialog_ops::op_dialog,
         network_transports::op_connect_allowed,
         network_transports::op_ws_open,
         network_transports::op_ws_send_text,
@@ -9198,7 +9380,7 @@ for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:
 // Deno's error builders live for the whole isolate. Register them in the main
 // realm before frame bootstrap can install crypto, so an initial iframe never
 // becomes a permanent constructor/context root in the shared native core.
-if (!__G.isFrame) {
+if (!__G.isFrame && !__G.isAuxiliary) {
   const NativeDOMException = globalThis.DOMException;
   for (const name of [
     "DataCloneError",
@@ -9578,7 +9760,7 @@ globalThis.chrome = globalThis.chrome || {
   csi: function () { return {}; },
   app: { isInstalled: false },
 };
-globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
+if (!globalThis.location) globalThis.location = { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
 // Storage areas live in the host and are keyed by the actual Window's origin.
 // Private IDs remain attached to retained Storage objects across navigation.
 const __storageApply=Reflect.apply,__storageCharCode=String.prototype.charCodeAt,__storageGetters=__recordCreate(null);
@@ -9707,6 +9889,7 @@ ops.op_storage_events_factory((key,oldValue,newValue,url,session)=>{
 
 const __pageErrorApply = Reflect.apply;
 const __pageErrorRead = Object.fromEntries(["error","message"].map(name=>[name,Object.getOwnPropertyDescriptor(ErrorEvent.prototype,name).get]));
+const __consoleDocument = globalThis.document, __consoleWindow = globalThis;
 const __consoleError = Error;
 const __consoleApply = Reflect.apply;
 const __consoleDescriptors = Object.getOwnPropertyDescriptors;
@@ -9738,8 +9921,8 @@ const __consoleLog = type => (...args) => {
  try {
   const text=args.map(__consolePreview).join(' ');
   __print(text+'\n');
-  for(const value of args) descriptors.push({id:__G.remoteHandleRetain(globalThis,value),kind:value instanceof __consoleElement?'element':'value'});
-  ops.op_console_message({event:'console',type,text,args:descriptors,location:__consoleLocation(),contextId:ops.op_csp_context(globalThis)});
+  for(const value of args) descriptors.push({id:__G.remoteHandleRetain(__consoleWindow,value),kind:value instanceof __consoleElement?'element':'value'});
+  ops.op_console_message(__consoleDocument,{event:'console',type,text,args:descriptors,location:__consoleLocation(),contextId:ops.op_csp_context(__consoleWindow)});
  }catch(error){for(const descriptor of descriptors)__G.remoteHandleDispose(descriptor.id);}
 };
 globalThis.console = {log:__consoleLog('log'),info:__consoleLog('info'),warn:__consoleLog('warning'),error:__consoleLog('error'),debug:__consoleLog('debug'),dir:__consoleLog('dir'),trace:__consoleLog('trace'),clear:__consoleLog('clear')};
@@ -10048,11 +10231,11 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
   return fired;
 };
 __G.runTimers = (max=100000) => {
-  let fired=__G.isFrame?0:ops.op_sync_network_state();
+  let fired=__G.isFrame||__G.isAuxiliary?0:ops.op_sync_network_state();
   fired+=ops.op_storage_events();
   if(fired)return fired;
   fired=ops.op_run_local_timers(__timerDocument,max);
-  if(!__G.isFrame)fired+=ops.op_run_frame_timers();
+  if(!__G.isFrame&&!__G.isAuxiliary)fired+=ops.op_run_frame_timers();
   return fired;
 };
 ops.op_set_host_capabilities({
@@ -10187,8 +10370,8 @@ if(ops.op_is_secure_context()) {
   Object.defineProperty(Document.prototype,name,{value:__documentFunction(method,name,length),writable:true,enumerable:true,configurable:true});
 }
 const __cookieAccess = () => {if (!ops.op_document_cookie_allowed(__document)) throw new DOMException("An opaque document cannot access cookies", "SecurityError");};
-__documentRuntimeState.readCookie = () => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_get(__document) : ops.op_cookie_get();};
-__documentRuntimeState.writeCookie = value => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_set(__document, value) : ops.op_cookie_set(value);};
+__documentRuntimeState.readCookie = () => {__cookieAccess();return ops.op_frame_cookie_get(__document);};
+__documentRuntimeState.writeCookie = value => {__cookieAccess();return ops.op_frame_cookie_set(__document, value);};
 __defineDocumentAccessor("cookie", state => state.readCookie(),
   (state, _receiver, value) => state.writeCookie(String(value)));
 __G.readDocumentCookie = __documentRuntimeState.readCookie;
@@ -10199,6 +10382,7 @@ ops.op_set_host_capabilities({setCurrentScript:__G.setCurrentScript});
 __defineDocumentAccessor("fonts", state => state.fonts);
 __defineDocumentAccessor("currentScript", state => state.currentScript);
 "##,
+    include_str!("dialogs.js"),
     include_str!("permissions_policy.js"),
     include_str!("permission_status.js"),
     include_str!("geolocation.js"),
@@ -11213,7 +11397,7 @@ globalThis.addEventListener("error", event => {
   const record = __errorEventState.get(event);
   const error = record ? record.error : __pageErrorApply(__pageErrorRead.error,event,[]);
   const message = record ? record.message : __pageErrorApply(__pageErrorRead.message,event,[]);
-  ops.op_page_diagnostic({event:"pageerror",name:String(error?.name || "Error"),message:String(error?.message || message),stack:String(error?.stack || "")});
+  ops.op_page_diagnostic(__document,{event:"pageerror",name:String(error?.name || "Error"),message:String(error?.message || message),stack:String(error?.stack || "")});
 });
 // PromiseRejectionEvent and the Window promise-rejection tracker (turbo-surf#103).
 // deno_core's V8 reject callback hands over unhandled rejections after the microtask
@@ -11301,7 +11485,7 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   // Only the main realm installs the shared handlers: a frame-realm closure held by
   // the core would keep a retired frame alive.
   ops.op_register_rejection_realm(realm);
-  if (!__G.isFrame) {
+  if (!__G.isFrame && !__G.isAuxiliary) {
     // Routed reports are handled here (the event, never a fatal event-loop error);
     // one no realm takes keeps deno_core's default reporting.
     __core.setUnhandledPromiseRejectionHandler((promise, reason) => ops.op_route_promise_rejection(promise, reason, false));
@@ -12166,6 +12350,7 @@ const __initialResourceScripts = ops.op_parser_scripts(__document);
 let __replacingDocumentContent = false;
 let __replacementParserPreparations = new WeakMap();
 const __replacementParserDelete = Function.prototype.call.bind(WeakMap.prototype.delete);
+__G.dispatchAnchorDefault = (_node, event) => ops.op_auxiliary_anchor_default(event);
 ops.op_set_host_capabilities({replaceDocumentContent:html=>{
   let scripts;
   __resourceDocumentGeneration++;
@@ -13178,7 +13363,7 @@ const __pendingWindowTimer = () => {
   return index>=0 && __timers[index].due<=__timerNow();
 };
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __setSize(__resourcePromises) > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
+  (!__G.isFrame && !__G.isAuxiliary && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __setSize(__resourcePromises) > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
 __G.pendingFetchCount = () => String(__pendingFetchCount);
@@ -13296,9 +13481,11 @@ __G.domSig = (() => {
       ops.op_dispatch_host_event(event, el);
     }, 0);
   };
+  // Native length/frames are read-only; same-origin indices still use the host's child table.
+  const producerFrameProperties = ops.op_producer_window_proxy(__document);
   let frameCount = globalThis.length || 0;
   for (let i = 0; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
-  globalThis.length = 0; globalThis.frames = globalThis;
+  if (!producerFrameProperties) { globalThis.length = 0; globalThis.frames = globalThis; }
   const refreshFrameTree = () => {
     const windows = ops.op_window_child_frames(__document);
     for (let i = windows.length; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
@@ -13308,7 +13495,8 @@ __G.domSig = (() => {
         configurable: true, get() { return frameWindowView(window); }
       });
     }
-    frameCount = windows.length; globalThis.length = frameCount;
+    frameCount = windows.length;
+    if (!producerFrameProperties) globalThis.length = frameCount;
   };
 
   // Compile in the child's V8 context, preserving its global lexical bindings and
@@ -13358,18 +13546,18 @@ __G.domSig = (() => {
   __G.executeFrameModule = index => {const element=__frameScriptElements[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
   // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
   __G.configureFrame = (metadata, parentWin, hostEl) => {
-    for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
+    if (!producerFrameProperties) for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
       const getter=__documentFunction(function(){if(!ops.op_surf_is_window(this))throw new __exceptionTypeError("Illegal invocation");const value=read(this);return name==="frameElement"?value:frameWindowView(value);},"get "+name,0);
       Object.defineProperty(globalThis,name,{__proto__:null,get:getter,configurable:true,enumerable:true});
     }
     __G.setDocumentReadyState("loading");
     globalThis.origin = metadata.origin;
-    location.href = metadata.location;
+    if (!ops.op_native_location_installed(__document)) location.href = metadata.location;
     __documentRuntimeState.frame = metadata;
     __documentRuntimeState.contentType = metadata.contentType || "text/html";
     __initializeDocumentBase();
     __documentRuntimeState.referrer = ops.op_document_referrer(__document);
-    globalThis.frames = globalThis;
+    if (!producerFrameProperties) globalThis.frames = globalThis;
     installFrameFactory(globalThis, document, metadata.depth + 1);
   };
   function fireFrameEvent(target, type, bubbles) {
@@ -13965,6 +14153,7 @@ __G.domSig = (() => {
     __G.performancePhase("domContentLoadedEventStart");
     lifecycleEvent(document, "DOMContentLoaded", true);
     __G.performancePhase("domContentLoadedEventEnd");
+    ops.op_page_lifecycle(__document, "domcontentloaded");
   };
   let __documentCompleted = false;
   let __contentLoadGeneration = 0;
@@ -13978,6 +14167,7 @@ __G.domSig = (() => {
     lifecycleEvent(globalThis, "load", false);
     __G.performancePhase("loadEventEnd");
     lifecycleEvent(globalThis, "pageshow");
+    ops.op_page_lifecycle(__document, "load");
   };
   ops.op_set_host_capabilities({scheduleContentLoad:()=>{const generation=__contentLoadGeneration;__resourceThen(__G.waitForDocumentResources(),()=>{if(generation===__contentLoadGeneration)dispatchDocumentComplete();});}});
   ops.op_set_host_capabilities({documentLoading:()=>{__contentLoadGeneration++;__documentCompleted=false;__G.initialLoading=true;__G.setDocumentReadyState("loading");},markDocumentInteractive:__markDocumentInteractive,dispatchDocumentInteractive,dispatchDocumentComplete});
@@ -15155,6 +15345,15 @@ fn pin_timezone() {
     });
 }
 
+// Deno supplies its template argument, but the producer constructor owns the
+// native Window layout and access checks required by canonical auxiliary roots.
+fn auxiliary_root_template<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    _template: v8::Local<'s, v8::ObjectTemplate>,
+) -> v8::Local<'s, v8::ObjectTemplate> {
+    turbo_dom_browser_env::host_internals::auxiliary_window_template(scope)
+}
+
 fn make_runtime(base: &str, cookies: &str, ua: &str) -> OwnedRuntime {
     make_runtime_with_hints(base, cookies, ua, ClientHints::default())
 }
@@ -15210,6 +15409,7 @@ fn make_runtime_with_storage_and_options(
         turbo_surf_core::request_context::origin(base).is_none(),
     ));
     let csp = CspHandle::new(base, &[], "");
+    let module_network = ModuleNetworkLog(Rc::new(RefCell::new(NetworkLog::default())));
     #[cfg(turbo_surf_native_proxy)]
     let module_stages = ModuleStages::default();
     let mut rt = JsRuntime::new(RuntimeOptions {
@@ -15218,7 +15418,7 @@ fn make_runtime_with_storage_and_options(
             let extension = turbo_dom::init();
             let extension = {
                 let mut extension = extension;
-                extension.global_template_middleware = Some(window_proxy::template);
+                extension.global_template_middleware = Some(auxiliary_root_template);
                 extension
             };
             let mut extensions = crate::crypto_backend::extensions();
@@ -15251,6 +15451,7 @@ fn make_runtime_with_storage_and_options(
             }
         })),
         module_loader: Some(Rc::new(NetModuleLoader {
+            network: module_network.clone(),
             max_resource_bytes: options.max_resource_bytes,
             base: base.to_string(),
             source: base.to_string(),
@@ -15277,7 +15478,6 @@ fn make_runtime_with_storage_and_options(
     // Date/Intl report the coherent zone rather than a cached host default.
     rt.v8_isolate()
         .date_time_configuration_change_notification(v8::TimeZoneDetection::Redetect);
-    #[cfg(turbo_surf_native_proxy)]
     rt.v8_isolate()
         .set_failed_access_check_callback(window_proxy::failed_access);
     // Install the JS wasm-streaming handler before we delete `Deno` from the
@@ -15317,7 +15517,8 @@ fn make_runtime_with_storage_and_options(
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put(ResourceBudget(options.max_resource_bytes));
-    let network = NetworkLog::default();
+    let network = module_network.0.borrow().clone();
+    state.put(module_network);
     state.put(network.own_world());
     state.put(network);
     state.put(driver_sync::Revision::default());
@@ -15339,6 +15540,8 @@ fn make_runtime_with_storage_and_options(
     state.put(module_stages);
     state.put(ClassicScripts::default());
     state.put(FrameContexts::default());
+    state.put(auxiliary_pages::Pages::default());
+    state.put(auxiliary_navigation::State::default());
     state.put(crate::document_facts::AgentClusters::default());
     state.put(crate::live_layout_backend::InitialViewport(
         options.viewport,
@@ -15480,7 +15683,6 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let mut scope = v8::ContextScope::new(&mut scope, context);
         set_origin_token(&mut scope, context, base);
         install_dom_csp_handle(&mut scope, context, base, html);
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::seed_location(&mut scope, base);
         let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
             let policy = handle.policy.borrow();
@@ -15488,11 +15690,7 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         });
         // Chrome's interface key order is applied once Surf's own interfaces exist too.
         crate::browser_env::defer_key_order(&mut scope);
-        if source_positions {
-            crate::browser_env::install_with_html_source_positions(&mut scope, html);
-        } else {
-            crate::browser_env::install_html(&mut scope, html);
-        }
+        auxiliary_host::install_root_document_html(&mut scope, html, source_positions);
         // Canvas `measureText` resolves `ctx.font` against the faces live layout uses
         // (turbo-dom#237); a page opened before font discovery keeps the bundled faces.
         if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {
@@ -15507,6 +15705,8 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
             .clone();
         let facts = DocumentFacts::response(&mut scope, context, base, &headers);
         install_document_facts(&mut scope, facts);
+        auxiliary_navigation::install_opener_policy(context, &headers, base);
+        auxiliary_host::install_root(&mut scope, base)?;
     }
     let origin = ModuleSpecifier::parse(base)
         .map(|url| url.origin().ascii_serialization())
@@ -15531,7 +15731,6 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         crate::audio_backend::install(scope, core)?;
         crate::geometry_backend::install(scope, core)?;
     }
-    #[cfg(turbo_surf_native_proxy)]
     {
         let context = rt.main_context();
         let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
@@ -15544,6 +15743,11 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
     {
         deno_core::scope!(scope, rt);
         crate::browser_env::finish_key_order(scope);
+        auxiliary_host::install_root(scope, base)?;
+        let context = scope.get_current_context();
+        if turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some() {
+            turbo_dom_browser_env::host_internals::run_auxiliary_init_scripts(scope, context);
+        }
     }
     Ok(())
 }
@@ -18132,6 +18336,50 @@ impl PageSession {
             options,
             engine_init_script,
             event_log,
+            AuxiliaryHostServices::default(),
+        )
+        .await?;
+        session.follow_form_navigation().await?;
+        Ok(session)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_auxiliary_services(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        engine_init_script: &str,
+        event_log: Option<crate::NetworkEventLog>,
+        auxiliary: AuxiliaryHostServices,
+    ) -> Result<Self, String> {
+        if let Some(log) = &event_log {
+            log.retain_host_bodies();
+        }
+        let mut session = Self::open_with_document_response_unfollowed(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            engine_init_script,
+            event_log,
+            auxiliary,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -18154,6 +18402,7 @@ impl PageSession {
         options: PageSessionOptions,
         engine_init_script: &str,
         event_log: Option<crate::NetworkEventLog>,
+        auxiliary: AuxiliaryHostServices,
     ) -> Result<Self, String> {
         let options = PageSessionOptions {
             animation_policy: Some(
@@ -18180,6 +18429,37 @@ impl PageSession {
             let mut state = state.borrow_mut();
             state.put(event_log.own_world());
             state.put(event_log);
+        }
+        rt.op_state()
+            .borrow_mut()
+            .borrow_mut::<auxiliary_pages::Pages>()
+            .enabled = true;
+        {
+            let state = rt.op_state();
+            let mut state = state.borrow_mut();
+            let pages = state.borrow_mut::<auxiliary_pages::Pages>();
+            pages.bootstrap = auxiliary.bootstrap;
+            pages.root_bootstrap = auxiliary.root_bootstrap;
+            pages.events = auxiliary.events;
+            pages.policy = auxiliary.policy;
+            pages.events.set_limit(auxiliary.policy.max_event_rows);
+        }
+        {
+            let _activation = rt.activation_key().enter();
+            deno_core::scope!(scope, rt);
+            let context = scope.get_current_context();
+            if !turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context) {
+                let state = JsRuntime::op_state_from(scope);
+                let mut state = state.borrow_mut();
+                let pages = state.borrow_mut::<auxiliary_pages::Pages>();
+                pages.enabled = false;
+                pages
+                    .events
+                    .set_capability(AuxiliaryCapability::Unsupported {
+                        reason: "The active root does not use the producer native Window template"
+                            .into(),
+                    });
+            }
         }
         user_activation::seed(&mut rt, base, activation);
         let mut script_inventory = std::env::var_os("TURBO_SURF_JS_TRACE")
@@ -18391,7 +18671,9 @@ impl PageSession {
     async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
         let key = self.rt.activation_key();
         let result = key.during(self.eval_active(script, engine)).await;
+        self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
+        self.publish_auxiliary_state();
         result
     }
 
@@ -18475,7 +18757,9 @@ impl PageSession {
         let result = key
             .during(self.eval_expression_active(expression, json, engine))
             .await;
+        self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
+        self.publish_auxiliary_state();
         result
     }
 
@@ -18532,7 +18816,9 @@ impl PageSession {
     pub async fn input(&mut self, steps: &serde_json::Value) -> Result<(), String> {
         let key = self.rt.activation_key();
         let result = key.during(self.input_active(steps)).await;
+        self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
+        self.publish_auxiliary_state();
         result
     }
 
@@ -18879,6 +19165,11 @@ impl PageSession {
     pub fn close(mut self) {
         let _activation = self.rt.activation_key().enter();
         self.script_inventory.take();
+        {
+            deno_core::scope!(scope, self.rt);
+            auxiliary_pages::close_all(scope);
+        }
+        self.auxiliary_event_log().close();
         self.closed = true;
     }
 }
@@ -18887,6 +19178,11 @@ impl Drop for PageSession {
     fn drop(&mut self) {
         let _activation = self.rt.activation_key().enter();
         self.script_inventory.take();
+        if !self.closed {
+            deno_core::scope!(scope, self.rt);
+            auxiliary_pages::close_all(scope);
+        }
+        self.auxiliary_event_log().close();
     }
 }
 

@@ -3,7 +3,7 @@
 "Headless hydration" in turbo-surf means two distinct things. Both are tracked
 here so the requirements are explicit.
 
-## Current rendering scope (v0.8.3)
+## Current rendering scope (v0.8.4 candidate)
 
 The implemented GPU bridge is described in [GPU-BRIDGE.md](../docs/GPU-BRIDGE.md).
 `gpu-metal` and `coretext` are optional consumer features, off in default shipped
@@ -23,7 +23,7 @@ ordinary JavaScript callbacks.
 ## Historical parity evidence
 
 The Google checkpoints and cohort counts below retain their recorded source,
-engine, date and outcome. They are not current v0.8.3 release acceptance receipts.
+engine, date and outcome. They are not current v0.8.4 release acceptance receipts.
 
 The historical source-pinned validation and live outcomes are recorded in
 [FINDINGS.md](../harness/detection/FINDINGS.md) and

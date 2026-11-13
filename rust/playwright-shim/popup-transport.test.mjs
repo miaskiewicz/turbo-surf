@@ -353,3 +353,17 @@ test(
       assert.equal(read(root, "return window.length"), 1);
     }),
 );
+
+test("replacement document timers join the actor's native window queue", { timeout: 10000 }, () =>
+  fixture(async ({ open, base }) => {
+    const root = await open();
+    await native.liveNavigateTarget(root, base + "timer-replacement", "push");
+    assert.equal(
+      await native.liveEvalEngineExpression(
+        root,
+        "new Promise(resolve => setTimeout(() => resolve('replacement-timer-fired'), 1))",
+      ),
+      "replacement-timer-fired",
+    );
+  }),
+);

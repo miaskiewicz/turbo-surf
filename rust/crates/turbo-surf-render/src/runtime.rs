@@ -4743,14 +4743,7 @@ fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::In
 
 fn window_timer_contexts(rt: &JsRuntime) -> Vec<v8::Global<v8::Context>> {
     let mut contexts = vec![rt.main_context()];
-    contexts.extend(
-        rt.op_state()
-            .borrow()
-            .borrow::<FrameContexts>()
-            .contexts
-            .iter()
-            .cloned(),
-    );
+    contexts.extend(secondary_window_contexts(&rt.op_state().borrow()));
     contexts
 }
 

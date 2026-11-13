@@ -5,7 +5,7 @@
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`628e3efeb6cc90e233411cc608debc9a85729dd6`. The dependency graph uses one
+`f97d31e3065b0cc222582d49c37103340ef8a76e`. The dependency graph uses one
 `turbo-dom-v8` 150.4.2 from the exact WindowProxy candidate
 `0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release

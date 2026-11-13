@@ -9,7 +9,7 @@ turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-R
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
 uses `turbo-dom`, `turbo-dom-layout`, `turbo-dom-raster` and
 `turbo-dom-browser-env` 0.8.4. The v0.8.4 candidate pins those four crates to
-`628e3efeb6cc90e233411cc608debc9a85729dd6` through the workspace
+`f97d31e3065b0cc222582d49c37103340ef8a76e` through the workspace
 `[patch.crates-io]` table. The single V8 binding is 150.4.2 at
 `0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`;
 published-release validation must use the registry graph. Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the

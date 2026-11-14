@@ -54,6 +54,8 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 ## Additional confirmed failures and investigations
 
+Baseline classification: the Enter, frame-top form and programmatic-submit cases all reproduce on byte-exact old main `6b583d98` shim plus verified registry addon `bdcebe65` (3 intended failures, no skips/cancellations, 3.442s). These are preexisting gaps, not regressions introduced by the new action candidate. All remain in scope.
+
 - [ ] **Enter-key form completion** — fresh coalesced control confirms no replacement document (1 vs 2). Action owner will use explicit interaction dispatch for keyboard actions without changing ordinary evaluate/read semantics.
 - [ ] **Frame form targeting top-level completion** — fresh coalesced frame `_top` form control confirms no replacement document (1 vs 2). Action owner assigned; preserve actual initiator/destination authority.
 - [ ] **Programmatic form background scheduling** — `Page.evaluate(form.submit)` followed by ordinary `waitForURL` produces only initial GET and times out at the original 1000ms. Action owner assigned native background scheduling; do not fix by making ordinary evaluate/read calls implicitly wait or pump unrelated work.

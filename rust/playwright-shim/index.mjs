@@ -2116,8 +2116,10 @@ class Frame {
     this._assertAttached();
     return this._parentPage._ensureLive();
   }
-  _followIntent(intent) {
-    return this._parentPage._followIntent(intent);
+  async _followIntent(intent) {
+    if (intent.action !== "navigate") return this._parentPage._followIntent(intent);
+    await this._ensureLive();
+    await this._sessionEval(`location.href = ${JSON.stringify(intent.url)}; return "OK";`);
   }
   _readEngine(script) {
     const expression = this._realmExpression(`(() => { ${script} })()`, true);

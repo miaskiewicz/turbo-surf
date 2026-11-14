@@ -39,6 +39,40 @@ fn supported_navigation_scheme(url: &ModuleSpecifier) -> bool {
         || (url.scheme() == "about" && url.as_str() == "about:blank")
 }
 
+fn navigate_fragment<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    target: v8::Local<'s, v8::Context>,
+    url: &ModuleSpecifier,
+    replace: bool,
+    reload: bool,
+) -> bool {
+    if reload || url.fragment().is_none() {
+        return false;
+    }
+    let Some(current) = window_proxy::location_url(target) else {
+        return false;
+    };
+    if current.split('#').next() != url.as_str().split('#').next() {
+        return false;
+    }
+    let Some(navigate) = host_capability(scope, target, "navigateLocation") else {
+        return false;
+    };
+    let Some(href) = v8::String::new(scope, url.as_str()) else {
+        return false;
+    };
+    let undefined = v8::undefined(scope);
+    let scope = &mut v8::ContextScope::new(scope, target);
+    let replace = v8::Boolean::new(scope, replace);
+    let reload = v8::Boolean::new(scope, false);
+    navigate.call(
+        scope,
+        undefined.into(),
+        &[href.into(), replace.into(), reload.into()],
+    );
+    true
+}
+
 fn queue_auxiliary_navigation<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     source: v8::Local<'s, v8::Context>,
@@ -46,6 +80,9 @@ fn queue_auxiliary_navigation<'s>(
     url: &ModuleSpecifier,
     replace: bool,
 ) -> bool {
+    if target.get_slot::<FrameHost>().is_some() {
+        return false;
+    }
     if !JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<auxiliary_pages::Pages>()
@@ -113,6 +150,9 @@ fn navigate_kind<'s>(
         named_exception(scope, "Invalid navigation URL", "SyntaxError");
         return;
     };
+    if navigate_fragment(scope, target, &url, replace, reload) {
+        return;
+    }
     if !supported_navigation_scheme(&url) {
         named_exception(
             scope,

@@ -16,6 +16,9 @@ branch.
 - Refresh legacy Window frame counts until the actual canonical read-only surface
   is registered, preserving iframe adoption, indexed identities and parent links.
 
+- Keep frame locator navigation in its actual child realm and handle fragment
+  history through the native Location without navigating the parent Page.
+
 - Report asynchronous host-binding collection failures to foreground callers
   without making keyboard input wait for unrelated host callback completion.
 

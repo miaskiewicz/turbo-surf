@@ -127,7 +127,7 @@
   const url = () => (nativeHref ? apply(nativeHref, location, []) : current);
   // Same-document URL updates; the native-proxy Location keeps its own copy of the URL.
   const moveTo = (href) => {
-    if (nativeHref) ops.op_location_seed(href);
+    if (nativeHref) ops.op_location_seed(__document, href);
     else current = href;
   };
   const checkLocation = (receiver) => {
@@ -240,7 +240,7 @@
     }
     // A cross-document navigation: the session driver loads the admitted URL.
     if (nativeHref) {
-      ops.op_location_seed(href);
+      ops.op_location_seed(__document, href);
     } else current = href;
     admitDocument(href, replace);
   }

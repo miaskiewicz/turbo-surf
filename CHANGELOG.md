@@ -5,6 +5,10 @@
 - Retire screenshot image bytes and retained paint scenes when a native document navigates, including same-URL replacements.
 - Reuse bounded Rust-owned current-document image bodies for native screenshots, including no-store images, without exposing opaque bytes to guest JavaScript or accepting retired image completions.
 
+- Strengthen retained-Page commit reload controls with actual document/global
+  replacement, stable native ownership and exact client requests; verify commit
+  returns before a held script completes and genuine load follows its release.
+
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision

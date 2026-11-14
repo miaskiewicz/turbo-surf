@@ -258,6 +258,7 @@ fn fetch_job(
     let ua = state.borrow::<Ua>().0.clone();
     let hints = state.borrow::<ClientHints>().clone();
     let storage = state.borrow::<BrowserStorage>().clone();
+    let auth_credentials = storage.http_credentials();
     let log = state.borrow::<NetworkLog>().clone();
     Box::pin(async move {
         let mut local = jar.borrow().fork_for_request();
@@ -320,6 +321,7 @@ fn fetch_job(
             fetch_html(
                 &navigation.url,
                 FetchOptions {
+                    http_credentials: auth_credentials.as_ref(),
                     headers,
                     method: navigation.snapshot.request.method.clone(),
                     body_bytes: navigation.snapshot.request.body.clone(),

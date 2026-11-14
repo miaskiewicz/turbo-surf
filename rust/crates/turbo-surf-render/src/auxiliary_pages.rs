@@ -274,6 +274,7 @@ pub(super) struct Pages {
     pub(super) enabled: bool,
     pub(super) bootstrap: AuxiliaryBootstrap,
     pub(super) root_bootstrap: AuxiliaryBootstrap,
+    pub(super) legacy_frame_bootstrap: bool,
     targets: BTreeMap<u64, Target>,
     pending: VecDeque<Navigation>,
     pub(super) events: AuxiliaryPageEventLog,
@@ -1206,6 +1207,30 @@ impl PageSession {
             .ok_or("Target page is closed")?;
         target.page_bootstrap = bootstrap;
         Ok(())
+    }
+}
+
+pub(super) fn update_legacy_frame_bootstrap<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    engine: &str,
+    guest: &str,
+) {
+    let context = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let context = v8::Local::new(scope, context);
+    let Some(identity) = top_level_identity(scope, context) else {
+        return;
+    };
+    let state = JsRuntime::op_state_from(scope);
+    let mut state = state.borrow_mut();
+    let pages = state.borrow_mut::<Pages>();
+    if !pages.legacy_frame_bootstrap {
+        return;
+    }
+    if let Some(target) = pages.targets.get_mut(&identity.0) {
+        target.page_bootstrap = AuxiliaryBootstrap {
+            init_script: guest.to_owned(),
+            engine_init_script: engine.to_owned(),
+        };
     }
 }
 

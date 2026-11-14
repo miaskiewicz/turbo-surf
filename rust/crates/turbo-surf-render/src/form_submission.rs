@@ -803,16 +803,19 @@ impl PageSession {
                 .clone();
             let network = self.network_event_log();
             network.push(serde_json::json!({"kind":"navigation","initiator":"form","url":pending.plan.url,"final_url":response.final_url,"status":response.status,"method":pending.plan.method,"response_received":true}));
-            let auxiliary = {
+            let (auxiliary, legacy_frame_bootstrap) = {
                 let state = self.rt.op_state();
                 let state = state.borrow();
                 let pages = state.borrow::<auxiliary_pages::Pages>();
-                AuxiliaryHostServices {
-                    bootstrap: pages.bootstrap.clone(),
-                    root_bootstrap: pages.root_bootstrap.clone(),
-                    events: pages.events.clone(),
-                    policy: pages.policy,
-                }
+                (
+                    AuxiliaryHostServices {
+                        bootstrap: pages.bootstrap.clone(),
+                        root_bootstrap: pages.root_bootstrap.clone(),
+                        events: pages.events.clone(),
+                        policy: pages.policy,
+                    },
+                    pages.legacy_frame_bootstrap,
+                )
             };
             let mut next = PageSession::open_with_document_response_unfollowed(
                 &response.html,
@@ -830,6 +833,7 @@ impl PageSession {
                 &engine_init_script,
                 Some(network),
                 auxiliary,
+                legacy_frame_bootstrap,
             )
             .await?;
             next.navigation_count = self

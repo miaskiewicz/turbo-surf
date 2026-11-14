@@ -5274,6 +5274,7 @@ fn op_shim_binding_scripts(
     #[string] guest: String,
     #[string] install: String,
 ) -> Result<(), JsErrorBox> {
+    auxiliary_pages::update_legacy_frame_bootstrap(scope, &engine, &guest);
     let contexts = {
         let state = JsRuntime::op_state_from(scope);
         let mut state = state.borrow_mut();
@@ -18338,6 +18339,7 @@ impl PageSession {
             engine_init_script,
             event_log,
             AuxiliaryHostServices::default(),
+            true,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -18381,6 +18383,7 @@ impl PageSession {
             engine_init_script,
             event_log,
             auxiliary,
+            false,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -18404,6 +18407,7 @@ impl PageSession {
         engine_init_script: &str,
         event_log: Option<crate::NetworkEventLog>,
         auxiliary: AuxiliaryHostServices,
+        legacy_frame_bootstrap: bool,
     ) -> Result<Self, String> {
         let options = PageSessionOptions {
             animation_policy: Some(
@@ -18440,7 +18444,15 @@ impl PageSession {
             let mut state = state.borrow_mut();
             let pages = state.borrow_mut::<auxiliary_pages::Pages>();
             pages.bootstrap = auxiliary.bootstrap;
-            pages.root_bootstrap = auxiliary.root_bootstrap;
+            pages.legacy_frame_bootstrap = legacy_frame_bootstrap;
+            pages.root_bootstrap = if legacy_frame_bootstrap {
+                auxiliary_pages::AuxiliaryBootstrap {
+                    init_script: init_script.to_owned(),
+                    engine_init_script: engine_init_script.to_owned(),
+                }
+            } else {
+                auxiliary.root_bootstrap
+            };
             pages.events = auxiliary.events;
             pages.policy = auxiliary.policy;
             pages.events.set_limit(auxiliary.policy.max_event_rows);

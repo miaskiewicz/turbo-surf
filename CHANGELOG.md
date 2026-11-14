@@ -234,6 +234,10 @@ branch.
 
 ### Pages, frames, and evaluation
 
+- Preserve generic Rust host bindings in current and future child realms after
+  native page registration, including late driver updates without rerunning
+  guest initialization or sharing page scripts with sibling popups.
+
 - Wait for URL changes through the configured deadline, including unlimited
   waits, without canceling requests or sibling URL waits when one wait expires
   (#497).

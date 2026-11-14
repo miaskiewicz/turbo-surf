@@ -3436,6 +3436,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         await this._waitForTargetNetworkIdle(
           this._remainingTargetIdleTimeout(opts, navigationStarted),
         );
+      if (opts.waitUntil !== "commit") this._html = native.liveSerialize(session);
       if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
       const response = this._recentResponses?.findLast(
         (value) => String(nativeResponseIds.get(value)) === String(receipt.requestId),

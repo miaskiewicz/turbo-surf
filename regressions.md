@@ -2,7 +2,7 @@
 
 Target: `release/v0.8.4`. Updated 2026-11-14.
 
-Original batch: **34 test cases (11 Rust, 23 shim)**. **27 have component proof and their fixes are merged; 7 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
+Original batch: **34 test cases (11 Rust, 23 shim)**. **29 have component proof and their fixes are merged; 5 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
 
@@ -20,12 +20,12 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | Rust | `adopted_iframe_retires_its_context_and_reinsertion_gets_a_fresh_document` | `f35933a0`; targeted proof complete, combined rerun pending |
 | [x] | Rust | `retired_iframe_document_has_no_default_view_and_keeps_its_own_metadata` | `d6ecd5a2`; targeted proof complete, combined rerun pending |
 | [x] | Rust | `same_origin_sandboxed_frames_navigate_top_only_with_allow_top_navigation` | `68e5186e`; targeted proof complete, combined rerun pending |
-| [ ] | Rust | `debugger_inventory_captures_real_eval_function_and_child_sources` | Render/module: Original ON → guest-registration-only OFF missing-eval RED → exact restore GREEN; strict/CC/fmt pass. Actual archive consumer also passes inventory + module + extension checks and strict; component `2aeb763` awaits registry-resolved adoption before merge; the five approved dependency publications and checksum checks completed successfully |
+| [x] | Rust | `debugger_inventory_captures_real_eval_function_and_child_sources` | Merged `8049cbc3`; original and critical inverse/restored pass, actual registry consumer inventory/module/extension/Node controls and strict pass; final full gates pending |
 | [x] | shim | `commit reload hydrates the new document only when requested` | `81423b6d`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `commit history document replacements retain on-demand execution` | Navigation/history: Driver promotion implementation; native proof pending |
 | [x] | shim | `aliased DOM mutations, errors, cookies and child documents stay synchronized (#297)` | `e75cc661`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `real Location navigation and same-URL reload still fetch and execute (#319)` | Navigation/history: Bounded correction plus full native history ledger/ordering now required |
-| [ ] | shim | `initial module top-level awaits can complete host fulfillment and route.fetch` | Module owner: Actual audited-archive consumer passes native 5, Node 4, original host TLA case, inspector 1 and extension identity 5 on default V8; strict/fmt/CC also pass and Node controls are registered in official test:shim. User explicitly approved the five immutable dependency publications; all five approved dependencies are published and public registry/download checksums match the independently reviewed payloads. Registry-resolved adoption is in progress. No Surf tag/release authorized |
+| [x] | shim | `initial module top-level awaits can complete host fulfillment and route.fetch` | Merged `cf51f309`; five published dependencies verified, real registry graph passes native 5, Node 4, original TLA, inventory 1, extension 5 and strict/fmt/CC; official controls registered; final full gates pending |
 | [x] | shim | `background binding collection errors remain observable` | `f1fb5c63`; targeted proof complete, combined rerun pending |
 | [x] | shim | `native tabs and navigation match the source-pinned Chrome profile control` | `ff0a767`; targeted proof complete, combined rerun pending |
 | [x] | shim | `HTTP attachments emit binary downloads without replacing the live document` | `e51c6f21`; targeted proof complete, combined rerun pending |
@@ -67,11 +67,11 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 Accounting: 34 original test cases plus 11 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
 
-- Merged with component proof: **31** (27 original + count, all, platform ownership, NAPI export).
-- Locally proven, not yet merged: **2** (module and inspector dependency adoption).
+- Merged with component proof: **33** (29 original + count, all, platform ownership, NAPI export).
+- Locally proven, not yet merged: **0** (module and inspector adoption merged).
 - Awaiting fresh-binary classification/verification: **3** detector controls.
 - Still requiring implementation or a passing fix: **9**.
-- Total pending: **14**. Total merged/done at component level: **31**. Total tracked: **45**.
+- Total pending: **12**. Total merged/done at component level: **33**. Total tracked: **45**.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

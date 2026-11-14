@@ -349,3 +349,35 @@ test("waitForURL can start before a static driver navigation", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test(
+  "initial root Location navigation loads once without bootstrap self-requests",
+  { timeout: 5000 },
+  async () => {
+    const requests = [];
+    const server = createServer((req, res) => {
+      requests.push(req.url);
+      res.end("<body>real-document</body>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const page = shim.newPage();
+    let loads = 0;
+    page.on("load", () => loads++);
+    try {
+      await page.goto(`${base}/one`, { waitUntil: "networkidle", timeout: 2000 });
+      const firstLoads = loads;
+      const loaded = page.waitForEvent("load", { timeout: 2000 });
+      loaded.catch(() => {});
+      await page.evaluate(() => location.assign("/two"));
+      await loaded;
+      assert.equal(page.url(), `${base}/two`);
+      assert.deepEqual(requests, ["/one", "/two"]);
+      assert.equal(loads, firstLoads + 1);
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);

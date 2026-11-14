@@ -22,6 +22,9 @@ branch.
 - Keep frame locator navigation in its actual child realm and handle fragment
   history through the native Location without navigating the parent Page.
 
+- Install the initial root Location before page bootstrap, so guest assign/reload
+  uses real native navigation without extra bootstrap network requests.
+
 - Report asynchronous host-binding collection failures to foreground callers
   without making keyboard input wait for unrelated host callback completion.
 

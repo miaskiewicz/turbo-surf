@@ -15708,17 +15708,18 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         install_document_facts(&mut scope, facts);
         auxiliary_navigation::install_opener_policy(context, &headers, base);
         auxiliary_host::install_root(&mut scope, base)?;
+        window_proxy::install_location(&mut scope, base);
     }
-    let origin = ModuleSpecifier::parse(base)
-        .map(|url| url.origin().ascii_serialization())
-        .unwrap_or_else(|_| "null".to_string());
     let actual_origin = {
         deno_core::scope!(scope, rt);
         let context = scope.get_current_context();
         window_origin(scope, context)
     };
-    rt.execute_script("<location>", format!("location.href = {base:?}; location.origin = {origin:?}; globalThis.origin = {actual_origin:?}"))
-        .map_err(|e| e.to_string())?;
+    rt.execute_script(
+        "<location>",
+        format!("globalThis.origin = {actual_origin:?}"),
+    )
+    .map_err(|e| e.to_string())?;
     {
         deno_core::scope!(scope, rt);
         let context = scope.get_current_context();
@@ -15739,7 +15740,6 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let context = v8::Local::new(&scope, context);
         let scope = &mut v8::ContextScope::new(&mut scope, context);
         window_proxy::capture_exception(scope);
-        window_proxy::install_location(scope, base);
     }
     {
         deno_core::scope!(scope, rt);

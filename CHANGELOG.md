@@ -13,6 +13,17 @@ branch.
 
 ### Engine and performance
 
+- Preserve actual Page ownership for intercepted responses, including opening
+  roots and children retained after opener closure; reject retired target tokens.
+- Preserve genuine cross-window message clone exceptions instead of replacing
+  them with unsupported-operation errors.
+- Recheck canonical frame surfaces during bootstrap to avoid writing read-only
+  Window properties after native admission.
+- Service navigation host bindings within the original deadline, publish content
+  lifecycle events once, preserve page-close errors and update native dialog
+  policy only when dialog listeners change. Delegate Page selector waits to the
+  locator's existing query preparation.
+
 - Retain the actual root form response in legacy Rust and MCP callers after
   native document replacement, including same-URL POST metadata and committed
   responses followed by a guest exception. Keep child target responses separate.

@@ -61,6 +61,8 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 - [ ] **NAPI all-target strict dead-code errors** — `ImageAssets`, `LiveImageAssetsTask`, and `live_image_assets` fail the lib-test strict build. Render owner assigned a meaningful integration/test fix; no lint suppression or removed capability.
 
+- [ ] **Detection trace retry, same-URL POST and delayed-consent controls** — detector completed 273 total: 258 passed, 3 failed, 12 existing feature skips, 0 cancellations (62.43s). Three native controls fail pending-Promise completion using the existing `rust/target/debug/examples/detection_trace` executable, which is independent of the pinned addon. Capture exact binary/source provenance and rebuild the example on the final graph before classification; any reproduced current-source defect remains in scope.
+
 ## Completion gates
 
 - [ ] Validate each production fix: unchanged meaningful RED → GREEN → critical fix-only OFF reproduces intended RED → byte-exact restore GREEN.

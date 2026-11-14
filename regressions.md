@@ -20,7 +20,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | Rust | `adopted_iframe_retires_its_context_and_reinsertion_gets_a_fresh_document` | `f35933a0`; targeted proof complete, combined rerun pending |
 | [x] | Rust | `retired_iframe_document_has_no_default_view_and_keeps_its_own_metadata` | `d6ecd5a2`; targeted proof complete, combined rerun pending |
 | [x] | Rust | `same_origin_sandboxed_frames_navigate_top_only_with_allow_top_navigation` | `68e5186e`; targeted proof complete, combined rerun pending |
-| [ ] | Rust | `debugger_inventory_captures_real_eval_function_and_child_sources` | Render/module: Local inspector API passes original; inverse/combined fork packaging pending |
+| [ ] | Rust | `debugger_inventory_captures_real_eval_function_and_child_sources` | Render/module: Original ON → guest-registration-only OFF missing-eval RED → exact restore GREEN; strict/CC/fmt pass. Component `2aeb763` awaits combined module/inspector dependency packaging before merge |
 | [x] | shim | `commit reload hydrates the new document only when requested` | `81423b6d`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `commit history document replacements retain on-demand execution` | Navigation/history: Driver promotion implementation; native proof pending |
 | [x] | shim | `aliased DOM mutations, errors, cookies and child documents stay synchronized (#297)` | `e75cc661`; targeted proof complete, combined rerun pending |
@@ -55,6 +55,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 ## Additional confirmed failures and investigations
 
 - [ ] **Classic-script response visibility during opening close** — confirmed script-fetch drops the core response observer: server flushes headers but facade waits for EOF. Lifecycle owner is implementing bounded forwarding with actual cancellation tests, preserving CORS/CSP/SRI and the header assertion.
+- [ ] **Child-frame click navigation (#280)** — passes its accepted component, but also fails on the older E118 addon in the locator-control replay with enumeration fix OFF. Keep exact original in the final combined rerun; no waiver.
 - [ ] **Shadow-link navigation control** — fails on the immutable older E118 addon both with and without the count fix. Preserve receipt and rerun on the combined navigation build before classifying current-source behavior.
 
 ## Completion gates

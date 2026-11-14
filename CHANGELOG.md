@@ -13,6 +13,9 @@ branch.
 
 ### Engine and performance
 
+- Report asynchronous host-binding collection failures to foreground callers
+  without making keyboard input wait for unrelated host callback completion.
+
 - Preserve actual Page ownership for intercepted responses, including opening
   roots and children retained after opener closure; reject retired target tokens.
 - Preserve genuine cross-window message clone exceptions instead of replacing

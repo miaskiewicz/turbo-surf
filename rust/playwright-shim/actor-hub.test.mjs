@@ -628,3 +628,38 @@ test("retired target metadata prevents native reads without closing live sibling
   assert.equal(f.hub.canReadTarget("200"), false);
   assert.equal(f.hub.canReadTarget("100"), true);
 });
+
+for (const failure of [new RangeError("binding collection failed"), undefined]) {
+  test(`a reentrant binding drain observes an in-flight collection rejection (${String(failure)})`, async () => {
+    const { hub } = fixture();
+    let entered, reject;
+    const started = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const collecting = new Promise((_, fail) => {
+      reject = fail;
+    });
+    hub.drain = async () => {};
+    hub.pages.set("100", {
+      _session: 1,
+      _mergedBindings: () => new Map([["binding", {}]]),
+      _takeBindingCalls: async () => {
+        entered();
+        return collecting;
+      },
+    });
+    const background = hub.drainBindings();
+    const backgroundResult = background.then(
+      () => ({ threw: false }),
+      (error) => ({ threw: true, error }),
+    );
+    await started;
+    const foreground = hub.drainBindings().then(
+      () => ({ threw: false }),
+      (error) => ({ threw: true, error }),
+    );
+    reject(failure);
+    assert.deepEqual(await backgroundResult, { threw: true, error: failure });
+    assert.deepEqual(await foreground, { threw: true, error: failure });
+  });
+}

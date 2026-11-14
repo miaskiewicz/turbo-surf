@@ -223,6 +223,7 @@ export class LiveActorHub {
   }
 
   async _takeActorBindings(state) {
+    await this.drain();
     let count = 0;
     for (const page of this._bindingPages()) {
       const handlers = page._mergedBindings();
@@ -255,7 +256,13 @@ export class LiveActorHub {
   }
 
   async _bindingStep(state, collect) {
-    const count = await this._takeActorBindings(state);
+    this.bindingCollection = this._takeActorBindings(state);
+    let count;
+    try {
+      count = await this.bindingCollection;
+    } finally {
+      this.bindingCollection = undefined;
+    }
     if (count && ++state.rounds > 100) throw new Error("Exposed binding call budget exhausted");
     if (count) state.advanced = false;
     if (!state.pending.size && !count) {
@@ -270,13 +277,15 @@ export class LiveActorHub {
   }
 
   async drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
-    if (this.bindingDrain || this.opening) return;
+    if (this.opening) return;
+    // Join queue collection, whose errors belong to every observer of that turn.
+    // Host callbacks remain independent: joining their completion would deadlock reentry.
+    if (this.bindingDrain) return this.bindingCollection;
     this.bindingDrain = true;
     const state = { pending: new Set(), changed: new Set(), advanced: false, rounds: 0 };
     try {
       while (this.active) {
         this._bindingDeadline(deadline, cancelOnTimeout);
-        await this.drain();
         if (!(await this._bindingStep(state, collect))) break;
       }
       for (const page of state.changed) if (!page._closed) await page._refreshFromSession(true);

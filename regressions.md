@@ -59,9 +59,20 @@ All additional bugs found during this work are explicitly in scope and tracked b
 - [ ] **Shadow-link default navigation** — full newer platform-addon cohort reproduces `/` instead of `/folder/next` (`shadow-locators.test.mjs:248`). Action/navigation owner investigating actual completion and target URL, with unchanged link assertions.
 - [ ] **Page.click GET form completion** — new cohort failure: returned content is the old form rather than the server response containing `q=rust` (`surface.test.mjs:515`). Action/navigation owner investigating alongside shadow-link and original same-URL screenshot form navigation.
 
-- [ ] **NAPI all-target strict dead-code errors** — `ImageAssets`, `LiveImageAssetsTask`, and `live_image_assets` fail the lib-test strict build. Render owner assigned a meaningful integration/test fix; no lint suppression or removed capability.
+- [x] **NAPI all-target strict dead-code errors** — merged `680ee757`: restored missing crate-root `live_image_assets` re-export. Test-first E0425 RED → export fix GREEN; focused task-construction unit and NAPI all-target strict pass. No lint suppression or removed capability.
 
 - [ ] **Detection trace retry, same-URL POST and delayed-consent controls** — detector completed 273 total: 258 passed, 3 failed, 12 existing feature skips, 0 cancellations (62.43s). Three native controls fail pending-Promise completion using the existing `rust/target/debug/examples/detection_trace` executable, which is independent of the pinned addon. Capture exact binary/source provenance and rebuild the example on the final graph before classification; any reproduced current-source defect remains in scope.
+
+## Current tally
+
+Accounting: 34 original test cases plus 11 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
+
+- Merged with component proof: **31** (27 original + count, all, platform ownership, NAPI export).
+- Locally proven, not yet merged: **2** (module and inspector dependency adoption).
+- Awaiting fresh-binary classification/verification: **3** detector controls.
+- Still requiring implementation or a passing fix: **9**.
+- Total pending: **14**. Total merged/done at component level: **31**. Total tracked: **45**.
+- Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates
 

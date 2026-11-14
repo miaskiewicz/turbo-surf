@@ -38,7 +38,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `history navigation honors networkidle hydration (#425)` | `d1b61ed7`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Deadline owner: Native controls 5/5 pass, but full original still FAILS: second reload times out correctly yet closes Page (line 3239). Initial timeout0 recovery passes. Typed native probe isolates Environment stage after identity commit: animation-policy installation returns false while execution is not terminating; actual native Closed event follows. Investigating policy/bootstrap ownership, no green credit |
 | [x] | shim | `viewport resize updates live layout media and only its own page (#369)` | `864b3343`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Action/navigation owner: Full original rerun fails replacement document request count 1 vs 2 (surface line 4315; before screenshot/image assertions); investigating form completion with GET/shadow defaults, cache fixes remain merged |
+| [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Action/navigation owner: Full original rerun fails replacement document request count 1 vs 2 (surface line 4315; before screenshot/image assertions); fresh coalesced form path now reaches a 10s target-interaction timeout; tracing its actual fetch/commit/load phase. Cache fixes remain merged |
 | [x] | shim | `frame locator typing uses canonical child selection and child event constructors` | `0a451d99`; targeted proof complete, combined rerun pending |
 | [x] | shim | `Browser credentials answer Basic challenges and stay origin scoped (#394)` | `90ca133b`; targeted proof complete, combined rerun pending |
 | [x] | shim | `static frame identity survives promotion to the live native registry (#447)` | `0a451d99`; targeted proof complete, combined rerun pending |
@@ -54,10 +54,14 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 ## Additional confirmed failures and investigations
 
+- [ ] **Enter-key form completion** — fresh coalesced control confirms no replacement document (1 vs 2). Action owner will use explicit interaction dispatch for keyboard actions without changing ordinary evaluate/read semantics.
+- [ ] **Frame form targeting top-level completion** — fresh coalesced frame `_top` form control confirms no replacement document (1 vs 2). Action owner assigned; preserve actual initiator/destination authority.
+- [ ] **Programmatic form background scheduling** — `Page.evaluate(form.submit)` followed by ordinary `waitForURL` produces only initial GET and times out at the original 1000ms. Action owner assigned native background scheduling; do not fix by making ordinary evaluate/read calls implicitly wait or pump unrelated work.
+
 - [ ] **Classic-script response visibility during opening close** — confirmed script-fetch drops the core response observer: server flushes headers but facade waits for EOF. Fresh coalesced candidate passes direct/redirect/SRI-denied/CSP-blocked headers and actual cancellation controls; independent inverse/restored/strict proof remains pending before merge. CORS/CSP/SRI and header assertions are preserved.
 - [x] **Child-frame click navigation (#280) older-addon failure** — whole surface replay on newer platform addon passes the original. Old E118 failure was missing accepted native fixes; final composed build must still rerun it.
-- [ ] **Shadow-link default navigation** — full newer platform-addon cohort reproduces `/` instead of `/folder/next` (`shadow-locators.test.mjs:248`). Actual read-only diagnostic confirms server fetched the new link document and native Location/document.URL changed, but Page.url remained old: action completion/mirror lag. Targeted interaction completion fix is source-reviewed; native acceptance pending.
-- [ ] **Page.click GET form completion** — new cohort failure: returned content is the old form rather than the server response containing `q=rust` (`surface.test.mjs:515`). Actual read-only diagnostic confirms valid form action/document URL and accepted native pending navigation, but no replacement HTTP request: form work is unscheduled on the actual guest target. Targeted interaction completion fix is source-reviewed; native acceptance pending. Review of the unmerged candidate found global navigation draining could also admit sibling queued navigation; fix requires target-scoped completion plus an actual sibling pending-navigation control before acceptance (part of this fix, not another baseline failure). Adjacent original single-slot form queue may discard another target’s submission; require an actual multi-target RED/control before classifying it as a distinct confirmed bug.
+- [ ] **Shadow-link default navigation** — full newer platform-addon cohort reproduces `/` instead of `/folder/next` (`shadow-locators.test.mjs:248`). Actual read-only diagnostic confirms server fetched the new link document and native Location/document.URL changed, but Page.url remained old: action completion/mirror lag. Fresh coalesced original now passes; critical inverse/restoration and strict acceptance still pending before merge.
+- [ ] **Page.click GET form completion** — new cohort failure: returned content is the old form rather than the server response containing `q=rust` (`surface.test.mjs:515`). Actual read-only diagnostic confirms valid form action/document URL and accepted native pending navigation, but no replacement HTTP request: form work is unscheduled on the actual guest target. Fresh coalesced original now passes; critical inverse/restoration and strict acceptance still pending before merge. Review of the unmerged candidate found global navigation draining could also admit sibling queued navigation; fix requires target-scoped completion plus an actual sibling pending-navigation control before acceptance (part of this fix, not another baseline failure). Adjacent original single-slot form queue may discard another target’s submission; require an actual multi-target RED/control before classifying it as a distinct confirmed bug.
 
 - [x] **NAPI all-target strict dead-code errors** — merged `680ee757`: restored missing crate-root `live_image_assets` re-export. Test-first E0425 RED → export fix GREEN; focused task-construction unit and NAPI all-target strict pass. No lint suppression or removed capability.
 
@@ -65,13 +69,13 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 ## Current tally
 
-Accounting: 34 original test cases plus 11 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
+Accounting: 34 original test cases plus 14 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
 
 - Merged with component proof: **33** (29 original + count, all, platform ownership, NAPI export).
 - Locally proven, not yet merged: **0** (module and inspector adoption merged).
 - Awaiting fresh-binary classification/verification: **3** detector controls.
-- Still requiring implementation or a passing fix: **9**.
-- Total pending: **12**. Total merged/done at component level: **33**. Total tracked: **45**.
+- Still requiring implementation or a passing fix: **12**.
+- Total pending: **15**. Total merged/done at component level: **33**. Total tracked: **48**.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

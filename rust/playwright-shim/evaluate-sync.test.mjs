@@ -59,10 +59,14 @@ test("aliased DOM mutations, errors, cookies and child documents stay synchroniz
       }, 0);
     });
     assert.match(await page.content(), /timer mutation/);
-    await page.evaluate(() =>
-      requestAnimationFrame(() => {
-        document.querySelector("h1").textContent = "frame mutation";
-      }),
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => {
+            document.querySelector("h1").textContent = "frame mutation";
+            resolve();
+          }),
+        ),
     );
     assert.match(await page.content(), /frame mutation/);
     await page.evaluate(() => {

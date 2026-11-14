@@ -47,13 +47,15 @@ All three additional groups below are explicitly in scope. No deferrals. Payroll
 
 ## Additional findings — required before completion
 
-- [ ] **Locator.count stale document** — root owns. Add deterministic regression; count after visibility must read actual current DOM without requiring evaluate, executing guest code or serializing the whole document on each query.
+- [x] **Locator.count stale document** — merged `94e4915b`. Original count 0→1, fix-only OFF reproduces 0, exact restore passes six targeted/read-only controls; root merged-source routing and locator-read files pass 10/10 (3.62s) on signed ba119 artifact. Reads current live DOM without evaluate, guest execution or full serialization; final combined rerun pending.
+- [ ] **Locator.all stale document** — count owner confirmed adjacent static-snapshot path; separate regression and correction in progress.
 - [ ] **Platform-value ownership** — infrastructure owner. DOMRect/AudioBuffer own and borrowed paths must allocate in the actual guest owner; preserve DOMPoint controls and constructor/isolation guards.
 - [ ] **Broader native history gap** — navigation owner. Verified original `2abd5438`/`c8d4` loses `/spa` after pushState → cross-document navigation → back; Chrome retains it. Implement authenticated native document/group/state history with structured-clone state, transactional mutation and correct guest/driver traversal. User explicitly requires this; do not defer.
 
-## Findings under investigation
+## Additional confirmed failures and investigations
 
-- [ ] **Classic-script response visibility during opening close** — lifecycle owner is checking whether the script-fetch path drops the response observer and withholds header events until EOF. Not yet classified as a separate defect; preserve the header assertion and original initial-close case until validated.
+- [ ] **Classic-script response visibility during opening close** — confirmed script-fetch drops the core response observer: server flushes headers but facade waits for EOF. Lifecycle owner is implementing bounded forwarding with actual cancellation tests, preserving CORS/CSP/SRI and the header assertion.
+- [ ] **Shadow-link navigation control** — fails on the immutable older E118 addon both with and without the count fix. Preserve receipt and rerun on the combined navigation build before classifying current-source behavior.
 
 ## Completion gates
 

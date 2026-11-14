@@ -58,6 +58,17 @@ struct RequestPlan {
     headers: BTreeMap<String, String>,
     referer: Option<String>,
     form_action: bool,
+    driver_navigation: bool,
+}
+
+impl RequestPlan {
+    fn initiator(&self, source: &str) -> Option<String> {
+        if self.driver_navigation {
+            self.referer.clone()
+        } else {
+            Some(source.into())
+        }
+    }
 }
 #[derive(Default, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -263,7 +274,10 @@ fn fetch_job(
     Box::pin(async move {
         let mut local = jar.borrow().fork_for_request();
         let mut request = RequestContext::navigation(
-            Some(navigation.snapshot.source.clone()),
+            navigation
+                .snapshot
+                .request
+                .initiator(&navigation.snapshot.source),
             navigation.snapshot.user_activation,
         );
         request.referrer = navigation.snapshot.request.referer.clone();
@@ -884,6 +898,7 @@ impl PageSession {
                 headers,
                 referer: options.referer,
                 form_action: false,
+                driver_navigation: true,
             };
             let mode = history_mode(&JsRuntime::op_state_from(scope).borrow(), target, history)?;
             let resolved = if let HistoryMode::Traverse(index) = mode {
@@ -926,6 +941,7 @@ impl PageSession {
                 headers: pending.plan.headers,
                 referer: None,
                 form_action: true,
+                driver_navigation: false,
             },
         };
         let navigation = auxiliary_pages::Navigation {
@@ -1192,6 +1208,22 @@ mod tests {
         );
         assert_eq!(state.history[&2].index, 1);
         assert_eq!(state.history[&3].entries, ["https://local.test/other"]);
+    }
+
+    #[test]
+    fn driver_navigation_initiator_uses_only_an_explicit_referrer() {
+        let mut plan = RequestPlan {
+            driver_navigation: true,
+            ..Default::default()
+        };
+        assert_eq!(plan.initiator("https://current.test/"), None);
+        plan.referer = Some("https://explicit.test/".into());
+        assert_eq!(plan.initiator("https://current.test/"), plan.referer);
+        plan.driver_navigation = false;
+        assert_eq!(
+            plan.initiator("https://current.test/"),
+            Some("https://current.test/".into())
+        );
     }
 
     #[test]

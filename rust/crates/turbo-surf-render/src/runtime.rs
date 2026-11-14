@@ -36,6 +36,8 @@ mod code_generation;
 mod dialog_ops;
 #[path = "driver_sync.rs"]
 mod driver_sync;
+#[path = "resident_image_assets.rs"]
+pub(crate) mod resident_image_assets;
 pub use auxiliary_pages::{
     AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryHostServices, AuxiliaryPageEvent,
     AuxiliaryPageEventLog, AuxiliaryPageInfo,
@@ -193,6 +195,7 @@ impl Drop for OwnedRuntime {
                 }
             }
         }
+        resident_image_assets::clear_runtime(&self.0.op_state().borrow());
         crate::browser_env::reset_isolate(self.0.v8_isolate());
         crate::browser_env::clear_interface_records(self.0.v8_isolate());
         crate::message_ports::clear(&mut self.0);
@@ -252,6 +255,7 @@ struct InlineModule {
 #[derive(Clone)]
 struct CspHandle {
     id: u32,
+    image_assets: resident_image_assets::Assets,
     partition: Option<Rc<CredentiallessPartition>>,
     policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
     response_metadata: Rc<RefCell<crate::DocumentResponseMetadata>>,
@@ -269,6 +273,7 @@ impl CspHandle {
         static NEXT: AtomicU32 = AtomicU32::new(1);
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
+            image_assets: Default::default(),
             partition: None,
             dictionaries: Rc::new(RefCell::new(compression_dictionary::Discovery::new(
                 base, headers,
@@ -4093,6 +4098,7 @@ async fn op_load_image(
     #[string] source: String,
     csp: u32,
     #[string] context_json: String,
+    asset_token: u32,
 ) -> ImageOut {
     let _activity = state
         .borrow()
@@ -4120,6 +4126,7 @@ async fn op_load_image(
         source
     };
     let target = resolve(&source, &url).unwrap_or(url);
+    let mut asset = resident_image_assets::Request::new(&state.borrow(), csp, asset_token, &target);
     let (policy, embedder_policy) = state
         .borrow()
         .borrow::<CspContexts>()
@@ -4219,14 +4226,17 @@ async fn op_load_image(
         return ImageOut::default();
     };
     match natural_image_size(&response.bytes, &response.content_type) {
-        Some((width, height, ratio)) => ImageOut {
-            url: response.final_url,
-            status: response.status,
-            width,
-            height,
-            ratio,
-            ok: true,
-        },
+        Some((width, height, ratio)) => {
+            asset.finish(response.final_url.clone(), response.bytes);
+            ImageOut {
+                url: response.final_url,
+                status: response.status,
+                width,
+                height,
+                ratio,
+                ok: true,
+            }
+        }
         None => ImageOut {
             url: response.final_url,
             status: response.status,
@@ -7004,6 +7014,7 @@ fn retire_frame_tree_impl<'s>(
                 storage_events::retire(context);
                 retire_frame_identity(scope, context, preserved);
                 turbo_dom_browser_env::host_internals::retire_context(context);
+                resident_image_assets::retire(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 #[cfg(turbo_surf_native_proxy)]
@@ -7149,6 +7160,7 @@ fn initialize_new_frame<'s>(
 
     let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
         storage_events::retire(context);
+        resident_image_assets::retire(context);
         context.set_slot(Rc::new(FrameRetired));
         crate::context_ownership::release_parent(scope, context);
         JsErrorBox::generic("frame initialization was interrupted")
@@ -9102,6 +9114,9 @@ deno_core::extension!(
         blob_urls::op_blob_url_read,
         sync_xhr::op_fetch_sync,
         op_load_image,
+        resident_image_assets::op_begin_image_asset,
+        resident_image_assets::op_commit_image_asset,
+        resident_image_assets::op_discard_image_asset,
         op_decode_data_image,
         op_dictionary_active,
         op_dictionary_headers,
@@ -12502,14 +12517,20 @@ function __loadImage(el, win = globalThis, parser = false, restart = false) {
   else __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc});
   state.promise = __trackResource((async () => {
     let result = decoded;
+    let assetToken = 0;
     const url = new URL(src, source).href, start = __resourceNow(win);
     try {
       await 0;
-      if (!data && ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(doc):undefined}));
+      if (!data && ops.op_csp_request(doc,url,"img-src","")) {
+        assetToken = ops.op_begin_image_asset(el,choice.key,url);
+        result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(doc):undefined}),assetToken);
+      }
     } catch (_) {}
     __recordResource(win, url, "img", start);
-    if (__resources.get(el) !== state) return;
-    __fireResourceEvent(el, __imageLoaded(el,choice,result,url) ? "load" : "error", win);
+    if (__resources.get(el) !== state) { ops.op_discard_image_asset(doc,assetToken); return; }
+    const loaded = __imageLoaded(el,choice,result,url);
+    ops.op_commit_image_asset(el,assetToken);
+    __fireResourceEvent(el, loaded ? "load" : "error", win);
   })());
   return state.promise;
 }

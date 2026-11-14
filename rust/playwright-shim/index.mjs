@@ -4648,8 +4648,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
       cookies = this._cookies;
     const key = `${url}\u0000${html}`;
     if (this._imageCache?.key !== key) this._imageCache = { key, images: Object.create(null) };
-    const images = this._imageCache.images;
+    const cache = this._imageCache;
     const selected = [...new Set(refs.slice(0, 60))];
+    await this._seedResidentImages(cache, selected);
+    const images = cache.images;
     const entries = await mapBounded(selected, 8, async (ref) => {
       // Share pending work without restoring an invalidated document's cache.
       if (Object.hasOwn(images, ref)) return images[ref];
@@ -4665,6 +4667,32 @@ return String(globalThis.__RESULT ?? ""); })()`,
       return images[ref];
     });
     return Object.fromEntries(entries.filter(Boolean));
+  }
+
+  async _seedResidentImages(cache, refs) {
+    if (this._session == null || typeof native.liveImageAssets !== "function") return;
+    const session = this._session;
+    // Keep generation reads and cache updates ordered even for different capture plans.
+    const pending = (cache.resident ?? Promise.resolve()).then(async () => {
+      const query = JSON.stringify({
+        refs,
+        generation: cache.generation,
+        cachedRefs: refs.filter((ref) => Object.hasOwn(cache.images, ref)),
+      });
+      const snapshot = JSON.parse(await native.liveImageAssets(session, query));
+      if (snapshot.generation == null || cache.generation !== snapshot.generation)
+        cache.images = Object.create(null);
+      cache.generation = snapshot.generation;
+      for (const [ref, bytes] of Object.entries(snapshot.images))
+        if (!Object.hasOwn(cache.images, ref))
+          cache.images[ref] = Promise.resolve([ref, Buffer.from(bytes, "base64")]);
+    });
+    cache.resident = pending;
+    try {
+      await pending;
+    } finally {
+      if (cache.resident === pending) cache.resident = undefined;
+    }
   }
 
   // Concatenate the page's `<link rel="stylesheet">` bodies, resolved against the

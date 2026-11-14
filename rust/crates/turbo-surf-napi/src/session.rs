@@ -243,6 +243,7 @@ enum LiveJob {
     ),
     ExpressionTracked(String, SyncSender<std::result::Result<String, String>>),
     Serialize(SyncSender<std::result::Result<String, String>>),
+    ImageAssets(String, SyncSender<std::result::Result<String, String>>),
     Cookies(SyncSender<std::result::Result<String, String>>),
     SetCookies(String, SyncSender<std::result::Result<(), String>>),
     ConfigureTarget(
@@ -270,6 +271,7 @@ impl LiveJob {
             | Self::Expression(_, _, reply)
             | Self::ExpressionTracked(_, reply)
             | Self::Serialize(reply)
+            | Self::ImageAssets(_, reply)
             | Self::Cookies(reply) => {
                 let _ = reply.send(Err(error));
             }
@@ -772,6 +774,16 @@ impl TargetWorker<'_> {
                 } else {
                     self.target.with_auxiliary(|native_target| {
                         self.session.serialize_target_for_driver(native_target)
+                    })
+                });
+            }
+            LiveJob::ImageAssets(query, reply) => {
+                let _ = reply.send(if self.primary {
+                    self.session.screenshot_image_assets(&query)
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session
+                            .screenshot_target_image_assets(native_target, &query)
                     })
                 });
             }
@@ -2047,6 +2059,35 @@ pub fn live_target_configure(
             engine_init_script,
         },
     }))
+}
+
+/// Read screenshot bytes through the actor without executing guest JavaScript.
+pub struct LiveImageAssetsTask {
+    id: u32,
+    query: String,
+}
+#[napi]
+impl Task for LiveImageAssetsTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(
+            self.id,
+            LiveJob::ImageAssets(std::mem::take(&mut self.query), reply),
+        )
+        .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live session dropped image asset reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+#[napi]
+pub fn live_image_assets(id: u32, query: String) -> AsyncTask<LiveImageAssetsTask> {
+    AsyncTask::new(LiveImageAssetsTask { id, query })
 }
 
 #[cfg(test)]

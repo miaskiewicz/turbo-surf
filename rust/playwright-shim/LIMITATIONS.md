@@ -52,8 +52,10 @@ surfaces remain unavailable or approximate:
   external `<link>` stylesheets and cascades them (`{externalCss:false}` opts
   out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP/BMP/ICO/
   AVIF + SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
-  models
-  `position:absolute/fixed/relative` + `z-index` for block flow (painted
+  reuses successful native image bodies while resident in the current document
+  (up to 60 resources / 64 MiB), and fetches unavailable assets through the ordinary
+  screenshot request path. Residency never overrides HTTP `no-store` across documents.
+  It models `position:absolute/fixed/relative` + `z-index` for block flow (painted
   back-to-front per CSS stacking order), propagates the root/body background, and
   supports `{fullPage:true}`. It does **not** run JS-driven visuals (a `<canvas>`
   gradient background is absent) or crop to an element — `locator.screenshot()`

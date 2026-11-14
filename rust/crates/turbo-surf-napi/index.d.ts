@@ -79,6 +79,8 @@ export function liveEvalEngine(id: number, script: string, collect?: boolean): P
 export function liveReadEngine(id: number, script: string): string;
 /** Same non-pumping query, yielding Node while the native actor is busy. */
 export function liveReadEngineAsync(id: number, script: string): Promise<string>;
+/** Read current-document image bytes through the trusted native actor. */
+export function liveImageAssets(id: number, query: string): Promise<string>;
 /** Await an expression’s actual native Promise completion. */
 export function liveEvalEngineExpression(id: number, expression: string): Promise<string>;
 export function liveEvalExpression(id: number, expression: string): Promise<string>;

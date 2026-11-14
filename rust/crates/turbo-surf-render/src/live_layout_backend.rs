@@ -111,6 +111,7 @@ pub(crate) fn screenshot_image_metadata(
 }
 
 pub(crate) fn clear_document_images(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) {
+    crate::runtime::resident_image_assets::clear_document(scope, document);
     let _document = turbo_dom_browser_env::host_internals::enter_document_of(scope, document);
     let Some(context) = turbo_dom_browser_env::host_internals::current_document_context(scope)
     else {

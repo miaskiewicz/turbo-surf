@@ -198,6 +198,7 @@ fn initialize<'s>(
     )));
     context.set_slot(Rc::new(BootstrapDepth(0)));
     install_hyperlink_handler(context);
+    initialize_module_context(scope, context)?;
     window_proxy::install_location(scope, "about:blank");
     install_environment(scope, core).map_err(JsErrorBox::generic)?;
     let core = core
@@ -213,6 +214,18 @@ fn initialize<'s>(
     // The producer installs opener/name/identity after this callback returns.
     // Guest init scripts and document loads cannot run inside admission.
     Ok(())
+}
+
+fn initialize_module_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<(), JsErrorBox> {
+    let base = context
+        .get_slot::<AuxiliaryFallbackBase>()
+        .ok_or_else(|| JsErrorBox::generic("Auxiliary module base unavailable"))?
+        .0
+        .clone();
+    frame_modules::register_frame_modules(scope, &base)
 }
 
 fn location<'s>(

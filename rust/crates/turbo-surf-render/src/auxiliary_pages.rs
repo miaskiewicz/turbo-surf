@@ -661,6 +661,7 @@ pub(super) fn retire_owned_resources<'s>(
     auxiliary_storage::retire(context);
     resident_image_assets::retire(context);
     context.set_slot(Rc::new(FrameRetired));
+    retire_module_context(scope, context);
 }
 
 pub(super) fn close_all(scope: &mut v8::PinScope) {

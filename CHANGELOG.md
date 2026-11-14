@@ -26,6 +26,10 @@ branch.
 
 ### Engine and performance
 
+- Execute initial and replacement native Page modules in registered document-owned
+  module maps, isolating inline-source authority and cancelling retired module work.
+  Consume the published core 0.412.2 and matching extension dependency closure.
+
 - Allocate opaque geometry and Web Audio values in their actual frontend realm,
   preserving borrowed constructors, subclass prototypes and guest stream identity
   without exposing infrastructure objects.

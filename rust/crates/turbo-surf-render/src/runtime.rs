@@ -22,6 +22,10 @@ use private_boundary::{
     op_infrastructure_active, op_infrastructure_adopt_crypto_key, op_infrastructure_origin,
 };
 
+#[cfg(not(turbo_surf_native_proxy))]
+#[path = "registered_module_scripts.rs"]
+mod registered_module_scripts;
+
 #[path = "private_infrastructure.rs"]
 mod private_infrastructure;
 
@@ -253,6 +257,7 @@ impl ModuleOrigins {
 #[derive(Clone, Default)]
 struct InlineModules(Rc<RefCell<std::collections::HashMap<String, InlineModule>>>);
 struct InlineModule {
+    owner: u32,
     code: String,
     #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
     code_units: std::sync::Arc<[u16]>,
@@ -1779,13 +1784,32 @@ struct ModuleRequest {
     policy: crate::csp::Policy,
 }
 
+fn module_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    owner: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    use turbo_dom_browser_env::host_internals as host;
+    host::handle_of(scope, owner)
+        .ok_or_else(|| JsErrorBox::generic("Native module document required"))?;
+    let _document = host::enter_document_of(scope, owner);
+    if !host::is_browsing_context() {
+        return Err(JsErrorBox::generic("Module document is not active"));
+    }
+    let context = host::current_document_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native module document context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Err(JsErrorBox::generic("Module document has been retired"));
+    }
+    Ok(context)
+}
+
 #[op2(fast)]
-fn op_module_credentials(
-    scope: &mut v8::PinScope,
-    element: v8::Local<v8::Object>,
+fn op_module_credentials<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    element: v8::Local<'s, v8::Object>,
     #[string] specifier: String,
 ) -> Result<(), JsErrorBox> {
-    let context = scope.get_current_context();
+    let context = module_document_context(scope, element)?;
     let options = context
         .get_slot::<ModuleCredentials>()
         .ok_or_else(|| JsErrorBox::generic("Module context unavailable"))?;
@@ -1801,8 +1825,11 @@ fn op_module_credentials(
         crate::browser_env::node_attribute(scope, element, "integrity").unwrap_or_default();
     let policy = context
         .get_slot::<CspHandle>()
-        .map(|handle| handle.policy.borrow().active.clone())
-        .unwrap_or_default();
+        .ok_or_else(|| JsErrorBox::generic("Native module document policy unavailable"))?
+        .policy
+        .borrow()
+        .active
+        .clone();
     options
         .0
         .borrow_mut()
@@ -1833,13 +1860,18 @@ fn op_module_staging_enabled() -> bool {
 
 #[op2]
 #[string]
-fn op_inline_module(
-    scope: &mut v8::PinScope,
+fn op_inline_module<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
-    code: v8::Local<v8::String>,
+    element: v8::Local<'s, v8::Object>,
+    code: v8::Local<'s, v8::String>,
     #[string] base: &str,
     #[string] source: String,
-) -> String {
+) -> Result<String, JsErrorBox> {
+    let owner = module_document_context(scope, element)?
+        .get_slot::<CspHandle>()
+        .ok_or_else(|| JsErrorBox::generic("Native module document owner unavailable"))?
+        .id;
     let code_units = crate::browser_env::string_code_units(scope, code);
     let code = String::from_utf16_lossy(&code_units);
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1852,13 +1884,34 @@ fn op_inline_module(
     state.borrow::<InlineModules>().0.borrow_mut().insert(
         specifier.clone(),
         InlineModule {
+            owner,
             code,
             code_units: code_units.into(),
             base: base.to_string(),
             source,
         },
     );
-    specifier
+    Ok(specifier)
+}
+
+impl NetModuleLoader {
+    fn inline_module_source(&self, url: &ModuleSpecifier) -> Option<ModuleLoadResponse> {
+        let sources = self.inline_sources.0.borrow();
+        let source = sources.get(url.as_str())?;
+        let result = if source.owner == self.csp.id {
+            Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::String(source.code.clone().into()),
+                url,
+                None,
+            ))
+        } else {
+            Err(JsErrorBox::type_error(
+                "Inline module belongs to another document",
+            ))
+        };
+        Some(ModuleLoadResponse::Sync(result))
+    }
 }
 
 impl ModuleLoader for NetModuleLoader {
@@ -1868,6 +1921,7 @@ impl ModuleLoader for NetModuleLoader {
             .0
             .borrow()
             .get(specifier)
+            .filter(|source| source.owner == self.csp.id)
             .map(|source| source.source.clone())
             .unwrap_or_else(|| specifier.to_string())
     }
@@ -1878,6 +1932,7 @@ impl ModuleLoader for NetModuleLoader {
             .0
             .borrow()
             .get(specifier)
+            .filter(|source| source.owner == self.csp.id)
             .map(|source| source.code_units.clone())
     }
 
@@ -1924,6 +1979,7 @@ impl ModuleLoader for NetModuleLoader {
         let sources = self.inline_sources.0.borrow();
         let referrer = sources
             .get(referrer)
+            .filter(|source| source.owner == self.csp.id)
             .map(|source| source.base.as_str())
             .unwrap_or(referrer);
         let resolved =
@@ -1942,19 +1998,8 @@ impl ModuleLoader for NetModuleLoader {
         _options: ModuleLoadOptions,
     ) -> ModuleLoadResponse {
         let url = module_specifier.clone();
-        if let Some(code) = self
-            .inline_sources
-            .0
-            .borrow()
-            .get(url.as_str())
-            .map(|source| source.code.clone())
-        {
-            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
-                ModuleType::JavaScript,
-                ModuleSourceCode::String(code.into()),
-                &url,
-                None,
-            )));
+        if let Some(inline) = self.inline_module_source(&url) {
+            return inline;
         }
         let credentials = {
             let mut options = self.credentials.0.borrow_mut();
@@ -4303,6 +4348,25 @@ fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32, Opt
 // The host retains contexts only until page reset/runtime destruction.
 #[derive(Default)]
 struct FrameContextMarker;
+struct NativePageModuleContext;
+
+fn retire_module_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) {
+    JsRuntime::detach_module_context(scope, context);
+    context.remove_slot::<NativePageModuleContext>();
+    if let Some(owner) = context.get_slot::<CspHandle>() {
+        let state = JsRuntime::op_state_from(scope);
+        state
+            .borrow()
+            .borrow::<InlineModules>()
+            .0
+            .borrow_mut()
+            .retain(|_, source| source.owner != owner.id);
+    }
+}
+
 struct FrameDocumentUrl(String);
 struct AuxiliaryFallbackBase(String);
 struct FrameDocumentLocation(String);
@@ -7026,8 +7090,7 @@ fn retire_frame_tree_impl<'s>(
                 resident_image_assets::retire(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
-                #[cfg(turbo_surf_native_proxy)]
-                JsRuntime::detach_module_context(scope, context);
+                retire_module_context(scope, context);
                 break;
             }
             let Some(parent) = ancestor.get_slot::<FrameParent>() else {
@@ -12790,7 +12853,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
   if (prepared.kind === "module") {
     const src = get("src");
     const specifier = src ? new URL(src, __baseApply(__resourceBaseURL,__document,[])).href
-      : ops.op_inline_module(prepared.source, __baseApply(__resourceBaseURL,__document,[]), document.URL);
+      : ops.op_inline_module(el, prepared.source, __baseApply(__resourceBaseURL,__document,[]), document.URL);
     ops.op_module_credentials(el,specifier);
     // The SDK loader observes actual graph/evaluation transitions independently
     // of import()'s promise, which waits for top-level await. The published SDK
@@ -15498,19 +15561,19 @@ fn make_runtime_with_storage_and_options(
             extensions.push(extension);
             extensions
         },
-        // Exact-engine children own native module maps. Published SDK children
-        // fail closed; actual context retirement and sandbox flags gate imports.
+        // Registered native Pages own their maps; no guest context falls back to E.
         validate_import_attributes_cb: Some(Box::new(|scope, _attributes, _context| {
             let current = scope.get_current_context();
-            if (current.get_slot::<FrameContextMarker>().is_some()
+            if current.get_slot::<FrameRetired>().is_some()
                 || current
-                    .get_slot::<private_infrastructure::GuestDocument>()
-                    .is_some())
-                && (!cfg!(turbo_surf_native_proxy)
-                    || current.get_slot::<FrameRetired>().is_some()
+                    .get_slot::<FrameSandbox>()
+                    .is_some_and(|policy| policy.scripts_blocked)
+                || ((current.get_slot::<FrameContextMarker>().is_some()
                     || current
-                        .get_slot::<FrameSandbox>()
-                        .is_some_and(|policy| policy.scripts_blocked))
+                        .get_slot::<private_infrastructure::GuestDocument>()
+                        .is_some())
+                    && !cfg!(turbo_surf_native_proxy)
+                    && current.get_slot::<NativePageModuleContext>().is_none())
             {
                 let message = v8::String::new(
                     scope,
@@ -17781,17 +17844,9 @@ async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), Str
 // This is the path a Next dev / turbopack build (served as ES modules) needs to hydrate.
 async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     for n in 0..1000usize {
-        namespace_call(rt, "takeModuleScript", &[])?;
-        let g = namespace_value(rt, "moduleDescriptor")?;
-        let desc = read_string(rt, g)?;
-        if desc.is_empty() || desc == "undefined" || desc == "null" {
+        let Some(v) = take_module_descriptor(rt)? else {
             break;
-        }
-        if private_infrastructure::enabled(rt) {
-            return Err("Guest-root ES modules require registered guest module ownership".into());
-        }
-        let v: deno_core::serde_json::Value =
-            deno_core::serde_json::from_str(&desc).unwrap_or(deno_core::serde_json::Value::Null);
+        };
         let src = v.get("src").and_then(|s| s.as_str()).unwrap_or("");
         let code = v
             .get("code")
@@ -17806,6 +17861,19 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
         let Ok(spec) = ModuleSpecifier::parse(&spec_str) else {
             continue;
         };
+        if private_infrastructure::enabled(rt) {
+            #[cfg(not(turbo_surf_native_proxy))]
+            {
+                let context = private_infrastructure::context(rt)?;
+                registered_module_scripts::load_and_evaluate(rt, &context, &spec, code).await?;
+                if crate::shim_bindings::pending(rt) {
+                    return Ok(());
+                }
+                continue;
+            }
+            #[cfg(turbo_surf_native_proxy)]
+            return Err("Guest-root module dispatch requires the registered default engine".into());
+        }
         // Code in hand (inline module, OR a `<script src>` chunk whose fetched body was
         // ESM — the engine namespace's `execScriptEl` already fetched it and queued it) → evaluate from that
         // code with `spec` as its identity so the import graph still resolves relative to
@@ -17825,6 +17893,20 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+fn take_module_descriptor(
+    rt: &mut JsRuntime,
+) -> Result<Option<deno_core::serde_json::Value>, String> {
+    namespace_call(rt, "takeModuleScript", &[])?;
+    let value = namespace_value(rt, "moduleDescriptor")?;
+    let descriptor = read_string(rt, value)?;
+    if descriptor.is_empty() || descriptor == "undefined" || descriptor == "null" {
+        return Ok(None);
+    }
+    Ok(Some(
+        deno_core::serde_json::from_str(&descriptor).unwrap_or(deno_core::serde_json::Value::Null),
+    ))
 }
 
 async fn evaluate_loaded_module(

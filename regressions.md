@@ -49,7 +49,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 - [x] **Locator.count stale document** — merged `94e4915b`. Original count 0→1, fix-only OFF reproduces 0, exact restore passes six targeted/read-only controls; root merged-source routing and locator-read files pass 10/10 (3.62s) on signed ba119 artifact. Reads current live DOM without evaluate, guest execution or full serialization; final combined rerun pending.
 - [x] **Locator.all stale document** — merged `e00e36e7`. Regression and fix-only inverse reproduce stale 0; restored live enumeration passes, including returned/indexed locators and static-disabled controls. Root merged-source routing/read files pass 10/10 (3.51s); final combined rerun pending.
-- [ ] **Platform-value ownership** — infrastructure owner. DOMRect/AudioBuffer own and borrowed paths must allocate in the actual guest owner; preserve DOMPoint controls and constructor/isolation guards.
+- [x] **Platform-value ownership** — merged `659a1931`: Rust 6/6, platform/subclass 7/7 and infrastructure 7/7 pass. Allocation-only OFF produces five expected failures with DOMPoint controls green; byte-exact restore 14/14 green. Render strict/format/CC/hooks pass. Final combined build/gates pending.
 - [ ] **Broader native history gap** — navigation owner. Verified original `2abd5438`/`c8d4` loses `/spa` after pushState → cross-document navigation → back; Chrome retains it. Implement authenticated native document/group/state history with structured-clone state, transactional mutation and correct guest/driver traversal. User explicitly requires this; do not defer.
 
 ## Additional confirmed failures and investigations
@@ -58,6 +58,8 @@ All additional bugs found during this work are explicitly in scope and tracked b
 - [x] **Child-frame click navigation (#280) older-addon failure** — whole surface replay on newer platform addon passes the original. Old E118 failure was missing accepted native fixes; final composed build must still rerun it.
 - [ ] **Shadow-link default navigation** — full newer platform-addon cohort reproduces `/` instead of `/folder/next` (`shadow-locators.test.mjs:248`). Action/navigation owner investigating actual completion and target URL, with unchanged link assertions.
 - [ ] **Page.click GET form completion** — new cohort failure: returned content is the old form rather than the server response containing `q=rust` (`surface.test.mjs:515`). Action/navigation owner investigating alongside shadow-link and original same-URL screenshot form navigation.
+
+- [ ] **NAPI all-target strict dead-code errors** — `ImageAssets`, `LiveImageAssetsTask`, and `live_image_assets` fail the lib-test strict build. Render owner assigned a meaningful integration/test fix; no lint suppression or removed capability.
 
 ## Completion gates
 

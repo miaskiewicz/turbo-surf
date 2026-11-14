@@ -548,11 +548,7 @@ fn component_set<'s>(
             true
         }
         "hash" => {
-            url.set_fragment(if value.is_empty() {
-                None
-            } else {
-                Some(value.trim_start_matches('#'))
-            });
+            url.set_fragment(Some(value.strip_prefix('#').unwrap_or(&value)));
             true
         }
         _ => false,

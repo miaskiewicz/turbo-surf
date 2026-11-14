@@ -16,6 +16,9 @@ branch.
 - Refresh legacy Window frame counts until the actual canonical read-only surface
   is registered, preserving iframe adoption, indexed identities and parent links.
 
+- Preserve an empty fragment for `location.hash = ""`, keeping child document
+  identity and genuine hashchange events consistent with Chromium.
+
 - Keep frame locator navigation in its actual child realm and handle fragment
   history through the native Location without navigating the parent Page.
 

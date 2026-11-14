@@ -85,6 +85,43 @@ test("frame locator interactions do not crash (#280)", async () => {
   await child.locator("#ok").click();
 });
 
+test("child fragment navigation clears a hash without replacing its document", async () => {
+  const page = newPage();
+  await page.setContent('<iframe name="pay" srcdoc="<p>child</p>"></iframe>');
+  const child = page.frame({ name: "pay" });
+  assert.ok(child);
+  await child.evaluate(() => {
+    globalThis.originalDocument = document;
+  });
+  const changed = await child.evaluate(async () => {
+    const events = [];
+    const change = (href) =>
+      new Promise((resolve) => {
+        addEventListener(
+          "hashchange",
+          (event) => {
+            events.push([event.oldURL, event.newURL]);
+            resolve();
+          },
+          { once: true },
+        );
+        location.hash = href;
+      });
+    await change("x");
+    await change("");
+    return { events, href: location.href, same: document === originalDocument };
+  });
+  assert.deepEqual(changed, {
+    events: [
+      ["about:srcdoc", "about:srcdoc#x"],
+      ["about:srcdoc#x", "about:srcdoc#"],
+    ],
+    href: "about:srcdoc#",
+    same: true,
+  });
+  assert.equal(page.url(), "about:blank");
+});
+
 test("evaluate + render (JS execution, no browser)", async () => {
   const page = newPage();
   await page.setContent("<body><h1 id='t'>Hi</h1><div id='app'></div></body>");

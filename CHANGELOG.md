@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Retire screenshot image bytes and retained paint scenes when a native document navigates, including same-URL replacements.
+
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision

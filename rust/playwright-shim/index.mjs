@@ -3351,6 +3351,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   _didNativeNavigate(event) {
     if (this._closed || this._session == null) return;
+    this._imageCache = undefined;
+    closeScreenshotScene(this);
     this._nativeLoad().reset();
     const previous = this._url;
     if (!this._driverNavigation && previous !== "about:blank" && previous !== event.url) {

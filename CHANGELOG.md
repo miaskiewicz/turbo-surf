@@ -13,6 +13,9 @@ branch.
 
 ### Engine and performance
 
+- Refresh legacy Window frame counts until the actual canonical read-only surface
+  is registered, preserving iframe adoption, indexed identities and parent links.
+
 - Report asynchronous host-binding collection failures to foreground callers
   without making keyboard input wait for unrelated host callback completion.
 

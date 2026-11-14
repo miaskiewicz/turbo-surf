@@ -6829,7 +6829,6 @@ fn op_native_window_proxy() -> bool {
 fn op_producer_window_proxy(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
     document.get_creation_context(scope).is_some_and(|context| {
         turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some()
-            || turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context)
     })
 }
 

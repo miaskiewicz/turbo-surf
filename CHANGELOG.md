@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Export live screenshot image-asset reads from the NAPI crate root, keeping the async task reachable in strict all-target builds.
+
 - Enumerate `Locator.all()` from the current query count instead of a stale pre-hydration snapshot.
 
 - Read locator counts from the current native document after hydration, preserving static execution policy, indexed/scoped queries and nonblocking reads.

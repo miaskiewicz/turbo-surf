@@ -26,11 +26,12 @@ pub use session::{
     live_actor_close, live_auxiliary_adopt, live_auxiliary_configure, live_auxiliary_state,
     live_auxiliary_wait, live_close, live_cookies, live_dialog_cancel, live_dialog_configure,
     live_dialog_respond, live_eval, live_eval_engine, live_eval_engine_expression,
-    live_eval_expression, live_eval_expression_tracked, live_navigate_target, live_network_log,
-    live_network_log_acknowledge, live_network_log_create, live_network_log_discard_handles,
-    live_network_log_publish_intercepted, live_network_log_wait, live_network_log_wake, live_open,
-    live_read_engine, live_read_engine_async, live_resize, live_serialize, live_set_content,
-    live_set_cookies, live_target_configure, live_target_network_state,
+    live_eval_expression, live_eval_expression_tracked, live_image_assets, live_navigate_target,
+    live_network_log, live_network_log_acknowledge, live_network_log_create,
+    live_network_log_discard_handles, live_network_log_publish_intercepted, live_network_log_wait,
+    live_network_log_wake, live_open, live_read_engine, live_read_engine_async, live_resize,
+    live_serialize, live_set_content, live_set_cookies, live_target_configure,
+    live_target_network_state,
 };
 
 use napi::bindgen_prelude::*;
@@ -1330,4 +1331,13 @@ pub async fn crawl(opts_json: String) -> Result<String> {
     let recs = run_crawl(opts, Arc::new(nav)).await;
     let arr: Vec<Value> = recs.iter().map(record_json).collect();
     Ok(Value::Array(arr).to_string())
+}
+
+#[cfg(test)]
+mod export_tests {
+    #[test]
+    fn image_assets_task_is_available_from_the_crate_root_without_a_live_session() {
+        // Creating an asynchronous asset read must not dispatch before NAPI schedules it.
+        drop(crate::live_image_assets(u32::MAX, "[]".to_owned()));
+    }
 }

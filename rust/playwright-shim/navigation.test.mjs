@@ -381,3 +381,32 @@ test(
     }
   },
 );
+
+test("loaded native navigation mirrors a late external script's document mutation", async () => {
+  let scriptRequests = 0;
+  const server = createServer((request, response) => {
+    response.setHeader("cache-control", "no-store");
+    if (request.url === "/late.js") {
+      scriptRequests++;
+      response.setHeader("content-type", "application/javascript");
+      setTimeout(() => response.end("document.body.dataset.loadedPath=location.pathname;"), 30);
+      return;
+    }
+    response.setHeader("content-type", "text/html");
+    response.end('<body><script src="/late.js"></script></body>');
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const page = shim.newPage();
+  try {
+    for (const path of ["/first", "/next"]) {
+      await page.goto(origin + path, { waitUntil: path === "/first" ? "networkidle" : "load" });
+      assert.equal(await page.locator("body").getAttribute("data-loaded-path"), path);
+    }
+    assert.equal(scriptRequests, 2);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

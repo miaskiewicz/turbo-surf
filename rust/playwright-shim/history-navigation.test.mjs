@@ -96,3 +96,21 @@ test("real Location navigation and same-URL reload still fetch and execute (#319
     assert.equal(new URL(page.url()).pathname, "/replacement");
   });
 });
+
+test("a current-document mutation does not replace the previous driver history entry", async () => {
+  await fixture(async (page) => {
+    const initial = page.url();
+    await page.goto(new URL("/next", initial).href, { waitUntil: "networkidle" });
+    assert.equal(
+      await page.evaluate(() => {
+        document.body.dataset.observed = "yes";
+        return location.pathname;
+      }),
+      "/next",
+    );
+    assert.equal((await page.goBack({ waitUntil: "networkidle" }))?.status(), 200);
+    assert.equal(page.url(), initial);
+    assert.equal((await page.goForward({ waitUntil: "networkidle" }))?.status(), 200);
+    assert.equal(new URL(page.url()).pathname, "/next");
+  });
+});

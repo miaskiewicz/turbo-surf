@@ -3614,12 +3614,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
   async goto(url, opts) {
     const started = Date.now();
     const previous = this._url;
+    const previousEntry = this._historyCurrent ?? previous;
     this._navHops = 0; // user navigation — reset the redirect-follow budget
     const resp = await this._navigate(this._resolveUrl(url), undefined, undefined, {
       ...opts,
       referer: opts?.referer ?? null,
     });
-    if (previous !== "about:blank") this._history.push(this._historyCurrent ?? previous);
+    if (previous !== "about:blank") this._history.push(previousEntry);
     this._historyCurrent = null;
     this._fwd = []; // a committed navigation invalidates the forward stack
     // `waitUntil:'networkidle'` (or a later waitForLoadState('networkidle')) opens a LIVE

@@ -391,10 +391,13 @@ fn start(
     let (frame, current_url) = {
         deno_core::scope!(scope, rt);
         let context = auxiliary_pages::context(scope, target)?;
-        let url = context
-            .get_slot::<FrameDocumentLocation>()
-            .map(|url| url.0.clone())
-            .unwrap_or_else(|| "about:blank".into());
+        let url = window_proxy::location_url(context)
+            .or_else(|| {
+                context
+                    .get_slot::<FrameDocumentLocation>()
+                    .map(|url| url.0.clone())
+            })
+            .ok_or("Native navigation target Location is unavailable")?;
         (request_frame_metadata(scope, context, None), url)
     };
     let shared = rt.op_state();

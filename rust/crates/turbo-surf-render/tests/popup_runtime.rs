@@ -4,9 +4,10 @@ use turbo_dom_browser_env::host_internals as binding;
 
 #[test]
 fn producer_root_template_admits_only_native_contexts() {
-    let mut extension = deno_core::Extension::default();
-    extension.global_template_middleware =
-        Some(|scope, _| binding::auxiliary_window_template(scope));
+    let extension = deno_core::Extension {
+        global_template_middleware: Some(|scope, _| binding::auxiliary_window_template(scope)),
+        ..Default::default()
+    };
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![extension],
         ..Default::default()

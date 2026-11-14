@@ -406,15 +406,10 @@ fn start(
     cancel(&mut shared, target.0);
     let future = fetch_job(&shared, navigation, frame, budget_ms);
     let state = self::state(&mut shared);
-    if !state.history.contains_key(&target.0) {
-        state.history.insert(
-            target.0,
-            History {
-                entries: vec![current_url.clone()],
-                index: 0,
-            },
-        );
-    }
+    state.history.entry(target.0).or_insert_with(|| History {
+        entries: vec![current_url.clone()],
+        index: 0,
+    });
     let mode = if current_url == "about:blank" && matches!(mode, HistoryMode::Push) {
         HistoryMode::Replace
     } else {
@@ -1094,55 +1089,6 @@ fn report_target_error(rt: &mut JsRuntime, target: u64, message: &str) {
         }));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn target_history_traversal_and_replacement_preserve_independent_entries() {
-        let mut state = State::default();
-        update_history(&mut state, 2, "https://local.test/first", HistoryMode::Push);
-        update_history(
-            &mut state,
-            2,
-            "https://local.test/second",
-            HistoryMode::Push,
-        );
-        update_history(&mut state, 3, "https://local.test/other", HistoryMode::Push);
-        update_history(
-            &mut state,
-            2,
-            "https://local.test/first",
-            HistoryMode::Traverse(0),
-        );
-        update_history(
-            &mut state,
-            2,
-            "https://local.test/replaced",
-            HistoryMode::Replace,
-        );
-        update_history(&mut state, 2, "https://local.test/new", HistoryMode::Push);
-        assert_eq!(
-            state.history[&2].entries,
-            ["https://local.test/replaced", "https://local.test/new"]
-        );
-        assert_eq!(state.history[&2].index, 1);
-        assert_eq!(state.history[&3].entries, ["https://local.test/other"]);
-    }
-
-    #[test]
-    fn options_keep_binary_body_and_content_type_independent_of_text_fallback() {
-        let options: NavigationOptions = serde_json::from_str(r#"{"method":"POST","body":"fallback","bodyBytes":[0,255,10],"contentType":"application/octet-stream","timeoutMs":0}"#).unwrap();
-        assert_eq!(options.body_bytes, Some(vec![0, 255, 10]));
-        assert_eq!(options.body.as_deref(), Some("fallback"));
-        assert_eq!(
-            options.content_type.as_deref(),
-            Some("application/octet-stream")
-        );
-        assert_eq!(options.timeout_ms, Some(0));
-    }
-}
-
 fn report_scope_error<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
@@ -1207,5 +1153,54 @@ impl PageSession {
         let context = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
         context.set_slot(Rc::new(FailAuxiliaryBackingForTesting));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_history_traversal_and_replacement_preserve_independent_entries() {
+        let mut state = State::default();
+        update_history(&mut state, 2, "https://local.test/first", HistoryMode::Push);
+        update_history(
+            &mut state,
+            2,
+            "https://local.test/second",
+            HistoryMode::Push,
+        );
+        update_history(&mut state, 3, "https://local.test/other", HistoryMode::Push);
+        update_history(
+            &mut state,
+            2,
+            "https://local.test/first",
+            HistoryMode::Traverse(0),
+        );
+        update_history(
+            &mut state,
+            2,
+            "https://local.test/replaced",
+            HistoryMode::Replace,
+        );
+        update_history(&mut state, 2, "https://local.test/new", HistoryMode::Push);
+        assert_eq!(
+            state.history[&2].entries,
+            ["https://local.test/replaced", "https://local.test/new"]
+        );
+        assert_eq!(state.history[&2].index, 1);
+        assert_eq!(state.history[&3].entries, ["https://local.test/other"]);
+    }
+
+    #[test]
+    fn options_keep_binary_body_and_content_type_independent_of_text_fallback() {
+        let options: NavigationOptions = serde_json::from_str(r#"{"method":"POST","body":"fallback","bodyBytes":[0,255,10],"contentType":"application/octet-stream","timeoutMs":0}"#).unwrap();
+        assert_eq!(options.body_bytes, Some(vec![0, 255, 10]));
+        assert_eq!(options.body.as_deref(), Some("fallback"));
+        assert_eq!(
+            options.content_type.as_deref(),
+            Some("application/octet-stream")
+        );
+        assert_eq!(options.timeout_ms, Some(0));
     }
 }

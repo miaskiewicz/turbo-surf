@@ -39,6 +39,12 @@ branch.
 - Install the initial root Location before page bootstrap, so guest assign/reload
   uses real native navigation without extra bootstrap network requests.
 
+- Keep Deno service algorithms in a private stable realm while persistent Page
+  sessions start in actual native guest Window contexts. Preserve cached-fetch
+  and stream completion across document replacement, guest object identity and
+  BYOB aliasing/detachment; bind private value conversion to the live frontend
+  owner and reject closed guest snapshots instead of reading engine state.
+
 - Report asynchronous host-binding collection failures to foreground callers
   without making keyboard input wait for unrelated host callback completion.
 

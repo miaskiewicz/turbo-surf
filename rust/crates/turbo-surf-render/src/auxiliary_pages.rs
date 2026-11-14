@@ -331,7 +331,9 @@ pub(super) fn register_root<'s>(
                 source: None,
                 source_page: None,
                 published: true,
-                primary: true,
+                primary: context
+                    .get_slot::<private_infrastructure::GuestDocument>()
+                    .is_none(),
                 url: url.to_owned(),
                 page_bootstrap: root_bootstrap,
                 snapshot: None,

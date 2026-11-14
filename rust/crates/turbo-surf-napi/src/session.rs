@@ -770,7 +770,7 @@ impl TargetWorker<'_> {
             }
             LiveJob::Serialize(reply) => {
                 let _ = reply.send(if self.primary {
-                    Ok(self.session.serialize_for_driver())
+                    self.session.serialize_for_driver_checked()
                 } else {
                     self.target.with_auxiliary(|native_target| {
                         self.session.serialize_target_for_driver(native_target)

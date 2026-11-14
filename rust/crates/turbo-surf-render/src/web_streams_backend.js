@@ -1,5 +1,5 @@
 // The official algorithms and their symbol records never enter a guest object.
-(function (core, make) {
+(function (core, make, boundary) {
   "use strict";
   const ops = core.ops,
     get = ops.op_interface_record_get,
@@ -89,7 +89,7 @@
     getSize = WeakMap.prototype.get.bind(sizeFunctions),
     setSize = WeakMap.prototype.set.bind(sizeFunctions);
   const isPrototypeOf = Object.prototype.isPrototypeOf;
-  const localError = (error) => {
+  const legacyError = (error) => {
     if (
       error === null ||
       (typeof error !== "object" && typeof error !== "function") ||
@@ -113,6 +113,22 @@
       );
     } catch {
       return error;
+    }
+  };
+  const localError = (error) => {
+    if (!ops.op_infrastructure_active()) return legacyError(error);
+    if (!ops.op_infrastructure_origin(error) || backend.authoredHas(error)) return error;
+    try {
+      return boundary.rehome(error);
+    } catch {
+      try {
+        return new Exception(
+          apply(backend.exception.message.get, error, []),
+          apply(backend.exception.name.get, error, []),
+        );
+      } catch {
+        return new TypeErrorType("Unsupported private infrastructure error");
+      }
     }
   };
   const authored = (value) => {
@@ -151,9 +167,17 @@
     if (previous) return previous;
     return save(create(constructors[name].prototype), name, raw);
   };
-  const promise = (value, convert = (value) => value) =>
+  const boundaryValue = (value) =>
+    ops.op_infrastructure_origin(value) ? boundary.rehome(value) : value;
+  const observe = (value, fulfilled, rejected) => {
+    if (ops.op_value_is_promise(value) && ops.op_infrastructure_origin(value))
+      return boundary.observe(value, fulfilled, rejected);
+    return apply(then, resolvePromise(value), [fulfilled, rejected]);
+  };
+  const promise = (value, convert = boundaryValue) =>
     new PromiseType((resolve, reject) => {
-      apply(then, resolvePromise(value), [
+      observe(
+        value,
         (value) => {
           try {
             resolve(convert(value));
@@ -162,7 +186,7 @@
           }
         },
         (error) => reject(localError(error)),
-      ]);
+      );
     });
   const result = (name, member, value) => {
     if (member === "size" && typeof value === "function") {
@@ -189,7 +213,7 @@
       return fn;
     }
     if (member === "read" || member === "next" || member === "return")
-      return promise(value, (item) => ({ value: item.value, done: item.done }));
+      return promise(value, (item) => ({ value: boundaryValue(item.value), done: item.done }));
     if (["closed", "ready", "write", "close", "abort", "cancel", "pipeTo"].includes(member))
       return promise(value);
     if (member === "getReader")
@@ -208,7 +232,7 @@
     if (member === "tee")
       return [wrap(value[0], "ReadableStream"), wrap(value[1], "ReadableStream")];
     if (member === "values") return iteratorFront(value);
-    return value;
+    return boundaryValue(value);
   };
   const argumentsFor = (name, member, args) => {
     if (member === "pipeTo") return [unwrap(args[0], "WritableStream"), pipeOptions(args[1])];

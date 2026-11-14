@@ -54,9 +54,14 @@ impl PageSession {
     /// Serialize and record exactly the native revisions represented by this snapshot.
     /// Other serialization consumers keep using `serialize` without acknowledging a driver read.
     pub fn serialize_for_driver(&mut self) -> String {
-        let html = self.serialize();
+        self.serialize_for_driver_checked().unwrap_or_default()
+    }
+
+    /// Failed/closed roots must not acknowledge a snapshot of the private engine.
+    pub fn serialize_for_driver_checked(&mut self) -> Result<String, String> {
+        let html = self.serialize_checked()?;
         self.driver_snapshot = snapshot(&mut self.rt);
-        html
+        Ok(html)
     }
 
     /// Record the cookie jar actually returned to the driver, including HttpOnly changes.

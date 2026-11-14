@@ -54,6 +54,7 @@ pub(crate) fn install<'s>(
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
     if let Some(function) = result {
+        let boundary = crate::runtime::private_boundary::capabilities(scope)?;
         let receiver = v8::undefined(scope);
         let secure = v8::Boolean::new(scope, secure);
         if function
@@ -66,6 +67,7 @@ pub(crate) fn install<'s>(
                     secure.into(),
                     algorithm_factory.into(),
                     hybrid_factory.into(),
+                    boundary.into(),
                 ],
             )
             .is_some()

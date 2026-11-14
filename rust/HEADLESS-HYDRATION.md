@@ -20,6 +20,17 @@ layout/paint sampling. Reduced-motion media does not disable animations. The exp
 effect presentation per session while preserving timing, events, promises and
 ordinary JavaScript callbacks.
 
+Persistent `PageSession` actors keep Deno service algorithms in a private stable
+V8 context. The initial page and later replacements use actual native guest
+Window contexts; authored scripts and init scripts never run in the private
+service context. Replacing a document retires its callbacks while shared service
+algorithms can finish live pages' stream and cached-response work. Public byte
+objects preserve buffer aliasing and detachment, and retain their guest owner
+across same-agent use. Closed guest operations fail rather than selecting the
+private context. Module graphs require registration for their actual document
+and never fall back to the service realm. The standalone render path retains
+its existing single-document runtime scope.
+
 ## Historical parity evidence
 
 The Google checkpoints and cohort counts below retain their recorded source,

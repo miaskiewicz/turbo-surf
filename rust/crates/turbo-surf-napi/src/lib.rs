@@ -591,7 +591,7 @@ impl Task for HydrateTask {
                 self.response.metadata.clone(),
             )
             .await?;
-            let html = page.serialize();
+            let html = page.serialize_checked()?;
             page.close();
             Ok::<String, String>(html)
         })

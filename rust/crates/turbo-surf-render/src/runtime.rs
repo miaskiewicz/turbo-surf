@@ -16,6 +16,15 @@
 #[path = "window_proxy.rs"]
 mod window_proxy;
 
+#[path = "private_boundary.rs"]
+pub(crate) mod private_boundary;
+use private_boundary::{
+    op_infrastructure_active, op_infrastructure_adopt_crypto_key, op_infrastructure_origin,
+};
+
+#[path = "private_infrastructure.rs"]
+mod private_infrastructure;
+
 #[path = "auxiliary_host.rs"]
 mod auxiliary_host;
 #[path = "auxiliary_navigation.rs"]
@@ -8803,6 +8812,7 @@ fn install_environment<'s>(
         .ok_or("Native stream initialization failed")?;
     let namespace = crate::browser_env::engine_namespace(scope)
         .ok_or("Native environment namespace unavailable")?;
+    let boundary = private_boundary::capabilities(scope)?;
     let code = v8::String::new(scope, ENV_BOOTSTRAP).unwrap();
     let function = v8::Script::compile(scope, code, None)
         .and_then(|script| script.run(scope))
@@ -8813,7 +8823,7 @@ fn install_environment<'s>(
             .call(
                 scope,
                 receiver.into(),
-                &[core, web_factory.into(), namespace.into()],
+                &[core, web_factory.into(), namespace.into(), boundary.into()],
             )
             .is_some()
         {
@@ -9030,6 +9040,9 @@ deno_core::extension!(
         storage_events::op_storage_events,
         storage_events::op_storage_event_create,
         op_storage_bind,
+        op_infrastructure_adopt_crypto_key,
+        op_infrastructure_active,
+        op_infrastructure_origin,
         op_interface_record_get,
         op_interface_record_set,
         op_storage_id,
@@ -9184,7 +9197,7 @@ deno_core::extension!(
 // inside the IIFE they're per-invocation. Globals are assigned to `globalThis`
 // (idempotent) and the cookie bridge re-applies to the current `document`.
 const ENV_BOOTSTRAP: &str = concat!(
-    r##"((__core, __webFactory, __tsNs) => {
+    r##"((__core, __webFactory, __tsNs, __boundary) => {
 "use strict";
 // Core is a private embedder argument; no page global temporarily exposes ops.
 const ops = __core.ops;
@@ -10686,7 +10699,7 @@ const __resourceDiagnosticError=error=>__hostPolicyFailure(error)?"Network origi
   __resourceResponse=response=>{const item=state(responses,response);if(!item.resource)throw new TypeError("Not a network response");return item.resource;};
   __requestInit = value => {const item=requests.get(value);return item?{...item,body:item.body.raw,bodyIsStream:item.body.sourceStream}:value;};
 }
-__web = __webFactory(__core, __G.makeNativeFunction);
+__web = __webFactory(__core, __G.makeNativeFunction, __boundary);
 const __FetchReadable=ReadableStream;
 const __FetchPromise=Promise,__FetchPromiseRace=Promise.race.bind(Promise),__FetchThen=Function.prototype.call.bind(Promise.prototype.then);
 const __ReadableGetReader=ReadableStream.prototype.getReader,__ReadableTee=ReadableStream.prototype.tee;
@@ -15456,7 +15469,10 @@ fn make_runtime_with_storage_and_options(
         // fail closed; actual context retirement and sandbox flags gate imports.
         validate_import_attributes_cb: Some(Box::new(|scope, _attributes, _context| {
             let current = scope.get_current_context();
-            if current.get_slot::<FrameContextMarker>().is_some()
+            if (current.get_slot::<FrameContextMarker>().is_some()
+                || current
+                    .get_slot::<private_infrastructure::GuestDocument>()
+                    .is_some())
                 && (!cfg!(turbo_surf_native_proxy)
                     || current.get_slot::<FrameRetired>().is_some()
                     || current
@@ -15696,7 +15712,23 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         queue.used_inline_offsets.clear();
         queue.jobs.clear();
     }
-    let context = rt.main_context();
+    install_dom_document(rt, html, base)?;
+    let actual_origin = {
+        let selected = private_infrastructure::context(rt)?;
+        deno_core::scope!(scope, rt);
+        let context = v8::Local::new(scope, selected);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        window_origin(scope, context)
+    };
+    private_infrastructure::execute(rt, &format!("globalThis.origin = {actual_origin:?}"))
+        .map_err(|e| e.to_string())?;
+    install_dom_environment(rt, base)?;
+    finish_dom_window(rt, base)?;
+    Ok(())
+}
+
+fn install_dom_document(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String> {
+    let context = private_infrastructure::context(rt)?;
     {
         let scope = v8::HandleScope::new(rt.v8_isolate());
         let scope = std::pin::pin!(scope);
@@ -15730,20 +15762,17 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         auxiliary_navigation::install_opener_policy(context, &headers, base);
         auxiliary_host::install_root(&mut scope, base)?;
         window_proxy::install_location(&mut scope, base);
+        private_infrastructure::configure_guest(&mut scope, context, base)?;
     }
-    let actual_origin = {
-        deno_core::scope!(scope, rt);
-        let context = scope.get_current_context();
-        window_origin(scope, context)
-    };
-    rt.execute_script(
-        "<location>",
-        format!("globalThis.origin = {actual_origin:?}"),
-    )
-    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn install_dom_environment(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     {
+        let selected = private_infrastructure::context(rt)?;
         deno_core::scope!(scope, rt);
-        let context = scope.get_current_context();
+        let context = v8::Local::new(scope, selected);
+        let scope = &mut v8::ContextScope::new(scope, context);
         let core = context
             .get_slot::<RuntimeCore>()
             .ok_or("Native crypto core unavailable")?;
@@ -15754,8 +15783,12 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         crate::audio_backend::install(scope, core)?;
         crate::geometry_backend::install(scope, core)?;
     }
+    Ok(())
+}
+
+fn finish_dom_window(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     {
-        let context = rt.main_context();
+        let context = private_infrastructure::context(rt)?;
         let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
         let mut scope = scope.init();
         let context = v8::Local::new(&scope, context);
@@ -15763,7 +15796,10 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         window_proxy::capture_exception(scope);
     }
     {
+        let selected = private_infrastructure::context(rt)?;
         deno_core::scope!(scope, rt);
+        let context = v8::Local::new(scope, selected);
+        let scope = &mut v8::ContextScope::new(scope, context);
         crate::browser_env::finish_key_order(scope);
         auxiliary_host::install_root(scope, base)?;
         let context = scope.get_current_context();
@@ -15790,7 +15826,7 @@ fn namespace_call(
     name: &str,
     args: &[HostArg],
 ) -> Result<v8::Global<v8::Value>, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -15822,7 +15858,7 @@ pub(crate) fn execute_engine_script(
     rt: &mut JsRuntime,
     source: &str,
 ) -> Result<v8::Global<v8::Value>, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -15838,8 +15874,8 @@ pub(crate) fn execute_engine_script(
 
 /// Reads a data property of the main realm's bootstrap namespace natively
 /// (turbo-surf#87); `undefined` when the namespace is unavailable.
-fn namespace_value(rt: &mut JsRuntime, name: &str) -> v8::Global<v8::Value> {
-    let context = rt.main_context();
+fn namespace_value(rt: &mut JsRuntime, name: &str) -> Result<v8::Global<v8::Value>, String> {
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -15849,11 +15885,11 @@ fn namespace_value(rt: &mut JsRuntime, name: &str) -> v8::Global<v8::Value> {
         namespace.get(scope, key.into())
     });
     let value = value.unwrap_or_else(|| v8::undefined(scope).into());
-    v8::Global::new(scope, value)
+    Ok(v8::Global::new(scope, value))
 }
 
 fn read_string(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<String, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     let scope = v8::HandleScope::new(rt.v8_isolate());
     let scope = std::pin::pin!(scope);
     let mut scope = scope.init();
@@ -15864,7 +15900,7 @@ fn read_string(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<Stri
 }
 
 fn read_json(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<String, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -16962,7 +16998,7 @@ pub async fn render_capture_cookies_with_document_response(
             page.eval(program).await?;
         }
     }
-    let result = (page.serialize(), page.cookies());
+    let result = (page.serialize_checked()?, page.cookies());
     page.close();
     Ok(result)
 }
@@ -17414,7 +17450,7 @@ fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str, base: &str) -> Result<(),
 // receiver-local state; each phase updates it and dispatches the matching trusted
 // events. All fully guarded so a lifecycle hiccup can't break a render.
 fn run_lifecycle(rt: &mut JsRuntime, phase: &str) -> Result<(), String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
     let mut scope = scope.init();
     let context = v8::Local::new(&scope, context);
@@ -17656,8 +17692,7 @@ async fn hydrate_installed_document(
         execute_engine_script(rt, &engine_source)?;
     }
     if !init_script.is_empty() {
-        rt.execute_script("<init-script>", init_script.to_string())
-            .map_err(|e| e.to_string())?;
+        private_infrastructure::execute(rt, init_script).map_err(|e| e.to_string())?;
     }
     hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
     namespace_call(rt, "startInitialHydrate", &[])?;
@@ -17714,10 +17749,13 @@ async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), Str
 async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     for n in 0..1000usize {
         namespace_call(rt, "takeModuleScript", &[])?;
-        let g = namespace_value(rt, "moduleDescriptor");
+        let g = namespace_value(rt, "moduleDescriptor")?;
         let desc = read_string(rt, g)?;
         if desc.is_empty() || desc == "undefined" || desc == "null" {
             break;
+        }
+        if private_infrastructure::enabled(rt) {
+            return Err("Guest-root ES modules require registered guest module ownership".into());
         }
         let v: deno_core::serde_json::Value =
             deno_core::serde_json::from_str(&desc).unwrap_or(deno_core::serde_json::Value::Null);
@@ -17746,29 +17784,40 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
         };
         match loaded {
             Ok(id) => {
-                // Point document.currentScript at the chunk's element for the duration of
-                // evaluation: turbopack chunks self-register via TURBOPACK.push([document
-                // .currentScript, …]) and key the chunk by currentScript.src. Without this
-                // an ESM chunk registers under a stale path and the entry's chunk-load
-                // Promise.all never resolves (→ the app never hydrates, no error).
-                let element = namespace_value(rt, "currentModuleEl");
-                namespace_call(rt, "setCurrentScript", &[HostArg::Value(element)])?;
-                let evaluation = rt.mod_evaluate(id);
-                if crate::shim_bindings::pending(rt) {
-                    drop(evaluation);
-                    namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
+                if !evaluate_loaded_module(rt, id, &spec_str).await? {
                     return Ok(());
-                }
-                let ev = evaluation.await;
-                namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
-                if let Err(e) = ev {
-                    eprintln!("module eval error ({spec_str}): {e}");
                 }
             }
             Err(e) => eprintln!("module load error ({spec_str}): {e}"),
         }
     }
     Ok(())
+}
+
+async fn evaluate_loaded_module(
+    rt: &mut JsRuntime,
+    id: deno_core::ModuleId,
+    spec_str: &str,
+) -> Result<bool, String> {
+    // Point document.currentScript at the chunk's element for the duration of
+    // evaluation: turbopack chunks self-register via TURBOPACK.push([document
+    // .currentScript, …]) and key the chunk by currentScript.src. Without this
+    // an ESM chunk registers under a stale path and the entry's chunk-load
+    // Promise.all never resolves (→ the app never hydrates, no error).
+    let element = namespace_value(rt, "currentModuleEl")?;
+    namespace_call(rt, "setCurrentScript", &[HostArg::Value(element)])?;
+    let evaluation = rt.mod_evaluate(id);
+    if crate::shim_bindings::pending(rt) {
+        drop(evaluation);
+        namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
+        return Ok(false);
+    }
+    let ev = evaluation.await;
+    namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
+    if let Err(e) = ev {
+        eprintln!("module eval error ({spec_str}): {e}");
+    }
+    Ok(true)
 }
 
 // RAII runaway-execution watchdog: terminates the isolate if an op runs past the
@@ -18515,7 +18564,7 @@ impl PageSession {
         rt.op_state().borrow_mut().borrow_mut::<ResponseHeaders>().0 = response_headers.to_vec();
         {
             let _activation = rt.activation_key().enter();
-            prepare_hydration(&mut rt, html, base)?;
+            private_infrastructure::prepare(&mut rt, html, base)?;
         }
         let enforce_initial_deadline = options.window_timer_mode == WindowTimerMode::RealTime
             || options.initial_hydration_budget_ms.is_some();
@@ -18547,7 +18596,7 @@ impl PageSession {
         let progress = rt.op_state().borrow().borrow::<HydrationProgress>().clone();
         let unsupported_csp = {
             let _activation = rt.activation_key().enter();
-            let context = rt.main_context();
+            let context = private_infrastructure::context(&mut rt)?;
             let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
             let scope = &mut scope.init();
             let context = v8::Local::new(scope, context);
@@ -18617,7 +18666,10 @@ impl PageSession {
         }
         {
             let _activation = self.rt.activation_key().enter();
+            let selected = private_infrastructure::context(&mut self.rt)?;
             deno_core::scope!(scope, self.rt);
+            let context = v8::Local::new(scope, selected);
+            let scope = &mut v8::ContextScope::new(scope, context);
             crate::live_layout_backend::set_viewport(scope, width, height)?;
         }
         self.options.viewport = Some([width, height]);
@@ -18680,13 +18732,11 @@ impl PageSession {
             .during(async {
                 execute_engine_script(&mut self.rt, script)?;
                 // Capture before guest tasks run: a page must not overwrite a collected reply.
-                let value = self
-                    .rt
-                    .execute_script(
-                        "<collected-result>",
-                        "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)",
-                    )
-                    .map_err(|error| error.to_string())?;
+                let value = private_infrastructure::execute(
+                    &mut self.rt,
+                    "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)",
+                )
+                .map_err(|error| error.to_string())?;
                 let result = read_string(&mut self.rt, value)?;
                 poll_driver_turn(&mut self.rt).await?;
                 Ok(result)
@@ -18702,6 +18752,10 @@ impl PageSession {
     }
 
     async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
+        {
+            let _activation = self.rt.activation_key().enter();
+            let _guest = private_infrastructure::context(&mut self.rt)?;
+        }
         let result = if let Some(target) = self.replaced_root_target() {
             self.eval_replaced_root(target, script, engine).await
         } else {
@@ -18809,6 +18863,10 @@ impl PageSession {
         json: bool,
         engine: bool,
     ) -> Result<String, String> {
+        {
+            let _activation = self.rt.activation_key().enter();
+            let _guest = private_infrastructure::context(&mut self.rt)?;
+        }
         let result = if let Some(target) = self.replaced_root_target() {
             self.eval_target_expression(target, expression, engine, json)
                 .await
@@ -19174,16 +19232,22 @@ impl PageSession {
     /// Activation is captured when a script navigation is admitted, before timers run.
     pub fn script_nav_activation_snapshot(&mut self) -> Option<(String, bool)> {
         let _activation = self.rt.activation_key().enter();
+        let selected = private_infrastructure::context(&mut self.rt).ok()?;
         deno_core::scope!(scope, self.rt);
-        script_navigation::snapshot(scope.get_current_context())
+        let context = v8::Local::new(scope, selected);
+        script_navigation::snapshot(context)
     }
 
     /// Native sticky activation and source origin for a subsequent document navigation.
     pub fn navigation_activation_snapshot(&mut self) -> NavigationActivationSnapshot {
         let source = self.rt.op_state().borrow().borrow::<Base>().0.clone();
         let _activation = self.rt.activation_key().enter();
+        let Ok(selected) = private_infrastructure::context(&mut self.rt) else {
+            return NavigationActivationSnapshot::inactive(source);
+        };
         deno_core::scope!(scope, self.rt);
-        NavigationActivationSnapshot::capture(source, scope.get_current_context())
+        let context = v8::Local::new(scope, selected);
+        NavigationActivationSnapshot::capture(source, context)
     }
 
     /// Snapshot the host-owned headers of the installed response after navigation.
@@ -19198,11 +19262,26 @@ impl PageSession {
 
     /// Serialize the CURRENT live DOM to HTML (no reset — the page stays alive).
     pub fn serialize(&mut self) -> String {
+        self.serialize_checked().unwrap_or_default()
+    }
+
+    /// Serialize only an owned live document; private infrastructure is never a fallback.
+    pub fn serialize_checked(&mut self) -> Result<String, String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
+        {
+            let _activation = self.rt.activation_key().enter();
+            let _guest = private_infrastructure::context(&mut self.rt)?;
+        }
         if let Some(target) = self.replaced_root_target() {
-            return self.serialize_target(target).unwrap_or_default();
+            return self.serialize_target(target);
+        }
+        if private_infrastructure::enabled(&self.rt) {
+            return Err("Guest root ownership unavailable".into());
         }
         let _activation = self.rt.activation_key().enter();
-        crate::browser_env::document_html()
+        Ok(crate::browser_env::document_html())
     }
 
     /// The page's cookies as a `storageState` JSON string (includes HttpOnly session

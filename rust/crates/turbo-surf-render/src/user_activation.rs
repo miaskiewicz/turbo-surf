@@ -206,6 +206,13 @@ fn activation_host(
 }
 
 impl NavigationActivationSnapshot {
+    pub(super) fn inactive(source: String) -> Self {
+        Self {
+            source,
+            sticky: false,
+        }
+    }
+
     pub(super) fn capture(source: String, context: v8::Local<v8::Context>) -> Self {
         Self {
             source,
@@ -235,6 +242,12 @@ pub(super) fn seed(
     scope
         .get_current_context()
         .set_slot(Rc::new(InheritedSticky(sticky)));
+}
+
+pub(super) fn inherit_initial(source: v8::Local<v8::Context>, target: v8::Local<v8::Context>) {
+    if let Some(sticky) = source.get_slot::<InheritedSticky>() {
+        target.set_slot(sticky);
+    }
 }
 
 fn key<'s>(scope: &mut v8::PinScope<'s, '_>, name: &str) -> Option<v8::Local<'s, v8::Private>> {

@@ -937,7 +937,17 @@
             x = coordinate(x, name);
             y = coordinate(y, name);
             const result = ops.op_live_elements_at_point(this, x, y);
-            return name === "elementFromPoint" ? (result[0] ?? null) : result;
+            if (name === "elementFromPoint") return result[0] ?? null;
+            const values = [];
+            for (let index = 0; index < result.length; index++)
+              define(values, index, {
+                __proto__: null,
+                value: result[index],
+                writable: true,
+                enumerable: true,
+                configurable: true,
+              });
+            return values;
           },
           name,
           2,

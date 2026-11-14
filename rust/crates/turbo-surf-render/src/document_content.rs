@@ -50,7 +50,7 @@ impl PageSession {
         }
         result.unwrap()?;
         self.follow_form_navigation().await?;
-        Ok(self.serialize())
+        self.serialize_checked()
     }
 
     async fn set_content_active(&mut self, html: &str, wait_until: &str) -> Result<(), String> {

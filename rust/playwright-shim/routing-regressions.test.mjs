@@ -119,29 +119,49 @@ test("route fallback visits older handlers and unroute updates one live wrapper"
 });
 
 test("a missed web-first assertion hydrates default navigation while commit stays static", async () => {
-  const server = createServer((_request, response) =>
+  let executions = 0;
+  let documents = 0;
+  const server = createServer((request, response) => {
+    if (request.url === "/executed") {
+      executions++;
+      response.end("executed");
+      return;
+    }
+    documents++;
     response.end(
-      '<body><script>setTimeout(()=>{document.body.innerHTML="<input id=ready>"},100)</script></body>',
-    ),
-  );
+      '<body><script>fetch("/executed"); setTimeout(()=>{document.body.innerHTML="<input id=ready>"},100)</script></body>',
+    );
+  });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const endpoint = `http://127.0.0.1:${server.address().port}/`;
   try {
+    // Commit controls the waiting milestone; independent permission controls execution.
     for (const waitUntil of ["load", "commit"]) {
-      const page = shim.newPage();
-      try {
-        await page.goto(endpoint, { waitUntil });
-        assert.equal(page._live, false);
-        const assertion = shim.expect(page.locator("#ready")).toBeVisible({ timeout: 1000 });
-        if (waitUntil === "load") {
-          await assertion;
-          assert.equal(page._live, true);
-        } else {
-          await assert.rejects(assertion);
+      for (const autoHydrate of [true, false]) {
+        const before = { executions, documents };
+        const page = shim.newPage();
+        page._autoHydrate = autoHydrate;
+        try {
+          await page.goto(endpoint, { waitUntil });
           assert.equal(page._live, false);
+          assert.equal(executions - before.executions, 0);
+          assert.equal(documents - before.documents, 1);
+          const assertion = shim.expect(page.locator("#ready")).toBeVisible({ timeout: 1000 });
+          if (autoHydrate) {
+            await assertion;
+            assert.equal(page._live, true);
+            assert.equal(executions - before.executions, 1);
+            assert.equal(await page.evaluate(() => document.querySelectorAll("#ready").length), 1);
+          } else {
+            await assert.rejects(assertion);
+            assert.equal(page._live, false);
+            assert.equal(executions - before.executions, 0);
+            assert.equal(await page.locator("#ready").count(), 0);
+          }
+          assert.equal(documents - before.documents, 1, "hydration must not refetch its document");
+        } finally {
+          await page.close();
         }
-      } finally {
-        await page.close();
       }
     }
   } finally {

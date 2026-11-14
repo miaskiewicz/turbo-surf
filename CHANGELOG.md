@@ -16,6 +16,10 @@ branch.
 
 ### Engine and performance
 
+- Align navigation regression controls with independent execution permission:
+  load and commit permit later on-demand execution, while an explicitly disabled
+  policy remains static without client requests.
+
 - Preserve explicit driver navigation referrers and authentic request metadata.
   Read root history from the actual native Location, retain prior document
   entries, and keep the active document/history on 204/205 responses.

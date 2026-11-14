@@ -151,6 +151,10 @@ test("a missed web-first assertion hydrates default navigation while commit stay
             await assertion;
             assert.equal(page._live, true);
             assert.equal(executions - before.executions, 1);
+            const ready = await page.locator("#ready").all();
+            assert.equal(ready.length, 1);
+            assert.equal(await ready[0].count(), 1);
+            assert.equal((await page.locator("input").nth(1).all()).length, 0);
             assert.equal(await page.locator("#ready").count(), 1);
             assert.equal(await page.locator("body").locator("input").count(), 1);
             assert.equal(await page.locator("input").nth(0).count(), 1);
@@ -162,6 +166,7 @@ test("a missed web-first assertion hydrates default navigation while commit stay
             assert.equal(page._live, false);
             assert.equal(executions - before.executions, 0);
             assert.equal(await page.locator("#ready").count(), 0);
+            assert.equal((await page.locator("#ready").all()).length, 0);
           }
           assert.equal(documents - before.documents, 1, "hydration must not refetch its document");
         } finally {

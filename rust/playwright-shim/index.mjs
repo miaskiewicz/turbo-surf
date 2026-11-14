@@ -996,8 +996,7 @@ class Locator {
     return this._all().length;
   }
   async all() {
-    await this._prepareQuery();
-    return this._all().map((_, i) => this.nth(i));
+    return Array.from({ length: await this.count() }, (_, i) => this.nth(i));
   }
   async textContent() {
     await this._prepareQuery();

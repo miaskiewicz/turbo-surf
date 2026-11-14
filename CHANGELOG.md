@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Enumerate `Locator.all()` from the current query count instead of a stale pre-hydration snapshot.
+
 - Read locator counts from the current native document after hydration, preserving static execution policy, indexed/scoped queries and nonblocking reads.
 
 - Retire screenshot image bytes and retained paint scenes when a native document navigates, including same-URL replacements.

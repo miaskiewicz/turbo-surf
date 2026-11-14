@@ -4,7 +4,7 @@ Target: `release/v0.8.4`. Updated 2026-11-14.
 
 Original batch: **34 test cases (11 Rust, 23 shim)**. **27 have component proof and their fixes are merged; 7 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
-All three additional groups below are explicitly in scope. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
+All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
 
 ## Original cases
 
@@ -48,7 +48,7 @@ All three additional groups below are explicitly in scope. No deferrals. Payroll
 ## Additional findings — required before completion
 
 - [x] **Locator.count stale document** — merged `94e4915b`. Original count 0→1, fix-only OFF reproduces 0, exact restore passes six targeted/read-only controls; root merged-source routing and locator-read files pass 10/10 (3.62s) on signed ba119 artifact. Reads current live DOM without evaluate, guest execution or full serialization; final combined rerun pending.
-- [ ] **Locator.all stale document** — count owner confirmed adjacent static-snapshot path; separate regression and correction in progress.
+- [x] **Locator.all stale document** — merged `e00e36e7`. Regression and fix-only inverse reproduce stale 0; restored live enumeration passes, including returned/indexed locators and static-disabled controls. Root merged-source routing/read files pass 10/10 (3.51s); final combined rerun pending.
 - [ ] **Platform-value ownership** — infrastructure owner. DOMRect/AudioBuffer own and borrowed paths must allocate in the actual guest owner; preserve DOMPoint controls and constructor/isolation guards.
 - [ ] **Broader native history gap** — navigation owner. Verified original `2abd5438`/`c8d4` loses `/spa` after pushState → cross-document navigation → back; Chrome retains it. Implement authenticated native document/group/state history with structured-clone state, transactional mutation and correct guest/driver traversal. User explicitly requires this; do not defer.
 

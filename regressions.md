@@ -76,6 +76,8 @@ Accounting: 34 original test cases plus 11 additional tracked cases/findings (th
 
 ## Completion gates
 
+User sequencing requirement: **fix all known failures first**, with targeted and adjacent regression checks as each fix lands. Only then freeze the combined release build and run the complete sweep; coverage follows green full gates.
+
 - [ ] Validate each production fix: unchanged meaningful RED → GREEN → critical fix-only OFF reproduces intended RED → byte-exact restore GREEN.
 - [ ] Merge and push every validated component; keep this file and the detailed receipt ledgers synchronized.
 - [ ] Verify latest turbo-dom release head before the final integrated build, then pin and push the final graph.

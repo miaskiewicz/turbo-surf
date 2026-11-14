@@ -3358,8 +3358,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return { controller, milestone };
   }
 
+  _navigationBindingDeadline(options) {
+    const timeout = this._navigationTimeoutFor(options);
+    return timeout === 0 ? Infinity : Date.now() + timeout;
+  }
+
   async _navigateActorTarget(url, method, body, opts = {}) {
     const navigationStarted = performance.now();
+    const bindingDeadline = this._navigationBindingDeadline(opts);
     const { controller, milestone } = this._navigationMilestone(opts);
     this._driverNavigation = true;
     try {
@@ -3386,6 +3392,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
       await this._actorHub.drain();
       await this._refreshFromSession(true);
+      await this._drainBindings(bindingDeadline, true, true);
       if (milestone) await milestone;
       if (opts.waitUntil === "networkidle")
         await this._waitForTargetNetworkIdle(

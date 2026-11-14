@@ -38,7 +38,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `history navigation honors networkidle hydration (#425)` | `d1b61ed7`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Deadline owner: Native controls 5/5 pass, but full original still FAILS: second reload times out correctly yet closes Page (line 3239). Initial timeout0 recovery passes; investigating retained-target reload lifetime, no green credit |
 | [x] | shim | `viewport resize updates live layout media and only its own page (#369)` | `864b3343`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Integration/test runner: Merged infrastructure and resident bytes; full original rerun pending |
+| [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Action/navigation owner: Full original rerun fails replacement document request count 1 vs 2 (surface line 4315; before screenshot/image assertions); investigating form completion with GET/shadow defaults, cache fixes remain merged |
 | [x] | shim | `frame locator typing uses canonical child selection and child event constructors` | `0a451d99`; targeted proof complete, combined rerun pending |
 | [x] | shim | `Browser credentials answer Basic challenges and stay origin scoped (#394)` | `90ca133b`; targeted proof complete, combined rerun pending |
 | [x] | shim | `static frame identity survives promotion to the live native registry (#447)` | `0a451d99`; targeted proof complete, combined rerun pending |
@@ -55,8 +55,9 @@ All additional bugs found during this work are explicitly in scope and tracked b
 ## Additional confirmed failures and investigations
 
 - [ ] **Classic-script response visibility during opening close** — confirmed script-fetch drops the core response observer: server flushes headers but facade waits for EOF. Lifecycle owner is implementing bounded forwarding with actual cancellation tests, preserving CORS/CSP/SRI and the header assertion.
-- [ ] **Child-frame click navigation (#280)** — passes its accepted component, but also fails on the older E118 addon in the locator-control replay with enumeration fix OFF. Keep exact original in the final combined rerun; no waiver.
-- [ ] **Shadow-link navigation control** — fails on the immutable older E118 addon both with and without the count fix. Preserve receipt and rerun on the combined navigation build before classifying current-source behavior.
+- [x] **Child-frame click navigation (#280) older-addon failure** — whole surface replay on newer platform addon passes the original. Old E118 failure was missing accepted native fixes; final composed build must still rerun it.
+- [ ] **Shadow-link default navigation** — full newer platform-addon cohort reproduces `/` instead of `/folder/next` (`shadow-locators.test.mjs:248`). Action/navigation owner investigating actual completion and target URL, with unchanged link assertions.
+- [ ] **Page.click GET form completion** — new cohort failure: returned content is the old form rather than the server response containing `q=rust` (`surface.test.mjs:515`). Action/navigation owner investigating alongside shadow-link and original same-URL screenshot form navigation.
 
 ## Completion gates
 
@@ -68,6 +69,10 @@ All additional bugs found during this work are explicitly in scope and tracked b
 - [ ] Complete Rust workspace tests, strict all-target Clippy, core no-default-feature Clippy, formatting, Rust/JS CC≤15, shim/e2e/detection and release utility gates.
 - [ ] Measure current official coverage shards and pass unchanged aggregate/per-crate floors. No floor reductions or new exclusions.
 - [ ] Report all results, intentional exclusions and remaining limitations. Payroll validation requires separate express user go-ahead.
+
+## Latest broader component replay
+
+On main shim/test source `21361462` and immutable platform addon `6b8b`: six full locator/shadow files completed **232 total: 227 passed, 4 failed, 1 existing skip, 0 cancellations (83.37s)**. Failures are the tracked shadow-link, GET form, deadline #427 and same-URL form screenshot #489 cases. This is not the final composed source/artifact result. Source/artifact hashes remained unchanged.
 
 ## Evidence
 

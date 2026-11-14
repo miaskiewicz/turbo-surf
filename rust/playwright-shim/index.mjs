@@ -3164,6 +3164,28 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._responseBodies.delete(entry.id);
     this._networkResponses?.delete(entry.id);
     this._updateNetworkPump();
+    this._recordResponseDownload(pending.entry, pending.response);
+  }
+  _recordResponseDownload(entry, response) {
+    if (
+      !entry.context?.navigation ||
+      response.request().redirectedTo() ||
+      [204, 205].includes(entry.status) ||
+      entry.error ||
+      entry.bodyIncomplete
+    )
+      return;
+    const attachment = attachmentRecord({
+      headers: entry.headers,
+      finalUrl: entry.url,
+      bodyBytes: entry.bodyBytes,
+    });
+    if (!attachment) return;
+    if (entry.bodyUnavailable || entry.bodyBytes == null)
+      throw new Error("Native navigation download body bytes are unavailable");
+    if (entry.id == null)
+      throw new Error("Native navigation download omitted its request identity");
+    this._recordDownload(attachment, entry.id);
   }
   _captureNetworkResponse(entry) {
     let lifecycle;
@@ -3176,7 +3198,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
     const response = makeNetResponse(entry, this._requestFrame(entry), lifecycle);
     nativeResponseIds.set(response, entry.id);
-    if (!lifecycle) return { response };
+    if (!lifecycle) {
+      this._recordResponseDownload(entry, response);
+      return { response };
+    }
     lifecycle.response = response;
     (this._responseBodies ??= new Map()).set(entry.id, lifecycle);
     (this._networkResponses ??= new Map()).set(entry.id, response);
@@ -3367,13 +3392,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   async _navigateActorTarget(url, method, body, opts = {}) {
     const navigationStarted = performance.now();
+    const session = this._session;
     const bindingDeadline = this._navigationBindingDeadline(opts);
     const { controller, milestone } = this._navigationMilestone(opts);
     this._driverNavigation = true;
     try {
       const receipt = JSON.parse(
         await native.liveNavigateTarget(
-          this._session,
+          session,
           url,
           opts._historyMode ?? "push",
           JSON.stringify({
@@ -3389,7 +3415,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (receipt.attachment) {
         const attachment = attachmentRecord(receipt);
         if (!attachment) throw new Error("Native attachment navigation omitted its disposition");
-        this._recordDownload(attachment);
+        this._recordDownload(attachment, receipt.requestId, session);
         throw new DownloadNavigationError();
       }
       await this._actorHub.drain();
@@ -4250,8 +4276,16 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._defaultTimeout ?? this._context._defaultTimeout ?? 30000,
     );
   }
-  _recordDownload(entry) {
+  _downloadRequestKey(requestId, session = this._session ?? this._openingNetworkId) {
+    if (requestId == null) return undefined;
+    if (session == null) throw new Error("Native download has no owned Page session");
+    return `${session}:${requestId}`;
+  }
+  _recordDownload(entry, requestId, session) {
+    const key = this._downloadRequestKey(requestId, session);
+    if (key !== undefined && this._downloadRequestIds?.has(key)) return;
     const download = makeDownload(entry);
+    if (key !== undefined) (this._downloadRequestIds ??= new Set()).add(key);
     (this._downloads ??= []).push(download);
     this._emit("download", download);
   }

@@ -65,6 +65,7 @@ test("HTTP attachments emit binary downloads without replacing the live document
   const origin = `http://127.0.0.1:${server.address().port}/`;
   const page = shim.newPage();
   let downloadPath;
+  let staticPage;
   try {
     await page.goto(origin, { waitUntil: "networkidle" });
     const events = [];
@@ -84,29 +85,131 @@ test("HTTP attachments emit binary downloads without replacing the live document
       page.waitForEvent("download", { timeout: 30 }),
       (error) => error.name === "TimeoutError",
     );
-    page._autoHydrate = false; // Explicitly exercise the static-only download path.
-    await page.goto(origin, { waitUntil: "commit" });
+    staticPage = await page.context().newPage();
+    staticPage._autoHydrate = false; // Exercise the independent static-only tier.
+    await staticPage.goto(origin, { waitUntil: "commit" });
     await assert.rejects(
-      page.locator("#hidden").click({ timeout: 30 }),
+      staticPage.locator("#hidden").click({ timeout: 30 }),
       (error) => error.name === "TimeoutError",
     );
     await assert.rejects(
-      page.locator("#disabled").click({ timeout: 30 }),
+      staticPage.locator("#disabled").click({ timeout: 30 }),
       (error) => error.name === "TimeoutError",
     );
-    assert.equal(page._live, false);
+    assert.equal(staticPage._live, false);
     assert.equal(attachmentRequests, 1);
-    const staticWaiting = page.waitForEvent("download", { timeout: 300 });
-    await page.locator("#download").click();
+    const staticWaiting = staticPage.waitForEvent("download", { timeout: 300 });
+    await staticPage.locator("#download").click();
     assert.equal((await staticWaiting).suggestedFilename(), "fíxture.bin");
-    assert.equal(page._live, false);
+    assert.equal(staticPage._live, false);
     assert.equal(attachmentRequests, 2);
+    assert.equal(await page.evaluate(() => document.body.dataset.keep), "yes");
   } finally {
+    await staticPage?.close();
     await page.close();
     await new Promise((resolve) => server.close(resolve));
     if (downloadPath) await rm(dirname(downloadPath), { recursive: true, force: true });
   }
 });
+
+test(
+  "native document downloads wait for body EOF, exclude fetches and deduplicate receipts",
+  { timeout: 5000 },
+  async () => {
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    let heldResponse;
+    const server = createServer((request, response) => {
+      if (request.url === "/redirect") {
+        response.writeHead(302, {
+          location: "/direct",
+          "content-disposition": 'attachment; filename="ignored.bin"',
+        });
+        response.end();
+        return;
+      }
+      if (request.url !== "/") {
+        response.setHeader("content-disposition", 'attachment; filename="actual.bin"');
+        response.setHeader("content-type", "application/octet-stream");
+        if (request.url === "/held") {
+          heldResponse = response;
+          response.write(bytes.subarray(0, 2));
+        } else response.end(bytes);
+        return;
+      }
+      response.end(
+        '<body data-keep="yes"><a id="attachment" href="/held">Download</a><a id="redirect" href="/redirect">Redirect</a></body>',
+      );
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const page = shim.newPage();
+    const downloads = [];
+    const directories = new Set();
+    page.on("download", (download) => downloads.push(download));
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      const header = page.waitForResponse((response) => response.url() === `${origin}/held`, {
+        timeout: 1000,
+      });
+      const waiting = page.waitForEvent("download", { timeout: 2000 });
+      waiting.catch(() => {});
+      const click = page.click("#attachment");
+      click.catch(() => {});
+      assert.equal(
+        (await header).headers()["content-disposition"],
+        'attachment; filename="actual.bin"',
+      );
+      assert.equal(downloads.length, 0, "response headers do not complete a native download");
+      heldResponse.end(bytes.subarray(2));
+      heldResponse = null;
+      const download = await waiting;
+      await click;
+      const file = await download.path();
+      directories.add(dirname(file));
+      assert.deepEqual(await readFile(file), bytes);
+      assert.equal(downloads.length, 1);
+      assert.equal(await page.evaluate(() => document.body.dataset.keep), "yes");
+      assert.deepEqual(
+        await page.evaluate(async () =>
+          Array.from(new Uint8Array(await (await fetch("/fetch")).arrayBuffer())),
+        ),
+        [...bytes],
+      );
+      assert.equal(
+        downloads.length,
+        1,
+        "a fetch with attachment headers is not a document download",
+      );
+      const directWaiting = page.waitForEvent("download", { timeout: 1000 });
+      directWaiting.catch(() => {});
+      await assert.rejects(page.goto(`${origin}/direct`), /Download is starting/);
+      const direct = await directWaiting;
+      const directFile = await direct.path();
+      directories.add(dirname(directFile));
+      assert.deepEqual(await readFile(directFile), bytes);
+      assert.deepEqual(
+        downloads,
+        [download, direct],
+        "a native receipt and its body event share one download",
+      );
+      const redirectedWaiting = page.waitForEvent("download", { timeout: 1000 });
+      redirectedWaiting.catch(() => {});
+      await page.click("#redirect");
+      const redirected = await redirectedWaiting;
+      const redirectedFile = await redirected.path();
+      directories.add(dirname(redirectedFile));
+      assert.equal(redirected.suggestedFilename(), "actual.bin");
+      assert.deepEqual(await readFile(redirectedFile), bytes);
+      assert.deepEqual(downloads, [download, direct, redirected]);
+    } finally {
+      heldResponse?.end();
+      await page.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      for (const directory of directories) await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("waitForURL keeps waiting for a later driver navigation within its timeout", async () => {
   const page = shim.newPage();

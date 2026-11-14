@@ -108,6 +108,43 @@ fn queue_auxiliary_navigation<'s>(
     true
 }
 
+fn deny_navigation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Context>,
+    text: &str,
+) {
+    if !crate::runtime::sandbox_blocks_top_navigation(source, target) {
+        deny(scope);
+        return;
+    }
+    let base = source
+        .get_slot::<FrameScriptPolicy>()
+        .map(|policy| policy.base.clone())
+        .or_else(|| {
+            source
+                .get_slot::<FrameDocumentUrl>()
+                .map(|url| url.0.clone())
+        })
+        .unwrap_or_else(|| {
+            JsRuntime::op_state_from(scope)
+                .borrow()
+                .borrow::<Base>()
+                .0
+                .clone()
+        });
+    let url = ModuleSpecifier::parse(&base)
+        .and_then(|base| base.join(text))
+        .map_or_else(|_| text.to_owned(), |url| url.to_string());
+    named_exception(
+        scope,
+        &format!(
+            "The current window does not have permission to navigate the target frame to '{url}'."
+        ),
+        "SecurityError",
+    );
+}
+
 fn navigate_kind<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
@@ -127,7 +164,8 @@ fn navigate_kind<'s>(
         return;
     }
     if !navigation_allowed(scope, source, target) {
-        deny(scope);
+        let text = text.to_rust_string_lossy(scope);
+        deny_navigation(scope, source, target, &text);
         return;
     }
     let source_url = source

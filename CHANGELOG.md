@@ -16,6 +16,9 @@ branch.
 
 ### Engine and performance
 
+- Retain native Window hooks when iframe documents change, keeping nested frame
+  counts live and sandbox navigation errors consistent with Chromium.
+
 - Align navigation regression controls with independent execution permission:
   load and commit permit later on-demand execution, while an explicitly disabled
   policy remains static without client requests.

@@ -434,6 +434,7 @@ pub(super) fn finish_nested_navigation<'s>(
         if let Some(previous) = previous.filter(|previous| {
             turbo_dom_browser_env::host_internals::auxiliary_context_identity(*previous).is_some()
         }) {
+            binding::install_auxiliary_window_hooks(context, hooks());
             if !turbo_dom_browser_env::host_internals::commit_auxiliary_navigation(
                 scope,
                 previous,

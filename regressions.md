@@ -51,6 +51,10 @@ All three additional groups below are explicitly in scope. No deferrals. Payroll
 - [ ] **Platform-value ownership** — infrastructure owner. DOMRect/AudioBuffer own and borrowed paths must allocate in the actual guest owner; preserve DOMPoint controls and constructor/isolation guards.
 - [ ] **Broader native history gap** — navigation owner. Verified original `2abd5438`/`c8d4` loses `/spa` after pushState → cross-document navigation → back; Chrome retains it. Implement authenticated native document/group/state history with structured-clone state, transactional mutation and correct guest/driver traversal. User explicitly requires this; do not defer.
 
+## Findings under investigation
+
+- [ ] **Classic-script response visibility during opening close** — lifecycle owner is checking whether the script-fetch path drops the response observer and withholds header events until EOF. Not yet classified as a separate defect; preserve the header assertion and original initial-close case until validated.
+
 ## Completion gates
 
 - [ ] Validate each production fix: unchanged meaningful RED → GREEN → critical fix-only OFF reproduces intended RED → byte-exact restore GREEN.

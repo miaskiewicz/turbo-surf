@@ -2156,10 +2156,12 @@ class Frame {
         if (!host) throw new Error('turbo-surf: frame is detached');
         child = host.contentWindow;
       }
-      const result = ((globalThis, document, KeyboardEvent, InputEvent, HTMLInputElement, HTMLTextAreaElement) => {
+      const childHelpers = __tsNs.shimBindingNamespace(child);
+      if (!childHelpers) throw new Error('turbo-surf: frame is detached');
+      const result = ((globalThis, document, KeyboardEvent, InputEvent, HTMLInputElement, HTMLTextAreaElement, __tsNs) => {
         ${script};
         return globalThis.__RESULT;
-      })(child, child.document, child.KeyboardEvent, child.InputEvent, child.HTMLInputElement, child.HTMLTextAreaElement);
+      })(child, child.document, child.KeyboardEvent, child.InputEvent, child.HTMLInputElement, child.HTMLTextAreaElement, childHelpers);
       globalThis.__RESULT = result;
     })();`,
     );

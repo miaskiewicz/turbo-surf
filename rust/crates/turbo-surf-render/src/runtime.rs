@@ -8690,6 +8690,39 @@ fn storage_id(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> Result
 
 struct RuntimeCore(v8::Weak<v8::Object>);
 
+/// Native platform factories receive captured bootstrap prototypes, never page arguments.
+pub(crate) fn platform_object_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    prototype: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    let owner = prototype
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Native platform owner unavailable"))?;
+    let owner = v8::Global::new(scope, owner);
+    let owner = v8::Local::new(scope, &owner);
+    if owner.get_slot::<FrameRetired>().is_some() || owner.get_slot::<CspHandle>().is_none() {
+        return Err(JsErrorBox::type_error(
+            "Native platform owner is closed or invalid",
+        ));
+    }
+    let caller = scope.get_current_context();
+    let caller_core = caller
+        .get_slot::<RuntimeCore>()
+        .and_then(|core| core.0.to_local(scope));
+    let owner_core = owner
+        .get_slot::<RuntimeCore>()
+        .and_then(|core| core.0.to_local(scope));
+    if !caller_core
+        .zip(owner_core)
+        .is_some_and(|(caller, owner)| caller.strict_equals(owner.into()))
+    {
+        return Err(JsErrorBox::type_error(
+            "Native platform owner belongs to another actor",
+        ));
+    }
+    Ok(owner)
+}
+
 #[op2(fast)]
 fn op_capture_runtime_core(scope: &mut v8::PinScope, core: v8::Local<v8::Object>) {
     let context = scope.get_current_context();

@@ -24,6 +24,10 @@ branch.
 
 ### Engine and performance
 
+- Allocate opaque geometry and Web Audio values in their actual frontend realm,
+  preserving borrowed constructors, subclass prototypes and guest stream identity
+  without exposing infrastructure objects.
+
 - Retain native Window hooks when iframe documents change, keeping nested frame
   counts live and sandbox navigation errors consistent with Chromium.
 

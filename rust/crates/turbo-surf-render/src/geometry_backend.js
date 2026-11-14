@@ -1,6 +1,6 @@
 // Private, native-branded rectangle data; no guest-visible host registry.
 // oxlint-disable-next-line no-unused-expressions -- The host evaluates this expression to obtain the private installer.
-(function (core, make, frameWindow, frameStep, ns) {
+(function (core, make, frameWindow, frameStep, ns, boundary) {
   "use strict";
   const ops = core.ops;
   const getRecord = ops.op_interface_record_get;
@@ -108,8 +108,16 @@
     // Engine ToNumber rejects even a BigInt returned by valueOf/toPrimitive.
     return +value;
   }
+  function nativeObject(prototype, ownerPrototype) {
+    try {
+      return ops.op_geometry_object(prototype, ownerPrototype);
+    } catch (error) {
+      if (ops.op_infrastructure_origin(error)) throw boundary.rehome(error);
+      throw error;
+    }
+  }
   function object(kind, prototype, x, y, width, height) {
-    const result = ops.op_geometry_object(prototype);
+    const result = nativeObject(prototype, prototypes[kind]);
     const record = { __proto__: null, kind, x, y, width, height };
     if (!setRecord(result, record))
       throw new LocalTypeError("Geometry record installation interrupted");
@@ -380,7 +388,7 @@
     configurable: true,
   });
   function rectList(rects) {
-    const result = ops.op_geometry_object(rectListPrototype),
+    const result = nativeObject(rectListPrototype, rectListPrototype),
       items = [];
     setPrototype(items, null);
     for (let i = 0; i < rects.length; i++) {
@@ -1068,7 +1076,7 @@
             apply(rangeCollapse, range, [true]);
             return range;
           }
-          const result = ops.op_geometry_object(caretPrototype);
+          const result = nativeObject(caretPrototype, caretPrototype);
           if (
             !setRecord(result, {
               __proto__: null,

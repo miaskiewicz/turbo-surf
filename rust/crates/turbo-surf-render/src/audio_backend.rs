@@ -40,6 +40,8 @@ fn op_audio_object<'s>(
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     // An opaque V8 host object prevents structuredClone from copying or forging
     // private audio state. The sole record is guest data behind a private key.
+    let context = crate::runtime::platform_object_context(scope, prototype)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
     let template = v8::ObjectTemplate::new(scope);
     template.set_internal_field_count(1);
     let object = template
@@ -88,9 +90,14 @@ pub(crate) fn install<'s>(
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
     if let Some(initializer) = initializer {
+        let boundary = crate::runtime::private_boundary::capabilities(scope)?;
         let receiver = v8::undefined(scope);
         if initializer
-            .call(scope, receiver.into(), &[core.into(), factory.into()])
+            .call(
+                scope,
+                receiver.into(),
+                &[core.into(), factory.into(), boundary.into()],
+            )
             .is_some()
         {
             return Ok(());

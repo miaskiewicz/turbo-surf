@@ -1,5 +1,5 @@
 // Native offline Web Audio records and DSP; no public host/core references.
-(function (core, make) {
+(function (core, make, boundary) {
   "use strict";
   const ops = core.ops,
     get = ops.op_interface_record_get,
@@ -86,11 +86,16 @@
       throw new LocalTypeError("Illegal invocation");
     return value;
   }
+  function nativeObject(kind) {
+    try {
+      return ops.op_audio_object(prototypes[kind], kind !== "AudioBuffer" && kind !== "AudioParam");
+    } catch (error) {
+      if (ops.op_infrastructure_origin(error)) throw boundary.rehome(error);
+      throw error;
+    }
+  }
   function object(kind, state) {
-    const result = ops.op_audio_object(
-      prototypes[kind],
-      kind !== "AudioBuffer" && kind !== "AudioParam",
-    );
+    const result = nativeObject(kind);
     setPrototype(state, null);
     if (state.inputs) setPrototype(state.inputs, null);
     if (state.events) setPrototype(state.events, null);

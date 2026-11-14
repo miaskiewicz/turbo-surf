@@ -6,7 +6,10 @@ use deno_error::JsErrorBox;
 fn op_geometry_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     prototype: v8::Local<'s, v8::Object>,
+    owner_prototype: v8::Local<'s, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let context = crate::runtime::platform_object_context(scope, owner_prototype)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
     let template = v8::ObjectTemplate::new(scope);
     template.set_internal_field_count(1);
     let object = template
@@ -182,6 +185,7 @@ pub(crate) fn install<'s>(
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
     if let Some(initializer) = initializer {
+        let boundary = crate::runtime::private_boundary::capabilities(scope)?;
         let undefined = v8::undefined(scope);
         let context = scope.get_current_context();
         let frame_window = crate::runtime::native_frame_layout_host(scope, context).is_some();
@@ -200,6 +204,7 @@ pub(crate) fn install<'s>(
                     frame_window.into(),
                     scheduler,
                     namespace.into(),
+                    boundary.into(),
                 ],
             )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())

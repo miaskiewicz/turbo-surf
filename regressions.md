@@ -36,7 +36,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `no-content navigation retains the active document and history (#428)` | `efdc3f0d`; targeted proof complete, combined rerun pending |
 | [x] | shim | `direct navigation referrers are explicit and reload retains them (#426)` | `8f511cfa`; targeted proof complete, combined rerun pending |
 | [x] | shim | `history navigation honors networkidle hydration (#425)` | `d1b61ed7`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Deadline owner: Chrome recovery oracle passes; native acceptance pending |
+| [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Deadline owner: Native controls 5/5 pass, but full original still FAILS: second reload times out correctly yet closes Page (line 3239). Initial timeout0 recovery passes; investigating retained-target reload lifetime, no green credit |
 | [x] | shim | `viewport resize updates live layout media and only its own page (#369)` | `864b3343`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Integration/test runner: Merged infrastructure and resident bytes; full original rerun pending |
 | [x] | shim | `frame locator typing uses canonical child selection and child event constructors` | `0a451d99`; targeted proof complete, combined rerun pending |

@@ -4826,21 +4826,23 @@ async fn frame_navigation_retains_the_old_blank_realm_without_exposing_the_repla
         oldWindow.setTimeout(()=>parent.document.body.setAttribute('data-old-timer','ran'),100000);
         window.onmessage=e=>{{if(!e.data.loaded)return;
           const current=frame.contentWindow;
-          let blocked=false;try{{current.document.body}}catch(error){{blocked=/SecurityError|denied|access/i.test(error.name+' '+error.message)}}
-          document.body.setAttribute('data-blocked',String(blocked));
+          const denied=read=>{{try{{read();return false;}}catch(error){{return /SecurityError|TypeError|EvalError/.test(error.name);}}}};
+          document.body.setAttribute('data-blocked',String(denied(()=>current.document.body)));
+          document.body.setAttribute('data-old-window-denied',String(denied(()=>oldWindow.document)));
           document.body.setAttribute('data-identity',String(oldWindow===current));
-          document.body.setAttribute('data-old-document',String(oldWindow.document===oldDocument && oldDocument.body.getAttribute('data-retained')==='old'));
-          document.body.setAttribute('data-old-function',String(oldFunction('return globalThis.remoteSecret')()===undefined));
+          document.body.setAttribute('data-old-document',String(oldDocument.defaultView===null && oldDocument.body.getAttribute('data-retained')==='old'));
+          document.body.setAttribute('data-old-function',String(denied(()=>oldFunction('return 73')())));
           oldDocument.body.setAttribute('data-mutated','old-again');
           const script=oldDocument.createElement('script');script.textContent="parent.document.body.setAttribute('data-old-script','ran')";oldDocument.body.appendChild(script);
-          const retiredChild=oldFunction("return document.body.appendChild(document.createElement('iframe')).contentWindow")()===null;
+          const retiredChild=oldDocument.body.appendChild(oldDocument.createElement('iframe')).contentWindow===null;
           document.body.setAttribute('data-retired-child',String(retiredChild));
-          document.body.setAttribute('data-new-isolation',String(oldFunction('return globalThis.document.body.getAttribute("data-secret")')()===null));
+          document.body.setAttribute('data-new-isolation',String(oldDocument.body.getAttribute('data-secret')===null));
         }};
         frame.src='http://127.0.0.1:{port}/child';
     "#)).await.unwrap();
     for key in [
         "blocked",
+        "old-window-denied",
         "old-document",
         "old-function",
         "new-isolation",
@@ -4851,9 +4853,9 @@ async fn frame_navigation_retains_the_old_blank_realm_without_exposing_the_repla
             "{key}: {html}"
         );
     }
-    // Stable WindowProxy identity is an explicit remaining gap; old globals are
-    // isolated and retained rather than being repurposed for a new origin.
-    assert!(html.contains("data-identity=\"false\""), "{html}");
+    // Chrome retains the WindowProxy, while the old document loses its Window
+    // and its saved Function constructor cannot execute retired-realm code.
+    assert!(html.contains("data-identity=\"true\""), "{html}");
     assert!(!html.contains("data-old-timer"), "{html}");
     assert!(!html.contains("data-old-script"), "{html}");
 }

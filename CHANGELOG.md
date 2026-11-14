@@ -39,6 +39,9 @@ branch.
 - Install the initial root Location before page bootstrap, so guest assign/reload
   uses real native navigation without extra bootstrap network requests.
 
+- Align retained-frame validation with Chromium: a stable WindowProxy denies
+  cross-origin reads, while the old document and retired code remain isolated.
+
 - Restore standalone renderer cross-origin Window messaging, preserving cloned
   payloads, sender realm identity and authenticated nested-frame completion.
 

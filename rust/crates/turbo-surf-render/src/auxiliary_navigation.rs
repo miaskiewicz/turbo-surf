@@ -654,7 +654,7 @@ fn commit_fetched(
     fetched: Fetched,
 ) -> Result<serde_json::Value, String> {
     let receipt = receipt(&fetched);
-    if attachment(&fetched.response) {
+    if attachment(&fetched.response) || matches!(fetched.response.status, 204 | 205) {
         return Ok(receipt);
     }
     {

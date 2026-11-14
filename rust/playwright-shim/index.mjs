@@ -3394,6 +3394,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return timeout === 0 ? Infinity : Date.now() + timeout;
   }
 
+  _rejectNoContentNavigation(receipt, url) {
+    if ([204, 205].includes(receipt.status))
+      throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
+  }
+
   async _navigateActorTarget(url, method, body, opts = {}) {
     const navigationStarted = performance.now();
     const session = this._session;
@@ -3422,6 +3427,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._recordDownload(attachment, receipt.requestId, session);
         throw new DownloadNavigationError();
       }
+      this._rejectNoContentNavigation(receipt, url);
       await this._actorHub.drain();
       await this._refreshFromSession(true);
       await this._drainBindings(bindingDeadline, true, true);

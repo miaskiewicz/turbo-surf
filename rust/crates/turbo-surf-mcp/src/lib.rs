@@ -717,7 +717,8 @@ impl Session {
         }
         let (count, url, metadata) = page.navigation_snapshot();
         let headers = page.response_headers_snapshot();
-        let html = page.serialize();
+        let root = page.auxiliary_root_id()?;
+        let html = page.serialize_target(root)?;
         let cookies = page.cookies();
         // Snapshot the live IDL `indeterminate` flag on `<input>` elements (tree-order
         // over `document.querySelectorAll('input')`); the serialized HTML does not

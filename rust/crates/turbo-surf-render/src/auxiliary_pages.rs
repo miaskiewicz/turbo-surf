@@ -681,6 +681,14 @@ impl PageSession {
         event_log(&self.rt.op_state().borrow())
     }
 
+    pub(super) fn replaced_root_target(&self) -> Option<u64> {
+        let target = self.auxiliary_event_log().root()?.parse().ok()?;
+        self.target_is_primary(target)
+            .ok()
+            .filter(|primary| !primary)?;
+        Some(target)
+    }
+
     pub fn auxiliary_root_id(&mut self) -> Result<u64, String> {
         if let Some(root) = self.auxiliary_event_log().root() {
             return root

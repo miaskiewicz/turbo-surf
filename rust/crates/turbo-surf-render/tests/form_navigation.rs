@@ -483,3 +483,62 @@ async fn navigation_activation_comes_from_private_input_and_expires_per_document
         page.close();
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn child_post_response_does_not_replace_the_root_response_snapshot() {
+    let (base, rx) = server(vec![response(
+        "201 Created",
+        "X-Child-Response: yes\r\n",
+        "<title>child response</title><p>posted child</p>",
+    )]);
+    let mut page = PageSession::open(
+        "<title>root response</title><form method=post action=/child target=child><input name=q value=one></form>",
+        &format!("{base}/start"), "", "", 5000,
+    ).await.unwrap();
+    let before = page.navigation_snapshot();
+    let headers = page.response_headers_snapshot();
+    page.eval("window.open('about:blank','child')")
+        .await
+        .unwrap();
+    let root = page.auxiliary_root_id().unwrap().to_string();
+    let child = page
+        .auxiliary_event_log()
+        .pages()
+        .into_iter()
+        .find(|child| child.target != root)
+        .unwrap();
+    page.navigate_target_with_options(
+        child.target.parse().unwrap(),
+        &format!("{base}/child"),
+        "push",
+        r#"{"method":"POST","body":"q=one","contentType":"application/x-www-form-urlencoded"}"#,
+    )
+    .await
+    .unwrap();
+    let wire = request(&rx);
+    assert!(wire.starts_with("POST /child HTTP/1.1\r\n"), "{wire}");
+    assert!(wire.ends_with("q=one"), "{wire}");
+    let after = page.navigation_snapshot();
+    assert_eq!(
+        (after.0, after.1, after.2.status, after.2.referrer),
+        (before.0, before.1, before.2.status, before.2.referrer)
+    );
+    assert_eq!(page.response_headers_snapshot(), headers);
+    assert!(page.serialize().contains("root response"));
+    assert_eq!(
+        page.eval_expression("document.title").await.unwrap(),
+        "root response"
+    );
+    assert_eq!(
+        page.eval_target_expression(
+            child.target.parse().unwrap(),
+            "document.title",
+            false,
+            false
+        )
+        .await
+        .unwrap(),
+        "child response"
+    );
+    page.close();
+}

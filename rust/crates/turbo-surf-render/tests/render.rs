@@ -2891,7 +2891,7 @@ async fn live_session_opens_best_effort_on_budget_exceed() {
         document.getElementById('root').appendChild(m);
       </script>
       <script>while (true) {}</script></body>"#;
-    let session = PageSession::open(html, "https://app.test/", "", "", 300)
+    let mut session = PageSession::open(html, "https://app.test/", "", "", 300)
         .await
         .expect("open() must succeed best-effort on a budget-exceed");
     let out = session.serialize();

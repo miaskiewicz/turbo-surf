@@ -18669,12 +18669,35 @@ impl PageSession {
     }
 
     async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
-        let key = self.rt.activation_key();
-        let result = key.during(self.eval_active(script, engine)).await;
+        let result = if let Some(target) = self.replaced_root_target() {
+            self.eval_replaced_root(target, script, engine).await
+        } else {
+            let key = self.rt.activation_key();
+            key.during(self.eval_active(script, engine)).await
+        };
         self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
         result
+    }
+
+    async fn eval_replaced_root(
+        &mut self,
+        target: u64,
+        script: &str,
+        engine: bool,
+    ) -> Result<String, String> {
+        if engine {
+            return self.eval_target_engine(target, script, false).await;
+        }
+        let source =
+            format!("{script}\n;String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)");
+        let result = self
+            .eval_target_expression(target, &source, false, false)
+            .await?;
+        self.eval_target_expression(target, "__tsNs.hydrate(300,200000,true)", true, false)
+            .await?;
+        Ok(result)
     }
 
     async fn eval_active(&mut self, script: &str, engine: bool) -> Result<String, String> {
@@ -18753,10 +18776,14 @@ impl PageSession {
         json: bool,
         engine: bool,
     ) -> Result<String, String> {
-        let key = self.rt.activation_key();
-        let result = key
-            .during(self.eval_expression_active(expression, json, engine))
-            .await;
+        let result = if let Some(target) = self.replaced_root_target() {
+            self.eval_target_expression(target, expression, engine, json)
+                .await
+        } else {
+            let key = self.rt.activation_key();
+            key.during(self.eval_expression_active(expression, json, engine))
+                .await
+        };
         self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
@@ -19105,7 +19132,7 @@ impl PageSession {
         let state = self.rt.op_state();
         let state = state.borrow();
         (
-            self.navigation_count,
+            self.navigation_count + auxiliary_navigation::root_commits(&state),
             state.borrow::<Base>().0.clone(),
             state.borrow::<crate::DocumentResponseMetadata>().clone(),
         )
@@ -19137,7 +19164,10 @@ impl PageSession {
     }
 
     /// Serialize the CURRENT live DOM to HTML (no reset — the page stays alive).
-    pub fn serialize(&self) -> String {
+    pub fn serialize(&mut self) -> String {
+        if let Some(target) = self.replaced_root_target() {
+            return self.serialize_target(target).unwrap_or_default();
+        }
         let _activation = self.rt.activation_key().enter();
         crate::browser_env::document_html()
     }

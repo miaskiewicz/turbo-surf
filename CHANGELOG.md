@@ -13,6 +13,10 @@ branch.
 
 ### Engine and performance
 
+- Retain the actual root form response in legacy Rust and MCP callers after
+  native document replacement, including same-URL POST metadata and committed
+  responses followed by a guest exception. Keep child target responses separate.
+
 - Add real native popup Pages, named-window reuse, opener ownership, context
   bootstrap inheritance and retained child operation after opener closure. Keep
   actual Window identities, Location/history, caller promise realms and document

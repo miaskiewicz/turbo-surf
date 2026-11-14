@@ -578,7 +578,7 @@ impl Task for HydrateTask {
             .build()
             .map_err(|e| Error::from_reason(e.to_string()))?;
         rt.block_on(async {
-            let page = turbo_surf_render::PageSession::open_with_document_response(
+            let mut page = turbo_surf_render::PageSession::open_with_document_response(
                 &self.html,
                 &self.base_url,
                 &self.cookies,

@@ -183,11 +183,43 @@ struct History {
 #[derive(Default)]
 pub(super) struct State {
     sequence: u64,
+    root_commits: u64,
     jobs: BTreeMap<u64, Job>,
     loading: BTreeMap<u64, Loading>,
     results: BTreeMap<u64, Result<serde_json::Value, String>>,
     waiters: BTreeSet<u64>,
     history: BTreeMap<u64, History>,
+}
+
+pub(super) fn root_commits(state: &OpState) -> u64 {
+    state
+        .try_borrow::<State>()
+        .map_or(0, |state| state.root_commits)
+}
+
+fn adopt_root_response(rt: &mut JsRuntime, target: u64, fetched: &Fetched) -> Result<(), String> {
+    let shared = rt.op_state();
+    let mut shared = shared.borrow_mut();
+    let root = shared.borrow::<auxiliary_pages::Pages>().events.root();
+    let target = target.to_string();
+    if root.as_deref() != Some(target.as_str()) {
+        return Ok(());
+    }
+    let count = state(&mut shared)
+        .root_commits
+        .checked_add(1)
+        .ok_or("Native navigation counter exhausted")?;
+    state(&mut shared).root_commits = count;
+    shared
+        .borrow_mut::<Base>()
+        .0
+        .clone_from(&fetched.response.final_url);
+    shared
+        .borrow_mut::<ResponseHeaders>()
+        .0
+        .clone_from(&fetched.response.headers);
+    *shared.borrow_mut::<crate::DocumentResponseMetadata>() = fetched.metadata.clone();
+    Ok(())
 }
 
 fn state(state: &mut OpState) -> &mut State {
@@ -240,8 +272,10 @@ fn fetch_job(
             navigation.snapshot.referrer_policy
         };
         let metadata = std::sync::Mutex::new(crate::DocumentResponseMetadata::default());
+        let response_url = std::sync::Mutex::new(navigation.url.clone());
         let response_policy =
             |request: &RequestContext, target: &str, _headers: &[(String, String)]| {
+                *response_url.lock().unwrap() = target.to_owned();
                 *metadata.lock().unwrap() =
                     crate::DocumentResponseMetadata::from_request(0, request, target);
                 true
@@ -306,9 +340,12 @@ fn fetch_job(
         )
         .await;
         jar.borrow_mut().merge_request_changes(local);
-        let response = result
+        let mut response = result
             .map_err(|_| "Native target navigation exceeded session budget".to_owned())?
             .map_err(|error| format!("Native target navigation failed: {error}"))?;
+        // The native HTTP client's response URL omits fragments. The admitted
+        // response hop retains the document navigation URL, including its fragment.
+        response.final_url = response_url.into_inner().unwrap();
         let request_id = trace.last_id();
         if let Some(id) = request_id {
             log.push(
@@ -611,6 +648,7 @@ fn commit_fetched(
         let previous = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
         install_response(scope, previous, &fetched)?;
     }
+    adopt_root_response(rt, target, &fetched)?;
     let id = AuxiliaryContextId(target);
     auxiliary_pages::target_call(rt, id, "documentLoading", &[])?;
     let promise =
@@ -902,8 +940,20 @@ impl PageSession {
             activity: pending.activity,
         };
         let generation = start(&mut self.rt, navigation, HistoryMode::Push, self.budget_ms)?;
-        self.wait_target_navigation(generation, self.budget_ms)
-            .await
+        let receipt = self
+            .wait_target_navigation(generation, self.budget_ms)
+            .await?;
+        while self
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<State>()
+            .loading
+            .contains_key(&target)
+        {
+            self.service_auxiliary_navigation().await?;
+        }
+        Ok(receipt)
     }
 
     async fn wait_target_navigation(

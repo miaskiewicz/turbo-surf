@@ -3866,13 +3866,22 @@ test("viewport resize updates live layout media and only its own page (#369)", a
   const context = new BrowserContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   const sibling = await context.newPage();
+  const resizePage = async (size) => {
+    await page.evaluate(() => {
+      globalThis.resized = new Promise((resolve) =>
+        addEventListener("resize", resolve, { once: true }),
+      );
+    });
+    await page.setViewportSize(size);
+    await page.evaluate(() => resized);
+  };
   try {
     await page.goto(base, { waitUntil: "networkidle" });
     await sibling.setViewportSize({ width: 375, height: 600 });
     await sibling.goto(base, { waitUntil: "networkidle" });
     assert.deepEqual(await sibling.evaluate(() => initialSize), [375, 600]);
     await sibling.setViewportSize({ width: 1280, height: 800 });
-    await page.setViewportSize({ width: 375, height: 812 });
+    await resizePage({ width: 375, height: 812 });
     assert.deepEqual(page.viewportSize(), { width: 375, height: 812 });
     assert.deepEqual(sibling.viewportSize(), { width: 1280, height: 800 });
     assert.deepEqual(
@@ -3887,7 +3896,7 @@ test("viewport resize updates live layout media and only its own page (#369)", a
     );
     await page.setViewportSize({ width: 375, height: 812 });
     assert.equal(await page.evaluate(() => resizeCount), 1);
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await resizePage({ width: 1280, height: 800 });
     assert.deepEqual(
       await page.evaluate(() => [
         innerWidth,

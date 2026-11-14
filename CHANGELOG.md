@@ -15,6 +15,10 @@ branch.
 
 ### Engine and performance
 
+- Preserve explicit driver navigation referrers and authentic request metadata.
+  Read root history from the actual native Location, retain prior document
+  entries, and keep the active document/history on 204/205 responses.
+
 - Refresh legacy Window frame counts until the actual canonical read-only surface
   is registered, preserving iframe adoption, indexed identities and parent links.
 

@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Publish classic-script response headers before body completion and report actual canceled script bodies, preserving redirect, integrity and CSP enforcement.
+
 - Export live screenshot image-asset reads from the NAPI crate root, keeping the async task reachable in strict all-target builds.
 
 - Enumerate `Locator.all()` from the current query count instead of a stale pre-hydration snapshot.

@@ -3161,6 +3161,57 @@ fn append_response_trace(
     log.push(entry);
 }
 
+fn append_cancelled_response_trace(log: &NetworkLog, trace: &FetchResponseTrace) {
+    if trace.suppressed {
+        return;
+    }
+    if let Some(id) = trace.last_id() {
+        log.push(serde_json::json!({"event":"responsebody", "id":id,
+            "bodyIncomplete":true,"error":"Fetch cancelled"}));
+    }
+}
+
+#[cfg(test)]
+mod cancelled_response_trace_tests {
+    use super::{append_cancelled_response_trace, FetchResponseTrace, NetworkLog};
+    use std::sync::Mutex;
+
+    #[test]
+    fn cancellation_terminates_only_an_already_observed_response_without_inventing_body() {
+        let log = NetworkLog::default();
+        log.push(serde_json::json!({"event":"response", "id":7, "status":200}));
+        let trace = FetchResponseTrace {
+            last: Mutex::new(Some((7, 200))),
+            suppressed: false,
+        };
+        append_cancelled_response_trace(&log, &trace);
+        let events: serde_json::Value = serde_json::from_str(&log.drain()).unwrap();
+        assert_eq!(events[0]["status"], 200);
+        assert_eq!(events[1]["event"], "responsebody");
+        assert_eq!(events[1]["id"], 7);
+        assert_eq!(events[1]["bodyIncomplete"], true);
+        assert_eq!(events[1]["error"], "Fetch cancelled");
+        assert!(events[1].get("bodyBytes").is_none());
+        assert!(events[1].get("body").is_none());
+        assert_eq!(events.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn unobserved_or_suppressed_fetches_never_fabricate_a_terminal_response() {
+        for trace in [
+            FetchResponseTrace::default(),
+            FetchResponseTrace {
+                last: Mutex::new(Some((7, 200))),
+                suppressed: true,
+            },
+        ] {
+            let log = NetworkLog::default();
+            append_cancelled_response_trace(&log, &trace);
+            assert_eq!(log.drain(), "[]");
+        }
+    }
+}
+
 /// Parse the method / body / headers trio from the fetch init bag, stripping
 /// the browser-controlled headers the guest never gets to override (sec-*,
 /// cookie / origin / referer / host / user-agent / upgrade-insecure-requests).
@@ -4045,6 +4096,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
                         max_bytes: opts.max_bytes,
                         http_cache: Some(&http_cache),
                         response_side_effects: Some(storage_effects.as_ref()),
+                        response_observer: Some(&observer),
                         cache_partition: &cache_partition,
                         request: Some(&|target, redirected| {
                             policy.allows_request(directive, target, nonce, redirected)
@@ -4082,6 +4134,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let Some(response) = response else {
         jar_rc.borrow_mut().merge_request_changes(local);
         fetch_streams::release(&mut state.borrow_mut(), cancel_id);
+        append_cancelled_response_trace(&event_log, &response_trace);
         return FetchOut {
             aborted: true,
             final_url: target,

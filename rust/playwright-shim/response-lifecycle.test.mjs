@@ -261,3 +261,107 @@ test("captured response header names cannot collide with object prototypes", asy
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+for (const mode of ["direct", "redirect", "failed-integrity", "blocked-csp"])
+  test(`classic script headers precede body completion: ${mode}`, { timeout: 10000 }, async () => {
+    const source = "window.classicHeaderMarker = 37";
+    let release;
+    const gate = new Promise((resolve) => (release = resolve));
+    let sent;
+    const headersSent = new Promise((resolve) => (sent = resolve));
+    let ended = false;
+    let scripts = 0;
+    let redirects = 0;
+    let timer;
+    const server = createServer(async (request, response) => {
+      response.setHeader("cache-control", "no-store");
+      if (request.url === "/redirect.js") {
+        redirects++;
+        response.writeHead(302, { location: "/held.js" });
+        response.end();
+      } else if (request.url === "/held.js") {
+        scripts++;
+        response.writeHead(200, {
+          "content-type": "application/javascript",
+          "x-script-stage": "headers",
+        });
+        response.flushHeaders();
+        sent();
+        await gate;
+        ended = true;
+        response.end(source);
+      } else {
+        response.setHeader("content-security-policy", "script-src 'nonce-script'");
+        const nonce = mode === "blocked-csp" ? "wrong" : "script";
+        const integrity =
+          mode === "failed-integrity"
+            ? ` integrity="sha256-${createHash("sha256")
+                .update(source + "tampered")
+                .digest("base64")}"`
+            : "";
+        response.end(
+          `<script nonce="${nonce}"${integrity} src="/${mode === "redirect" ? "redirect" : "held"}.js"></script>`,
+        );
+      }
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const page = shim.newPage();
+    let navigation;
+    try {
+      let observed = false;
+      const waiting = page.waitForResponse((response) => response.url().endsWith("/held.js"));
+      waiting.then(
+        () => {
+          observed = true;
+        },
+        () => {},
+      );
+      navigation = page.goto(`http://127.0.0.1:${server.address().port}`, {
+        waitUntil: "networkidle",
+      });
+      navigation.catch(() => {});
+      if (mode === "blocked-csp") {
+        await navigation;
+        assert.equal(scripts, 0);
+        assert.equal(observed, false);
+        assert.equal(await page.evaluate(() => typeof window.classicHeaderMarker), "undefined");
+        return;
+      }
+      await headersSent;
+      const response = await Promise.race([
+        waiting,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Script headers were not published while its body was held")),
+            500,
+          );
+        }),
+      ]);
+      clearTimeout(timer);
+      assert.equal(ended, false);
+      assert.equal(response.status(), 200);
+      assert.equal(await response.headerValue("x-script-stage"), "headers");
+      assert.equal(response.request().frame(), page.mainFrame());
+      if (mode === "redirect")
+        assert.ok(response.request().redirectedFrom()?.url().endsWith("/redirect.js"));
+      const body = response.text();
+      body.catch(() => {});
+      release();
+      if (mode === "failed-integrity") await assert.rejects(body, /integrity/i);
+      else assert.equal(await body, source);
+      await navigation;
+      assert.equal(
+        await page.evaluate(() => window.classicHeaderMarker),
+        mode === "failed-integrity" ? undefined : 37,
+      );
+      assert.equal(scripts, 1);
+      assert.equal(redirects, mode === "redirect" ? 1 : 0);
+    } finally {
+      clearTimeout(timer);
+      release();
+      await navigation?.catch(() => {});
+      await page.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });

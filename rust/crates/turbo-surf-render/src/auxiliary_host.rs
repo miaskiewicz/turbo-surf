@@ -279,13 +279,13 @@ fn post_message<'s>(
     let window = target.global(scope);
     let scope = &mut v8::ContextScope::new(scope, source);
     let receiver = v8::undefined(scope);
-    callback
-        .call(
-            scope,
-            receiver.into(),
-            &[window.into(), message, target_origin, transfer],
-        )
-        .is_some()
+    // A clone rejection is still handled; preserve its pending guest exception.
+    let _ = callback.call(
+        scope,
+        receiver.into(),
+        &[window.into(), message, target_origin, transfer],
+    );
+    true
 }
 
 pub(super) fn install_nested(

@@ -29,14 +29,14 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `background binding collection errors remain observable` | `f1fb5c63`; targeted proof complete, combined rerun pending |
 | [x] | shim | `native tabs and navigation match the source-pinned Chrome profile control` | `ff0a767`; targeted proof complete, combined rerun pending |
 | [x] | shim | `HTTP attachments emit binary downloads without replacing the live document` | `e51c6f21`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `headers remain observable during initial-close hydration` | Opening-close owner: Fresh coalesced candidate initially passed original and 8/8 controls, but restored run now exposes Fetch native resource-owner release failure (opening-target-close line 72, true vs false). Original headers still pass; investigate cleanup race and require full restored controls + strict before merge |
+| [ ] | shim | `headers remain observable during initial-close hydration` | Opening-close owner: Fresh coalesced candidate initially passed original and 8/8 controls, but restored run now exposes Fetch native resource-owner release failure (opening-target-close line 72, true vs false). Original headers still pass; last-page actor drops its Tokio runtime before real completion acknowledgment. Source fix keeps Tokio alive without guest/V8 pumping; review also requires waiting all actual observed terminal callbacks when concurrent root/popup closes leave no surviving targets. Require full restored controls + strict before merge |
 | [x] | shim | `unrouting every handler survives a fresh realm and later route reactivation` | `ff0a767`; targeted proof complete, combined rerun pending |
 | [x] | shim | `a missed web-first assertion hydrates default navigation while commit stays static` | `98c8a8b8`; targeted proof complete, combined rerun pending |
 | [x] | shim | `request metadata and client hints survive hydration and stay context scoped` | `8f511cfa`; targeted proof complete, combined rerun pending |
 | [x] | shim | `no-content navigation retains the active document and history (#428)` | `efdc3f0d`; targeted proof complete, combined rerun pending |
 | [x] | shim | `direct navigation referrers are explicit and reload retains them (#426)` | `8f511cfa`; targeted proof complete, combined rerun pending |
 | [x] | shim | `history navigation honors networkidle hydration (#425)` | `d1b61ed7`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Deadline owner: Native controls 5/5 pass, but full original still FAILS: second reload times out correctly yet closes Page (line 3239). Initial timeout0 recovery passes. Typed native probe isolates Environment stage after identity commit: animation-policy installation returns false while execution is not terminating; actual native Closed event follows. Investigating policy/bootstrap ownership, no green credit |
+| [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Deadline owner: Native controls 5/5 pass, but full original still FAILS: second reload times out correctly yet closes Page (line 3239). Initial timeout0 recovery passes. Typed native probe isolates Environment stage after identity commit: animation-policy installation returns false while execution is not terminating; actual native Closed event follows. Producer [turbo-dom #513](https://github.com/miaskiewicz/turbo-dom/issues/513) filed in v0.8.4 and accepted by the producer agent for a typed staged UTF-16 setup result. Surf must discard a failed staged candidate before live commit/retirement; consumer work remains open, no green credit |
 | [x] | shim | `viewport resize updates live layout media and only its own page (#369)` | `864b3343`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Action/navigation owner: Full original rerun fails replacement document request count 1 vs 2 (surface line 4315; before screenshot/image assertions); fresh coalesced POST succeeds once and the replacement document is interactive, but its image is incomplete with one native pending request and no new image HTTP; action reaches 10s timeout. Static-to-live promotion also redundantly fetches the old image. Tracing image admission/cache/realm; no timeout or assertion changes. Earlier cache fixes remain merged |
 | [x] | shim | `frame locator typing uses canonical child selection and child event constructors` | `0a451d99`; targeted proof complete, combined rerun pending |
@@ -67,7 +67,8 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 
 - [x] **NAPI all-target strict dead-code errors** — merged `680ee757`: restored missing crate-root `live_image_assets` re-export. Test-first E0425 RED → export fix GREEN; focused task-construction unit and NAPI all-target strict pass. No lint suppression or removed capability.
 
-- [ ] **Detection trace retry, same-URL POST and delayed-consent controls** — detector completed 273 total: 258 passed, 3 failed, 12 existing feature skips, 0 cancellations (62.43s). Three native controls fail pending-Promise completion using the existing `rust/target/debug/examples/detection_trace` executable, which is independent of the pinned addon. Capture exact binary/source provenance and rebuild the example on the final graph before classification; any reproduced current-source defect remains in scope.
+- [x] **Detection same-URL POST control** — fresh current `4e1634a6` source with immutable MCP example `6403299b` passes the original in 7.35s. Old pending-Promise symptom is gone. Verified clear without an additional source fix; not a new merge.
+- [ ] **Detection retry and delayed-consent input controls (2 cases)** — fresh current trace fails both with `TypeError: Illegal invocation` in native driver `element` lookup (line 18687), then input (18961/18969). Consent is present but not clicked; subsequent steps are correctly not attempted. `surf_510` owns the shared receiver/realm fix in an isolated worktree. Fresh three-case run: 1 pass, 2 fail, 0 skips, 14.62s; source/test/binary hashes unchanged. Full raw evidence is in `.recovery/issue-510/detector3-4e1634a6/`.
 
 ## Current tally
 
@@ -75,9 +76,10 @@ Accounting: 34 original test cases plus 14 additional tracked cases/findings (th
 
 - Merged with component proof: **34** (29 original + count, all, platform ownership, NAPI export, script observer).
 - Locally proven, not yet merged: **0** (module and inspector adoption merged).
-- Awaiting fresh-binary classification/verification: **3** detector controls.
-- Still requiring implementation or a passing fix: **11**.
-- Total pending: **14**. Total merged/done at component level: **34**. Total tracked: **48**.
+- Verified clear without an additional source fix: **1** detector POST control.
+- Awaiting fresh-binary classification/verification: **0**.
+- Still requiring implementation or a passing fix: **13**.
+- Total pending: **13**. Total merged: **34**. Total done at component/verification level: **35** (34 merged + 1 verified clear). Total tracked: **48**.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

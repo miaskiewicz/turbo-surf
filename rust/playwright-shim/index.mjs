@@ -985,7 +985,7 @@ class Locator {
   // --- counts / text (from the single resolve payload) ---
   async count() {
     await this._prepareQuery();
-    if (this._needsQuery())
+    if (this._page._live || this._needsQuery())
       return this._page._readEngineAsync(`return (${this._liveElementsExpression()}).length;`);
     if (!this._needsQuery() && this._count && !this._filter && this._scope.length === 0) {
       const count = this._count(this._page._html);

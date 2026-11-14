@@ -76,6 +76,7 @@ test(
           .first()
           ._waitActionable("click", { timeout: 2000 });
         return {
+          count: await page.locator("#time").count(),
           value: await page.locator("#time").inputValue(),
           visible: await page.locator("#shift").isVisible(),
           hidden: await page.locator("#hidden").isVisible(),
@@ -83,6 +84,7 @@ test(
         };
       })();
       const result = await beforeRelease(reading, held);
+      assert.equal(result.count, 1);
       assert.equal(result.value, "09:00");
       assert.equal(result.visible, true);
       assert.equal(result.hidden, false);

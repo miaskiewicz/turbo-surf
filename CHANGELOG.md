@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Read locator counts from the current native document after hydration, preserving static execution policy, indexed/scoped queries and nonblocking reads.
+
 - Retire screenshot image bytes and retained paint scenes when a native document navigates, including same-URL replacements.
 - Reuse bounded Rust-owned current-document image bodies for native screenshots, including no-store images, without exposing opaque bytes to guest JavaScript or accepting retired image completions.
 

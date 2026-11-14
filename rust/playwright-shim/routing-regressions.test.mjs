@@ -151,6 +151,11 @@ test("a missed web-first assertion hydrates default navigation while commit stay
             await assertion;
             assert.equal(page._live, true);
             assert.equal(executions - before.executions, 1);
+            assert.equal(await page.locator("#ready").count(), 1);
+            assert.equal(await page.locator("body").locator("input").count(), 1);
+            assert.equal(await page.locator("input").nth(0).count(), 1);
+            assert.equal(await page.locator("input").nth(1).count(), 0);
+            assert.equal(await page.locator("input").nth(-1).count(), 1);
             assert.equal(await page.evaluate(() => document.querySelectorAll("#ready").length), 1);
           } else {
             await assert.rejects(assertion);

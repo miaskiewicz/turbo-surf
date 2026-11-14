@@ -539,6 +539,7 @@ fn install_response_backing<'s>(
             current.set_aligned_pointer_in_embedder_data(slot, pointer);
         }
     }
+    crate::script_inventory::register_guest(scope, current);
     let bootstrap = auxiliary_pages::bootstrap_for_context(scope, previous);
     let scope = &mut v8::ContextScope::new(scope, current);
     let policy = CspHandle::new(&response.final_url, &response.headers, &response.html);

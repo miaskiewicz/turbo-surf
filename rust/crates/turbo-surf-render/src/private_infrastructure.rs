@@ -71,6 +71,7 @@ pub(super) fn prepare(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), 
                 guest.set_aligned_pointer_in_embedder_data(slot, pointer);
             }
         }
+        crate::script_inventory::register_guest(scope, guest);
         let core = source
             .get_slot::<RuntimeCore>()
             .ok_or("Private runtime core unavailable")?;

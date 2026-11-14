@@ -131,6 +131,7 @@ fn allocate<'s>(
             context.set_aligned_pointer_in_embedder_data(slot, pointer);
         }
     }
+    crate::script_inventory::register_guest(scope, context);
     initialize(scope, context, source, core.into(), request)?;
     Ok(context)
 }

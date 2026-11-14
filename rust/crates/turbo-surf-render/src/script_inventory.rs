@@ -147,35 +147,43 @@ fn apply_script_source(records: &mut Records, script_id: String, value: &Value, 
     }
 }
 
-#[cfg(turbo_surf_native_proxy)]
 struct FrameInspector(Rc<JsRuntimeInspector>);
+struct InspectedContext;
 
-pub(crate) fn register_frame(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
-    #[cfg(turbo_surf_native_proxy)]
-    if let Some(inspector) = JsRuntime::op_state_from(scope)
+fn register_context(scope: &mut v8::PinScope, context: v8::Local<v8::Context>, name: &str) {
+    if context.get_slot::<InspectedContext>().is_some() {
+        return;
+    }
+    let inspector = JsRuntime::op_state_from(scope)
         .borrow()
         .try_borrow::<FrameInspector>()
-    {
-        inspector.0.context_created(context, "native iframe");
+        .map(|inspector| inspector.0.clone());
+    if let Some(inspector) = inspector {
+        context.set_slot(Rc::new(InspectedContext));
+        inspector.context_created(context, name);
     }
-    #[cfg(not(turbo_surf_native_proxy))]
-    let _ = (scope, context);
+}
+
+pub(crate) fn register_frame(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    register_context(scope, context, "native iframe");
+}
+
+pub(crate) fn register_guest(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    register_context(scope, context, "guest page");
 }
 
 pub(crate) fn retire_frame(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
-    #[cfg(turbo_surf_native_proxy)]
-    {
-        let inspector = JsRuntime::op_state_from(scope)
-            .borrow()
-            .try_borrow::<FrameInspector>()
-            .map(|inspector| inspector.0.clone());
-        if let Some(inspector) = inspector {
-            let context = v8::Global::new(scope, context);
-            inspector.context_destroyed(scope, context);
-        }
+    if context.remove_slot::<InspectedContext>().is_none() {
+        return;
     }
-    #[cfg(not(turbo_surf_native_proxy))]
-    let _ = (scope, context);
+    let inspector = JsRuntime::op_state_from(scope)
+        .borrow()
+        .try_borrow::<FrameInspector>()
+        .map(|inspector| inspector.0.clone());
+    if let Some(inspector) = inspector {
+        let context = v8::Global::new(scope, context);
+        inspector.context_destroyed(scope, context);
+    }
 }
 
 pub(crate) struct ScriptInventory {
@@ -196,7 +204,6 @@ impl ScriptInventory {
             fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
                 .map_err(|error| error.to_string())?;
         }
-        #[cfg(turbo_surf_native_proxy)]
         runtime
             .op_state()
             .borrow_mut()
@@ -301,7 +308,7 @@ impl ScriptInventory {
             }
         }
         let records = self.records.borrow();
-        let value = json!({"backend":"native V8 Inspector", "intrusive":true, "scripts":records.scripts.values().collect::<Vec<_>>(), "dropped":records.dropped,"sourceBytes":records.bytes,"pendingSources":records.requests.len(),"cpuProfileSaved":records.profile_saved,"cpuProfilePending":records.profile_request.is_some(),"cpuProfileSetup":{"requestedIntervalMicroseconds":(!records.profile_setup.is_empty()).then_some(1000),"commands":records.profile_setup.values().map(|(method,acknowledged)| json!({"method":method,"acknowledged":acknowledged})).collect::<Vec<_>>()},"errors":records.failures,"coverage":if cfg!(turbo_surf_native_proxy){"main and native iframe V8 contexts; native workers are unsupported"}else{"main V8 context; child inspector registration requires a source-built native proxy profile; native workers are unsupported"}});
+        let value = json!({"backend":"native V8 Inspector", "intrusive":true, "scripts":records.scripts.values().collect::<Vec<_>>(), "dropped":records.dropped,"sourceBytes":records.bytes,"pendingSources":records.requests.len(),"cpuProfileSaved":records.profile_saved,"cpuProfilePending":records.profile_request.is_some(),"cpuProfileSetup":{"requestedIntervalMicroseconds":(!records.profile_setup.is_empty()).then_some(1000),"commands":records.profile_setup.values().map(|(method,acknowledged)| json!({"method":method,"acknowledged":acknowledged})).collect::<Vec<_>>()},"errors":records.failures,"coverage":"infrastructure and registered guest V8 contexts; native workers are unsupported"});
         if let Err(error) = save(
             &self.directory.join("inventory.json"),
             serde_json::to_string_pretty(&value).unwrap().as_bytes(),

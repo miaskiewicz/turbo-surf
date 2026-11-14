@@ -26,6 +26,9 @@ branch.
 
 ### Engine and performance
 
+- Register actual guest Page contexts with the native inspector, keeping eval,
+  function and child-script inventory visible while retiring replaced contexts.
+
 - Execute initial and replacement native Page modules in registered document-owned
   module maps, isolating inline-source authority and cancelling retired module work.
   Consume the published core 0.412.2 and matching extension dependency closure.

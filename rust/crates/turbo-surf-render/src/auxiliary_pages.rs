@@ -650,6 +650,7 @@ pub(super) fn retire_owned_resources<'s>(
     context: v8::Local<'s, v8::Context>,
 ) {
     // The auxiliary's frame subtree is separate from every opener relationship.
+    crate::script_inventory::retire_frame(scope, context);
     retire_frame_tree(scope, context);
     crate::shim_bindings::retire(context);
     crate::remote_handles::retire_context(scope, context);

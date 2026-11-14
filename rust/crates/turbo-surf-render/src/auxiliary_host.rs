@@ -4,6 +4,8 @@ use super::*;
 use turbo_dom_browser_env::host_internals as binding;
 
 pub(super) fn install_root(scope: &mut v8::PinScope, url: &str) -> Result<(), String> {
+    let context = scope.get_current_context();
+    binding::install_auxiliary_window_hooks(context, hooks());
     if !JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<auxiliary_pages::Pages>()
@@ -11,13 +13,11 @@ pub(super) fn install_root(scope: &mut v8::PinScope, url: &str) -> Result<(), St
     {
         return Ok(());
     }
-    let context = scope.get_current_context();
     if binding::auxiliary_context_identity(context).is_some() {
         return Ok(());
     }
     install_hyperlink_handler(context);
     binding::set_auxiliary_ready_host(context, Some(ready));
-    binding::install_auxiliary_window_hooks(context, hooks());
     if !binding::install_auxiliary_context(scope, context, url, Some(host())) {
         return Err("Native root browsing-context installation failed".into());
     }

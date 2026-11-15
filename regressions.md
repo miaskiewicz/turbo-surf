@@ -2,7 +2,7 @@
 
 Target: `release/v0.8.4`. Updated 2026-11-15.
 
-Original batch: **34 test cases (11 Rust, 23 shim)**. **30 have component proof and their fixes are merged; 4 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
+Original batch: **34 test cases (11 Rust, 23 shim)**. **32 have component proof and their fixes are merged; 2 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
 
@@ -22,9 +22,9 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | Rust | `same_origin_sandboxed_frames_navigate_top_only_with_allow_top_navigation` | `68e5186e`; targeted proof complete, combined rerun pending |
 | [x] | Rust | `debugger_inventory_captures_real_eval_function_and_child_sources` | Merged `8049cbc3`; original and critical inverse/restored pass, actual registry consumer inventory/module/extension/Node controls and strict pass; final full gates pending |
 | [x] | shim | `commit reload hydrates the new document only when requested` | `81423b6d`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `commit history document replacements retain on-demand execution` | History candidate original 13-case cohort includes this case and passes. Broader source safety/expanded acceptance/inverse/strict requirements remain before the modular history merge |
+| [x] | shim | `commit history document replacements retain on-demand execution` | Merged `3aaeed4d`; fresh committed-source history 31/31 and interruption/identity 3/3 pass, affected strict/fmt/CC/hooks pass; current merged-source all-target check passes. Final combined gates pending |
 | [x] | shim | `aliased DOM mutations, errors, cookies and child documents stay synchronized (#297)` | `e75cc661`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `real Location navigation and same-URL reload still fetch and execute (#319)` | History candidate original cohort 13/13 passes on 7f; expanded 18 has 16 passes and 2 failures. Awaited Navigation task progress deadlocks and initial-blank native load-state bookkeeping need fixes; interruption ACK and full acceptance still gate merge |
+| [x] | shim | `real Location navigation and same-URL reload still fetch and execute (#319)` | Merged `3aaeed4d`; all 31 original/parity/policy/alias controls and three interruption/identity tests pass on fresh committed-source artifacts. Native document-group restoration, awaited history tasks and initial-blank load bookkeeping are included; final combined gates pending |
 | [x] | shim | `initial module top-level awaits can complete host fulfillment and route.fetch` | Merged `cf51f309`; five published dependencies verified, real registry graph passes native 5, Node 4, original TLA, inventory 1, extension 5 and strict/fmt/CC; official controls registered; final full gates pending |
 | [x] | shim | `background binding collection errors remain observable` | `f1fb5c63`; targeted proof complete, combined rerun pending |
 | [x] | shim | `native tabs and navigation match the source-pinned Chrome profile control` | `ff0a767`; targeted proof complete, combined rerun pending |
@@ -50,7 +50,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 - [x] **Locator.count stale document** — merged `94e4915b`. Original count 0→1, fix-only OFF reproduces 0, exact restore passes six targeted/read-only controls; root merged-source routing and locator-read files pass 10/10 (3.62s) on signed ba119 artifact. Reads current live DOM without evaluate, guest execution or full serialization; final combined rerun pending.
 - [x] **Locator.all stale document** — merged `e00e36e7`. Regression and fix-only inverse reproduce stale 0; restored live enumeration passes, including returned/indexed locators and static-disabled controls. Root merged-source routing/read files pass 10/10 (3.51s); final combined rerun pending.
 - [x] **Platform-value ownership** — merged `659a1931`: Rust 6/6, platform/subclass 7/7 and infrastructure 7/7 pass. Allocation-only OFF produces five expected failures with DOMPoint controls green; byte-exact restore 14/14 green. Render strict/format/CC/hooks pass. Final combined build/gates pending.
-- [ ] **Broader native history gap** — navigation owner. Verified original `2abd5438`/`c8d4` loses `/spa` after pushState → cross-document navigation → back; Chrome retains it. Authenticated native document/group/state history is being implemented. Source review confirms fixes for actor-budget recheck after getters, strict true owned-activation receipts, safe captured methods on private null-prototype arrays, and preserving stored undefined versus null. All 31 original/parity/policy/alias controls now pass on fresh `ca4c` (0 failures/skips/cancellations, 26.856s); formerly failed awaited Navigation task progress and initial-blank load bookkeeping both pass after scoped fixes. Native commit/private-mirror interruption requires an immediate protected ACK before guest callbacks. All corresponding controls remain required. Chromium 158 reentrant oracle confirms popstate.event.state stays the selected destination even when currententrychange pushes a newer history.state; preserve the selected state snapshot. Do not defer.
+- [x] **Broader native history gap** — merged `3aaeed4d`. Authenticated native document/group/state restoration, protected private-mirror acknowledgment and exact interrupted-document retirement pass fresh history 31/31 plus interruption/identity 3/3. Materialization, replacement and initial-load receipt inverses reproduce specific failures; cleanup-only OFF reproduces an active unacknowledged root, exact restoration passes. Task-pump OFF blocked at the outer deadline and is recorded only as corroborating evidence. Current Case51/activation composition passes all-target Render/NAPI check; prior affected strict/fmt/CC/hooks pass. Navigation API cross-group promises remain explicitly unsupported; driver/History cross-group traversal and Navigation same-group traversal are covered. Initial-open deadline interoperability remains separate, and final combined gates remain pending.
 
 ## Additional confirmed failures and investigations
 
@@ -83,10 +83,10 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 
 Accounting: 34 original test cases plus 19 additional tracked cases/findings. This is not a count of unique GitHub issues.
 
-- Merged with component proof: **39**.
+- Merged with component proof: **42**.
 - Verified clear without an additional source fix: **1** detector POST control.
-- Total done: **40**. Total pending: **13**. Total tracked: **53**.
-- Pending includes locally green history/action/MCP packets awaiting final validation and integration; deadline safety still fails.
+- Total done: **43**. Total pending: **10**. Total tracked: **53**.
+- Pending includes locally green action/MCP packets awaiting final validation and integration; deadline safety still fails.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

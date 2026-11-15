@@ -1600,21 +1600,41 @@ fn csp_eval_sample(units: &[u16]) -> &[u16] {
     &prefix[start..end]
 }
 
+fn timer_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Context>> {
+    let context = document.get_creation_context(scope)?;
+    if context.get_slot::<FrameRetired>().is_some()
+        || context
+            .get_slot::<private_boundary::Infrastructure>()
+            .is_some()
+    {
+        return None;
+    }
+    context
+        .get_slot::<ActiveDocument>()?
+        .0
+        .to_local(scope)
+        .is_some_and(|active| active.strict_equals(document.into()))
+        .then_some(context)
+}
+
 #[op2(fast, reentrant)]
 fn op_timer_code_allowed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
     source: v8::Local<'s, v8::String>,
 ) -> bool {
-    let context = scope.get_current_context();
+    let Some(context) = timer_document_context(scope, document) else {
+        return false;
+    };
     let Some(handle) = context.get_slot::<CspHandle>() else {
         return false;
     };
-    if context.get_slot::<FrameRetired>().is_some() {
-        return false;
-    }
     let policy = handle.policy.borrow().current().clone();
     let report_only = handle.policy.borrow().report_only.clone();
+    let scope = &mut v8::ContextScope::new(scope, context);
     let units = crate::browser_env::string_code_units(scope, source);
     let sample = csp_eval_sample(&units);
     for (disposition, records) in [
@@ -1653,12 +1673,13 @@ fn op_engine_task_scope<'s>(
 #[op2(reentrant)]
 fn op_run_timer_code<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
     source: v8::Local<'s, v8::String>,
 ) -> v8::Local<'s, v8::Value> {
-    let context = scope.get_current_context();
-    if context.get_slot::<FrameRetired>().is_some() {
+    let Some(context) = timer_document_context(scope, document) else {
         return v8::undefined(scope).into();
-    }
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     let url = context.get_slot::<FrameDocumentLocation>().map_or_else(
         || {
             JsRuntime::op_state_from(scope)
@@ -10766,7 +10787,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);
     try{
-      try{ops.op_engine_task_scope(()=>{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);});}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+      try{ops.op_engine_task_scope(()=>{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(__timerDocument,timer.source);});}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){
         if(timer.nesting<7)timer.nesting++;
         timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);timer.sequence=ops.op_task_sequence();__timerPush(timer);
@@ -20235,13 +20256,26 @@ mod window_timer_task_tests {
         .unwrap()
     }
 
+    fn guest_script(
+        page: &mut PageSession,
+        source: &str,
+        engine: bool,
+    ) -> Result<v8::Global<v8::Value>, String> {
+        let target = page.replaced_root_target().expect("actual guest root");
+        auxiliary_pages::execute_target(
+            &mut page.rt,
+            turbo_dom_browser_env::host_internals::AuxiliaryContextId(target),
+            source,
+            engine,
+        )
+    }
+
     async fn chain(kind: &str) {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        page.rt
-            .execute_script(
-                "<timer-chain>",
-                format!(
+        guest_script(
+            &mut page,
+            &format!(
                     r#"(()=>{{
                       const kind={kind:?},frame=document.querySelector('#frame').contentWindow;
                       const rows=globalThis.timerRows=[];
@@ -20263,8 +20297,9 @@ mod window_timer_task_tests {
                       }},0);else schedule();
                     }})()"#
                 ),
-            )
-            .unwrap();
+            false,
+        )
+        .unwrap();
         checkpoint_window_timer(&mut page.rt).unwrap();
         for index in 0..12 {
             let turn = run_next_window_timer(&mut page.rt, true);
@@ -20281,10 +20316,7 @@ mod window_timer_task_tests {
             drop(turn);
             assert_eq!(nesting.level.get(), 0, "{kind} finished task {index}");
         }
-        let value = page
-            .rt
-            .execute_script("<timer-rows>", "JSON.stringify(timerRows)")
-            .unwrap();
+        let value = guest_script(&mut page, "JSON.stringify(timerRows)", false).unwrap();
         let rows: Vec<f64> =
             serde_json::from_str(&read_string(&mut page.rt, value).unwrap()).unwrap();
         assert_eq!(rows.len(), 12);
@@ -20302,7 +20334,7 @@ mod window_timer_task_tests {
     async fn retired_task() {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        page.rt.execute_script("<retired-timer>", "const frame=document.querySelector('#frame');frame.contentWindow.setTimeout(()=>{frame.remove();Promise.resolve().then(()=>setTimeout(()=>{},0));},0)").unwrap();
+        guest_script(&mut page, "const frame=document.querySelector('#frame');frame.contentWindow.setTimeout(()=>{frame.remove();Promise.resolve().then(()=>setTimeout(()=>{},0));},0)", false).unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
         assert_eq!(turn.fired, 1);
         let retired = turn._task.as_ref().unwrap().nesting.clone();
@@ -20325,9 +20357,10 @@ mod window_timer_task_tests {
     async fn legacy_reentrancy() {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        execute_engine_script(
-            &mut page.rt,
+        guest_script(
+            &mut page,
             "setTimeout(()=>{setTimeout(()=>{},0);__tsNs.runTimers(1);setTimeout(()=>{},0);},0)",
+            true,
         )
         .unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
@@ -20359,9 +20392,7 @@ mod window_timer_task_tests {
             window_timer_nesting(scope.get_current_context())
         };
         assert_eq!(nesting.level.get(), 0);
-        page.rt
-            .execute_script("<after-interruption>", "setTimeout(()=>{},0)")
-            .unwrap();
+        guest_script(&mut page, "setTimeout(()=>{},0)", false).unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
         assert_eq!(turn.fired, 1);
         assert_eq!(turn._task.as_ref().unwrap().nesting.level.get(), 1);

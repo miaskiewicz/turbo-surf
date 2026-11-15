@@ -21,7 +21,11 @@ pub(super) fn install_root(scope: &mut v8::PinScope, url: &str) -> Result<(), St
     if !binding::install_auxiliary_context(scope, context, url, Some(host())) {
         return Err("Native root browsing-context installation failed".into());
     }
-    auxiliary_pages::register_root(scope, context, url);
+    // Only the native creation path can grant initial-empty replacement eligibility.
+    if url == "about:blank" {
+        context.set_slot(Rc::new(native_history::InitialEmptyDocument));
+    }
+    auxiliary_pages::register_root(scope, context, url)?;
     let frames = JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<FrameContexts>()
@@ -157,6 +161,7 @@ fn initialize<'s>(
         context.set_slot(Rc::new(*sandbox));
     }
     crate::browser_env::defer_key_order(scope);
+    context.set_slot(Rc::new(native_history::InitialEmptyDocument));
     binding::initialize_auxiliary_document(
         scope,
         "<!doctype html><html><head></head><body></body></html>",
@@ -332,6 +337,17 @@ pub(super) fn ready<'s>(
     _request: &binding::OpenRequest,
 ) -> binding::AuxiliaryReadyAction {
     v8::tc_scope!(let scope, scope);
+    if let Err(error) = native_history::activate(scope, target)
+        .and_then(|_| native_history::materialize(scope, target))
+    {
+        if !scope.has_caught() {
+            let message = v8::String::new(scope, &error).unwrap();
+            let error = v8::Exception::error(scope, message);
+            scope.throw_exception(error);
+        }
+        scope.rethrow();
+        return binding::AuxiliaryReadyAction::Abort;
+    }
     auxiliary_pages::publish(scope);
     if let Err(error) = run_context_bootstrap(scope, target) {
         if scope.has_caught() {

@@ -81,6 +81,7 @@ struct NavigationOptions {
     timeout_ms: Option<u64>,
     wait_until: Option<String>,
     content_type: Option<String>,
+    reload: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,7 +161,8 @@ pub(super) enum HistoryMode {
     #[default]
     Push,
     Replace,
-    Traverse(usize),
+    Reload,
+    Traverse(u64),
 }
 
 struct Fetched {
@@ -174,7 +176,25 @@ struct Job {
     generation: u64,
     future: FetchFuture,
     history: HistoryMode,
+    driver_navigation: bool,
 }
+
+pub(super) struct CommitHistory {
+    pub(super) previous_url: String,
+    pub(super) operation: &'static str,
+    pub(super) driver_navigation: bool,
+    pub(super) mode: HistoryMode,
+}
+
+fn history_operation(mode: HistoryMode) -> &'static str {
+    match mode {
+        HistoryMode::Push => "push",
+        HistoryMode::Replace => "replace",
+        HistoryMode::Reload => "reload",
+        HistoryMode::Traverse(_) => "traverse",
+    }
+}
+
 struct Loading {
     _activity: crate::network_activity::RequestActivity,
     generation: u64,
@@ -187,11 +207,6 @@ enum LoadPhase {
     Resources,
 }
 #[derive(Default)]
-struct History {
-    entries: Vec<String>,
-    index: usize,
-}
-#[derive(Default)]
 pub(super) struct State {
     sequence: u64,
     root_commits: u64,
@@ -199,7 +214,6 @@ pub(super) struct State {
     loading: BTreeMap<u64, Loading>,
     results: BTreeMap<u64, Result<serde_json::Value, String>>,
     waiters: BTreeSet<u64>,
-    history: BTreeMap<u64, History>,
 }
 
 pub(super) fn root_commits(state: &OpState) -> u64 {
@@ -388,52 +402,31 @@ fn start(
 ) -> Result<u64, String> {
     let _activation = rt.activation_key().enter();
     let target = navigation.target;
-    let (frame, current_url) = {
+    let frame = {
         deno_core::scope!(scope, rt);
         let context = auxiliary_pages::context(scope, target)?;
-        let url = window_proxy::location_url(context)
-            .or_else(|| {
-                context
-                    .get_slot::<FrameDocumentLocation>()
-                    .map(|url| url.0.clone())
-            })
-            .ok_or("Native navigation target Location is unavailable")?;
-        (request_frame_metadata(scope, context, None), url)
+        request_frame_metadata(scope, context, None)
     };
     let shared = rt.op_state();
     let mut shared = shared.borrow_mut();
-    let limit = shared
-        .borrow::<auxiliary_pages::Pages>()
-        .policy
-        .max_history_entries;
-    let history_len = shared
-        .try_borrow::<State>()
-        .and_then(|state| state.history.get(&target.0))
-        .map_or(1, |history| history.index + 1);
-    if limit == 0
-        || (matches!(mode, HistoryMode::Push)
-            && current_url != "about:blank"
-            && history_len >= limit)
+    if navigation.url.len()
+        > shared
+            .borrow::<auxiliary_pages::Pages>()
+            .policy
+            .max_navigation_url_bytes
     {
-        return Err("Native target session history limit exceeded".into());
+        return Err("Native target navigation URL budget exceeded".into());
     }
+    let mode = native_history::admit_navigation(&shared, target.0, mode)?;
     let activity = navigation.activity.clone().unwrap_or_else(|| {
         shared
             .borrow::<NetworkLog>()
             .begin_page_navigation(&target.0.to_string())
     });
     cancel(&mut shared, target.0);
+    let driver_navigation = navigation.snapshot.request.driver_navigation;
     let future = fetch_job(&shared, navigation, frame, budget_ms);
     let state = self::state(&mut shared);
-    state.history.entry(target.0).or_insert_with(|| History {
-        entries: vec![current_url.clone()],
-        index: 0,
-    });
-    let mode = if current_url == "about:blank" && matches!(mode, HistoryMode::Push) {
-        HistoryMode::Replace
-    } else {
-        mode
-    };
     state.sequence = state
         .sequence
         .checked_add(1)
@@ -446,6 +439,7 @@ fn start(
             generation,
             future,
             history: mode,
+            driver_navigation,
         },
     );
     Ok(generation)
@@ -469,38 +463,25 @@ fn poll_fetches(
         .collect()
 }
 
-fn update_history(state: &mut State, target: u64, url: &str, mode: HistoryMode) {
-    let history = state.history.entry(target).or_default();
-    if history.entries.is_empty() {
-        history.entries.push(url.into());
-        history.index = 0;
-        return;
-    }
-    match mode {
-        HistoryMode::Push => {
-            history.entries.truncate(history.index + 1);
-            history.entries.push(url.into());
-            history.index += 1;
-        }
-        HistoryMode::Replace => history.entries[history.index] = url.into(),
-        HistoryMode::Traverse(index) => {
-            history.index = index;
-            history.entries[index] = url.into();
-        }
-    }
-}
-
 fn install_response<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
     fetched: &Fetched,
+    job: &Job,
 ) -> Result<v8::Global<v8::Context>, String> {
+    let history = CommitHistory {
+        previous_url: window_proxy::location_url(previous)
+            .ok_or("Previous native document Location is unavailable")?,
+        operation: history_operation(job.history),
+        driver_navigation: job.driver_navigation,
+        mode: job.history,
+    };
     let response = &fetched.response;
     let next_policy = OpenerPolicy::response(&response.headers, &response.final_url);
     let isolated = needs_group_switch(previous.get_slot::<OpenerPolicy>().as_deref(), &next_policy);
     let current = binding::create_auxiliary_window_context(scope, (!isolated).then_some(previous));
     current.set_slot(Rc::new(next_policy));
-    let result = install_response_backing(scope, previous, current, fetched, isolated);
+    let result = install_response_backing(scope, previous, current, fetched, isolated, history);
     if let Err(error) = &result {
         // DetachGlobal cannot restore the old lexical realm. A failed backing
         // installation retires this real Page; its peers retain their actor.
@@ -522,6 +503,7 @@ fn install_response_backing<'s>(
     current: v8::Local<'s, v8::Context>,
     fetched: &Fetched,
     isolated: bool,
+    history: CommitHistory,
 ) -> Result<v8::Global<v8::Context>, String> {
     let response = &fetched.response;
     current.set_slot(Rc::new(FrameContextMarker));
@@ -598,8 +580,26 @@ fn install_response_backing<'s>(
         return Err("Injected native auxiliary backing initialization failure".into());
     }
     // Commit identity before ENV can initialize actual nested frame sources.
-    auxiliary_pages::committed(scope, previous, current, &response.final_url, isolated)?;
-    install_response_environment(scope, current, core, &response.final_url, &bootstrap)?;
+    let mode = history.mode;
+    let mut event = auxiliary_pages::committed(
+        scope,
+        previous,
+        current,
+        &response.final_url,
+        isolated,
+        history,
+    )?;
+    let active_url = native_history::commit_navigation(scope, current, &response.final_url, mode)?;
+    install_response_environment(scope, current, core, &active_url)?;
+    if let AuxiliaryPageEvent::Navigated { url, .. } = &mut event {
+        *url = active_url;
+    }
+    JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .events
+        .push(event);
+    run_navigation_init(scope, current, &bootstrap)?;
     auxiliary_pages::retire_owned_resources(scope, previous);
     if let Some(retired) = previous.get_slot::<CspHandle>() {
         JsRuntime::op_state_from(scope)
@@ -616,7 +616,6 @@ fn install_response_environment<'s>(
     current: v8::Local<'s, v8::Context>,
     core: v8::Local<'s, v8::Object>,
     url: &str,
-    bootstrap: &AuxiliaryBootstrap,
 ) -> Result<(), String> {
     window_proxy::install_location(scope, url);
     install_environment(scope, core.into())?;
@@ -624,9 +623,10 @@ fn install_response_environment<'s>(
     crate::crypto_backend::install(scope, core, secure)?;
     crate::audio_backend::install(scope, core)?;
     crate::geometry_backend::install(scope, core)?;
+    native_history::activate(scope, current)?;
+    native_history::materialize(scope, current)?;
     binding::capture_auxiliary_window_exception(scope, current);
     crate::browser_env::finish_key_order(scope);
-    run_navigation_init(scope, current, bootstrap)?;
     Ok(())
 }
 
@@ -659,9 +659,10 @@ fn commit_fetched(
         return Ok(receipt);
     }
     {
+        native_history::admit_navigation(&rt.op_state().borrow(), target, job.history)?;
         deno_core::scope!(scope, rt);
         let previous = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
-        install_response(scope, previous, &fetched)?;
+        install_response(scope, previous, &fetched, job)?;
     }
     adopt_root_response(rt, target, &fetched)?;
     let id = AuxiliaryContextId(target);
@@ -671,7 +672,6 @@ fn commit_fetched(
     let shared = rt.op_state();
     let mut shared = shared.borrow_mut();
     let state = self::state(&mut shared);
-    update_history(state, target, &fetched.response.final_url, job.history);
     state.loading.insert(
         target,
         Loading {
@@ -761,7 +761,9 @@ impl PageSession {
     pub fn has_pending_auxiliary_work(&self) -> bool {
         let shared = self.rt.op_state();
         let shared = shared.borrow();
-        pending(&shared) || shared.borrow::<auxiliary_pages::Pages>().pending_count() > 0
+        pending(&shared)
+            || shared.borrow::<auxiliary_pages::Pages>().pending_count() > 0
+            || native_history::has_tasks(&shared)
     }
 
     /// One interruptible actor turn. The jobs and hydration phases remain owned
@@ -779,10 +781,14 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
-            return Err("Native auxiliary work exceeded execution budget".into());
-        }
-        result.map_err(|_| "Native auxiliary work exceeded execution budget".to_owned())?
+        let result = if exceeded {
+            Err("Native auxiliary work exceeded execution budget".into())
+        } else {
+            result.unwrap_or_else(|_| {
+                Err("Native auxiliary work exceeded execution budget".to_owned())
+            })
+        };
+        self.finish_history_command(result)
     }
 
     async fn service_auxiliary_navigation_active(&mut self) -> Result<(), String> {
@@ -791,11 +797,11 @@ impl PageSession {
             let Some(navigation) = navigation else {
                 break;
             };
-            let mode = if navigation.replace {
+            let mode = navigation.history_mode.unwrap_or(if navigation.replace {
                 HistoryMode::Replace
             } else {
                 HistoryMode::Push
-            };
+            });
             start(&mut self.rt, navigation, mode, self.budget_ms)?;
         }
         if !self.has_pending_auxiliary_work() {
@@ -906,11 +912,18 @@ impl PageSession {
                 form_action: false,
                 driver_navigation: true,
             };
-            let mode = history_mode(&JsRuntime::op_state_from(scope).borrow(), target, history)?;
-            let resolved = if let HistoryMode::Traverse(index) = mode {
-                let shared = JsRuntime::op_state_from(scope);
-                let shared = shared.borrow();
-                shared.borrow::<State>().history[&target].entries[index].clone()
+            let mode = native_history::resolve_mode(
+                &JsRuntime::op_state_from(scope).borrow(),
+                target,
+                history,
+                options.reload,
+            )?;
+            let resolved = if let HistoryMode::Traverse(row) = mode {
+                native_history::traversal_url(
+                    &JsRuntime::op_state_from(scope).borrow(),
+                    target,
+                    row,
+                )?
             } else {
                 resolve(&snapshot.source, url).ok_or("Invalid target navigation URL")?
             };
@@ -920,14 +933,30 @@ impl PageSession {
                     url: resolved,
                     noreferrer: false,
                     replace: false,
+                    history_mode: None,
                     snapshot,
                     activity: None,
                 },
                 mode,
             )
         };
+        if let Some(receipt) = self.same_document_history_receipt(target, mode, budget)? {
+            return Ok(receipt);
+        }
         let generation = start(&mut self.rt, navigation, mode, budget)?;
         self.wait_target_navigation(generation, budget).await
+    }
+
+    fn same_document_history_receipt(
+        &mut self,
+        target: u64,
+        mode: HistoryMode,
+        budget: u64,
+    ) -> Result<Option<String>, String> {
+        match mode {
+            HistoryMode::Traverse(row) => self.traverse_same_history_group(target, row, budget),
+            _ => Ok(None),
+        }
     }
 
     pub(super) async fn navigate_form_target(
@@ -955,6 +984,7 @@ impl PageSession {
             url: pending.plan.url,
             noreferrer: false,
             replace: false,
+            history_mode: None,
             snapshot,
             activity: pending.activity,
         };
@@ -1012,37 +1042,14 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
-            return Err(format!("Target navigation timeout after {budget}ms"));
-        }
-        let result = result.map_err(|_| format!("Target navigation timeout after {budget}ms"))?;
+        let result = if exceeded {
+            Err(format!("Target navigation timeout after {budget}ms"))
+        } else {
+            result.unwrap_or_else(|_| Err(format!("Target navigation timeout after {budget}ms")))
+        };
+        let result = self.finish_history_command(result);
         waiter.completed = result.is_ok();
         result
-    }
-}
-
-fn history_mode(state: &OpState, target: u64, mode: &str) -> Result<HistoryMode, String> {
-    match mode {
-        "push" => Ok(HistoryMode::Push),
-        "replace" => Ok(HistoryMode::Replace),
-        "back" | "forward" => {
-            let history = state
-                .try_borrow::<State>()
-                .and_then(|state| state.history.get(&target))
-                .ok_or("Target has no recorded session history")?;
-            let index = if mode == "back" {
-                history.index.checked_sub(1)
-            } else {
-                history
-                    .index
-                    .checked_add(1)
-                    .filter(|index| *index < history.entries.len())
-            };
-            index
-                .map(HistoryMode::Traverse)
-                .ok_or_else(|| "Target history traversal is out of range".into())
-        }
-        _ => Err(format!("Unsupported target history operation: {mode}")),
     }
 }
 
@@ -1186,34 +1193,55 @@ mod tests {
 
     #[test]
     fn target_history_traversal_and_replacement_preserve_independent_entries() {
-        let mut state = State::default();
-        update_history(&mut state, 2, "https://local.test/first", HistoryMode::Push);
-        update_history(
-            &mut state,
-            2,
-            "https://local.test/second",
-            HistoryMode::Push,
-        );
-        update_history(&mut state, 3, "https://local.test/other", HistoryMode::Push);
-        update_history(
-            &mut state,
-            2,
-            "https://local.test/first",
-            HistoryMode::Traverse(0),
-        );
-        update_history(
-            &mut state,
-            2,
-            "https://local.test/replaced",
-            HistoryMode::Replace,
-        );
-        update_history(&mut state, 2, "https://local.test/new", HistoryMode::Push);
+        use super::super::session_history::{Change, History, Limits};
+        let limits = Limits {
+            entries: 8,
+            url_bytes: 1024,
+            state_bytes: 0,
+        };
+        let mut state: BTreeMap<u64, History<()>> = BTreeMap::new();
+        for (target, url) in [
+            (2, "https://local.test/first"),
+            (2, "https://local.test/second"),
+            (3, "https://local.test/other"),
+        ] {
+            state
+                .entry(target)
+                .or_insert_with(|| History::new(target))
+                .placeholder(url.into(), None, Change::Push, limits)
+                .unwrap();
+        }
+        let first = state[&2].entries()[0].row;
+        let history = state.get_mut(&2).unwrap();
+        history.select(first).unwrap();
+        history
+            .placeholder(
+                "https://local.test/replaced".into(),
+                None,
+                Change::Replace,
+                limits,
+            )
+            .unwrap();
+        history
+            .placeholder("https://local.test/new".into(), None, Change::Push, limits)
+            .unwrap();
         assert_eq!(
-            state.history[&2].entries,
+            state[&2]
+                .entries()
+                .iter()
+                .map(|entry| entry.url.as_str())
+                .collect::<Vec<_>>(),
             ["https://local.test/replaced", "https://local.test/new"]
         );
-        assert_eq!(state.history[&2].index, 1);
-        assert_eq!(state.history[&3].entries, ["https://local.test/other"]);
+        assert_eq!(state[&2].index(), 1);
+        assert_eq!(
+            state[&3]
+                .entries()
+                .iter()
+                .map(|entry| entry.url.as_str())
+                .collect::<Vec<_>>(),
+            ["https://local.test/other"]
+        );
     }
 
     #[test]

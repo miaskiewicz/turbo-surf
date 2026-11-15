@@ -30,6 +30,13 @@ import { createRequire } from "node:module";
 import { basename } from "node:path";
 import { closeScreenshotScene, paintScreenshotScene } from "./screenshot-scene.mjs";
 import { historyUrl, syncHistory, traverseLive } from "./history-navigation.mjs";
+import {
+  emitNativeFrameNavigation,
+  hasNativeHistory,
+  notifyNativeHistory,
+  retiredNativeHistoryTarget,
+  syncNativeHistory,
+} from "./history-snapshot.mjs";
 import { validateArtifactOptions } from "./artifact-options.mjs";
 import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
 import { equalValues } from "./equality.mjs";
@@ -2739,10 +2746,25 @@ return String(globalThis.__RESULT ?? ""); })()`,
     opening.promise = this._startLiveSession(timeoutMs, opening);
     return opening.promise;
   }
+  _driverHistorySnapshot() {
+    if (!this._history.length && !this._fwd.length) return undefined;
+    if (
+      [this._history, this._fwd].some((entries) =>
+        entries.some((entry) => typeof entry !== "string"),
+      )
+    )
+      throw new Error("Native history promotion cannot restore retired same-document state");
+    return {
+      entries: [...this._history, this._url, ...this._fwd.toReversed()],
+      index: this._history.length,
+    };
+  }
+
   _liveDocumentMetadata(opening) {
     return JSON.stringify({
       ...this._documentResponse,
       hostNetworkLog: opening.id,
+      rootHistory: this._driverHistorySnapshot(),
       auxiliaryPolicy: this._context._auxiliaryPolicy,
       viewport: [this._viewport.width, this._viewport.height],
       auxiliaryInitScript: this._context._initScripts
@@ -2832,77 +2854,87 @@ return String(globalThis.__RESULT ?? ""); })()`,
 
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
   // over `this._html`) and a subsequent navigation see the post-interaction state.
-  async _refreshFromSession(collect = false) {
-    if (this._session == null) return;
-    const collectScript = (id, script) => this._collectSession(id, script, collect);
-    const previousUrl = this._url;
-    let historyNavigation = null;
-    let rscNavigation = false;
+  async _refreshHistory(collectScript) {
+    if (syncNativeHistory(this, native)) return { url: this._url };
     try {
       const encoded = await collectScript(
         this._session,
         "globalThis.__RESULT = __tsNs.takeHistoryNavigation();",
       );
-      historyNavigation = JSON.parse(encoded);
+      const navigation = JSON.parse(encoded);
+      if (navigation) syncHistory(this, navigation);
+      return navigation;
     } catch {
-      /* A session terminated during navigation retains its last driver state. */
+      /* A terminated legacy session retains its last driver state. */
+      return null;
     }
-    if (historyNavigation) syncHistory(this, historyNavigation);
-    this._html = native.liveSerialize(this._session);
+  }
+
+  async _refreshRequestContext(collectScript, historyNavigation) {
     try {
       const href = await collectScript(
         this._session,
         "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
       );
-      if (href) {
-        const current = JSON.parse(href);
-        this._url = historyNavigation?.url ?? current.url;
-        this._requestContextId = current.id;
-        this._requestFrames ??= new Map();
-        if (current.id) this._requestFrames.set(current.id, this.mainFrame());
-      }
+      if (!href) return;
+      const current = JSON.parse(href);
+      this._url = historyNavigation?.url ?? current.url;
+      this._requestContextId = current.id;
+      this._requestFrames ??= new Map();
+      if (current.id) this._requestFrames.set(current.id, this.mainFrame());
     } catch {
-      /* keep prior url */
+      /* keep prior URL */
     }
-    // Next App Router client navigation (router.push) doesn't change location.href in our
-    // engine — it fetches the target's RSC flight, which the runtime records on __rscNav.
-    // Treat that as the navigation target (the post-login redirect chain rides this).
+  }
+
+  async _refreshRscNavigation(collectScript, historyNavigation) {
     try {
       const nav = await collectScript(
         this._session,
         "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
-      if (nav && pathOf(nav) !== this._loadedPath) {
-        const target = this._resolveUrl(nav);
-        if (target !== historyNavigation?.url) {
-          this._url = target;
-          rscNavigation = true;
-        }
-      }
+      if (!nav || pathOf(nav) === this._loadedPath) return false;
+      const target = this._resolveUrl(nav);
+      if (target === historyNavigation?.url) return false;
+      this._url = target;
+      return true;
     } catch {
-      /* no pending rsc nav */
+      return false;
     }
+  }
+
+  async _followDocumentNavigation(historyNavigation, rscNavigation, previousUrl) {
+    const admitted = historyNavigation?.crossDocument;
+    const needsDocument = (!this._auxiliaryActor && admitted) || rscNavigation;
+    if (!this._live || !/^https?:/.test(this._url) || !needsDocument || !(this._navHops < 10))
+      return;
+    this._navHops++;
+    if (admitted && !admitted.replace) {
+      this._history.push(this._historyCurrent ?? previousUrl);
+      this._fwd = [];
+    }
+    await this._reopen(admitted?.url ?? this._url);
+  }
+
+  async _refreshFromSession(collect = false) {
+    if (this._session == null) return;
+    const collectScript = (id, script) => this._collectSession(id, script, collect);
+    const previousUrl = this._url;
+    const historyNavigation = await this._refreshHistory(collectScript);
+    this._html = native.liveSerialize(this._session);
+    await this._refreshRequestContext(collectScript, historyNavigation);
+    const rscNavigation = await this._refreshRscNavigation(collectScript, historyNavigation);
     try {
       this._cookies = native.liveCookies(this._session);
     } catch {
       /* keep prior cookies */
     }
     if (!historyNavigation && previousUrl !== this._url) this._emit("framenavigated", this);
-    if (this._html.includes("<iframe")) {
-      await this._refreshRequestFrames(collect);
-    } else this._frameEntries = undefined;
+    if (this._html.includes("<iframe")) await this._refreshRequestFrames(collect);
+    else this._frameEntries = undefined;
     this._syncFrames();
     await this._drainNetworkEvents();
-    const admitted = historyNavigation?.crossDocument;
-    const needsDocument = (!this._auxiliaryActor && admitted) || rscNavigation;
-    if (this._live && /^https?:/.test(this._url) && needsDocument && this._navHops < 10) {
-      this._navHops++;
-      if (admitted && !admitted.replace) {
-        this._history.push(this._historyCurrent ?? previousUrl);
-        this._fwd = [];
-      }
-      await this._reopen(admitted?.url ?? this._url);
-    }
+    await this._followDocumentNavigation(historyNavigation, rscNavigation, previousUrl);
   }
 
   async _refreshRequestFrames(collect = false) {
@@ -3349,23 +3381,27 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return (this._nativeLoadState ??= new NativeLoadState(this));
   }
 
-  _didNativeNavigate(event) {
-    if (this._closed || this._session == null) return;
+  _retireNativeDocumentAssets() {
     this._imageCache = undefined;
     closeScreenshotScene(this);
+  }
+
+  _didNativeNavigate(event) {
+    if (retiredNativeHistoryTarget(this)) return;
+    this._retireNativeDocumentAssets();
     this._nativeLoad().reset();
-    const previous = this._url;
-    if (!this._driverNavigation && previous !== "about:blank" && previous !== event.url) {
-      this._history.push(this._historyCurrent ?? previous);
-      this._fwd = [];
-    }
-    this._url = event.url;
-    this._loadedPath = pathOf(event.url);
+    if (!syncNativeHistory(this, native))
+      throw new Error("Native navigation has no owned history target");
+    this._loadedPath = pathOf(this._url);
     if (this._actorHub.canReadTarget(this._targetId)) {
       if (!this._actorHub.opening) this._html = native.liveSerialize(this._session);
       this._syncFrames();
     }
-    this._emit("framenavigated", this);
+    emitNativeFrameNavigation(this, event.url);
+  }
+
+  _didNativeHistoryChanged(event) {
+    notifyNativeHistory(this, native, event);
   }
 
   _navigationTimeoutFor(options) {
@@ -3399,6 +3435,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
       throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
   }
 
+  _nativeNavigationOptions(method, body, opts) {
+    return {
+      method: method ?? "GET",
+      body,
+      contentType: opts._contentType,
+      referer: Object.hasOwn(opts, "referer") ? opts.referer : this._url,
+      timeoutMs: this._navigationTimeoutFor(opts),
+      waitUntil: opts.waitUntil ?? "load",
+      reload: opts.reload === true,
+    };
+  }
+
   async _navigateActorTarget(url, method, body, opts = {}) {
     const navigationStarted = performance.now();
     const session = this._session;
@@ -3411,14 +3459,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
           session,
           url,
           opts._historyMode ?? "push",
-          JSON.stringify({
-            method: method ?? "GET",
-            body,
-            contentType: opts._contentType,
-            referer: Object.hasOwn(opts, "referer") ? opts.referer : this._url,
-            timeoutMs: this._navigationTimeoutFor(opts),
-            waitUntil: opts.waitUntil ?? "load",
-          }),
+          JSON.stringify(this._nativeNavigationOptions(method, body, opts)),
         ),
       );
       if (receipt.attachment) {
@@ -3431,12 +3472,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
       await this._actorHub.drain();
       await this._refreshFromSession(true);
       await this._drainBindings(bindingDeadline, true, true);
-      if (milestone) await milestone;
+      if (milestone && receipt.sameDocument !== true) await milestone;
       if (opts.waitUntil === "networkidle")
         await this._waitForTargetNetworkIdle(
           this._remainingTargetIdleTimeout(opts, navigationStarted),
         );
       if (opts.waitUntil !== "commit") this._html = native.liveSerialize(session);
+      syncNativeHistory(this, native);
+      if (receipt.sameDocument === true) return null;
       if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
       const response = this._recentResponses?.findLast(
         (value) => String(nativeResponseIds.get(value)) === String(receipt.requestId),
@@ -3620,6 +3663,17 @@ return String(globalThis.__RESULT ?? ""); })()`,
     error.name = "TimeoutError";
     throw error;
   }
+  _needsObservedHydration(opts) {
+    return (
+      !this._live &&
+      this._autoHydrate !== false &&
+      opts?.waitUntil !== "commit" &&
+      ["pageerror", "console", "response", "request", "requestfinished", "requestfailed"].some(
+        (event) => this._listeners.has(event),
+      )
+    );
+  }
+
   async goto(url, opts) {
     const started = Date.now();
     const previous = this._url;
@@ -3629,9 +3683,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
       ...opts,
       referer: opts?.referer ?? null,
     });
-    if (previous !== "about:blank") this._history.push(previousEntry);
-    this._historyCurrent = null;
-    this._fwd = []; // a committed navigation invalidates the forward stack
+    if (!hasNativeHistory(this)) {
+      if (previous !== "about:blank") this._history.push(previousEntry);
+      this._historyCurrent = null;
+      this._fwd = [];
+    }
     // `waitUntil:'networkidle'` (or a later waitForLoadState('networkidle')) opens a LIVE
     // session: hydrate the app to quiescence so an SPA's client-rendered content (forms,
     // dashboards) appears, and keep it mounted so clicks/fills dispatch real events into
@@ -3645,17 +3701,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // wants to observe only run inside a live session. Auto-hydrate so the
     // wait short-circuits on a real response instead of timing out with
     // the synthetic 200 fallback. Harmless when nothing is waiting.
-    else if (
-      !this._live &&
-      this._autoHydrate !== false &&
-      opts?.waitUntil !== "commit" &&
-      (this._listeners.has("pageerror") ||
-        this._listeners.has("console") ||
-        this._listeners.has("response") ||
-        this._listeners.has("request") ||
-        this._listeners.has("requestfinished") ||
-        this._listeners.has("requestfailed"))
-    ) {
+    else if (this._needsObservedHydration(opts)) {
       await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     }
     return resp;
@@ -3670,12 +3716,24 @@ return String(globalThis.__RESULT ?? ""); })()`,
       ...opts,
       referer: opts?.referer ?? this._documentResponse?.referrer ?? null,
       _historyMode: "replace",
+      reload: true,
     });
     if (opts?.waitUntil === "networkidle")
       await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     return resp;
   }
+  async _traverseNativeHistory(direction, opts) {
+    syncNativeHistory(this, native);
+    const entry = direction === "back" ? this._history.at(-1) : this._fwd.at(-1);
+    if (entry == null) return null;
+    return this._navigateActorTarget(historyUrl(entry), undefined, undefined, {
+      ...opts,
+      _historyMode: direction,
+    });
+  }
+
   async goBack(opts) {
+    if (hasNativeHistory(this)) return this._traverseNativeHistory("back", opts);
     const prev = this._history.at(-1);
     if (prev == null) return null;
     if (await traverseLive(this, prev, native)) return null;
@@ -3691,6 +3749,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return response;
   }
   async goForward(opts) {
+    if (hasNativeHistory(this)) return this._traverseNativeHistory("forward", opts);
     const next = this._fwd.at(-1);
     if (next == null) return null;
     if (await traverseLive(this, next, native)) return null;
@@ -5427,12 +5486,14 @@ class BrowserContext {
         page._targetId = target;
       },
       create: (info, alias) => this._adoptNativePage(actor, info, alias),
+      initialDocumentComplete: (target) => target._nativeLoad().observe("load", { emit: false }),
       created: (child, event) => {
         this._emit("page", child);
         const source = actor.page(event.sourcePage);
         if (source) source._emit("popup", child);
       },
       navigated: (target, event) => target._didNativeNavigate(event),
+      historyChanged: (target, event) => target._didNativeHistoryChanged(event),
       lifecycle: (target, event) =>
         target._nativeLoad().observe(event.kind, { emit: !target._initializingForSetContent }),
       closed: (target) => target._didNativeClose(),

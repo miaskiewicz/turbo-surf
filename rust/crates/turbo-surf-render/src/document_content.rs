@@ -45,10 +45,11 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded || result.is_err() {
-            return Err(format!("setContent timeout after {budget}ms"));
-        }
-        result.unwrap()?;
+        let result = match (result, exceeded) {
+            (Ok(result), false) => result,
+            _ => Err(format!("setContent timeout after {budget}ms")),
+        };
+        self.finish_history_command(result)?;
         self.follow_form_navigation().await?;
         self.serialize_checked()
     }

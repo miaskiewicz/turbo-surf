@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Preserve native document-group history and structured-cloned state across real navigation, replacement and back/forward traversal; authenticate current-document ownership and retire only interrupted, unacknowledged mutations. Navigation API traversal remains limited to its current document group.
+
 - Preserve authored getter exceptions from native JSON collectors and reject undefined results consistently across root and child targets.
 
 - Dispatch native host input in its actual guest document realm, retain the operation owner for cancellation, skip retired realms and use captured cleanup primitives.

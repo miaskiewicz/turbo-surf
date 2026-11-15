@@ -13,8 +13,17 @@
 //! Isolate-owned cleanup disposes native handles before V8 invalidation, including
 //! cached runtimes and independent sessions; an entry point never resets its peer.
 
+#[path = "native_history.rs"]
+mod native_history;
+#[path = "session_history.rs"]
+mod session_history;
 #[path = "window_proxy.rs"]
 mod window_proxy;
+use native_history::{
+    op_history_ack, op_history_clone, op_history_initialize, op_history_notify,
+    op_history_precommit, op_history_queue_task, op_history_scroll_restoration, op_history_select,
+    op_history_status, op_history_traverse,
+};
 
 #[path = "private_boundary.rs"]
 pub(crate) mod private_boundary;
@@ -52,8 +61,8 @@ mod driver_sync;
 #[path = "resident_image_assets.rs"]
 pub(crate) mod resident_image_assets;
 pub use auxiliary_pages::{
-    AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryHostServices, AuxiliaryPageEvent,
-    AuxiliaryPageEventLog, AuxiliaryPageInfo,
+    AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryDriverHistory, AuxiliaryHostServices,
+    AuxiliaryPageEvent, AuxiliaryPageEventLog, AuxiliaryPageInfo,
 };
 
 #[cfg(turbo_surf_native_proxy)]
@@ -9107,10 +9116,13 @@ fn op_driver_sync_changed(state: &mut OpState) {
     driver_sync::changed(state);
 }
 
-#[op2]
+#[op2(reentrant)]
 #[string]
-fn op_history_document_id(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> String {
-    turbo_dom_browser_env::host_internals::document_id_of(scope, document).to_string()
+fn op_history_document_id<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Result<String, JsErrorBox> {
+    native_history::document_id_for_script(scope, document)
 }
 
 #[op2(nofast)]
@@ -9237,6 +9249,16 @@ deno_core::extension!(
         op_user_activation_read,
         op_script_navigation_admitted,
         op_history_document_id,
+        op_history_initialize,
+        op_history_precommit,
+        op_history_clone,
+        op_history_select,
+        op_history_ack,
+        op_history_notify,
+        op_history_status,
+        op_history_scroll_restoration,
+        op_history_queue_task,
+        op_history_traverse,
         op_driver_sync_changed,
         op_capture_runtime_core,
         op_set_host_capabilities,
@@ -15999,6 +16021,8 @@ fn install_dom_environment(rt: &mut JsRuntime, base: &str) -> Result<(), String>
         crate::crypto_backend::install(scope, core, trustworthy_url(base))?;
         crate::audio_backend::install(scope, core)?;
         crate::geometry_backend::install(scope, core)?;
+        native_history::activate(scope, context)?;
+        native_history::materialize(scope, context)?;
     }
     Ok(())
 }
@@ -16565,7 +16589,20 @@ fn evaluate_completion_condition(
 /// True when the event loop should yield back to the outer loop because a
 /// native-proxy module stage, a window message, or a pending classic-script
 /// job is queued.
+fn drive_pending_document_task(rt: &mut JsRuntime) -> Result<bool, String> {
+    if native_history::run_task(rt)? {
+        return Ok(true);
+    }
+    #[cfg(turbo_surf_native_proxy)]
+    return drive_pending_module_stage(rt);
+    #[cfg(not(turbo_surf_native_proxy))]
+    Ok(false)
+}
+
 fn has_pending_frame_work(rt: &JsRuntime) -> bool {
+    if native_history::has_tasks(&rt.op_state().borrow()) {
+        return true;
+    }
     #[cfg(turbo_surf_native_proxy)]
     if !rt
         .op_state()
@@ -16918,8 +16955,7 @@ async fn drain_event_loop_until_completion(
         if completion.is_some_and(|promise| promise_settled(rt, promise)) {
             return Ok(());
         }
-        #[cfg(turbo_surf_native_proxy)]
-        if drive_pending_module_stage(rt)? {
+        if drive_pending_document_task(rt)? {
             continue;
         }
         let message = {
@@ -18758,6 +18794,8 @@ impl PageSession {
             } else {
                 auxiliary.root_bootstrap
             };
+            pages.root_history = auxiliary.root_history;
+            pages.history_log = auxiliary.history_log;
             pages.events = auxiliary.events;
             pages.policy = auxiliary.policy;
             pages.events.set_limit(auxiliary.policy.max_event_rows);
@@ -18934,11 +18972,12 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
+        let result = if exceeded {
             Err("Engine read exceeded the session execution budget".into())
         } else {
             result
-        }
+        };
+        self.finish_history_command(result)
     }
 
     /// Run `script` in the LIVE isolate, then drain the event loop to quiescence so any
@@ -18981,10 +19020,12 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
-            return Err("Driver collection exceeded the session execution budget".into());
-        }
-        result
+        let result = if exceeded {
+            Err("Driver collection exceeded the session execution budget".into())
+        } else {
+            result
+        };
+        self.finish_history_command(result)
     }
 
     async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
@@ -19059,14 +19100,18 @@ impl PageSession {
             .borrow()
             .borrow::<HydrationProgress>()
             .clone();
-        match drained {
+        if let Err(error) = self.finish_history_command(Ok(())) {
+            return Err(drained.err().unwrap_or(error));
+        }
+        let result = match drained {
             Err(e) if !(e.contains("terminat") || e.contains("execution")) => Err(e),
             _ => self
                 .rt
                 .execute_script("<result>", READ)
                 .map_err(|e| budget_msg(&e.to_string(), budget))
                 .and_then(|g| read_string(&mut self.rt, g)),
-        }
+        };
+        self.finish_history_command(result)
     }
 
     /// Evaluate an expression and await its own result without a page-global result slot.
@@ -19158,10 +19203,14 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
-            return Err("Expression exceeded the session execution budget".into());
-        }
-        result.map_err(|_| "Expression exceeded the session execution budget".to_owned())?
+        let result = if exceeded {
+            Err("Expression exceeded the session execution budget".into())
+        } else {
+            result.unwrap_or_else(|_| {
+                Err("Expression exceeded the session execution budget".to_owned())
+            })
+        };
+        self.finish_history_command(result)
     }
 
     /// Deliver embedder input through a private native dispatch capability.
@@ -19222,7 +19271,17 @@ impl PageSession {
             .load(std::sync::atomic::Ordering::Relaxed);
         drop(_watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded || !matches!(&result, Ok(Ok(()))) {
+        let result = if exceeded {
+            Err("Host input exceeded the session execution budget".into())
+        } else {
+            result.unwrap_or_else(|_| {
+                Err("Host input exceeded the session execution budget".to_string())
+            })
+        };
+        if let Err(error) = self.finish_history_command(Ok(())) {
+            return result.and(Err(error));
+        }
+        if result.is_err() {
             deno_core::scope!(scope, self.rt);
             let context = v8::Local::new(scope, &selected);
             if context.get_slot::<FrameRetired>().is_none() {
@@ -19234,10 +19293,7 @@ impl PageSession {
                 }
             }
         }
-        if exceeded {
-            return Err("Host input exceeded the session execution budget".into());
-        }
-        result.map_err(|_| "Host input exceeded the session execution budget".to_string())?
+        self.finish_history_command(result)
     }
 
     /// Host-only retention diagnostics; never installed on the guest global.

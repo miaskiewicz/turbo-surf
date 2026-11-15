@@ -9,6 +9,9 @@ struct BackgroundTurn {
 }
 
 pub(super) fn ready_tasks(rt: &mut JsRuntime) -> Result<bool, String> {
+    if native_history::run_task(rt)? {
+        return Ok(true);
+    }
     #[cfg(turbo_surf_native_proxy)]
     if drive_pending_module_stage(rt)? {
         return Ok(true);
@@ -108,12 +111,16 @@ impl PageSession {
             let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
             drop(watchdog);
             self.rt.v8_isolate().cancel_terminate_execution();
-            if exceeded {
+            let result = if exceeded {
                 Poll::Ready(Err(
                     "Native background task exceeded execution budget".into()
                 ))
             } else {
                 result
+            };
+            match result {
+                Poll::Ready(result) => Poll::Ready(self.finish_history_command(result)),
+                Poll::Pending => Poll::Pending,
             }
         });
         key.during(async {

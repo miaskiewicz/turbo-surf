@@ -6,6 +6,7 @@ use super::*;
 pub struct AuxiliaryResourcePolicy {
     pub max_pages: usize,
     pub max_history_entries: usize,
+    pub max_history_state_bytes: usize,
     pub max_creations: usize,
     pub max_pending_navigations: usize,
     pub max_event_rows: usize,
@@ -17,6 +18,7 @@ impl Default for AuxiliaryResourcePolicy {
         Self {
             max_pages: 32,
             max_history_entries: 256,
+            max_history_state_bytes: 16 * 1024 * 1024,
             max_creations: 128,
             max_pending_navigations: 64,
             max_event_rows: 1024,

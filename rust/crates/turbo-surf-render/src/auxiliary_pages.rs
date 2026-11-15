@@ -48,7 +48,7 @@ impl AuxiliaryPageEventLog {
         self.record_change();
     }
 
-    fn push(&self, event: AuxiliaryPageEvent) {
+    pub(super) fn push(&self, event: AuxiliaryPageEvent) {
         {
             let mut targets = self.0.targets.lock().unwrap();
             match &event {
@@ -58,6 +58,7 @@ impl AuxiliaryPageEventLog {
                     source_page,
                     opener_page,
                     url,
+                    ..
                 } => {
                     targets.insert(
                         target.clone(),
@@ -80,6 +81,13 @@ impl AuxiliaryPageEventLog {
                     if let Some(page) = targets.get_mut(target) {
                         page.url = url.clone();
                         page.opener_page = opener_page.clone();
+                    }
+                }
+                AuxiliaryPageEvent::HistoryChanged { target, url, .. } => {
+                    if let Some(page) = targets.get_mut(target) {
+                        if !page.closed {
+                            page.url = url.clone();
+                        }
                     }
                 }
                 AuxiliaryPageEvent::DomContentLoaded { .. }
@@ -207,12 +215,26 @@ pub enum AuxiliaryPageEvent {
         source_page: Option<String>,
         opener_page: Option<String>,
         url: String,
+        initial_document_complete: bool,
     },
     Navigated {
         target: String,
         url: String,
+        previous_url: String,
+        history_operation: &'static str,
+        driver_navigation: bool,
+        document: String,
         isolated: bool,
         opener_page: Option<String>,
+    },
+    HistoryChanged {
+        target: String,
+        document: String,
+        group: String,
+        revision: String,
+        row: String,
+        local: u32,
+        url: String,
     },
     DomContentLoaded {
         target: String,
@@ -251,6 +273,7 @@ pub(super) struct Navigation {
     pub url: String,
     pub noreferrer: bool,
     pub replace: bool,
+    pub history_mode: Option<auxiliary_navigation::HistoryMode>,
     pub snapshot: auxiliary_navigation::SourceSnapshot,
     pub activity: Option<crate::network_activity::RequestActivity>,
 }
@@ -261,10 +284,19 @@ pub struct AuxiliaryBootstrap {
     pub engine_init_script: String,
 }
 
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuxiliaryDriverHistory {
+    pub entries: Vec<String>,
+    pub index: usize,
+}
+
 #[derive(Clone, Default)]
 pub struct AuxiliaryHostServices {
     pub bootstrap: AuxiliaryBootstrap,
     pub root_bootstrap: AuxiliaryBootstrap,
+    pub root_history: Option<AuxiliaryDriverHistory>,
+    pub history_log: crate::NativeHistoryLog,
     pub events: AuxiliaryPageEventLog,
     pub policy: AuxiliaryResourcePolicy,
 }
@@ -274,6 +306,8 @@ pub(super) struct Pages {
     pub(super) enabled: bool,
     pub(super) bootstrap: AuxiliaryBootstrap,
     pub(super) root_bootstrap: AuxiliaryBootstrap,
+    pub(super) root_history: Option<AuxiliaryDriverHistory>,
+    pub(super) history_log: crate::NativeHistoryLog,
     pub(super) legacy_frame_bootstrap: bool,
     targets: BTreeMap<u64, Target>,
     pending: VecDeque<Navigation>,
@@ -299,8 +333,16 @@ pub(super) fn register_root<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
     url: &str,
-) {
+) -> Result<(), String> {
     let identity = auxiliary_context_identity(context).expect("installed native root identity");
+    let state = JsRuntime::op_state_from(scope);
+    let history = state.borrow_mut().borrow_mut::<Pages>().root_history.take();
+    native_history::initialize_driver_history(
+        &mut state.borrow_mut(),
+        identity.id.0,
+        url,
+        history,
+    )?;
     let root_bootstrap = JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<Pages>()
@@ -341,6 +383,7 @@ pub(super) fn register_root<'s>(
             },
         );
     log.set_capability(AuxiliaryCapability::Supported);
+    Ok(())
 }
 
 /// Admission has already allocated/initialized this actual native context.
@@ -381,6 +424,7 @@ pub(super) fn admitted(
             url: request.url.clone(),
             noreferrer: request.noreferrer,
             replace: false,
+            history_mode: None,
             snapshot,
             activity: Some(network.begin_page_navigation(&request.target_id.0.to_string())),
         });
@@ -462,6 +506,11 @@ pub(super) fn publish(scope: &mut v8::PinScope) {
     let mut rejected = Vec::new();
     let event_log = pages.events.clone();
     let mut metadata_changed = false;
+    let pending_targets = pages
+        .pending
+        .iter()
+        .map(|navigation| navigation.target.0)
+        .collect::<std::collections::BTreeSet<_>>();
     pages.targets.retain(|id, target| {
         let context = v8::Local::new(scope, &target.context);
         if target.published {
@@ -493,6 +542,10 @@ pub(super) fn publish(scope: &mut v8::PinScope) {
             source_page: target.source_page.map(|source| source.0.to_string()),
             opener_page: opener_page(scope, context),
             url: target.url.clone(),
+            initial_document_complete: context
+                .get_slot::<native_history::InitialEmptyDocument>()
+                .is_some()
+                && !pending_targets.contains(id),
         });
         true
     });
@@ -521,6 +574,18 @@ pub(super) fn queue_navigation(
     source_context: v8::Local<v8::Context>,
     url: String,
     replace: bool,
+) -> bool {
+    queue_navigation_mode(scope, target, source, source_context, url, replace, None)
+}
+
+pub(super) fn queue_navigation_mode(
+    scope: &mut v8::PinScope,
+    target: AuxiliaryContextId,
+    source: AuxiliaryContextId,
+    source_context: v8::Local<v8::Context>,
+    url: String,
+    replace: bool,
+    mode: Option<auxiliary_navigation::HistoryMode>,
 ) -> bool {
     if auxiliary_context_identity(source_context).map(|identity| identity.id) != Some(source) {
         return false;
@@ -551,6 +616,7 @@ pub(super) fn queue_navigation(
         url,
         noreferrer: false,
         replace,
+        history_mode: mode,
         snapshot,
         activity: Some(network.begin_page_navigation(&target.0.to_string())),
     });
@@ -568,8 +634,16 @@ pub(super) fn committed<'s>(
     current: v8::Local<'s, v8::Context>,
     url: &str,
     isolated: bool,
-) -> Result<(), String> {
+    history: auxiliary_navigation::CommitHistory,
+) -> Result<AuxiliaryPageEvent, String> {
     let identity = auxiliary_context_identity(previous).ok_or("Missing native Page identity")?;
+    let document = current
+        .get_slot::<ActiveDocument>()
+        .and_then(|document| document.0.to_local(scope))
+        .ok_or("Committed native document identity is unavailable")?;
+    let document = native_history::physical_document_identity(scope, current, document)
+        .map_err(|error| error.to_string())?
+        .to_string();
     let commit = if isolated {
         commit_isolated_auxiliary_navigation
     } else {
@@ -589,13 +663,16 @@ pub(super) fn committed<'s>(
     target.primary = false;
     target.snapshot = None;
     target.url = url.to_owned();
-    pages.events.push(AuxiliaryPageEvent::Navigated {
+    Ok(AuxiliaryPageEvent::Navigated {
         target: identity.id.0.to_string(),
         url: url.to_owned(),
+        previous_url: history.previous_url,
+        history_operation: history.operation,
+        driver_navigation: history.driver_navigation,
+        document,
         isolated,
         opener_page: opener_page(scope, current),
-    });
-    Ok(())
+    })
 }
 
 pub(super) fn close<'s>(
@@ -622,6 +699,7 @@ pub(super) fn close<'s>(
         });
     }
     auxiliary_navigation::cancel(&mut state, identity.id.0);
+    native_history::close(&mut state, identity.id.0);
     true
 }
 
@@ -716,11 +794,12 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
+        let result = if exceeded {
             Err("Target engine read exceeded session budget".into())
         } else {
             result
-        }
+        };
+        self.finish_history_command(result)
     }
 
     fn read_target_engine_active(&mut self, target: u64, source: &str) -> Result<String, String> {
@@ -893,10 +972,14 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
-            return Err("Target expression exceeded session execution budget".into());
-        }
-        result.map_err(|_| "Target expression exceeded session execution budget".to_owned())?
+        let result = if exceeded {
+            Err("Target expression exceeded session execution budget".into())
+        } else {
+            result.unwrap_or_else(|_| {
+                Err("Target expression exceeded session execution budget".to_owned())
+            })
+        };
+        self.finish_history_command(result)
     }
 
     pub async fn eval_target_engine(
@@ -1056,10 +1139,12 @@ impl PageSession {
             let exceeded = watchdog.exceeded.load(Ordering::Relaxed);
             drop(watchdog);
             self.rt.v8_isolate().cancel_terminate_execution();
-            result?;
-            if exceeded {
-                return Err("Target script exceeded session budget".into());
-            }
+            let result = if exceeded {
+                Err("Target script exceeded session budget".into())
+            } else {
+                result
+            };
+            self.finish_history_command(result)?;
             self.eval_target_engine(target, "", false).await
         })
         .await
@@ -1144,10 +1229,11 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded || result.is_err() {
-            return Err(format!("setContent timeout after {budget}ms"));
-        }
-        result.unwrap()?;
+        let result = match (result, exceeded) {
+            (Ok(result), false) => result,
+            _ => Err(format!("setContent timeout after {budget}ms")),
+        };
+        self.finish_history_command(result)?;
         self.serialize_target_for_driver(target)
     }
 
@@ -1308,12 +1394,51 @@ pub(super) fn target_call(
         .unwrap_or_else(|| format!("Target capability {name} failed")))
 }
 
+pub(super) fn queue_history_navigation(
+    scope: &mut v8::PinScope,
+    context: v8::Local<v8::Context>,
+    target: AuxiliaryContextId,
+    url: String,
+    mode: auxiliary_navigation::HistoryMode,
+) -> Result<(), String> {
+    let identity =
+        auxiliary_context_identity(context).ok_or("Native history source identity unavailable")?;
+    if identity.id != target || identity.closed || self::context(scope, target)? != context {
+        return Err("Native history navigation has no active document owner".into());
+    }
+    let snapshot = auxiliary_navigation::SourceSnapshot::capture(scope, context, target)?;
+    let shared = JsRuntime::op_state_from(scope);
+    let mut state = shared.borrow_mut();
+    let network = state.borrow::<NetworkLog>().clone();
+    let pages = state.borrow_mut::<Pages>();
+    if pages.pending.len() >= pages.policy.max_pending_navigations
+        || url.len() > pages.policy.max_navigation_url_bytes
+    {
+        return Err("Native history navigation admission budget exceeded".into());
+    }
+    pages
+        .pending
+        .retain(|navigation| navigation.target != target);
+    pages.pending.push_back(Navigation {
+        target,
+        url,
+        noreferrer: false,
+        replace: false,
+        history_mode: Some(mode),
+        snapshot,
+        activity: Some(network.begin_page_navigation(&target.0.to_string())),
+    });
+    auxiliary_navigation::cancel(&mut state, target.0);
+    Ok(())
+}
+
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
 
     fn created(target: &str) -> AuxiliaryPageEvent {
         AuxiliaryPageEvent::Created {
+            initial_document_complete: false,
             target: target.into(),
             source: Some("1".into()),
             source_page: Some("1".into()),

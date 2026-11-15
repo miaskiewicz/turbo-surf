@@ -16,6 +16,7 @@ export class LiveActorHub {
     if (this.root != null) this.callbacks.root = undefined;
     this.retiredPages = new Map();
     this.published = new Set(this.root == null ? [] : [this.root]);
+    this.initialDocuments = new Set();
     this.retired = new Set();
     this.info = new Map();
     this.requests = new Map();
@@ -154,24 +155,49 @@ export class LiveActorHub {
     if (state.closed) this._retireAll();
   }
 
+  _initialDocumentState(page, event) {
+    if (!page || event.initialDocumentComplete !== true || this.initialDocuments.has(event.target))
+      return;
+    this.initialDocuments.add(event.target);
+    this.callbacks.initialDocumentComplete?.(page);
+  }
+
   async _event(event) {
     if (event.kind === "overflow") throw new Error(event.message);
     if (event.kind === "created") {
-      if (this.published.has(event.target)) return;
+      if (this.published.has(event.target)) {
+        this._initialDocumentState(this.page(event.target), event);
+        return;
+      }
       const info = this.info.get(event.target);
       if (!info) throw new Error("Native auxiliary creation has no owned identity");
       const alias = info.closed ? null : this.native.liveAuxiliaryAdopt(this.actor, event.target);
       const page = await this.callbacks.create({ ...info, ...event, closed: info.closed }, alias);
       this.pages.set(event.target, page);
       this.published.add(event.target);
+      this._initialDocumentState(page, event);
       this.callbacks.created(page, event);
       return;
     }
     const page = this.page(event.target);
-    if (!page) return;
+    if (!page) {
+      this._missingEventPage(event);
+      return;
+    }
     if (event.kind === "closed") await this.closeTarget(event.target);
     if (event.kind === "navigated") await this.callbacks.navigated(page, event);
+    if (event.kind === "historyChanged") {
+      if (typeof this.callbacks.historyChanged !== "function")
+        throw new Error("Native history callback is unavailable");
+      await this.callbacks.historyChanged(page, event);
+    }
     if (["domContentLoaded", "load"].includes(event.kind)) this.callbacks.lifecycle(page, event);
+  }
+
+  _missingEventPage(event) {
+    if (event.kind !== "historyChanged") return;
+    const retired = this.retired.has(event.target) || this.info.get(event.target)?.closed === true;
+    if (!retired) throw new Error("Native history event has no owned Page identity");
   }
 
   canReadTarget(target) {

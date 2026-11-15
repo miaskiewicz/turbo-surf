@@ -21,6 +21,8 @@ pub(crate) struct DocumentResponse {
     pub page_engine_init_script: String,
     #[serde(rename = "auxiliaryPolicy")]
     pub auxiliary_policy: Option<AuxiliaryResourcePolicy>,
+    #[serde(rename = "rootHistory")]
+    pub root_history: Option<turbo_surf_render::AuxiliaryDriverHistory>,
 }
 pub(crate) fn parse(value: Option<String>) -> Result<DocumentResponse> {
     value.map_or_else(

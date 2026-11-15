@@ -365,6 +365,7 @@ struct LiveActor {
     tx: MpscSender<LiveMessage>,
     network: turbo_surf_render::NetworkEventLog,
     auxiliary: AuxiliaryPageEventLog,
+    history_log: turbo_surf_render::NativeHistoryLog,
     emulation: turbo_surf_render::ContextEmulationHandle,
     opening: AtomicBool,
     started: AtomicBool,
@@ -488,6 +489,7 @@ fn prepare_live_actor(
         tx,
         network,
         auxiliary: AuxiliaryPageEventLog::default(),
+        history_log: turbo_surf_render::NativeHistoryLog::default(),
         emulation,
         opening: AtomicBool::new(true),
         started: AtomicBool::new(false),
@@ -1136,6 +1138,7 @@ impl Task for LiveOpenTask {
         let viewport = response.viewport;
         let max_resource_bytes = self.max_resource_bytes;
         let auxiliary = actor.auxiliary.clone();
+        let history_log = actor.history_log.clone();
         let worker_actor = actor.clone();
         let auxiliary_policy = self.response.auxiliary_policy.unwrap_or_default();
         let root_bootstrap = AuxiliaryBootstrap {
@@ -1188,6 +1191,8 @@ impl Task for LiveOpenTask {
                     AuxiliaryHostServices {
                         bootstrap: auxiliary_bootstrap,
                         root_bootstrap,
+                        root_history: response.root_history,
+                        history_log,
                         events: auxiliary,
                         policy: auxiliary_policy,
                     },
@@ -1925,6 +1930,43 @@ pub fn live_target_network_state(id: u32) -> Result<String> {
         state["pendingNavigation"] = true.into();
     }
     Ok(state.to_string())
+}
+
+/// Read one authenticated target's native history metadata without entering V8.
+#[napi]
+pub fn live_target_history_state(id: u32) -> Result<String> {
+    let (actor, target) = {
+        let live = live_registry()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        let connection = live
+            .get(&id)
+            .ok_or_else(|| Error::from_reason("no such live session"))?;
+        let target = connection
+            .target
+            .with_auxiliary(Ok)
+            .map_err(Error::from_reason)?;
+        (connection.actor.clone(), target)
+    };
+    let key = target.to_string();
+    let info = actor
+        .auxiliary
+        .info(&key)
+        .ok_or_else(|| Error::from_reason("Native target ownership is unavailable"))?;
+    let cancelling = actor
+        .cancellations
+        .lock()
+        .map_err(|_| Error::from_reason("target cancellation registry poisoned"))?
+        .get(&LiveTarget::Auxiliary(target))
+        .is_some_and(|cancel| *cancel.borrow());
+    if info.closed || cancelling || actor.auxiliary.is_closed() {
+        return Err(Error::from_reason("Native history target is closed"));
+    }
+    actor
+        .history_log
+        .snapshot(&key)
+        .map(|value| value.to_string())
+        .map_err(Error::from_reason)
 }
 
 /// Inspect and drain the one actor-owned lifecycle queue, including pre-open events.

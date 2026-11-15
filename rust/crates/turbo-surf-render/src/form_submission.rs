@@ -811,6 +811,8 @@ impl PageSession {
                     AuxiliaryHostServices {
                         bootstrap: pages.bootstrap.clone(),
                         root_bootstrap: pages.root_bootstrap.clone(),
+                        root_history: None,
+                        history_log: pages.history_log.clone(),
                         events: pages.events.clone(),
                         policy: pages.policy,
                     },

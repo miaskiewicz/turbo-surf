@@ -74,22 +74,34 @@ test("nested replacements and repeated URL entries retain identity (#319)", asyn
 
 test("real Location navigation and same-URL reload still fetch and execute (#319)", async () => {
   await fixture(async (page, requests) => {
-    await page.evaluate(() => {
-      history.pushState({ x: 1 }, "", "/target");
-      location.assign("/real");
-    });
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.evaluate(() => {
+        history.pushState({ x: 1 }, "", "/target");
+        location.assign("/real");
+      }),
+    ]);
     assert.equal(new URL(page.url()).pathname, "/real");
     assert.equal(await page.evaluate(() => document.body.dataset.spa), undefined);
-    await page.evaluate(() => {
-      window.beforeReload = true;
-      location.reload();
-    });
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.evaluate(() => {
+        window.beforeReload = true;
+        location.reload();
+      }),
+    ]);
     assert.equal(await page.evaluate(() => window.beforeReload), undefined);
     assert.deepEqual(requests, ["/", "/real", "/real"]);
-    await page.evaluate(() => location.assign(location.href));
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.evaluate(() => location.assign(location.href)),
+    ]);
     assert.deepEqual(requests, ["/", "/real", "/real", "/real"]);
-    await page.evaluate(() => location.assign("/next"));
-    await page.evaluate(() => location.replace("/replacement"));
+    await Promise.all([page.waitForEvent("load"), page.evaluate(() => location.assign("/next"))]);
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.evaluate(() => location.replace("/replacement")),
+    ]);
     assert.equal((await page.goBack({ waitUntil: "networkidle" })).status(), 200);
     assert.equal(new URL(page.url()).pathname, "/real");
     assert.equal((await page.goForward({ waitUntil: "networkidle" })).status(), 200);
@@ -113,4 +125,95 @@ test("a current-document mutation does not replace the previous driver history e
     assert.equal((await page.goForward({ waitUntil: "networkidle" }))?.status(), 200);
     assert.equal(new URL(page.url()).pathname, "/next");
   });
+});
+
+test("popup Location replacement exhausts at the actual original entry (#319)", async () => {
+  await fixture(async (root) => {
+    const base = new URL(root.url()).origin;
+    const opened = root.waitForEvent("popup", { timeout: 2000 });
+    opened.catch(() => {});
+    await root.evaluate(() => {
+      window.open("/one", "historycontrol");
+    });
+    const page = await opened;
+    try {
+      await page.waitForLoadState("load", { timeout: 2000 });
+      for (const action of ["assign", "replace"]) {
+        await Promise.all([
+          page.waitForEvent("load", { timeout: 2000 }),
+          page.evaluate(
+            (operation) => location[operation](operation === "assign" ? "/two" : "/three"),
+            action,
+          ),
+        ]);
+      }
+      const first = await page.goBack({ waitUntil: "load", timeout: 2000 });
+      assert.equal(first.status(), 200);
+      assert.equal(page.url(), `${base}/one`);
+      assert.equal(await page.goBack({ waitUntil: "load", timeout: 2000 }), null);
+      assert.equal(page.url(), `${base}/one`);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("native replacement preserves new-document script history ordering and forward state", async () => {
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url);
+    response.setHeader("content-type", "text/html");
+    response.setHeader("cache-control", "no-store");
+    response.end(
+      `<body><script>window.marker={};${request.url === "/new" ? "history.pushState({step:1},'', '/later');history.back();" : ""}</script></body>`,
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const root = newPage();
+  try {
+    await root.goto(`${base}/host`, { waitUntil: "networkidle" });
+    for (const source of ["driver", "guest"]) {
+      const before = requests.length;
+      const opened = root.waitForEvent("popup", { timeout: 2000 });
+      opened.catch(() => {});
+      await root.evaluate((name) => {
+        window.open("/one", name);
+      }, source);
+      const page = await opened;
+      try {
+        await page.waitForLoadState("load", { timeout: 2000 });
+        if (source === "driver") {
+          await page.goto(`${base}/new`, { waitUntil: "networkidle", timeout: 2000 });
+        } else {
+          await Promise.all([
+            page.waitForEvent("load", { timeout: 2000 }),
+            page.evaluate(() => location.assign("/new")),
+          ]);
+          await page.waitForLoadState("networkidle", { timeout: 2000 });
+        }
+        assert.equal(page.url(), `${base}/new`);
+        await page.evaluate(() => {
+          window.savedMarker = marker;
+        });
+        assert.equal(await page.goForward({ waitUntil: "load", timeout: 2000 }), null);
+        assert.equal(page.url(), `${base}/later`);
+        assert.equal(await page.evaluate(() => marker === savedMarker), true);
+        assert.deepEqual(await page.evaluate(() => history.state), { step: 1 });
+        assert.equal(await page.goBack({ waitUntil: "load", timeout: 2000 }), null);
+        assert.equal(page.url(), `${base}/new`);
+        assert.equal(await page.evaluate(() => history.state), null);
+        assert.equal((await page.goBack({ waitUntil: "load", timeout: 2000 })).status(), 200);
+        assert.equal(page.url(), `${base}/one`);
+        assert.equal(await page.goBack({ waitUntil: "load", timeout: 2000 }), null);
+        assert.deepEqual(requests.slice(before), ["/one", "/new", "/one"]);
+      } finally {
+        await page.close();
+      }
+    }
+  } finally {
+    await root.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

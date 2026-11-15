@@ -663,3 +663,81 @@ for (const failure of [new RangeError("binding collection failed"), undefined]) 
     assert.deepEqual(await foreground, { threw: true, error: failure });
   });
 }
+
+test("history notifications route to their owned child in lifecycle order", async () => {
+  const f = fixture();
+  f.callbacks.historyChanged = (page, event) =>
+    f.emitted.push(["history", page.id, event.url, event.document]);
+  await f.hub.applyState({
+    actor: 7,
+    capability: { kind: "supported" },
+    root: "100",
+    pages: [child()],
+    closed: false,
+    events: [
+      { kind: "created", target: "200", sourcePage: "100" },
+      { kind: "historyChanged", target: "200", url: "/first", document: "71" },
+      { kind: "navigated", target: "200", url: "/new", isolated: false },
+      { kind: "historyChanged", target: "200", url: "/later", document: "72" },
+    ],
+  });
+  assert.deepEqual(f.emitted, [
+    ["created", "200", "100"],
+    ["history", "200", "/first", "71"],
+    ["navigated", "200", "/new", false],
+    ["history", "200", "/later", "72"],
+  ]);
+});
+
+test("unknown history targets never fall back to the actor root", async () => {
+  const f = fixture();
+  f.callbacks.historyChanged = () => {
+    throw new Error("must not dispatch");
+  };
+  await assert.rejects(
+    f.hub.applyState({
+      actor: 7,
+      capability: { kind: "supported" },
+      root: "100",
+      pages: [],
+      closed: false,
+      events: [{ kind: "historyChanged", target: "unknown" }],
+    }),
+    /no owned Page identity/,
+  );
+  assert.deepEqual(f.emitted, []);
+  f.hub.retired.add("retired");
+  await f.hub.applyState({
+    actor: 7,
+    capability: { kind: "supported" },
+    root: "100",
+    pages: [],
+    closed: false,
+    events: [{ kind: "historyChanged", target: "retired" }],
+  });
+  assert.deepEqual(f.emitted, []);
+});
+
+test("native initial document completion is adopted once before publishing the owned popup", async () => {
+  const f = fixture();
+  f.callbacks.initialDocumentComplete = (page) => f.emitted.push(["initial-complete", page.id]);
+  f.snapshots.push({
+    actor: 7,
+    capability: { kind: "supported" },
+    root: "100",
+    pages: [child()],
+    events: [
+      { kind: "created", target: "100", url: "about:blank", initialDocumentComplete: true },
+      { kind: "created", ...child(), initialDocumentComplete: true },
+      { kind: "created", ...child(), initialDocumentComplete: true },
+    ],
+    closed: false,
+  });
+  await f.hub.drain();
+  assert.deepEqual(f.emitted, [
+    ["initial-complete", "100"],
+    ["initial-complete", "200"],
+    ["created", "200", "100"],
+  ]);
+  assert.deepEqual(f.adopted, [[7, "200"]]);
+});

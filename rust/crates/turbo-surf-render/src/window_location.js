@@ -21,6 +21,9 @@
     HashChange = globalThis.HashChangeEvent;
   const arrayPush = Array.prototype.push,
     arraySplice = Array.prototype.splice,
+    arrayIndexOf = Array.prototype.indexOf,
+    arrayMap = Array.prototype.map,
+    arrayFindIndex = Array.prototype.findIndex,
     indexOf = String.prototype.indexOf,
     slice = String.prototype.slice;
   const nativeLocation = ops.op_native_location_installed(__document);
@@ -97,7 +100,10 @@
     ops.op_event_trust(event, -1);
     ops.op_dispatch_host_event(event, realm);
   };
-  const task = (callback) => apply(hostTimeout, realm, [callback, 0]);
+  const task = (callback) =>
+    nativeHistory
+      ? nativeCall(ops.op_history_queue_task, [__document, callback])
+      : apply(hostTimeout, realm, [callback, 0]);
 
   // ---- Location -------------------------------------------------------------------------
   const seeded = (globalThis.location && globalThis.location.href) || "about:blank";
@@ -139,10 +145,19 @@
   // ---- Session history --------------------------------------------------------------------
   // Entries of this document only: the engine loads every other document as a new page.
   // Navigation API identity: replacing an entry keeps its key and mints a new id.
-  const uid = () =>
-    "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx".replace(/x/g, () =>
-      ((Math.random() * 16) | 0).toString(16),
-    );
+  const random = Math.random;
+  const uid = () => {
+    let value = "";
+    const hex = "0123456789abcdef";
+    for (let at = 0; at < 36; at++) {
+      if (at === 8 || at === 13 || at === 18 || at === 23) value += "-";
+      else {
+        const digit = (apply(random, undefined, []) * 16) | 0;
+        value += hex[at === 14 ? 4 : at === 19 ? (digit & 3) | 8 : digit];
+      }
+    }
+    return value;
+  };
   let entrySerial = 0;
   const stamp = (entry, key, navState) => {
     entry.hostId = ++entrySerial;
@@ -152,11 +167,109 @@
     return entry;
   };
   let navigationHooks = null;
-  const entries = [stamp({ __proto__: null, url: seeded, serialized: null, scroll: "auto" })];
+  const privateArray = () => apply(setPrototypeOf, null, [[], null]);
+  let entries = privateArray();
+  apply(arrayPush, entries, [
+    stamp({ __proto__: null, url: seeded, serialized: null, scroll: "auto" }),
+  ]);
   let index = 0,
     stateObject = null;
-  const documentId = ops.op_history_document_id(__document);
-  const initialEntry = { __proto__: null, id: entries[0].hostId, url: seeded };
+  let documentId = ops.op_history_document_id(__document);
+  let initialEntry = { __proto__: null, id: entries[0].hostId, url: seeded };
+  let nativeHistory = false;
+  let historyGroup = null;
+  const parseJSON = JSON.parse;
+  const LocalError = Error,
+    LocalRangeError = RangeError;
+  const nativeCall = (operation, args) => {
+    const result = apply(operation, ops, args);
+    if (result?.ok === true) return result.value;
+    const name = result?.name || "InvalidStateError";
+    const message = result?.message || "Native history operation did not complete";
+    if (name === "TypeError") throw new ErrorType(message);
+    if (name === "RangeError") throw new LocalRangeError(message);
+    if (name === "Error") throw new LocalError(message);
+    throw new Exception(message, name);
+  };
+  const activateHistory = () => {
+    if (nativeHistory) return true;
+    const encoded = ops.op_history_initialize(__document, {
+      __proto__: null,
+      key: entries[index].key,
+      id: entries[index].id,
+    });
+    if (!encoded) return false;
+    const metadata = apply(parseJSON, undefined, [encoded]);
+    const restored = privateArray();
+    for (let at = 0; at < metadata.entries.length; at++) {
+      const entry = metadata.entries[at];
+      apply(arrayPush, restored, [
+        {
+          __proto__: null,
+          hostId: entry.id,
+          key: entry.key,
+          id: entry.navigationId,
+          url: entry.url,
+          scroll: entry.scroll,
+          serialized: null,
+          navState: undefined,
+        },
+      ]);
+    }
+    entries = restored;
+    index = metadata.index;
+    entrySerial = metadata.serial;
+    historyGroup = metadata.group;
+    documentId = metadata.document;
+    initialEntry = { __proto__: null, id: entries[index].hostId, url: entries[index].url };
+    nativeHistory = true;
+    return true;
+  };
+  const prepareEntry = (kind, entry) => {
+    if (!nativeHistory) return false;
+    const receipt = nativeCall(ops.op_history_precommit, [
+      __document,
+      kind,
+      {
+        __proto__: null,
+        url: entry.url,
+        key: entry.key,
+        id: entry.id,
+        scroll: entry.scroll,
+        payload: { __proto__: null, state: entry.serialized, navState: entry.navState },
+      },
+    ]);
+    if (!receipt?.local || typeof receipt.transaction !== "string")
+      throw new Exception("Native history document lost its owner", "InvalidStateError");
+    entry.hostId = receipt.local;
+    entry.transaction = receipt.transaction;
+    entrySerial = receipt.local;
+    return true;
+  };
+  const acknowledgeMutation = (token) => {
+    if (typeof token !== "string" || nativeCall(ops.op_history_ack, [__document, token]) !== true)
+      throw new Exception("Native history mutation acknowledgement failed", "InvalidStateError");
+  };
+  const acknowledgeEntry = (entry) => {
+    if (!nativeHistory) return;
+    acknowledgeMutation(entry.transaction);
+    delete entry.transaction;
+  };
+  __G.historyActivate = activateHistory;
+  __G.restoreHistoryState = (states) => {
+    if (!nativeHistory || states.length !== entries.length)
+      throw new ErrorType("Native history restore identity mismatch");
+    for (let at = 0; at < states.length; at++) {
+      const value = states[at];
+      if (value.local !== entries[at].hostId)
+        throw new ErrorType("Native history restore entry mismatch");
+      entries[at].serialized = value.payload === null ? null : value.payload.state;
+      entries[at].navState = value.payload === null ? undefined : value.payload.navState;
+    }
+    stateObject = deserialize(entries[index].serialized);
+    return true;
+  };
+  activateHistory();
   const changeList = () => apply(setPrototypeOf, null, [[], null]);
   let changes = changeList(),
     crossDocument = null;
@@ -169,6 +282,7 @@
     const result = {
       __proto__: null,
       document: documentId,
+      group: historyGroup,
       initial: initialEntry,
       changes,
       crossDocument,
@@ -182,12 +296,17 @@
   __G.traverseHistoryEntry = (id) => {
     for (let at = 0; at < entries.length; at++) {
       if (entries[at].hostId === id) {
-        traverseTo(at);
-        return true;
+        return traverseTo(at);
       }
     }
     return false;
   };
+  ops.op_set_host_capabilities({
+    __proto__: null,
+    historyActivate: __G.historyActivate,
+    restoreHistoryState: __G.restoreHistoryState,
+    historyTraverse: __G.traverseHistoryEntry,
+  });
   const activeEntry = () => entries[index];
   const appendEntry = (entry) => {
     apply(arraySplice, entries, [index + 1, entries.length - index - 1]);
@@ -217,10 +336,12 @@
       replace ? from.key : null,
       pending.navState,
     );
+    const nativeCommit = prepareEntry(kind, entry);
     if (replace) entries[index] = entry;
     else appendEntry(entry);
-    moveTo(href);
+    if (!nativeCommit) moveTo(href);
     stateObject = null;
+    acknowledgeEntry(entry);
     navigationHooks.committed(kind, from, pending);
     trusted(new PopState("popstate", { state: null }));
     navigationHooks.settle(pending, true);
@@ -498,6 +619,10 @@
   const history = Object.create(H);
   const checkHistory = (receiver) => {
     if (receiver !== history) throw new ErrorType("Illegal invocation");
+    if (!ops.op_windows_same_origin(realm))
+      throw new Exception("Cross-origin History access", "SecurityError");
+    if (nativeHistory && !nativeCall(ops.op_history_status, [__document]))
+      throw new Exception("Native history document is no longer active", "InvalidStateError");
   };
   // "Can have its URL rewritten": same scheme/credentials/host/port; beyond http(s), only the
   // query and fragment of a file: URL, and only the fragment otherwise, may change.
@@ -513,25 +638,16 @@
     if (document.protocol === "file:") return document.pathname === target.pathname;
     return withoutFragment(document.href) === withoutFragment(target.href);
   };
+  const initialEmptyHistory = () =>
+    nativeHistory && nativeCall(ops.op_history_status, [__document]).length === 0;
   function updateState(operation, data, unused, address) {
     unused = string(unused);
     const hasURL = address !== undefined && address !== null;
     if (hasURL) address = string(address);
-    let serialized;
-    try {
-      serialized = ops.op_surf_structured_clone(
-        data,
-        globalThis,
-        undefined,
-        `Failed to execute '${operation}' on 'History': `,
-      );
-    } catch (error) {
-      if (error && error.name === "DataCloneError") throw error;
-      throw new Exception(
-        `Failed to execute '${operation}' on 'History': ${(error && error.message) || "An object could not be cloned."}`,
-        "DataCloneError",
-      );
-    }
+    const initialEmpty = initialEmptyHistory();
+    const kind = operation === "pushState" && !initialEmpty ? "push" : "replace";
+    const serialized = nativeCall(ops.op_history_clone, [__document, data, kind]);
+    const nextState = deserialize(serialized);
     let target = url();
     if (hasURL) {
       const documentURL = parse(target);
@@ -543,7 +659,6 @@
         );
       target = parsed.href;
     }
-    const kind = operation === "pushState" ? "push" : "replace";
     const pending = navigationHooks.begin(kind, target, {
       __proto__: null,
       uncancelable: true,
@@ -554,43 +669,66 @@
       { __proto__: null, url: target, serialized, scroll: from.scroll },
       kind === "replace" ? from.key : null,
     );
+    const nativeCommit = prepareEntry(kind, entry);
     if (kind === "push") appendEntry(entry);
     else entries[index] = entry;
-    if (target !== url()) {
-      moveTo(target);
-    }
-    stateObject = deserialize(serialized);
+    if (!nativeCommit && target !== url()) moveTo(target);
+    stateObject = nextState;
+    acknowledgeEntry(entry);
     navigationHooks.committed(kind, from, pending);
     navigationHooks.settle(pending, true);
   }
   // A same-document traversal: navigate, currententrychange and navigatesuccess, then
   // popstate and a queued hashchange, as Chrome 156 orders them.
   function traverseTo(target, nav) {
-    task(() => {
-      if (target < 0 || target >= entries.length || target === index) return;
-      const entry = entries[target];
+    const wanted = entries[target]?.hostId;
+    return task(() => {
+      const destination = apply(arrayFindIndex, entries, [(entry) => entry.hostId === wanted]);
+      if (destination < 0 || destination === index) return 0;
+      const entry = entries[destination];
       const pending = navigationHooks.begin("traverse", entry.url, {
         __proto__: null,
         ...nav,
-        index: target,
+        index: destination,
         entry,
       });
-      if (!pending) return;
+      if (!pending) return 0;
+      const nextState = deserialize(entry.serialized);
       const oldURL = url();
       const from = activeEntry();
-      index = target;
-      if (entry.url !== oldURL) moveTo(entry.url);
-      stateObject = deserialize(entry.serialized);
+      let selectedMutation = null;
+      if (nativeHistory) {
+        selectedMutation = nativeCall(ops.op_history_select, [__document, entry.hostId]);
+        if (selectedMutation.local !== entry.hostId)
+          throw new Exception(
+            "Native history traversal did not select its entry",
+            "InvalidStateError",
+          );
+      }
+      index = destination;
+      if (!nativeHistory && entry.url !== oldURL) moveTo(entry.url);
+      stateObject = nextState;
+      if (selectedMutation) acknowledgeMutation(selectedMutation.transaction);
       navigationHooks.committed("traverse", from, pending);
       navigationHooks.settle(pending, false);
-      trusted(new PopState("popstate", { state: stateObject }));
+      trusted(new PopState("popstate", { state: nextState }));
       hashChange(oldURL, entry.url);
+      return entry.hostId;
     });
   }
-  const traverse = (delta) => traverseTo(index + delta);
+  const nativeStatus = () => nativeCall(ops.op_history_status, [__document]);
+  const traverse = (delta) => {
+    if (!nativeHistory) return traverseTo(index + delta);
+    const local = nativeCall(ops.op_history_traverse, [__document, delta]);
+    if (!local) return;
+    const at = apply(arrayFindIndex, entries, [(entry) => entry.hostId === local]);
+    if (at < 0)
+      throw new Exception("Native history traversal entry is unavailable", "InvalidStateError");
+    return traverseTo(at);
+  };
   accessor(H, "length", function () {
     checkHistory(this);
-    return entries.length;
+    return nativeHistory ? nativeStatus().length : entries.length;
   });
   accessor(
     H,
@@ -602,7 +740,19 @@
     function (value) {
       checkHistory(this);
       value = string(value);
-      if (value === "auto" || value === "manual") activeEntry().scroll = value;
+      if (value !== "auto" && value !== "manual") return;
+      const entry = activeEntry();
+      let receipt = null;
+      if (nativeHistory) {
+        receipt = nativeCall(ops.op_history_scroll_restoration, [__document, entry.hostId, value]);
+        if (receipt.local !== entry.hostId)
+          throw new Exception(
+            "Native history scroll restoration did not update its entry",
+            "InvalidStateError",
+          );
+      }
+      entry.scroll = value;
+      if (receipt) acknowledgeMutation(receipt.transaction);
     },
   );
   accessor(H, "state", function () {
@@ -621,7 +771,7 @@
     checkHistory(this);
     delta = +delta | 0;
     // go(0) reloads the document, which the engine admits as a navigation to its URL.
-    if (delta === 0) admitDocument(url(), true);
+    if (delta === 0 && !nativeHistory) admitDocument(url(), true);
     else traverse(delta);
   });
   for (const name of ["pushState", "replaceState"])
@@ -752,7 +902,7 @@
     ["url", (state) => state.entry.url],
     ["key", (state) => state.entry.key],
     ["id", (state) => state.entry.id],
-    ["index", (state) => entries.indexOf(state.entry)],
+    ["index", (state) => apply(arrayIndexOf, entries, [state.entry])],
     ["sameDocument", () => true],
   ]);
   method(HistoryEntry.prototype, "getState", 0, function () {
@@ -853,6 +1003,7 @@
       return pending;
     },
     committed(kind, from, pending) {
+      if (nativeHistory) nativeCall(ops.op_history_notify, [__document, activeEntry().hostId]);
       ops.op_driver_sync_changed();
       apply(arrayPush, changes, [
         { __proto__: null, kind, id: activeEntry().hostId, url: activeEntry().url },
@@ -905,13 +1056,18 @@
         kind === "replace" ? from.key : null,
         pending.navState,
       );
+      const nativeCommit = prepareEntry(kind, entry);
       if (kind === "push") appendEntry(entry);
       else entries[index] = entry;
       stateObject = null;
-      if (href !== url()) {
-        moveTo(href);
-      }
-    } else if (pending.navState !== undefined) from.navState = pending.navState;
+      if (!nativeCommit && href !== url()) moveTo(href);
+      acknowledgeEntry(entry);
+    } else if (pending.navState !== undefined) {
+      const updated = { __proto__: null, ...from, navState: pending.navState };
+      prepareEntry("update", updated);
+      from.navState = pending.navState;
+      acknowledgeEntry(updated);
+    }
     navigationHooks.committed(kind, from, pending);
     navigationHooks.settle(pending, true);
   };
@@ -924,7 +1080,7 @@
   };
   accessor(Navigation.prototype, "currentEntry", function () {
     checkNavigation(this);
-    return entryObject(activeEntry());
+    return nativeHistory && nativeStatus().length === 0 ? null : entryObject(activeEntry());
   });
   accessor(Navigation.prototype, "transition", function () {
     checkNavigation(this);
@@ -932,22 +1088,28 @@
   });
   accessor(Navigation.prototype, "canGoBack", function () {
     checkNavigation(this);
-    return index > 0;
+    return nativeHistory ? nativeStatus().index > 0 : index > 0;
   });
   accessor(Navigation.prototype, "canGoForward", function () {
     checkNavigation(this);
-    return index < entries.length - 1;
+    if (!nativeHistory) return index < entries.length - 1;
+    const status = nativeStatus();
+    return status.index < status.length - 1;
   });
   method(Navigation.prototype, "entries", 0, function () {
     checkNavigation(this);
-    return entries.map(entryObject);
+    if (nativeHistory && nativeStatus().length === 0) return [];
+    return apply(arrayMap, entries, [entryObject]);
   });
   method(Navigation.prototype, "updateCurrentEntry", 1, function (options) {
     checkNavigation(this);
     arity("updateCurrentEntry", arguments.length);
     const state = serializeState((options || {}).state, "updateCurrentEntry", "Navigation");
     const entry = activeEntry();
+    const updated = { __proto__: null, ...entry, navState: state };
+    prepareEntry("update", updated);
     entry.navState = state;
+    acknowledgeEntry(updated);
     fire(
       navigation,
       new ChangeEvent("currententrychange", { navigationType: null, from: entryObject(entry) }),
@@ -1001,8 +1163,16 @@
     else admitDocument(url(), true);
     return exposed(result);
   });
-  const traverseResult = (target, options, message) => {
+  const traverseResult = (target, options, message, crossGroup = false) => {
     const result = results();
+    if (crossGroup)
+      return failed(
+        result,
+        new Exception(
+          "Cross-document Navigation API traversal is unsupported; use History or driver traversal",
+          "NotSupportedError",
+        ),
+      );
     if (target < 0 || target >= entries.length)
       return failed(result, new Exception(message, "InvalidStateError"));
     if (target === index) {
@@ -1016,18 +1186,30 @@
     arity("traverseTo", arguments.length);
     key = string(key);
     return traverseResult(
-      entries.findIndex((entry) => entry.key === key),
+      apply(arrayFindIndex, entries, [(entry) => entry.key === key]),
       options,
       "Invalid key",
     );
   });
   method(Navigation.prototype, "back", 0, function (options = {}) {
     checkNavigation(this);
-    return traverseResult(index - 1, options, "Cannot go back");
+    return traverseResult(
+      index - 1,
+      options,
+      "Cannot go back",
+      nativeHistory && index === 0 && nativeStatus().index > 0,
+    );
   });
   method(Navigation.prototype, "forward", 0, function (options = {}) {
     checkNavigation(this);
-    return traverseResult(index + 1, options, "Cannot go forward");
+    return traverseResult(
+      index + 1,
+      options,
+      "Cannot go forward",
+      nativeHistory &&
+        index === entries.length - 1 &&
+        nativeStatus().index < nativeStatus().length - 1,
+    );
   });
   for (const name of ["onnavigate", "onnavigatesuccess", "onnavigateerror", "oncurrententrychange"])
     __defineEventHandler(Navigation.prototype, name, checkNavigation);

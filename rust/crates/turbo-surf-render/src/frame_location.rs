@@ -79,6 +79,7 @@ fn queue_auxiliary_navigation<'s>(
     target: v8::Local<'s, v8::Context>,
     url: &ModuleSpecifier,
     replace: bool,
+    reload: bool,
 ) -> bool {
     if target.get_slot::<FrameHost>().is_some() {
         return false;
@@ -97,13 +98,14 @@ fn queue_auxiliary_navigation<'s>(
     ) else {
         return false;
     };
-    if auxiliary_pages::queue_navigation(
+    if auxiliary_pages::queue_navigation_mode(
         scope,
         identity.id,
         source_id.id,
         source,
         url.to_string(),
         replace,
+        reload.then_some(auxiliary_navigation::HistoryMode::Reload),
     ) {
         script_navigation::record(source, target, url.to_string());
     }
@@ -201,7 +203,7 @@ fn navigate_kind<'s>(
         );
         return;
     }
-    if queue_auxiliary_navigation(scope, source, target, &url, replace || reload) {
+    if queue_auxiliary_navigation(scope, source, target, &url, replace || reload, reload) {
         return;
     }
     driver_sync::changed(&mut JsRuntime::op_state_from(scope).borrow_mut());

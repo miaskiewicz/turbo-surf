@@ -16,7 +16,7 @@ test("native same-URL document replacement retires screenshot assets and scene",
     _screenshotScene: { scene: { close: () => closed++ } },
     _emit() {},
   });
-  page._didNativeNavigate({ url: page._url });
+  page._retireNativeDocumentAssets();
   assert.deepEqual(
     {
       assetsRetired: page._imageCache === undefined,

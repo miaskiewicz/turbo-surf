@@ -2,7 +2,7 @@
 
 Target: `release/v0.8.4`. Updated 2026-11-15.
 
-Original batch: **34 test cases (11 Rust, 23 shim)**. **29 have component proof and their fixes are merged; 5 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
+Original batch: **34 test cases (11 Rust, 23 shim)**. **30 have component proof and their fixes are merged; 4 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
 
@@ -29,7 +29,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `background binding collection errors remain observable` | `f1fb5c63`; targeted proof complete, combined rerun pending |
 | [x] | shim | `native tabs and navigation match the source-pinned Chrome profile control` | `ff0a767`; targeted proof complete, combined rerun pending |
 | [x] | shim | `HTTP attachments emit binary downloads without replacing the live document` | `e51c6f21`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `headers remain observable during initial-close hydration` | Opening-close owner: Fresh coalesced candidate initially passed original and 8/8 controls, but restored run now exposes Fetch native resource-owner release failure (opening-target-close line 72, true vs false). Original headers still pass; last-page actor drops its Tokio runtime before real completion acknowledgment. Source fix keeps Tokio alive without guest/V8 pumping; review also requires waiting all actual observed terminal callbacks when concurrent root/popup closes leave no surviving targets. Require full restored controls + strict before merge |
+| [x] | shim | `headers remain observable during initial-close hydration` | Merged `f4f5ca7e`: real completion acknowledgment before actor teardown, including concurrent final root/popup closure. Original/restored 11 + Rust 15 + module 5/inventory 1/Node 5 + strict pass. Deterministic host-terminal production inverses give two assertion failures and one passing control, exact restore passes; native final-teardown OFF noncompletion/cancellation is corroborating evidence, not claimed as a clean 5s assertion. Fresh combined 7f gates remain pending |
 | [x] | shim | `unrouting every handler survives a fresh realm and later route reactivation` | `ff0a767`; targeted proof complete, combined rerun pending |
 | [x] | shim | `a missed web-first assertion hydrates default navigation while commit stays static` | `98c8a8b8`; targeted proof complete, combined rerun pending |
 | [x] | shim | `request metadata and client hints survive hydration and stay context scoped` | `8f511cfa`; targeted proof complete, combined rerun pending |
@@ -54,6 +54,9 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 ## Additional confirmed failures and investigations
 
+- [ ] **Native JSON collectors preserve authored getter errors** — existing `json_collectors_await_values_without_page_serializers_or_result_slots` now fails at host_input.rs:239 with generic target serialization failure. Input/collector owner assigned; preserve the actual authored getter exception and classify against unchanged source before claiming regression attribution.
+- [ ] **Script navigation captures admission activation** — existing `script_navigation_captures_source_activation_at_admission` fails at host_input.rs:398: None vs expected next URL/activation tuple before input dispatch. Input owner coordinates the actual auxiliary admission record with history/action owners; original source attribution pending.
+
 Baseline classification: the Enter, frame-top form and programmatic-submit cases all reproduce on byte-exact old main `6b583d98` shim plus verified registry addon `bdcebe65` (3 intended failures, no skips/cancellations, 3.442s). These are preexisting gaps, not regressions introduced by the new action candidate. All remain in scope.
 
 - [ ] **Enter-key form completion** — fresh coalesced control confirms no replacement document (1 vs 2). Action owner will use explicit interaction dispatch for keyboard actions without changing ordinary evaluate/read semantics.
@@ -72,14 +75,14 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 
 ## Current tally
 
-Accounting: 34 original test cases plus 14 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
+Accounting: 34 original test cases plus 16 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
 
-- Merged with component proof: **34** (29 original + count, all, platform ownership, NAPI export, script observer).
+- Merged with component proof: **35** (30 original + count, all, platform ownership, NAPI export, script observer).
 - Locally proven, not yet merged: **0** (module and inspector adoption merged).
 - Verified clear without an additional source fix: **1** detector POST control.
 - Awaiting fresh-binary classification/verification: **0**.
-- Still requiring implementation or a passing fix: **13**.
-- Total pending: **13**. Total merged: **34**. Total done at component/verification level: **35** (34 merged + 1 verified clear). Total tracked: **48**.
+- Still requiring implementation or a passing fix: **14**.
+- Total pending: **14**. Total merged: **35**. Total done at component/verification level: **36** (35 merged + 1 verified clear). Total tracked: **50**.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

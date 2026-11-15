@@ -802,8 +802,10 @@ impl PageSession {
             return Ok(());
         }
         self.rt.v8_isolate().perform_microtask_checkpoint();
+        let mut timer_wake = None;
         let completed = std::future::poll_fn(|cx| {
-            let host_task = background_work::ready_tasks(&mut self.rt)?;
+            let host_task = background_work::ready_tasks(&mut self.rt)?
+                || poll_auxiliary_document_tasks(&mut self.rt, None, cx, &mut timer_wake)?;
             let ready = {
                 let shared = self.rt.op_state();
                 let mut shared = shared.borrow_mut();

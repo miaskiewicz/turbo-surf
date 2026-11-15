@@ -4905,8 +4905,66 @@ fn window_timer_contexts(rt: &JsRuntime) -> Vec<v8::Global<v8::Context>> {
     contexts
 }
 
+fn auxiliary_task_contexts(
+    rt: &mut JsRuntime,
+    owner: Option<u64>,
+) -> Result<Vec<v8::Global<v8::Context>>, String> {
+    let contexts = window_timer_contexts(rt);
+    let Some(owner) = owner else {
+        return Ok(contexts);
+    };
+    deno_core::scope!(scope, rt);
+    let root = auxiliary_pages::context(
+        scope,
+        turbo_dom_browser_env::host_internals::AuxiliaryContextId(owner),
+    )?;
+    Ok(contexts
+        .into_iter()
+        .filter(|context| {
+            let context = v8::Local::new(scope, context);
+            context.get_slot::<FrameRetired>().is_none()
+                && auxiliary_pages::in_target_tree(scope, context, root)
+        })
+        .collect())
+}
+
+fn poll_auxiliary_document_tasks(
+    rt: &mut JsRuntime,
+    owner: Option<u64>,
+    cx: &mut std::task::Context<'_>,
+    timer_wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
+) -> Result<bool, String> {
+    let contexts = auxiliary_task_contexts(rt, owner)?;
+    // Auxiliary navigation must service real document tasks while its resource
+    // promise is pending, without advancing clocks or admitting another Page.
+    let real_timers =
+        rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
+    let turn = if real_timers {
+        run_next_window_timer_in(rt, false, contexts.clone())
+    } else {
+        WindowTimerTurn::default()
+    };
+    if turn.fired > 0 {
+        checkpoint_window_timer(rt)?;
+        return Ok(true);
+    }
+    if run_background_resource_task_in(rt, contexts) > 0 {
+        checkpoint_window_timer(rt)?;
+        return Ok(true);
+    }
+    Ok(park_on_window_timer_deadline(cx, timer_wake, turn.deadline).is_some())
+}
+
 fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimerTurn {
     let contexts = window_timer_contexts(rt);
+    run_next_window_timer_in(rt, allow_advance, contexts)
+}
+
+fn run_next_window_timer_in(
+    rt: &mut JsRuntime,
+    allow_advance: bool,
+    contexts: Vec<v8::Global<v8::Context>>,
+) -> WindowTimerTurn {
     deno_core::scope!(scope, rt);
     // Earliest deadline first; equal deadlines in agent-wide queueing order.
     let mut next: Option<((f64, f64), v8::Local<v8::Context>)> = None;
@@ -4988,6 +5046,16 @@ fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
             .iter()
             .cloned(),
     );
+    run_background_resource_task_in(rt, contexts)
+}
+
+fn run_background_resource_task_in(
+    rt: &mut JsRuntime,
+    contexts: Vec<v8::Global<v8::Context>>,
+) -> u32 {
+    if contexts.is_empty() {
+        return 0;
+    }
     let start = rt
         .op_state()
         .borrow()

@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Resolve native Location navigation against the trusted live document base, preserve same-document identity for repeated and empty fragments, and retain sandbox navigation checks.
+
 - Enforce dynamic-compilation CSP and Trusted Types through the default native V8 callback, preserving direct-eval lexical scope, Function-family identity and bounded violation delivery. Enable the three source-pinned native code-generation controls in the default gate.
 
 - Keep supported native Page actors recoverable after driver navigation deadlines while retiring only unfinished owned frame/module work; preserve completed child documents, healthy module caches and surviving peer Pages.
@@ -35,9 +37,9 @@
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`7f1b70e1192a237b7c9fee27989ffeba27b4eb7d`. The dependency graph uses one
-`turbo-dom-v8` 150.4.2 from the exact WindowProxy candidate
-`0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`. Combined release validation is still in
+`af946ea0f8f8e0fe8d50b6470b33dbe2068393f6`. The dependency graph uses one
+`turbo-dom-v8` 150.4.2 from the exact generated crate-root revision
+`03839d09726f6e184d72ef83e7e73a1c2ef8d7f9`. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.
 

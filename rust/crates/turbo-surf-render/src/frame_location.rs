@@ -45,8 +45,9 @@ fn navigate_fragment<'s>(
     url: &ModuleSpecifier,
     replace: bool,
     reload: bool,
+    fragment_setter: bool,
 ) -> bool {
-    if reload || url.fragment().is_none() {
+    if reload || (!fragment_setter && url.fragment().is_none()) {
         return false;
     }
     let Some(current) = window_proxy::location_url(target) else {
@@ -55,7 +56,12 @@ fn navigate_fragment<'s>(
     if current.split('#').next() != url.as_str().split('#').next() {
         return false;
     }
-    let Some(navigate) = host_capability(scope, target, "navigateLocation") else {
+    let capability = if fragment_setter {
+        "navigateLocationFragment"
+    } else {
+        "navigateLocation"
+    };
+    let Some(navigate) = host_capability(scope, target, capability) else {
         return false;
     };
     let Some(href) = v8::String::new(scope, url.as_str()) else {
@@ -149,6 +155,28 @@ fn deny_navigation<'s>(
     );
 }
 
+fn navigation_base<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+) -> Option<String> {
+    if let Some(read) = host_capability(scope, source, "documentBaseURL") {
+        let scope = &mut v8::ContextScope::new(scope, source);
+        let receiver = v8::undefined(scope);
+        return read
+            .call(scope, receiver.into(), &[])
+            .and_then(|value| v8::Local::<v8::String>::try_from(value).ok())
+            .map(|value| value.to_rust_string_lossy(scope));
+    }
+    source
+        .get_slot::<FrameScriptPolicy>()
+        .map(|policy| policy.base.clone())
+        .or_else(|| {
+            source
+                .get_slot::<FrameDocumentUrl>()
+                .map(|url| url.0.clone())
+        })
+}
+
 fn navigate_kind<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
@@ -182,17 +210,16 @@ fn navigate_kind<'s>(
                 .0
                 .clone()
         });
-    let base = source
-        .get_slot::<FrameScriptPolicy>()
-        .map(|policy| policy.base.clone())
-        .unwrap_or_else(|| source_url.clone());
+    let Some(base) = navigation_base(scope, source) else {
+        return;
+    };
     let url =
         ModuleSpecifier::parse(&base).and_then(|base| base.join(&text.to_rust_string_lossy(scope)));
     let Ok(url) = url else {
         named_exception(scope, "Invalid navigation URL", "SyntaxError");
         return;
     };
-    if navigate_fragment(scope, target, &url, replace, reload) {
+    if navigate_fragment(scope, target, &url, replace, reload, false) {
         return;
     }
     if !supported_navigation_scheme(&url) {
@@ -540,6 +567,41 @@ fn component_get(
     result.set(v8::String::new(scope, &value).unwrap().into());
 }
 
+fn navigate_fragment_setter<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+    url: &ModuleSpecifier,
+) {
+    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let source = v8::Local::new(scope, source);
+    let Some(target) = window.get_creation_context(scope) else {
+        return;
+    };
+    if target.get_slot::<FrameRetired>().is_some() {
+        return;
+    }
+    if !navigation_allowed(scope, source, target) {
+        deny_navigation(scope, source, target, url.as_str());
+        return;
+    }
+    if !navigate_fragment(scope, target, url, false, false, true) {
+        named_exception(
+            scope,
+            "Native fragment navigation owner is unavailable",
+            "InvalidStateError",
+        );
+    }
+}
+
+fn set_fragment_component(url: &mut ModuleSpecifier, value: &str) -> bool {
+    if value.is_empty() && url.fragment().is_none() {
+        return false;
+    }
+    let before = url.as_str().to_owned();
+    url.set_fragment(Some(value.strip_prefix('#').unwrap_or(value)));
+    url.as_str() != before
+}
+
 fn component_set<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
@@ -589,10 +651,7 @@ fn component_set<'s>(
             });
             true
         }
-        "hash" => {
-            url.set_fragment(Some(value.strip_prefix('#').unwrap_or(&value)));
-            true
-        }
+        "hash" => set_fragment_component(&mut url, &value),
         _ => false,
     };
     if valid {
@@ -600,7 +659,11 @@ fn component_set<'s>(
         let Some(window) = state.window.to_local(scope) else {
             return;
         };
-        navigate(scope, window, value.into());
+        if property == "hash" {
+            navigate_fragment_setter(scope, window, &url);
+        } else {
+            navigate(scope, window, value.into());
+        }
     }
 }
 
@@ -1016,4 +1079,22 @@ pub(super) fn url(context: v8::Local<v8::Context>) -> Option<String> {
     context
         .get_slot::<State>()
         .map(|state| state.url.borrow().clone())
+}
+
+#[cfg(test)]
+mod fragment_tests {
+    use super::*;
+
+    #[test]
+    fn location_hash_empty_preserves_an_existing_empty_fragment() {
+        let mut url = ModuleSpecifier::parse("about:srcdoc").unwrap();
+        assert!(!set_fragment_component(&mut url, ""));
+        assert_eq!(url.as_str(), "about:srcdoc");
+        assert!(set_fragment_component(&mut url, "x"));
+        assert!(!set_fragment_component(&mut url, "#x"));
+        assert!(set_fragment_component(&mut url, ""));
+        assert_eq!(url.as_str(), "about:srcdoc#");
+        assert!(!set_fragment_component(&mut url, ""));
+        assert!(!set_fragment_component(&mut url, "#"));
+    }
 }

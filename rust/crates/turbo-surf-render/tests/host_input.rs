@@ -845,3 +845,101 @@ async fn host_file_selection_installs_genuine_files_with_trusted_events() {
         assert!(page.input(&steps).await.is_err(), "{steps}");
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn host_input_uses_native_document_receivers_after_guest_query_replacement() {
+    let mut page = PageSession::open(
+        "<body><input name=q><button id=consent>Continue</button><script>globalThis.received=[];document.querySelector('#consent').onclick=()=>received.push('consent');document.querySelector('input').oninput=event=>received.push(event.target.value);document.querySelector=()=>{throw Error('guest query override');};document.querySelectorAll=()=>{throw Error('guest queryAll override');};</script></body>",
+        "https://input.test/",
+        "",
+        "",
+        60_000,
+    ).await.unwrap();
+    page.input(&json!([{"click":"#consent"},{"focus":"input[name=q]"},{"type":"fixture"}]))
+        .await
+        .unwrap();
+    let received: serde_json::Value =
+        serde_json::from_str(&page.eval_json_expression("received").await.unwrap()).unwrap();
+    assert_eq!(
+        received,
+        json!(["consent", "f", "fi", "fix", "fixt", "fixtu", "fixtur", "fixture"])
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn canceling_guest_input_keeps_peer_document_input_independent() {
+    let mut interrupted =
+        PageSession::open("<input id=q>", "https://interrupted.test/", "", "", 60_000)
+            .await
+            .unwrap();
+    let mut peer = PageSession::open("<input id=q>", "https://peer.test/", "", "", 60_000)
+        .await
+        .unwrap();
+    interrupted.set_execution_budget_for_testing(100);
+    let error = interrupted
+        .input(&json!([
+            {"focus":"#q"}, {"wait":1_000_000}, {"type":"late"}
+        ]))
+        .await
+        .unwrap_err();
+    assert!(
+        error.contains("budget") || error.contains("Promise resolution is still pending"),
+        "{error}"
+    );
+    peer.input(&json!([{"focus":"#q"}, {"type":"peer"}]))
+        .await
+        .unwrap();
+    assert_eq!(
+        peer.eval_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "peer"
+    );
+    interrupted.set_execution_budget_for_testing(60_000);
+    interrupted
+        .input(&json!([{"focus":"#q"}, {"type":"owner"}]))
+        .await
+        .unwrap();
+    assert_eq!(
+        interrupted
+            .eval_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "owner"
+    );
+    assert_eq!(
+        peer.eval_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "peer"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_cancellation_ignores_guest_map_and_promise_replacements() {
+    let mut page = PageSession::open("<input id=q>", "https://cleanup.test/", "", "", 60_000)
+        .await
+        .unwrap();
+    page.eval("Map.prototype[Symbol.iterator]=()=>{throw Error('guest wait iteration');};Map.prototype.clear=()=>{throw Error('guest wait clear');};globalThis.Promise=class{constructor(){throw Error('guest wait promise');}};").await.unwrap();
+    page.set_execution_budget_for_testing(100);
+    let error = page
+        .input(&json!([
+            {"focus":"#q"}, {"wait":1_000_000}, {"type":"late"}
+        ]))
+        .await
+        .unwrap_err();
+    assert!(
+        error.contains("budget") || error.contains("Promise resolution is still pending"),
+        "{error}"
+    );
+    page.set_execution_budget_for_testing(60_000);
+    page.input(&json!([{"focus":"#q"}, {"type":"kept"}]))
+        .await
+        .unwrap();
+    assert_eq!(
+        page.eval_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "kept"
+    );
+}

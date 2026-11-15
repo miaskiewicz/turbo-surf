@@ -19112,12 +19112,15 @@ impl PageSession {
         if self.closed {
             return Err("Page session is closed".into());
         }
+        // Cancellation belongs to this operation's document, even if navigation replaces it.
+        let selected = private_infrastructure::context(&mut self.rt)?;
         let _watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
                 let promise = {
                     deno_core::scope!(scope, self.rt);
-                    let context = scope.get_current_context();
+                    let context = v8::Local::new(scope, &selected);
+                    let scope = &mut v8::ContextScope::new(scope, context);
                     let driver = context
                         .get_slot::<HostInputDriver>()
                         .ok_or("Host input driver unavailable")?;
@@ -19153,11 +19156,14 @@ impl PageSession {
         self.rt.v8_isolate().cancel_terminate_execution();
         if exceeded || !matches!(&result, Ok(Ok(()))) {
             deno_core::scope!(scope, self.rt);
-            let context = scope.get_current_context();
-            if let Some(driver) = context.get_slot::<HostInputDriver>() {
-                let callback = crate::context_ownership::local(scope, &driver.cancel);
-                let receiver = v8::undefined(scope).into();
-                callback.call(scope, receiver, &[]);
+            let context = v8::Local::new(scope, &selected);
+            if context.get_slot::<FrameRetired>().is_none() {
+                let scope = &mut v8::ContextScope::new(scope, context);
+                if let Some(driver) = context.get_slot::<HostInputDriver>() {
+                    let callback = crate::context_ownership::local(scope, &driver.cancel);
+                    let receiver = v8::undefined(scope).into();
+                    callback.call(scope, receiver, &[]);
+                }
             }
         }
         if exceeded {

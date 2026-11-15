@@ -156,24 +156,32 @@
   }
   const schedule = setTimeout.bind(globalThis),
     clear = clearTimeout.bind(globalThis);
-  const waits = new Map();
+  const waits = new Map(),
+    WaitPromise = Promise,
+    waitSet = Map.prototype.set,
+    waitDelete = Map.prototype.delete,
+    waitEach = Map.prototype.forEach,
+    waitClear = Map.prototype.clear;
   let activeRun = 0;
   const wait = (milliseconds) =>
-    new Promise((resolve) => {
+    new WaitPromise((resolve) => {
       const timer = schedule(() => {
-        waits.delete(timer);
+        apply(waitDelete, waits, [timer]);
         resolve();
       }, milliseconds);
-      waits.set(timer, resolve);
+      apply(waitSet, waits, [timer, resolve]);
     });
   const cancel = () => {
     activeRun++;
     guardedInput = null;
-    for (const [timer, resolve] of waits) {
-      clear(timer);
-      resolve();
-    }
-    waits.clear();
+    // Cleanup cannot enter guest replacements after the execution watchdog stops.
+    apply(waitEach, waits, [
+      (resolve, timer) => {
+        clear(timer);
+        resolve();
+      },
+    ]);
+    apply(waitClear, waits, []);
   };
   // The mouse pointer: the elements under it for pointer and for compatibility mouse
   // boundaries, its position (null before the first event), pressed buttons, the

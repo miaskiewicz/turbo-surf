@@ -157,6 +157,14 @@ Additional discovered blockers remain in scope until integrated proof:
 
 Ignored/skipped audit obligations: native CSP three controls and native layout one control are enabled and component-green; IDB ignore must be resolved with the dependency controls. Keep the existing external TLS probe explicitly classified as live/manual. Audit the six generated documentation examples separately. Run the 12 eligible Chrome/Patchright oracle cases with dependencies enabled; retain only the three intentional runner-semantics skips, whose bodies are designed not to execute. No failure may be reclassified as skipped to pass a gate.
 
+### Additional validation findings
+
+- [ ] **Late native navigation attribution** — the formerly dependency-gated `both collectors use a fixed Enter window for slow forms and delayed retries` oracle now actually runs and fails in `navigation-observation.test.mjs` (script-enter/native). The native actor commits the single `/search` response before the unchanged deadline, but capture retains counters sampled before its existing wait loop and reports `none` instead of `script`. The 12 eligible oracles executed **11 pass / 1 fail / zero skipped, missing or unrun**. A final-counter refresh and gated late-response control are being implemented; expected source and clocks remain unchanged.
+- [ ] **Real compression stream exposure** — the combined async product's new fire-and-forget SHA256/gzip/HTTP control reaches crypto, then fails because `CompressionStream` is an existence-only placeholder rather than a constructor. The exact published `14_compression.js` and native operations are already pinned and available. Minimal private-backend wiring and constructor/roundtrip/error guards are under validation; the failing stream assertion is retained.
+- [ ] **Final async ownership matrix** — actual held/rejected peer controls and fresh combined IDB 13 controls pass on the private current-engine prototype. Error ownership, void native IO, module/dependency, cancellation/GC and lifecycle validation remain mandatory before dependency publication or merge. Early bootstrap/Infrastructure timer admission failures and their native diagnostics remain in the monotonic private receipts.
+
+The eligible-oracle receipt is `.worktrees/oracle12-current/.recovery/oracle12/ACTUAL-12-RESULTS.json`; its new failure is appended to the monotonic regression set rather than replacing any of the 298 baseline cases below. GPU and all-feature profile validation is source-audited and queued; no hardware or profile pass is claimed before execution.
+
 ### Rust assertion failures (78)
 
 1. `tests::human_interact_does_not_bypass_form_submission_admission` — Running unittests src/lib.rs (rust/target/debug/deps/turbo_surf_mcp-eafc73731efcfb99)

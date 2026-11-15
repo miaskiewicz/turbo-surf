@@ -1,8 +1,10 @@
 # GPU bridge and render hooks
 
-This describes the v0.8.3 source at `7fd911b`, with turbo-dom pinned to
-`ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6`. Build features, installed callbacks
-and successful hardware execution are separate checks.
+This describes the v0.8.4 candidate's source interfaces. Its current DOM source
+pin is `af946ea0f8f8e0fe8d50b6470b33dbe2068393f6`; use the manifest and lockfile
+of the tested artifact for exact dependency identity (see
+[build features](BUILD-FEATURES.md#dependency-identity-and-verification)). Build
+features, installed callbacks and successful hardware execution are separate checks.
 
 ## Features and entry points
 
@@ -29,7 +31,7 @@ On a macOS host with an accessible Metal adapter and the normal Rust/native buil
 toolchain, a stock-SDK build can opt in explicitly:
 
 ```sh
-cargo build --manifest-path rust/Cargo.toml --release \
+cargo build --locked --manifest-path rust/Cargo.toml --release \
   -p turbo-surf-mcp -p turbo-surf-napi \
   --features turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext
 ```
@@ -40,11 +42,14 @@ workflow builds MCP/NAPI with their default features, without these two opt-ins;
 GPU availability on the host does not change those compiled artifacts. See the
 [publishing instructions](../PUBLISHING.md).
 
-The [Chrome 155 runbook](../harness/detection/CHROME-PARITY-RUNBOOK.md) adds an
-independent, verified source-built V8 SDK. Its `detection_trace --build-info`
-reports compiled `gpuMetal`/`coretext` booleans and the actual V8 version. GPU
-support also works with the stock SDK; selecting the experimental SDK alone does
-not install or enable GPU hooks.
+Keep the current V8 engine and SDK fixed across the separate GPU-only,
+CoreText-only and combined profiles in the
+[validation matrix](BUILD-FEATURES.md#current-engine-validation-matrix). The
+`detection_trace --build-info` diagnostic reports compiled `gpuMetal`/`coretext`
+booleans and the actual V8 version. Historical alternate-SDK procedures in the
+[parity runbook](../harness/detection/CHROME-PARITY-RUNBOOK.md) are separate
+reference builds; they are not evidence that the current optional profile passed.
+Selecting an SDK alone does not install GPU hooks.
 
 Verify real content-dependent WebGL pixels and adapter metadata with the shared
 GPU controls, plus canvas text/pixel probes for the selected text path. Record
@@ -81,9 +86,12 @@ Proven independent local-box/isolated-extent reads are admitted under the native
 overlay-scrollbar/zero-offset policy. Affected animated targets/ancestors,
 animated descendants of an extent query, layout-changing/unknown effects and
 strict hit-test/scroll paths can still reject explicitly. GPU opt-in does not
-remove those checks. A general animation-disable option is tracked in
-[#500](https://github.com/miaskiewicz/turbo-surf/issues/500); reduced-motion media
-emulation is not that option.
+remove those checks. The render
+[`AnimationPolicy`](../rust/crates/turbo-surf-render/src/animation_policy.rs) and
+shim context `animations: "enabled" | "disabled"` select animation presentation
+independently of GPU build features. Disabled presentation uses underlying styles
+while timing, events, promises, timers and animation-frame callbacks continue.
+Reduced-motion emulation remains a separate media preference.
 
 ## Source references
 
@@ -91,8 +99,8 @@ emulation is not that option.
   [NAPI initialization](../rust/crates/turbo-surf-napi/src/lib.rs),
   [Python entry points](../rust/crates/turbo-surf-py/src/lib.rs), and
   [recording/readback callbacks](../rust/crates/turbo-surf-render/src/runtime.rs).
-- Pinned raster [features](https://github.com/miaskiewicz/turbo-dom/blob/ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6/crates/turbo-dom-raster/Cargo.toml),
-  [canvas backend selection](https://github.com/miaskiewicz/turbo-dom/blob/ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6/crates/turbo-dom-raster/src/lib.rs), and
-  [WebGL replay/adapter lifecycle](https://github.com/miaskiewicz/turbo-dom/blob/ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6/crates/turbo-dom-raster/src/webgl.rs).
+- Pinned raster [features](https://github.com/miaskiewicz/turbo-dom/blob/af946ea0f8f8e0fe8d50b6470b33dbe2068393f6/crates/turbo-dom-raster/Cargo.toml),
+  [canvas backend selection](https://github.com/miaskiewicz/turbo-dom/blob/af946ea0f8f8e0fe8d50b6470b33dbe2068393f6/crates/turbo-dom-raster/src/lib.rs), and
+  [WebGL replay/adapter lifecycle](https://github.com/miaskiewicz/turbo-dom/blob/af946ea0f8f8e0fe8d50b6470b33dbe2068393f6/crates/turbo-dom-raster/src/webgl.rs).
 - [Host-hook controls](../rust/crates/turbo-surf-render/tests/host_render_hooks.rs)
   verify callback wiring; hardware controls must independently verify the real adapter.

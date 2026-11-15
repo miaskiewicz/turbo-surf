@@ -372,6 +372,7 @@
     __proto__: null,
     navigateLocation: (href, replace, reload) =>
       reload ? admitDocument(href, true) : navigate(href, replace),
+    navigateLocationFragment: (href, replace) => navigateToFragment(href, replace),
   });
   const resolve = (value, operation) => {
     const target = parse(value, documentBase());

@@ -7681,11 +7681,40 @@ fn op_run_local_timers<'s>(
     let Some(context) = document.get_creation_context(scope) else {
         return 0;
     };
-    let _task = WindowTimerTask::new(context);
+    if context.get_slot::<FrameRetired>().is_some()
+        || !context
+            .get_slot::<ActiveDocument>()
+            .and_then(|active| active.0.to_local(scope))
+            .is_some_and(|active| active.strict_equals(document.into()))
+    {
+        return 0;
+    }
+    let max = max.number_value(scope).unwrap_or(0.0);
+    if max.is_nan() || max <= 0.0 || context.get_microtask_queue().is_running_microtasks() {
+        return 0;
+    }
+    // Hydration may call this private drain from a Promise continuation. Such
+    // turns cannot nest a full checkpoint, so the outer host pump owns their tasks.
     let active = &mut v8::ContextScope::new(scope, context);
-    call_frame_helper(active, "runLocalTimers", &[max])
-        .and_then(|value| value.uint32_value(active))
-        .unwrap_or(0)
+    active.perform_microtask_checkpoint();
+    let mut fired = 0;
+    while f64::from(fired) < max
+        && !active.is_execution_terminating()
+        && context.get_slot::<FrameRetired>().is_none()
+    {
+        let _task = WindowTimerTask::new(context);
+        let next = call_frame_helper(active, "runNextTimer", &[])
+            .and_then(|value| value.uint32_value(active))
+            .unwrap_or(0);
+        if next == 0 {
+            break;
+        }
+        fired += next;
+        // Promise reactions and observers from this task finish before the next
+        // timer, including a fullscreenchange task queued by requestFullscreen.
+        active.perform_microtask_checkpoint();
+    }
+    fired
 }
 
 #[op2(fast)]

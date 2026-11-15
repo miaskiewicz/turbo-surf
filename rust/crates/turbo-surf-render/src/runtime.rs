@@ -859,7 +859,10 @@ fn queue_csp_report<'s>(
         return;
     }
     let url = csp_document_url(scope, context);
-    let (source, line, column) = csp_callsite(scope, parser, kind, &url);
+    let (source, line, column) = {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        csp_callsite(scope, parser, kind, &url)
+    };
     let response_metadata = csp_response_metadata(context);
     let ctx = CspEmitContext {
         kind,

@@ -130,7 +130,7 @@ fn prepare<'s>(
     let id = jobs.next;
     let (cancel, _) = watch::channel(false);
     let cancel = Arc::new(cancel);
-    event_log.register(&cancel);
+    event_log.register_target(&cancel, frame.page_id.as_deref());
     jobs.owners.insert(id, v8::Weak::new(scope, context));
     jobs.active.insert(
         id,

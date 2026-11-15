@@ -2817,7 +2817,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
     } catch (error) {
       if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
-      await this._failedActorOpen(opening);
+      if (this._openingClosePromise) await this._openingClosePromise;
+      else await this._failedActorOpen(opening);
       if (this._openingSession === opening) this._failPendingNetworkResponses(error.message);
       throw error;
     } finally {
@@ -3459,9 +3460,11 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (this._nativeClosePublished) return null;
     const session = this._session ?? this._openingNetworkId;
     if (this._closed && session == null && !this._auxiliaryActor) return null;
+    // The opening task owns alias retirement even if readiness races this event.
+    const ownedClose = this._openingClosePromise != null;
     const deferred = Boolean(this._actorHub?.opening && session != null);
-    const finalState = session == null || deferred ? null : native.liveClose(session);
-    if (deferred) (this._actorHub.retiringAliases ??= new Set()).add(session);
+    const finalState = session == null || deferred || ownedClose ? null : native.liveClose(session);
+    if (deferred && !ownedClose) (this._actorHub.retiringAliases ??= new Set()).add(session);
     this._nativeClosePublished = true;
     this._session = null;
     this._openingSession = null;
@@ -4551,7 +4554,29 @@ return String(globalThis.__RESULT ?? ""); })()`,
   isClosed() {
     return this._closed;
   }
-  async close() {
+  async _closeOpeningTarget() {
+    if (this._openingClosePromise) return this._openingClosePromise;
+    if (this._closed) return false;
+    const actor = this._actorHub;
+    if (
+      !actor?.opening ||
+      actor.capability !== "supported" ||
+      actor.root == null ||
+      this._targetId !== actor.root
+    )
+      return false;
+    if (!native.liveCloseOpeningTarget)
+      throw new Error("Native opening-target cancellation is unavailable");
+    return (this._openingClosePromise ??= this._closeOwnedOpeningTarget(actor));
+  }
+
+  async _closeOwnedOpeningTarget(actor) {
+    const finalState = await native.liveCloseOpeningTarget(actor.actor, this._targetId);
+    await actor.applyState(JSON.parse(finalState));
+    return true;
+  }
+
+  async _prepareClose() {
     const dialogSession = this._session ?? this._openingNetworkId;
     if (!this._closed && dialogSession != null && native.liveDialogCancel)
       native.liveDialogCancel(dialogSession);
@@ -4560,12 +4585,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
         await (this._actorHub?.ready ?? this._openingSession?.promise);
       } catch {}
     }
-    if (this._closed) return;
-    if (this._auxiliaryActor) {
-      await this._actorHub.closeTarget(this._targetId);
-      if (this._ownsContext) await this._context.close();
-      return;
-    }
+  }
+
+  _closeLegacyPage() {
     this._closeSession();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
@@ -4577,7 +4599,23 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const position = this._context._pages.indexOf(this);
     if (position >= 0) this._context._pages.splice(position, 1);
     this._emit("close");
+  }
+
+  async _closeOwnedContext() {
     if (this._ownsContext) await this._context.close();
+  }
+
+  async close() {
+    if (await this._closeOpeningTarget()) {
+      await this._closeOwnedContext();
+      return;
+    }
+    if (this._closed) return;
+    await this._prepareClose();
+    if (this._closed) return;
+    if (this._auxiliaryActor) await this._actorHub.closeTarget(this._targetId);
+    else this._closeLegacyPage();
+    await this._closeOwnedContext();
   }
   video() {
     return null;

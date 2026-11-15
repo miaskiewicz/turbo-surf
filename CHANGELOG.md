@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Cancel opening root targets without retiring surviving popups, join concurrent closes, and await actual response-body completion before the final actor runtime exits.
+
 - Publish classic-script response headers before body completion and report actual canceled script bodies, preserving redirect, integrity and CSP enforcement.
 
 - Export live screenshot image-asset reads from the NAPI crate root, keeping the async task reachable in strict all-target builds.

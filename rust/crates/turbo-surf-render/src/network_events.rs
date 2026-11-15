@@ -1,11 +1,11 @@
 //! Host-only transport records. This queue contains no V8 handles and can be
 //! drained while the owning isolate is awaiting network IO.
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc, Mutex, Weak,
+    Arc, Condvar, Mutex, Weak,
 };
-type CancellationOwner = Weak<tokio::sync::watch::Sender<bool>>;
+type CancellationOwner = (Option<String>, Weak<tokio::sync::watch::Sender<bool>>);
 #[derive(Clone, Default)]
 pub struct NetworkEventLog {
     pub(crate) rows: Arc<Mutex<VecDeque<serde_json::Value>>>,
@@ -20,6 +20,8 @@ pub struct NetworkEventLog {
     disposals: Arc<Mutex<Vec<u32>>>,
     lost: Arc<AtomicBool>,
     cancellations: Arc<Mutex<Vec<CancellationOwner>>>,
+    cancelled_targets: Arc<Mutex<HashSet<String>>>,
+    pending_responses: Arc<(Mutex<HashMap<u64, String>>, Condvar)>,
     activity: crate::network_activity::NetworkActivity,
     dialogs: crate::DialogBroker,
 }
@@ -94,6 +96,10 @@ impl NetworkEventLog {
         self.ids.fetch_add(1, Ordering::Relaxed) + 1
     }
     pub(crate) fn push(&self, row: serde_json::Value) {
+        self.observe_pending_response(&row);
+        let terminal = (row["event"] == "responsebody")
+            .then(|| row["id"].as_u64())
+            .flatten();
         let mut rows = self.rows.lock().unwrap();
         if rows.len() >= 1000 {
             if let Some(previous) = rows.pop_front() {
@@ -114,7 +120,81 @@ impl NetworkEventLog {
         }
         rows.push_back(row);
         self.revision.fetch_add(1, Ordering::Release);
+        drop(rows);
+        self.complete_observed_response(terminal);
         self.changed.notify_waiters();
+    }
+    fn observe_pending_response(&self, row: &serde_json::Value) {
+        if row["event"] != "response" || row["bodyPending"] != true {
+            return;
+        }
+        let Some(id) = row["id"].as_u64() else { return };
+        let Some(target) = row["context"]["frame"]["pageId"].as_str() else {
+            return;
+        };
+        self.pending_responses
+            .0
+            .lock()
+            .unwrap()
+            .insert(id, target.to_owned());
+    }
+    fn complete_observed_response(&self, id: Option<u64>) {
+        let Some(id) = id else { return };
+        self.pending_responses.0.lock().unwrap().remove(&id);
+        self.pending_responses.1.notify_all();
+    }
+    /// Wait for actual observed body terminals, without entering the isolate.
+    pub fn wait_target_response_completion(
+        &self,
+        target: &str,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let pending = self.pending_responses.0.lock().unwrap();
+        let (pending, _) = self
+            .pending_responses
+            .1
+            .wait_timeout_while(pending, timeout, |active| {
+                active.values().any(|owner| owner == target)
+            })
+            .unwrap();
+        !pending.values().any(|owner| owner == target)
+    }
+    /// Keep native transport callbacks running while a target is closing.
+    pub async fn wait_target_response_completion_async(
+        &self,
+        target: &str,
+        timeout: std::time::Duration,
+    ) -> bool {
+        self.wait_response_completion_async(Some(target), timeout)
+            .await
+    }
+    /// The final Page may retire only after every observed body has terminated.
+    pub async fn wait_all_response_completion_async(&self, timeout: std::time::Duration) -> bool {
+        self.wait_response_completion_async(None, timeout).await
+    }
+    fn response_completion_ready(&self, target: Option<&str>) -> bool {
+        let pending = self.pending_responses.0.lock().unwrap();
+        target.map_or(pending.is_empty(), |target| {
+            !pending.values().any(|owner| owner == target)
+        })
+    }
+    async fn wait_response_completion_async(
+        &self,
+        target: Option<&str>,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let completion = async {
+            loop {
+                let changed = self.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                if self.response_completion_ready(target) {
+                    return;
+                }
+                changed.await;
+            }
+        };
+        tokio::time::timeout(timeout, completion).await.is_ok()
     }
     /// Only an isolate owner may release these evicted native argument handles.
     pub fn take_disposals(&self) -> Vec<u32> {
@@ -197,21 +277,51 @@ impl NetworkEventLog {
         self.acknowledge(revision);
         value
     }
+    #[cfg(test)]
     pub(crate) fn register(&self, cancel: &Arc<tokio::sync::watch::Sender<bool>>) {
+        self.register_target(cancel, None);
+    }
+    pub(crate) fn register_target(
+        &self,
+        cancel: &Arc<tokio::sync::watch::Sender<bool>>,
+        target: Option<&str>,
+    ) {
+        let cancelled = self.cancelled_targets.lock().unwrap();
         let mut active = self.cancellations.lock().unwrap();
-        if self.closed.load(Ordering::Acquire) {
+        if self.closed.load(Ordering::Acquire)
+            || target.is_some_and(|target| cancelled.contains(target))
+        {
             cancel.send_replace(true);
         } else {
-            active.retain(|owner| owner.strong_count() != 0);
-            active.push(Arc::downgrade(cancel));
+            active.retain(|(_, owner)| owner.strong_count() != 0);
+            active.push((target.map(str::to_owned), Arc::downgrade(cancel)));
         }
+    }
+    /// Cancel only resources whose host-owned request context belongs to this target.
+    pub fn cancel_target(&self, target: &str) {
+        let mut cancelled = self.cancelled_targets.lock().unwrap();
+        cancelled.insert(target.to_owned());
+        self.cancellations
+            .lock()
+            .unwrap()
+            .retain(|(owner, cancel)| {
+                if owner.as_deref() == Some(target) {
+                    if let Some(cancel) = cancel.upgrade() {
+                        cancel.send_replace(true);
+                    }
+                    false
+                } else {
+                    cancel.strong_count() != 0
+                }
+            });
+        self.wake();
     }
     pub(crate) fn unregister(&self, cancel: &Arc<tokio::sync::watch::Sender<bool>>) {
         let owner = Arc::downgrade(cancel);
         self.cancellations
             .lock()
             .unwrap()
-            .retain(|active| !Weak::ptr_eq(active, &owner));
+            .retain(|(_, active)| !Weak::ptr_eq(active, &owner));
     }
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
@@ -225,7 +335,7 @@ impl NetworkEventLog {
             .lock()
             .unwrap()
             .drain(..)
-            .filter_map(|owner| owner.upgrade())
+            .filter_map(|(_, owner)| owner.upgrade())
         {
             cancel.send_replace(true);
         }
@@ -333,6 +443,28 @@ mod tests {
         assert!(receiver.has_changed().is_err());
     }
     #[test]
+    fn target_close_cancels_only_owned_requests_and_future_owned_work() {
+        let log = NetworkEventLog::default();
+        let (root, root_state) = tokio::sync::watch::channel(false);
+        let (child, child_state) = tokio::sync::watch::channel(false);
+        let (legacy, legacy_state) = tokio::sync::watch::channel(false);
+        let root = Arc::new(root);
+        let child = Arc::new(child);
+        let legacy = Arc::new(legacy);
+        log.register_target(&root, Some("root"));
+        log.register_target(&child, Some("child"));
+        log.register(&legacy);
+        log.cancel_target("root");
+        assert!(*root_state.borrow());
+        assert!(!*child_state.borrow());
+        assert!(!*legacy_state.borrow());
+        assert!(!log.is_closed());
+        let (late, late_state) = tokio::sync::watch::channel(false);
+        log.register_target(&Arc::new(late), Some("root"));
+        assert!(*late_state.borrow());
+    }
+
+    #[test]
     fn close_cancels_a_registered_request_without_entering_the_isolate() {
         let log = NetworkEventLog::default();
         let (sender, receiver) = tokio::sync::watch::channel(false);
@@ -363,5 +495,92 @@ mod tests {
         log.close();
         log.publish_intercepted_response(serde_json::json!({"status":200}), b"late");
         assert_eq!(log.drain(), "[]");
+    }
+    #[test]
+    fn target_cancellation_waits_for_real_observed_body_terminals() {
+        let log = NetworkEventLog::default();
+        for (id, target) in [(1, "root"), (2, "child")] {
+            log.push(
+                serde_json::json!({"event":"response","id":id,"bodyPending":true,
+                "context":{"frame":{"pageId":target}}}),
+            );
+        }
+        log.cancel_target("root");
+        assert!(!log.wait_target_response_completion("root", std::time::Duration::ZERO));
+        assert_eq!(
+            serde_json::from_str::<Vec<serde_json::Value>>(&log.drain())
+                .unwrap()
+                .len(),
+            2
+        );
+        log.push(serde_json::json!({"event":"responsebody","id":1,"error":"Fetch cancelled"}));
+        assert!(log.wait_target_response_completion("root", std::time::Duration::ZERO));
+        assert!(!log.wait_target_response_completion("child", std::time::Duration::ZERO));
+    }
+
+    #[test]
+    fn target_completion_ack_follows_published_terminal_even_after_cancellation() {
+        let log = NetworkEventLog::default();
+        log.cancel_target("root");
+        log.push(
+            serde_json::json!({"event":"response","id":3,"bodyPending":true,
+            "context":{"frame":{"pageId":"root"}}}),
+        );
+        assert!(!log.wait_target_response_completion("root", std::time::Duration::ZERO));
+        let worker = log.clone();
+        let terminal = std::thread::spawn(move || {
+            worker
+                .push(serde_json::json!({"event":"responsebody","id":3,"error":"Fetch cancelled"}));
+        });
+        assert!(log.wait_target_response_completion("root", std::time::Duration::from_secs(1)));
+        terminal.join().unwrap();
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&log.drain()).unwrap();
+        assert_eq!(rows[1]["event"], "responsebody");
+        assert!(rows[1].get("bodyBytes").is_none());
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn last_target_completion_keeps_native_terminal_callbacks_running() {
+        let log = NetworkEventLog::default();
+        log.push(
+            serde_json::json!({"event":"response","id":4,"bodyPending":true,
+            "context":{"frame":{"pageId":"root"}}}),
+        );
+        let callback = log.clone();
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            callback
+                .push(serde_json::json!({"event":"responsebody","id":4,"error":"Fetch cancelled"}));
+        });
+        assert!(
+            log.wait_target_response_completion_async("root", std::time::Duration::from_secs(1))
+                .await
+        );
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&log.drain()).unwrap();
+        assert_eq!(rows[1]["event"], "responsebody");
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn final_page_waits_for_a_previously_closed_targets_real_terminal() {
+        let log = NetworkEventLog::default();
+        for (id, target) in [(5, "root"), (6, "popup")] {
+            log.push(
+                serde_json::json!({"event":"response","id":id,"bodyPending":true,
+                "context":{"frame":{"pageId":target}}}),
+            );
+        }
+        log.push(serde_json::json!({"event":"responsebody","id":6,"error":"Fetch cancelled"}));
+        assert!(log.wait_target_response_completion("popup", std::time::Duration::ZERO));
+        assert!(
+            !log.wait_all_response_completion_async(std::time::Duration::ZERO)
+                .await
+        );
+        let callback = log.clone();
+        tokio::spawn(async move {
+            callback
+                .push(serde_json::json!({"event":"responsebody","id":5,"error":"Fetch cancelled"}));
+        });
+        assert!(
+            log.wait_all_response_completion_async(std::time::Duration::from_secs(1))
+                .await
+        );
     }
 }

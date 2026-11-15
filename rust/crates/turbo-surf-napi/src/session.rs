@@ -944,6 +944,33 @@ impl TargetWorker<'_> {
     }
 }
 
+fn finish_actor_target_close(
+    rt: &tokio::runtime::Runtime,
+    session: PageSession,
+    actor: &LiveActor,
+    target: LiveTarget,
+    cleanup: &mut LiveWorkerCleanup,
+    reply: Option<SyncSender<std::result::Result<(), String>>>,
+) {
+    session.close();
+    let completed = match target {
+        LiveTarget::LegacyRoot => true,
+        LiveTarget::Auxiliary(_) => rt.block_on(
+            actor
+                .network
+                .wait_all_response_completion_async(std::time::Duration::from_secs(5)),
+        ),
+    };
+    cleanup.finish();
+    if let Some(reply) = reply {
+        let _ = reply.send(
+            completed
+                .then_some(())
+                .ok_or_else(|| "Native target response cancellation did not complete".to_owned()),
+        );
+    }
+}
+
 fn run_actor_loop(
     rt: &tokio::runtime::Runtime,
     mut session: PageSession,
@@ -1045,11 +1072,7 @@ fn run_actor_loop(
             storage_work: &mut storage_work,
         };
         if !worker.execute(job) {
-            session.close();
-            cleanup.finish();
-            if let Some(reply) = final_close {
-                let _ = reply.send(Ok(()));
-            }
+            finish_actor_target_close(rt, session, actor, target, cleanup, final_close);
             break;
         }
         storage_work |= session.has_pending_auxiliary_work();
@@ -1246,10 +1269,17 @@ impl Task for LiveOpenTask {
         };
         debug_assert_eq!(actor.auxiliary.root(), auxiliary_root);
         debug_assert_eq!(auxiliary.root(), actor.auxiliary.root());
-        if auxiliary_root
-            .as_deref()
-            .and_then(|id| actor.auxiliary.info(id))
-            .is_some_and(|info| info.closed)
+        let root_closing = actor
+            .cancellations
+            .lock()
+            .map_err(|_| Error::from_reason("actor cancellation registry poisoned"))?
+            .get(&root)
+            .is_some_and(|cancel| *cancel.borrow());
+        if root_closing
+            || auxiliary_root
+                .as_deref()
+                .and_then(|id| actor.auxiliary.info(id))
+                .is_some_and(|info| info.closed)
         {
             opening.remove(&id);
             self.opening_guard.committed = true;
@@ -1752,6 +1782,115 @@ pub fn live_close(id: u32) -> Result<Option<String>> {
         }
     }
     Ok(None)
+}
+
+pub struct LiveOpeningCloseTask {
+    actor: Arc<LiveActor>,
+    target: u64,
+}
+
+impl LiveOpeningCloseTask {
+    fn closed_snapshot(&self) -> Result<String> {
+        if !self.actor.network.wait_target_response_completion(
+            &self.target.to_string(),
+            std::time::Duration::from_secs(5),
+        ) {
+            return Err(Error::from_reason(
+                "Native target response cancellation did not complete",
+            ));
+        }
+        if !self
+            .actor
+            .auxiliary
+            .info(&self.target.to_string())
+            .is_some_and(|info| info.closed)
+        {
+            return Err(Error::from_reason("Native opening target did not close"));
+        }
+        {
+            // Open checks root liveness and publishes its alias under this same lock.
+            let mut live = live_registry()
+                .lock()
+                .map_err(|_| Error::from_reason("session registry poisoned"))?;
+            live.retain(|_, connection| {
+                connection.actor.id != self.actor.id
+                    || connection.target != LiveTarget::Auxiliary(self.target)
+            });
+        }
+        Ok(auxiliary_snapshot(&self.actor).to_string())
+    }
+}
+
+#[napi]
+impl Task for LiveOpeningCloseTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        if self
+            .actor
+            .auxiliary
+            .info(&self.target.to_string())
+            .is_some_and(|info| info.closed)
+        {
+            return self.closed_snapshot();
+        }
+        let _closing = ActiveActorClose::new(self.actor.clone());
+        let (reply, receiver) = sync_channel(1);
+        self.actor
+            .tx
+            .send(LiveMessage::Target {
+                target: LiveTarget::Auxiliary(self.target),
+                job: LiveJob::Close(reply),
+            })
+            .map_err(|_| Error::from_reason("live actor worker gone"))?;
+        receiver
+            .recv()
+            .map_err(|_| Error::from_reason("live target dropped close reply"))?
+            .map_err(Error::from_reason)?;
+        self.closed_snapshot()
+    }
+
+    fn resolve(&mut self, _env: Env, result: String) -> Result<String> {
+        Ok(result)
+    }
+}
+
+/// Cancel one registered opening target without retiring its surviving auxiliaries.
+#[napi]
+pub fn live_close_opening_target(
+    id: u32,
+    target: String,
+) -> Result<AsyncTask<LiveOpeningCloseTask>> {
+    let actor = live_actor(id)?;
+    if actor.id != id {
+        return Err(Error::from_reason(
+            "Opening close requires the actual actor token",
+        ));
+    }
+    let target_id = parse_auxiliary_target(&target)?;
+    actor
+        .auxiliary
+        .info(&target)
+        .ok_or_else(|| Error::from_reason("Native target ownership is unavailable"))?;
+    if actor.auxiliary.root().as_deref() != Some(target.as_str()) {
+        return Err(Error::from_reason(
+            "Opening root target ownership is unavailable",
+        ));
+    }
+    actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .entry(LiveTarget::Auxiliary(target_id))
+        .or_insert_with(|| tokio::sync::watch::channel(false).0)
+        .send_replace(true);
+    actor.network.dialogs().cancel_owner(&target);
+    actor.network.cancel_target(&target);
+    Ok(AsyncTask::new(LiveOpeningCloseTask {
+        actor,
+        target: target_id,
+    }))
 }
 
 /// Observe one real target without entering the actor or consuming transport events.

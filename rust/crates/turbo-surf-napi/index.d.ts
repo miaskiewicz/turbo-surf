@@ -326,6 +326,8 @@ export function liveAuxiliaryAdopt(id: number, target: string): number;
 export function liveAuxiliaryWait(id: number, revision?: string): Promise<string>;
 /** Close every target and release the shared actor; return final lifecycle snapshot JSON, or null if already gone. */
 export function liveActorClose(id: number): string | null;
+/** Cancel one authoritative opening root without closing its surviving auxiliary targets. */
+export function liveCloseOpeningTarget(id: number, target: string): Promise<string>;
 
 /** Navigate the alias' actual target inside its existing actor. */
 export function liveNavigateTarget(

@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Dispatch native host input in its actual guest document realm, retain the operation owner for cancellation, skip retired realms and use captured cleanup primitives.
+
 - Cancel opening root targets without retiring surviving popups, join concurrent closes, and await actual response-body completion before the final actor runtime exits.
 
 - Publish classic-script response headers before body completion and report actual canceled script bodies, preserving redirect, integrity and CSP enforcement.
@@ -22,7 +24,7 @@
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
 The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
 `turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`5a76487c434533a400138059d3ccff5e92c77c98`. The dependency graph uses one
+`7f1b70e1192a237b7c9fee27989ffeba27b4eb7d`. The dependency graph uses one
 `turbo-dom-v8` 150.4.2 from the exact WindowProxy candidate
 `0cfe2c3a405ce33809c23afd7dd30a05fab3f06c`. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release

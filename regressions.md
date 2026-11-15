@@ -2,7 +2,7 @@
 
 Target: `release/v0.8.4`. Updated 2026-11-15.
 
-Original batch: **34 test cases (11 Rust, 23 shim)**. **32 have component proof and their fixes are merged; 2 remain open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
+Original batch: **34 test cases (11 Rust, 23 shim)**. **33 have component proof and their fixes are merged; 1 remains open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
 
@@ -38,7 +38,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `history navigation honors networkidle hydration (#425)` | `d1b61ed7`; targeted proof complete, combined rerun pending |
 | [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Producer #513 API pinned at 7f via `9b91244f`. Combined 7f candidate whole original now passes 1/1 (2.535s): both 30ms timeouts preserve the same actual native Page and both timeout0 retries load 180ms authored work. API 5/5 and clock 5/5 pass on the earlier artifact. A pre-merge safety control then found root init running in the infrastructure realm; the explicit actual-root context fix and guard are now in fresh artifact 544620d1. The entire original/API/warm/iframe packet must rerun on that artifact, with no carried final credit. Critical inverses/restoration and strict still gate merge |
 | [x] | shim | `viewport resize updates live layout media and only its own page (#369)` | `864b3343`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Action/navigation owner: Full original rerun fails replacement document request count 1 vs 2 (surface line 4315; before screenshot/image assertions); latest commit-only/background candidate succeeds quickly with real POST and replacement image HTTP; only exact image-request count now fails (3 vs 2) because static-to-live promotion redundantly fetches the old image. Image helper implementing bounded current-logical-document resource handoff; pixel and request assertions remain mandatory. Earlier cache fixes remain merged |
+| [x] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Merged `5144ec81`; original plus seven image admission/ownership/pixel controls pass. Essential handoff OFF reproduces exact extra-image counts, byte-exact restore passes. Native resource-cap/retirement controls, action/history combined checks and affected acceptance pass; final full gates pending |
 | [x] | shim | `frame locator typing uses canonical child selection and child event constructors` | `0a451d99`; targeted proof complete, combined rerun pending |
 | [x] | shim | `Browser credentials answer Basic challenges and stay origin scoped (#394)` | `90ca133b`; targeted proof complete, combined rerun pending |
 | [x] | shim | `static frame identity survives promotion to the live native registry (#447)` | `0a451d99`; targeted proof complete, combined rerun pending |
@@ -61,14 +61,14 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 Baseline classification: the Enter, frame-top form and programmatic-submit cases all reproduce on byte-exact old main `6b583d98` shim plus verified registry addon `bdcebe65` (3 intended failures, no skips/cancellations, 3.442s). These are preexisting gaps, not regressions introduced by the new action candidate. All remain in scope.
 
-- [ ] **Enter-key form completion** — baseline control confirms no replacement document (1 vs 2). Input helper is implementing real implicit-submit semantics and whole-Locator.press signal scope; raw keyboard/mouse/touch must not acquire navigation waits. Ordinary evaluate/read semantics remain unchanged.
-- [ ] **Frame form targeting top-level completion** — fresh coalesced frame `_top` form control confirms no replacement document (1 vs 2). Action owner assigned; preserve actual initiator/destination authority.
-- [ ] **Programmatic form background scheduling** — `Page.evaluate(form.submit)` followed by ordinary `waitForURL` produces only initial GET and times out at the original 1000ms. Action owner assigned native background scheduling; do not fix by making ordinary evaluate/read calls implicitly wait or pump unrelated work.
+- [x] **Enter-key form completion** — merged `5144ec81`. Implicit-submit and whole-press signal controls pass; essential caller inverses reproduce missing activation and early press settlement, exact restoration passes. Raw input and ordinary evaluate/read remain nonblocking; native trusted-input control passes.
+- [x] **Frame form targeting top-level completion** — merged `5144ec81`. Actual native inherited base resolution preserves source/origin/CSP; original plus eight base/ownership controls pass, including parent/child bases, spoofed getters and auxiliary blank documents.
+- [x] **Programmatic form background scheduling** — merged `5144ec81`. Ordinary evaluate plus waitForURL now progresses accepted native form work. Real wire/document and dropped-background-turn controls pass without making passive reads wait or admitting unrelated target work.
 
 - [x] **Classic-script response visibility during opening close** — merged `8c62b9dc`. Independent four-control ON passes; observer-forwarding-only OFF yields two explicit missing-header assertion failures; exact restored fresh build passes all four. Pure Rust 2 and all-target Render/NAPI strict, formatting, CC and hooks pass. CORS/CSP/SRI and body/header assertions remain intact. Opening-close acknowledgment race is separate and remains open.
 - [x] **Child-frame click navigation (#280) older-addon failure** — whole surface replay on newer platform addon passes the original. Old E118 failure was missing accepted native fixes; final composed build must still rerun it.
-- [ ] **Shadow-link default navigation** — full newer platform-addon cohort reproduces `/` instead of `/folder/next` (`shadow-locators.test.mjs:248`). Actual read-only diagnostic confirms server fetched the new link document and native Location/document.URL changed, but Page.url remained old: action completion/mirror lag. Fresh coalesced original now passes; critical inverse/restoration and strict acceptance still pending before merge.
-- [ ] **Page.click GET form completion** — new cohort failure: returned content is the old form rather than the server response containing `q=rust` (`surface.test.mjs:515`). Actual read-only diagnostic confirms valid form action/document URL and accepted native pending navigation, but no replacement HTTP request: form work is unscheduled on the actual guest target. Fresh coalesced original now passes; critical inverse/restoration and strict acceptance still pending before merge. Review of the unmerged candidate found global navigation draining could also admit sibling queued navigation; fix requires target-scoped completion plus an actual sibling pending-navigation control before acceptance (part of this fix, not another baseline failure). Adjacent original single-slot form queue may discard another target’s submission; require an actual multi-target RED/control before classifying it as a distinct confirmed bug.
+- [x] **Shadow-link default navigation** — merged `5144ec81`. Target-owned action completion and authoritative mirror updates pass the original and combined action controls; passive reads do not pump guest navigation.
+- [x] **Page.click GET form completion** — merged `5144ec81`. Accepted forms are scheduled for the actual target and click waits for commit. Native multi-target queue/isolation controls, held-load commit timing, typed failures and mixed queues pass; full combined gates pending.
 
 - [x] **NAPI all-target strict dead-code errors** — merged `680ee757`: restored missing crate-root `live_image_assets` re-export. Test-first E0425 RED → export fix GREEN; focused task-construction unit and NAPI all-target strict pass. No lint suppression or removed capability.
 
@@ -76,17 +76,17 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 - [x] **Detection consent native input** — merged `1f7d97f1`. Actual guest dispatch with same-owner cancellation, retired-skip and captured wait primitives. Original consent passes; selector-only OFF reproduces the same Illegal invocation, byte-exact restore passes. Three new input/cancel/poison guards pass and all-target Render/NAPI strict passes. Whole host-input cohort has 24 passes and two independent tracked failures; no existing tests skipped.
 - [ ] **Detection retry / MCP root navigation progress** — input steps now succeed with no errors, but the actual final results are 0 vs 1 and remain at /search. Both the example observation loop and product MCP render pipeline omit native auxiliary navigation progress. Owner is preparing bounded root-admitted native work within existing deadlines plus a product-level regression; harness-only progress will not be accepted as product completion.
 
-- [ ] **Frame Enter after top navigation** — actual old-frame keyup routing and stale root mirror failures. Fresh v7 six focused plus 20 adjacent controls pass; routing-only and mirror-only OFF reproduce failures, exact restoration passes. Final action integration/strict pending.
-- [ ] **FontFaceSet private WeakMap exposure** — authored WeakMap.get intercepts Surf's private font maps. Captured primitives fix both maps; zero-hook/font semantics controls pass. Native get-only OFF reproduces eight hooks, exact restore passes. Final action integration/strict pending.
+- [x] **Frame Enter after top navigation** — merged `5144ec81`. Atomic native-root routing preserves physical keyup after replacement, and post-commit mirrors retire stale frames. Six focused plus 20 adjacent controls pass; routing-only and mirror-only OFF reproduce failures, exact restoration passes.
+- [x] **FontFaceSet private WeakMap exposure** — merged `5144ec81`. Captured primitives protect both private maps; zero-hook/font brands/status/ready controls pass. Native get-only OFF reproduces eight hooks, exact restoration passes.
 
 ## Current tally
 
 Accounting: 34 original test cases plus 19 additional tracked cases/findings. This is not a count of unique GitHub issues.
 
-- Merged with component proof: **42**.
+- Merged with component proof: **50**.
 - Verified clear without an additional source fix: **1** detector POST control.
-- Total done: **43**. Total pending: **10**. Total tracked: **53**.
-- Pending includes locally green action/MCP packets awaiting final validation and integration; deadline safety still fails.
+- Total done: **51**. Total pending: **2**. Total tracked: **53**.
+- Pending: MCP root-navigation integration and deadline safety. Action/history composition passed 15 affected action controls, 31 history controls and three interruption/identity tests on fresh combined artifacts. Final complete gates remain pending.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

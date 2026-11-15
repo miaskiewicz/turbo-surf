@@ -19,9 +19,21 @@ test("viewport screenshot selects contributing image bytes while preserving inde
         ),
         true,
       );
+      const refs = Array.from({ length: 6 }, (_, index) => `/image/${index}.png`);
+      assert.deepEqual([...requests].sort(), refs, "the native document loaded each image once");
       requests.length = 0;
       const viewport = await page.screenshot({ externalCss: false });
-      assert.deepEqual(requests, ["/image/0.png"]);
+      assert.deepEqual(requests, [], "capture reuses the native document's resident bytes");
+      assert.deepEqual(
+        page._capturePlan.refs,
+        [refs[0]],
+        "only viewport-contributing pixels are selected",
+      );
+      assert.deepEqual(
+        Object.keys(page._imageCache.images),
+        [refs[0]],
+        "offscreen bodies stay outside capture preparation",
+      );
       assert.equal(viewport.readUInt32BE(16), 300);
       assert.equal(viewport.readUInt32BE(20), 200);
       assert.deepEqual(pngPixels(viewport).pixel(150, 100).slice(0, 3), [255, 0, 0]);
@@ -36,12 +48,13 @@ test("viewport screenshot selects contributing image bytes while preserving inde
       assert.ok(repeated.equals(viewport), "guest getters cannot spoof native intrinsic metadata");
       assert.equal(requests.length, 0);
       const full = await page.screenshot({ externalCss: false, fullPage: true });
-      assert.equal(
-        new Set(requests).size,
-        5,
-        "full-page selection obtains remaining offscreen images",
-      );
+      assert.deepEqual(requests, [], "full-page capture also reuses current-document responses");
+      assert.deepEqual(page._capturePlan.refs, refs);
+      assert.deepEqual(Object.keys(page._imageCache.images).sort(), refs);
       assert.equal(full.readUInt32BE(20), 1200);
+      const pixels = pngPixels(full);
+      for (let index = 0; index < 6; index++)
+        assert.deepEqual(pixels.pixel(150, 100 + index * 200).slice(0, 3), [255, 0, 0]);
     } finally {
       await page.close();
     }
@@ -87,7 +100,7 @@ test("capture resource planning preserves pixels, unknown intrinsic dependencies
 });
 
 test("resident image keys preserve URL strings without invoking object prototype setters", async () => {
-  await withScreenshotImageSite(native, async ({ url, requests }) => {
+  await withScreenshotImageSite(native, async ({ url, requests, png }) => {
     const page = newPage();
     try {
       await page.goto(url, { waitUntil: "commit" });
@@ -97,8 +110,81 @@ test("resident image keys preserve URL strings without invoking object prototype
       await page.screenshot({ externalCss: false });
       assert.equal(Object.hasOwn(page._imageCache.images, "__proto__"), true);
       assert.equal(Object.getPrototypeOf(page._imageCache.images), null);
+      const [reference, bytes] = await page._imageCache.images.__proto__;
+      assert.equal(reference, "__proto__");
+      assert.ok(bytes.equals(png), "the own-property key retains the actual native response bytes");
       await page.screenshot({ externalCss: false });
-      assert.deepEqual(requests, ["/__proto__"]);
+      assert.deepEqual(
+        requests,
+        [],
+        "resident no-store image bytes do not trigger another HTTP request",
+      );
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("viewport capture fetches only the selected image beyond bounded native residency", async () => {
+  await withScreenshotImageSite(native, async ({ url, requests }) => {
+    const page = newPage({ viewport: { width: 300, height: 200 } });
+    try {
+      await page.goto(url, { waitUntil: "commit" });
+      await page.setContent(
+        "<!doctype html><style>body{margin:0}img{display:block;width:300px;position:absolute;left:0;top:400px}#viewport-target{top:0}</style>",
+      );
+      requests.length = 0;
+      // The documented resident-body bound is 60. The first 60 sequential
+      // loads fill it; the final image still loads its independent intrinsic size.
+      const valid = await page.evaluate(async () => {
+        for (let index = 0; index < 61; index++) {
+          const image = document.createElement("img");
+          const loaded = new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = reject;
+          });
+          document.body.appendChild(image);
+          image.src = `/image/${index}.png`;
+          await loaded;
+        }
+        document.images[60].id = "viewport-target";
+        return Array.from(document.images).every(
+          (image) => image.naturalWidth === 3 && image.naturalHeight === 2,
+        );
+      });
+      assert.equal(valid, true);
+      assert.equal(
+        requests.length,
+        61,
+        "fixture completed the actual sequential native image requests",
+      );
+      const resident = JSON.parse(
+        await native.liveImageAssets(
+          page._session,
+          JSON.stringify({
+            refs: ["/image/0.png", "/image/60.png"],
+          }),
+        ),
+      );
+      assert.equal(
+        Object.hasOwn(resident.images, "/image/0.png"),
+        true,
+        "the first admitted response is resident",
+      );
+      assert.equal(
+        Object.hasOwn(resident.images, "/image/60.png"),
+        false,
+        "the excess completed response has no resident body",
+      );
+      requests.length = 0;
+      const first = await page.screenshot({ externalCss: false });
+      assert.deepEqual(requests, ["/image/60.png"], "only the missing viewport image is fetched");
+      assert.deepEqual(page._capturePlan.refs, ["/image/60.png"]);
+      assert.deepEqual(Object.keys(page._imageCache.images), ["/image/60.png"]);
+      assert.deepEqual(pngPixels(first).pixel(150, 100).slice(0, 3), [255, 0, 0]);
+      requests.length = 0;
+      assert.ok((await page.screenshot({ externalCss: false })).equals(first));
+      assert.deepEqual(requests, [], "the fetched capture asset is retained for repeated captures");
     } finally {
       await page.close();
     }

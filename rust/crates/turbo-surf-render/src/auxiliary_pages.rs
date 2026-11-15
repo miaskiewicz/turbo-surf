@@ -818,9 +818,20 @@ fn target_result(
     v8::tc_scope!(let scope, scope);
     let value = v8::Local::new(scope, value);
     let result = if json {
-        v8::json::stringify(scope, value)
-            .map(|json| json.to_rust_string_lossy(scope))
-            .ok_or_else(|| "Target result could not be serialized".to_owned())
+        let json = v8::json::stringify(scope, value).map(|json| json.to_rust_string_lossy(scope));
+        if let Some(json) = json.filter(|json| json != "undefined") {
+            Ok(json)
+        } else {
+            let error = if scope.is_execution_terminating() {
+                None
+            } else {
+                scope.exception()
+            };
+            Err(error.map_or_else(
+                || "Expression result is not JSON serializable".to_owned(),
+                |error| error.to_rust_string_lossy(scope),
+            ))
+        }
     } else {
         Ok(value.to_rust_string_lossy(scope))
     };

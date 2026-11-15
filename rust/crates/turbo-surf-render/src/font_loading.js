@@ -8,6 +8,10 @@
 (() => {
   if (!globalThis.document) return;
   const __fontDocument = __document;
+  const __fontApply = Reflect.apply,
+    __fontWeakMap = WeakMap;
+  const __fontWeakGet = __fontWeakMap.prototype.get,
+    __fontWeakSet = __fontWeakMap.prototype.set;
   const __fontTask = (callback) => setTimeout(callback, 0);
   const __fontArrayBuffer = Response.prototype.arrayBuffer;
   // Live geometry replaces Element#getBoundingClientRect after this bootstrap.
@@ -30,9 +34,9 @@
     return parsed && typeof parsed.family === "string" ? parsed.family : family;
   };
   const __fontFormats = ["truetype", "opentype", "woff", "woff2", "collection"];
-  const __fontState = new WeakMap();
+  const __fontState = new __fontWeakMap();
   const state = (face) => {
-    const value = __fontState.get(face);
+    const value = __fontApply(__fontWeakGet, __fontState, [face]);
     if (!value) throw new TypeError("Illegal invocation");
     return value;
   };
@@ -150,7 +154,7 @@
         id: 0,
         css: false,
       };
-      __fontState.set(this, item);
+      __fontApply(__fontWeakSet, __fontState, [this, item]);
       if (descriptors === __fontToken) return;
       const css = ["style", "weight", "stretch", "unicodeRange"];
       const names = {
@@ -294,7 +298,7 @@
       return this.#faces;
     }
   }
-  const sets = new WeakMap();
+  const sets = new __fontWeakMap();
   class FontFaceSet extends EventTarget {
     constructor(token) {
       if (token !== __fontToken) throw new TypeError("Illegal constructor");
@@ -302,20 +306,23 @@
       let resolve;
       const ready = new Promise((done) => (resolve = done));
       resolve(this);
-      sets.set(this, {
-        added: new Set(),
-        css: [],
-        loading: 0,
-        done: [],
-        failed: [],
-        ready,
-        resolve: null,
-        started: (face) => this.#started(face),
-        finished: (face, ok) => this.#finished(face, ok),
-      });
+      __fontApply(__fontWeakSet, sets, [
+        this,
+        {
+          added: new Set(),
+          css: [],
+          loading: 0,
+          done: [],
+          failed: [],
+          ready,
+          resolve: null,
+          started: (face) => this.#started(face),
+          finished: (face, ok) => this.#finished(face, ok),
+        },
+      ]);
     }
     #state() {
-      const value = sets.get(this);
+      const value = __fontApply(__fontWeakGet, sets, [this]);
       if (!value) throw new TypeError("Illegal invocation");
       return value;
     }

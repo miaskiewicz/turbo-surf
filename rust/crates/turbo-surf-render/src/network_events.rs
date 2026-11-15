@@ -56,10 +56,18 @@ impl NetworkEventLog {
         self.activity.begin_navigation(target)
     }
     /// Read host-owned target activity without entering or waking a V8 isolate.
+    pub(crate) fn current_navigation_revision(&self, target: u64) -> Option<u64> {
+        let snapshot = self.activity.snapshot(&target.to_string());
+        snapshot
+            .error
+            .is_none()
+            .then(|| snapshot.navigation_revision.parse().ok())
+            .flatten()
+    }
     pub fn target_network_state(&self, target: &str) -> serde_json::Value {
         let state = self.activity.snapshot(target);
         serde_json::json!({"pendingRequests":state.requests, "pendingNavigation":state.navigation,
-            "revision":state.revision, "error":state.error})
+            "revision":state.revision, "navigationRevision":state.navigation_revision, "error":state.error})
     }
 
     pub fn dialogs(&self) -> crate::DialogBroker {

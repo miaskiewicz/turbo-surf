@@ -88,9 +88,9 @@ pub use runtime::{
     set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, AuxiliaryBootstrap,
     AuxiliaryCapability, AuxiliaryDriverHistory, AuxiliaryHostServices, AuxiliaryPageEvent,
     AuxiliaryPageEventLog, AuxiliaryPageInfo, AuxiliaryResourcePolicy, BrowserStorage,
-    HydrationDiagnostics, HydrationPhase, HydrationProgress, NavigationActivationSnapshot,
-    PageSession, PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS,
-    SCRIPT_BOUNDARY,
+    HydrationDiagnostics, HydrationPhase, HydrationProgress, InitialDocumentImages,
+    NavigationActivationSnapshot, PageSession, PageSessionOptions, WindowTimerMode,
+    DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
 pub use web_fonts::{font_face_sources, web_font_face, WebFontSource};
 

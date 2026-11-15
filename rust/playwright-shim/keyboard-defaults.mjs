@@ -65,30 +65,52 @@ function selectKeyboardText(element) {
     selection.addRange(range);
   }
 }
-function activateKeyboardTarget(element, options, phase) {
+function activateKeyboardTarget(element, options, phase, keyboardClick) {
   if (element.disabled) return;
   const input = element.tagName === "INPUT";
   const button =
     element.tagName === "BUTTON" || (input && /^(button|submit|reset)$/.test(element.type));
   const spaceControl = button || (input && /^(checkbox|radio)$/.test(element.type));
   const link = element.tagName === "A" && element.hasAttribute("href");
-  const enter = phase === "keydown" && options.key === "Enter" && (button || link);
+  const ownInputEnter =
+    input &&
+    /^(image|file|color)$/.test(element.type) &&
+    !options.ctrlKey &&
+    !options.metaKey &&
+    !options.altKey;
+  const enter = phase === "keydown" && options.key === "Enter" && (button || link || ownInputEnter);
   const space = phase === "keyup" && options.key === " " && spaceControl;
-  if (enter || space) element.click();
+  if (enter || space) {
+    if (typeof keyboardClick !== "function")
+      throw new Error("Native keyboard activation is unavailable");
+    keyboardClick(element);
+  }
 }
 function isSelectAllShortcut(options) {
   return (
     (options.ctrlKey || options.metaKey) && options.key.toLowerCase() === "a" && !options.altKey
   );
 }
-function applyKeyboardDefault(element, options, phase, replaceControlSelection) {
-  activateKeyboardTarget(element, options, phase);
+function applyKeyboardDefault(
+  element,
+  options,
+  phase,
+  replaceControlSelection,
+  implicitSubmit,
+  keyboardClick,
+) {
+  activateKeyboardTarget(element, options, phase, keyboardClick);
   if (phase !== "keydown") return;
   if (isSelectAllShortcut(options)) {
     selectKeyboardText(element);
     return;
   }
   if (options.ctrlKey || options.metaKey || options.altKey) return;
+  if (options.key === "Enter" && element.tagName === "INPUT") {
+    if (typeof implicitSubmit !== "function")
+      throw new Error("Native implicit keyboard submission is unavailable");
+    implicitSubmit(element);
+  }
   const deletion = { Backspace: "deleteContentBackward", Delete: "deleteContentForward" }[
     options.key
   ];

@@ -24,12 +24,14 @@ struct Target {
     requests: usize,
     navigation: usize,
     revision: u64,
+    navigation_revision: u64,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Snapshot {
     pub requests: usize,
     pub navigation: bool,
     pub revision: String,
+    pub navigation_revision: String,
     pub error: Option<&'static str>,
 }
 #[derive(Clone)]
@@ -39,6 +41,7 @@ struct Request {
     log: NetworkActivity,
     finished: AtomicBool,
     navigation: bool,
+    navigation_revision: Option<u64>,
 }
 impl Drop for Request {
     fn drop(&mut self) {
@@ -53,6 +56,9 @@ impl Request {
     }
 }
 impl RequestActivity {
+    pub(crate) fn navigation_revision(&self) -> Option<u64> {
+        self.0.navigation_revision
+    }
     pub(crate) fn finish(&self) {
         self.0.finish();
     }
@@ -92,14 +98,18 @@ impl NetworkActivity {
             state.invalid = true;
         }
         state.active = state.active.saturating_add(1);
+        let mut navigation_revision = None;
         if let Some(target) = owner.as_deref() {
             let target = state.targets.entry(target.to_owned()).or_default();
             if navigation {
                 target.navigation += 1;
+                if bump(&mut target.navigation_revision) {
+                    navigation_revision = Some(target.navigation_revision);
+                }
             } else {
                 target.requests += 1;
             }
-            if !bump(&mut target.revision) {
+            if (navigation && navigation_revision.is_none()) || !bump(&mut target.revision) {
                 state.invalid = true;
             }
         } else {
@@ -113,6 +123,7 @@ impl NetworkActivity {
             log: self.clone(),
             finished: AtomicBool::new(false),
             navigation,
+            navigation_revision,
         }))
     }
     fn finish(&self, owner: Option<&str>, navigation: bool) {
@@ -147,6 +158,9 @@ impl NetworkActivity {
             None
         };
         Snapshot {
+            navigation_revision: target
+                .map_or(0, |target| target.navigation_revision)
+                .to_string(),
             requests: target.map_or(0, |target| target.requests),
             navigation: target.is_some_and(|target| target.navigation != 0),
             revision: format!(
@@ -168,6 +182,38 @@ mod tests {
         log.register_context(2, "child");
         log
     }
+    #[test]
+    fn navigation_baseline_tracks_only_owned_admissions_not_lifetime_changes() {
+        let log = log();
+        let initial = log.snapshot("root").navigation_revision;
+        let request = log.begin_context(1);
+        request.finish();
+        assert_eq!(log.snapshot("root").navigation_revision, initial);
+        let navigation = log.begin_navigation("root");
+        assert_eq!(navigation.navigation_revision(), Some(1));
+        assert_eq!(log.snapshot("root").navigation_revision, "1");
+        assert_eq!(log.snapshot("child").navigation_revision, "0");
+        navigation.finish();
+        assert_eq!(log.snapshot("root").navigation_revision, "1");
+        let later = log.begin_navigation("root");
+        assert_eq!(later.navigation_revision(), Some(2));
+    }
+
+    #[test]
+    fn navigation_baseline_overflow_is_explicit_and_never_reuses_a_token() {
+        let log = log();
+        log.0
+            .lock()
+            .unwrap()
+            .targets
+            .get_mut("root")
+            .unwrap()
+            .navigation_revision = u64::MAX;
+        let navigation = log.begin_navigation("root");
+        assert_eq!(navigation.navigation_revision(), None);
+        assert!(log.snapshot("root").error.is_some());
+    }
+
     #[test]
     fn requests_are_busy_before_headers_until_true_completion() {
         let log = log();

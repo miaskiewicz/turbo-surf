@@ -51,10 +51,22 @@ function keyDefinition(input, pressed) {
 }
 
 export function makeKeyboard(page) {
+  const parent = page._parentPage;
+  if (parent) page._assertAttached();
+  const parentDocument = parent ? parent._readEngine("return __tsNs.shimBindingId();") : null;
+  if (parent) {
+    if (!Number.isSafeInteger(parentDocument) || parentDocument <= 0)
+      throw new Error("Native keyboard parent identity is unavailable");
+    if (parentDocument !== parent._requestContextId)
+      throw new Error("turbo-surf: frame is detached");
+  }
+  let firstKey = true;
   const pressed = new Set();
   const canceled = new Set();
   const dispatch = async (type, input) => {
-    await page._ensureLive();
+    const continuing = pressed.size > 0 || (firstKey && type === "keydown");
+    if (type === "keydown" && pressed.size === 0) firstKey = false;
+    await (parent ?? page)._ensureLive();
     const definition = keyDefinition(String(input), pressed);
     const repeat = type === "keydown" && pressed.has(definition.code);
     if (type === "keydown") pressed.add(definition.code);
@@ -68,8 +80,7 @@ export function makeKeyboard(page) {
       altKey: has("Alt"),
       metaKey: has("Meta"),
     };
-    const result = await page._sessionEval(
-      `(() => {
+    const script = `(() => {
       ${keyboardDefaultsSource()}
       const element = document.activeElement || document.body || document.documentElement;
       const options = {...${JSON.stringify(options)}, bubbles: true, cancelable: true, view: globalThis};
@@ -78,11 +89,12 @@ export function makeKeyboard(page) {
         const charCode = options.key === 'Enter' ? 13 : options.key.charCodeAt(0);
         allowed = element.dispatchEvent(new KeyboardEvent('keypress', {...options, charCode, keyCode: charCode}));
       }
-      if (allowed && ${!canceled.has(definition.code) || type === "keydown"}) applyKeyboardDefault(element, options, ${JSON.stringify(type)}, __tsNs.replaceControlSelection);
+      if (allowed && ${!canceled.has(definition.code) || type === "keydown"}) applyKeyboardDefault(element, options, ${JSON.stringify(type)}, __tsNs.replaceControlSelection, __tsNs.implicitSubmit, __tsNs.keyboardClick);
       globalThis.__RESULT = allowed ? 'OK' : 'CANCELED';
-    })()`,
-      { waitForBindings: false },
-    );
+    })()`;
+    const result = parent
+      ? await page._keyboardSessionEval(script, parentDocument, continuing)
+      : await page._sessionEval(script, { waitForBindings: false });
     if (type === "keydown" && result === "CANCELED") canceled.add(definition.code);
     else canceled.delete(definition.code);
   };

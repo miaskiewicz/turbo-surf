@@ -1372,17 +1372,38 @@ class Locator {
   }
   async dblclick(opts = {}) {
     await this._prepareQuery();
-    return this.click({ ...opts, clickCount: 2 });
+    return this.click({ ...opts, clickCount: 2, noWaitAfter: true });
   }
   async tap() {
     await this._prepareQuery();
-    return this.click();
+    return this.click({ noWaitAfter: true });
   }
   async press(key) {
     await this._prepareQuery();
     await this._page._ensureLive();
+    const owner = this._page._parentPage ?? this._page;
+    const state = owner._auxiliaryActor
+      ? JSON.parse(native.liveTargetNetworkState(owner._session))
+      : null;
+    if (state && (state.error || typeof state.navigationRevision !== "string"))
+      throw new Error(state.error ?? "Native navigation baseline is unavailable");
+    const keyboard = this._page.keyboard ?? makeKeyboard(this._page);
     await this.focus();
-    return (this._page.keyboard ?? makeKeyboard(this._page)).press(key);
+    const result = await keyboard.press(key);
+    if (state) {
+      const outcome = JSON.parse(
+        await native.liveDispatchEngine(owner._session, "", state.navigationRevision),
+      );
+      if (outcome.status !== "released" && outcome.status !== "navigation-failed")
+        throw new Error("Native action completion returned an invalid outcome");
+      const completed = JSON.parse(native.liveTargetNetworkState(owner._session));
+      if (completed.error || typeof completed.navigationRevision !== "string")
+        throw new Error(completed.error ?? "Native navigation baseline is unavailable");
+      if (completed.navigationRevision !== state.navigationRevision)
+        await owner._refreshFromSession();
+      else await owner._drainNetworkEvents();
+    }
+    return result;
   }
   async focus() {
     await this._prepareQuery();
@@ -2008,6 +2029,27 @@ function _matchUrl(url, spec) {
   return url.includes(stripped);
 }
 
+function frameRealmExpression(path, source, helpers, hostIdentity = null) {
+  return `(() => {
+      let child = globalThis;
+      const indices = ${JSON.stringify(path)};
+      for (let depth = 0; depth < indices.length; depth++) {
+        const host = child.document.querySelectorAll('iframe')[indices[depth]];
+        if (!host) throw new Error('turbo-surf: frame is detached');
+        ${hostIdentity == null ? "" : `if (depth === indices.length - 1 && __tsNs.shimFrameId(host) !== ${JSON.stringify(hostIdentity)}) throw new Error('turbo-surf: frame is detached');`}
+        child = host.contentWindow;
+      }
+      let code = ${JSON.stringify(`return (${source});`)};
+      let helperState;
+      if (${helpers}) {
+        helperState = __tsNs.shimBindingNamespace(child);
+        if (!helperState) throw new Error('turbo-surf: frame is detached');
+        code = '"use strict"; const __G = arguments[0]; const __tsNs = __G;' + code;
+      }
+      return (${helpers} ? __tsNs.remoteHandleCompile(child, code) : child.Function(code))(helperState);
+    })()`;
+}
+
 class Frame {
   constructor(parentPage, parentFrame, meta) {
     this._parentPage = parentPage;
@@ -2045,22 +2087,36 @@ class Frame {
   }
   _realmExpression(source, helpers = false) {
     this._assertAttached();
-    return `(() => {
-      let child = globalThis;
-      for (const index of ${JSON.stringify(this._path)}) {
-        const host = child.document.querySelectorAll('iframe')[index];
-        if (!host) throw new Error('turbo-surf: frame is detached');
-        child = host.contentWindow;
+    return frameRealmExpression(
+      this._path,
+      source,
+      helpers,
+      helpers && this._nativeIdentity ? this._node : null,
+    );
+  }
+  // Select the current document and dispatch in one actor job; a host snapshot
+  // between keys can already be stale when the next event reaches the isolate.
+  async _keyboardSessionEval(script, parentDocument, continuing) {
+    const expression = frameRealmExpression(
+      this._path,
+      `(() => { ${script}; return globalThis.__RESULT; })()`,
+      true,
+      this._nativeIdentity ? this._node : null,
+    );
+    return this._parentPage._sessionEval(
+      `(() => {
+      const current = __tsNs.shimBindingId();
+      if (typeof current !== 'number' || current <= 0) throw new Error('Native keyboard parent identity is unavailable');
+      if (current !== ${JSON.stringify(parentDocument)}) {
+        if (!${Boolean(continuing)}) throw new Error('turbo-surf: frame is detached');
+        ${script}
+      } else {
+        if (${Boolean(this._detached)}) throw new Error('turbo-surf: frame is detached');
+        globalThis.__RESULT = ${expression};
       }
-      let code = ${JSON.stringify(`return (${source});`)};
-      let helperState;
-      if (${helpers}) {
-        helperState = __tsNs.shimBindingNamespace(child);
-        if (!helperState) throw new Error('turbo-surf: frame is detached');
-        code = '"use strict"; const __G = arguments[0]; const __tsNs = __G;' + code;
-      }
-      return (${helpers} ? __tsNs.remoteHandleCompile(child, code) : child.Function(code))(helperState);
-    })()`;
+    })()`,
+      { waitForBindings: false },
+    );
   }
   async evaluateHandle(script, arg) {
     return handleEvaluation(this, script, arg, true);
@@ -2135,12 +2191,13 @@ class Frame {
     const expression = this._realmExpression(`(() => { ${script} })()`, true);
     return JSON.parse(await native.liveReadEngineAsync(this._session, `return ${expression};`));
   }
-  _evalEngine(script) {
+  _evalEngine(script, waitForNavigation = false) {
     const expression = this._realmExpression(
       `(() => { ${script}; return globalThis.__RESULT; })()`,
       true,
     );
-    return native.liveEvalEngine(this._session, `globalThis.__RESULT = ${expression};`);
+    const evaluate = waitForNavigation ? native.liveDispatchEngine : native.liveEvalEngine;
+    return evaluate(this._session, `globalThis.__RESULT = ${expression};`);
   }
   async _sessionDispatch(selector, index, kind, value, strict = false) {
     if (kind !== "isfocused") this._parentPage._actionSeq++;
@@ -2148,7 +2205,9 @@ class Frame {
     const result =
       kind === "type"
         ? await this._typeWithCanonicalSelection(script)
-        : await this._sessionEval(script);
+        : await this._sessionEval(script, {
+            waitForNavigation: kind === "click" && !value?.noWaitAfter,
+          });
     if (result === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
     return result;
   }
@@ -2177,8 +2236,8 @@ class Frame {
     await this._parentPage._drainBindings();
     return result;
   }
-  async _sessionEval(script, { waitForBindings = true } = {}) {
-    const result = await this._evalEngine(script);
+  async _sessionEval(script, { waitForBindings = true, waitForNavigation = false } = {}) {
+    const result = await this._evalEngine(script, waitForNavigation);
     await this._parentPage._refreshFromSession();
     if (waitForBindings) await this._parentPage._drainBindings();
     else scheduleBindingDrain(this._parentPage);
@@ -2820,6 +2879,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._engineInitScriptSource(),
         // Browser editing must not expire future timers between consecutive keys.
         true,
+        this._imageCache?.documentToken,
       );
       await this._observeActorOpen(opened, opening);
       const session = await opened;
@@ -2942,11 +3002,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const frames = await this._collectSession(
       session,
       `(() => {
-        const ids = __tsNs.shimFrameIds ??= new WeakMap();
-        __tsNs.shimFrameNext ??= 1;
         const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
-          if (!ids.has(el)) ids.set(el, __tsNs.shimFrameNext++);
-          const entry = { node: ids.get(el), contextId: __tsNs.requestContextId?.(el.contentWindow), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
+          const entry = { node: __tsNs.shimFrameId(el), contextId: __tsNs.requestContextId?.(el.contentWindow), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
           try { entry.url = el.contentWindow.location.href; if (el.contentDocument) { entry.html = el.contentDocument.documentElement?.outerHTML || ""; entry.live = true; entry.children = walk(el.contentDocument, entry.path); } } catch (_) {}
           return entry;
         });
@@ -3327,7 +3384,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // for any waitForResponse paired with it; responses from before are stale. The
     // "isfocused" probe is a read, not an interaction — don't tag responses off it.
     if (kind !== "isfocused") this._actionSeq++;
-    const r = await native.liveEvalEngine(
+    const dispatch =
+      kind === "click" && !value?.noWaitAfter ? native.liveDispatchEngine : native.liveEvalEngine;
+    const r = await dispatch(
       this._session,
       interactionScript(selector, index ?? 0, kind, value, strict),
     );
@@ -3382,7 +3441,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   _retireNativeDocumentAssets() {
-    this._imageCache = undefined;
+    this._clearImageCache();
     closeScreenshotScene(this);
   }
 
@@ -3523,7 +3582,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._failPendingNetworkResponses("Page closed");
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
-    this._imageCache = undefined;
+    this._clearImageCache();
     closeScreenshotScene(this);
     for (const frame of this._frames ?? []) {
       frame._detached = true;
@@ -3570,7 +3629,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
     // blank page instead of a "builder error for url (about:blank)" from the net layer.
     if (/^about:/i.test(url)) {
-      this._imageCache = undefined;
+      this._clearImageCache();
       closeScreenshotScene(this);
       this._closeSession();
       this._html = "<html><head></head><body></body></html>";
@@ -3635,7 +3694,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._cookies = r.cookies;
       throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
     }
-    this._imageCache = undefined;
+    this._clearImageCache();
     closeScreenshotScene(this);
     this._closeSession(); // only a committed response replaces the active document
     this._html = r.html;
@@ -3894,7 +3953,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._initializingForSetContent = false;
       }
     }
-    this._imageCache = undefined;
+    this._clearImageCache();
     closeScreenshotScene(this);
     if (this._auxiliaryActor) this._nativeLoad().reset();
     let failure;
@@ -4006,7 +4065,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._context._maxResponseBytes,
       ),
     );
-    this._imageCache = undefined;
+    this._clearImageCache();
     this._html = r.html;
     this._url = r.finalUrl;
     this._cookies = r.cookies;
@@ -4650,7 +4709,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._closeSession();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
-    this._imageCache = undefined;
+    this._clearImageCache();
     closeScreenshotScene(this);
     this._closed = true;
     this._routeHandlers?.clear();
@@ -4733,6 +4792,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return out;
   }
 
+  _clearImageCache() {
+    const token = this._imageCache?.documentToken;
+    if (token != null && this._requestState != null)
+      native.requestStateDiscardImageDocument(this._requestState, token);
+    this._imageCache = undefined;
+  }
+
   // Fetch the page's `<img>` + `background-image` bytes, keyed by their raw ref
   // (the resolver key the raster expects), resolved against the page URL and
   // fetched as raw bytes over the engine's client. Best-effort: non-http pages
@@ -4744,7 +4810,17 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const requestState = this._requestState,
       cookies = this._cookies;
     const key = `${url}\u0000${html}`;
-    if (this._imageCache?.key !== key) this._imageCache = { key, images: Object.create(null) };
+    if (this._imageCache?.key !== key) {
+      this._clearImageCache();
+      this._imageCache = {
+        key,
+        images: Object.create(null),
+        documentToken:
+          this._session == null
+            ? native.requestStateImageDocument(this._requestState, url)
+            : undefined,
+      };
+    }
     const cache = this._imageCache;
     const selected = [...new Set(refs.slice(0, 60))];
     await this._seedResidentImages(cache, selected);
@@ -4755,7 +4831,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       images[ref] = (async () => {
         try {
           const abs = new URL(ref, url).href;
-          const buf = await native.fetchBytes(abs, requestState, url, cookies);
+          const buf = await native.fetchBytes(abs, requestState, url, cookies, cache.documentToken);
           return buf && buf.length ? [ref, buf] : null;
         } catch {
           return null;

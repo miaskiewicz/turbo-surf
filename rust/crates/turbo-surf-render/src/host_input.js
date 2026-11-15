@@ -10,6 +10,7 @@
   const activeElement = Object.getOwnPropertyDescriptor(Document.prototype, "activeElement").get;
   const connected = Object.getOwnPropertyDescriptor(Node.prototype, "isConnected").get;
   const requestSubmit = HTMLFormElement.prototype.requestSubmit;
+  const click = HTMLElement.prototype.click;
   const controls = document.querySelectorAll.bind(document);
   const matches = Element.prototype.matches;
   const controlGetters = [HTMLInputElement, HTMLButtonElement].map((Constructor) =>
@@ -453,11 +454,41 @@
     }
     return null;
   }
-  function submit(target) {
+  const blockingImplicitStates = {
+    __proto__: null,
+    text: true,
+    search: true,
+    tel: true,
+    url: true,
+    email: true,
+    password: true,
+    date: true,
+    month: true,
+    week: true,
+    time: true,
+    "datetime-local": true,
+    number: true,
+  };
+  const implicitSubmissionStates = {
+    __proto__: null,
+    ...blockingImplicitStates,
+    checkbox: true,
+    radio: true,
+    range: true,
+  };
+  function trustedSubmitter(candidate) {
+    fire(candidate, "PointerEvent", "click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+  }
+  function untrustedSubmitter(candidate) {
+    apply(click, candidate, []);
+  }
+  function submit(target, activateSubmitter = trustedSubmitter) {
     const state = controlState(target);
-    const blocking =
-      /^(text|search|tel|url|email|password|date|month|week|time|datetime-local|number)$/;
-    if (!state || state.kind !== 0 || !blocking.test(state.type) || !state.form) return;
+    if (!state || state.kind !== 0 || !state.form || !implicitSubmissionStates[state.type]) return;
     let fields = 0;
     const candidates = controls("input,button");
     for (let index = 0; index < candidates.length; index++) {
@@ -465,15 +496,10 @@
         value = controlState(candidate);
       if (value?.form !== state.form) continue;
       if (value.type === "submit" || (value.kind === 0 && value.type === "image")) {
-        if (!apply(matches, candidate, [":disabled"]))
-          fire(candidate, "PointerEvent", "click", {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-          });
+        if (!apply(matches, candidate, [":disabled"])) activateSubmitter(candidate);
         return;
       }
-      if (value.kind === 0 && blocking.test(value.type)) fields++;
+      if (value.kind === 0 && blockingImplicitStates[value.type]) fields++;
     }
     if (fields <= 1) apply(requestSubmit, state.form, []);
   }
@@ -549,5 +575,9 @@
       throw new TypeError("Unsupported input step");
     }
   }
+  // The shim retains its existing untrusted event contract; only the Rust input
+  // capability above uses trusted dispatch. Neither callback is a page global.
+  __G.implicitSubmit = (target) => submit(target, untrustedSubmitter);
+  __G.keyboardClick = untrustedSubmitter;
   ops.op_set_host_input_driver(input, cancel);
 })();

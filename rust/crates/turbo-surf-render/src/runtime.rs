@@ -58,8 +58,13 @@ mod code_generation;
 mod dialog_ops;
 #[path = "driver_sync.rs"]
 mod driver_sync;
+#[path = "initial_document_images.rs"]
+mod initial_document_images;
+pub use initial_document_images::InitialDocumentImages;
 #[path = "resident_image_assets.rs"]
 pub(crate) mod resident_image_assets;
+#[path = "target_action_completion.rs"]
+mod target_action_completion;
 pub use auxiliary_pages::{
     AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryDriverHistory, AuxiliaryHostServices,
     AuxiliaryPageEvent, AuxiliaryPageEventLog, AuxiliaryPageInfo,
@@ -4304,6 +4309,18 @@ async fn op_load_image(
         .borrow::<BrowserStorage>()
         .partition_response_effects(anonymous);
     let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
+    let promoted_image = state
+        .borrow()
+        .try_borrow::<initial_document_images::PromotionImages>()
+        .and_then(|images| {
+            images.get(
+                csp,
+                &source,
+                &target,
+                &context,
+                state.borrow().borrow::<ResourceBudget>().0,
+            )
+        });
     let opts = FetchOptions {
         http_credentials: auth_credentials.as_ref(),
         max_bytes: state.borrow().borrow::<ResourceBudget>().0,
@@ -4322,7 +4339,9 @@ async fn op_load_image(
     };
     // data: URLs go through the Fetch data: URL processor (base64, percent-encoded and
     // raw payloads) and keep their MIME type, like a network response's Content-Type.
-    let response = if target
+    let response = if let Some(image) = promoted_image {
+        Some(image)
+    } else if target
         .get(..5)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
     {
@@ -7218,6 +7237,7 @@ fn retire_frame_tree_impl<'s>(
                 retire_frame_identity(scope, context, preserved);
                 turbo_dom_browser_env::host_internals::retire_context(context);
                 resident_image_assets::retire(context);
+                initial_document_images::retire(scope, context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 retire_module_context(scope, context);
@@ -7363,6 +7383,7 @@ fn initialize_new_frame<'s>(
     let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
         storage_events::retire(context);
         resident_image_assets::retire(context);
+        initial_document_images::retire(scope, context);
         context.set_slot(Rc::new(FrameRetired));
         crate::context_ownership::release_parent(scope, context);
         JsErrorBox::generic("frame initialization was interrupted")
@@ -14025,6 +14046,28 @@ __G.domSig = (() => {
     if (frameApply(iframeTag, el, []) !== "IFRAME") throw new TypeError("Illegal invocation");
     return frameOwner(el);
   };
+  // Automation identities are document-scoped and never expose their map to authored code.
+  __G.shimFrameId = (() => {
+    const Constructor = WeakMap, get = Constructor.prototype.get, set = Constructor.prototype.set;
+    const identities = new Constructor(), Failure = Error;
+    const documentId = ops.op_csp_context(__document);
+    const ownWindow = frameApply(frameDefaultView, __document, []);
+    const ownTop = ownWindow && ops.op_window_top(ownWindow);
+    const rootId = ownTop ? ops.op_csp_context(ownTop) : 0;
+    let next = 0;
+    return host => {
+      const owner = frameReceiver(host), top = owner && ops.op_window_top(owner);
+      if (!frameConnected(host) || !top || rootId <= 0 || ops.op_csp_context(top) !== rootId)
+        throw new Failure("turbo-surf: frame is detached");
+      let identity = frameApply(get, identities, [host]);
+      if (identity === undefined) {
+        if (next >= 9007199254740991) throw new Failure("Native frame identity limit exceeded");
+        identity = __String(documentId) + ":" + __String(++next);
+        frameApply(set, identities, [host, identity]);
+      }
+      return identity;
+    };
+  })();
   const accessFrame = (el, documentOnly) => {
     const owner = frameReceiver(el);
     if (!owner) return null;
@@ -16007,6 +16050,24 @@ fn install_dom_document(rt: &mut JsRuntime, html: &str, base: &str) -> Result<()
 }
 
 fn install_dom_environment(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
+    {
+        let guest = private_infrastructure::context(rt)?;
+        deno_core::scope!(scope, rt);
+        let guest = v8::Local::new(scope, guest);
+        if guest
+            .get_slot::<private_infrastructure::GuestDocument>()
+            .is_some()
+        {
+            if let Some(csp) = guest.get_slot::<CspHandle>() {
+                if let Some(images) = JsRuntime::op_state_from(scope)
+                    .borrow_mut()
+                    .try_borrow_mut::<initial_document_images::PromotionImages>()
+                {
+                    images.bind(csp.id, base);
+                }
+            }
+        }
+    }
     {
         let selected = private_infrastructure::context(rt)?;
         deno_core::scope!(scope, rt);
@@ -18776,6 +18837,11 @@ impl PageSession {
             state.put(event_log.own_world());
             state.put(event_log);
         }
+        rt.op_state()
+            .borrow_mut()
+            .put(initial_document_images::PromotionImages::new(
+                auxiliary.initial_images,
+            ));
         rt.op_state()
             .borrow_mut()
             .borrow_mut::<auxiliary_pages::Pages>()

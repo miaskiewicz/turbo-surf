@@ -257,9 +257,11 @@ pub(super) fn op_discard_image_asset(
 
 pub(crate) fn clear_document(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) {
     let _document = turbo_dom_browser_env::host_internals::enter_document_of(scope, document);
-    if let Some(owner) = turbo_dom_browser_env::host_internals::current_document_context(scope)
-        .and_then(context_assets)
-    {
+    let context = turbo_dom_browser_env::host_internals::current_document_context(scope);
+    if let Some(context) = context {
+        initial_document_images::retire(scope, context);
+    }
+    if let Some(owner) = context.and_then(context_assets) {
         let mut owner = owner.borrow_mut();
         owner.pending.clear();
         owner.resident.clear();

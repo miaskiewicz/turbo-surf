@@ -170,7 +170,11 @@ struct Fetched {
     metadata: crate::DocumentResponseMetadata,
     request_id: Option<u64>,
 }
-type FetchFuture = Pin<Box<dyn Future<Output = Result<Fetched, String>>>>;
+enum NavigationFetchError {
+    Failed(String),
+    Deadline,
+}
+type FetchFuture = Pin<Box<dyn Future<Output = Result<Fetched, NavigationFetchError>>>>;
 struct Job {
     activity: crate::network_activity::RequestActivity,
     generation: u64,
@@ -206,10 +210,26 @@ enum LoadPhase {
     Parsing,
     Resources,
 }
+pub(super) enum ActionCompletion {
+    Released,
+    NavigationFailed(String),
+}
+
+enum NavigationWaitError {
+    Navigation(String),
+    Driver(String),
+}
+
+enum ActionTerminalError {
+    Navigation(String),
+    Driver(String),
+}
+
 #[derive(Default)]
 pub(super) struct State {
     sequence: u64,
     root_commits: u64,
+    action_commits: BTreeMap<u64, (u64, Result<(), ActionTerminalError>)>,
     jobs: BTreeMap<u64, Job>,
     loading: BTreeMap<u64, Loading>,
     results: BTreeMap<u64, Result<serde_json::Value, String>>,
@@ -262,6 +282,7 @@ pub(super) fn pending(state: &OpState) -> bool {
 
 pub(super) fn cancel(state: &mut OpState, target: u64) {
     let state = self::state(state);
+    state.action_commits.remove(&target);
     if let Some(job) = state.jobs.remove(&target) {
         if state.waiters.contains(&job.generation) {
             state.results.insert(
@@ -371,8 +392,10 @@ fn fetch_job(
         .await;
         jar.borrow_mut().merge_request_changes(local);
         let mut response = result
-            .map_err(|_| "Native target navigation exceeded session budget".to_owned())?
-            .map_err(|error| format!("Native target navigation failed: {error}"))?;
+            .map_err(|_| NavigationFetchError::Deadline)?
+            .map_err(|error| {
+                NavigationFetchError::Failed(format!("Native target navigation failed: {error}"))
+            })?;
         // The native HTTP client's response URL omits fragments. The admitted
         // response hop retains the document navigation URL, including its fragment.
         response.final_url = response_url.into_inner().unwrap();
@@ -390,6 +413,22 @@ fn fetch_job(
             response,
             metadata,
             request_id,
+        })
+    })
+}
+
+fn current_admission(
+    state: &OpState,
+    target: u64,
+    activity: Option<&crate::network_activity::RequestActivity>,
+) -> bool {
+    // Legacy driver navigation has no queued admission token and is admitted by start().
+    activity.is_none_or(|activity| {
+        activity.navigation_revision().is_some_and(|revision| {
+            state
+                .borrow::<NetworkLog>()
+                .current_navigation_revision(target)
+                == Some(revision)
         })
     })
 }
@@ -448,10 +487,12 @@ fn start(
 fn poll_fetches(
     state: &mut State,
     cx: &mut Context<'_>,
-) -> Vec<(u64, Job, Result<Fetched, String>)> {
+    owner: Option<u64>,
+) -> Vec<(u64, Job, Result<Fetched, NavigationFetchError>)> {
     let ready = state
         .jobs
         .iter_mut()
+        .filter(|(target, _)| owner.is_none_or(|owner| owner == **target))
         .filter_map(|(target, job)| match job.future.as_mut().poll(cx) {
             Poll::Pending => None,
             Poll::Ready(result) => Some((*target, result)),
@@ -703,13 +744,14 @@ fn promise_result(
     }
 }
 
-fn advance_loads(rt: &mut JsRuntime) -> Result<(), String> {
+fn advance_loads(rt: &mut JsRuntime, owner: Option<u64>) -> Result<(), String> {
     let pending = {
         let shared = rt.op_state();
         let mut shared = shared.borrow_mut();
         self::state(&mut shared)
             .loading
             .iter()
+            .filter(|(id, _)| owner.is_none_or(|owner| owner == **id))
             .map(|(id, load)| (*id, load.promise.clone(), load.phase))
             .collect::<Vec<_>>()
     };
@@ -769,13 +811,20 @@ impl PageSession {
     /// One interruptible actor turn. The jobs and hydration phases remain owned
     /// by OpState if the caller is dropped to service another target's command.
     pub(super) async fn service_auxiliary_navigation(&mut self) -> Result<(), String> {
+        self.service_auxiliary_navigation_scoped(None).await
+    }
+
+    async fn service_auxiliary_navigation_scoped(
+        &mut self,
+        owner: Option<u64>,
+    ) -> Result<(), String> {
         let budget = self.budget_ms;
         let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
         let key = self.rt.activation_key();
         let result = key
             .during(tokio::time::timeout(
                 std::time::Duration::from_millis(budget),
-                self.service_auxiliary_navigation_active(),
+                self.service_auxiliary_navigation_active(owner),
             ))
             .await;
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
@@ -791,12 +840,29 @@ impl PageSession {
         self.finish_history_command(result)
     }
 
-    async fn service_auxiliary_navigation_active(&mut self) -> Result<(), String> {
+    async fn service_auxiliary_navigation_active(
+        &mut self,
+        owner: Option<u64>,
+    ) -> Result<(), String> {
         loop {
-            let navigation = auxiliary_pages::next_navigation(&mut self.rt.op_state().borrow_mut());
+            let navigation = {
+                let shared = self.rt.op_state();
+                let mut state = shared.borrow_mut();
+                match owner {
+                    Some(target) => auxiliary_pages::next_navigation_for(&mut state, target),
+                    None => auxiliary_pages::next_navigation(&mut state),
+                }
+            };
             let Some(navigation) = navigation else {
                 break;
             };
+            if !current_admission(
+                &self.rt.op_state().borrow(),
+                navigation.target.0,
+                navigation.activity.as_ref(),
+            ) {
+                continue;
+            }
             let mode = navigation.history_mode.unwrap_or(if navigation.replace {
                 HistoryMode::Replace
             } else {
@@ -804,18 +870,28 @@ impl PageSession {
             });
             start(&mut self.rt, navigation, mode, self.budget_ms)?;
         }
-        if !self.has_pending_auxiliary_work() {
+        let pending = {
+            let shared = self.rt.op_state();
+            let shared = shared.borrow();
+            match owner {
+                Some(target) => shared.try_borrow::<State>().is_some_and(|state| {
+                    state.jobs.contains_key(&target) || state.loading.contains_key(&target)
+                }),
+                None => self.has_pending_auxiliary_work(),
+            }
+        };
+        if !pending {
             return Ok(());
         }
         self.rt.v8_isolate().perform_microtask_checkpoint();
         let mut timer_wake = None;
         let completed = std::future::poll_fn(|cx| {
-            let host_task = background_work::ready_tasks(&mut self.rt)?
-                || poll_auxiliary_document_tasks(&mut self.rt, None, cx, &mut timer_wake)?;
+            let host_task = background_work::ready_tasks_for(&mut self.rt, owner)?
+                || poll_auxiliary_document_tasks(&mut self.rt, owner, cx, &mut timer_wake)?;
             let ready = {
                 let shared = self.rt.op_state();
                 let mut shared = shared.borrow_mut();
-                poll_fetches(self::state(&mut shared), cx)
+                poll_fetches(self::state(&mut shared), cx, owner)
             };
             let event = self.rt.poll_event_loop(cx, Default::default());
             if let Poll::Ready(Err(error)) = event {
@@ -827,6 +903,7 @@ impl PageSession {
                 self::state(&mut shared)
                     .loading
                     .iter()
+                    .filter(|(target, _)| owner.is_none_or(|owner| owner == **target))
                     .map(|(target, load)| (*target, load.promise.clone()))
                     .collect::<Vec<_>>()
             };
@@ -841,16 +918,35 @@ impl PageSession {
         })
         .await?;
         for (target, job, fetched) in completed {
-            let result =
-                fetched.and_then(|fetched| commit_fetched(&mut self.rt, target, &job, fetched));
+            let (result, terminal) = match fetched {
+                Err(NavigationFetchError::Failed(error)) => (
+                    Err(error.clone()),
+                    Err(ActionTerminalError::Navigation(error)),
+                ),
+                Err(NavigationFetchError::Deadline) => {
+                    let error = "Native target navigation exceeded session budget".to_owned();
+                    (Err(error.clone()), Err(ActionTerminalError::Driver(error)))
+                }
+                Ok(fetched) => {
+                    let result = commit_fetched(&mut self.rt, target, &job, fetched);
+                    let terminal = result
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|error| ActionTerminalError::Driver(error.clone()));
+                    (result, terminal)
+                }
+            };
             let shared = self.rt.op_state();
             let mut shared = shared.borrow_mut();
             let state = self::state(&mut shared);
+            if let Some(revision) = job.activity.navigation_revision() {
+                state.action_commits.insert(target, (revision, terminal));
+            }
             if state.waiters.contains(&job.generation) {
                 state.results.insert(job.generation, result);
             }
         }
-        advance_loads(&mut self.rt)?;
+        advance_loads(&mut self.rt, owner)?;
         Ok(())
     }
 
@@ -944,7 +1040,7 @@ impl PageSession {
             return Ok(receipt);
         }
         let generation = start(&mut self.rt, navigation, mode, budget)?;
-        self.wait_target_navigation(generation, budget).await
+        self.wait_target_navigation(generation, budget, None).await
     }
 
     fn same_document_history_receipt(
@@ -964,6 +1060,44 @@ impl PageSession {
         target: u64,
         pending: form_submission::Pending,
     ) -> Result<String, String> {
+        self.navigate_form_target_scoped(target, pending, false)
+            .await
+    }
+
+    pub(super) async fn navigate_form_target_scoped(
+        &mut self,
+        target: u64,
+        pending: form_submission::Pending,
+        owned_completion: bool,
+    ) -> Result<String, String> {
+        let generation = self.start_form_target(target, pending)?;
+        let receipt = self
+            .wait_target_navigation(
+                generation,
+                self.budget_ms,
+                owned_completion.then_some(target),
+            )
+            .await?;
+        while !owned_completion
+            && self
+                .rt
+                .op_state()
+                .borrow()
+                .borrow::<State>()
+                .loading
+                .contains_key(&target)
+        {
+            self.service_auxiliary_navigation_scoped(owned_completion.then_some(target))
+                .await?;
+        }
+        Ok(receipt)
+    }
+
+    fn start_form_target(
+        &mut self,
+        target: u64,
+        pending: form_submission::Pending,
+    ) -> Result<u64, String> {
         let identity = AuxiliaryContextId(target);
         let snapshot = SourceSnapshot {
             source: pending.source,
@@ -988,28 +1122,66 @@ impl PageSession {
             snapshot,
             activity: pending.activity,
         };
-        let generation = start(&mut self.rt, navigation, HistoryMode::Push, self.budget_ms)?;
-        let receipt = self
-            .wait_target_navigation(generation, self.budget_ms)
-            .await?;
-        while self
+        start(&mut self.rt, navigation, HistoryMode::Push, self.budget_ms)
+    }
+
+    /// Admit accepted native forms before yielding an interruptible actor turn.
+    /// Jobs retain the request; dropping a background poll cannot cancel or replay it.
+    pub(super) fn admit_actor_form_navigations(&mut self) -> Result<(), String> {
+        if !self
             .rt
             .op_state()
             .borrow()
-            .borrow::<State>()
-            .loading
-            .contains_key(&target)
+            .borrow::<auxiliary_pages::Pages>()
+            .enabled
         {
-            self.service_auxiliary_navigation().await?;
+            return Ok(());
         }
-        Ok(receipt)
+        loop {
+            let pending = self
+                .rt
+                .op_state()
+                .borrow_mut()
+                .borrow_mut::<form_submission::Queue>()
+                .take_native();
+            let Some((target, pending)) = pending else {
+                return Ok(());
+            };
+            if !current_admission(
+                &self.rt.op_state().borrow(),
+                target,
+                pending.activity.as_ref(),
+            ) {
+                continue;
+            }
+            if let Err(error) = self.start_form_target(target, pending) {
+                report_target_error(&mut self.rt, target, &error);
+            }
+        }
     }
 
     async fn wait_target_navigation(
         &mut self,
         generation: u64,
         budget: u64,
+        owner: Option<u64>,
     ) -> Result<String, String> {
+        self.wait_target_navigation_classified(generation, budget, owner, None)
+            .await
+            .map_err(|error| match error {
+                NavigationWaitError::Navigation(error) | NavigationWaitError::Driver(error) => {
+                    error
+                }
+            })
+    }
+
+    async fn wait_target_navigation_classified(
+        &mut self,
+        generation: u64,
+        budget: u64,
+        owner: Option<u64>,
+        admission: Option<u64>,
+    ) -> Result<String, NavigationWaitError> {
         let shared = self.rt.op_state();
         self::state(&mut shared.borrow_mut())
             .waiters
@@ -1032,9 +1204,18 @@ impl PageSession {
                             self::state(&mut shared).results.remove(&generation)
                         };
                         if let Some(result) = result {
-                            return result.map(|receipt| receipt.to_string());
+                            return result.map(|receipt| receipt.to_string()).map_err(|error| {
+                                let navigation_failure = owner.zip(admission).is_some_and(|(target, serial)| {
+                                    let shared = self.rt.op_state();
+                                    let shared = shared.borrow();
+                                    matches!(shared.borrow::<State>().action_commits.get(&target),
+                                        Some((revision, Err(ActionTerminalError::Navigation(_)))) if *revision == serial)
+                                });
+                                if navigation_failure { NavigationWaitError::Navigation(error) }
+                                else { NavigationWaitError::Driver(error) }
+                            });
                         }
-                        self.service_auxiliary_navigation().await?;
+                        self.service_auxiliary_navigation_scoped(owner).await.map_err(NavigationWaitError::Driver)?;
                     }
                 },
             ))
@@ -1043,11 +1224,20 @@ impl PageSession {
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
         let result = if exceeded {
-            Err(format!("Target navigation timeout after {budget}ms"))
+            Err(NavigationWaitError::Driver(format!(
+                "Target navigation timeout after {budget}ms"
+            )))
         } else {
-            result.unwrap_or_else(|_| Err(format!("Target navigation timeout after {budget}ms")))
+            result.unwrap_or_else(|_| {
+                Err(NavigationWaitError::Driver(format!(
+                    "Target navigation timeout after {budget}ms"
+                )))
+            })
         };
-        let result = self.finish_history_command(result);
+        let result = match self.finish_history_command(Ok(())) {
+            Ok(()) => result,
+            Err(error) => Err(NavigationWaitError::Driver(error)),
+        };
         waiter.completed = result.is_ok();
         result
     }
@@ -1184,6 +1374,116 @@ impl PageSession {
         let context = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
         context.set_slot(Rc::new(FailAuxiliaryBackingForTesting));
         Ok(())
+    }
+}
+
+impl PageSession {
+    pub(super) async fn finish_target_navigation_since(
+        &mut self,
+        target: u64,
+        baseline: u64,
+    ) -> Result<ActionCompletion, String> {
+        let latest = self
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<NetworkLog>()
+            .current_navigation_revision(target)
+            .ok_or("Native navigation tracking is invalid")?;
+        if latest <= baseline {
+            return Ok(ActionCompletion::Released);
+        }
+        let pending = auxiliary_pages::next_navigation_for_since(
+            &mut self.rt.op_state().borrow_mut(),
+            target,
+            latest - 1,
+        );
+        if let Some(navigation) = pending {
+            let mode = navigation.history_mode.unwrap_or(if navigation.replace {
+                HistoryMode::Replace
+            } else {
+                HistoryMode::Push
+            });
+            let generation = start(&mut self.rt, navigation, mode, self.budget_ms)?;
+            return self
+                .wait_action_navigation(target, generation, latest)
+                .await;
+        }
+        let generation = {
+            let shared = self.rt.op_state();
+            let mut shared = shared.borrow_mut();
+            self::state(&mut shared)
+                .jobs
+                .get(&target)
+                .filter(|job| {
+                    job.activity
+                        .navigation_revision()
+                        .is_some_and(|revision| revision == latest)
+                })
+                .map(|job| job.generation)
+        };
+        if let Some(generation) = generation {
+            return self
+                .wait_action_navigation(target, generation, latest)
+                .await;
+        }
+        self.action_terminal_outcome(target, latest)
+    }
+
+    fn action_terminal_outcome(
+        &mut self,
+        target: u64,
+        revision: u64,
+    ) -> Result<ActionCompletion, String> {
+        let shared = self.rt.op_state();
+        let mut shared = shared.borrow_mut();
+        match self::state(&mut shared).action_commits.get(&target) {
+            Some((serial, Err(ActionTerminalError::Navigation(error)))) if *serial == revision => {
+                Ok(ActionCompletion::NavigationFailed(error.clone()))
+            }
+            Some((serial, Err(ActionTerminalError::Driver(error)))) if *serial == revision => {
+                Err(error.clone())
+            }
+            _ => Ok(ActionCompletion::Released),
+        }
+    }
+
+    async fn wait_action_navigation(
+        &mut self,
+        target: u64,
+        generation: u64,
+        revision: u64,
+    ) -> Result<ActionCompletion, String> {
+        match self
+            .wait_target_navigation_classified(
+                generation,
+                self.budget_ms,
+                Some(target),
+                Some(revision),
+            )
+            .await
+        {
+            Ok(_) => self.action_terminal_outcome(target, revision),
+            Err(NavigationWaitError::Navigation(error)) => {
+                Ok(ActionCompletion::NavigationFailed(error))
+            }
+            Err(NavigationWaitError::Driver(error)) => Err(error),
+        }
+    }
+
+    pub(super) async fn finish_action_form(
+        &mut self,
+        target: u64,
+        pending: form_submission::Pending,
+    ) -> Result<ActionCompletion, String> {
+        let revision = pending
+            .activity
+            .as_ref()
+            .and_then(|activity| activity.navigation_revision())
+            .ok_or("Native form admission token is unavailable")?;
+        let generation = self.start_form_target(target, pending)?;
+        self.wait_action_navigation(target, generation, revision)
+            .await
     }
 }
 

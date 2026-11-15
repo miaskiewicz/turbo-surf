@@ -7,6 +7,7 @@
 mod context_emulation;
 mod document_response;
 pub use context_emulation::live_actor_configure_emulation;
+mod document_images;
 mod image_metadata;
 mod parse_cache;
 mod screenshot_options;
@@ -25,7 +26,7 @@ mod upload_mime;
 pub use session::{
     live_actor_close, live_auxiliary_adopt, live_auxiliary_configure, live_auxiliary_state,
     live_auxiliary_wait, live_close, live_close_opening_target, live_cookies, live_dialog_cancel,
-    live_dialog_configure, live_dialog_respond, live_eval, live_eval_engine,
+    live_dialog_configure, live_dialog_respond, live_dispatch_engine, live_eval, live_eval_engine,
     live_eval_engine_expression, live_eval_expression, live_eval_expression_tracked,
     live_image_assets, live_navigate_target, live_network_log, live_network_log_acknowledge,
     live_network_log_create, live_network_log_discard_handles,
@@ -866,6 +867,7 @@ fn shared_client() -> &'static turbo_surf_core::http_backend::Client {
 pub(crate) struct RequestState {
     pub(crate) client_hints: ClientHints,
     pub(crate) storage: turbo_surf_render::BrowserStorage,
+    pub(crate) document_images: document_images::DocumentImages,
 }
 fn request_states() -> &'static std::sync::Mutex<std::collections::HashMap<u32, RequestState>> {
     static STATES: std::sync::OnceLock<
@@ -925,6 +927,7 @@ fn new_request_state(parent_context_id: Option<u32>, independent_network: bool) 
                     parent.client_hints
                 },
                 storage: parent.storage.new_tab().map_err(Error::from_reason)?,
+                document_images: Default::default(),
             }
         }
         None => RequestState::default(),
@@ -946,10 +949,13 @@ fn new_request_state(parent_context_id: Option<u32>, independent_network: bool) 
 
 #[napi]
 pub fn request_state_close(id: u32) -> Result<()> {
-    request_states()
+    let removed = request_states()
         .lock()
         .map_err(|_| Error::from_reason("request state registry poisoned"))?
         .remove(&id);
+    if let Some(state) = removed {
+        state.document_images.clear();
+    }
     Ok(())
 }
 
@@ -1068,6 +1074,7 @@ async fn do_fetch_headers(
     let RequestState {
         client_hints,
         storage,
+        ..
     } = request_state(request_state_id)?;
     let headers = storage.request_headers(headers);
     let auth_credentials = storage.http_credentials();
@@ -1167,6 +1174,22 @@ pub async fn fetch_html(url: String) -> Result<String> {
     do_fetch(&url, None, None, None).await
 }
 
+/// Allocate a document-owned image handoff; replacing it retires pending captures.
+#[napi]
+pub fn request_state_image_document(id: u32, source: String) -> Result<u32> {
+    request_state(Some(id))?
+        .document_images
+        .begin(source)
+        .ok_or_else(|| Error::from_reason("image document handles exhausted"))
+}
+
+/// Release only the addressed static document's retained native response bodies.
+#[napi]
+pub fn request_state_discard_image_document(id: u32, token: u32) -> Result<()> {
+    request_state(Some(id))?.document_images.discard(token);
+    Ok(())
+}
+
 /// Fetch a URL as raw bytes (no charset decode) → a `Buffer`. For binary
 /// resources — images for `screenshotWithAssets` — that a `fetchHtml` string
 /// would corrupt. Uses the shared pooled client; non-HTML content types allowed.
@@ -1183,6 +1206,7 @@ pub async fn fetch_bytes(
     request_state_id: Option<u32>,
     source_url: Option<String>,
     cookies: Option<String>,
+    image_document: Option<u32>,
 ) -> Result<Buffer> {
     let mut headers = std::collections::BTreeMap::new();
     if let Some(accept) = turbo_surf_core::request_context::paintable_image_accept(
@@ -1194,6 +1218,7 @@ pub async fn fetch_bytes(
     let RequestState {
         client_hints,
         storage,
+        document_images,
     } = request_state(request_state_id)?;
     let headers = storage.request_headers(headers);
     let auth_credentials = storage.http_credentials();
@@ -1208,7 +1233,12 @@ pub async fn fetch_bytes(
         Destination::Image,
         RequestMode::NoCors,
     );
-    context.source = source_url;
+    context.source = source_url.clone();
+    let redirected = std::sync::atomic::AtomicBool::new(false);
+    let observe_request = |_: &str, is_redirect: bool| {
+        redirected.fetch_or(is_redirect, std::sync::atomic::Ordering::Relaxed);
+        true
+    };
     let cache_partition = browsing_cache_partition(&context, &url);
     let opts = FetchOptions {
         http_credentials: auth_credentials.as_ref(),
@@ -1220,12 +1250,26 @@ pub async fn fetch_bytes(
         http_cache: Some(&http_cache),
         cache_partition,
         context: Some(context),
+        request_policy: Some(&observe_request),
         jar: jar.as_mut(),
         ..Default::default()
     };
-    let (_final_url, bytes, _status) = turbo_surf_core::net::fetch_bytes(&url, opts)
+    let response = turbo_surf_core::net::fetch_typed_bytes(&url, opts)
         .await
         .map_err(|e| Error::from_reason(e.to_string()))?;
+    let bytes =
+        if image_document.is_some() && !redirected.load(std::sync::atomic::Ordering::Relaxed) {
+            let bytes = response.bytes.clone();
+            document_images.record(
+                image_document,
+                source_url.as_deref().unwrap_or(""),
+                &url,
+                response,
+            );
+            bytes
+        } else {
+            response.bytes
+        };
     Ok(Buffer::from(bytes))
 }
 

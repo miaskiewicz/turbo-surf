@@ -234,6 +234,11 @@ enum LiveJob {
     ),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
+    Interaction(
+        String,
+        Option<String>,
+        SyncSender<std::result::Result<String, String>>,
+    ),
     EngineCollect(String, SyncSender<std::result::Result<String, String>>),
     EngineRead(String, SyncSender<std::result::Result<String, String>>),
     Expression(
@@ -266,6 +271,7 @@ impl LiveJob {
             | Self::Navigate(_, _, _, reply)
             | Self::Eval(_, reply)
             | Self::EngineEval(_, reply)
+            | Self::Interaction(_, _, reply)
             | Self::EngineCollect(_, reply)
             | Self::EngineRead(_, reply)
             | Self::Expression(_, _, reply)
@@ -826,6 +832,28 @@ impl TargetWorker<'_> {
                     })
                 });
             }
+            LiveJob::Interaction(script, baseline, reply) => {
+                let result = if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_engine(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.dispatch_target_engine_since(
+                                target,
+                                &script,
+                                baseline.as_deref(),
+                            ),
+                        )
+                    })
+                };
+                let _ = reply.send(result);
+            }
             LiveJob::EngineEval(script, reply) => {
                 let _ = reply.send(if self.primary {
                     run_target_job(
@@ -1085,6 +1113,7 @@ fn run_actor_loop(
 /// Async (hydration fetches chunks from a possibly same-process server, so Node's loop
 /// must stay free).
 pub struct LiveOpenTask {
+    initial_images: turbo_surf_render::InitialDocumentImages,
     receiver: Option<tokio::sync::mpsc::UnboundedReceiver<LiveMessage>>,
     opening_guard: OpeningActorGuard,
     max_resource_bytes: Option<u32>,
@@ -1126,6 +1155,7 @@ impl Task for LiveOpenTask {
         let ua = std::mem::take(&mut self.user_agent);
         let client_hints = self.client_hints.clone();
         let storage = self.storage.clone();
+        let initial_images = std::mem::take(&mut self.initial_images);
         let response = self.response.clone();
         let reserved = response.host_network_log;
         let id = actor.id;
@@ -1189,6 +1219,7 @@ impl Task for LiveOpenTask {
                     &engine_init_script,
                     Some(worker_network.clone()),
                     AuxiliaryHostServices {
+                        initial_images,
                         bootstrap: auxiliary_bootstrap,
                         root_bootstrap,
                         root_history: response.root_history,
@@ -1324,6 +1355,7 @@ pub fn live_open(
     max_resource_bytes: Option<u32>,
     engine_init_script: Option<String>,
     real_time_timers: Option<bool>,
+    image_document: Option<u32>,
 ) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
@@ -1334,7 +1366,9 @@ pub fn live_open(
         response.host_network_log,
         state.storage.context_emulation_handle(),
     )?;
+    let initial_images = state.document_images.take(image_document, &base_url);
     Ok(AsyncTask::new(LiveOpenTask {
+        initial_images,
         receiver: Some(receiver),
         opening_guard,
         max_resource_bytes,
@@ -1396,6 +1430,8 @@ pub struct LiveEvalTask {
     tracked: bool,
     engine: bool,
     collect: bool,
+    interaction: bool,
+    navigation_baseline: Option<String>,
 }
 
 #[napi]
@@ -1407,7 +1443,13 @@ impl Task for LiveEvalTask {
         let (reply, rx) = sync_channel(1);
         live_send(
             self.id,
-            if self.tracked {
+            if self.interaction {
+                LiveJob::Interaction(
+                    std::mem::take(&mut self.script),
+                    self.navigation_baseline.take(),
+                    reply,
+                )
+            } else if self.tracked {
                 LiveJob::ExpressionTracked(std::mem::take(&mut self.script), reply)
             } else if self.expression {
                 LiveJob::Expression(std::mem::take(&mut self.script), self.engine, reply)
@@ -1437,6 +1479,8 @@ pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
         id,
         script,
         expression: false,
+        interaction: false,
+        navigation_baseline: None,
         tracked: false,
         collect: false,
         engine: false,
@@ -1451,9 +1495,30 @@ pub fn live_eval_engine(id: u32, script: String, collect: Option<bool>) -> Async
         id,
         script,
         expression: false,
+        interaction: false,
+        navigation_baseline: None,
         tracked: false,
         collect: collect.unwrap_or(false),
         engine: true,
+    })
+}
+
+/// Dispatch a trusted interaction and await navigation admitted by its actual target.
+#[napi]
+pub fn live_dispatch_engine(
+    id: u32,
+    script: String,
+    navigation_baseline: Option<String>,
+) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: false,
+        tracked: false,
+        collect: false,
+        engine: true,
+        interaction: true,
+        navigation_baseline,
     })
 }
 
@@ -1464,6 +1529,8 @@ pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> 
         id,
         script,
         expression: true,
+        interaction: false,
+        navigation_baseline: None,
         tracked: false,
         collect: false,
         engine: false,
@@ -1477,6 +1544,8 @@ pub fn live_eval_expression_tracked(id: u32, script: String) -> AsyncTask<LiveEv
         id,
         script,
         expression: true,
+        interaction: false,
+        navigation_baseline: None,
         tracked: true,
         collect: false,
         engine: false,
@@ -1490,6 +1559,8 @@ pub fn live_eval_engine_expression(id: u32, script: String) -> AsyncTask<LiveEva
         id,
         script,
         expression: true,
+        interaction: false,
+        navigation_baseline: None,
         tracked: false,
         collect: false,
         engine: true,

@@ -14,6 +14,7 @@ struct Payload {
 }
 
 pub(super) struct Pending {
+    pub initiator: Option<u64>,
     pub target: Option<u64>,
     pub activity: Option<crate::network_activity::RequestActivity>,
     pub plan: form_navigation::Submission,
@@ -23,7 +24,57 @@ pub(super) struct Pending {
     pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
 }
 #[derive(Default)]
-pub(super) struct Queue(pub Option<Pending>);
+pub(super) struct Queue(pub std::collections::VecDeque<Pending>);
+
+impl Queue {
+    pub(super) fn take_native(&mut self) -> Option<(u64, Pending)> {
+        let (index, target) = self
+            .0
+            .iter()
+            .enumerate()
+            .find_map(|(index, pending)| pending.target.map(|target| (index, target)))?;
+        self.0.remove(index).map(|pending| (target, pending))
+    }
+
+    fn check_admission(&self, target: Option<u64>, limit: usize) -> Result<(), String> {
+        let replacing = self.0.iter().any(|entry| entry.target == target);
+        if !replacing && self.0.len() >= limit {
+            return Err("Native form navigation queue limit exceeded".into());
+        }
+        Ok(())
+    }
+
+    fn admit(&mut self, pending: Pending, limit: usize) -> Result<(), String> {
+        self.check_admission(pending.target, limit)?;
+        self.0.retain(|entry| entry.target != pending.target);
+        self.0.push_back(pending);
+        Ok(())
+    }
+}
+
+pub(super) fn cancel_target(state: &mut OpState, target: u64) {
+    state
+        .borrow_mut::<Queue>()
+        .0
+        .retain(|pending| pending.target != Some(target));
+}
+
+pub(super) fn take_for_destination_since(
+    state: &mut OpState,
+    target: u64,
+    baseline: u64,
+) -> Option<Pending> {
+    let queue = &mut state.borrow_mut::<Queue>().0;
+    let index = queue.iter().position(|pending| {
+        pending.target == Some(target)
+            && pending
+                .activity
+                .as_ref()
+                .and_then(|activity| activity.navigation_revision())
+                .is_some_and(|revision| revision > baseline)
+    })?;
+    queue.remove(index)
+}
 
 pub(super) fn install(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
     let callback = v8::Function::new(scope, submit)
@@ -131,10 +182,10 @@ fn collect<'s>(
 
 /// The submitting document's URL and the resolved action (the document URL when
 /// the action is empty).
-fn submission_urls(
-    scope: &mut v8::PinScope,
-    context: v8::Local<v8::Context>,
-    form: v8::Local<v8::Object>,
+fn submission_urls<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    form: v8::Local<'s, v8::Object>,
     payload: &Payload,
 ) -> Result<(String, String), String> {
     let state = JsRuntime::op_state_from(scope);
@@ -146,13 +197,47 @@ fn submission_urls(
                 .map(|url| url.0.clone())
         })
         .unwrap_or(source);
-    let base = approved_base(scope, context, form, &source);
+    // Request origin and policy keep the actual document URL. Resolution alone
+    // inherits the native parent's accepted base, never a guest baseURI getter.
+    let fallback = inherited_form_base(scope, context, &source)?;
+    let base = approved_base(scope, context, form, &fallback);
     let action = match payload.action.as_deref().filter(|value| !value.is_empty()) {
         Some(action) => resolve(&base, action),
         None => Some(source.clone()),
     }
     .ok_or("Native form action cannot be resolved")?;
     Ok((source, action))
+}
+
+fn inherited_form_base<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    source: &str,
+) -> Result<String, String> {
+    let inherited = url::Url::parse(source)
+        .is_ok_and(|url| url.scheme() == "about" && matches!(url.path(), "blank" | "srcdoc"));
+    if !inherited {
+        return Ok(source.to_string());
+    }
+    if context.get_slot::<FrameHost>().is_some() {
+        let owner = parent(scope, context).ok_or("Native inherited form parent is unavailable")?;
+        if owner.get_slot::<FrameRetired>().is_some() {
+            return Err("Native inherited form parent is retired".into());
+        }
+        return call_capability(scope, owner, "documentBaseURL", &[])
+            .and_then(|value| v8::Local::<v8::String>::try_from(value).ok())
+            .map(|value| value.to_rust_string_lossy(scope))
+            .ok_or_else(|| "Native inherited form base is unavailable".into());
+    }
+    Ok(context
+        .get_slot::<AuxiliaryFallbackBase>()
+        .map(|base| base.0.clone())
+        .or_else(|| {
+            context
+                .get_slot::<FrameDocumentUrl>()
+                .map(|url| url.0.clone())
+        })
+        .unwrap_or_else(|| source.to_string()))
 }
 
 /// Fires `formdata` over a fresh submission FormData and snapshots its entries.
@@ -228,24 +313,38 @@ fn navigate<'s>(
         return Ok(false);
     };
     let policy = handle.policy.borrow();
-    // A later submission replaces the earlier pending navigation before any wire IO.
+    // Replacement is per actual destination; another Page's admission survives.
     let state = JsRuntime::op_state_from(scope);
     let target = auxiliary_pages::top_level_identity(scope, navigable).map(|id| id.0);
+    let initiator = auxiliary_pages::top_level_identity(scope, context).map(|id| id.0);
+    let limit = state
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .policy
+        .max_pending_navigations;
+    state
+        .borrow()
+        .borrow::<Queue>()
+        .check_admission(target, limit)?;
     let activity = target.map(|target| {
         state
             .borrow()
             .borrow::<NetworkLog>()
             .begin_page_navigation(&target.to_string())
     });
-    state.borrow_mut().borrow_mut::<Queue>().0 = Some(Pending {
-        target,
-        activity,
-        plan,
-        source,
-        user_activation: host_user_activation(context),
-        policy: policy.active.clone(),
-        referrer_policy: policy.referrer_policy,
-    });
+    state.borrow_mut().borrow_mut::<Queue>().admit(
+        Pending {
+            initiator,
+            target,
+            activity,
+            plan,
+            source,
+            user_activation: host_user_activation(context),
+            policy: policy.active.clone(),
+            referrer_policy: policy.referrer_policy,
+        },
+        limit,
+    )?;
     Ok(true)
 }
 
@@ -702,7 +801,7 @@ impl PageSession {
                 .borrow_mut()
                 .borrow_mut::<Queue>()
                 .0
-                .take();
+                .pop_front();
             let Some(pending) = pending else {
                 return Ok(());
             };
@@ -802,13 +901,14 @@ impl PageSession {
                 .engine_init_script
                 .clone();
             let network = self.network_event_log();
-            network.push(serde_json::json!({"kind":"navigation","initiator":"form","url":pending.plan.url,"final_url":response.final_url,"status":response.status,"method":pending.plan.method,"response_received":true}));
+            network.push(serde_json::json!({"kind":"navigation","initiator":"form","sourceTarget":pending.initiator,"url":pending.plan.url,"final_url":response.final_url,"status":response.status,"method":pending.plan.method,"response_received":true}));
             let (auxiliary, legacy_frame_bootstrap) = {
                 let state = self.rt.op_state();
                 let state = state.borrow();
                 let pages = state.borrow::<auxiliary_pages::Pages>();
                 (
                     AuxiliaryHostServices {
+                        initial_images: Default::default(),
                         bootstrap: pages.bootstrap.clone(),
                         root_bootstrap: pages.root_bootstrap.clone(),
                         root_history: None,
@@ -1053,4 +1153,87 @@ fn submission_form_data<'s>(
         "createSubmissionFormData",
         &[entries, charset, encoding],
     )
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    fn pending(initiator: u64, target: u64, url: &str) -> Pending {
+        Pending {
+            initiator: Some(initiator),
+            target: Some(target),
+            activity: None,
+            plan: form_navigation::Submission {
+                url: url.into(),
+                method: "POST".into(),
+                headers: Default::default(),
+                body: Some(b"q=rust".to_vec()),
+            },
+            source: "https://example.test/".into(),
+            user_activation: false,
+            policy: Default::default(),
+            referrer_policy: Default::default(),
+        }
+    }
+
+    #[test]
+    fn admission_replaces_only_the_actual_destination_and_keeps_other_pages() {
+        let mut queue = Queue::default();
+        queue.admit(pending(1, 1, "/old"), 2).unwrap();
+        queue.admit(pending(2, 2, "/sibling"), 2).unwrap();
+        queue.admit(pending(3, 1, "/named-replacement"), 2).unwrap();
+        assert_eq!(queue.0.len(), 2);
+        assert_eq!(queue.0[0].plan.url, "/sibling");
+        assert_eq!(queue.0[1].plan.url, "/named-replacement");
+        assert_eq!(queue.0[1].initiator, Some(3));
+        assert_eq!(queue.0[1].target, Some(1));
+    }
+
+    #[test]
+    fn background_admission_preserves_non_page_forms_and_other_request_bodies() {
+        let mut queue = Queue::default();
+        let mut legacy = pending(1, 1, "/legacy");
+        legacy.target = None;
+        queue.admit(legacy, 2).unwrap();
+        queue.admit(pending(2, 2, "/native"), 2).unwrap();
+        let (target, form) = queue.take_native().unwrap();
+        assert_eq!(target, 2);
+        assert_eq!(form.plan.url, "/native");
+        assert_eq!(form.plan.body.as_deref(), Some(b"q=rust".as_slice()));
+        assert!(queue.take_native().is_none());
+        assert_eq!(queue.0.len(), 1);
+        assert_eq!(queue.0[0].plan.url, "/legacy");
+        assert_eq!(queue.0[0].plan.body.as_deref(), Some(b"q=rust".as_slice()));
+    }
+
+    #[test]
+    fn queue_limit_rejection_preserves_accepted_form_body_and_owner() {
+        let mut queue = Queue::default();
+        queue.admit(pending(1, 1, "/accepted"), 1).unwrap();
+        assert!(queue.admit(pending(2, 2, "/rejected"), 1).is_err());
+        assert_eq!(queue.0.len(), 1);
+        assert_eq!(queue.0[0].plan.url, "/accepted");
+        assert_eq!(queue.0[0].initiator, Some(1));
+        assert_eq!(queue.0[0].plan.body.as_deref(), Some(b"q=rust".as_slice()));
+    }
+    #[test]
+    fn capacity_preflight_preserves_an_accepted_native_navigation_token() {
+        let network = NetworkLog::default();
+        let mut queue = Queue::default();
+        let mut accepted = pending(1, 1, "/accepted");
+        accepted.activity = Some(network.begin_page_navigation("1"));
+        queue.admit(accepted, 1).unwrap();
+        let before = network.target_network_state("1");
+        assert!(queue.check_admission(Some(2), 1).is_err());
+        assert_eq!(network.target_network_state("1"), before);
+        assert_eq!(queue.0.len(), 1);
+        assert_eq!(
+            queue.0[0].activity.as_ref().unwrap().navigation_revision(),
+            Some(1)
+        );
+        assert_eq!(queue.0[0].plan.body.as_deref(), Some(b"q=rust".as_slice()));
+        assert_eq!(queue.0[0].initiator, Some(1));
+        assert_eq!(queue.0[0].target, Some(1));
+    }
 }

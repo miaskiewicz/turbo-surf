@@ -17,6 +17,7 @@ export function fetchBytes(
   requestStateId?: number,
   sourceUrl?: string,
   cookies?: string,
+  imageDocument?: number,
 ): Promise<Buffer>;
 /** Create/close origin-scoped client-hint state shared by a browsing context. */
 /** Derive a tab sharing a parent's local storage, HTTP cache and client hints. */
@@ -24,6 +25,9 @@ export function requestStateNew(parentContextId?: number): number;
 export function requestStateNewApi(parentContextId?: number): number;
 export function requestStateSetOffline(id: number, offline: boolean): void;
 export function requestStateClose(id: number): void;
+/** Native one-shot image handoff for the same static document. */
+export function requestStateImageDocument(id: number, source: string): number;
+export function requestStateDiscardImageDocument(id: number, token: number): void;
 /** Replace host-owned per-tab browser emulation options. */
 export function requestStateConfigure(id: number, optionsJson: string): void;
 export function requestStateImportStorage(id: number, originsJson: string): void;
@@ -70,11 +74,14 @@ export function liveOpen(
   maxResourceBytes?: number,
   engineInitScript?: string,
   realTimeTimers?: boolean,
+  imageDocument?: number,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
 /** Private-namespace driver eval; collect polls one ready turn without resuming hydration. */
 export function liveEvalEngine(id: number, script: string, collect?: boolean): Promise<string>;
+/** Trusted interaction; await only navigation admitted by the addressed native target. */
+export function liveDispatchEngine(id: number, script: string, navigationBaseline?: string): Promise<string>;
 /** Bounded synchronous engine query; JSON-encode its return without draining the event loop. */
 export function liveReadEngine(id: number, script: string): string;
 /** Same non-pumping query, yielding Node while the native actor is busy. */

@@ -9,7 +9,11 @@ struct BackgroundTurn {
 }
 
 pub(super) fn ready_tasks(rt: &mut JsRuntime) -> Result<bool, String> {
-    if native_history::run_task(rt)? {
+    ready_tasks_for(rt, None)
+}
+
+pub(super) fn ready_tasks_for(rt: &mut JsRuntime, owner: Option<u64>) -> Result<bool, String> {
+    if native_history::run_task_for(rt, owner)? {
         return Ok(true);
     }
     #[cfg(turbo_surf_native_proxy)]
@@ -95,6 +99,7 @@ impl PageSession {
         if self.closed {
             return Err("Page session is closed".into());
         }
+        self.admit_actor_form_navigations()?;
         if self.has_pending_auxiliary_work() {
             return self
                 .service_auxiliary_navigation()

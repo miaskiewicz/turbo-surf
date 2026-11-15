@@ -293,6 +293,8 @@ pub struct AuxiliaryDriverHistory {
 
 #[derive(Clone, Default)]
 pub struct AuxiliaryHostServices {
+    /// Completed assets of this same initial document; never inherited by navigation.
+    pub initial_images: InitialDocumentImages,
     pub bootstrap: AuxiliaryBootstrap,
     pub root_bootstrap: AuxiliaryBootstrap,
     pub root_history: Option<AuxiliaryDriverHistory>,
@@ -628,6 +630,32 @@ pub(super) fn next_navigation(state: &mut OpState) -> Option<Navigation> {
     state.borrow_mut::<Pages>().pending.pop_front()
 }
 
+pub(super) fn next_navigation_for_since(
+    state: &mut OpState,
+    target: u64,
+    baseline: u64,
+) -> Option<Navigation> {
+    let pages = state.borrow_mut::<Pages>();
+    let index = pages.pending.iter().position(|navigation| {
+        navigation.target.0 == target
+            && navigation
+                .activity
+                .as_ref()
+                .and_then(|activity| activity.navigation_revision())
+                .is_some_and(|revision| revision > baseline)
+    })?;
+    pages.pending.remove(index)
+}
+
+pub(super) fn next_navigation_for(state: &mut OpState, target: u64) -> Option<Navigation> {
+    let pages = state.borrow_mut::<Pages>();
+    let index = pages
+        .pending
+        .iter()
+        .position(|navigation| navigation.target.0 == target)?;
+    pages.pending.remove(index)
+}
+
 pub(super) fn committed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
@@ -700,6 +728,7 @@ pub(super) fn close<'s>(
     }
     auxiliary_navigation::cancel(&mut state, identity.id.0);
     native_history::close(&mut state, identity.id.0);
+    form_submission::cancel_target(&mut state, identity.id.0);
     true
 }
 
@@ -739,6 +768,7 @@ pub(super) fn retire_owned_resources<'s>(
     storage_events::retire(context);
     auxiliary_storage::retire(context);
     resident_image_assets::retire(context);
+    initial_document_images::retire(scope, context);
     context.set_slot(Rc::new(FrameRetired));
     retire_module_context(scope, context);
 }

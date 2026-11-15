@@ -1164,7 +1164,7 @@ fn execute_task(rt: &mut JsRuntime, task: &HistoryTask) -> Result<Option<u32>, S
         .filter(|id| *id > 0))
 }
 
-fn run_task_for(rt: &mut JsRuntime, target: Option<u64>) -> Result<bool, String> {
+pub(super) fn run_task_for(rt: &mut JsRuntime, target: Option<u64>) -> Result<bool, String> {
     let task = {
         let shared = rt.op_state();
         let mut state = shared.borrow_mut();

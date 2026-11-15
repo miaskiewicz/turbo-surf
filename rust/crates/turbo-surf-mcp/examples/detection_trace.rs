@@ -15,7 +15,31 @@ use turbo_surf_render::{
     NavigationActivationSnapshot, PageSession, PageSessionOptions, WindowTimerMode,
 };
 
-// Host sleeps give delayed HTTP futures a turn without advancing future window timers.
+#[derive(Clone, Copy)]
+struct NavigationCounters {
+    commits: u64,
+    forms: u64,
+}
+impl NavigationCounters {
+    fn read(page: &PageSession) -> Self {
+        Self {
+            commits: page.navigation_snapshot().0,
+            forms: page.form_navigation_count(),
+        }
+    }
+    fn source(self, before: Self, steps_empty: bool) -> Option<&'static str> {
+        let committed = self.commits > before.commits || (steps_empty && self.commits > 0);
+        committed.then_some(
+            if self.forms > before.forms || (steps_empty && self.forms > 0) {
+                "native-form"
+            } else {
+                "script"
+            },
+        )
+    }
+}
+
+// Host progress gives delayed native tasks a turn without advancing future window timers.
 async fn wait_until(page: &mut PageSession, deadline: Instant) -> Result<(), String> {
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         // A scalar evaluation cannot advance the actor's queued document loads.
@@ -535,7 +559,7 @@ fn timed_out(trace: &mut Value) -> Option<PageSession> {
 fn choose_target(
     trace: &Value,
     installed_url: &str,
-    native_form: bool,
+    native_source: Option<&'static str>,
     steps_empty: bool,
     fallback: &Value,
 ) -> (String, &'static str) {
@@ -545,14 +569,12 @@ fn choose_target(
         .and_then(|p| p["nav"].as_str())
         .unwrap_or(installed_url)
         .to_string();
-    let mut nav_source = if native_form {
-        "native-form"
-    } else if target != installed_url {
+    let mut nav_source = native_source.unwrap_or(if target != installed_url {
         "script"
     } else {
         "none"
-    };
-    if !native_form && !steps_empty && target == installed_url {
+    });
+    if native_source.is_none() && !steps_empty && target == installed_url {
         if let Some(u) = fallback.as_str().filter(|u| *u != installed_url) {
             target = u.into();
             nav_source = "form-fallback";
@@ -732,7 +754,7 @@ impl Capture<'_> {
         self.home_readiness(&mut page, trace).await?;
         self.home_dwell(&mut page, trace).await?;
         self.dismiss(&mut page, trace).await?;
-        let native_before_input = page.navigation_snapshot().0;
+        let native_before_input = NavigationCounters::read(&page);
         let steps = self.config["steps"]
             .as_array()
             .ok_or("steps array required")?;
@@ -827,7 +849,7 @@ impl Capture<'_> {
         &self,
         mut page: PageSession,
         window: ObservationWindow,
-        native_before_input: u64,
+        native_before_input: NavigationCounters,
         trace: &mut Value,
     ) -> Result<(), BoxError> {
         let observed = self
@@ -850,12 +872,15 @@ impl Capture<'_> {
         &self,
         page: &mut PageSession,
         window: &ObservationWindow,
-        native_before_input: u64,
+        native_before_input: NavigationCounters,
         trace: &mut Value,
     ) -> Result<(), BoxError> {
-        let native_form = page.navigation_snapshot().0 > native_before_input;
+        let counters = NavigationCounters::read(page);
+        let native_source = counters.source(native_before_input, false);
+        let native_form = native_source == Some("native-form");
+        trace["nativeNavigation"] = json!({"beforeCommits":native_before_input.commits,"beforeForms":native_before_input.forms,"commits":counters.commits,"forms":counters.forms});
         trace["inputSource"] = json!("native-host");
-        trace["navigationSource"] = json!(if native_form { "native-form" } else { "none" });
+        trace["navigationSource"] = json!(native_source.unwrap_or("none"));
         trace["formFallback"] = Value::Null;
         self.follow_observed_hops(page, window, native_form, trace)
             .await?;
@@ -1002,24 +1027,33 @@ impl Capture<'_> {
         &self,
         mut page: PageSession,
         steps_empty: bool,
-        native_before_input: u64,
+        native_before_input: NavigationCounters,
         trace: &mut Value,
     ) -> Result<(), BoxError> {
         self.search_dwell(&mut page, steps_empty, trace).await?;
-        let (native_after_input, installed_url, _) = page.navigation_snapshot();
-        let native_form =
-            native_after_input > native_before_input || (steps_empty && native_after_input > 0);
-        if native_form && !self.native_final(&mut page, &installed_url, trace).await? {
-            return self.finish_native(page, trace).await;
-        }
+        let (_, installed_url, _) = page.navigation_snapshot();
+        let counters = NavigationCounters::read(&page);
+        let native_source = counters.source(native_before_input, steps_empty);
+        let native_form = native_source == Some("native-form");
+        trace["nativeNavigation"] = json!({"beforeCommits":native_before_input.commits,"beforeForms":native_before_input.forms,"commits":counters.commits,"forms":counters.forms});
         if !native_form && require_native_form(self.config) {
             return Err(NATIVE_FORM_REQUIRED.into());
         }
+        if let Some(source) = native_source {
+            if !self
+                .native_final(&mut page, &installed_url, source, trace)
+                .await?
+            {
+                return self.finish_native(page, trace).await;
+            }
+        }
         // Follow the actual JS navigation; if the DOM's Enter default is absent, record the
         // serialized GET form fallback separately rather than claiming the JS navigated.
-        let fallback = self.form_fallback(&mut page, native_form).await?;
+        let fallback = self
+            .form_fallback(&mut page, native_source.is_some())
+            .await?;
         let (target, nav_source) =
-            choose_target(trace, &installed_url, native_form, steps_empty, &fallback);
+            choose_target(trace, &installed_url, native_source, steps_empty, &fallback);
         trace["inputSource"] = json!("native-host");
         trace["navigationSource"] = json!(nav_source);
         trace["formFallback"] = fallback;
@@ -1059,16 +1093,17 @@ impl Capture<'_> {
         Ok(())
     }
 
-    /// Snapshot a committed native form navigation; true when a script navigation
+    /// Snapshot a committed native navigation; true when a script navigation
     /// is still pending on it.
     async fn native_final(
         &self,
         page: &mut PageSession,
         installed_url: &str,
+        source: &'static str,
         trace: &mut Value,
     ) -> Result<bool, BoxError> {
         trace["inputSource"] = json!("native-host");
-        trace["navigationSource"] = json!("native-form");
+        trace["navigationSource"] = json!(source);
         trace["formFallback"] = Value::Null;
         let row = snapshot(page, self.out, "native-final", self.config).await?;
         let pending_script_navigation = row["nav"]

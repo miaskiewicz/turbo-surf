@@ -183,6 +183,7 @@ struct Job {
     future: FetchFuture,
     history: HistoryMode,
     driver_navigation: bool,
+    form_action: bool,
 }
 
 pub(super) struct CommitHistory {
@@ -231,6 +232,7 @@ enum ActionTerminalError {
 pub(super) struct State {
     sequence: u64,
     root_commits: u64,
+    root_form_commits: u64,
     action_commits: BTreeMap<u64, (u64, Result<(), ActionTerminalError>)>,
     jobs: BTreeMap<u64, Job>,
     loading: BTreeMap<u64, Loading>,
@@ -244,7 +246,18 @@ pub(super) fn root_commits(state: &OpState) -> u64 {
         .map_or(0, |state| state.root_commits)
 }
 
-fn adopt_root_response(rt: &mut JsRuntime, target: u64, fetched: &Fetched) -> Result<(), String> {
+pub(super) fn root_form_commits(state: &OpState) -> u64 {
+    state
+        .try_borrow::<State>()
+        .map_or(0, |state| state.root_form_commits)
+}
+
+fn adopt_root_response(
+    rt: &mut JsRuntime,
+    target: u64,
+    fetched: &Fetched,
+    form: bool,
+) -> Result<(), String> {
     let shared = rt.op_state();
     let mut shared = shared.borrow_mut();
     let root = shared.borrow::<auxiliary_pages::Pages>().events.root();
@@ -252,11 +265,17 @@ fn adopt_root_response(rt: &mut JsRuntime, target: u64, fetched: &Fetched) -> Re
     if root.as_deref() != Some(target.as_str()) {
         return Ok(());
     }
-    let count = state(&mut shared)
+    let current = state(&mut shared);
+    let count = current
         .root_commits
         .checked_add(1)
         .ok_or("Native navigation counter exhausted")?;
-    state(&mut shared).root_commits = count;
+    let forms = current
+        .root_form_commits
+        .checked_add(u64::from(form))
+        .ok_or("Native form navigation counter exhausted")?;
+    current.root_commits = count;
+    current.root_form_commits = forms;
     shared
         .borrow_mut::<Base>()
         .0
@@ -466,6 +485,7 @@ fn start(
     });
     cancel(&mut shared, target.0);
     let driver_navigation = navigation.snapshot.request.driver_navigation;
+    let form_action = navigation.snapshot.request.form_action;
     let future = fetch_job(&shared, navigation, frame, budget_ms);
     let state = self::state(&mut shared);
     state.sequence = state
@@ -481,6 +501,7 @@ fn start(
             future,
             history: mode,
             driver_navigation,
+            form_action,
         },
     );
     Ok(generation)
@@ -711,7 +732,7 @@ fn commit_fetched(
         navigation_deadline::capture_source_lease(scope, current, target, job.generation)?;
         installed
     };
-    adopt_root_response(rt, target, &fetched)?;
+    adopt_root_response(rt, target, &fetched, job.form_action)?;
     setup.finish()?;
     navigation_deadline::run_deferred_frames(rt)?;
     {

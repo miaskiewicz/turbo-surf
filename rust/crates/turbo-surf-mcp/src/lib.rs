@@ -4511,7 +4511,7 @@ mod tests {
                         ),
                         _ => ("", "", "<input name=q value=unexpected>"),
                     };
-                    let html = format!("<body><form action=/action method=post {attributes}>{control}<button type=submit>Go</button></form></body>");
+                    let html = format!("<title>{path}</title><body><form action=/action method=post {attributes}>{control}<button type=submit>Go</button></form></body>");
                     let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{html}", html.len());
                     socket.write_all(response.as_bytes()).await.unwrap();
                 });
@@ -4542,7 +4542,8 @@ mod tests {
             "canceled, invalid and policy-blocked submissions must issue no action request"
         );
         let mut session = Session::new();
-        session.goto(&format!("{origin}/javascript")).await.unwrap();
+        let source = format!("{origin}/javascript");
+        session.goto(&source).await.unwrap();
         let result = call_tool(
             &mut session,
             "human_interact",
@@ -4557,7 +4558,18 @@ mod tests {
             "explicit JavaScript location navigation remains supported: {result}"
         );
         assert_eq!(session.url, format!("{origin}/client-target"));
-        assert_eq!(session.last_render_navigation_count, 0);
+        assert_eq!(
+            session.last_render_navigation_count, 1,
+            "the explicit Location must commit once natively without submitting the canceled form"
+        );
+        assert_eq!(
+            session.requests,
+            vec![source.clone(), format!("{origin}/client-target")],
+            "the installed native Location response is recorded exactly once"
+        );
+        assert_eq!(session.back, vec![source]);
+        assert_eq!(session.response_metadata.status, 200);
+        assert_eq!(title_of(session.tree.as_ref().unwrap()), "/client-target");
         assert_eq!(
             *requests.lock().unwrap(),
             vec![

@@ -20041,6 +20041,13 @@ impl PageSession {
         )
     }
 
+    /// Installed native root responses whose actual admitted request was a form submission.
+    pub fn form_navigation_count(&self) -> u64 {
+        let state = self.rt.op_state();
+        let forms = auxiliary_navigation::root_form_commits(&state.borrow());
+        self.navigation_count + forms
+    }
+
     /// Activation is captured when a script navigation is admitted, before timers run.
     pub fn script_nav_activation_snapshot(&mut self) -> Option<(String, bool)> {
         let _activation = self.rt.activation_key().enter();

@@ -425,6 +425,7 @@ fn cloned_draft<'s>(
             scope,
             payload,
             prep.available,
+            "",
         )?)
     };
     let bytes = snapshot.size_bytes();
@@ -651,7 +652,13 @@ fn storage_clone<'s>(
     document: v8::Local<'s, v8::Object>,
     value: v8::Local<'s, v8::Value>,
     kind: &str,
+    operation: &str,
 ) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    let prefix = match operation {
+        "pushState" => "Failed to execute 'pushState' on 'History': ",
+        "replaceState" => "Failed to execute 'replaceState' on 'History': ",
+        _ => return Err(failure("Unsupported native History method")),
+    };
     let before = owner(scope, document)?;
     let change = if kind == "replace" {
         Change::Replace
@@ -659,7 +666,7 @@ fn storage_clone<'s>(
         Change::Push
     };
     let limit = limits(&JsRuntime::op_state_from(scope).borrow()).state_bytes;
-    let snapshot = crate::crypto_clone::serialize_history_state(scope, value, limit)?;
+    let snapshot = crate::crypto_clone::serialize_history_state(scope, value, limit, prefix)?;
     let value = crate::crypto_clone::deserialize(scope, &snapshot)?;
     if let Some(before) = before {
         let after = owner(scope, document)?
@@ -671,7 +678,7 @@ fn storage_clone<'s>(
         if snapshot.size_bytes() > fresh.available {
             return Err(JsErrorBox::new(
                 "DOMExceptionDataCloneError",
-                "Actor session history state storage budget exceeded",
+                format!("{prefix}Actor session history state storage budget exceeded"),
             ));
         }
     }
@@ -684,13 +691,14 @@ pub(super) fn op_history_clone<'s>(
     document: v8::Local<'s, v8::Object>,
     value: v8::Local<'s, v8::Value>,
     #[string] kind: &str,
+    #[string] operation: &str,
 ) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
     let context = document
         .get_creation_context(scope)
         .ok_or_else(|| failure("Native history clone document realm unavailable"))?;
     let scope = &mut v8::ContextScope::new(scope, context);
     v8::tc_scope!(let scope, scope);
-    let result = storage_clone(scope, document, value, kind);
+    let result = storage_clone(scope, document, value, kind, operation);
     if scope.has_caught() || scope.has_terminated() {
         scope.rethrow();
         return Ok(v8::undefined(scope).into());

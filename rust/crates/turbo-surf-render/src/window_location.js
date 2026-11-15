@@ -647,7 +647,7 @@
     if (hasURL) address = string(address);
     const initialEmpty = initialEmptyHistory();
     const kind = operation === "pushState" && !initialEmpty ? "push" : "replace";
-    const serialized = nativeCall(ops.op_history_clone, [__document, data, kind]);
+    const serialized = nativeCall(ops.op_history_clone, [__document, data, kind, operation]);
     const nextState = deserialize(serialized);
     let target = url();
     if (hasURL) {

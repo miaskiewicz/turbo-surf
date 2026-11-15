@@ -1063,13 +1063,14 @@ pub(crate) fn serialize_history_state<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     value: v8::Local<'s, v8::Value>,
     limit: usize,
+    prefix: &str,
 ) -> Result<CloneSnapshot, JsErrorBox> {
     let snapshot =
-        prepare_transfer_with_mode(scope, value, None, None, false, true, "")?.commit(scope)?;
+        prepare_transfer_with_mode(scope, value, None, None, false, true, prefix)?.commit(scope)?;
     if snapshot.size_bytes() > limit {
         return Err(JsErrorBox::new(
             "DOMExceptionDataCloneError",
-            "Session history state storage budget exceeded",
+            format!("{prefix}Session history state storage budget exceeded"),
         ));
     }
     Ok(snapshot)

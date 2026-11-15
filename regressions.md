@@ -104,6 +104,9 @@ The frozen `f1b4d10e` discovery run recorded **78 Rust assertion failures**, **1
 - [x] **Font registry ownership and initialization** — merged `24baa970`. Every actual window starts with the same cached font policy; attaching or removing web fonts updates only its authenticated document registry. Independent canvas 2 and font-face 2 controls pass, including the unchanged 428-metric oracle and peer-detach stability.
 - [x] **Transferred-stream completion observation** — merged `fa38e0e7`. The private native observer handles infrastructure promises without invoking guest Promise hooks. All eight original stream controls and the corrected transfer-phase/brand/poison control pass. Font/stream strict, hooks and fresh native Rlib/test provenance pass.
 - [x] **Native window names** — merged `39f4e46e` through `c4043f0d`. Captured authentic native name access preserves the original three Chrome controls plus the poisoned-getter/rename/removal control. Independent 4/4, strict, hooks and fresh native artifacts pass; no cross-origin authority or producer-private access was added.
+- [x] **Storage error ownership and quota atomicity** — merged `fc395053`. Reserved native replies produce method-realm TypeError or QuotaExceededError without exposing infrastructure exceptions. Original brand, borrowed-method, foreign-interface and Chrome quota controls pass independently.
+- [x] **WebSocket binary ownership** — merged `c38209d8` through `aa10a887`. Captured socket-realm typed arrays copy the exact native byte view for WebSocket and WebSocketStream; original transport/CSP/nonblocking and new root/child buffer/event checks pass. Combined Storage/WebSocket 8/8, strict, hooks and fresh native artifacts pass.
+- [x] **Dictionary document dispatch** — merged `28f3e069` through `317693aa`. Authenticated document access and the existing complete window-context inventory service actual root/auxiliary queues. Independent original 4/4, including the 34-case oracle and 300-link completion, pass without the async proposal. Strict and native library/dispatcher assembly provenance pass. Earlier mislabeled quiet artifacts contained old code and remain explicitly invalid candidate proofs.
 - [ ] **Remaining full-suite failures and crash outcomes** — expanded replay executed all 48 selected binaries: **752 passed, 12 failed, 4 ignored, zero crashes**. All original failures and all 13 formerly unreported crash cases have matched outcomes: original 78 → 72 pass / 6 fail; crash 13 → 11 pass / 2 assertion failures. Four additional controls fail. No required case was unmatched. The later focused Escape fix is recorded above. The legacy root-eval held-peer timeout and sticky-activation carry remain open. IDB has 10 of 11 controls plus the role/crypto control passing; its new peer-continuation control still fails. JavaScript replay matched all 207 original failures: **205 pass / 2 fail**; its broader 465 cases yielded 461 pass / 3 fail / 1 intentional skip. Final combined gates remain pending.
 
 ## Completion gates
@@ -141,7 +144,7 @@ Additional discovered blockers remain in scope until integrated proof:
 - [ ] Sticky activation across same-origin navigation, initialization, cross-origin and sandbox controls.
 - [ ] Child fragment clearing preserves the authored trailing hash; HTTP and srcdoc controls.
 - [x] String timer ownership and code-generation admission: `a893e18b` integrated with original three controls and exact nesting fixture green.
-- [ ] Dictionary admission/enumeration and link-load completion (two original failures).
+- [x] Dictionary admission/enumeration and link-load completion: independent `28f3e069` integrated with both original failures and positive controls green.
 - [x] Font registry initialization and peer-detach stability: `24baa970` integrated with independent original and ownership controls green.
 - [x] Observable host-error unknown-column overflow and safe realm attribution: `29dc4233` integrated with independent three-control proof.
 - [x] Stream sampling at the correct phase, guest brands and poisoned-hook isolation: `fa38e0e7` integrated with independent 9/9 proof.
@@ -149,8 +152,8 @@ Additional discovered blockers remain in scope until integrated proof:
 - [ ] History budget control uses supported push operation while retaining budget and atomicity assertions.
 - [ ] MCP form admission assertion and detection form-commit attribution.
 - [x] Screenshot 61st-image fallback: independent 4/4 proof and test-only `6fdb37f8` are integrated; final combined rerun remains required.
-- [x] Independent navigation deadline/host ownership guards: `50c7f331` is integrated with independent 202-case proof; issue #326 closure still awaits its separate popup/load checks.
-- [ ] Storage receiver/quota ownership, WebSocket buffer ownership and window-name isolation controls.
+- [x] Independent navigation deadline/host ownership guards: `50c7f331` is integrated with independent 202-case proof; separate popup/load contracts also pass 20/20. GitHub issue closure is audited separately.
+- [x] Storage receiver/quota ownership, WebSocket buffer ownership and window-name isolation controls: `fc395053`, `c38209d8` and `39f4e46e` integrated with independent focused proofs.
 
 Ignored/skipped audit obligations: native CSP three controls and native layout one control are enabled and component-green; IDB ignore must be resolved with the dependency controls. Keep the existing external TLS probe explicitly classified as live/manual. Audit the six generated documentation examples separately. Run the 12 eligible Chrome/Patchright oracle cases with dependencies enabled; retain only the three intentional runner-semantics skips, whose bodies are designed not to execute. No failure may be reclassified as skipped to pass a gate.
 

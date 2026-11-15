@@ -66,7 +66,7 @@ fn limits(state: &OpState) -> Limits {
     let policy = state.borrow::<auxiliary_pages::Pages>().policy;
     Limits {
         entries: policy.max_history_entries,
-        url_bytes: policy.max_navigation_url_bytes,
+        url_bytes: policy.max_history_url_bytes,
         state_bytes: policy.max_history_state_bytes,
     }
 }
@@ -933,9 +933,13 @@ pub(super) fn admit_navigation(
     state: &OpState,
     target: u64,
     mode: auxiliary_navigation::HistoryMode,
+    url: &str,
 ) -> Result<auxiliary_navigation::HistoryMode, String> {
     use auxiliary_navigation::HistoryMode;
     let policy = limits(state);
+    if url.len() > policy.url_bytes {
+        return Err("Native session history URL budget exceeded".into());
+    }
     let history = state
         .try_borrow::<Histories>()
         .and_then(|histories| histories.targets.get(&target))

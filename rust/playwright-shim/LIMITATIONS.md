@@ -355,3 +355,8 @@ observe configured position changes, not a physical device, and stop on
 permission denial, explicit cancellation or document retirement.
 
 Native document-group history stores structured-clone state and supports driver traversal and guest `history.back()`, `history.forward()`, and `history.go()` across documents. The Navigation API supports entry inspection and traversal within the current document group. Cross-document `navigation.back()` and `navigation.forward()` reject both result promises with `NotSupportedError`; use History or driver traversal for that boundary. This does not provide full Navigation API parity.
+
+Native auxiliary resource policy separates `maxNavigationUrlBytes` (guest network
+navigation admission) from `maxHistoryUrlBytes` (retained history URL metadata,
+16 KiB by default). Initial host documents, same-document state mutations and
+cross-document history commits remain subject to the history metadata bound.

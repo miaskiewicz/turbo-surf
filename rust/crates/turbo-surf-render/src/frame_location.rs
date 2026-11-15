@@ -91,20 +91,22 @@ fn queue_auxiliary_navigation<'s>(
         return false;
     }
     use turbo_dom_browser_env::host_internals::auxiliary_context_identity;
-    let (Some(target), Some(source_id)) = (
+    let (Some(identity), Some(source_id)) = (
         auxiliary_context_identity(target),
         auxiliary_context_identity(source),
     ) else {
         return false;
     };
-    auxiliary_pages::queue_navigation(
+    if auxiliary_pages::queue_navigation(
         scope,
-        target.id,
+        identity.id,
         source_id.id,
         source,
         url.to_string(),
         replace,
-    );
+    ) {
+        script_navigation::record(source, target, url.to_string());
+    }
     true
 }
 

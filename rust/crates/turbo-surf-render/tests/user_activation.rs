@@ -87,3 +87,77 @@ async fn public_activation_has_chrome_brands_and_native_context_state() {
     fresh.close();
     page.close();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn trusted_input_activates_its_native_document_tree_without_activating_a_peer_page() {
+    let mut page = PageSession::open(
+        "<button id=activate>activate</button><iframe id=child srcdoc='<p>child</p>'></iframe>",
+        "https://activation.test/start",
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
+    page.eval_expression("globalThis.peer=window.open('', 'activation-peer');void 0")
+        .await
+        .unwrap();
+    const STATES: &str = "[window,document.getElementById('child').contentWindow,peer].map(w=>[w.navigator.userActivation.isActive,w.navigator.userActivation.hasBeenActive])";
+    assert_eq!(
+        read(&mut page, STATES).await,
+        json!([[false, false], [false, false], [false, false]])
+    );
+    page.eval_expression("document.getElementById('activate').click();void 0")
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&mut page, STATES).await,
+        json!([[false, false], [false, false], [false, false]])
+    );
+    page.input(&json!([{"click":"#activate"}])).await.unwrap();
+    assert_eq!(
+        read(&mut page, STATES).await,
+        json!([[true, true], [true, true], [false, false]])
+    );
+    let snapshot = page.navigation_activation_snapshot();
+    let mut next = PageSession::open_with_document_response_and_activation(
+        "<body>next",
+        "https://activation.test/next",
+        "",
+        "",
+        60_000,
+        "",
+        Default::default(),
+        &[],
+        BrowserStorage::default(),
+        DocumentResponseMetadata::default(),
+        Some(snapshot),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        read(&mut next, READ).await,
+        json!({"isActive":false,"hasBeenActive":true})
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn trusted_escape_closes_the_actual_input_document_dialog() {
+    let mut page = PageSession::open(
+        "<dialog id=box><button>inside</button></dialog><script>globalThis.closeEvents=0;globalThis.cancelEvents=0;const dialog=document.getElementById('box');dialog.addEventListener('close',()=>closeEvents++);dialog.addEventListener('cancel',()=>cancelEvents++);dialog.showModal();</script>",
+        "https://activation.test/dialog", "", "", 60_000,
+    ).await.unwrap();
+    assert_eq!(
+        read(&mut page, "document.getElementById('box').open").await,
+        json!(true)
+    );
+    page.input(&json!([{"press":"Escape"}])).await.unwrap();
+    assert_eq!(
+        read(
+            &mut page,
+            "[document.getElementById('box').open,cancelEvents,closeEvents]"
+        )
+        .await,
+        json!([false, 1, 1])
+    );
+}

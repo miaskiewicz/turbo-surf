@@ -120,15 +120,33 @@ fn active_document<'s>(
     context.get_slot::<ActiveDocument>()?.0.to_local(scope)
 }
 
-/// https://html.spec.whatwg.org/#activation-notification for trusted host input.
-#[op2(nofast, reentrant)]
-pub(super) fn op_host_user_activation(scope: &mut v8::PinScope) {
-    let context = scope.get_current_context();
+fn input_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Context>> {
+    let context = document.get_creation_context(scope)?;
     if context.get_slot::<HostInputDriver>().is_none()
         || context.get_slot::<FrameRetired>().is_some()
+        || context
+            .get_slot::<private_boundary::Infrastructure>()
+            .is_some()
     {
-        return;
+        return None;
     }
+    let active = active_document(scope, context)?;
+    active.strict_equals(document.into()).then_some(context)
+}
+
+/// https://html.spec.whatwg.org/#activation-notification for trusted host input.
+#[op2(nofast, reentrant)]
+pub(super) fn op_host_user_activation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) {
+    let Some(context) = input_document_context(scope, document) else {
+        return;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     let stamp = NEXT_STAMP.with(|next| {
         let stamp = next.get();
         next.set(stamp + 1);

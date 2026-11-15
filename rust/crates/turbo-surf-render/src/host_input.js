@@ -30,7 +30,8 @@
   const parentOf = Object.getOwnPropertyDescriptor(Node.prototype, "parentNode").get;
   const nodeTypeOf = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
   const shadowHost = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, "host").get;
-  const activate = ops.op_host_user_activation;
+  const notifyActivation = ops.op_host_user_activation;
+  const activate = () => notifyActivation(document);
   const closeRequest = ops.op_host_close_request,
     lightDismiss = ops.op_host_light_dismiss,
     backdropOf = ops.op_host_modal_backdrop,

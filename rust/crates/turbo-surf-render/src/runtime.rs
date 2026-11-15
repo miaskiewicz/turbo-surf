@@ -5079,15 +5079,7 @@ fn run_window_timers(rt: &mut JsRuntime, max: u32) -> Result<u32, String> {
 }
 
 fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
-    let mut contexts = vec![rt.main_context()];
-    contexts.extend(
-        rt.op_state()
-            .borrow()
-            .borrow::<FrameContexts>()
-            .contexts
-            .iter()
-            .cloned(),
-    );
+    let contexts = window_timer_contexts(rt);
     run_background_resource_task_in(rt, contexts)
 }
 

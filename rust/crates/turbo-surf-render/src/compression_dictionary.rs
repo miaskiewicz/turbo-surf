@@ -1,5 +1,5 @@
 //! Native discovery of compression dictionaries advertised by document responses.
-use super::{op2, v8, Base, CspHandle, FrameDocumentUrl, FrameRetired, JsRuntime};
+use super::{op2, v8, ActiveDocument, Base, CspHandle, FrameDocumentUrl, FrameRetired, JsRuntime};
 use url::Url;
 
 #[derive(Default)]
@@ -27,14 +27,37 @@ fn context<'s>(
         return None;
     }
     let context = document.get_creation_context(scope)?;
-    if context.get_slot::<FrameRetired>().is_some() {
+    let active = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|active| active.0.to_local(scope))
+        .is_some_and(|active| active.strict_equals(document.into()));
+    if !active || context.get_slot::<FrameRetired>().is_some() {
         return None;
     }
     let caller = scope.get_entered_or_microtask_context();
-    caller
+    if caller
         .get_security_token(scope)
         .strict_equals(context.get_security_token(scope))
-        .then_some(context)
+    {
+        return Some(context);
+    }
+    // Deno invokes captured native ops in the private infrastructure realm.
+    // Only that native-marked caller may cross the document's origin boundary,
+    // and the existing platform check still requires the same runtime actor.
+    let current = scope.get_current_context();
+    if caller != current
+        || caller
+            .get_slot::<super::private_boundary::Infrastructure>()
+            .is_none()
+        || current
+            .get_slot::<super::private_boundary::Infrastructure>()
+            .is_none()
+    {
+        return None;
+    }
+    super::platform_object_context(scope, document)
+        .ok()
+        .filter(|owner| *owner == context)
 }
 
 #[op2]

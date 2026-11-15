@@ -79,19 +79,27 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 - [x] **Frame Enter after top navigation** — merged `5144ec81`. Atomic native-root routing preserves physical keyup after replacement, and post-commit mirrors retire stale frames. Six focused plus 20 adjacent controls pass; routing-only and mirror-only OFF reproduce failures, exact restoration passes.
 - [x] **FontFaceSet private WeakMap exposure** — merged `5144ec81`. Captured primitives protect both private maps; zero-hook/font brands/status/ready controls pass. Native get-only OFF reproduces eight hooks, exact restoration passes.
 
-## Current tally
+## Original component tally
 
 Accounting: 34 original test cases plus 19 additional tracked cases/findings. This is not a count of unique GitHub issues.
 
 - Merged with component proof: **52**.
 - Verified clear without an additional source fix: **1** detector POST control.
 - Total done: **53**. Total pending known fixes: **0**. Total tracked: **53**.
-- All known fixes are integrated with component proof. The pinned JS complexity gate now passes without raising its limit. Freeze the pushed source and run complete gates next; track and fix every newly exposed failure, then rerun until green before coverage.
+- These 53 findings describe the earlier component campaign. The full-suite failures below reopen release completion; this tally is not a claim that the current release is green.
 - Final combined gates and coverage remain pending for the release as a whole.
+
+## Full-suite regression follow-up
+
+The frozen `f1b4d10e` discovery run recorded **78 Rust assertion failures**, **13 cases without outcomes across two crashed targets**, and **207 JavaScript failures**. The regression subset retains every case and appends newly exposed failures. Source proposals do not count as fixed until runtime proof passes. The authoritative case manifest is `.recovery/final-gates-f1b4d10e/all-full-run-regressions-root-manifest.json`.
+
+- [x] **Native CSP code-generation callback support** — merged and pushed `df9721df`. The three original default-engine ignored controls now run normally and pass, together with two authored Chrome Trusted Types controls. All five pass on the isolated release component without the pending async-quiescence change; exact all-target Render/NAPI strict, formatting, CC, hooks and policy-intersection unit pass. The graph pins turbo-dom `af946ea0` and its generated V8 `03839d09`, using the same native V8 archive. Receipt: `.worktrees/native-csp-release-adoption/.recovery/native-csp-adoption/final-receipt.json`.
+- [x] **Stale native layout override ignore** — merged `b24e24a1` after the unchanged explicitly ignored control passed.
+- [ ] **Remaining full-suite failures and crash outcomes** — expanded component replay is in progress. The legacy root-eval held-peer timeout, original Escape interest cancellation and newly exposed sticky-activation carry failure remain open. Fullscreen ordering has component proof but is not yet merged. IDB cleanup/storage changes remain under validation.
 
 ## Completion gates
 
-User sequencing requirement: **fix all known failures first**, with targeted and adjacent regression checks as each fix lands. Only then freeze the combined release build and run the complete sweep; coverage follows green full gates.
+User sequencing requirement: collect the complete Rust and JavaScript failures, fix every failure with targeted and adjacent checks, and independently review the final combined changes before repeating both full suites. Coverage follows green full gates.
 
 - [ ] Validate each production fix: unchanged meaningful RED → GREEN → critical fix-only OFF reproduces intended RED → byte-exact restore GREEN.
 - [ ] Merge and push every validated component; keep this file and the detailed receipt ledgers synchronized.

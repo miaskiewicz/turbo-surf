@@ -224,7 +224,7 @@ features = ["reactor-tokio", "v8_use_custom_libcxx"]
                 self.assertFalse(core["default-features"])
                 self.assertEqual(core["features"], ["reactor-tokio", "v8_use_custom_libcxx"])
                 self.assertEqual(core["package"], "turbo-surf-deno-core")
-                self.assertEqual(core["version"], "=0.412.2")
+                self.assertEqual(core["version"], "=0.412.3")
                 self.assertEqual(core["path"], "../turbo-surf-deno-core")
                 self.assertEqual(result["package"]["license"], "MIT")
                 self.assertEqual(result["package"]["version"], package.publish)
@@ -401,7 +401,7 @@ class PatchedSourceContracts(unittest.TestCase):
 class CandidateTreeContracts(unittest.TestCase):
     MANIFEST = '''[package]
 name = "turbo-surf-deno-web"
-version = "0.290.2"
+version = "0.290.3"
 
 [lib]
 name = "deno_web"
@@ -412,13 +412,13 @@ name = "encoding"
 path = "benches/encoding.rs"
 
 [dependencies.deno_core]
-version = "=0.412.2"
+version = "=0.412.3"
 default-features = false
 package = "turbo-surf-deno-core"
 path = "../turbo-surf-deno-core"
 
 [target.'cfg(windows)'.dev-dependencies.deno_webidl]
-version = "=0.259.2"
+version = "=0.259.3"
 package = "turbo-surf-deno-webidl"
 path = "../turbo-surf-deno-webidl"
 '''
@@ -428,7 +428,7 @@ path = "../turbo-surf-deno-webidl"
         self.assertEqual(result["lib"]["path"], "lib.rs")
         self.assertEqual(result["bench"][0]["path"], "benches/encoding.rs")
         self.assertNotIn("path", result["dependencies"]["deno_core"])
-        self.assertEqual(result["dependencies"]["deno_core"]["version"], "=0.412.2")
+        self.assertEqual(result["dependencies"]["deno_core"]["version"], "=0.412.3")
         self.assertNotIn("path", result["target"]["cfg(windows)"]["dev-dependencies"]["deno_webidl"])
         with self.assertRaisesRegex(ValueError, "more than dependency paths"):
             # An inline dependency path would survive line removal; refuse it.

@@ -13,11 +13,11 @@ ShouldThrowOnError fixes formerly prepared here as `turbo-surf-v8`).
 | — | `turbo-dom-v8` (turbo-dom) | 150.4.x | prerequisite, not prepared here |
 | 1 | `turbo-surf-deno-v8` | 0.4.1 (0.4.0) | `rusty_v8` → registry `turbo-dom-v8 ~150.4` |
 | 2 | `turbo-surf-serde-v8` | 0.321.1 (0.321.0) | `v8` → forked facade |
-| 3 | `turbo-surf-deno-core` | 0.412.2 (0.412.0) | `v8`, `serde_v8` → forks |
-| 4 | `turbo-surf-deno-bench-util` | 0.253.2 (0.253.0) | `deno_core` → fork |
-| 5 | `turbo-surf-deno-crypto` | 0.273.2 (0.273.0) | `deno_core` → fork |
-| 6 | `turbo-surf-deno-webidl` | 0.259.2 (0.259.0) | `deno_core`, benchmark utility → forks |
-| 7 | `turbo-surf-deno-web` | 0.290.2 (0.290.0) | core, WebIDL and benchmark utility → forks |
+| 3 | `turbo-surf-deno-core` | 0.412.3 (0.412.0) | `v8`, `serde_v8` → forks |
+| 4 | `turbo-surf-deno-bench-util` | 0.253.3 (0.253.0) | `deno_core` → fork |
+| 5 | `turbo-surf-deno-crypto` | 0.273.3 (0.273.0) | `deno_core` → fork |
+| 6 | `turbo-surf-deno-webidl` | 0.259.3 (0.259.0) | `deno_core`, benchmark utility → forks |
+| 7 | `turbo-surf-deno-web` | 0.290.3 (0.290.0) | core, WebIDL and benchmark utility → forks |
 
 Keep the original library names and dependency aliases. Rust handles, op macros,
 serde conversions and native CryptoKey snapshots must share one runtime type
@@ -44,6 +44,13 @@ Core 0.412.2 adds owner-scoped module contexts with cancellation and explicit
 retirement, plus host-only inspector context registration. The generator patch
 changes only `runtime/jsruntime.rs`, `modules/map.rs`, and `inspector.rs`; published
 infrastructure JS and ops sources remain exact.
+
+Core 0.412.3 adds host-only cancellation of pending work for a live registered
+module context while preserving its compiled map and loader. It rejects
+unregistered, inactive and busy contexts; its dependency leaves advance to .3
+only to keep exact core/type edges coherent. Facade/serde versions and embedded
+extension JS bytes remain unchanged. This paragraph describes the draft API;
+archive publication requires the reviewed proof and approval packet.
 
 The 0.4.1 facade drops upstream's unused optional `v8x` second backend and its
 `quickjs` feature, so no lock file lists a second native engine; serde_v8 and

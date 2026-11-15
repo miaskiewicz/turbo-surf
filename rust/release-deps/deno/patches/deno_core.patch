@@ -1,9 +1,6 @@
 --- a/inspector.rs
 +++ b/inspector.rs
-@@ -958,6 +958,22 @@
-     })
-   }
- 
+@@ -960,0 +961,16 @@
 +  /// Announce an embedder-owned context in this runtime's inspector group.
 +  pub fn context_created(
 +    &self,
@@ -20,49 +17,26 @@
 +    );
 +  }
 +
-   pub fn is_dispatching_message(&self) -> bool {
-     *self.state.is_dispatching_message.borrow()
-   }
 --- a/modules/map.rs
 +++ b/modules/map.rs
-@@ -176,13 +176,19 @@
- impl ModuleMap {
-   /// There is a circular Rc reference between the module map and the futures,
-   /// so when destroying the module map we need to clear the pending futures.
+@@ -179 +179 @@
 -  pub(crate) fn destroy(&self) {
 +  pub(crate) fn cancel_pending_work(&self) {
-     self.dynamic_import_map.borrow_mut().clear();
-     self.preparing_dynamic_imports.clear();
-     self.pending_dynamic_imports.clear();
-     self.pending_dyn_mod_evaluations.clear();
-     self.pending_tla_waiters.borrow_mut().clear();
-     self.code_cache_ready_futs.clear();
+@@ -185,0 +186,6 @@
 +    self.pending_mod_evaluation.set(false);
 +    self.dyn_module_evaluate_idle_counter.set(0);
 +  }
 +
 +  pub(crate) fn destroy(&self) {
 +    self.cancel_pending_work();
-     std::mem::take(&mut *self.data.borrow_mut());
-   }
- 
 --- a/runtime/jsruntime.rs
 +++ b/runtime/jsruntime.rs
-@@ -255,6 +255,10 @@
-     // the runtime.
-     _ = unsafe { Rc::from_raw(state_ptr as *const JsRuntimeState) };
- 
+@@ -257,0 +258,4 @@
 +    for entry in self.state.module_contexts.borrow_mut().drain(..) {
 +      entry.modules.destroy();
 +    }
 +
-     // Destroy the realm while the uv_loop (stored in op_state's
-     // gotham_state) is still alive. destroy() reads uv_loop_ptr to
-     // release the Global<Context> stored in loop.data. If we clear
-@@ -506,9 +510,51 @@
- 
- pub type CompiledWasmModuleStore = CrossIsolateStore<v8::CompiledWasmModule>;
- 
+@@ -508,0 +513,44 @@
 +// The embedder's ContextState/op driver stays shared; only module work is owned.
 +struct ModuleContext {
 +  context: v8::Weak<v8::Context>,
@@ -80,9 +54,12 @@
 +    if self.active.get() {
 +      return Ok(());
 +    }
-+    Err(CoreErrorKind::JsBox(JsErrorBox::type_error(
-+      "Module context was retired while loading",
-+    )).into_box())
++    Err(
++      CoreErrorKind::JsBox(JsErrorBox::type_error(
++        "Module context was retired while loading",
++      ))
++      .into_box(),
++    )
 +  }
 +}
 +
@@ -104,17 +81,9 @@
 +  }
 +}
 +
- /// Internal state for JsRuntime which is stored in one of v8::Isolate's
- /// embedder slots.
- pub struct JsRuntimeState {
+@@ -511,0 +560 @@
 +  module_contexts: RefCell<Vec<Rc<ModuleContext>>>,
-   pub(crate) source_mapper: Rc<RefCell<SourceMapper>>,
-   pub(crate) op_state: Rc<RefCell<OpState>>,
-   pub(crate) shared_array_buffer_store: Option<SharedArrayBufferStore>,
-@@ -782,6 +828,105 @@
-     EventLoopPendingState::new_from_scope(scope).is_pending()
-   }
- 
+@@ -784,0 +834,139 @@
 +  /// Attach a module graph to an embedder-created context sharing this runtime's
 +  /// ContextState. The embedder must authenticate its loader and reject imports
 +  /// after retirement. No JavaScript core/op-driver state is replaced.
@@ -123,15 +92,22 @@
 +    loader: Rc<dyn ModuleLoader>,
 +  ) -> bool {
 +    let context = scope.get_current_context();
-+    if context.get_aligned_pointer_from_embedder_data(
-+      super::jsrealm::CONTEXT_STATE_SLOT_INDEX,
-+    ).is_null() {
++    if context
++      .get_aligned_pointer_from_embedder_data(
++        super::jsrealm::CONTEXT_STATE_SLOT_INDEX,
++      )
++      .is_null()
++    {
 +      return false;
 +    }
 +    let state = Self::state_from(scope);
 +    let contexts = state.module_contexts.borrow().clone();
 +    for entry in contexts {
-+      if entry.context.to_local(scope).is_some_and(|owner| owner == context) {
++      if entry
++        .context
++        .to_local(scope)
++        .is_some_and(|owner| owner == context)
++      {
 +        return entry.active.get();
 +      }
 +    }
@@ -149,13 +125,16 @@
 +        Rc::as_ptr(&modules) as *mut c_void,
 +      );
 +    }
-+    state.module_contexts.borrow_mut().push(Rc::new(ModuleContext {
-+      context: v8::Weak::new(scope, context),
-+      modules,
-+      active: Cell::new(true),
-+      busy: Cell::new(0),
-+      cancellation_waker: Default::default(),
-+    }));
++    state
++      .module_contexts
++      .borrow_mut()
++      .push(Rc::new(ModuleContext {
++        context: v8::Weak::new(scope, context),
++        modules,
++        active: Cell::new(true),
++        busy: Cell::new(0),
++        cancellation_waker: Default::default(),
++      }));
 +    true
 +  }
 +
@@ -169,7 +148,10 @@
 +    let state = Self::state_from(scope);
 +    let contexts = state.module_contexts.borrow().clone();
 +    for entry in contexts {
-+      if entry.context.to_local(scope).is_some_and(|owner| owner == context)
++      if entry
++        .context
++        .to_local(scope)
++        .is_some_and(|owner| owner == context)
 +        && entry.active.replace(false)
 +      {
 +        entry.cancellation_waker.wake();
@@ -180,6 +162,29 @@
 +        return;
 +      }
 +    }
++  }
++
++  /// Cancel pending module work for this live registered context without
++  /// retiring its loader or compiled module map. Must be called outside an
++  /// in-flight registered module operation.
++  pub fn cancel_module_context_pending_work<'s>(
++    scope: &mut v8::PinScope<'s, '_>,
++    context: v8::Local<'s, v8::Context>,
++  ) -> bool {
++    let state = Self::state_from(scope);
++    let contexts = state.module_contexts.borrow().clone();
++    for entry in contexts {
++      if entry.active.get()
++        && entry.context.to_local(scope) == Some(context)
++        && entry.busy.get() == 0
++      {
++        entry.modules.cancel_pending_work();
++        entry.cancellation_waker.wake();
++        state.waker.wake();
++        return true;
++      }
++    }
++    false
 +  }
 +
 +  fn poll_module_contexts(
@@ -197,7 +202,11 @@
 +    cx: &mut Context,
 +    scope: &mut v8::PinScope,
 +  ) -> Result<(), CoreError> {
-+    self.inner.state.module_contexts.borrow_mut()
++    self
++      .inner
++      .state
++      .module_contexts
++      .borrow_mut()
 +      .retain(|entry| !entry.context.is_empty());
 +    let entries = self.inner.state.module_contexts.borrow().clone();
 +    for entry in entries {
@@ -214,30 +223,12 @@
 +    Ok(())
 +  }
 +
-   /// Returns the `OpMetadata` associated with the op `name`.
-   /// Note this is linear with respect to the number of ops registered.
-   pub fn op_metadata(&self, name: &str) -> Option<OpMetadata> {
-@@ -872,6 +1017,7 @@
-         .map(|cbs| (Some(cbs.0), Some(cbs.1)))
-         .unwrap_or_default();
-     let state_rc = Rc::new(JsRuntimeState {
+@@ -874,0 +1063 @@
 +      module_contexts: Default::default(),
-       source_mapper: Rc::new(RefCell::new(source_mapper)),
-       shared_array_buffer_store: options.shared_array_buffer_store,
-       compiled_wasm_module_store: options.compiled_wasm_module_store,
-@@ -2473,7 +2619,7 @@
- 
-     // ===== Phase 2: Pending work =====
-     // Module progress polling (before ops, matching original ordering)
+@@ -2476 +2665 @@
 -    modules.poll_progress(cx, scope)?;
-+    self.poll_module_contexts(cx, scope, &modules)?;
- 
-     // 2a. V8 task spawner tasks
-     dispatched_ops |= Self::dispatch_task_spawner(cx, scope, context_state);
-@@ -2830,6 +2976,21 @@
-     return Some(js_error);
-   }
- 
++    self.poll_module_contexts(cx, scope, modules)?;
+@@ -2832,0 +3022,17 @@
 +  let runtime = JsRuntime::state_from(scope);
 +  let contexts = runtime.module_contexts.borrow().clone();
 +  for entry in contexts {
@@ -248,43 +239,35 @@
 +      continue;
 +    };
 +    let scope = &mut v8::ContextScope::new(scope, context);
-+    if let Some(message) = entry.modules.find_stalled_top_level_await(scope).first() {
++    if let Some(message) =
++      entry.modules.find_stalled_top_level_await(scope).first()
++    {
 +      let message = v8::Local::new(scope, message);
 +      return Some(JsError::from_v8_message(scope, message));
 +    }
 +  }
-   None
- }
- 
-@@ -3083,7 +3244,7 @@
-       } else {
-         false
-       };
+@@ -3086 +3292 @@
 -    EventLoopPendingState {
 +    let mut result = EventLoopPendingState {
-       has_pending_ops: has_pending_refed_ops || (num_pending_ops > 0),
-       has_pending_refed_ops,
-       has_pending_dyn_imports,
-@@ -3096,7 +3257,14 @@
-       has_outstanding_immediates,
-       has_pending_timers,
-       has_uv_alive_handles,
+@@ -3099 +3305,16 @@
 -    }
 +    };
 +    let runtime = JsRuntime::state_from(scope);
-+    for entry in runtime.module_contexts.borrow().iter().filter(|entry| entry.active.get()) {
-+      result.has_pending_dyn_imports |= entry.modules.has_pending_dynamic_imports();
-+      result.has_pending_dyn_module_evaluation |= entry.modules.has_pending_dyn_module_evaluation();
-+      result.has_pending_module_evaluation |= entry.modules.has_pending_module_evaluation();
++    for entry in runtime
++      .module_contexts
++      .borrow()
++      .iter()
++      .filter(|entry| entry.active.get())
++    {
++      result.has_pending_dyn_imports |=
++        entry.modules.has_pending_dynamic_imports();
++      result.has_pending_dyn_module_evaluation |=
++        entry.modules.has_pending_dyn_module_evaluation();
++      result.has_pending_module_evaluation |=
++        entry.modules.has_pending_module_evaluation();
 +    }
 +    result
-   }
- 
-   /// Collect event loop state from all the states stored in the scope.
-@@ -3275,6 +3443,113 @@
-     specifier: &ModuleSpecifier,
-   ) -> Result<ModuleId, CoreError> {
-     self.drive_es_module_load(false, specifier, None).await
+@@ -3277,0 +3499,145 @@
 +  }
 +
 +  /// Load a side module into an active embedder-registered context. The caller
@@ -294,7 +277,9 @@
 +    context: &v8::Global<v8::Context>,
 +    specifier: &ModuleSpecifier,
 +  ) -> Result<ModuleId, CoreError> {
-+    self.load_registered_side_module(context, specifier, None).await
++    self
++      .load_registered_side_module(context, specifier, None)
++      .await
 +  }
 +
 +  /// Load code already fetched by the embedder without fetching it again.
@@ -304,7 +289,13 @@
 +    specifier: &ModuleSpecifier,
 +    code: impl IntoModuleCodeString,
 +  ) -> Result<ModuleId, CoreError> {
-+    self.load_registered_side_module(context, specifier, Some(code.into_module_code())).await
++    self
++      .load_registered_side_module(
++        context,
++        specifier,
++        Some(code.into_module_code()),
++      )
++      .await
 +  }
 +
 +  fn registered_module_realm(
@@ -315,14 +306,22 @@
 +    let entries = runtime.module_contexts.borrow().clone();
 +    v8::scope!(scope, self.v8_isolate());
 +    let requested = v8::Local::new(scope, context);
-+    let entry = entries.into_iter().find(|entry| {
-+      entry.active.get() && entry.context.to_local(scope) == Some(requested)
-+    }).ok_or_else(|| CoreErrorKind::JsBox(JsErrorBox::type_error(
-+      "Module context is not registered or has been retired",
-+    )).into_box())?;
++    let entry = entries
++      .into_iter()
++      .find(|entry| {
++        entry.active.get() && entry.context.to_local(scope) == Some(requested)
++      })
++      .ok_or_else(|| {
++        CoreErrorKind::JsBox(JsErrorBox::type_error(
++          "Module context is not registered or has been retired",
++        ))
++        .into_box()
++      })?;
 +    let scope = &mut v8::ContextScope::new(scope, requested);
 +    let realm = JsRealm::new(JsRealmInner::new(
-+      JsRealm::state_from_scope(scope), context.clone(), entry.modules.clone(),
++      JsRealm::state_from_scope(scope),
++      context.clone(),
++      entry.modules.clone(),
 +      runtime.function_templates.clone(),
 +    ));
 +    Ok((realm, entry))
@@ -336,11 +335,22 @@
 +  ) -> Result<ModuleId, CoreError> {
 +    let (realm, entry) = self.registered_module_realm(context)?;
 +    let _work = ModuleContextWork::enter(entry.clone());
-+    let result = self.drive_es_module_load_in_realm(realm, false, specifier, code, Some(entry.clone())).await;
++    let result = self
++      .drive_es_module_load_in_realm(
++        realm,
++        false,
++        specifier,
++        code,
++        Some(entry.clone()),
++      )
++      .await;
 +    if !entry.active.get() {
-+      return Err(CoreErrorKind::JsBox(JsErrorBox::type_error(
-+        "Module context was retired while loading",
-+      )).into_box());
++      return Err(
++        CoreErrorKind::JsBox(JsErrorBox::type_error(
++          "Module context was retired while loading",
++        ))
++        .into_box(),
++      );
 +    }
 +    result
 +  }
@@ -355,9 +365,17 @@
 +    let Some(code) = code else { return Ok(()) };
 +    let modules = realm.0.module_map();
 +    jsrealm::context_scope!(scope, realm, self.v8_isolate());
-+    modules.new_es_module(
-+      scope, is_main, specifier.to_string().into(), code, false, None,
-+    ).map(|_| ()).map_err(|error| error.into_error(scope, false, false))
++    modules
++      .new_es_module(
++        scope,
++        is_main,
++        specifier.to_string().into(),
++        code,
++        false,
++        None,
++      )
++      .map(|_| ())
++      .map_err(|error| error.into_error(scope, false, false))
 +  }
 +
 +  async fn drive_module_context_future<F, T>(
@@ -371,10 +389,10 @@
 +  {
 +    let mut future = std::pin::pin!(future);
 +    poll_fn(|cx| {
-+      if let Some(entry) = registered {
-+        if let Err(error) = entry.check_active(Some(cx)) {
-+          return Poll::Ready(Err(error));
-+        }
++      if let Some(entry) = registered
++        && let Err(error) = entry.check_active(Some(cx))
++      {
++        return Poll::Ready(Err(error));
 +      }
 +      if let Poll::Ready(result) = future.as_mut().poll(cx) {
 +        return Poll::Ready(result);
@@ -382,24 +400,23 @@
 +      if !pump_event_loop {
 +        return Poll::Pending;
 +      }
-+      if let Poll::Ready(Err(error)) = self.poll_event_loop(cx, Default::default()) {
++      if let Poll::Ready(Err(error)) =
++        self.poll_event_loop(cx, Default::default())
++      {
 +        return Poll::Ready(Err(error));
 +      }
-+      if let Some(entry) = registered {
-+        if let Err(error) = entry.check_active(Some(cx)) {
-+          return Poll::Ready(Err(error));
-+        }
++      if let Some(entry) = registered
++        && let Err(error) = entry.check_active(Some(cx))
++      {
++        return Poll::Ready(Err(error));
 +      }
 +      future.as_mut().poll(cx)
-+    }).await
-   }
- 
-   /// Drive a recursive ES module load to completion while concurrently
-@@ -3290,6 +3565,17 @@
-     code: Option<ModuleCodeString>,
-   ) -> Result<ModuleId, CoreError> {
-     let realm = JsRealm::clone(&self.inner.main_realm);
-+    self.drive_es_module_load_in_realm(realm, is_main, specifier, code, None).await
++    })
++    .await
+@@ -3292,0 +3659,13 @@
++    self
++      .drive_es_module_load_in_realm(realm, is_main, specifier, code, None)
++      .await
 +  }
 +
 +  async fn drive_es_module_load_in_realm(
@@ -410,13 +427,7 @@
 +    code: Option<ModuleCodeString>,
 +    registered: Option<Rc<ModuleContext>>,
 +  ) -> Result<ModuleId, CoreError> {
-     let module_map_rc = realm.0.module_map();
- 
-     // Only pump the V8 event loop alongside the load when the loader resolves
-@@ -3300,32 +3586,23 @@
-     let pump_event_loop =
-       module_map_rc.loader.borrow().pump_event_loop_during_load();
- 
+@@ -3303,9 +3682,14 @@
 -    if let Some(code) = code {
 -      jsrealm::context_scope!(scope, &realm, self.v8_isolate());
 -      module_map_rc
@@ -426,8 +437,21 @@
 -          specifier.to_string().into(),
 -          code,
 -          false,
--          None,
--        )
++    self.compile_context_module_code(&realm, is_main, specifier, code)?;
++
++    if let Some(entry) = &registered {
++      entry.check_active(None)?;
++    }
++    let preparation = async {
++      if is_main {
++        RecursiveModuleLoad::main(specifier.to_string(), module_map_rc.clone())
++          .await
++      } else {
++        RecursiveModuleLoad::side(
++          specifier.to_string(),
++          module_map_rc.clone(),
++          SideModuleKind::Async,
+@@ -3314,12 +3698,8 @@
 -        .map_err(|e| e.into_error(scope, false, false))?;
 -    }
 -
@@ -440,32 +464,19 @@
 -        module_map_rc.clone(),
 -        SideModuleKind::Async,
 -        None,
--      )
--      .await?
-+    self.compile_context_module_code(&realm, is_main, specifier, code)?;
-+
-+    if let Some(entry) = &registered {
-+      entry.check_active(None)?;
-+    }
-+    let preparation = async {
-+      if is_main {
-+        RecursiveModuleLoad::main(specifier.to_string(), module_map_rc.clone()).await
-+      } else {
-+        RecursiveModuleLoad::side(
-+          specifier.to_string(), module_map_rc.clone(), SideModuleKind::Async, None,
-+        ).await
++        .await
 +      }
-     };
-+    let mut load = self.drive_module_context_future(
-+      preparation, registered.as_ref(), pump_event_loop,
-+    ).await?;
- 
-     loop {
-       // Drive the recursive load, optionally pumping the V8 event loop
-@@ -3333,28 +3610,15 @@
-       // (`module.registerHooks()`) respond to load requests issued by the
-       // recursive load via the async hook bridge; for ordinary loads it is
-       // skipped so unrelated event-loop work doesn't run mid-load.
++    };
++    let mut load = self
++      .drive_module_context_future(
++        preparation,
++        registered.as_ref(),
++        pump_event_loop,
+@@ -3327,2 +3707 @@
+-      .await?
+-    };
++      .await?;
+@@ -3336,19 +3715,7 @@
 -      let next_step = poll_fn(|cx| {
 -        if let Poll::Ready(t) = load.poll_next_unpin(cx) {
 -          return Poll::Ready(Ok::<_, CoreError>(t));
@@ -485,25 +496,139 @@
 -        }
 -      })
 -      .await?;
-+      let next_step = self.drive_module_context_future(
-+        async { Ok(load.next().await) }, registered.as_ref(), pump_event_loop,
-+      ).await?;
- 
-       let Some(load_result) = next_step else { break };
-       let (request, source) = load_result?;
++      let next_step = self
++        .drive_module_context_future(
++          async { Ok(load.next().await) },
++          registered.as_ref(),
++          pump_event_loop,
++        )
++        .await?;
+@@ -3357,0 +3725,3 @@
 +      if let Some(entry) = &registered {
 +        entry.check_active(None)?;
 +      }
- 
-       jsrealm::context_scope!(scope, &realm, self.v8_isolate());
-       load
-@@ -3362,6 +3626,9 @@
-         .map_err(|e| e.into_error(scope, false, false))?;
-     }
- 
+@@ -3364,0 +3735,3 @@
 +    if let Some(entry) = &registered {
 +      entry.check_active(None)?;
 +    }
-     let root_id = load.root_module_id().expect("Root module should be loaded");
- 
-     jsrealm::context_scope!(scope, &realm, self.v8_isolate());
+@@ -3737,0 +4111,4 @@
++
++#[cfg(test)]
++#[path = "tests/module_pending_cancel.rs"]
++mod pending_cancel_tests;
+--- a/uv_compat/tcp.rs
++++ b/uv_compat/tcp.rs
+@@ -818 +818,3 @@
+-      && stream.set_linger(Some(std::time::Duration::ZERO)).is_err()
++      && socket2::SockRef::from(stream)
++        .set_linger(Some(std::time::Duration::ZERO))
++        .is_err()
+--- a/modules/recursive_load.rs
++++ b/modules/recursive_load.rs
+@@ -366 +366 @@
+-          &module_source.module_type
++          module_source.module_type
+--- a/uv_compat.rs
++++ b/uv_compat.rs
+@@ -360 +360 @@
+-    for (_, handle_ptr) in self.timer_handles.borrow().iter() {
++    for handle_ptr in self.timer_handles.borrow().values() {
+--- /dev/null
++++ b/runtime/tests/module_pending_cancel.rs
+@@ -0,0 +1,90 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++
++use super::JsRuntime;
++use super::ModuleContextWork;
++use crate::NoopModuleLoader;
++use crate::RuntimeOptions;
++use std::rc::Rc;
++
++fn native_context(runtime: &mut JsRuntime) -> v8::Global<v8::Context> {
++  crate::scope!(scope, runtime);
++  let initial = scope.get_current_context();
++  let state = initial.get_aligned_pointer_from_embedder_data(
++    crate::runtime::jsrealm::CONTEXT_STATE_SLOT_INDEX,
++  );
++  let modules = initial.get_aligned_pointer_from_embedder_data(
++    crate::runtime::jsrealm::MODULE_MAP_SLOT_INDEX,
++  );
++  let context = v8::Context::new(scope, Default::default());
++  // SAFETY: this runtime owns the borrowed slots until its native contexts drop.
++  unsafe {
++    context.set_aligned_pointer_in_embedder_data(
++      crate::runtime::jsrealm::CONTEXT_STATE_SLOT_INDEX,
++      state,
++    );
++    context.set_aligned_pointer_in_embedder_data(
++      crate::runtime::jsrealm::MODULE_MAP_SLOT_INDEX,
++      modules,
++    );
++  }
++  v8::Global::new(scope, context)
++}
++
++fn register(
++  runtime: &mut JsRuntime,
++  context: &v8::Global<v8::Context>,
++) -> bool {
++  crate::scope!(scope, runtime);
++  let context = v8::Local::new(scope, context);
++  let scope = &mut v8::ContextScope::new(scope, context);
++  JsRuntime::register_module_context(scope, Rc::new(NoopModuleLoader))
++}
++
++fn cancel(runtime: &mut JsRuntime, context: &v8::Global<v8::Context>) -> bool {
++  crate::scope!(scope, runtime);
++  let context = v8::Local::new(scope, context);
++  let scope = &mut v8::ContextScope::new(scope, context);
++  JsRuntime::cancel_module_context_pending_work(scope, context)
++}
++
++#[test]
++fn pending_module_cancel_requires_a_live_registered_native_context() {
++  let mut runtime = JsRuntime::new(RuntimeOptions::default());
++  let unregistered = native_context(&mut runtime);
++  assert!(!cancel(&mut runtime, &unregistered));
++
++  let registered = native_context(&mut runtime);
++  assert!(register(&mut runtime, &registered));
++  assert!(cancel(&mut runtime, &registered));
++  {
++    crate::scope!(scope, &mut runtime);
++    let context = v8::Local::new(scope, &registered);
++    JsRuntime::detach_module_context(scope, context);
++  }
++  assert!(!cancel(&mut runtime, &registered));
++  assert!(!register(&mut runtime, &registered));
++  assert!(!cancel(&mut runtime, &unregistered));
++}
++
++#[test]
++fn pending_module_cancel_rejects_an_in_flight_registered_operation() {
++  let mut runtime = JsRuntime::new(RuntimeOptions::default());
++  let context = native_context(&mut runtime);
++  assert!(register(&mut runtime, &context));
++  let state = JsRuntime::state_from(runtime.v8_isolate());
++  let entry = {
++    let contexts = state.module_contexts.borrow();
++    assert_eq!(contexts.len(), 1);
++    contexts[0].clone()
++  };
++  // Hold the exact RAII guard used by registered load/evaluation operations;
++  // no guest flag or test-only production admission path is introduced.
++  let operation = ModuleContextWork::enter(entry.clone());
++  assert_eq!(entry.busy.get(), 1);
++  assert!(!cancel(&mut runtime, &context));
++  assert!(entry.active.get());
++  drop(operation);
++  assert_eq!(entry.busy.get(), 0);
++  assert!(cancel(&mut runtime, &context));
++  assert!(entry.active.get());
++}
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -192,0 +193,3 @@
++[dependencies.socket2]
++version = "=0.6.4"
++

@@ -220,6 +220,14 @@ function validateResourceTagOptions(kind, opts) {
 }
 
 // --- page.route helpers ---------------------------------------------------
+function harResponseHeaders(response) {
+  const headers = {};
+  for (const h of response.headers || []) {
+    if (h && h.name) headers[String(h.name).toLowerCase()] = h.value == null ? "" : String(h.value);
+  }
+  return headers;
+}
+
 // Normalize a route pattern + fulfill payload into a JSON-serializable record.
 // `patternKey` preserves predicate identity, or the string/RegExp source for unroute.
 // Convert one HAR entry (Playwright / Chrome DevTools format) into the same
@@ -231,10 +239,7 @@ function harEntryToRoute(entry) {
   const url = entry?.request?.url;
   if (!url) return null;
   const resp = entry.response ?? {};
-  const headers = {};
-  for (const h of resp.headers || []) {
-    if (h && h.name) headers[String(h.name).toLowerCase()] = h.value == null ? "" : String(h.value);
-  }
+  const headers = harResponseHeaders(resp);
   const content = resp.content ?? {};
   const payload = {
     status: resp.status ?? 200,
@@ -1927,6 +1932,37 @@ function pathOf(url) {
 // hydration populates them in the engine, but this snapshot-oriented shim does
 // not fetch iframe src here — call `page.content()` after hydration if needed).
 // ---------------------------------------------------------------------------
+function iframeMatchMetadata(parent, html, m) {
+  if (m == null || m.node == null) return null;
+  // The selector may be broader than "iframe" (e.g. a user passed "main") — restrict
+  // to iframe elements by sniffing the serialized outer-HTML opening tag. Match
+  // records don't carry a tag field, so this is the cheapest fidelity check.
+  const outer = String(m.html ?? "")
+    .trimStart()
+    .toLowerCase();
+  if (!outer.startsWith("<iframe")) return null;
+  const name = native.attrOf(html, m.node, "name") ?? "";
+  const id = native.attrOf(html, m.node, "id") ?? "";
+  const src = native.attrOf(html, m.node, "src") ?? "";
+  const srcdoc = native.attrOf(html, m.node, "srcdoc");
+  let url = srcdoc != null ? "about:srcdoc" : "about:blank";
+  if (srcdoc == null && src) {
+    try {
+      url = new URL(src, parent._url).href;
+    } catch {
+      url = src;
+    }
+  }
+  return {
+    node: m.node,
+    name,
+    id,
+    src,
+    html: srcdoc ?? "",
+    url,
+  };
+}
+
 function _collectIframes(parent, selector = "iframe") {
   if (selector === "iframe" && parent._frameEntries) return parent._frameEntries;
   const html = parent._html ?? "";
@@ -1939,34 +1975,8 @@ function _collectIframes(parent, selector = "iframe") {
   }
   const out = [];
   for (const m of matches) {
-    if (m == null || m.node == null) continue;
-    // The selector may be broader than "iframe" (e.g. a user passed "main") — restrict
-    // to iframe elements by sniffing the serialized outer-HTML opening tag. Match
-    // records don't carry a tag field, so this is the cheapest fidelity check.
-    const outer = String(m.html ?? "")
-      .trimStart()
-      .toLowerCase();
-    if (!outer.startsWith("<iframe")) continue;
-    const name = native.attrOf(html, m.node, "name") ?? "";
-    const id = native.attrOf(html, m.node, "id") ?? "";
-    const src = native.attrOf(html, m.node, "src") ?? "";
-    const srcdoc = native.attrOf(html, m.node, "srcdoc");
-    let url = srcdoc != null ? "about:srcdoc" : "about:blank";
-    if (srcdoc == null && src) {
-      try {
-        url = new URL(src, parent._url).href;
-      } catch {
-        url = src;
-      }
-    }
-    out.push({
-      node: m.node,
-      name,
-      id,
-      src,
-      html: srcdoc ?? "",
-      url,
-    });
+    const meta = iframeMatchMetadata(parent, html, m);
+    if (meta) out.push(meta);
   }
   if (parent._frameEntries) {
     const all = JSON.parse(native.query(html, "iframe", "css"));
@@ -2523,19 +2533,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (allowed !== "true") throw new TypeError("Failed to fetch");
     if (!matchesHostRoutePredicate(entry, data.matchUrl ?? data.request.url))
       return { action: "fallback" };
-    if (!data.request.overriddenHeaders)
-      data = {
-        ...data,
-        request: {
-          ...data.request,
-          headers: {
-            ...Object.fromEntries(
-              Object.entries(this._context._headers).map(([k, v]) => [k.toLowerCase(), v]),
-            ),
-            ...data.request.headers,
-          },
-        },
-      };
+    data = this._hostRouteHeaders(data);
     const session = this._session;
     const createRequest = (request) =>
       makeCapturedRequest(
@@ -2578,6 +2576,27 @@ return String(globalThis.__RESULT ?? ""); })()`,
       fetchResponse,
       signal,
     );
+    this._publishHostRouteFulfillment(source, data, decision, signal, session);
+    return decision;
+  }
+
+  _hostRouteHeaders(data) {
+    if (!data.request.overriddenHeaders)
+      data = {
+        ...data,
+        request: {
+          ...data.request,
+          headers: {
+            ...Object.fromEntries(
+              Object.entries(this._context._headers).map(([k, v]) => [k.toLowerCase(), v]),
+            ),
+            ...data.request.headers,
+          },
+        },
+      };
+    return data;
+  }
+  _publishHostRouteFulfillment(source, data, decision, signal, session) {
     if (decision.fulfilled && !signal.aborted && session === this._session && !this._closed) {
       const value = decision.fulfilled;
       const status = value.status ?? 200;
@@ -2602,7 +2621,6 @@ return String(globalThis.__RESULT ?? ""); })()`,
         body,
       );
     }
-    return decision;
   }
 
   async _takeBindingCalls() {
@@ -2691,58 +2709,64 @@ return String(globalThis.__RESULT ?? ""); })()`,
       return this._actorHub.drainBindings(deadline, cancelOnTimeout, collect);
     return this._drainOwnBindings(deadline, cancelOnTimeout, collect);
   }
+  _checkBindingDeadline(deadline, cancelOnTimeout) {
+    if (!(Date.now() >= deadline)) return;
+    const error = new Error("Timeout exceeded while waiting for host bindings");
+    error.name = "TimeoutError";
+    if (cancelOnTimeout) {
+      this._routeLifetime?.abort(error);
+      this._routeLifetime = undefined;
+    }
+    throw error;
+  }
+  _enqueueBindingCalls(calls, handlers, pending, state) {
+    for (const call of calls) {
+      const entry = handlers.get(call.name);
+      if (!entry) continue;
+      state.changed = true;
+      const task = this._settleBindingCall(call, entry)
+        .catch((error) => {
+          state.failure ??= error;
+        })
+        .finally(() => pending.delete(task));
+      pending.add(task);
+    }
+  }
+  async _drainBindingRounds(handlers, state, deadline, cancelOnTimeout, collect) {
+    const pending = new Set();
+    let rounds = 0;
+    let advanced = false;
+    while (this._session != null) {
+      this._checkBindingDeadline(deadline, cancelOnTimeout);
+      const calls = await this._takeBindingCalls();
+      if (this._session == null || this._closed) break;
+      if (calls.length && ++rounds > 100) throw new Error("Exposed binding call budget exhausted");
+      this._enqueueBindingCalls(calls, handlers, pending, state);
+      if (calls.length) advanced = false;
+      if (!pending.size && !calls.length) {
+        if (state.changed && !advanced && !this._contentCollecting) {
+          advanced = true;
+          // Observers advance one turn; actions retain full settlement.
+          await this._collectSession(this._session, "globalThis.__RESULT = '';", collect);
+          continue;
+        }
+        break;
+      }
+      // Keep servicing calls while an async host callback awaits another page operation.
+      if (pending.size)
+        await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 1))]);
+      if (state.failure) throw state.failure;
+    }
+  }
   async _drainOwnBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
     if (this._session == null || this._draining) return;
     const handlers = this._mergedBindings();
     if (handlers.size === 0) return;
     this._draining = true;
-    let changed = false;
+    const state = { changed: false, failure: undefined };
     try {
-      const pending = new Set();
-      let rounds = 0;
-      let advanced = false;
-      let failure;
-      while (this._session != null) {
-        if (Date.now() >= deadline) {
-          const error = new Error("Timeout exceeded while waiting for host bindings");
-          error.name = "TimeoutError";
-          if (cancelOnTimeout) {
-            this._routeLifetime?.abort(error);
-            this._routeLifetime = undefined;
-          }
-          throw error;
-        }
-        const calls = await this._takeBindingCalls();
-        if (this._session == null || this._closed) break;
-        if (calls.length && ++rounds > 100)
-          throw new Error("Exposed binding call budget exhausted");
-        for (const call of calls) {
-          const entry = handlers.get(call.name);
-          if (!entry) continue;
-          changed = true;
-          const task = this._settleBindingCall(call, entry)
-            .catch((error) => {
-              failure ??= error;
-            })
-            .finally(() => pending.delete(task));
-          pending.add(task);
-        }
-        if (calls.length) advanced = false;
-        if (!pending.size && !calls.length) {
-          if (changed && !advanced && !this._contentCollecting) {
-            advanced = true;
-            // Observers advance one turn; actions retain full settlement.
-            await this._collectSession(this._session, "globalThis.__RESULT = '';", collect);
-            continue;
-          }
-          break;
-        }
-        // Keep servicing calls while an async host callback awaits another page operation.
-        if (pending.size)
-          await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 1))]);
-        if (failure) throw failure;
-      }
-      if (changed) await this._refreshFromSession(true);
+      await this._drainBindingRounds(handlers, state, deadline, cancelOnTimeout, collect);
+      if (state.changed) await this._refreshFromSession(true);
     } finally {
       this._draining = false;
     }
@@ -3317,10 +3341,15 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (known) return known;
     }
     if (context.navigation && !path) return null;
-    if (path)
-      return (
-        this._frames?.find((frame) => JSON.stringify(frame._path) === JSON.stringify(path)) ?? null
-      );
+    if (path) return this._requestFrameFromPath(path);
+    return this._requestFrameFromContext(metadata);
+  }
+  _requestFrameFromPath(path) {
+    return (
+      this._frames?.find((frame) => JSON.stringify(frame._path) === JSON.stringify(path)) ?? null
+    );
+  }
+  _requestFrameFromContext(metadata) {
     return this._requestFrames?.get(metadata?.contextId) ?? null;
   }
 
@@ -3615,64 +3644,46 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return policy;
   }
 
-  async _navigate(url, method, body, opts) {
-    if (this._closed) throw new Error("page is closed");
-    if (this._actorHub?.opening) {
-      try {
-        await this._actorHub.ready;
-      } catch {}
-      if (this._closed) throw new Error("Page is closed");
-    }
-    if (this._auxiliaryActor && this._session != null)
-      return this._navigateActorTarget(url, method, body, opts);
-    // `about:blank` (and other about: URLs) are not network resources — a browser shows an
-    // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
-    // blank page instead of a "builder error for url (about:blank)" from the net layer.
-    if (/^about:/i.test(url)) {
-      this._clearImageCache();
-      closeScreenshotScene(this);
-      this._closeSession();
-      this._html = "<html><head></head><body></body></html>";
-      this._url = url;
-      this._documentResponse = { status: 0, referrer: "", headers: [] };
-      this._hydrated = false;
-      this._syncFrames();
-      this._emit("framenavigated", this);
-      this._emit("load");
-      this._emit("domcontentloaded");
-      return makeResponse({ status: 200, finalUrl: url, html: this._html });
-    }
-    let raw;
-    try {
-      raw = await native.fetchWithCookies(
-        url,
-        this._cookies,
-        method ?? null,
-        body ?? null,
-        this._context._headersJson(),
-        false,
-        this._requestState,
-        JSON.stringify({
-          source: Object.hasOwn(opts ?? {}, "referer")
-            ? opts.referer
-            : /^https?:/.test(this._url)
-              ? this._url
-              : null,
-          destination: "document",
-          referrerPolicy: this._navigationReferrerPolicy(),
-        }),
-        null,
-        null,
-        null,
-        opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
-        this._context._maxResponseBytes,
-      );
-    } catch (error) {
-      if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
-      throw error;
-    }
-    const r = JSON.parse(raw);
-    const response = makeResponse(r);
+  _navigateAbout(url) {
+    this._clearImageCache();
+    closeScreenshotScene(this);
+    this._closeSession();
+    this._html = "<html><head></head><body></body></html>";
+    this._url = url;
+    this._documentResponse = { status: 0, referrer: "", headers: [] };
+    this._hydrated = false;
+    this._syncFrames();
+    this._emit("framenavigated", this);
+    this._emit("load");
+    this._emit("domcontentloaded");
+    return makeResponse({ status: 200, finalUrl: url, html: this._html });
+  }
+  _fetchNavigationDocument(url, method, body, opts) {
+    return native.fetchWithCookies(
+      url,
+      this._cookies,
+      method ?? null,
+      body ?? null,
+      this._context._headersJson(),
+      false,
+      this._requestState,
+      JSON.stringify({
+        source: Object.hasOwn(opts ?? {}, "referer")
+          ? opts.referer
+          : /^https?:/.test(this._url)
+            ? this._url
+            : null,
+        destination: "document",
+        referrerPolicy: this._navigationReferrerPolicy(),
+      }),
+      null,
+      null,
+      null,
+      opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+      this._context._maxResponseBytes,
+    );
+  }
+  _publishNavigationRequests(r, response) {
     for (const hop of r.requests ?? []) {
       const entry = {
         ...hop,
@@ -3684,16 +3695,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (hop.url === r.finalUrl) response.request = () => request;
       this._emit("request", request);
     }
-    const attachment = attachmentRecord(r);
-    if (attachment) {
-      if (r.cookies !== this._cookies) this._context._setCookies(r.cookies);
-      this._recordDownload(attachment);
-      throw new DownloadNavigationError();
-    }
-    if (r.status === 204 || r.status === 205) {
-      this._cookies = r.cookies;
-      throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
-    }
+  }
+  _commitNavigationDocument(r, response) {
     this._clearImageCache();
     closeScreenshotScene(this);
     this._closeSession(); // only a committed response replaces the active document
@@ -3712,6 +3715,43 @@ return String(globalThis.__RESULT ?? ""); })()`,
     this._emit("domcontentloaded");
     return response;
   }
+  async _navigate(url, method, body, opts) {
+    if (this._closed) throw new Error("page is closed");
+    if (this._actorHub?.opening) {
+      try {
+        await this._actorHub.ready;
+      } catch {}
+      if (this._closed) throw new Error("Page is closed");
+    }
+    if (this._auxiliaryActor && this._session != null)
+      return this._navigateActorTarget(url, method, body, opts);
+    // `about:blank` (and other about: URLs) are not network resources — a browser shows an
+    // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
+    // blank page instead of a "builder error for url (about:blank)" from the net layer.
+    if (/^about:/i.test(url)) return this._navigateAbout(url);
+    let raw;
+    try {
+      raw = await this._fetchNavigationDocument(url, method, body, opts);
+    } catch (error) {
+      if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
+      throw error;
+    }
+    const r = JSON.parse(raw);
+    const response = makeResponse(r);
+    this._publishNavigationRequests(r, response);
+    const attachment = attachmentRecord(r);
+    if (attachment) {
+      if (r.cookies !== this._cookies) this._context._setCookies(r.cookies);
+      this._recordDownload(attachment);
+      throw new DownloadNavigationError();
+    }
+    if (r.status === 204 || r.status === 205) {
+      this._cookies = r.cookies;
+      throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
+    }
+    return this._commitNavigationDocument(r, response);
+  }
+
   _remainingNavigationTimeout(opts, started) {
     const timeout =
       opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000;
@@ -5443,76 +5483,96 @@ function hasContextPreferences(context) {
   );
 }
 
+function initializeContextRendering(context, merged) {
+  validateArtifactOptions(merged);
+  context._animations = animationPolicy(merged.animations);
+  context._deviceScaleFactor = merged.deviceScaleFactor ?? 1;
+  if (!Number.isFinite(context._deviceScaleFactor) || context._deviceScaleFactor <= 0)
+    throw new Error("deviceScaleFactor must be finite and positive");
+  context.tracing = Object.fromEntries(
+    ["start", "startChunk", "stopChunk", "stop", "group", "groupEnd"].map((method) => [
+      method,
+      UNSUPPORTED(`tracing.${method}`, "no-browser engine has no Playwright trace recorder"),
+    ]),
+  );
+  if (merged.offline !== undefined && typeof merged.offline !== "boolean")
+    throw new Error("offline must be a boolean");
+  context._maxResponseBytes = responseBudget(merged.maxResponseBytes);
+}
+function initializeContextDefaults(context, merged, cookies) {
+  // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
+  // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
+  context._defaultTimeout = merged.actionTimeout;
+  context._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
+  context._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
+  context._cookies = JSON.stringify(cookies);
+}
+function initializeContextStorage(context, merged) {
+  context._requestState = native.requestStateNew?.();
+  const origins = merged.storageState?.origins ?? [];
+  if (origins.length) {
+    try {
+      native.requestStateImportStorage(context._requestState, encodeStorageOrigins(origins));
+    } catch (error) {
+      native.requestStateClose(context._requestState);
+      throw error;
+    }
+  }
+}
+function initializeContextIdentity(context, merged) {
+  // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
+  context._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
+  context._headers = merged.extraHTTPHeaders ?? {};
+  context._auxiliaryPolicy = merged.auxiliaryPolicy;
+  context._viewport = merged.viewport ?? { width: 1280, height: 720 };
+  context._testIdAttribute =
+    merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
+}
+function initializeContextPreferences(context, merged, permissionGrant, geolocation) {
+  // Capture-only remaining per-project `use` keys so a suite that reads them
+  // from the context (via a getter or in-suite introspection) sees the real
+  // project value. Timezone and HTTPS settings retain their current capability
+  // limits; permission and location options are applied through native context state.
+  context._httpCredentials = merged.httpCredentials ?? null;
+  context._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
+  context._colorScheme = merged.colorScheme ?? null;
+  context._reducedMotion = merged.reducedMotion ?? null;
+  context._permissions = merged.permissions ?? [];
+  context._geolocation = geolocation;
+  context._permissionGrants = permissionGrant.permissions.length ? [permissionGrant] : [];
+  context._timezoneId = merged.timezoneId ?? null;
+  context._offline = merged.offline ?? false;
+  if (context._offline) native.requestStateSetOffline(context._requestState, true);
+  context._screen = merged.screen ?? null;
+}
+
+function mergedContextOptions(opts) {
+  // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
+  // so every supported key can reach fixture-constructed contexts without
+  // the test code having to pass it explicitly. In-suite `opts` still wins
+  // over the project block.
+  let projectUse = {};
+  try {
+    projectUse = process.env.TURBO_PW_USE ? JSON.parse(process.env.TURBO_PW_USE) : {};
+  } catch {
+    /* ignore malformed env — a project without a use block is the common case */
+  }
+  return { ...projectUse, ...opts };
+}
+
 class BrowserContext {
   constructor(opts = {}, browser = null) {
     this._closed = false;
     this._browser = browser;
-    // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
-    // so every supported key can reach fixture-constructed contexts without
-    // the test code having to pass it explicitly. In-suite `opts` still wins
-    // over the project block.
-    let projectUse = {};
-    try {
-      projectUse = process.env.TURBO_PW_USE ? JSON.parse(process.env.TURBO_PW_USE) : {};
-    } catch {
-      /* ignore malformed env — a project without a use block is the common case */
-    }
-    const merged = { ...projectUse, ...opts };
-    validateArtifactOptions(merged);
-    this._animations = animationPolicy(merged.animations);
-    this._deviceScaleFactor = merged.deviceScaleFactor ?? 1;
-    if (!Number.isFinite(this._deviceScaleFactor) || this._deviceScaleFactor <= 0)
-      throw new Error("deviceScaleFactor must be finite and positive");
-    this.tracing = Object.fromEntries(
-      ["start", "startChunk", "stopChunk", "stop", "group", "groupEnd"].map((method) => [
-        method,
-        UNSUPPORTED(`tracing.${method}`, "no-browser engine has no Playwright trace recorder"),
-      ]),
-    );
-    if (merged.offline !== undefined && typeof merged.offline !== "boolean")
-      throw new Error("offline must be a boolean");
-    this._maxResponseBytes = responseBudget(merged.maxResponseBytes);
+    const merged = mergedContextOptions(opts);
+    initializeContextRendering(this, merged);
     const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
-    // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
-    // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
-    this._defaultTimeout = merged.actionTimeout;
-    this._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
-    this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
-    this._cookies = JSON.stringify(cookies);
+    initializeContextDefaults(this, merged, cookies);
     const permissionGrant = contextPermissionGrant(merged.permissions ?? []);
     const geolocation = contextGeolocation(merged.geolocation);
-    this._requestState = native.requestStateNew?.();
-    const origins = merged.storageState?.origins ?? [];
-    if (origins.length) {
-      try {
-        native.requestStateImportStorage(this._requestState, encodeStorageOrigins(origins));
-      } catch (error) {
-        native.requestStateClose(this._requestState);
-        throw error;
-      }
-    }
-    // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
-    this._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
-    this._headers = merged.extraHTTPHeaders ?? {};
-    this._auxiliaryPolicy = merged.auxiliaryPolicy;
-    this._viewport = merged.viewport ?? { width: 1280, height: 720 };
-    this._testIdAttribute =
-      merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
-    // Capture-only remaining per-project `use` keys so a suite that reads them
-    // from the context (via a getter or in-suite introspection) sees the real
-    // project value. Timezone and HTTPS settings retain their current capability
-    // limits; permission and location options are applied through native context state.
-    this._httpCredentials = merged.httpCredentials ?? null;
-    this._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
-    this._colorScheme = merged.colorScheme ?? null;
-    this._reducedMotion = merged.reducedMotion ?? null;
-    this._permissions = merged.permissions ?? [];
-    this._geolocation = geolocation;
-    this._permissionGrants = permissionGrant.permissions.length ? [permissionGrant] : [];
-    this._timezoneId = merged.timezoneId ?? null;
-    this._offline = merged.offline ?? false;
-    if (this._offline) native.requestStateSetOffline(this._requestState, true);
-    this._screen = merged.screen ?? null;
+    initializeContextStorage(this, merged);
+    initializeContextIdentity(this, merged);
+    initializeContextPreferences(this, merged, permissionGrant, geolocation);
     this._initScripts = [];
     this._bindings = new Map();
     this._pages = [];
@@ -6741,6 +6801,14 @@ function skipConditionMet(args, fixtures = {}) {
   return !!c;
 }
 
+function skipActiveAttempt(attempt, reason) {
+  attempt.info.status = "skipped";
+  attempt.info.expectedStatus = "skipped";
+  attempt.info.annotations.push({ type: "skip", description: reason });
+  getActiveT()?.skip(reason);
+  throw SKIP_SIGNAL;
+}
+
 function applySkip(args) {
   const attempt = activeAttemptStore.getStore();
   const workerHook = activeWorkerHookStore.getStore();
@@ -6753,11 +6821,7 @@ function applySkip(args) {
   if (!skipConditionMet(args, current?.fixtures.arg)) return;
   const reason = typeof args.at(-1) === "string" ? args.at(-1) : undefined;
   if (attempt) {
-    attempt.info.status = "skipped";
-    attempt.info.expectedStatus = "skipped";
-    attempt.info.annotations.push({ type: "skip", description: reason });
-    getActiveT()?.skip(reason);
-    throw SKIP_SIGNAL;
+    skipActiveAttempt(attempt, reason);
   }
   if (!workerHook && getActiveT()) {
     getActiveT().skip(reason);
@@ -7236,6 +7300,49 @@ async function encodeMultipart(fields) {
   return { body: Buffer.concat(chunks), type: `multipart/form-data; boundary=${boundary}` };
 }
 
+function setAPIContentType(headers, value) {
+  if (!Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
+    headers["Content-Type"] = value;
+  }
+}
+function encodeAPIRequestData(options, headers) {
+  if (typeof options.data === "string" || Buffer.isBuffer?.(options.data)) {
+    const body = Buffer.isBuffer(options.data) ? options.data : String(options.data);
+    setAPIContentType(headers, "application/octet-stream");
+    return body;
+  }
+  const body = JSON.stringify(options.data);
+  setAPIContentType(headers, "application/json");
+  return body;
+}
+function appendAPIRequestParams(target, options) {
+  if (options.params === undefined) return target;
+  const parsed = new URL(target);
+  for (const [name, value] of new URLSearchParams(options.params))
+    parsed.searchParams.append(name, value);
+  return parsed.href;
+}
+function validateAPIMaxRedirects(maxRedirects) {
+  if (maxRedirects !== undefined && (!Number.isInteger(maxRedirects) || maxRedirects < 0)) {
+    throw new Error("maxRedirects must be a non-negative integer");
+  }
+}
+function needsAPIBasicChallenge(parsed, target, credentialAllowed, credentials) {
+  return (
+    parsed.status === 401 &&
+    credentialAllowed(parsed.finalUrl ?? target) &&
+    credentials.send !== "always" &&
+    parsed.headers?.some(
+      ([name, value]) => name.toLowerCase() === "www-authenticate" && /^Basic(?:\s|$)/i.test(value),
+    )
+  );
+}
+function validateAPIStatus(parsed, failOnStatusCode) {
+  if (failOnStatusCode && (parsed.status < 200 || parsed.status >= 400)) {
+    throw new Error(`API request failed with status ${parsed.status}`);
+  }
+}
+
 export const request = {
   // Synchronous (no await needed) — tests chain `request.newContext({...}).fetch(...)`.
   // Real Playwright returns a Promise here; the synchronous form also works at
@@ -7314,59 +7421,35 @@ export const request = {
       if (o.form !== undefined) {
         const entries = o.form instanceof FormData ? o.form.entries() : o.form;
         body = new URLSearchParams(entries).toString();
-        if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
-          h["Content-Type"] = "application/x-www-form-urlencoded";
-        }
+        setAPIContentType(h, "application/x-www-form-urlencoded");
       }
       if (o.multipart !== undefined) {
         const multipart = await encodeMultipart(o.multipart);
         body = multipart.body;
-        if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
-          h["Content-Type"] = multipart.type;
-        }
+        setAPIContentType(h, multipart.type);
       }
       if (o.data !== null && o.data !== undefined) {
-        if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {
-          body = Buffer.isBuffer(o.data) ? o.data : String(o.data);
-          if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
-            h["Content-Type"] = "application/octet-stream";
-          }
-        } else {
-          body = JSON.stringify(o.data);
-          if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
-            h["Content-Type"] = "application/json";
-          }
-        }
+        body = encodeAPIRequestData(o, h);
       }
       const hdr = Object.keys(h).length ? JSON.stringify(h) : headers;
       return { body, hdr };
     };
-    const call = async (url, method, o = {}) => {
-      ensureOpen();
-      await initialState;
-      let target = resolve(url);
-      if (o.params !== undefined) {
-        const parsed = new URL(target);
-        for (const [name, value] of new URLSearchParams(o.params))
-          parsed.searchParams.append(name, value);
-        target = parsed.href;
-      }
-      const maxRedirects = o.maxRedirects ?? opts.maxRedirects;
-      if (maxRedirects !== undefined && (!Number.isInteger(maxRedirects) || maxRedirects < 0)) {
-        throw new Error("maxRedirects must be a non-negative integer");
-      }
-      const credentialHeaders =
-        credentialAllowed(target) && credentials.send === "always"
-          ? { Authorization: authorization, ...o.headers }
-          : o.headers;
-      const { body, hdr } = await encode({ ...o, headers: credentialHeaders });
-      const inCookies = bc ? bc._cookies : cookies;
-      let raw = await native.fetchWithCookies(
+    const fetchResponse = (
+      target,
+      inCookies,
+      method,
+      body,
+      hdr,
+      maxRedirects,
+      o,
+      encodeHeaders = false,
+    ) =>
+      native.fetchWithCookies(
         target,
         inCookies,
         method ?? null,
         Buffer.isBuffer(body) ? null : body,
-        hdr,
+        encodeHeaders ? JSON.stringify(hdr) : hdr,
         false,
         requestState,
         null,
@@ -7376,32 +7459,32 @@ export const request = {
         o.timeout ?? opts.timeout ?? null,
         maxBytes,
       );
+    const call = async (url, method, o = {}) => {
+      ensureOpen();
+      await initialState;
+      const target = appendAPIRequestParams(resolve(url), o);
+      const maxRedirects = o.maxRedirects ?? opts.maxRedirects;
+      validateAPIMaxRedirects(maxRedirects);
+      const credentialHeaders =
+        credentialAllowed(target) && credentials.send === "always"
+          ? { Authorization: authorization, ...o.headers }
+          : o.headers;
+      const { body, hdr } = await encode({ ...o, headers: credentialHeaders });
+      const inCookies = bc ? bc._cookies : cookies;
+      let raw = await fetchResponse(target, inCookies, method, body, hdr, maxRedirects, o);
       let parsed = JSON.parse(raw);
-      if (
-        parsed.status === 401 &&
-        credentialAllowed(parsed.finalUrl ?? target) &&
-        credentials.send !== "always" &&
-        parsed.headers?.some(
-          ([name, value]) =>
-            name.toLowerCase() === "www-authenticate" && /^Basic(?:\s|$)/i.test(value),
-        )
-      ) {
+      if (needsAPIBasicChallenge(parsed, target, credentialAllowed, credentials)) {
         const authHeaders = JSON.parse(hdr ?? "{}");
         authHeaders.Authorization = authorization;
-        raw = await native.fetchWithCookies(
+        raw = await fetchResponse(
           target,
           inCookies,
-          method ?? null,
-          Buffer.isBuffer(body) ? null : body,
-          JSON.stringify(authHeaders),
-          false,
-          requestState,
-          null,
-          Buffer.isBuffer(body) ? body : null,
+          method,
+          body,
+          authHeaders,
           maxRedirects,
+          o,
           true,
-          o.timeout ?? opts.timeout ?? null,
-          maxBytes,
         );
         parsed = JSON.parse(raw);
       }
@@ -7413,12 +7496,7 @@ export const request = {
       }
       // oxlint-enable no-underscore-dangle
       ensureOpen();
-      if (
-        (o.failOnStatusCode ?? opts.failOnStatusCode) &&
-        (parsed.status < 200 || parsed.status >= 400)
-      ) {
-        throw new Error(`API request failed with status ${parsed.status}`);
-      }
+      validateAPIStatus(parsed, o.failOnStatusCode ?? opts.failOnStatusCode);
       responses.add(parsed);
       return makeResponse(parsed, ensureOpen);
     };

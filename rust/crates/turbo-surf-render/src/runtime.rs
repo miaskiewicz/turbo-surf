@@ -8886,6 +8886,7 @@ fn storage_string<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Lo
 mod storage_events;
 
 enum StorageReply {
+    QuotaExceeded,
     Null,
     Value(Vec<u16>),
     Keys(Vec<Vec<u16>>),
@@ -8997,7 +8998,7 @@ fn storage_set(
         .map(|(name, value)| name.len() + value.len())
         .sum();
     if other_units + key.len() + value.len() > quota_units {
-        return Err(JsErrorBox::range_error("Storage quota exceeded"));
+        return Ok((StorageReply::QuotaExceeded, None));
     }
     let index = values.iter().position(|(name, _)| *name == key);
     let edit = if index.is_none_or(|index| values[index].1 != value) {
@@ -9087,7 +9088,7 @@ fn op_storage_call<'s>(
         })
         .unwrap_or_else(|| state.borrow::<Base>().0.clone());
     if command == "set" && key.length() + value.length() > QUOTA_UNITS {
-        return Err(JsErrorBox::range_error("Storage quota exceeded"));
+        return Ok(storage_reply_to_js(scope, StorageReply::QuotaExceeded));
     }
     // An oversized key cannot have been stored. Avoid materializing a guest rope
     // that cannot possibly match an entry or pass the write quota.
@@ -9138,6 +9139,7 @@ fn storage_reply_to_js<'s>(
     reply: StorageReply,
 ) -> v8::Local<'s, v8::Value> {
     match reply {
+        StorageReply::QuotaExceeded => v8::Integer::new(scope, -1).into(),
         StorageReply::Null => v8::null(scope).into(),
         StorageReply::Value(units) => storage_string(scope, &units),
         StorageReply::Keys(keys) => {
@@ -9178,11 +9180,11 @@ fn op_interface_record_set<'s>(
 }
 
 #[op2(fast)]
-fn op_storage_id(
-    scope: &mut v8::PinScope,
-    object: v8::Local<v8::Object>,
-) -> Result<u32, JsErrorBox> {
-    storage_id(scope, object)
+fn op_storage_id(scope: &mut v8::PinScope, receiver: v8::Local<v8::Value>) -> u32 {
+    let Ok(object) = v8::Local::<v8::Object>::try_from(receiver) else {
+        return 0;
+    };
+    storage_id(scope, object).unwrap_or(0)
 }
 fn storage_id(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> Result<u32, JsErrorBox> {
     let name = v8::String::new(scope, "turbo-surf.Storage.area").unwrap();
@@ -10357,14 +10359,17 @@ if (!globalThis.location) globalThis.location = { href: "about:blank", protocol:
 // Private IDs remain attached to retained Storage objects across navigation.
 const __storageApply=Reflect.apply,__storageCharCode=String.prototype.charCodeAt,__storageGetters=__recordCreate(null);
 const __storageWindows = new WeakMap(),__storageWindowGet=WeakMap.prototype.get.bind(__storageWindows),__storageWindowSet=WeakMap.prototype.set.bind(__storageWindows),__storageNumber=Number;
-const __storageMap = receiver => ops.op_storage_id(receiver);
+const __storageMap = receiver => {
+ const id=ops.op_storage_id(receiver);
+ if(!id)throw new __exceptionTypeError('Illegal invocation');
+ return id;
+};
 const __storageString = value => {if(typeof value==='symbol')throw new __exceptionTypeError('Cannot convert a Symbol to a string');return __String(value);};
-const __storageRangeError=RangeError,__storageException=DOMException;
+const __storageException=DOMException;
 const __storageNativeCall=(id,receiver,command,key='',value='')=>{
- try{return ops.op_storage_call(id,receiver,command,key,value);}catch(error){
-  if(error instanceof __storageRangeError&&error.message==='Storage quota exceeded')throw new __storageException(error.message,'QuotaExceededError');
-  throw error;
- }
+ const result=ops.op_storage_call(id,receiver,command,key,value);
+ if(result===-1)throw new __storageException('Storage quota exceeded','QuotaExceededError');
+ return result;
 };
 const __storageCall = (receiver, command, key='', value='') => __storageNativeCall(__storageMap(receiver),receiver,command,key,value);
 function Storage() {throw new __exceptionTypeError('Illegal constructor');}

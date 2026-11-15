@@ -2,7 +2,7 @@
 
 Target: `release/v0.8.4`. Updated 2026-11-15.
 
-Original batch: **34 test cases (11 Rust, 23 shim)**. **33 have component proof and their fixes are merged; 1 remains open.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
+Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component proof and their fixes are merged.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
 
@@ -36,7 +36,7 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `no-content navigation retains the active document and history (#428)` | `efdc3f0d`; targeted proof complete, combined rerun pending |
 | [x] | shim | `direct navigation referrers are explicit and reload retains them (#426)` | `8f511cfa`; targeted proof complete, combined rerun pending |
 | [x] | shim | `history navigation honors networkidle hydration (#425)` | `d1b61ed7`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Producer #513 API pinned at 7f via `9b91244f`. Combined 7f candidate whole original now passes 1/1 (2.535s): both 30ms timeouts preserve the same actual native Page and both timeout0 retries load 180ms authored work. API 5/5 and clock 5/5 pass on the earlier artifact. A pre-merge safety control then found root init running in the infrastructure realm; the explicit actual-root context fix and guard are now in fresh artifact 544620d1. The entire original/API/warm/iframe packet must rerun on that artifact, with no carried final credit. Critical inverses/restoration and strict still gate merge |
+| [x] | shim | `navigation deadlines also cancel slow hydration (#427)` | Merged `37062d94` with the verified public `.3` Deno family. Exact owned absolute deadlines bound nested initialization without a persistent actor-wide watchdog; interrupted child work and old module evaluations retire only after outer guards unwind. Current actual-archive original/official/module controls pass 10/10, plus history 31/31 and interruption/identity 3/3. Read latency fell from 8545ms to 12ms while finished documents, cached/fresh imports and a peer's held module survive. API-only OFF reproduces the old unresolved-TLA recovery failure; exact restore passes. Core host API guards, affected strict/fmt/CC/hooks and real-registry all-target check pass. Final full gates pending |
 | [x] | shim | `viewport resize updates live layout media and only its own page (#369)` | `864b3343`; targeted proof complete, combined rerun pending |
 | [x] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Merged `5144ec81`; original plus seven image admission/ownership/pixel controls pass. Essential handoff OFF reproduces exact extra-image counts, byte-exact restore passes. Native resource-cap/retirement controls, action/history combined checks and affected acceptance pass; final full gates pending |
 | [x] | shim | `frame locator typing uses canonical child selection and child event constructors` | `0a451d99`; targeted proof complete, combined rerun pending |
@@ -83,10 +83,10 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 
 Accounting: 34 original test cases plus 19 additional tracked cases/findings. This is not a count of unique GitHub issues.
 
-- Merged with component proof: **51**.
+- Merged with component proof: **52**.
 - Verified clear without an additional source fix: **1** detector POST control.
-- Total done: **52**. Total pending: **1**. Total tracked: **53**.
-- Pending: deadline safety. Action/history composition passed 15 affected action controls, 31 history controls and three interruption/identity tests on fresh combined artifacts; MCP passes eight combined controls. Final complete gates and the remaining complexity cleanup remain pending.
+- Total done: **53**. Total pending known fixes: **0**. Total tracked: **53**.
+- All known fixes are integrated with component proof. The pinned JS complexity gate now passes without raising its limit. Freeze the pushed source and run complete gates next; track and fix every newly exposed failure, then rerun until green before coverage.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

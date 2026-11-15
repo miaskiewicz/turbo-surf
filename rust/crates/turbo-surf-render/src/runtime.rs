@@ -11430,7 +11430,7 @@ globalThis.fetch = async (input, init = undefined) => {
       let event;
       try { event = new MediaQueryListEvent("change", { media: list.mql.media, matches: now }); }
       catch { event = new __MediaEvent("change"); Object.defineProperties(event, { media: { value: list.mql.media }, matches: { value: now } }); }
-      for (const fn of list.listeners.slice()) { try { apply(fn, list.mql, [event]); } catch (e) { ops.op_report_exception(e); } }
+      for (const fn of list.listeners.slice()) { try { apply(fn, list.mql, [event]); } catch (e) { ops.op_report_exception(__document, e); } }
     }
   });
   const __mqLen = (tok, basis) => {

@@ -28,11 +28,16 @@ pub(super) struct Queue(pub std::collections::VecDeque<Pending>);
 
 impl Queue {
     pub(super) fn take_native(&mut self) -> Option<(u64, Pending)> {
-        let (index, target) = self
-            .0
-            .iter()
-            .enumerate()
-            .find_map(|(index, pending)| pending.target.map(|target| (index, target)))?;
+        self.take_native_for(None)
+    }
+
+    pub(super) fn take_native_for(&mut self, owner: Option<u64>) -> Option<(u64, Pending)> {
+        let (index, target) = self.0.iter().enumerate().find_map(|(index, pending)| {
+            pending
+                .target
+                .filter(|target| owner.is_none_or(|owner| owner == *target))
+                .map(|target| (index, target))
+        })?;
         self.0.remove(index).map(|pending| (target, pending))
     }
 

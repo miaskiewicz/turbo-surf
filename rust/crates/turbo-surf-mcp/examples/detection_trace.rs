@@ -18,8 +18,15 @@ use turbo_surf_render::{
 // Host sleeps give delayed HTTP futures a turn without advancing future window timers.
 async fn wait_until(page: &mut PageSession, deadline: Instant) -> Result<(), String> {
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-        tokio::time::sleep(remaining.min(Duration::from_millis(25))).await;
-        page.eval("void 0").await?;
+        // A scalar evaluation cannot advance the actor's queued document loads.
+        if let Ok(result) = tokio::time::timeout(
+            remaining.min(Duration::from_millis(25)),
+            page.poll_background_work(),
+        )
+        .await
+        {
+            result?;
+        }
     }
     Ok(())
 }
@@ -1205,6 +1212,55 @@ mod tests {
         assert_eq!(trace["pages"].as_array().unwrap().len(), 1);
         assert!(!Path::new("unexpected-js-trace").exists());
         assert!(!out.join("native-js").exists());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fixed_observation_deadline_does_not_wait_for_unfinished_native_io() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let (requested, seen) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+            let _ = requested.send(());
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\na")
+                .await;
+            std::future::pending::<()>().await;
+        });
+        let mut page = PageSession::open_with_document_response_and_options(
+            "<body>ready",
+            &base,
+            "",
+            "",
+            60_000,
+            "",
+            Default::default(),
+            &[],
+            Default::default(),
+            Default::default(),
+            None,
+            realtime_options(),
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap().to_string();
+        page.eval_expression("void fetch('/hold')").await.unwrap();
+        let start = Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(2), real_wait(&mut page, 200)).await;
+        let elapsed = start.elapsed();
+        let pending =
+            page.network_event_log().target_network_state(&root)["pendingRequests"].clone();
+        let requested = tokio::time::timeout(Duration::from_secs(1), seen).await;
+        server.abort();
+        result
+            .expect("fixed deadline must not await held HTTP body")
+            .unwrap();
+        assert!(requested.unwrap().is_ok());
+        assert!(elapsed >= Duration::from_millis(200), "{elapsed:?}");
+        assert_eq!(pending, json!(1));
     }
 
     fn capture_fixture_directory() -> std::path::PathBuf {

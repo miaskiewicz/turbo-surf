@@ -30,6 +30,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 
 mod enid;
 mod render_policy;
+mod root_navigation;
 use enid::{EnidCache, EnidCookie};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -682,6 +683,8 @@ impl Session {
         script: &str,
         await_final_program: bool,
     ) -> Result<String, String> {
+        let render_deadline = tokio::time::Instant::now()
+            + std::time::Duration::from_millis(turbo_surf_render::DEFAULT_RENDER_BUDGET_MS);
         // Keep initialization state off nested MCP dispatch frames so V8 lazy
         // extension startup retains its native stack headroom.
         let mut page = Box::pin(turbo_surf_render::PageSession::open_with_document_response(
@@ -714,6 +717,9 @@ impl Session {
                 program_error = Some(error);
                 break;
             }
+        }
+        if let Err(error) = root_navigation::finish(&mut page, render_deadline).await {
+            program_error.get_or_insert(error);
         }
         let (count, url, metadata) = page.navigation_snapshot();
         let headers = page.response_headers_snapshot();
@@ -4003,6 +4009,280 @@ mod tests {
         assert!(
             dom.contains("Results for weather"),
             "loaded the results page for the typed query: {dom}"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_follows_root_location_before_collecting_its_document() {
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut session = Session::new();
+        session.goto(&base).await.unwrap();
+        let source = serialize_doc(session.tree().unwrap());
+        let html = session
+            .render_script(&source, &base, "location.replace('/results?q=queued');")
+            .await
+            .unwrap();
+        assert!(html.contains("Results for queued"), "{html}");
+        assert!(
+            session.url.ends_with("/results?q=queued"),
+            "{}",
+            session.url
+        );
+        assert_eq!(session.last_render_navigation_count, 1);
+    }
+
+    #[tokio::test]
+    async fn root_navigation_surfaces_its_actual_http_failure() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let rejected = format!("http://{}/rejected", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+        });
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut session = Session::new();
+        session.goto(&base).await.unwrap();
+        let source = serialize_doc(session.tree().unwrap());
+        let result = session
+            .render_script(
+                &source,
+                &base,
+                &format!(
+                    "location.replace({});",
+                    serde_json::to_string(&rejected).unwrap()
+                ),
+            )
+            .await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result
+            .unwrap_err()
+            .contains("Native target navigation failed"));
+    }
+
+    async fn start_actual_peer_request(
+        page: &mut turbo_surf_render::PageSession,
+        seen: &mut tokio::sync::oneshot::Receiver<()>,
+    ) {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                tokio::select! {
+                    requested = &mut *seen => { requested.unwrap(); break; }
+                    step = page.poll_owned_work() => { step.unwrap(); }
+                }
+            }
+        })
+        .await
+        .expect("peer fixture must start actual native HTTP before root work");
+    }
+
+    async fn root_finishes_with_actual_peer_work(reject: bool) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let peer_url = format!("http://{}/peer", listener.local_addr().unwrap());
+        let (requested, mut seen) = tokio::sync::oneshot::channel();
+        let (release, failure) = tokio::sync::oneshot::channel();
+        let mut server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+            let _ = requested.send(());
+            if reject {
+                let _ = failure.await;
+                return;
+            }
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\na")
+                .await;
+            std::future::pending::<()>().await;
+        });
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut page = turbo_surf_render::PageSession::open("<body>root", &base, "", "", 60_000)
+            .await
+            .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        page.eval_expression(&format!(
+            "window.open({},'peer');void 0",
+            serde_json::to_string(&peer_url).unwrap()
+        ))
+        .await
+        .unwrap();
+        let peer = page
+            .auxiliary_event_log()
+            .pages()
+            .into_iter()
+            .find(|info| info.source_page.as_deref() == Some(&root.to_string()))
+            .unwrap()
+            .target;
+        start_actual_peer_request(&mut page, &mut seen).await;
+        assert_eq!(
+            page.network_event_log().target_network_state(&peer)["pendingNavigation"],
+            true
+        );
+        page.eval_expression("location.replace('/results?q=root');void 0")
+            .await
+            .unwrap();
+        if reject {
+            let _ = release.send(());
+            tokio::time::timeout(std::time::Duration::from_secs(1), &mut server)
+                .await
+                .expect("rejected peer must close before root progress")
+                .unwrap();
+        }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = super::root_navigation::finish(&mut page, deadline).await;
+        let html = page.serialize_target(root).unwrap();
+        let peer_pending =
+            page.network_event_log().target_network_state(&peer)["pendingNavigation"].clone();
+        server.abort();
+        result.unwrap();
+        assert!(html.contains("Results for root"), "{html}");
+        assert!(page.navigation_snapshot().1.ends_with("/results?q=root"));
+        if !reject {
+            assert_eq!(peer_pending, true);
+        }
+    }
+
+    #[tokio::test]
+    async fn root_navigation_does_not_wait_for_actual_held_peer_body() {
+        root_finishes_with_actual_peer_work(false).await;
+    }
+
+    #[tokio::test]
+    async fn root_navigation_does_not_inherit_actual_peer_request_failure() {
+        root_finishes_with_actual_peer_work(true).await;
+    }
+
+    #[tokio::test]
+    async fn root_navigation_finishes_its_form_without_admitting_a_peer_form() {
+        let (base, requests, server) = spawn_post_lifecycle_server().await;
+        let mut page = turbo_surf_render::PageSession::open(
+            "<body><form method=post><input name=q value=root></form>",
+            &base,
+            "",
+            "",
+            60_000,
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        page.eval_expression("window.open('about:blank','peer');void 0")
+            .await
+            .unwrap();
+        let peer = page
+            .auxiliary_event_log()
+            .pages()
+            .into_iter()
+            .find(|info| info.source_page.as_deref() == Some(&root.to_string()))
+            .unwrap()
+            .target;
+        let peer_id = peer.parse::<u64>().unwrap();
+        page.eval_target_expression(peer_id, &format!(
+            "document.body.innerHTML='<form method=post action=\"{}\"><input name=q value=peer></form>';document.querySelector('form').submit();void 0", base), false, false).await.unwrap();
+        page.eval_target_expression(
+            root,
+            "document.querySelector('form').submit();void 0",
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let log = page.network_event_log();
+        assert_eq!(
+            log.target_network_state(&root.to_string())["pendingNavigation"],
+            true
+        );
+        assert_eq!(log.target_network_state(&peer)["pendingNavigation"], true);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = super::root_navigation::finish(&mut page, deadline).await;
+        let html = page.serialize_target(root).unwrap();
+        let pending = log.target_network_state(&peer)["pendingNavigation"].clone();
+        server.abort();
+        result.unwrap();
+        assert!(html.contains("id=\"posted\""), "{html}");
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![("POST".to_owned(), "q=root".to_owned())]
+        );
+        assert_eq!(pending, true);
+    }
+
+    #[tokio::test]
+    async fn root_navigation_keeps_a_peer_history_task_queued_until_its_own_turn() {
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut page = turbo_surf_render::PageSession::open("<body>root", &base, "", "", 60_000)
+            .await
+            .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        page.eval_expression("window.open('about:blank','peer');void 0")
+            .await
+            .unwrap();
+        let peer = page
+            .auxiliary_event_log()
+            .pages()
+            .into_iter()
+            .find(|info| info.source_page.as_deref() == Some(&root.to_string()))
+            .unwrap()
+            .target;
+        let peer = peer.parse::<u64>().unwrap();
+        page.navigate_target(peer, &format!("{base}peer"), "push")
+            .await
+            .unwrap();
+        page.eval_target_expression(peer,
+            "history.pushState(null,'','/peer-a');history.pushState(null,'','/peer-b');history.back();void 0",
+            false, false).await.unwrap();
+        let peer_url = |page: &mut turbo_surf_render::PageSession| {
+            serde_json::from_str::<String>(
+                &page
+                    .read_target_engine(peer, "return location.href")
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        assert!(peer_url(&mut page).ends_with("/peer-b"));
+        page.eval_target_expression(
+            root,
+            "location.replace('/results?q=root');void 0",
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        super::root_navigation::finish(&mut page, deadline)
+            .await
+            .unwrap();
+        assert!(page
+            .serialize_target(root)
+            .unwrap()
+            .contains("Results for root"));
+        assert!(peer_url(&mut page).ends_with("/peer-b"));
+        let progressed = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while !peer_url(&mut page).ends_with("/peer-a") {
+                if let Ok(result) = tokio::time::timeout(
+                    std::time::Duration::from_millis(25),
+                    page.poll_owned_work(),
+                )
+                .await
+                {
+                    result.unwrap();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(
+            progressed.is_ok(),
+            "the peer history task must remain executable in a later generic turn; actual {}",
+            peer_url(&mut page)
         );
     }
 

@@ -1128,6 +1128,10 @@ impl PageSession {
     /// Admit accepted native forms before yielding an interruptible actor turn.
     /// Jobs retain the request; dropping a background poll cannot cancel or replay it.
     pub(super) fn admit_actor_form_navigations(&mut self) -> Result<(), String> {
+        self.admit_actor_form_navigations_scoped(None)
+    }
+
+    fn admit_actor_form_navigations_scoped(&mut self, owner: Option<u64>) -> Result<(), String> {
         if !self
             .rt
             .op_state()
@@ -1138,12 +1142,15 @@ impl PageSession {
             return Ok(());
         }
         loop {
-            let pending = self
-                .rt
-                .op_state()
-                .borrow_mut()
-                .borrow_mut::<form_submission::Queue>()
-                .take_native();
+            let pending = {
+                let shared = self.rt.op_state();
+                let mut state = shared.borrow_mut();
+                let queue = state.borrow_mut::<form_submission::Queue>();
+                match owner {
+                    Some(_) => queue.take_native_for(owner),
+                    None => queue.take_native(),
+                }
+            };
             let Some((target, pending)) = pending else {
                 return Ok(());
             };
@@ -1156,6 +1163,9 @@ impl PageSession {
             }
             if let Err(error) = self.start_form_target(target, pending) {
                 report_target_error(&mut self.rt, target, &error);
+                if owner.is_some() {
+                    return Err(error);
+                }
             }
         }
     }
@@ -1484,6 +1494,52 @@ impl PageSession {
         let generation = self.start_form_target(target, pending)?;
         self.wait_action_navigation(target, generation, revision)
             .await
+    }
+}
+
+impl PageSession {
+    /// Advance admitted navigation belonging to this session's native root only.
+    pub async fn poll_root_navigation_work(&mut self) -> Result<(), String> {
+        if self.closed {
+            return Err("Page session is closed".to_owned());
+        }
+        let root = self
+            .auxiliary_event_log()
+            .root()
+            .ok_or("Native root ownership unavailable")?
+            .parse::<u64>()
+            .map_err(|_| "Invalid native root identity")?;
+        {
+            let _activation = self.rt.activation_key().enter();
+            deno_core::scope!(scope, self.rt);
+            let context = auxiliary_pages::context(scope, AuxiliaryContextId(root))?;
+            if context.get_slot::<FrameRetired>().is_some()
+                || binding::auxiliary_context_identity(context)
+                    .is_none_or(|identity| identity.id.0 != root)
+            {
+                return Err("Native root document is closed or ownership changed".to_owned());
+            }
+        }
+        self.admit_actor_form_navigations_scoped(Some(root))?;
+        self.service_auxiliary_navigation_scoped(Some(root)).await?;
+        let shared = self.rt.op_state();
+        let state = shared.borrow();
+        let revision = state
+            .borrow::<NetworkLog>()
+            .current_navigation_revision(root)
+            .ok_or("Native root navigation ownership unavailable")?;
+        let failure = state
+            .borrow::<State>()
+            .action_commits
+            .get(&root)
+            .filter(|(serial, _)| *serial == revision)
+            .and_then(|(_, result)| result.as_ref().err());
+        match failure {
+            Some(ActionTerminalError::Navigation(error) | ActionTerminalError::Driver(error)) => {
+                Err(error.clone())
+            }
+            None => Ok(()),
+        }
     }
 }
 

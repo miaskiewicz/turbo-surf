@@ -129,3 +129,72 @@ async fn measure_text_matches_chrome156_with_a_host_measurer() {
         out.join("\n")
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn loaded_font_canvases_follow_the_native_document_owner_and_detach() {
+    let origin = serve("<!doctype html><body>font owner</body>".into()).await;
+    let mut session = PageSession::open(
+        "<!doctype html><body>font owner</body>",
+        &format!("{origin}/"),
+        "",
+        "",
+        15000,
+    )
+    .await
+    .unwrap();
+    let script = r#"(async () => {
+      const peer = window.open('about:blank', 'font-peer');
+      const own = document.createElement('canvas').getContext('2d');
+      const other = peer.document.createElement('canvas').getContext('2d');
+      own.font = other.font = '20px SurfFontOwnerProbe';
+      const read = (context) => context.measureText('Typography').width;
+      const before = [read(own), read(other)];
+      const face = await new FontFace('SurfFontOwnerProbe', 'url(/fonts/plex.ttf)').load();
+      document.fonts.add(face);
+      const attached = [read(own), read(other)];
+      document.fonts.delete(face);
+      const detached = [read(own), read(other)];
+      const peerFace = await new peer.FontFace('SurfFontOwnerProbe', `url(${new URL('/fonts/plex.ttf', location.href).href})`).load();
+      peer.document.fonts.add(peerFace);
+      const peerAttached = [read(own), read(other)];
+      peer.document.fonts.delete(peerFace);
+      const peerDetached = [read(own), read(other)];
+      peer.close();
+      return { before, attached, detached, peerAttached, peerDetached };
+    })()"#;
+    let raw = session.eval_json_expression(script).await.unwrap();
+    session.close();
+    let actual: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        actual["before"][0], actual["before"][1],
+        "fresh root and sibling canvases use the same system-font policy: {actual}"
+    );
+    assert_ne!(
+        actual["before"][0], 120.0,
+        "fixture must distinguish fallback from the loaded font"
+    );
+    assert_eq!(
+        actual["attached"][0], 120.0,
+        "root canvas must use its loaded face: {actual}"
+    );
+    assert_eq!(
+        actual["attached"][1], actual["before"][1],
+        "root font must not enter the sibling registry: {actual}"
+    );
+    assert_eq!(
+        actual["detached"], actual["before"],
+        "delete restores this document's fallback: {actual}"
+    );
+    assert_eq!(
+        actual["peerAttached"][0], actual["before"][0],
+        "sibling face must not alter root canvas: {actual}"
+    );
+    assert_eq!(
+        actual["peerAttached"][1], 120.0,
+        "sibling canvas must use its own loaded face: {actual}"
+    );
+    assert_eq!(
+        actual["peerDetached"], actual["before"],
+        "sibling delete restores only its registry: {actual}"
+    );
+}

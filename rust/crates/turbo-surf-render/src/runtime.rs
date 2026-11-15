@@ -459,6 +459,27 @@ fn op_document_feature_enabled(
     document_feature_enabled(scope, document, feature)
 }
 
+/// Authenticate the installed native Document without consulting guest properties.
+pub(crate) fn active_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Context>> {
+    use turbo_dom_browser_env::host_internals::{
+        current_document_context, enter_document_of, is_browsing_context,
+    };
+    let _document = enter_document_of(scope, document);
+    let context = current_document_context(scope)?;
+    if document.get_creation_context(scope) != Some(context) {
+        return None;
+    }
+    let active = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|active| active.0.to_local(scope))
+        .is_some_and(|active| active.strict_equals(document.into()));
+    (active && is_browsing_context() && context.get_slot::<FrameRetired>().is_none())
+        .then_some(context)
+}
+
 pub(crate) fn document_feature_enabled(
     scope: &mut v8::PinScope,
     document: v8::Local<v8::Object>,
@@ -9313,6 +9334,11 @@ fn install_environment<'s>(
     core: v8::Local<'s, v8::Value>,
 ) -> Result<(), String> {
     let context = scope.get_current_context();
+    // Every Window starts with the same font policy that web-font detach restores.
+    // Discovery already ran before the isolate's first guest turn.
+    if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {
+        crate::browser_env::set_canvas_fonts(context, fonts.clone());
+    }
     register_network_activity_context(scope, context);
     let core_object = core
         .to_object(scope)
@@ -16325,11 +16351,6 @@ fn install_dom_document(rt: &mut JsRuntime, html: &str, base: &str) -> Result<()
         // Chrome's interface key order is applied once Surf's own interfaces exist too.
         crate::browser_env::defer_key_order(&mut scope);
         auxiliary_host::install_root_document_html(&mut scope, html, source_positions);
-        // Canvas `measureText` resolves `ctx.font` against the faces live layout uses
-        // (turbo-dom#237); a page opened before font discovery keeps the bundled faces.
-        if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {
-            crate::browser_env::set_canvas_fonts(context, fonts.clone());
-        }
         install_css_authorization(&mut scope).map_err(|error| error.to_string())?;
         // Before the environment bootstrap, which already creates the parsed iframes.
         let headers = JsRuntime::op_state_from(&scope)

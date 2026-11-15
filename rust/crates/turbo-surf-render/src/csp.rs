@@ -552,20 +552,31 @@ impl Policy {
     }
 
     pub fn bypasses_trusted_types_eval(&self) -> bool {
-        let mut has_keyword = false;
+        self.requires_trusted_types()
+            && self.allows_eval_with_trusted_types(true)
+            && self.policies.iter().any(|policy| {
+                Self::list(policy, "script-src")
+                    .is_some_and(|list| has(list, "'trusted-types-eval'"))
+            })
+    }
+    pub fn allows_eval_with_trusted_types(&self, enforced: bool) -> bool {
         self.policies.iter().all(|policy| {
             Self::list(policy, "script-src").is_none_or(|list| {
-                let trusted = list.iter().any(|token| token == "'trusted-types-eval'");
-                has_keyword |= trusted;
-                trusted || list.iter().any(|token| token == "'unsafe-eval'")
+                has(list, "'unsafe-eval'") || enforced && has(list, "'trusted-types-eval'")
             })
-        }) && has_keyword
+        })
     }
-    #[cfg(turbo_surf_native_proxy)]
+    pub fn eval_violations_with_trusted_types(&self, enforced: bool) -> Vec<ReportRecord> {
+        self.records(|policy| {
+            let list = Self::list(policy, "script-src")?;
+            (!has(list, "'unsafe-eval'") && !(enforced && has(list, "'trusted-types-eval'")))
+                .then(|| has(list, "'report-sample'"))
+        })
+    }
     pub fn eval_error_message(&self) -> Option<String> {
         self.policies.iter().find_map(|policy| {
             let list = Self::list(policy, "script-src")?;
-            if list.iter().any(|source| source == "'unsafe-eval'") { return None; }
+            if has(list, "'unsafe-eval'") || self.requires_trusted_types() && has(list, "'trusted-types-eval'") { return None; }
             let directive = if policy.contains_key("script-src") { "script-src" } else { "default-src" };
             Some(format!("Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: {directive} {}\".\n",list.join(" ")))
         })
@@ -1411,6 +1422,47 @@ mod tests {
             "https://x.test:8443/a",
             false
         ));
+    }
+
+    #[test]
+    fn native_trusted_eval_respects_enforced_types_and_policy_intersection() {
+        let split = Policy::new(
+            "https://eval.test/",
+            [
+                "require-trusted-types-for 'script'".into(),
+                "script-src 'trusted-types-eval'".into(),
+            ],
+        );
+        assert!(split.bypasses_trusted_types_eval());
+        assert!(split.allows_eval_with_trusted_types(true));
+        assert!(split.eval_violations_with_trusted_types(true).is_empty());
+        let keyword_only = Policy::new(
+            "https://eval.test/",
+            ["script-src 'trusted-types-eval'".into()],
+        );
+        assert!(!keyword_only.bypasses_trusted_types_eval());
+        assert!(!keyword_only.allows_eval_with_trusted_types(false));
+        assert_eq!(
+            keyword_only.eval_violations_with_trusted_types(false).len(),
+            1
+        );
+        let denied = Policy::new(
+            "https://eval.test/",
+            [
+                "require-trusted-types-for 'script'".into(),
+                "script-src 'trusted-types-eval'".into(),
+                "script-src 'none'".into(),
+            ],
+        );
+        assert!(!denied.bypasses_trusted_types_eval());
+        assert!(!denied.allows_eval_with_trusted_types(true));
+        let violations = denied.eval_violations_with_trusted_types(true);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].original, "script-src 'none'");
+        assert!(denied
+            .eval_error_message()
+            .unwrap()
+            .contains("script-src 'none'"));
     }
 
     #[test]

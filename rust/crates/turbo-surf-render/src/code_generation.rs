@@ -1,7 +1,25 @@
-//! Native V8 code-generation admission (eval / Function): the exact-engine SDK's
-//! private callback applies the realm's CSP `script-src` and Trusted Types checks.
-//! Compiled only under `cfg(turbo_surf_native_proxy)`; measured in that configuration.
+//! Native V8 dynamic-compilation admission for the actual guest document.
+//! Admission is installed on every actual native document realm.
 use super::*;
+struct Installed;
+pub(super) fn installed(context: v8::Local<v8::Context>) -> bool {
+    context.get_slot::<Installed>().is_some()
+}
+fn authorization_document<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    if context.get_slot::<FrameRetired>().is_some()
+        || context
+            .get_slot::<private_boundary::Infrastructure>()
+            .is_some()
+    {
+        return None;
+    }
+    let document = context.get_slot::<ActiveDocument>()?.0.to_local(scope)?;
+    (document.get_creation_context(scope) == Some(context)).then_some(document)
+}
+
 fn csp_eval_sample_units(scope: &v8::PinScope, source: v8::Local<v8::String>) -> Vec<u16> {
     let mut units = vec![0; source.length().min(40)];
     source.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
@@ -10,93 +28,54 @@ fn csp_eval_sample_units(scope: &v8::PinScope, source: v8::Local<v8::String>) ->
 
 fn deny_code_generation<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    mut result: v8::ReturnValue,
+    context: v8::Local<'s, v8::Context>,
     message: &str,
-) {
-    let message = v8::String::new(scope, message).unwrap();
-    let detail = v8::Array::new(scope, 1);
-    detail.set_index(scope, 0, message.into());
-    result.set(detail.into());
+) -> v8::ModifyCodeGenerationFromStringsResult<'s> {
+    if let Some(message) = v8::String::new(scope, message) {
+        context.set_error_message_for_code_generation_from_strings(message);
+    }
+    v8::ModifyCodeGenerationFromStringsResult::default()
 }
-fn authorize_code_generation<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut result: v8::ReturnValue,
-) {
-    let context = scope.get_current_context();
-    let typed = crate::browser_env::trusted_script_source(scope, args.get(0));
-    let original = match typed.or_else(|| v8::Local::<v8::String>::try_from(args.get(0)).ok()) {
-        Some(source) => source,
-        None => {
-            result.set_bool(true);
-            return;
-        }
-    };
-    if context.get_slot::<FrameRetired>().is_some() {
-        result.set_bool(false);
-        return;
-    }
-    let Some(handle) = context.get_slot::<CspHandle>() else {
-        result.set_bool(context.is_code_generation_from_strings_allowed());
-        return;
-    };
-    let policy = handle.policy.borrow().current().clone();
-    let report_only = handle.policy.borrow().report_only.clone();
-    if policy.bypasses_trusted_types_eval() {
-        result.set_bool(true);
-        return;
-    }
-    let key = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
-    let key = v8::Private::for_api(scope, Some(key));
-    let Some(document) = context
-        .global(scope)
-        .get_private(scope, key)
-        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-    else {
-        result.set_bool(false);
-        return;
-    };
-    // Chromium labels generated constructor source using these engine prefixes.
-    // Source admission itself always stays in the real V8 compilation callback.
-    let text = original.to_rust_string_lossy(scope);
-    let sink = if [
+fn trusted_types_sink_label(scope: &v8::PinScope, source: v8::Local<v8::String>) -> &'static str {
+    let mut prefix = vec![0; source.length().min(32)];
+    source.write_v2(scope, 0, &mut prefix, v8::WriteFlags::empty());
+    let prefix = String::from_utf16_lossy(&prefix);
+    // Chrome applies this observable label even to eval text mimicking a constructor.
+    // It does not identify the native compilation kind or grant admission.
+    if [
         "(function anonymous",
         "(async function anonymous",
         "(function* anonymous",
         "(async function* anonymous",
     ]
     .iter()
-    .any(|prefix| text.starts_with(prefix))
+    .any(|candidate| prefix.starts_with(candidate))
     {
         "Function"
     } else {
         "eval"
-    };
-    v8::tc_scope!(let scope,scope);
-    let source = crate::browser_env::trusted_type_string(
-        scope,
-        document,
-        args.get(0),
-        "TrustedScript",
-        sink,
-        "",
-    );
-    let message=policy.eval_error_message().unwrap_or_else(||"Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements.".into());
-    let Some(source) = source else {
-        scope.reset();
-        deny_code_generation(scope, result, &message);
-        return;
-    };
-    if crate::browser_env::string_code_units(scope, source)
-        != crate::browser_env::string_code_units(scope, original)
-    {
-        deny_code_generation(scope, result, &message);
-        return;
     }
+}
+
+fn report_code_generation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    document: v8::Local<'s, v8::Object>,
+    source: v8::Local<'s, v8::String>,
+    policy: &crate::csp::Policy,
+    report_only: &crate::csp::Policy,
+) {
     let sample = csp_eval_sample_units(scope, source);
+    let enforced = policy.requires_trusted_types();
     for (disposition, records) in [
-        ("enforce", policy.eval_violations()),
-        ("report", report_only.eval_violations()),
+        (
+            "enforce",
+            policy.eval_violations_with_trusted_types(enforced),
+        ),
+        (
+            "report",
+            report_only.eval_violations_with_trusted_types(enforced),
+        ),
     ] {
         queue_csp_report(
             scope,
@@ -112,22 +91,106 @@ fn authorize_code_generation<'s>(
             },
         );
     }
-    if policy.allows_eval() {
-        result.set(source.into());
+}
+
+fn authorize_code_generation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    input: v8::Local<'s, v8::Value>,
+    _is_code_like: bool,
+) -> v8::ModifyCodeGenerationFromStringsResult<'s> {
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let Some(document) = authorization_document(scope, context) else {
+        return deny_code_generation(
+            scope,
+            context,
+            "Code generation requires an active guest document",
+        );
+    };
+    let typed = crate::browser_env::trusted_script_source(scope, input);
+    let original = match typed.or_else(|| v8::Local::<v8::String>::try_from(input).ok()) {
+        Some(source) => source,
+        None => {
+            return v8::ModifyCodeGenerationFromStringsResult {
+                codegen_allowed: true,
+                modified_source: None,
+            };
+        }
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return v8::ModifyCodeGenerationFromStringsResult {
+            codegen_allowed: true,
+            modified_source: Some(original),
+        };
+    };
+    let policy = handle.policy.borrow().current().clone();
+    // Chrome's keyword bypass is conditional on enforcing Trusted Types and
+    // leaves even branded non-string eval arguments unchanged.
+    if policy.bypasses_trusted_types_eval() {
+        if input.is_string() {
+            let report_only = handle.policy.borrow().report_only.clone();
+            report_code_generation(scope, context, document, original, &policy, &report_only);
+        }
+        return v8::ModifyCodeGenerationFromStringsResult {
+            codegen_allowed: !scope.is_execution_terminating(),
+            modified_source: None,
+        };
+    }
+    let sink = trusted_types_sink_label(scope, original);
+    v8::tc_scope!(let scope,scope);
+    let source =
+        crate::browser_env::trusted_type_string(scope, document, input, "TrustedScript", sink, "");
+    let message=policy.eval_error_message().unwrap_or_else(||"Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements.".into());
+    let Some(source) = source else {
+        if scope.has_terminated() || scope.is_execution_terminating() {
+            return v8::ModifyCodeGenerationFromStringsResult::default();
+        }
+        // Chrome translates a failed or throwing default policy into this EvalError.
+        scope.reset();
+        return deny_code_generation(scope, context, &message);
+    };
+    if crate::browser_env::string_code_units(scope, source)
+        != crate::browser_env::string_code_units(scope, original)
+    {
+        return deny_code_generation(scope, context, &message);
+    }
+    if authorization_document(scope, context) != Some(document) {
+        return deny_code_generation(
+            scope,
+            context,
+            "Code-generation document changed during conversion",
+        );
+    }
+    let policy = handle.policy.borrow().current().clone();
+    let report_only = handle.policy.borrow().report_only.clone();
+    let message = policy.eval_error_message().unwrap_or_else(|| "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements.".into());
+    report_code_generation(scope, context, document, source, &policy, &report_only);
+    if scope.has_terminated() || scope.is_execution_terminating() {
+        return v8::ModifyCodeGenerationFromStringsResult::default();
+    }
+    if policy.allows_eval_with_trusted_types(policy.requires_trusted_types()) {
+        v8::ModifyCodeGenerationFromStringsResult {
+            codegen_allowed: true,
+            modified_source: Some(source),
+        }
     } else {
-        deny_code_generation(scope, result, &message);
+        deny_code_generation(scope, context, &message)
     }
 }
 pub(super) fn install_code_generation_authorization(
     scope: &mut v8::PinScope,
 ) -> Result<(), String> {
     let context = scope.get_current_context();
-    let callback = v8::Function::new(scope, authorize_code_generation)
-        .ok_or("Native code-generation authorization unavailable")?;
-    if context.set_code_generation_callback(callback) {
-        context.set_allow_generation_from_strings(false);
-        Ok(())
-    } else {
-        Err("Native code-generation authorization unavailable".into())
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_some()
+    {
+        return Ok(());
     }
+    authorization_document(scope, context)
+        .ok_or("Native code-generation document owner unavailable")?;
+    scope.set_modify_code_generation_from_strings_callback(authorize_code_generation);
+    context.set_slot(Rc::new(Installed));
+    context.set_allow_generation_from_strings(false);
+    Ok(())
 }

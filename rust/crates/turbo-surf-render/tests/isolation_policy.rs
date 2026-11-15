@@ -1596,19 +1596,11 @@ async fn external_resource_reports_and_original_utf16_samples_match_chrome() {
     assert_eq!(actual, expected);
 }
 #[tokio::test(flavor = "current_thread")]
-#[cfg_attr(
-    not(turbo_surf_native_proxy),
-    ignore = "requires actual native V8 code-generation callback SDK"
-)]
 async fn native_eval_and_resource_csp_reports_match_full_chrome_control() {
     assert_eq!(resource_csp_results().await, resource_csp_control());
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[cfg_attr(
-    not(turbo_surf_native_proxy),
-    ignore = "requires actual native V8 code-generation callback SDK"
-)]
 async fn native_code_generation_preserves_lexical_identity_and_report_only_controls() {
     use sha2::Digest;
     let cases: Value = serde_json::from_str(include_str!(
@@ -1686,10 +1678,6 @@ async fn native_code_generation_preserves_lexical_identity_and_report_only_contr
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[cfg_attr(
-    not(turbo_surf_native_proxy),
-    ignore = "requires actual native V8 code-generation callback SDK"
-)]
 async fn native_code_generation_tasks_bound_capacity_and_release_before_reentry() {
     let headers = vec![(
         "Content-Security-Policy".into(),

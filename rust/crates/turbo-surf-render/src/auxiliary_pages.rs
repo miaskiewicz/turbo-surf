@@ -906,6 +906,9 @@ pub(super) fn execute_target(
         })
     };
     let value = value.ok_or_else(|| {
+        if scope.has_terminated() || scope.is_execution_terminating() {
+            return "Target script execution terminated".to_owned();
+        }
         scope
             .exception()
             .map(|error| error.to_rust_string_lossy(scope))

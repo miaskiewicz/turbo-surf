@@ -6,6 +6,11 @@ environment variable cannot change features in an existing binary or addon.
 See [GPU bridge](GPU-BRIDGE.md) for GPU execution details and
 [Publishing](../PUBLISHING.md) for release authorization and artifact verification.
 
+The default V8 engine uses a native dynamic-compilation callback for CSP `eval`
+and Function-family admission. It preserves direct-eval lexical scope and native
+constructor identity; this capability does not require `native-sdk-frame-read`
+or an alternate SDK. Trusted Types conversion uses the actual compiling document.
+
 ## Defaults by crate
 
 The declarations below come from the [crate manifests](../rust/crates). A

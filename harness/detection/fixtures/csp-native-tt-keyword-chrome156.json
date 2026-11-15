@@ -1,0 +1,357 @@
+{
+  "browser": "156.0.8078.47",
+  "probeSha256": "e9acb84b4add537c813c0329ebde2437fe3809e4abe17825268c66b52a5bb4a0",
+  "authored": true,
+  "requests": [
+    "/?mode=none&profile=unsafe-eval-required",
+    "/probe.js",
+    "/favicon.ico",
+    "/?mode=none&profile=trusted-eval-required",
+    "/probe.js",
+    "/favicon.ico",
+    "/?mode=none&profile=trusted-eval-optional",
+    "/probe.js",
+    "/favicon.ico"
+  ],
+  "rows": [
+    {
+      "result": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+        "mode": "none",
+        "trustedTypesType": "object",
+        "defaultPolicyCreated": false,
+        "calls": [],
+        "results": [
+          {
+            "name": "direct",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "indirect",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "function",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "asyncFunction",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "generator",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "asyncGenerator",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "prefixCollision",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "brandedDirect",
+            "result": 9,
+            "calls": 0
+          },
+          {
+            "name": "brandedFunction",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            },
+            "calls": 0
+          },
+          {
+            "name": "objectIdentity",
+            "result": true,
+            "calls": 0
+          },
+          {
+            "name": "boxedIdentity",
+            "result": true,
+            "calls": 0
+          }
+        ],
+        "violations": [
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce"
+          }
+        ]
+      }
+    },
+    {
+      "result": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+        "mode": "none",
+        "trustedTypesType": "object",
+        "defaultPolicyCreated": false,
+        "calls": [],
+        "results": [
+          {
+            "name": "direct",
+            "result": 8,
+            "calls": 0
+          },
+          {
+            "name": "indirect",
+            "result": "undefined",
+            "calls": 0
+          },
+          {
+            "name": "function",
+            "result": 9,
+            "calls": 0
+          },
+          {
+            "name": "asyncFunction",
+            "result": 10,
+            "calls": 0
+          },
+          {
+            "name": "generator",
+            "result": 11,
+            "calls": 0
+          },
+          {
+            "name": "asyncGenerator",
+            "result": 12,
+            "calls": 0
+          },
+          {
+            "name": "prefixCollision",
+            "result": 13,
+            "calls": 0
+          },
+          {
+            "name": "brandedDirect",
+            "result": "shadow + 2",
+            "calls": 0
+          },
+          {
+            "name": "brandedFunction",
+            "result": 14,
+            "calls": 0
+          },
+          {
+            "name": "objectIdentity",
+            "result": true,
+            "calls": 0
+          },
+          {
+            "name": "boxedIdentity",
+            "result": true,
+            "calls": 0
+          }
+        ],
+        "violations": []
+      }
+    },
+    {
+      "result": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+        "mode": "none",
+        "trustedTypesType": "object",
+        "defaultPolicyCreated": false,
+        "calls": [],
+        "results": [
+          {
+            "name": "direct",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "indirect",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "function",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "asyncFunction",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "generator",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "asyncGenerator",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "prefixCollision",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "brandedDirect",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "brandedFunction",
+            "error": {
+              "name": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'trusted-types-eval'\".\n"
+            },
+            "calls": 0
+          },
+          {
+            "name": "objectIdentity",
+            "result": true,
+            "calls": 0
+          },
+          {
+            "name": "boxedIdentity",
+            "result": true,
+            "calls": 0
+          }
+        ],
+        "violations": [
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          },
+          {
+            "directive": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce"
+          }
+        ]
+      }
+    }
+  ]
+}

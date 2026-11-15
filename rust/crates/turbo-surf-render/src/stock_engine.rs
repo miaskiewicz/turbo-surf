@@ -1,5 +1,4 @@
-//! Default-profile secondary-realm module and code-generation services.
-use super::v8;
+//! Default-profile secondary-realm module services.
 
 pub(super) mod frame_modules {
     use super::super::*;
@@ -81,15 +80,5 @@ pub(super) mod frame_modules {
         Err(JsErrorBox::generic(
             "Child-frame ES modules require the exact native SDK",
         ))
-    }
-}
-
-pub(super) mod code_generation {
-    use super::v8;
-
-    pub(in crate::runtime) fn install_code_generation_authorization(
-        _: &mut v8::PinScope,
-    ) -> Result<(), String> {
-        Ok(())
     }
 }

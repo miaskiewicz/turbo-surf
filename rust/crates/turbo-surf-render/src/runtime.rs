@@ -51,7 +51,6 @@ pub use auxiliary_policy::AuxiliaryResourcePolicy;
 mod auxiliary_pages;
 #[path = "background_work.rs"]
 mod background_work;
-#[cfg(turbo_surf_native_proxy)]
 #[path = "code_generation.rs"]
 mod code_generation;
 #[path = "dialog_ops.rs"]
@@ -74,13 +73,13 @@ pub use auxiliary_pages::{
 #[path = "frame_modules.rs"]
 mod frame_modules;
 
-// Per-frame module loading and code-generation admission remain profile capabilities.
+// Per-frame module loading remains a profile capability.
 // WindowProxy/Location host services use the producer native ABI in every profile.
 #[cfg(not(turbo_surf_native_proxy))]
 #[path = "stock_engine.rs"]
 mod stock_engine;
 #[cfg(not(turbo_surf_native_proxy))]
-use stock_engine::{code_generation, frame_modules};
+use stock_engine::frame_modules;
 
 use frame_modules::op_frame_module;
 
@@ -622,23 +621,10 @@ fn op_csp_finish_parser(scope: &mut v8::PinScope, document: v8::Local<v8::Object
     configure_csp_code_generation(scope, context, policy.current());
 }
 
-/// turbo-surf#121: whether the guest-side eval/Function shim should be
-/// installed for this document's current effective CSP. The shim lives only
-/// in the published (non-proxy) SDK; the exact-engine path uses V8's native
-/// source-conversion callback instead.
+/// Native compilation admission preserves direct-eval and constructor identity.
 #[op2(fast)]
-fn op_tt_eval_shim_required(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
-    if cfg!(turbo_surf_native_proxy) {
-        return false;
-    }
-    let Some(context) = document.get_creation_context(scope) else {
-        return false;
-    };
-    let Some(handle) = context.get_slot::<CspHandle>() else {
-        return false;
-    };
-    let required = handle.policy.borrow().current().requires_trusted_types();
-    required
+fn op_tt_eval_shim_required(_scope: &mut v8::PinScope, _document: v8::Local<v8::Object>) -> bool {
+    false
 }
 
 #[op2(fast)]
@@ -1472,35 +1458,18 @@ fn authorize_css(
 }
 
 fn configure_csp_code_generation(
-    scope: &mut v8::PinScope,
+    _scope: &mut v8::PinScope,
     context: v8::Local<v8::Context>,
     policy: &crate::csp::Policy,
 ) {
-    let allowed = policy.allows_eval();
-    #[cfg(turbo_surf_native_proxy)]
-    let allowed = {
-        let key = v8::String::new(scope, "turbo-surf.code-generation-callback").unwrap();
-        let key = v8::Private::for_api(scope, Some(key));
-        let global = context.global(scope);
-        allowed
-            && !global
-                .get_private(scope, key)
-                .is_some_and(|callback| callback.is_function())
-    };
-    // Published SDKs lack the private native source-conversion callback, so an
-    // eval-visible Trusted Types gate (turbo-surf#121) is approximated in guest JS:
-    // when the effective CSP requires Trusted Types, a bootstrap-installed shim
-    // patches globalThis.eval / globalThis.Function to route the source through
-    // the realm's TT converter (applying the `default` policy when one exists)
-    // and compile+run the admitted source on the host. Direct-eval semantics are
-    // lost, but the common cases match Chrome and the EvalError message matches
-    // too. V8's own eval gate is left open under TT enforcement so the shim's
-    // host compile and any late direct eval route through the shim.
-    #[cfg(not(turbo_surf_native_proxy))]
-    let allowed =
-        allowed || policy.requires_trusted_types() || policy.bypasses_trusted_types_eval();
-    #[cfg(not(turbo_surf_native_proxy))]
-    let _ = scope;
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_some()
+    {
+        context.set_allow_generation_from_strings(true);
+        return;
+    }
+    let allowed = policy.allows_eval() && !code_generation::installed(context);
     context.set_allow_generation_from_strings(allowed);
 }
 

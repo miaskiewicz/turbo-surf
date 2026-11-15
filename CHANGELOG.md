@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Enforce dynamic-compilation CSP and Trusted Types through the default native V8 callback, preserving direct-eval lexical scope, Function-family identity and bounded violation delivery. Enable the three source-pinned native code-generation controls in the default gate.
+
 - Keep supported native Page actors recoverable after driver navigation deadlines while retiring only unfinished owned frame/module work; preserve completed child documents, healthy module caches and surviving peer Pages.
 
 - Preserve native document-group history and structured-cloned state across real navigation, replacement and back/forward traversal; authenticate current-document ownership and retire only interrupted, unacknowledged mutations. Navigation API traversal remains limited to its current document group.

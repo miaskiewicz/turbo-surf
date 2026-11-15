@@ -98,11 +98,12 @@ value as tests land; never lower one to pass a change.
   `excluded` in `rust/coverage-floors.json`): the Node and Python bindings. Their code runs
   only inside `node` (the Playwright shim and detection suites) and `python` (the wheel
   tests) processes, which tarpaulin does not instrument, and they have no Rust tests.
-- **`turbo-surf-render/src/code_generation.rs`, `frame_modules.rs`**
-  (`exclude-files`; `stock_engine.rs` holds their stock-SDK stand-ins): compiled only
+- **`turbo-surf-render/src/frame_modules.rs`**
+  (`exclude-files`; `stock_engine.rs` holds its stock-SDK stand-in): compiled only
   under `cfg(turbo_surf_native_proxy)`, which `turbo-surf-render/build.rs` sets for
   `TURBO_SURF_ENGINE=154|155`. Those source-built SDK profiles require their own
-  native code-generation and frame-module gates before acceptance.
+  frame-module gates before acceptance. Native code-generation admission is now
+  compiled and measured in the default engine.
 
 `window_proxy.rs`, `frame_location.rs` and `frame_ancestors.rs` are compiled by the
 v0.8.4 default popup engine and are included in its line coverage. Their earlier

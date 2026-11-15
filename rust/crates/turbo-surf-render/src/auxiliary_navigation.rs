@@ -543,9 +543,13 @@ fn install_response<'s>(
     let response = &fetched.response;
     let next_policy = OpenerPolicy::response(&response.headers, &response.final_url);
     let isolated = needs_group_switch(previous.get_slot::<OpenerPolicy>().as_deref(), &next_policy);
+    let activation =
+        NavigationActivationSnapshot::capture(scope, history.previous_url.clone(), previous);
     let current = binding::create_auxiliary_window_context(scope, (!isolated).then_some(previous));
     current.set_slot(Rc::new(next_policy));
-    let result = install_response_backing(scope, previous, current, fetched, isolated, history);
+    let result = install_response_backing(
+        scope, previous, current, fetched, isolated, history, activation,
+    );
     if let Err(error) = &result {
         // DetachGlobal cannot restore the old lexical realm. A failed backing
         // installation retires this real Page; its peers retain their actor.
@@ -568,6 +572,7 @@ fn install_response_backing<'s>(
     fetched: &Fetched,
     isolated: bool,
     history: CommitHistory,
+    activation: NavigationActivationSnapshot,
 ) -> Result<v8::Global<v8::Context>, String> {
     let response = &fetched.response;
     current.set_slot(Rc::new(FrameContextMarker));
@@ -604,6 +609,7 @@ fn install_response_backing<'s>(
     install_css_authorization(scope).map_err(|e| e.to_string())?;
     let facts = DocumentFacts::response(scope, current, &response.final_url, &response.headers);
     install_document_facts(scope, facts);
+    user_activation::carry_navigation(scope, activation, current, &response.final_url);
     current.set_slot(Rc::new(FrameDocumentLocation(response.final_url.clone())));
     current.set_slot(Rc::new(FrameDocumentUrl(response.final_url.clone())));
     auxiliary_storage::carry_navigation(scope, previous, current)

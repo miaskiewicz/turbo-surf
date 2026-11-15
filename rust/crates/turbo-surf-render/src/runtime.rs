@@ -16239,6 +16239,7 @@ fn install_dom_csp_handle<'a, 'b>(
     *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
     context.remove_slot::<FrameSandbox>();
     install_csp_sandbox_flags(scope, context, &csp);
+    user_activation::reject_opaque_seed(scope, context);
     if let Some(origins) = context.get_slot::<ModuleOrigins>() {
         origins.opaque.set(window_is_opaque(scope, context));
         origins
@@ -20066,7 +20067,10 @@ impl PageSession {
         };
         deno_core::scope!(scope, self.rt);
         let context = v8::Local::new(scope, selected);
-        NavigationActivationSnapshot::capture(source, context)
+        let Some(source) = window_proxy::location_url(context) else {
+            return NavigationActivationSnapshot::inactive(source);
+        };
+        NavigationActivationSnapshot::capture(scope, source, context)
     }
 
     /// Snapshot the host-owned headers of the installed response after navigation.

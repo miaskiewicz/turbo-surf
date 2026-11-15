@@ -81,7 +81,11 @@ export function liveEval(id: number, script: string): Promise<string>;
 /** Private-namespace driver eval; collect polls one ready turn without resuming hydration. */
 export function liveEvalEngine(id: number, script: string, collect?: boolean): Promise<string>;
 /** Trusted interaction; await only navigation admitted by the addressed native target. */
-export function liveDispatchEngine(id: number, script: string, navigationBaseline?: string): Promise<string>;
+export function liveDispatchEngine(
+  id: number,
+  script: string,
+  navigationBaseline?: string,
+): Promise<string>;
 /** Bounded synchronous engine query; JSON-encode its return without draining the event loop. */
 export function liveReadEngine(id: number, script: string): string;
 /** Same non-pumping query, yielding Node while the native actor is busy. */

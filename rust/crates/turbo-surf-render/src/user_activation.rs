@@ -26,6 +26,7 @@ pub(super) struct HostUserActivation {
 pub struct NavigationActivationSnapshot {
     source: String,
     sticky: bool,
+    opaque: bool,
 }
 
 struct InheritedSticky(bool);
@@ -228,13 +229,19 @@ impl NavigationActivationSnapshot {
         Self {
             source,
             sticky: false,
+            opaque: true,
         }
     }
 
-    pub(super) fn capture(source: String, context: v8::Local<v8::Context>) -> Self {
+    pub(super) fn capture(
+        scope: &mut v8::PinScope,
+        source: String,
+        context: v8::Local<v8::Context>,
+    ) -> Self {
         Self {
             source,
             sticky: has_been_active(context),
+            opaque: window_is_opaque(scope, context),
         }
     }
 
@@ -245,6 +252,7 @@ impl NavigationActivationSnapshot {
             return false;
         };
         self.sticky
+            && !self.opaque
             && matches!(source.origin(), url::Origin::Tuple(..))
             && source.origin() == destination.origin()
     }
@@ -260,6 +268,26 @@ pub(super) fn seed(
     scope
         .get_current_context()
         .set_slot(Rc::new(InheritedSticky(sticky)));
+}
+
+pub(super) fn reject_opaque_seed(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_none()
+        && window_is_opaque(scope, context)
+    {
+        context.set_slot(Rc::new(InheritedSticky(false)));
+    }
+}
+
+pub(super) fn carry_navigation(
+    scope: &mut v8::PinScope,
+    snapshot: NavigationActivationSnapshot,
+    current: v8::Local<v8::Context>,
+    destination: &str,
+) {
+    let sticky = !window_is_opaque(scope, current) && snapshot.carries_to(destination);
+    current.set_slot(Rc::new(InheritedSticky(sticky)));
 }
 
 pub(super) fn inherit_initial(source: v8::Local<v8::Context>, target: v8::Local<v8::Context>) {

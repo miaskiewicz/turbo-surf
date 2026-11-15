@@ -16239,6 +16239,7 @@ fn install_dom_csp_handle<'a, 'b>(
     *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
     context.remove_slot::<FrameSandbox>();
     install_csp_sandbox_flags(scope, context, &csp);
+    user_activation::reject_opaque_seed(scope, context);
     if let Some(origins) = context.get_slot::<ModuleOrigins>() {
         origins.opaque.set(window_is_opaque(scope, context));
         origins
@@ -20041,6 +20042,13 @@ impl PageSession {
         )
     }
 
+    /// Installed native root responses whose actual admitted request was a form submission.
+    pub fn form_navigation_count(&self) -> u64 {
+        let state = self.rt.op_state();
+        let forms = auxiliary_navigation::root_form_commits(&state.borrow());
+        self.navigation_count + forms
+    }
+
     /// Activation is captured when a script navigation is admitted, before timers run.
     pub fn script_nav_activation_snapshot(&mut self) -> Option<(String, bool)> {
         let _activation = self.rt.activation_key().enter();
@@ -20059,7 +20067,10 @@ impl PageSession {
         };
         deno_core::scope!(scope, self.rt);
         let context = v8::Local::new(scope, selected);
-        NavigationActivationSnapshot::capture(source, context)
+        let Some(source) = window_proxy::location_url(context) else {
+            return NavigationActivationSnapshot::inactive(source);
+        };
+        NavigationActivationSnapshot::capture(scope, source, context)
     }
 
     /// Snapshot the host-owned headers of the installed response after navigation.

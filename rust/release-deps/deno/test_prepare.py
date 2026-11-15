@@ -193,7 +193,7 @@ version = "=0.321.0"
                          {k: (v["version"], v["candidateName"], v["publishVersion"]) for k, v in pins.items()})
         for package in prepare.PACKAGES:
             major, minor, patch_level = package.version.split(".")
-            revision = 1 if package.upstream in {"deno_v8", "serde_v8"} else 2
+            revision = 1 if package.upstream in {"deno_v8", "serde_v8"} else 3
             self.assertEqual(package.publish, f"{major}.{minor}.{int(patch_level) + revision}")
         self.assertEqual({k for k, v in pins.items() if "embeddedSources" in v}, prepare.EMBEDDED_LEAVES)
         self.assertFalse((ROOT / "v8-teardown-tests.patch").exists())

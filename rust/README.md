@@ -79,7 +79,7 @@ name alone does not establish hardware use, native-SDK identity or pixel parity.
 ## Registry dependency identity
 
 The seven direct Rust dependency aliases retain the existing source/API names.
-The Deno 0.x.1 family resolves from crates.io. The four turbo-dom 0.8-family
+The Deno core/extension 0.x.2 family and the unchanged V8/serde adapters resolve from crates.io. The four turbo-dom 0.8-family
 crates and the single V8 binding use the exact integration pins described above. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):
@@ -94,11 +94,11 @@ from turbo-dom):
 | `turbo-dom-v8` | 150.4.2 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
 | `turbo-surf-deno-v8` | 0.4.1 | `v8` (the shared facade) |
 | `turbo-surf-serde-v8` | 0.321.1 | shared value conversion |
-| `turbo-surf-deno-core` | 0.412.1 | `deno_core` |
-| `turbo-surf-deno-bench-util` | 0.253.1 | upstream test/benchmark identity |
-| `turbo-surf-deno-crypto` | 0.273.1 | `deno_crypto` |
-| `turbo-surf-deno-webidl` | 0.259.1 | `deno_webidl` |
-| `turbo-surf-deno-web` | 0.290.1 | `deno_web` |
+| `turbo-surf-deno-core` | 0.412.2 | `deno_core` |
+| `turbo-surf-deno-bench-util` | 0.253.2 | upstream test/benchmark identity |
+| `turbo-surf-deno-crypto` | 0.273.2 | `deno_crypto` |
+| `turbo-surf-deno-webidl` | 0.259.2 | `deno_webidl` |
+| `turbo-surf-deno-web` | 0.290.2 | `deno_web` |
 
 The distribution generators retain upstream versions, native archive URLs,
 licenses and reviewed source pins while mapping every internal dependency to the

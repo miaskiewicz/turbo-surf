@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Preserve authored getter exceptions from native JSON collectors and reject undefined results consistently across root and child targets.
+
 - Dispatch native host input in its actual guest document realm, retain the operation owner for cancellation, skip retired realms and use captured cleanup primitives.
 
 - Cancel opening root targets without retiring surviving popups, join concurrent closes, and await actual response-body completion before the final actor runtime exits.

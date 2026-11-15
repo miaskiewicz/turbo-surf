@@ -36,9 +36,9 @@ All additional bugs found during this work are explicitly in scope and tracked b
 | [x] | shim | `no-content navigation retains the active document and history (#428)` | `efdc3f0d`; targeted proof complete, combined rerun pending |
 | [x] | shim | `direct navigation referrers are explicit and reload retains them (#426)` | `8f511cfa`; targeted proof complete, combined rerun pending |
 | [x] | shim | `history navigation honors networkidle hydration (#425)` | `d1b61ed7`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Producer #513 API pinned at 7f via `9b91244f`. Combined 7f candidate whole original now passes 1/1 (2.535s): both 30ms timeouts preserve the same actual native Page and both timeout0 retries load 180ms authored work. API 5/5 and clock 5/5 pass. Corrected iframe safety controls, critical inverses/restoration and strict still gate merge; no credit yet |
+| [ ] | shim | `navigation deadlines also cancel slow hydration (#427)` | Producer #513 API pinned at 7f via `9b91244f`. Combined 7f candidate whole original now passes 1/1 (2.535s): both 30ms timeouts preserve the same actual native Page and both timeout0 retries load 180ms authored work. API 5/5 and clock 5/5 pass on the earlier artifact. A pre-merge safety control then found root init running in the infrastructure realm; the explicit actual-root context fix and guard are now in fresh artifact 544620d1. The entire original/API/warm/iframe packet must rerun on that artifact, with no carried final credit. Critical inverses/restoration and strict still gate merge |
 | [x] | shim | `viewport resize updates live layout media and only its own page (#369)` | `864b3343`; targeted proof complete, combined rerun pending |
-| [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Action/navigation owner: Full original rerun fails replacement document request count 1 vs 2 (surface line 4315; before screenshot/image assertions); fresh coalesced POST succeeds once and the replacement document is interactive, but its image is incomplete with one native pending request and no new image HTTP; action reaches 10s timeout. Static-to-live promotion also redundantly fetches the old image. Tracing image admission/cache/realm; no timeout or assertion changes. Earlier cache fixes remain merged |
+| [ ] | shim | `same-URL form navigation invalidates retained screenshot image bytes (#489)` | Action/navigation owner: Full original rerun fails replacement document request count 1 vs 2 (surface line 4315; before screenshot/image assertions); latest commit-only/background candidate succeeds quickly with real POST and replacement image HTTP; only exact image-request count now fails (3 vs 2) because static-to-live promotion redundantly fetches the old image. Image helper implementing bounded current-logical-document resource handoff; pixel and request assertions remain mandatory. Earlier cache fixes remain merged |
 | [x] | shim | `frame locator typing uses canonical child selection and child event constructors` | `0a451d99`; targeted proof complete, combined rerun pending |
 | [x] | shim | `Browser credentials answer Basic challenges and stay origin scoped (#394)` | `90ca133b`; targeted proof complete, combined rerun pending |
 | [x] | shim | `static frame identity survives promotion to the live native registry (#447)` | `0a451d99`; targeted proof complete, combined rerun pending |
@@ -54,12 +54,14 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 ## Additional confirmed failures and investigations
 
-- [ ] **Native JSON collectors preserve authored getter errors** — existing `json_collectors_await_values_without_page_serializers_or_result_slots` now fails at host_input.rs:239 with generic target serialization failure. Input/collector owner assigned; preserve the actual authored getter exception and classify against unchanged source before claiming regression attribution.
+- [ ] **Normal iframe parent-load completion** — non-looping positive iframe load stalls at load milestone on both original current-release diagnostic `fd8501a1` and revised timeout candidate `544620d1`; actual /iframe commit, root refresh and binding drain finish, but load never completes. This is separate from the 30ms deadline change. Dedicated lifecycle helper assigned through integration; keep real root/child ready/pending/load evidence, no synthetic events, timeout increases or waived iframe controls.
+
+- [x] **Native JSON collectors preserve authored getter errors** — merged `ec46bdf2`. New root/child and unchanged original host_input.rs:239 all pass (3/3); serializer-only OFF reproduces all three specific generic-error failures, byte-exact restore passes. All-target Render/NAPI strict, fmt and CC pass. Script-navigation admission remains separate/open.
 - [ ] **Script navigation captures admission activation** — existing `script_navigation_captures_source_activation_at_admission` fails at host_input.rs:398: None vs expected next URL/activation tuple before input dispatch. Input owner coordinates the actual auxiliary admission record with history/action owners; original source attribution pending.
 
 Baseline classification: the Enter, frame-top form and programmatic-submit cases all reproduce on byte-exact old main `6b583d98` shim plus verified registry addon `bdcebe65` (3 intended failures, no skips/cancellations, 3.442s). These are preexisting gaps, not regressions introduced by the new action candidate. All remain in scope.
 
-- [ ] **Enter-key form completion** — fresh coalesced control confirms no replacement document (1 vs 2). Action owner will use explicit interaction dispatch for keyboard actions without changing ordinary evaluate/read semantics.
+- [ ] **Enter-key form completion** — baseline control confirms no replacement document (1 vs 2). Input helper is implementing real implicit-submit semantics and whole-Locator.press signal scope; raw keyboard/mouse/touch must not acquire navigation waits. Ordinary evaluate/read semantics remain unchanged.
 - [ ] **Frame form targeting top-level completion** — fresh coalesced frame `_top` form control confirms no replacement document (1 vs 2). Action owner assigned; preserve actual initiator/destination authority.
 - [ ] **Programmatic form background scheduling** — `Page.evaluate(form.submit)` followed by ordinary `waitForURL` produces only initial GET and times out at the original 1000ms. Action owner assigned native background scheduling; do not fix by making ordinary evaluate/read calls implicitly wait or pump unrelated work.
 
@@ -76,14 +78,14 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 
 ## Current tally
 
-Accounting: 34 original test cases plus 16 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
+Accounting: 34 original test cases plus 17 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
 
-- Merged with component proof: **36** (30 original + count, all, platform ownership, NAPI export, script observer, detector consent).
+- Merged with component proof: **37** (30 original + count, all, platform ownership, NAPI export, script observer, detector consent, JSON collector).
 - Locally proven, not yet merged: **0** (module and inspector adoption merged).
 - Verified clear without an additional source fix: **1** detector POST control.
 - Awaiting fresh-binary classification/verification: **0**.
 - Still requiring implementation or a passing fix: **13**.
-- Total pending: **13**. Total merged: **36**. Total done at component/verification level: **37** (36 merged + 1 verified clear). Total tracked: **50**.
+- Total pending: **13**. Total merged: **37**. Total done at component/verification level: **38** (37 merged + 1 verified clear). Total tracked: **51**.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

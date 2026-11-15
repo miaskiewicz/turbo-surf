@@ -2706,7 +2706,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   async _drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
     throwBindingDrainError(this);
     if (this._auxiliaryActor)
-      return this._actorHub.drainBindings(deadline, cancelOnTimeout, collect);
+      return this._actorHub.drainBindings(deadline, cancelOnTimeout, collect, this);
     return this._drainOwnBindings(deadline, cancelOnTimeout, collect);
   }
   _checkBindingDeadline(deadline, cancelOnTimeout) {
@@ -3542,9 +3542,28 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const milestone =
       opts.waitUntil === "commit"
         ? null
-        : waitForEmitterEvent(this, event, { timeout, signal: controller.signal });
+        : waitForEmitterEvent(this, event, { timeout, signal: controller.signal }).catch(
+            (error) => {
+              throw this._navigationMilestoneError(error, event, timeout);
+            },
+          );
     milestone?.catch(() => {});
     return { controller, milestone };
+  }
+
+  _navigationMilestoneError(error, event, timeout) {
+    if (
+      !(error instanceof Error) ||
+      error.name !== "TimeoutError" ||
+      error.message !== `Timeout ${timeout}ms exceeded while waiting for event ${event}`
+    )
+      return error;
+    return Object.assign(
+      new Error(`Target navigation timeout after ${timeout}ms`, { cause: error }),
+      {
+        name: "TimeoutError",
+      },
+    );
   }
 
   _navigationBindingDeadline(options) {

@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 let newPage;
+let native;
 try {
   ({ newPage } = await import("./index.mjs"));
+  native = createRequire(import.meta.url)("../crates/turbo-surf-napi/index.js");
 } catch (error) {
   console.log("shim: native addon not built, skipping —", error.message);
   process.exit(0);
@@ -471,13 +474,17 @@ test("document replacement retires a paused route without poisoning the next req
   }));
 
 test("navigation deadlines bound a host route that never settles", async () =>
-  fixture(async (page, origin) => {
+  fixture(async (page, origin, received) => {
     let entered = false;
-    await page.route("**/api", async () => {
+    let paused;
+    await page.route("**/api", async (route) => {
+      paused = route;
       entered = true;
       await new Promise(() => {});
     });
     await page.addInitScript(() => {
+      globalThis.routeDocument = document;
+      globalThis.routeCount = 0;
       fetch("/api").catch(() => {});
     });
     await assert.rejects(
@@ -485,7 +492,52 @@ test("navigation deadlines bound a host route that never settles", async () =>
       (error) => error.name === "TimeoutError",
     );
     assert.equal(entered, true);
-    assert.equal(page._live, false);
+    assert.equal(page.isClosed(), false);
+    const session = Reflect.get(page, "_session");
+    const target = Reflect.get(page, "_targetId");
+    assert.equal(typeof session, "number");
+    const actual = () => JSON.parse(native.liveAuxiliaryState(session));
+    assert.equal(actual().root, target);
+    assert.equal(actual().pages.find((entry) => entry.target === target).closed, false);
+    await assert.rejects(
+      paused.fulfill({ body: "late" }),
+      (error) => error.name === "TimeoutError",
+    );
+    await page.unroute("**/api");
+    assert.deepEqual(
+      await page.evaluate(() => {
+        globalThis.oldOnly = true;
+        return {
+          sameDocument: routeDocument === document,
+          owned: document.defaultView === globalThis,
+          count: ++routeCount,
+        };
+      }),
+      { sameDocument: true, owned: true, count: 1 },
+    );
+    let fresh = 0;
+    await page.route("**/api", async (route) => {
+      fresh++;
+      await route.fulfill({ body: "fresh" });
+    });
+    await page.goto(`${origin}/recovered`, { waitUntil: "networkidle" });
+    assert.equal(Reflect.get(page, "_session"), session);
+    assert.equal(Reflect.get(page, "_targetId"), target);
+    assert.deepEqual(
+      await page.evaluate(() => ({
+        sameDocument: routeDocument === document,
+        old: typeof oldOnly,
+      })),
+      { sameDocument: true, old: "undefined" },
+    );
+    await page.reload({ waitUntil: "networkidle", timeout: 0 });
+    assert.equal(Reflect.get(page, "_session"), session);
+    assert.equal(Reflect.get(page, "_targetId"), target);
+    assert.equal(await page.evaluate(async () => (await fetch("/api")).text()), "fresh");
+    assert.equal(fresh, 3);
+    assert.equal(received.filter((entry) => entry.url === "/api").length, 0);
+    assert.equal(actual().root, target);
+    assert.equal(page.isClosed(), false);
   }));
 
 test("late host registrations service a new child's initial request in its actual frame", async () =>

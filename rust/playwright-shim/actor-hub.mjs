@@ -239,12 +239,19 @@ export class LiveActorHub {
     return [...this.pages.values()].filter((page) => !page._closed && page._session != null);
   }
 
-  _bindingDeadline(deadline, cancelOnTimeout) {
+  _bindingDeadline(deadline, cancelOnTimeout, owner) {
     if (Date.now() < deadline) return;
     const error = Object.assign(new Error("Timeout exceeded while waiting for host bindings"), {
       name: "TimeoutError",
     });
-    if (cancelOnTimeout) for (const page of this.pages.values()) page._routeLifetime?.abort(error);
+    if (cancelOnTimeout) {
+      const pages = owner ? [owner] : this.pages.values();
+      for (const page of pages) {
+        const lifetime = page._routeLifetime;
+        lifetime?.abort(error);
+        if (page._routeLifetime === lifetime) page._routeLifetime = undefined;
+      }
+    }
     throw error;
   }
 
@@ -255,19 +262,25 @@ export class LiveActorHub {
       const handlers = page._mergedBindings();
       if (!handlers.size) continue;
       const calls = await page._takeBindingCalls();
-      count += calls.length;
+      if (!state.owner || state.owner === page) count += calls.length;
       for (const call of calls) {
         const entry = handlers.get(call.name);
         if (!entry) continue;
-        state.changed.add(page);
+        const owned = !state.owner || state.owner === page;
+        if (owned) state.changed.add(page);
         const task = page
           ._settleBindingCall(call, entry)
           .catch((error) => {
-            state.failed = true;
-            state.failure = error;
+            if (owned) {
+              state.failed = true;
+              state.failure = error;
+            } else {
+              this.bindingFailures ??= new WeakMap();
+              this.bindingFailures.set(page, { error });
+            }
           })
           .finally(() => state.pending.delete(task));
-        state.pending.add(task);
+        if (owned) state.pending.add(task);
       }
     }
     return count;
@@ -289,6 +302,7 @@ export class LiveActorHub {
     } finally {
       this.bindingCollection = undefined;
     }
+    if (state.failed) throw state.failure;
     if (count && ++state.rounds > 100) throw new Error("Exposed binding call budget exhausted");
     if (count) state.advanced = false;
     if (!state.pending.size && !count) {
@@ -302,16 +316,24 @@ export class LiveActorHub {
     return true;
   }
 
-  async drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
+  _throwBindingFailure(page) {
+    const failure = this.bindingFailures?.get(page);
+    if (!failure) return;
+    this.bindingFailures.delete(page);
+    throw failure.error;
+  }
+
+  async drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false, owner) {
     if (this.opening) return;
+    this._throwBindingFailure(owner);
     // Join queue collection, whose errors belong to every observer of that turn.
     // Host callbacks remain independent: joining their completion would deadlock reentry.
     if (this.bindingDrain) return this.bindingCollection;
     this.bindingDrain = true;
-    const state = { pending: new Set(), changed: new Set(), advanced: false, rounds: 0 };
+    const state = { pending: new Set(), changed: new Set(), advanced: false, rounds: 0, owner };
     try {
       while (this.active) {
-        this._bindingDeadline(deadline, cancelOnTimeout);
+        this._bindingDeadline(deadline, cancelOnTimeout, owner);
         if (!(await this._bindingStep(state, collect))) break;
       }
       for (const page of state.changed) if (!page._closed) await page._refreshFromSession(true);

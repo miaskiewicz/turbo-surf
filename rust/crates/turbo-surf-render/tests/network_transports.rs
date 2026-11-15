@@ -161,6 +161,42 @@ async fn websocket_event_source_and_web_transport_match_chrome() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn websocket_binary_messages_use_the_socket_constructor_realm() {
+    let server = server::TransportServer::start(PAGES);
+    let base = format!("http://127.0.0.1:{}/", server.port);
+    let mut page = PageSession::open(
+        "<body><iframe srcdoc='<body></body>'></iframe></body>",
+        &base,
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let result: Value = serde_json::from_str(&page.eval_json_expression(r#"(async () => {
+      const child=document.querySelector('iframe').contentWindow,Bytes=Uint8Array;
+      const receive=(Socket,BufferType,OtherBuffer,EventType)=>new Promise((resolve,reject)=>{
+        const socket=new Socket('ws://'+location.host+'/ws/echo');socket.binaryType='arraybuffer';
+        socket.onerror=()=>reject(new Error('WebSocket fixture failed'));
+        socket.onopen=()=>socket.send(new Bytes([99,3,1,4,88]).subarray(1,4));
+        socket.onmessage=event=>{const result={own:event.data instanceof BufferType,foreign:event.data instanceof OtherBuffer,event:event instanceof EventType,bytes:Array.from(new Bytes(event.data))};socket.close();resolve(result)};
+      });
+      return await Promise.all([
+        receive(WebSocket,ArrayBuffer,child.ArrayBuffer,MessageEvent),
+        receive(child.WebSocket,child.ArrayBuffer,ArrayBuffer,child.MessageEvent)
+      ]);
+    })()"#).await.unwrap()).unwrap();
+    assert_eq!(
+        result,
+        json!([
+            {"own":true,"foreign":false,"event":true,"bytes":[3,1,4]},
+            {"own":true,"foreign":false,"event":true,"bytes":[3,1,4]}
+        ])
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn connect_src_governs_websocket_and_event_source_like_chrome() {
     let chrome = oracle("network-transports-csp-probe.js", CSP_PROBE);
     let native = observe(CSP_PROBE, "/csp").await;

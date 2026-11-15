@@ -83,6 +83,50 @@ async fn storage_is_branded_inherited_and_coerces_named_keys() {
         assert_eq!(value[key], true, "{value}");
     }
 }
+#[tokio::test(flavor = "current_thread")]
+async fn storage_receiver_errors_use_the_method_realm_and_keep_native_brands() {
+    let mut page = turbo_surf_render::PageSession::open(
+        "<body><iframe srcdoc='<body></body>'></iframe></body>",
+        "https://storage.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&page.eval_json_expression(r#"(() => {
+      const child=document.querySelector('iframe').contentWindow;
+      const errorRealm=(run,Type)=>{try{run();return false}catch(error){return error instanceof Type&&error.name==='TypeError'}};
+      const bad=[null,undefined,0,'text',{},()=>{},new Proxy({},{}),Object.create(child.Storage.prototype)];
+      const root=bad.map(receiver=>errorRealm(()=>Storage.prototype.getItem.call(receiver,'x'),TypeError));
+      const foreign=bad.map(receiver=>errorRealm(()=>child.Storage.prototype.getItem.call(receiver,'x'),child.TypeError));
+      const rootLength=Object.getOwnPropertyDescriptor(Storage.prototype,'length').get;
+      const childLength=Object.getOwnPropertyDescriptor(child.Storage.prototype,'length').get;
+      const lengths=[errorRealm(()=>rootLength.call({}),TypeError),errorRealm(()=>childLength.call({}),child.TypeError)];
+      Storage.prototype.setItem.call(child.localStorage,'shared','genuine');
+      const genuine=[Storage.prototype.getItem.call(child.localStorage,'shared'),child.Storage.prototype.getItem.call(localStorage,'shared')];
+      const forged=errorRealm(()=>Storage.prototype.getItem.call(Object.create(Storage.prototype),'shared'),TypeError);
+      const big='x'.repeat(5*1024*1024+1);
+      const quotaRealm=(method,receiver,Exception)=>{try{method.call(receiver,'shared',big);return false}catch(error){return error instanceof Exception&&error.name==='QuotaExceededError'&&error.code===22}};
+      const quota=[quotaRealm(Storage.prototype.setItem,child.localStorage,DOMException),quotaRealm(child.Storage.prototype.setItem,localStorage,child.DOMException)];
+      const retained=localStorage.getItem('shared')==='genuine'&&localStorage.length===1;
+      return {root,foreign,lengths,genuine,forged,quota,retained};
+    })()"#).await.unwrap()).unwrap();
+    assert_eq!(
+        value["root"],
+        serde_json::json!([true, true, true, true, true, true, true, true])
+    );
+    assert_eq!(
+        value["foreign"],
+        serde_json::json!([true, true, true, true, true, true, true, true])
+    );
+    assert_eq!(value["lengths"], serde_json::json!([true, true]));
+    assert_eq!(value["genuine"], serde_json::json!(["genuine", "genuine"]));
+    assert_eq!(value["forged"], true);
+    assert_eq!(value["quota"], serde_json::json!([true, true]));
+    assert_eq!(value["retained"], true);
+}
+
 #[test]
 fn native_urls_normalize_and_keep_live_search_params() {
     let value = evaluate(

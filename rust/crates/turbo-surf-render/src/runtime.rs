@@ -159,9 +159,9 @@ mod user_activation;
 mod window_interfaces;
 pub use user_activation::NavigationActivationSnapshot;
 use user_activation::{
-    host_user_activation, op_host_close_request, op_host_light_dismiss, op_host_modal_backdrop,
-    op_host_user_activation, op_user_activation_install, op_user_activation_navigator,
-    op_user_activation_read, op_user_activation_snapshot,
+    host_user_activation, op_host_close_request, op_host_input_dispatch, op_host_light_dismiss,
+    op_host_modal_backdrop, op_host_user_activation, op_user_activation_install,
+    op_user_activation_navigator, op_user_activation_read, op_user_activation_snapshot,
 };
 use window_interfaces::{op_location_ancestor_origins, op_location_object, op_location_seed};
 
@@ -9516,6 +9516,7 @@ deno_core::extension!(
         op_route_promise_rejection,
         op_set_host_input_driver,
         op_host_user_activation,
+        op_host_input_dispatch,
         op_host_close_request,
         op_host_light_dismiss,
         op_host_modal_backdrop,

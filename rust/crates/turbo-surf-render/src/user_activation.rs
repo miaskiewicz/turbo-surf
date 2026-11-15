@@ -369,16 +369,41 @@ pub(super) fn snapshot_bits(context: v8::Local<v8::Context>) -> i32 {
     i32::from(host_user_activation(context)) | (i32::from(has_been_active(context)) << 1)
 }
 
-/// A trusted Esc keydown the page did not cancel: process the window's close watchers.
+/// Trusted input defaults inspect the actual input document's native context slots.
 #[op2(nofast, reentrant)]
-pub(super) fn op_host_close_request(scope: &mut v8::PinScope) -> bool {
-    let context = scope.get_current_context();
-    if context.get_slot::<HostInputDriver>().is_none() {
-        return false;
+pub(super) fn op_host_input_dispatch<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    event: v8::Local<'s, v8::Object>,
+    target: v8::Local<'s, v8::Object>,
+) {
+    let Some(context) = input_document_context(scope, document) else {
+        return;
+    };
+    use turbo_dom_browser_env::host_internals::{
+        current_document_context, enter_document_of, handle_of,
+    };
+    if handle_of(scope, target).is_none() {
+        return;
     }
-    let Some(document) = active_document(scope, context) else {
+    let _document = enter_document_of(scope, target);
+    if current_document_context(scope) != Some(context) {
+        return;
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    crate::browser_env::dispatch_host_event(scope, event, target);
+}
+
+/// A trusted uncanceled Esc: process close watchers in the actual input document.
+#[op2(nofast, reentrant)]
+pub(super) fn op_host_close_request<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> bool {
+    let Some(context) = input_document_context(scope, document) else {
         return false;
     };
+    let scope = &mut v8::ContextScope::new(scope, context);
     crate::browser_env::process_close_watchers(scope, document)
 }
 

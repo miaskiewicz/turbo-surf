@@ -137,3 +137,93 @@ async fn trusted_hover_and_focus_show_interest_targets_after_css_delays() {
     );
     page.close();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn trusted_escape_keeps_its_private_document_and_leaves_peer_watchers_open() {
+    let mut page = PageSession::open(
+        "<dialog id=box><button id=inside>inside</button></dialog>",
+        "https://escape-owner.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval_expression(r#"(()=>{
+      globalThis.escapePeer=window.open('', 'escape-peer');
+      const peerDialog=escapePeer.document.createElement('dialog');
+      escapePeer.document.body.appendChild(peerDialog);peerDialog.showModal();
+      globalThis.peerDialog=peerDialog;globalThis.closeCounts={root:0,peer:0};
+      peerDialog.addEventListener('close',()=>closeCounts.peer++);
+      document.getElementById('box').addEventListener('close',()=>closeCounts.root++);
+      document.getElementById('box').showModal();document.getElementById('inside').focus();
+      globalThis.__document=escapePeer.document;
+      document.getElementById('inside').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+      return 'ready';
+    })()"#).await.unwrap();
+    let state =
+        "[document.getElementById('box').open,peerDialog.open,closeCounts.root,closeCounts.peer]";
+    assert_eq!(
+        page.eval_json_expression(state).await.unwrap(),
+        "[true,true,0,0]"
+    );
+    page.eval("document.getElementById('inside').addEventListener('keydown',event=>event.preventDefault(),{once:true})")
+        .await
+        .unwrap();
+    page.input(&json!([{"press":"Escape"}])).await.unwrap();
+    assert_eq!(
+        page.eval_json_expression(state).await.unwrap(),
+        "[true,true,0,0]"
+    );
+    page.input(&json!([{"press":"Escape"}])).await.unwrap();
+    assert_eq!(
+        page.eval_json_expression(state).await.unwrap(),
+        "[false,true,1,0]"
+    );
+    // Neither a forged object nor a retained retired peer document replaces the
+    // driver's captured document. Each trusted request still closes only root.
+    page.eval("globalThis.__document={};document.getElementById('box').showModal();document.getElementById('inside').focus()")
+        .await
+        .unwrap();
+    page.input(&json!([{"press":"Escape"}])).await.unwrap();
+    assert_eq!(
+        page.eval_json_expression(state).await.unwrap(),
+        "[false,true,2,0]"
+    );
+    page.eval("globalThis.__document=escapePeer.document;escapePeer.close();document.getElementById('box').showModal();document.getElementById('inside').focus()")
+        .await
+        .unwrap();
+    page.input(&json!([{"press":"Escape"}])).await.unwrap();
+    assert_eq!(
+        page.eval_json_expression(
+            "[document.getElementById('box').open,escapePeer.closed,closeCounts.root]"
+        )
+        .await
+        .unwrap(),
+        "[false,true,3]"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn trusted_keyboard_dispatch_accepts_a_same_origin_adopted_target() {
+    let mut page = PageSession::open("<body></body>", "https://adopted-input.test/", "", "", 5000)
+        .await
+        .unwrap();
+    page.eval_expression(
+        r#"(()=>{
+      const peer=window.open('', 'adoption-peer');
+      const button=peer.document.createElement('button');button.id='adopted';
+      document.body.appendChild(document.adoptNode(button));
+      globalThis.adoptedKeys=[];
+      button.addEventListener('keydown',event=>adoptedKeys.push([event.key,event.isTrusted]));
+      button.focus();
+    })()"#,
+    )
+    .await
+    .unwrap();
+    page.input(&json!([{"press":"ArrowRight"}])).await.unwrap();
+    assert_eq!(
+        page.eval_json_expression("adoptedKeys").await.unwrap(),
+        "[[\"ArrowRight\",true]]"
+    );
+}

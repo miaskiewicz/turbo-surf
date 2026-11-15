@@ -26,7 +26,7 @@
       (name) => [name, globalThis[name]],
     ),
   );
-  const dispatch = ops.op_dispatch_host_event;
+  const dispatch = (event, target) => ops.op_host_input_dispatch(document, event, target);
   const pointer = (command) => ops.op_host_pointer(document, command);
   const parentOf = Object.getOwnPropertyDescriptor(Node.prototype, "parentNode").get;
   const nodeTypeOf = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
@@ -557,7 +557,7 @@
         // its close event is a queued task, which (like a real keyboard's inter-event gap)
         // drains before keyup. keyup then targets whatever now holds focus.
         if (down && key === "Escape") {
-          closeRequest();
+          closeRequest(document);
           await wait(0);
           if (run !== activeRun) return;
           fire(apply(activeElement, document, []), "KeyboardEvent", "keyup", init);

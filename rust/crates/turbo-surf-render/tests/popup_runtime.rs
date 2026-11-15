@@ -1,28 +1,67 @@
-//! The Deno root must use the producer constructor, never a copied JS prototype.
+//! Native Page ownership cannot be forged by copying a Window prototype.
 use deno_core::{v8, JsRuntime, RuntimeOptions};
 use turbo_dom_browser_env::host_internals as binding;
 
-#[test]
-fn producer_root_template_admits_only_native_contexts() {
-    let extension = deno_core::Extension {
-        global_template_middleware: Some(|scope, _| binding::auxiliary_window_template(scope)),
-        ..Default::default()
-    };
-    let mut runtime = JsRuntime::new(RuntimeOptions {
-        extensions: vec![extension],
-        ..Default::default()
-    });
+#[tokio::test(flavor = "current_thread")]
+async fn producer_root_template_admits_only_native_contexts() {
+    let mut runtime = JsRuntime::new(RuntimeOptions::default());
     deno_core::scope!(scope, runtime);
-    let root = scope.get_current_context();
-    assert!(binding::is_auxiliary_window_context(scope, root));
+    let infrastructure = scope.get_current_context();
+    // Two internal fields describe template compatibility, not native Page ownership.
+    assert!(binding::auxiliary_context_identity(infrastructure).is_none());
+    let guest = binding::create_auxiliary_window_context(scope, None);
+    assert!(binding::is_auxiliary_window_context(scope, guest));
+    {
+        let scope = &mut v8::ContextScope::new(scope, guest);
+        binding::initialize_auxiliary_document(scope, "<!doctype html><body>owned</body>");
+        assert!(binding::install_auxiliary_context(
+            scope,
+            guest,
+            "https://native.test/",
+            None
+        ));
+    }
+    let identity = binding::auxiliary_context_identity(guest).unwrap();
+    assert!(!identity.closed);
+    assert!(binding::auxiliary_context_identity(infrastructure).is_none());
     let ordinary = v8::Context::new(scope, Default::default());
     assert!(!binding::is_auxiliary_window_context(scope, ordinary));
-    let native_global = root.global(scope);
-    let prototype = native_global.get_prototype(scope).unwrap();
-    let ordinary_global = ordinary.global(scope);
-    ordinary_global.set_prototype(scope, prototype);
+    let prototype = {
+        let scope = &mut v8::ContextScope::new(scope, guest);
+        guest.global(scope).get_prototype(scope).unwrap()
+    };
+    {
+        let scope = &mut v8::ContextScope::new(scope, ordinary);
+        v8::tc_scope!(let scope, scope);
+        let reflect_key = v8::String::new(scope, "Reflect").unwrap();
+        let reflect = ordinary
+            .global(scope)
+            .get(scope, reflect_key.into())
+            .unwrap()
+            .to_object(scope)
+            .unwrap();
+        let key = v8::String::new(scope, "setPrototypeOf").unwrap();
+        let set = reflect.get(scope, key.into()).unwrap();
+        let set = v8::Local::<v8::Function>::try_from(set).unwrap();
+        let global = ordinary.global(scope);
+        let result = set.call(scope, reflect.into(), &[global.into(), prototype]);
+        assert!(!scope.is_execution_terminating());
+        if let Some(result) = result {
+            assert!(result.is_boolean());
+        } else {
+            assert!(
+                scope.has_caught(),
+                "prototype assignment did not produce a result or exception"
+            );
+            scope.reset();
+        }
+    }
     assert!(!binding::is_auxiliary_window_context(scope, ordinary));
     assert!(binding::auxiliary_context_identity(ordinary).is_none());
+    let retained = binding::auxiliary_context_identity(guest).unwrap();
+    assert_eq!(retained.id, identity.id);
+    assert_eq!(retained.creation_source, identity.creation_source);
+    assert!(!retained.closed);
 }
 
 #[tokio::test]

@@ -477,7 +477,7 @@ fn start(
     {
         return Err("Native target navigation URL budget exceeded".into());
     }
-    let mode = native_history::admit_navigation(&shared, target.0, mode)?;
+    let mode = native_history::admit_navigation(&shared, target.0, mode, &navigation.url)?;
     let activity = navigation.activity.clone().unwrap_or_else(|| {
         shared
             .borrow::<NetworkLog>()
@@ -727,7 +727,12 @@ fn commit_fetched(
     if attachment(&fetched.response) || matches!(fetched.response.status, 204 | 205) {
         return Ok(receipt);
     }
-    native_history::admit_navigation(&rt.op_state().borrow(), target, job.history)?;
+    native_history::admit_navigation(
+        &rt.op_state().borrow(),
+        target,
+        job.history,
+        &fetched.response.final_url,
+    )?;
     // Defer the driver deadline only across trusted native document setup.
     let setup = navigation_deadline::TrustedSetup::enter(rt, target, job.generation)?;
     let installed = {

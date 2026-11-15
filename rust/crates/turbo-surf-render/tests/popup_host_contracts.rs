@@ -93,7 +93,18 @@ async fn target_reads_content_viewport_and_retirement_remain_independent() {
     let mut page = fixture::open("https://popup.test", Default::default()).await;
     let root = page.auxiliary_root_id().unwrap();
     let target = fixture::child(&mut page).await;
-    assert!(page.target_is_primary(root).unwrap());
+    assert_eq!(page.auxiliary_event_log().root(), Some(root.to_string()));
+    // The actual guest root is independent of the private runtime's main backing.
+    assert!(!page.target_is_primary(root).unwrap());
+    assert_eq!(
+        page.read_target_engine(root, "return document.title")
+            .unwrap(),
+        "\"opener\""
+    );
+    assert_eq!(
+        page.eval_expression("document.title").await.unwrap(),
+        "opener"
+    );
     assert!(!page.target_is_primary(target).unwrap());
     let html = page.serialize_target_for_driver(target).unwrap();
     assert!(html.contains("original"));
@@ -190,4 +201,42 @@ async fn overlong_guest_navigation_is_rejected_before_page_allocation_or_http() 
         page.eval_expression("document.title").await.unwrap(),
         "opener"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn history_url_budget_rejects_same_and_cross_document_changes_atomically() {
+    let server = fixture::Server::start().await;
+    let mut page = fixture::open(
+        &server.origin,
+        AuxiliaryHostServices {
+            policy: AuxiliaryResourcePolicy {
+                max_history_url_bytes: 128,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .await;
+    let root = page.auxiliary_root_id().unwrap();
+    let before = page
+        .eval_json_expression("({url:location.href,length:history.length,state:history.state})")
+        .await
+        .unwrap();
+    assert_eq!(page.eval_expression("(()=>{try{history.pushState({rejected:true},'', '/'+ 'x'.repeat(256));return false}catch{return true}})()").await.unwrap(), "true");
+    let long = server.url(&format!("/{}", "x".repeat(256)));
+    assert!(page
+        .navigate_target(root, &long, "push")
+        .await
+        .unwrap_err()
+        .contains("history URL budget"));
+    assert_eq!(
+        page.eval_json_expression(
+            "({url:location.href,length:history.length,state:history.state})"
+        )
+        .await
+        .unwrap(),
+        before
+    );
+    assert!(server.requests().is_empty());
+    assert!(!page.has_pending_auxiliary_work());
 }

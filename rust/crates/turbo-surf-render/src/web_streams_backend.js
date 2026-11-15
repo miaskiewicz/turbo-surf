@@ -789,6 +789,7 @@
         ReadableController: streams.ReadableStreamDefaultController,
         WritableController: streams.WritableStreamDefaultController,
         wrap,
+        observe,
         cancelFailure(error) {
           if (!realm.cancelPrefix) return error;
           return new Exception(

@@ -21,8 +21,9 @@
   const writable = Object.getOwnPropertyDescriptors(Writable.prototype);
   const rc = Object.getOwnPropertyDescriptors(api.ReadableController.prototype);
   const wc = Object.getOwnPropertyDescriptors(api.WritableController.prototype);
+  const ignore = () => undefined;
   const handled = (promise) => {
-    apply(then, promise, [undefined, () => undefined]);
+    api.observe(promise, ignore, ignore);
   };
   const close = (port) => api.close(port);
   const send = (port, type, value) => api.post(port, { type, value });

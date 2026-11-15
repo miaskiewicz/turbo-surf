@@ -496,11 +496,16 @@ test("late host registrations service a new child's initial request in its actua
       source = request.frame();
       await route.fulfill({ body: "child-initial" });
     });
-    await page.evaluate(() => {
-      const frame = document.createElement("iframe");
-      frame.src = "/child-route";
-      document.body.appendChild(frame);
-    });
+    // Appending an iframe does not wait for its initial document to load.
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const frame = document.createElement("iframe");
+          frame.addEventListener("load", () => resolve(), { once: true });
+          frame.src = "/child-route";
+          document.body.appendChild(frame);
+        }),
+    );
     const child = page.frames().find((frame) => frame !== page.mainFrame());
     assert.ok(child);
     assert.equal(source, child);

@@ -94,11 +94,15 @@ from turbo-dom):
 | `turbo-dom-v8` | 150.4.2 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
 | `turbo-surf-deno-v8` | 0.4.1 | `v8` (the shared facade) |
 | `turbo-surf-serde-v8` | 0.321.1 | shared value conversion |
-| `turbo-surf-deno-core` | 0.412.2 | `deno_core` |
-| `turbo-surf-deno-bench-util` | 0.253.2 | upstream test/benchmark identity |
-| `turbo-surf-deno-crypto` | 0.273.2 | `deno_crypto` |
-| `turbo-surf-deno-webidl` | 0.259.2 | `deno_webidl` |
-| `turbo-surf-deno-web` | 0.290.2 | `deno_web` |
+| `turbo-surf-deno-core` | 0.412.3 | `deno_core` |
+| `turbo-surf-deno-bench-util` | 0.253.3 | upstream test/benchmark identity |
+| `turbo-surf-deno-crypto` | 0.273.3 | `deno_crypto` |
+| `turbo-surf-deno-webidl` | 0.259.3 | `deno_webidl` |
+| `turbo-surf-deno-web` | 0.290.3 | `deno_web` |
+
+The core host API cancels only unfinished module work in an authenticated document
+context. Compiled module maps and healthy namespaces remain available for later
+imports; guest JavaScript receives no cancellation capability.
 
 The distribution generators retain upstream versions, native archive URLs,
 licenses and reviewed source pins while mapping every internal dependency to the

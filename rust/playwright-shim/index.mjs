@@ -2848,6 +2848,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       ...this._documentResponse,
       hostNetworkLog: opening.id,
       rootHistory: this._driverHistorySnapshot(),
+      retainInitialHydrationTimeout: Boolean(native.liveInitialHydrationStatus),
       auxiliaryPolicy: this._context._auxiliaryPolicy,
       viewport: [this._viewport.width, this._viewport.height],
       auxiliaryInitScript: this._context._initScripts
@@ -2887,6 +2888,39 @@ return String(globalThis.__RESULT ?? ""); })()`,
     else native.liveClose(opening.id);
   }
 
+  _initialHydrationTimeout(session) {
+    if (!native.liveInitialHydrationStatus || !this._auxiliaryActor) return null;
+    const status = JSON.parse(native.liveInitialHydrationStatus(session));
+    if (typeof status.timedOut !== "boolean")
+      throw new Error("Native initial hydration status omitted its outcome");
+    if (!status.timedOut) return null;
+    if (!Number.isSafeInteger(status.timeoutMs) || status.timeoutMs < 0)
+      throw new Error("Native initial hydration status omitted its timeout");
+    return status.timeoutMs;
+  }
+
+  _canRetainTimedOutActor(error) {
+    return (
+      error.name === "TimeoutError" &&
+      !this._closed &&
+      !this._openingClosePromise &&
+      this._session != null &&
+      this._auxiliaryActor &&
+      this._actorHub.pages.get(this._targetId) === this &&
+      this._actorHub.info.has(this._targetId) &&
+      this._actorHub.canReadTarget(this._targetId)
+    );
+  }
+
+  async _settleFailedLiveOpen(error, opening) {
+    if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
+    if (this._openingClosePromise) await this._openingClosePromise;
+    else if (!this._canRetainTimedOutActor(error)) {
+      await this._failedActorOpen(opening);
+      if (this._openingSession === opening) this._failPendingNetworkResponses(error.message);
+    }
+  }
+
   async _startLiveSession(timeoutMs, opening) {
     const started = Date.now();
     try {
@@ -2915,17 +2949,16 @@ return String(globalThis.__RESULT ?? ""); })()`,
       await this._completeActorOpen(session);
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);
+      const initialTimeout = this._initialHydrationTimeout(session);
+      if (initialTimeout != null) throw new Error(`navigation timeout after ${initialTimeout}ms`);
       await this._refreshFromSession(true);
       await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
       if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
-        this._closeSession();
+        if (!this._auxiliaryActor) this._closeSession();
         throw new Error(`navigation timeout after ${timeoutMs}ms`);
       }
     } catch (error) {
-      if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
-      if (this._openingClosePromise) await this._openingClosePromise;
-      else await this._failedActorOpen(opening);
-      if (this._openingSession === opening) this._failPendingNetworkResponses(error.message);
+      await this._settleFailedLiveOpen(error, opening);
       throw error;
     } finally {
       if (this._openingSession === opening) {
@@ -3027,7 +3060,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       session,
       `(() => {
         const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
-          const entry = { node: __tsNs.shimFrameId(el), contextId: __tsNs.requestContextId?.(el.contentWindow), name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
+          const window = el.contentWindow;
+          const entry = { node: __tsNs.shimFrameId(el), contextId: window ? __tsNs.requestContextId?.(window) : undefined, name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
           try { entry.url = el.contentWindow.location.href; if (el.contentDocument) { entry.html = el.contentDocument.documentElement?.outerHTML || ""; entry.live = true; entry.children = walk(el.contentDocument, entry.path); } } catch (_) {}
           return entry;
         });
@@ -3535,6 +3569,26 @@ return String(globalThis.__RESULT ?? ""); })()`,
     };
   }
 
+  _navigationDownload(receipt, session) {
+    if (!receipt.attachment) return;
+    const attachment = attachmentRecord(receipt);
+    if (!attachment) throw new Error("Native attachment navigation omitted its disposition");
+    this._recordDownload(attachment, receipt.requestId, session);
+    throw new DownloadNavigationError();
+  }
+
+  _targetNavigationError(error) {
+    if (
+      error instanceof Error &&
+      error.code === "GenericFailure" &&
+      /^(?:Target navigation timeout after \d+ms|Native target navigation exceeded session budget)$/.test(
+        error.message,
+      )
+    )
+      error.name = "TimeoutError";
+    return error;
+  }
+
   async _navigateActorTarget(url, method, body, opts = {}) {
     const navigationStarted = performance.now();
     const session = this._session;
@@ -3550,12 +3604,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
           JSON.stringify(this._nativeNavigationOptions(method, body, opts)),
         ),
       );
-      if (receipt.attachment) {
-        const attachment = attachmentRecord(receipt);
-        if (!attachment) throw new Error("Native attachment navigation omitted its disposition");
-        this._recordDownload(attachment, receipt.requestId, session);
-        throw new DownloadNavigationError();
-      }
+      this._navigationDownload(receipt, session);
       this._rejectNoContentNavigation(receipt, url);
       await this._actorHub.drain();
       await this._refreshFromSession(true);
@@ -3575,6 +3624,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (!response)
         throw new Error("Native navigation completed without an owned navigation response");
       return response;
+    } catch (error) {
+      throw this._targetNavigationError(error);
     } finally {
       controller.abort(new Error("Navigation event wait ended"));
       this._driverNavigation = false;

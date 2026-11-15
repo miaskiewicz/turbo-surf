@@ -111,11 +111,12 @@ impl PageSession {
         let budget = self.budget_ms;
         let mut turn = BackgroundTurn::default();
         let work = std::future::poll_fn(|cx| {
-            let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+            let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
             let result = turn.poll(&mut self.rt, cx);
             let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
             drop(watchdog);
             self.rt.v8_isolate().cancel_terminate_execution();
+            auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
             let result = if exceeded {
                 Poll::Ready(Err(
                     "Native background task exceeded execution budget".into()

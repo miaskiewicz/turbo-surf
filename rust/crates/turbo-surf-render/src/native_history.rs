@@ -1343,11 +1343,12 @@ impl PageSession {
         };
         let key = self.rt.activation_key();
         let _activation = key.enter();
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
         let result = self.perform_history_traversal(target, row, selected);
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err(format!("Native history traversal timeout after {budget}ms"))
         } else {

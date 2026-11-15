@@ -23,6 +23,8 @@ pub(crate) struct DocumentResponse {
     pub auxiliary_policy: Option<AuxiliaryResourcePolicy>,
     #[serde(rename = "rootHistory")]
     pub root_history: Option<turbo_surf_render::AuxiliaryDriverHistory>,
+    #[serde(rename = "retainInitialHydrationTimeout")]
+    pub retain_initial_hydration_timeout: bool,
 }
 pub(crate) fn parse(value: Option<String>) -> Result<DocumentResponse> {
     value.map_or_else(

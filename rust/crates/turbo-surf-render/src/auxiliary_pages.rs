@@ -819,11 +819,12 @@ impl PageSession {
 
     pub fn read_target_engine(&mut self, target: u64, source: &str) -> Result<String, String> {
         let _activation = self.rt.activation_key().enter();
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result = self.read_target_engine_active(target, source);
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err("Target engine read exceeded session budget".into())
         } else {
@@ -968,8 +969,9 @@ impl PageSession {
         engine: bool,
         json: bool,
     ) -> Result<String, String> {
+        auxiliary_navigation::reconcile_expired_source_modules(&mut self.rt, target)?;
         let target = AuxiliaryContextId(target);
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
                 let source = if engine {
@@ -1002,6 +1004,7 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err("Target expression exceeded session execution budget".into())
         } else {
@@ -1163,12 +1166,12 @@ impl PageSession {
     ) -> Result<String, String> {
         let key = self.rt.activation_key();
         key.during(async {
-            let watchdog =
-                Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+            let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
             let result = execute_target(&mut self.rt, AuxiliaryContextId(target), source, false);
             let exceeded = watchdog.exceeded.load(Ordering::Relaxed);
             drop(watchdog);
             self.rt.v8_isolate().cancel_terminate_execution();
+            auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
             let result = if exceeded {
                 Err("Target script exceeded session budget".into())
             } else {
@@ -1251,7 +1254,7 @@ impl PageSession {
         let budget = timeout_ms
             .filter(|value| *value > 0)
             .unwrap_or(self.budget_ms);
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
         let key = self.rt.activation_key();
         let operation = key.during(self.set_target_content_active(target, html, wait_until));
         let result =
@@ -1259,6 +1262,7 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = match (result, exceeded) {
             (Ok(result), false) => result,
             _ => Err(format!("setContent timeout after {budget}ms")),

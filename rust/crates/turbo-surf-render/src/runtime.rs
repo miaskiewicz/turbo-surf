@@ -5531,7 +5531,33 @@ fn op_shim_binding_scripts(
     Ok(())
 }
 
+fn initialize_frame_scripts<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<(), JsErrorBox> {
+    let has_native_identity =
+        turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some();
+    if auxiliary_navigation::defer_navigation_frame_init(scope, has_native_identity)? {
+        return Ok(());
+    }
+    if has_native_identity {
+        turbo_dom_browser_env::host_internals::run_auxiliary_init_scripts(scope, context);
+    }
+    let result = run_frame_init_script(scope);
+    auxiliary_navigation::finish_navigation_frame_init(scope);
+    result
+}
+
 fn run_frame_init_script(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
+    if auxiliary_navigation::defer_navigation_frame_init(scope, false)? {
+        return Ok(());
+    }
+    let result = run_frame_init_script_active(scope);
+    auxiliary_navigation::finish_navigation_frame_init(scope);
+    result
+}
+
+fn run_frame_init_script_active(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
     let context = scope.get_current_context();
     let bootstrap = auxiliary_pages::bootstrap_for_context(scope, context);
     let engine_source = bootstrap.engine_init_script;
@@ -6185,6 +6211,7 @@ fn queue_window_message<'s>(
 /// The locals [`finish_frame_document_install`] borrows from its caller. Using
 /// a struct beats a 9-arg function for readability.
 struct FrameDocumentInstall<'s, 'a> {
+    attempt: v8::Local<'s, v8::Object>,
     context: v8::Local<'s, v8::Context>,
     previous: Option<v8::Local<'s, v8::Context>>,
     parent: v8::Local<'s, v8::Context>,
@@ -6248,6 +6275,7 @@ fn finish_frame_document_install<'s>(
     args: FrameDocumentInstall<'s, '_>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     let FrameDocumentInstall {
+        attempt,
         context,
         previous,
         parent,
@@ -6276,6 +6304,7 @@ fn finish_frame_document_install<'s>(
     };
     install_document_facts(scope, facts);
     window_proxy::install_document(scope);
+    auxiliary_navigation::bind_frame_execution(scope, context, parent, host, attempt)?;
     let global = context.global(scope);
     let core = v8::Local::new(scope, core);
 
@@ -6628,7 +6657,96 @@ fn op_frame_set_document<'s>(
     html: v8::Local<'s, v8::String>,
     #[string] metadata: &str,
     response_id: u32,
+    attempt: v8::Local<'s, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    let guard = auxiliary_navigation::start_frame_execution_deadline(scope, parent, host, attempt)
+        .map_err(frame_start_error)?;
+    let mut ownership = FrameInstallOwnership::default();
+    let result = set_frame_document_active(
+        scope,
+        FrameDocumentRequest {
+            window,
+            parent_window,
+            host,
+            html,
+            metadata,
+            response_id,
+            attempt,
+        },
+        &mut ownership,
+    );
+    finish_frame_document_transaction(scope, result, guard, ownership)
+}
+
+fn frame_start_error(error: auxiliary_navigation::FrameStartError) -> JsErrorBox {
+    match error {
+        auxiliary_navigation::FrameStartError::Cancelled => {
+            JsErrorBox::generic("Frame load attempt is cancelled")
+        }
+        auxiliary_navigation::FrameStartError::Authority(error) => JsErrorBox::generic(error),
+    }
+}
+
+fn finish_frame_document_transaction<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    result: Result<v8::Local<'s, v8::Object>, JsErrorBox>,
+    guard: Option<auxiliary_navigation::FrameExecutionDeadline>,
+    ownership: FrameInstallOwnership<'s>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let outcome = guard
+        .map(|guard| guard.finish(scope))
+        .unwrap_or(auxiliary_navigation::FrameExecutionOutcome::Completed);
+    if outcome == auxiliary_navigation::FrameExecutionOutcome::Interrupted
+        || scope.is_execution_terminating()
+    {
+        if let Some(context) = ownership.current {
+            auxiliary_navigation::queue_interrupted_frame(scope, context, ownership.previous);
+        }
+        return Err(JsErrorBox::generic("Frame execution was interrupted"));
+    }
+    let expired = outcome == auxiliary_navigation::FrameExecutionOutcome::Cancelled;
+    if result.is_err() || expired {
+        if let Some(context) = ownership.current {
+            retire_failed_frame_navigation(scope, context, ownership.previous);
+        }
+    }
+    if expired {
+        Err(JsErrorBox::generic("Frame load attempt is cancelled"))
+    } else {
+        result
+    }
+}
+
+struct FrameDocumentRequest<'s, 'a> {
+    window: v8::Local<'s, v8::Object>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    html: v8::Local<'s, v8::String>,
+    metadata: &'a str,
+    response_id: u32,
+    attempt: v8::Local<'s, v8::Object>,
+}
+#[derive(Default)]
+struct FrameInstallOwnership<'s> {
+    current: Option<v8::Local<'s, v8::Context>>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+}
+
+fn set_frame_document_active<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    request: FrameDocumentRequest<'s, '_>,
+    ownership: &mut FrameInstallOwnership<'s>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let FrameDocumentRequest {
+        window,
+        parent_window,
+        host,
+        html,
+        metadata,
+        response_id,
+        attempt,
+    } = request;
     let supplied_units = crate::browser_env::string_code_units(scope, html);
     let mut context = window
         .get_creation_context(scope)
@@ -6648,18 +6766,13 @@ fn op_frame_set_document<'s>(
         .get_slot::<FrameParent>()
         .ok_or_else(|| JsErrorBox::generic("target is not a child frame"))?;
     let parent = crate::context_ownership::local(scope, &parent.0);
-    let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
-    let caller = v8::Local::new(scope, caller);
     let native_parent = parent.global(scope);
-    if !parent_window.strict_equals(native_parent.into())
-        || !caller
-            .get_security_token(scope)
-            .strict_equals(parent.get_security_token(scope))
-    {
+    if !is_frame_attempt_owner(scope, parent, parent_window) {
         return Err(JsErrorBox::generic(
             "frame document can only be replaced by its owning context",
         ));
     }
+    auxiliary_navigation::check_frame_load_attempt(scope, parent, host, attempt)?;
     // The recorded owner and V8 token authorize borrowed same-origin callbacks;
     // a guest __ownerWin facade cannot substitute for the owner's actual global.
     let parent_window = native_parent;
@@ -6692,6 +6805,8 @@ fn op_frame_set_document<'s>(
         context = window.get_creation_context(scope).unwrap();
         replaced = Some(previous);
     }
+    ownership.current = Some(context);
+    ownership.previous = replaced;
     let configure = || {
         let mut sandbox = FrameSandbox::from_host(scope, parent, host);
         if let Some(document) = &document {
@@ -6835,6 +6950,7 @@ fn op_frame_set_document<'s>(
         finish_frame_document_install(
             scope,
             FrameDocumentInstall {
+                attempt,
                 context,
                 previous: replaced,
                 parent,
@@ -6848,11 +6964,7 @@ fn op_frame_set_document<'s>(
             },
         )
     };
-    let result = configure();
-    if result.is_err() {
-        retire_failed_frame_navigation(scope, context, replaced);
-    }
-    result
+    configure()
 }
 
 #[op2(nofast, reentrant)]
@@ -7133,11 +7245,23 @@ fn op_frame_resources<'s>(
         .ok_or_else(|| JsErrorBox::generic("frame resource loading unavailable"))
 }
 
-#[op2(reentrant)]
-fn op_create_frame<'s>(
+fn is_frame_attempt_owner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    window: v8::Local<'s, v8::Object>,
+) -> bool {
+    let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let caller = v8::Local::new(scope, caller);
+    window.strict_equals(parent.global(scope).into())
+        && caller
+            .get_security_token(scope)
+            .strict_equals(parent.get_security_token(scope))
+}
+
+fn frame_attempt_owner<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     parent_window: v8::Local<'s, v8::Object>,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
     let parent = parent_window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("frame owner context unavailable"))?;
@@ -7149,7 +7273,133 @@ fn op_create_frame<'s>(
     {
         return Err(JsErrorBox::generic("frame owner is not same-origin"));
     }
-    create_frame(scope, parent)
+    Ok(parent)
+}
+
+#[op2(reentrant)]
+fn op_frame_load_attempt<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::new_frame_load_attempt(scope, parent, host)
+}
+
+#[op2(nofast, reentrant)]
+fn op_frame_load_complete<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<(), JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::complete_frame_load_attempt(scope, parent, host, attempt)
+}
+
+#[op2(fast, reentrant)]
+fn op_frame_load_active<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<bool, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::frame_load_attempt_active(scope, parent, host, attempt)
+}
+
+fn frame_window_document_current<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    document: v8::Local<'s, v8::Object>,
+) -> bool {
+    use turbo_dom_browser_env::host_internals as host;
+    let Some(_document) = host::enter_context_document(context) else {
+        return false;
+    };
+    let Some(root) = host::with_tree(|tree| tree.root()) else {
+        return false;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let actual = host::wrap(scope, root);
+    actual.strict_equals(document.into()) && actual.get_creation_context(scope) == Some(context)
+}
+
+#[op2(nofast, reentrant)]
+fn op_frame_load_window_valid<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    window: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<bool, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::frame_load_attempt_active(scope, parent, host, attempt)?;
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("Frame window context unavailable"))?;
+    if native_frame_is_retired(context) {
+        return Ok(false);
+    }
+    if let Some(identity) =
+        turbo_dom_browser_env::host_internals::auxiliary_context_identity(context)
+    {
+        if identity.closed {
+            return Ok(false);
+        }
+    }
+    let document = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|document| document.0.to_local(scope))
+        .ok_or_else(|| JsErrorBox::generic("Frame window document unavailable"))?;
+    let actual_parent = context
+        .get_slot::<FrameParent>()
+        .and_then(|parent| parent.0.to_local(scope));
+    let actual_host = context
+        .get_slot::<FrameHost>()
+        .and_then(|host| host.0.to_local(scope));
+    if !window.strict_equals(context.global(scope).into())
+        || actual_parent != Some(parent)
+        || !actual_host.is_some_and(|saved| saved.strict_equals(host.into()))
+        || !frame_window_document_current(scope, context, document)
+    {
+        return Err(JsErrorBox::generic("Frame window ownership changed"));
+    }
+    Ok(true)
+}
+
+#[op2(reentrant)]
+fn op_create_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    let guard = auxiliary_navigation::start_frame_execution_deadline(scope, parent, host, attempt)
+        .map_err(frame_start_error)?;
+    let mut current = None;
+    let result = (|| {
+        let window = allocate_frame(scope, parent, None)?;
+        let context = window
+            .get_creation_context(scope)
+            .ok_or_else(|| JsErrorBox::generic("Frame context unavailable"))?;
+        current = Some(context);
+        if cfg!(turbo_surf_native_proxy) {
+            initialize_created_frame(scope, context, parent)?;
+            auxiliary_navigation::bind_frame_execution(scope, context, parent, host, attempt)?;
+        }
+        Ok(window)
+    })();
+    finish_frame_document_transaction(
+        scope,
+        result,
+        guard,
+        FrameInstallOwnership {
+            current,
+            previous: None,
+        },
+    )
 }
 
 fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'s, v8::Context>) {
@@ -7173,7 +7423,7 @@ fn replace_frame_context<'s>(
     previous: v8::Local<'s, v8::Context>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     retire_frame_tree_impl(scope, previous, true, true);
-    allocate_frame(scope, parent, Some(previous), false).inspect_err(|_| {
+    allocate_frame(scope, parent, Some(previous)).inspect_err(|_| {
         turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, previous);
     })
 }
@@ -7274,20 +7524,26 @@ fn retire_frame_tree_impl<'s>(
     drop(discarded);
 }
 
-fn create_frame<'s>(
+fn initialize_created_frame<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
     parent: v8::Local<'s, v8::Context>,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
-    // frameRealm configures the initial document before publishing this context.
-    // Avoid bootstrapping its ENV twice and reading live parent geometry.
-    allocate_frame(scope, parent, None, cfg!(turbo_surf_native_proxy))
+) -> Result<(), JsErrorBox> {
+    let core = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .core
+        .clone()
+        .ok_or_else(|| JsErrorBox::generic("Frame host core unavailable"))?;
+    let core = v8::Local::new(scope, core);
+    let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
+    initialize_new_frame(scope, context, parent, core, depth)
 }
 
 fn allocate_frame<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     parent: v8::Local<'s, v8::Context>,
     previous: Option<v8::Local<'s, v8::Context>>,
-    initialize: bool,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     if parent.get_slot::<FrameRetired>().is_some() {
         return Err(JsErrorBox::generic(
@@ -7308,7 +7564,7 @@ fn allocate_frame<'s>(
         .core
         .clone()
         .ok_or_else(|| JsErrorBox::generic("frame host core unavailable"))?;
-    let core = v8::Local::new(scope, saved_core);
+    let _core = v8::Local::new(scope, saved_core);
     let context = window_proxy::context(scope, previous);
     crate::script_inventory::register_frame(scope, context);
     context.set_slot(Rc::new(FrameContextMarker));
@@ -7334,9 +7590,6 @@ fn allocate_frame<'s>(
         }
     }
     let global = context.global(scope);
-    if initialize {
-        initialize_new_frame(scope, context, parent, core, depth)?;
-    }
     let retained = v8::Global::new(scope, context);
     JsRuntime::op_state_from(scope)
         .borrow_mut()
@@ -7410,10 +7663,7 @@ fn initialize_new_frame<'s>(
         auxiliary_host::install_nested(scope, context, parent, "about:blank", "")
             .map_err(JsErrorBox::generic)?;
     }
-    if turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some() {
-        turbo_dom_browser_env::host_internals::run_auxiliary_init_scripts(scope, context);
-    }
-    run_frame_init_script(scope)?;
+    initialize_frame_scripts(scope, context)?;
     // Host capabilities are passed privately and never installed on the global.
     Ok(())
 }
@@ -9207,6 +9457,10 @@ deno_core::extension!(
     turbo_dom,
     ops = [
         op_create_frame,
+        op_frame_load_attempt,
+        op_frame_load_active,
+        op_frame_load_complete,
+        op_frame_load_window_valid,
         op_frame_host_helper,
         op_windows_same_origin,
         op_window_parent,
@@ -13749,7 +14003,7 @@ __G.domSig = (() => {
     if (owner !== globalThis) return ops.op_frame_host_helper(frameDocument(el), "frameRecordFor", [el]);
     let record = frameRecords.get(el);
     if (!record || record.owner !== owner) {
-      record = {__proto__:null, owner, depth: frameDepth, realm: null, started: false, connected: false, epoch: 0, loaded: false};
+      record = {__proto__:null, owner, depth: frameDepth, realm: null, started: false, connected: false, epoch: 0, loaded: false, attempt: null, attemptEpoch: -1};
       frameRecords.set(el, record);
     }
     if (frameConnected(el)) frameApply(frameHostAdd, frameHosts, [el]);
@@ -13901,19 +14155,32 @@ __G.domSig = (() => {
     const location = record.navigationURL || (frameSrcdocOf(el) !== null ? "about:srcdoc" : inherited ? "about:blank" : url);
     return {__proto__:null, url, origin, location, inherited, depth: record.depth, referrer: source[0]};
   };
-  const frameRealm = (el) => {
+  const frameLoadAttempt = (el, record) => {
+    if (record.attemptEpoch !== record.epoch) {
+      record.attempt = ops.op_frame_load_attempt(record.owner, el);
+      record.attemptEpoch = record.epoch;
+    }
+    return record.attempt;
+  };
+  const frameAttemptCancelled = (el, record, epoch, attempt) =>
+    record.epoch !== epoch || !frameConnected(el) || !ops.op_frame_load_active(record.owner, el, attempt);
+  const frameRealm = (el, capturedAttempt = null) => {
     if (!ops.op_window_active(__document)) return null;
     const record = recordFor(el);
     if (!record || !ops.op_window_active(__document) || !frameConnected(el) || record.depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) return null;
-    if (record.realm && ops.op_window_active(record.realm)) return record.realm;
+    const attempt = capturedAttempt || frameLoadAttempt(el, record);
+    const active = ops.op_frame_load_active(record.owner, el, attempt);
+    if (capturedAttempt && capturedAttempt !== record.attempt) return null;
+    if (record.realm && ops.op_frame_load_window_valid(record.owner, el, record.realm, attempt)) return record.realm;
+    if (!active) { record.realm = null; return null; }
     // An unsuccessful native commit retires its unpublished replacement. A
     // later host navigation must allocate a fresh realm rather than reuse it.
     record.realm = null;
-    let window = ops.op_create_frame(globalThis);
+    let window = ops.op_create_frame(globalThis, el, attempt);
     record.metadata = frameMetadata(el);
     window = ops.op_frame_set_document(window, record.owner, el,
       "<!DOCTYPE html><html><head></head><body></body></html>",
-      __stringify({__proto__:null,...record.metadata, inherited: true, initial: true}), 0);
+      __stringify({__proto__:null,...record.metadata, inherited: true, initial: true}), 0, attempt);
     record.realm = window;
     refreshFrameTree();
     return window;
@@ -13922,14 +14189,16 @@ __G.domSig = (() => {
     const record = recordFor(el);
     if (!record || record.owner !== globalThis || record.started || !frameConnected(el) || !ops.op_window_active(__document)) return;
     record.started = true;
-    const epoch = record.epoch;
+    const epoch = record.epoch, attempt = frameLoadAttempt(el, record);
+    if (!ops.op_frame_load_active(record.owner, el, attempt)) return;
+    let cancelled = false;
     __pendingFetchCount++;
     try {
       // Publish the initial realm synchronously; authored child work still waits
       // until trusted bootstrap has finished installing the owner's geometry.
-      let window = frameRealm(el);
+      let window = frameRealm(el, attempt);
       await undefined;
-      if (record.epoch !== epoch || !frameConnected(el)) return;
+      if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
       if (!window) { fireIframeLoad(el, epoch); return; }
       let frameUrl = record.metadata.url;
       let html = "", responseId = 0;
@@ -13946,16 +14215,17 @@ __G.domSig = (() => {
           try { response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init); }
           finally { if (cancelId) ops.op_fetch_release(cancelId); }
           if (request && ops.op_form_navigation_blocked(request) && record.epoch === epoch) { record.loaded = true; return; }
-          if (record.epoch !== epoch || !frameConnected(el)) return;
+          if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;
         }
       }
-      if (record.epoch !== epoch || !frameConnected(el)) return;
+      if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
+      if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
       if (!blank || record.navigation) {
         window = ops.op_frame_set_document(window, record.owner, el,
           html || "<!DOCTYPE html><html><head></head><body></body></html>",
-          __stringify({__proto__:null,...record.metadata, url: frameUrl}), responseId);
+          __stringify({__proto__:null,...record.metadata, url: frameUrl}), responseId, attempt);
         record.realm = window; record.navigation = false;
         refreshFrameTree();
       }
@@ -13964,11 +14234,16 @@ __G.domSig = (() => {
       await ops.op_frame_dom_ready(window);
       await __framePromiseAll(work.asynchronous);
       await ops.op_frame_finish(window);
+      ops.op_frame_load_complete(record.owner, el, attempt);
     } catch (error) {
-      if (record.epoch === epoch) __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
+      cancelled = true;
+      if (!frameAttemptCancelled(el, record, epoch, attempt)) {
+        cancelled = false;
+        __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
+      }
     } finally {
       __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
-      fireIframeLoad(el, epoch);
+      if (!cancelled) fireIframeLoad(el, epoch);
     }
   };
   const loadFrame = el => __trackResource(loadFrameImpl(el));
@@ -16320,6 +16595,8 @@ fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, Stri
 
 struct ClassicScriptFailure {
     interrupted: bool,
+    deadline_cancelled: bool,
+    deferred_interruption: bool,
     error: Option<v8::Global<v8::Value>>,
     message: String,
     line: usize,
@@ -16330,6 +16607,8 @@ impl ClassicScriptFailure {
     fn host(message: &str) -> Self {
         Self {
             interrupted: false,
+            deadline_cancelled: false,
+            deferred_interruption: false,
             error: None,
             message: message.into(),
             line: 0,
@@ -16353,7 +16632,46 @@ fn execute_frame_script(
         ));
     }
     let mut scope = v8::ContextScope::new(&mut scope, context);
-    let scope = std::pin::pin!(v8::TryCatch::new(&mut scope));
+    let guard = match auxiliary_navigation::start_frame_context_deadline(&mut scope, context) {
+        Ok(guard) => guard,
+        Err(auxiliary_navigation::FrameStartError::Cancelled) => {
+            let mut failure =
+                ClassicScriptFailure::host("Frame script navigation deadline expired");
+            failure.deadline_cancelled = true;
+            return Err(failure);
+        }
+        Err(auxiliary_navigation::FrameStartError::Authority(error)) => {
+            return Err(ClassicScriptFailure::host(&error))
+        }
+    };
+    let result = execute_frame_script_active(&mut scope, source_url, code);
+    let outcome = guard
+        .map(|guard| guard.finish(&mut scope))
+        .unwrap_or(auxiliary_navigation::FrameExecutionOutcome::Completed);
+    if outcome == auxiliary_navigation::FrameExecutionOutcome::Interrupted
+        || scope.is_execution_terminating()
+    {
+        auxiliary_navigation::queue_interrupted_frame(&mut scope, context, None);
+        let mut failure = ClassicScriptFailure::host("Frame script execution was interrupted");
+        failure.interrupted = true;
+        failure.deferred_interruption = true;
+        return Err(failure);
+    }
+    if outcome == auxiliary_navigation::FrameExecutionOutcome::Cancelled {
+        retire_failed_frame_tree(&mut scope, context);
+        let mut failure = ClassicScriptFailure::host("Frame script navigation deadline expired");
+        failure.deadline_cancelled = true;
+        return Err(failure);
+    }
+    result
+}
+
+fn execute_frame_script_active(
+    scope: &mut v8::PinScope,
+    source_url: &str,
+    code: &[u16],
+) -> Result<(), ClassicScriptFailure> {
+    let scope = std::pin::pin!(v8::TryCatch::new(scope));
     let scope = &mut scope.init();
     let source = v8::String::new_from_two_byte(scope, code, v8::NewStringType::Normal)
         .ok_or_else(|| ClassicScriptFailure::host("script source allocation failed"))?;
@@ -16390,6 +16708,8 @@ fn execute_frame_script(
     let message = scope.message();
     Err(ClassicScriptFailure {
         interrupted: false,
+        deadline_cancelled: false,
+        deferred_interruption: false,
         error: Some(v8::Global::new(scope, error)),
         message: message
             .map(|message| message.get(scope).to_rust_string_lossy(scope))
@@ -16777,6 +17097,43 @@ fn run_pending_classic_script(rt: &mut JsRuntime, job: ClassicScriptJob) -> Resu
     } = job;
     let previous_script = capture_current_script(rt, &script_context, &document, element.as_ref());
     let result = execute_frame_script(rt, script_context.clone(), &source, &code);
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|failure| failure.deferred_interruption)
+    {
+        let shared = rt.op_state();
+        let mut state = shared.borrow_mut();
+        if !state.has::<DeferredClassicInterruptions>() {
+            state.put(DeferredClassicInterruptions::default());
+        }
+        state
+            .borrow_mut::<DeferredClassicInterruptions>()
+            .0
+            .push(DeferredClassicInterruption {
+                script_context,
+                document,
+                previous_script,
+                waiter_context,
+                resolver,
+            });
+        return Err("Classic script execution was interrupted".into());
+    }
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|failure| failure.deadline_cancelled)
+    {
+        reject_classic_script_as_interrupted(
+            rt,
+            &script_context,
+            &document,
+            previous_script,
+            &waiter_context,
+            &resolver,
+        )?;
+        return Ok(());
+    }
     if script_execution_interrupted(rt, result.as_ref()) {
         rt.v8_isolate().cancel_terminate_execution();
         reject_classic_script_as_interrupted(
@@ -16803,6 +17160,35 @@ fn run_pending_classic_script(rt: &mut JsRuntime, job: ClassicScriptJob) -> Resu
     }
     settle_classic_script_waiter(&mut scope, &waiter_context, &resolver, failure);
     Ok(())
+}
+
+struct DeferredClassicInterruption {
+    script_context: v8::Global<v8::Context>,
+    document: v8::Global<v8::Object>,
+    previous_script: Option<v8::Global<v8::Value>>,
+    waiter_context: v8::Global<v8::Context>,
+    resolver: v8::Global<v8::PromiseResolver>,
+}
+#[derive(Default)]
+struct DeferredClassicInterruptions(Vec<DeferredClassicInterruption>);
+
+fn settle_deferred_classic_interruptions(rt: &mut JsRuntime) {
+    let jobs = rt
+        .op_state()
+        .borrow_mut()
+        .try_borrow_mut::<DeferredClassicInterruptions>()
+        .map(|jobs| std::mem::take(&mut jobs.0))
+        .unwrap_or_default();
+    for job in jobs {
+        let _ = reject_classic_script_as_interrupted(
+            rt,
+            &job.script_context,
+            &job.document,
+            job.previous_script,
+            &job.waiter_context,
+            &job.resolver,
+        );
+    }
 }
 
 /// Capture `document.currentScript` before a classic script runs so it can be
@@ -17813,7 +18199,7 @@ pub async fn render_hydrate_with_budget(
         let _activation = rt.activation_key().enter();
         prepare_hydration(&mut rt, html, base)?;
     }
-    let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
+    let watchdog = Watchdog::start(rt.v8_isolate(), budget_ms);
     rt.park();
     let key = rt.activation_key();
     let result = key
@@ -18156,17 +18542,32 @@ async fn evaluate_loaded_module(
 // RAII runaway-execution watchdog: terminates the isolate if an op runs past the
 // budget, and is cancelled (thread joined) on drop. Replaces the hand-rolled
 // done-flag + spawn + join that each one-shot entry point repeats.
+#[derive(Default)]
+struct ActiveWatchdogs(Vec<std::sync::Weak<std::sync::atomic::AtomicBool>>);
+
 struct Watchdog {
     exceeded: std::sync::Arc<std::sync::atomic::AtomicBool>,
     done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Watchdog {
-    fn start(handle: v8::IsolateHandle, budget_ms: u64) -> Self {
+    fn any_active(isolate: &v8::Isolate) -> bool {
+        isolate
+            .get_slot::<ActiveWatchdogs>()
+            .is_some_and(|active| active.0.iter().any(|flag| flag.strong_count() > 0))
+    }
+    fn start(isolate: &mut v8::Isolate, budget_ms: u64) -> Self {
+        let handle = isolate.thread_safe_handle();
         use std::sync::atomic::Ordering;
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let watch = done.clone();
         let exceeded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if isolate.get_slot::<ActiveWatchdogs>().is_none() {
+            isolate.set_slot(ActiveWatchdogs::default());
+        }
+        let active = isolate.get_slot_mut::<ActiveWatchdogs>().unwrap();
+        active.0.retain(|flag| flag.strong_count() > 0);
+        active.0.push(std::sync::Arc::downgrade(&done));
         let timed_out = exceeded.clone();
         let thread = std::thread::spawn(move || {
             let start = std::time::Instant::now();
@@ -18915,7 +19316,7 @@ impl PageSession {
             initial_hydration_budget_ms: None,
             ..options
         };
-        let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), initial_budget_ms);
+        let watchdog = Watchdog::start(rt.v8_isolate(), initial_budget_ms);
         let exceeded = watchdog.exceeded.clone();
         rt.park();
         let key = rt.activation_key();
@@ -19023,7 +19424,7 @@ impl PageSession {
             return Err("Page session is closed".into());
         }
         let _activation = self.rt.activation_key().enter();
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result = execute_engine_script(&mut self.rt, script).and_then(|value| {
             let promise = {
                 deno_core::scope!(scope, self.rt);
@@ -19038,6 +19439,7 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err("Engine read exceeded the session execution budget".into())
         } else {
@@ -19068,7 +19470,7 @@ impl PageSession {
             return Err("Page session is closed".into());
         }
         let key = self.rt.activation_key();
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result = key
             .during(async {
                 execute_engine_script(&mut self.rt, script)?;
@@ -19086,6 +19488,7 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err("Driver collection exceeded the session execution budget".into())
         } else {
@@ -19134,7 +19537,7 @@ impl PageSession {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
         let drained = {
-            let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+            let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
             with_async_execution_budget(
                 self.options.window_timer_mode == WindowTimerMode::RealTime,
                 budget,
@@ -19160,6 +19563,7 @@ impl PageSession {
         // drain — the budget is normally hit later on background churn (analytics
         // polling, React's idle scheduler). Returning the reached state beats throwing.
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         self.hydration_diagnostics.progress = self
             .rt
             .op_state()
@@ -19237,7 +19641,7 @@ impl PageSession {
         if self.closed {
             return Err("Page session is closed".into());
         }
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
                 let value = if engine {
@@ -19269,6 +19673,7 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err("Expression exceeded the session execution budget".into())
         } else {
@@ -19297,7 +19702,7 @@ impl PageSession {
         }
         // Cancellation belongs to this operation's document, even if navigation replaces it.
         let selected = private_infrastructure::context(&mut self.rt)?;
-        let _watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let _watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
                 let promise = {
@@ -19337,6 +19742,7 @@ impl PageSession {
             .load(std::sync::atomic::Ordering::Relaxed);
         drop(_watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err("Host input exceeded the session execution budget".into())
         } else {
@@ -19528,7 +19934,7 @@ impl PageSession {
     /// Snapshot the opt-in interface tracer inside each active native child context.
     pub fn frame_interface_snapshots(&mut self) -> Vec<serde_json::Value> {
         let _activation = self.rt.activation_key().enter();
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let contexts = self
             .rt
             .op_state()
@@ -19573,6 +19979,7 @@ impl PageSession {
         }
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         rows
     }
 

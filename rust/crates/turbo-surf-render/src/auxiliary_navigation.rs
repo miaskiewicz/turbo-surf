@@ -1,6 +1,8 @@
 //! Actor-owned navigation jobs survive cancellation of an individual driver turn.
 //! HTTP futures contain native request snapshots, never guest contexts or callbacks.
 use super::*;
+#[path = "navigation_deadline.rs"]
+mod navigation_deadline;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -563,7 +565,6 @@ fn install_response_backing<'s>(
         }
     }
     crate::script_inventory::register_guest(scope, current);
-    let bootstrap = auxiliary_pages::bootstrap_for_context(scope, previous);
     let scope = &mut v8::ContextScope::new(scope, current);
     let policy = CspHandle::new(&response.final_url, &response.headers, &response.html);
     policy.response_metadata.replace(fetched.metadata.clone());
@@ -577,7 +578,8 @@ fn install_response_backing<'s>(
     install_csp_sandbox_flags(scope, current, &policy);
     crate::browser_env::defer_key_order(scope);
     let units = response.html.encode_utf16().collect::<Vec<_>>();
-    binding::initialize_auxiliary_utf16_source_positions(scope, &units);
+    binding::try_initialize_auxiliary_utf16_source_positions(scope, &units)
+        .map_err(|error| error.to_string())?;
     install_css_authorization(scope).map_err(|e| e.to_string())?;
     let facts = DocumentFacts::response(scope, current, &response.final_url, &response.headers);
     install_document_facts(scope, facts);
@@ -640,7 +642,6 @@ fn install_response_backing<'s>(
         .borrow::<auxiliary_pages::Pages>()
         .events
         .push(event);
-    run_navigation_init(scope, current, &bootstrap)?;
     auxiliary_pages::retire_owned_resources(scope, previous);
     if let Some(retired) = previous.get_slot::<CspHandle>() {
         JsRuntime::op_state_from(scope)
@@ -699,13 +700,27 @@ fn commit_fetched(
     if attachment(&fetched.response) || matches!(fetched.response.status, 204 | 205) {
         return Ok(receipt);
     }
-    {
-        native_history::admit_navigation(&rt.op_state().borrow(), target, job.history)?;
+    native_history::admit_navigation(&rt.op_state().borrow(), target, job.history)?;
+    // Defer the driver deadline only across trusted native document setup.
+    let setup = navigation_deadline::TrustedSetup::enter(rt, target, job.generation)?;
+    let installed = {
         deno_core::scope!(scope, rt);
         let previous = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
-        install_response(scope, previous, &fetched, job)?;
-    }
+        let installed = install_response(scope, previous, &fetched, job)?;
+        let current = v8::Local::new(scope, &installed);
+        navigation_deadline::capture_source_lease(scope, current, target, job.generation)?;
+        installed
+    };
     adopt_root_response(rt, target, &fetched)?;
+    setup.finish()?;
+    navigation_deadline::run_deferred_frames(rt)?;
+    {
+        deno_core::scope!(scope, rt);
+        let current = v8::Local::new(scope, installed);
+        let scope = &mut v8::ContextScope::new(scope, current);
+        let bootstrap = auxiliary_pages::bootstrap_for_context(scope, current);
+        run_navigation_init(scope, current, &bootstrap)?;
+    }
     let id = AuxiliaryContextId(target);
     auxiliary_pages::target_call(rt, id, "documentLoading", &[])?;
     let promise =
@@ -752,10 +767,10 @@ fn advance_loads(rt: &mut JsRuntime, owner: Option<u64>) -> Result<(), String> {
             .loading
             .iter()
             .filter(|(id, _)| owner.is_none_or(|owner| owner == **id))
-            .map(|(id, load)| (*id, load.promise.clone(), load.phase))
+            .map(|(id, load)| (*id, load.promise.clone(), load.phase, load.generation))
             .collect::<Vec<_>>()
     };
-    for (target, promise, phase) in pending {
+    for (target, promise, phase, generation) in pending {
         match promise_result(rt, target, &promise) {
             Ok(false) => continue,
             Ok(true) => (),
@@ -772,6 +787,12 @@ fn advance_loads(rt: &mut JsRuntime, owner: Option<u64>) -> Result<(), String> {
         let next = match phase {
             LoadPhase::Parsing => {
                 auxiliary_pages::target_call(rt, id, "dispatchDocumentInteractive", &[])?;
+                navigation_deadline::finish_source_goal(
+                    rt,
+                    target,
+                    generation,
+                    navigation_deadline::ExecutionGoal::Interactive,
+                );
                 Some(auxiliary_pages::execute_target(
                     rt,
                     id,
@@ -781,6 +802,12 @@ fn advance_loads(rt: &mut JsRuntime, owner: Option<u64>) -> Result<(), String> {
             }
             LoadPhase::Resources => {
                 auxiliary_pages::target_call(rt, id, "dispatchDocumentComplete", &[])?;
+                navigation_deadline::finish_source_goal(
+                    rt,
+                    target,
+                    generation,
+                    navigation_deadline::ExecutionGoal::Complete,
+                );
                 None
             }
         };
@@ -819,7 +846,7 @@ impl PageSession {
         owner: Option<u64>,
     ) -> Result<(), String> {
         let budget = self.budget_ms;
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
         let key = self.rt.activation_key();
         let result = key
             .during(tokio::time::timeout(
@@ -830,6 +857,7 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {
             Err("Native auxiliary work exceeded execution budget".into())
         } else {
@@ -946,7 +974,9 @@ impl PageSession {
                 state.results.insert(job.generation, result);
             }
         }
-        advance_loads(&mut self.rt, owner)?;
+        if !navigation_deadline::expired(&self.rt) {
+            advance_loads(&mut self.rt, owner)?;
+        }
         Ok(())
     }
 
@@ -960,6 +990,16 @@ impl PageSession {
             .await
     }
 
+    fn parse_target_navigation_options(
+        &mut self,
+        target: u64,
+        options: &str,
+    ) -> Result<NavigationOptions, String> {
+        navigation_deadline::reconcile_expired_source_modules(&mut self.rt, target)?;
+        serde_json::from_str(options)
+            .map_err(|error| format!("Invalid target navigation options: {error}"))
+    }
+
     pub async fn navigate_target_with_options(
         &mut self,
         target: u64,
@@ -967,8 +1007,7 @@ impl PageSession {
         history: &str,
         options: &str,
     ) -> Result<String, String> {
-        let options: NavigationOptions = serde_json::from_str(options)
-            .map_err(|error| format!("Invalid target navigation options: {error}"))?;
+        let options = self.parse_target_navigation_options(target, options)?;
         if options.wait_until.as_deref().is_some_and(|value| {
             !matches!(
                 value,
@@ -977,6 +1016,7 @@ impl PageSession {
         }) {
             return Err("Unsupported target navigation waitUntil".into());
         }
+        let goal = navigation_deadline::ExecutionGoal::requested(options.wait_until.as_deref());
         let budget = options
             .timeout_ms
             .filter(|value| *value > 0)
@@ -1040,7 +1080,8 @@ impl PageSession {
             return Ok(receipt);
         }
         let generation = start(&mut self.rt, navigation, mode, budget)?;
-        self.wait_target_navigation(generation, budget, None).await
+        self.wait_target_navigation(target, generation, budget, None, goal)
+            .await
     }
 
     fn same_document_history_receipt(
@@ -1073,9 +1114,11 @@ impl PageSession {
         let generation = self.start_form_target(target, pending)?;
         let receipt = self
             .wait_target_navigation(
+                target,
                 generation,
                 self.budget_ms,
                 owned_completion.then_some(target),
+                navigation_deadline::ExecutionGoal::Commit,
             )
             .await?;
         while !owned_completion
@@ -1172,11 +1215,13 @@ impl PageSession {
 
     async fn wait_target_navigation(
         &mut self,
+        target: u64,
         generation: u64,
         budget: u64,
         owner: Option<u64>,
+        goal: navigation_deadline::ExecutionGoal,
     ) -> Result<String, String> {
-        self.wait_target_navigation_classified(generation, budget, owner, None)
+        self.wait_target_navigation_classified(target, generation, budget, owner, None, goal)
             .await
             .map_err(|error| match error {
                 NavigationWaitError::Navigation(error) | NavigationWaitError::Driver(error) => {
@@ -1187,10 +1232,12 @@ impl PageSession {
 
     async fn wait_target_navigation_classified(
         &mut self,
+        target: u64,
         generation: u64,
         budget: u64,
         owner: Option<u64>,
         admission: Option<u64>,
+        goal: navigation_deadline::ExecutionGoal,
     ) -> Result<String, NavigationWaitError> {
         let shared = self.rt.op_state();
         self::state(&mut shared.borrow_mut())
@@ -1202,7 +1249,13 @@ impl PageSession {
             completed: false,
         };
         let key = self.rt.activation_key();
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+        let watchdog = navigation_deadline::DriverDeadline::start(
+            &mut self.rt,
+            budget,
+            generation,
+            target,
+            goal,
+        );
         let result = key
             .during(tokio::time::timeout(
                 std::time::Duration::from_millis(budget),
@@ -1230,9 +1283,15 @@ impl PageSession {
                 },
             ))
             .await;
-        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        let exceeded = watchdog.exceeded();
+        let unfinished = exceeded.then(|| watchdog.unfinished_frames());
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        if let Some(frames) = unfinished {
+            let _activation = key.enter();
+            frames.retire(&mut self.rt);
+        }
         let result = if exceeded {
             Err(NavigationWaitError::Driver(format!(
                 "Target navigation timeout after {budget}ms"
@@ -1334,11 +1393,37 @@ fn report_scope_error<'s>(
         }));
 }
 
+fn check_navigation_init_owner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<(), String> {
+    let policy = context
+        .get_slot::<CspHandle>()
+        .ok_or("Native navigation init CSP owner unavailable")?;
+    let known_policy = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<CspContexts>()
+        .0
+        .contains_key(&policy.id);
+    if scope.get_current_context() != context
+        || context
+            .get_slot::<private_boundary::Infrastructure>()
+            .is_some()
+        || context.get_slot::<FrameRetired>().is_some()
+        || !known_policy
+        || !binding::auxiliary_context_identity(context).is_some_and(|identity| !identity.closed)
+    {
+        return Err("Native navigation init owner is closed or invalid".into());
+    }
+    Ok(())
+}
+
 fn run_navigation_init<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
     bootstrap: &AuxiliaryBootstrap,
 ) -> Result<(), String> {
+    check_navigation_init_owner(scope, context)?;
     v8::tc_scope!(let scope, scope);
     if !binding::run_auxiliary_init_scripts(scope, context) {
         let error = scope
@@ -1466,10 +1551,12 @@ impl PageSession {
     ) -> Result<ActionCompletion, String> {
         match self
             .wait_target_navigation_classified(
+                target,
                 generation,
                 self.budget_ms,
                 Some(target),
                 Some(revision),
+                navigation_deadline::ExecutionGoal::Commit,
             )
             .await
         {
@@ -1627,4 +1714,133 @@ mod tests {
         );
         assert_eq!(options.timeout_ms, Some(0));
     }
+}
+
+// ENV may create parsed frames, but their authored initialization waits until the
+// parent backing is complete and the original driver watchdog is armed again.
+pub(super) fn defer_navigation_frame_init(
+    scope: &mut v8::PinScope,
+    native_init: bool,
+) -> Result<bool, JsErrorBox> {
+    navigation_deadline::defer_frame_init(scope, native_init).map_err(JsErrorBox::generic)
+}
+
+pub(super) fn finish_navigation_frame_init(scope: &mut v8::PinScope) {
+    navigation_deadline::finish_frame_init(scope);
+}
+
+pub(super) fn new_frame_load_attempt<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    navigation_deadline::new_frame_attempt(scope, parent, host).map_err(JsErrorBox::generic)
+}
+pub(super) fn check_frame_load_attempt<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    token: v8::Local<'s, v8::Object>,
+) -> Result<(), JsErrorBox> {
+    navigation_deadline::check_frame_attempt(scope, parent, host, token)
+        .map_err(JsErrorBox::generic)
+}
+
+pub(super) fn frame_load_attempt_active<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    token: v8::Local<'s, v8::Object>,
+) -> Result<bool, JsErrorBox> {
+    navigation_deadline::frame_attempt_active(scope, parent, host, token)
+        .map_err(JsErrorBox::generic)
+}
+
+pub(super) fn complete_frame_load_attempt<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    token: v8::Local<'s, v8::Object>,
+) -> Result<(), JsErrorBox> {
+    navigation_deadline::complete_frame_attempt(scope, parent, host, token)
+        .map_err(JsErrorBox::generic)
+}
+pub(super) fn bind_frame_execution<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    token: v8::Local<'s, v8::Object>,
+) -> Result<(), JsErrorBox> {
+    navigation_deadline::bind_frame_execution(scope, context, parent, host, token)
+        .map_err(JsErrorBox::generic)
+}
+
+pub(super) struct FrameExecutionDeadline(navigation_deadline::FrameExecutionDeadline);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FrameExecutionOutcome {
+    Completed,
+    Cancelled,
+    Interrupted,
+}
+#[derive(Debug)]
+pub(super) enum FrameStartError {
+    Cancelled,
+    Authority(String),
+}
+impl FrameExecutionDeadline {
+    pub(super) fn finish(self, scope: &mut v8::PinScope) -> FrameExecutionOutcome {
+        match self.0.finish(scope) {
+            navigation_deadline::FrameExecutionOutcome::Completed => {
+                FrameExecutionOutcome::Completed
+            }
+            navigation_deadline::FrameExecutionOutcome::Cancelled => {
+                FrameExecutionOutcome::Cancelled
+            }
+            navigation_deadline::FrameExecutionOutcome::Interrupted => {
+                FrameExecutionOutcome::Interrupted
+            }
+        }
+    }
+}
+fn frame_start_error(error: navigation_deadline::FrameStartError) -> FrameStartError {
+    match error {
+        navigation_deadline::FrameStartError::Cancelled => FrameStartError::Cancelled,
+        navigation_deadline::FrameStartError::Authority(error) => FrameStartError::Authority(error),
+    }
+}
+pub(super) fn start_frame_execution_deadline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    host: v8::Local<'s, v8::Object>,
+    token: v8::Local<'s, v8::Object>,
+) -> Result<Option<FrameExecutionDeadline>, FrameStartError> {
+    navigation_deadline::frame_execution_deadline(scope, parent, host, token)
+        .map(|guard| guard.map(FrameExecutionDeadline))
+        .map_err(frame_start_error)
+}
+pub(super) fn start_frame_context_deadline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<Option<FrameExecutionDeadline>, FrameStartError> {
+    navigation_deadline::frame_context_deadline(scope, context)
+        .map(|guard| guard.map(FrameExecutionDeadline))
+        .map_err(frame_start_error)
+}
+pub(super) fn queue_interrupted_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+) {
+    navigation_deadline::queue_interrupted_frame(scope, context, previous)
+}
+pub(super) fn retire_interrupted_frames(rt: &mut OwnedRuntime) {
+    navigation_deadline::retire_interrupted_frames(rt)
+}
+
+pub(super) fn reconcile_expired_source_modules(
+    rt: &mut OwnedRuntime,
+    target: u64,
+) -> Result<(), String> {
+    navigation_deadline::reconcile_expired_source_modules(rt, target)
 }

@@ -374,6 +374,7 @@ struct LiveActor {
     history_log: turbo_surf_render::NativeHistoryLog,
     emulation: turbo_surf_render::ContextEmulationHandle,
     opening: AtomicBool,
+    initial_hydration_timeout: Mutex<Option<u32>>,
     started: AtomicBool,
     closing_calls: AtomicUsize,
     finished: Arc<(Mutex<bool>, Condvar)>,
@@ -498,6 +499,7 @@ fn prepare_live_actor(
         history_log: turbo_surf_render::NativeHistoryLog::default(),
         emulation,
         opening: AtomicBool::new(true),
+        initial_hydration_timeout: Mutex::new(None),
         started: AtomicBool::new(false),
         closing_calls: AtomicUsize::new(0),
         finished: Arc::new((Mutex::new(false), Condvar::new())),
@@ -601,6 +603,70 @@ fn dialog_owner(id: u32) -> Result<Option<String>> {
         LiveTarget::LegacyRoot => "legacy-root".to_owned(),
         LiveTarget::Auxiliary(target) => target.to_string(),
     }))
+}
+
+/// Read the completed actor bootstrap outcome without entering the guest isolate.
+#[napi]
+pub fn live_initial_hydration_status(id: u32) -> Result<String> {
+    let actor = live_actor(id)?;
+    if actor.id != id {
+        return Err(Error::from_reason(
+            "initial hydration status requires its actor token",
+        ));
+    }
+    if actor.opening.load(Ordering::Acquire) {
+        return Err(Error::from_reason("initial hydration is still pending"));
+    }
+    if actor.network.is_closed() {
+        return Err(Error::from_reason("initial hydration actor is closed"));
+    }
+    let root = initial_hydration_root(&actor)?;
+    if actor
+        .cancellations
+        .lock()
+        .map_err(|_| Error::from_reason("actor cancellation registry poisoned"))?
+        .get(&root)
+        .is_some_and(|cancel| *cancel.borrow())
+    {
+        return Err(Error::from_reason("initial hydration root is closing"));
+    }
+    let timeout = actor
+        .initial_hydration_timeout
+        .lock()
+        .map_err(|_| Error::from_reason("initial hydration status poisoned"))?;
+    Ok(serde_json::json!({"timedOut": timeout.is_some(), "timeoutMs": *timeout}).to_string())
+}
+
+fn initial_hydration_root(actor: &LiveActor) -> Result<LiveTarget> {
+    let root = actor
+        .auxiliary
+        .root()
+        .ok_or_else(|| Error::from_reason("initial hydration root ownership is unavailable"))?;
+    let info = actor
+        .auxiliary
+        .info(&root)
+        .ok_or_else(|| Error::from_reason("initial hydration root ownership is unavailable"))?;
+    if info.closed {
+        return Err(Error::from_reason("initial hydration root is closed"));
+    }
+    let target = root
+        .parse()
+        .map_err(|_| Error::from_reason("initial hydration root identity is invalid"))?;
+    Ok(LiveTarget::Auxiliary(target))
+}
+
+// A target-only close needs the partial session to retire its root without
+// destroying sibling pages; it does not authorize recovery of the closing Page.
+fn initial_root_close_requested(actor: &LiveActor) -> bool {
+    let Some(root) = actor.auxiliary.root().and_then(|root| root.parse().ok()) else {
+        return false;
+    };
+    actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .get(&LiveTarget::Auxiliary(root))
+        .is_some_and(|cancel| *cancel.borrow())
 }
 
 /// Configure a host listener without entering the owning (possibly paused) isolate.
@@ -1170,6 +1236,7 @@ impl Task for LiveOpenTask {
         let auxiliary = actor.auxiliary.clone();
         let history_log = actor.history_log.clone();
         let worker_actor = actor.clone();
+        let retain_initial_timeout = self.response.retain_initial_hydration_timeout;
         let auxiliary_policy = self.response.auxiliary_policy.unwrap_or_default();
         let root_bootstrap = AuxiliaryBootstrap {
             init_script: self.response.page_init_script.clone(),
@@ -1235,12 +1302,38 @@ impl Task for LiveOpenTask {
                         let _ = open_tx.send(Err("Page session closed".into()));
                         return;
                     }
+                    let initial_history_error = s.reconcile_interrupted_history().err();
+                    if let Some(error) = &initial_history_error {
+                        eprintln!("Initial document history reconciliation: {error}");
+                    }
+                    let history_retired_root = initial_history_error.is_some()
+                        && worker_actor
+                            .auxiliary
+                            .root()
+                            .and_then(|target| worker_actor.auxiliary.info(&target))
+                            .is_some_and(|info| info.closed);
                     if let Some(timeout) =
                         initial_timeout_ms.filter(|_| s.hydration_diagnostics().budget_exceeded)
                     {
-                        s.close();
-                        let _ = open_tx.send(Err(format!("navigation timeout after {timeout}ms")));
-                        return;
+                        if !(retain_initial_timeout
+                            || initial_root_close_requested(&worker_actor)
+                            || history_retired_root)
+                            || !matches!(
+                                s.auxiliary_event_log().capability(),
+                                AuxiliaryCapability::Supported
+                            )
+                        {
+                            s.close();
+                            let _ =
+                                open_tx.send(Err(format!("navigation timeout after {timeout}ms")));
+                            return;
+                        }
+                        let Ok(mut status) = worker_actor.initial_hydration_timeout.lock() else {
+                            s.close();
+                            let _ = open_tx.send(Err("initial hydration status poisoned".into()));
+                            return;
+                        };
+                        *status = Some(timeout);
                     }
                     let root = match initialized_root_target(&mut s) {
                         Ok(root) => root,

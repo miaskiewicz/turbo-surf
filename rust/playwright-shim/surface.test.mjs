@@ -3226,14 +3226,21 @@ test("navigation deadlines also cancel slow hydration (#427)", async () => {
       page.goto(base, { timeout: 30, waitUntil: "networkidle" }),
       (error) => error.name === "TimeoutError",
     );
-    assert.equal(page._session, null);
+    assert.equal(page.isClosed(), false);
+    const target = page._targetId;
+    assert.equal(typeof target, "string");
     await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
+    assert.equal(page._targetId, target);
     assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
     await assert.rejects(
       page.reload({ timeout: 30, waitUntil: "networkidle" }),
       (error) => error.name === "TimeoutError",
     );
-    assert.equal(page._session, null);
+    assert.equal(page.isClosed(), false);
+    assert.equal(page._targetId, target);
+    await page.goto(base, { timeout: 0, waitUntil: "networkidle" });
+    assert.equal(page._targetId, target);
+    assert.equal(await page.evaluate(() => document.body.dataset.loaded), "yes");
   } finally {
     await page.close();
     await new Promise((done) => server.close(done));

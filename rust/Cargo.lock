@@ -5992,9 +5992,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-core"
-version = "0.412.2"
+version = "0.412.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a50264111357eae0e0c745e0aa6092162ce1cccc10d341ec14f34dc2427dfbd"
+checksum = "4a4820e2a6b8270ca74f2edaaff055f0afb91933843be95cdd571a1dbdea43e6"
 dependencies = [
  "anyhow",
  "base64",
@@ -6018,6 +6018,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "socket2",
  "sourcemap",
  "static_assertions",
  "sys_traits",
@@ -6033,9 +6034,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-crypto"
-version = "0.273.2"
+version = "0.273.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2973821d816b5ac841ec0e924dbe5cbbcbdfe8c4aaefaa4174aeef91d5690c88"
+checksum = "eae5ee7d9161cf6162407bef3390a8a5ce4a17ee6999e532426a0675b780ad35"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6089,9 +6090,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-web"
-version = "0.290.2"
+version = "0.290.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8388c0651e18a1e18f0ba962555993b5f1a1e0578babd88e3f070f9f1d04b11e"
+checksum = "5293065e5f471843109d4caa866b95f270810f6890f8c4896095147288157ec0"
 dependencies = [
  "async-trait",
  "brotli 6.0.0",
@@ -6112,9 +6113,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-webidl"
-version = "0.259.2"
+version = "0.259.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34a455a299eb49531b4c1f1ecbd62d60524f39c1260718df95f519ac016972fa"
+checksum = "228400b635102ce15313eef30104a028476905162dae4a9156df3f13128d4ba6"
 dependencies = [
  "turbo-surf-deno-core",
 ]

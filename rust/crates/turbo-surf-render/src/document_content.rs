@@ -34,7 +34,7 @@ impl PageSession {
         let budget = timeout_ms
             .filter(|value| *value > 0)
             .unwrap_or(self.budget_ms);
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
         let key = self.rt.activation_key();
         let result = key
             .during(tokio::time::timeout(
@@ -45,6 +45,7 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = match (result, exceeded) {
             (Ok(result), false) => result,
             _ => Err(format!("setContent timeout after {budget}ms")),

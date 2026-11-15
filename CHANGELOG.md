@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Keep supported native Page actors recoverable after driver navigation deadlines while retiring only unfinished owned frame/module work; preserve completed child documents, healthy module caches and surviving peer Pages.
+
 - Preserve native document-group history and structured-cloned state across real navigation, replacement and back/forward traversal; authenticate current-document ownership and retire only interrupted, unacknowledged mutations. Navigation API traversal remains limited to its current document group.
 - Complete native click and locator-press navigation at the owning main-document commit, retain accepted background form jobs across interrupted reads, and preserve sibling navigation isolation.
 - Resolve inherited frame form bases through native parent capabilities, keep physical key sequences bound to their original page across document replacement, and capture private frame/font map operations before authored scripts.

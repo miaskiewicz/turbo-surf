@@ -359,3 +359,6 @@ export function liveTargetConfigure(
 
 /** Send-only actual actor location/permission update; does not execute page JavaScript. */
 export declare function liveActorConfigureEmulation(actor: number, optionsJson: string): void;
+
+/** Completed actor bootstrap timeout outcome; reads host state without pumping guest code. */
+export function liveInitialHydrationStatus(id: number): string;

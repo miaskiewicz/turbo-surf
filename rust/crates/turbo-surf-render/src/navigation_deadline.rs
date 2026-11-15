@@ -1228,12 +1228,7 @@ pub(super) fn reconcile_expired_source_modules(
         .borrow()
         .try_borrow::<Active>()
         .is_some_and(|active| active.clock.is_some());
-    if driver_active
-        || Watchdog::any_active(rt.v8_isolate())
-        || rt.v8_isolate().is_execution_terminating()
-    {
-        return Err("Module deadline reconciliation requires an inactive command boundary".into());
-    }
+    let cancellation_guarded = driver_active || Watchdog::any_active(rt.v8_isolate());
     let _activation = rt.activation_key().enter();
     deno_core::scope!(scope, rt);
     let context = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
@@ -1272,6 +1267,9 @@ pub(super) fn reconcile_expired_source_modules(
     }
     if context.get_slot::<NativePageModuleContext>().is_none() {
         return Ok(());
+    }
+    if cancellation_guarded || scope.is_execution_terminating() {
+        return Err("Module deadline reconciliation requires an inactive command boundary".into());
     }
     if !JsRuntime::cancel_module_context_pending_work(scope, context) {
         return Err("Expired native Page module work could not be cancelled".into());

@@ -741,3 +741,84 @@ test("native initial document completion is adopted once before publishing the o
   ]);
   assert.deepEqual(f.adopted, [[7, "200"]]);
 });
+
+test("a Page deadline aborts only its own captured route lifetime", () => {
+  const { hub } = fixture();
+  const root = { _routeLifetime: new AbortController() };
+  const peer = { _routeLifetime: new AbortController() };
+  const stopped = root._routeLifetime;
+  hub.pages.set("100", root);
+  hub.pages.set("200", peer);
+  assert.throws(() => hub._bindingDeadline(0, true, root), { name: "TimeoutError" });
+  assert.equal(stopped.signal.aborted, true);
+  assert.equal(root._routeLifetime, undefined);
+  assert.equal(peer._routeLifetime.signal.aborted, false);
+});
+
+function queuedBindingPage(settle) {
+  let queued = true;
+  return {
+    _session: 7,
+    _closed: false,
+    _mergedBindings: () => new Map([["host", {}]]),
+    _takeBindingCalls: async () => (queued ? ((queued = false), [{ name: "host" }]) : []),
+    _settleBindingCall: settle,
+    _collectSession: async () => {},
+    _refreshFromSession: async () => {},
+  };
+}
+
+test("a Page drain services but does not join an unrelated peer callback", async () => {
+  const { hub } = fixture();
+  hub.drain = async () => {};
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = false;
+  const root = queuedBindingPage(async () => {});
+  const peer = queuedBindingPage(async () => {
+    entered = true;
+    await held;
+  });
+  hub.pages.set("100", root);
+  hub.pages.set("200", peer);
+  try {
+    await hub.drainBindings(Date.now() + 200, true, false, root);
+    assert.equal(entered, true);
+  } finally {
+    release();
+  }
+});
+
+test("a peer callback failure is delivered only to its owning Page", async () => {
+  const { hub } = fixture();
+  hub.drain = async () => {};
+  const failure = new RangeError("peer settlement failed");
+  const root = queuedBindingPage(async () => {});
+  const peer = queuedBindingPage(async () => {
+    throw failure;
+  });
+  hub.pages.set("100", root);
+  hub.pages.set("200", peer);
+  await hub.drainBindings(Infinity, true, false, root);
+  await assert.rejects(
+    hub.drainBindings(Infinity, true, false, peer),
+    (error) => error === failure,
+  );
+  await hub.drainBindings(Infinity, true, false, peer);
+});
+
+test("an owned callback rejection is not lost when collection empties", async () => {
+  const { hub } = fixture();
+  hub.drain = async () => {};
+  const failure = new RangeError("owned settlement failed");
+  const root = queuedBindingPage(async () => {
+    throw failure;
+  });
+  hub.pages.set("100", root);
+  await assert.rejects(
+    hub.drainBindings(Infinity, true, false, root),
+    (error) => error === failure,
+  );
+});

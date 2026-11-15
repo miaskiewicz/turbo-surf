@@ -26,6 +26,21 @@ test("target navigation timeout normalization preserves unrelated rejection valu
   assert.equal(timeout.name, "TimeoutError");
 });
 
+test("owned navigation milestone timeouts preserve the timer cause and unrelated rejections", () => {
+  const normalize = Reflect.get(Page.prototype, "_navigationMilestoneError").bind(null);
+  const timer = Object.assign(new Error("Timeout 30ms exceeded while waiting for event load"), {
+    name: "TimeoutError",
+  });
+  const navigation = normalize(timer, "load", 30);
+  assert.equal(navigation.name, "TimeoutError");
+  assert.equal(navigation.message, "Target navigation timeout after 30ms");
+  assert.equal(navigation.cause, timer);
+  for (const value of [undefined, null, "rejected", new RangeError(timer.message)])
+    assert.equal(normalize(value, "load", 30), value);
+  assert.equal(normalize(timer, "domcontentloaded", 30), timer);
+  assert.equal(normalize(timer, "load", 31), timer);
+});
+
 async function fixture(run) {
   const timers = new Set();
   const server = createServer((request, response) => {

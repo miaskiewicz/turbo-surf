@@ -54,10 +54,10 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 ## Additional confirmed failures and investigations
 
-- [ ] **Normal iframe parent-load completion** — non-looping positive iframe load stalls at load milestone on both original current-release diagnostic `fd8501a1` and revised timeout candidate `544620d1`; actual /iframe commit, root refresh and binding drain finish, but load never completes. This is separate from the 30ms deadline change. Dedicated lifecycle helper found auxiliary-loading early return stranded real child completion timers. Fresh combined artifact `1123` now passes the normal iframe positive and official held/throwing-peer controls; critical inverse/restoration, strict and the full timeout safety rerun still gate merge. Keep real timer/lifecycle evidence, no synthetic events or virtual-time advance.
+- [x] **Normal iframe parent-load completion** — merged `92f5901c`. Official positive and held/error-peer controls pass; timer-only OFF reproduces the exact 2000ms load TimeoutError, byte-exact restoration passes. Strict, fmt, complexity and hooks pass. Deadline safety remains separate.
 
 - [x] **Native JSON collectors preserve authored getter errors** — merged `ec46bdf2`. New root/child and unchanged original host_input.rs:239 all pass (3/3); serializer-only OFF reproduces all three specific generic-error failures, byte-exact restore passes. All-target Render/NAPI strict, fmt and CC pass. Script-navigation admission remains separate/open.
-- [ ] **Script navigation captures admission activation** — existing `script_navigation_captures_source_activation_at_admission` fails at host_input.rs:398: None vs expected next URL/activation tuple before input dispatch. Input owner coordinates the actual auxiliary admission record with history/action owners; original source attribution pending.
+- [x] **Script navigation captures admission activation** — merged `f79d9a97`. Accepted admission metadata and trusted activation use the actual native guest Document. Original #398 plus six quota/activation/peer/HTTP controls pass; selector-only OFF reproduces three failures, exact restore and strict pass.
 
 Baseline classification: the Enter, frame-top form and programmatic-submit cases all reproduce on byte-exact old main `6b583d98` shim plus verified registry addon `bdcebe65` (3 intended failures, no skips/cancellations, 3.442s). These are preexisting gaps, not regressions introduced by the new action candidate. All remain in scope.
 
@@ -76,16 +76,17 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 - [x] **Detection consent native input** — merged `1f7d97f1`. Actual guest dispatch with same-owner cancellation, retired-skip and captured wait primitives. Original consent passes; selector-only OFF reproduces the same Illegal invocation, byte-exact restore passes. Three new input/cancel/poison guards pass and all-target Render/NAPI strict passes. Whole host-input cohort has 24 passes and two independent tracked failures; no existing tests skipped.
 - [ ] **Detection retry / MCP root navigation progress** — input steps now succeed with no errors, but the actual final results are 0 vs 1 and remain at /search. Both the example observation loop and product MCP render pipeline omit native auxiliary navigation progress. Owner is preparing bounded root-admitted native work within existing deadlines plus a product-level regression; harness-only progress will not be accepted as product completion.
 
+- [ ] **Frame Enter after top navigation** — actual old-frame keyup routing and stale root mirror failures. Fresh v7 six focused plus 20 adjacent controls pass; routing-only and mirror-only OFF reproduce failures, exact restoration passes. Final action integration/strict pending.
+- [ ] **FontFaceSet private WeakMap exposure** — authored WeakMap.get intercepts Surf's private font maps. Captured primitives fix both maps; zero-hook/font semantics controls pass. Native get-only OFF reproduces eight hooks, exact restore passes. Final action integration/strict pending.
+
 ## Current tally
 
-Accounting: 34 original test cases plus 17 additional tracked cases/findings (the three detector controls counted separately). This is not a count of unique GitHub issues.
+Accounting: 34 original test cases plus 19 additional tracked cases/findings. This is not a count of unique GitHub issues.
 
-- Merged with component proof: **37** (30 original + count, all, platform ownership, NAPI export, script observer, detector consent, JSON collector).
-- Locally proven, not yet merged: **0** (module and inspector adoption merged).
+- Merged with component proof: **39**.
 - Verified clear without an additional source fix: **1** detector POST control.
-- Awaiting fresh-binary classification/verification: **0**.
-- Still requiring implementation or a passing fix: **13**.
-- Total pending: **13**. Total merged: **37**. Total done at component/verification level: **38** (37 merged + 1 verified clear). Total tracked: **51**.
+- Total done: **40**. Total pending: **13**. Total tracked: **53**.
+- Pending includes locally green history/action/MCP packets awaiting final validation and integration; deadline safety still fails.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

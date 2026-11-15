@@ -107,10 +107,7 @@
       record.resolveOpened(opened(record, event));
     } else if (event.kind === "text") record.readable?.enqueue(event.text);
     else if (event.kind === "binary") {
-      const bytes = event.bytes;
-      record.readable?.enqueue(
-        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-      );
+      record.readable?.enqueue(transport.binaryBuffer(event.bytes));
     } else if (transport.terminal(event.kind)) settle(record, event);
     return !transport.terminal(event.kind);
   };

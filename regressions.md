@@ -74,7 +74,7 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 
 - [x] **Detection same-URL POST control** — fresh current `4e1634a6` source with immutable MCP example `6403299b` passes the original in 7.35s. Old pending-Promise symptom is gone. Verified clear without an additional source fix; not a new merge.
 - [x] **Detection consent native input** — merged `1f7d97f1`. Actual guest dispatch with same-owner cancellation, retired-skip and captured wait primitives. Original consent passes; selector-only OFF reproduces the same Illegal invocation, byte-exact restore passes. Three new input/cancel/poison guards pass and all-target Render/NAPI strict passes. Whole host-input cohort has 24 passes and two independent tracked failures; no existing tests skipped.
-- [ ] **Detection retry / MCP root navigation progress** — input steps now succeed with no errors, but the actual final results are 0 vs 1 and remain at /search. Both the example observation loop and product MCP render pipeline omit native auxiliary navigation progress. Owner is preparing bounded root-admitted native work within existing deadlines plus a product-level regression; harness-only progress will not be accepted as product completion.
+- [x] **Detection retry / MCP root navigation progress** — merged `016ebd7b`. Product collection and example observation progress only admitted native root work within the original deadline; cooperative polling preserves executor progress and does not consume a peer's history task. All eight combined controls pass, including real root/peer queued forms, held/rejected peers, peer history, fixed-deadline unfinished I/O and the unchanged original retry. Separate product-only and harness-only inverses reproduce stale collection and zero results, exact restoration passes; strict/fmt/CC/hooks pass. Final full gates pending.
 
 - [x] **Frame Enter after top navigation** — merged `5144ec81`. Atomic native-root routing preserves physical keyup after replacement, and post-commit mirrors retire stale frames. Six focused plus 20 adjacent controls pass; routing-only and mirror-only OFF reproduce failures, exact restoration passes.
 - [x] **FontFaceSet private WeakMap exposure** — merged `5144ec81`. Captured primitives protect both private maps; zero-hook/font brands/status/ready controls pass. Native get-only OFF reproduces eight hooks, exact restoration passes.
@@ -83,10 +83,10 @@ Baseline classification: the Enter, frame-top form and programmatic-submit cases
 
 Accounting: 34 original test cases plus 19 additional tracked cases/findings. This is not a count of unique GitHub issues.
 
-- Merged with component proof: **50**.
+- Merged with component proof: **51**.
 - Verified clear without an additional source fix: **1** detector POST control.
-- Total done: **51**. Total pending: **2**. Total tracked: **53**.
-- Pending: MCP root-navigation integration and deadline safety. Action/history composition passed 15 affected action controls, 31 history controls and three interruption/identity tests on fresh combined artifacts. Final complete gates remain pending.
+- Total done: **52**. Total pending: **1**. Total tracked: **53**.
+- Pending: deadline safety. Action/history composition passed 15 affected action controls, 31 history controls and three interruption/identity tests on fresh combined artifacts; MCP passes eight combined controls. Final complete gates and the remaining complexity cleanup remain pending.
 - Final combined gates and coverage remain pending for the release as a whole.
 
 ## Completion gates

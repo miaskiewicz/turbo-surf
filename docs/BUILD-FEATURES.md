@@ -158,23 +158,48 @@ assembly, and JPEG XL uses jxl-oxide without its optional Rayon pool; this does
 not make the entire render engine a pure-Rust/no-toolchain build.
 
 `RUSTY_V8_ARCHIVE` selects a native archive for a source build; it is not a runtime
-engine selector. For native 154/155 SDK experiments, use the pinned procedures in
+engine selector. Keep the current engine, matching archive and SDK inputs fixed
+when comparing optional-feature profiles. The historical
 [engine-154](../harness/detection/engine-154/README.md) and
-[engine-155](../harness/detection/engine-155/README.md). Their build helpers verify
-and arrange source overlays, SDK/archive/binding inputs and the corresponding
-frame-read feature. Exporting `TURBO_SURF_ENGINE` alone or adding
-`native-sdk-frame-read` to stock dependencies is not that procedure.
+[engine-155](../harness/detection/engine-155/README.md) procedures remain separate
+reference builds, outside the current-engine matrix below. Their helpers arrange
+source overlays, SDK/archive/binding inputs and the frame-read feature; exporting
+`TURBO_SURF_ENGINE` alone or enabling `native-sdk-frame-read` does not install an SDK.
+
+### Current-engine validation matrix
+
+These are distinct validation profiles, not recorded passing results. Preserve
+package selection and resolved features with each artifact: Cargo feature
+unification can change a profile when packages are built together.
+
+| Profile | Required evidence |
+| --- | --- |
+| MCP/NAPI defaults | The stock release feature graph, linked artifacts, offline surface controls and one resolved V8. |
+| Each package with defaults off; AVIF-only; JPEG XL-only | Actual decoder/placeholder controls and request negotiation where exposed. Core without defaults must be selected independently to establish its rustls path. |
+| `gpu-metal` only | Installed MCP/NAPI callbacks, a real Metal adapter and known content-dependent pixels; compilation alone is insufficient. Python forwarding remains a compile check for the guest bridge it does not install. |
+| `coretext` only | A macOS artifact and eligible canvas-text pixel controls, with GPU replay disabled so the text path is observable. |
+| `gpu-metal,coretext` | Combined-profile compilation and replay/fallback interaction controls, in addition to the separate profiles. |
+| `native-sdk-frame-read` | The resolved binding's compatibility with the current SDK; record any unavailable SDK combination without claiming an engine or platform pass. |
+| Python wheel | A real maturin extension-module artifact and installed-wheel tests, separate from ordinary Rust test linking. |
+
+Other operating systems and SDKs require their own build/runtime receipts. A host
+check or source audit does not establish cross-platform execution.
 
 ## Dependency identity and verification
 
-On this v0.8.3 integration branch, [rust/Cargo.toml](../rust/Cargo.toml) patches
-`turbo-dom`, `turbo-dom-browser-env`, `turbo-dom-layout` and `turbo-dom-raster`
-to `ce3d0d0b0f9a2c7a08e8a9fcf899085682186fd6`. Manifest requirements are
-`turbo-dom` 0.8 and the companion crates 0.8.2; the pin currently resolves all
-four to version 0.8.3. The lockfile, not a README version
-label, records the resolved sources. Stock V8 currently resolves
-`turbo-dom-v8` 150.4.1 through the named Deno facade family. The source version
-strings remain 0.8.2 until the separate release version bump.
+The v0.8.4 candidate manifests declare the Surf workspace and DOM dependencies
+at version 0.8.4. At this source snapshot, [rust/Cargo.toml](../rust/Cargo.toml)
+patches `turbo-dom`, `turbo-dom-browser-env`, `turbo-dom-layout` and
+`turbo-dom-raster` to `af946ea0f8f8e0fe8d50b6470b33dbe2068393f6`, and
+`turbo-dom-v8` to `03839d09726f6e184d72ef83e7e73a1c2ef8d7f9`.
+[Cargo.lock](../rust/Cargo.lock) resolves those DOM crates as 0.8.4, the V8 fork
+package as 150.4.2, and `turbo-surf-deno-core` as registry version 0.412.3.
+
+The manifest and lockfile of the artifact being tested are authoritative after
+any repin. Record their hashes and resolved sources with the receipt; a package
+version or this documentation is not a measured runtime V8 version. Obtain the
+actual engine version from `detection_trace --build-info` or
+`turbo_surf_render::v8_version()` in the built artifact.
 
 Tag publishing rejects development Git patches. Follow
 [Publishing](../PUBLISHING.md) to publish prerequisites, remove patches and verify

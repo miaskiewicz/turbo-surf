@@ -99,6 +99,8 @@ The frozen `f1b4d10e` discovery run recorded **78 Rust assertion failures**, **1
 - [x] **Trusted Escape/input document ownership** — merged `f54f08a3`. Host input dispatch and close-watcher processing enter the authenticated actual document. All four focus/interest controls pass, including the unchanged original Escape behavior, canceled/untrusted input, peer isolation and adopted targets; strict and normal hooks pass. String-timer changes are excluded from this commit.
 - [x] **Independent cancellation and host-route ownership guards** — merged `50c7f331` through `8c43590b`, excluding the unsafe async-quiescence and logical-root eval proposals. All 202 required cases pass across the original batch and corrected screenshot case replay; host routes 20, same-actor peer isolation 1 and actor controls 30 pass. Exact Render/NAPI/MCP all-target strict reports zero warnings. Current popup/load closure checks remain a separate obligation.
 - [x] **Native screenshot residency contract** — merged test-only `6fdb37f8`. Four controls pass independently without the async-quiescence proposal: existing viewport/full-page/prototype checks and a genuine unretained 61st image requiring one fallback HTTP fetch, correct pixels and warm reuse. The original residency limit rejects additional retention rather than evicting the first record; no production cache behavior was changed.
+- [x] **String-timer execution and policy ownership** — merged `a893e18b` through `d832cee5`. Both code-generation admission/reporting and source execution use the authenticated actual document. All three unchanged string-timer controls and the corrected actual-realm timer-nesting fixture pass; all 12 nesting/task/checkpoint assertions remain. Strict and hooks pass.
+- [x] **Observable error ownership and unknown locations** — merged `29dc4233` through `6456e53d`. Original Chrome and child-realm controls plus the five-error host/proxy/unknown-column control pass independently. Checked column conversion maps unknown locations to zero; guest identity, known locations and safe host-error conversion remain enforced. Exact fresh Rlib, strict and hooks pass.
 - [ ] **Remaining full-suite failures and crash outcomes** — expanded replay executed all 48 selected binaries: **752 passed, 12 failed, 4 ignored, zero crashes**. All original failures and all 13 formerly unreported crash cases have matched outcomes: original 78 → 72 pass / 6 fail; crash 13 → 11 pass / 2 assertion failures. Four additional controls fail. No required case was unmatched. The later focused Escape fix is recorded above. The legacy root-eval held-peer timeout and sticky-activation carry remain open. IDB has 10 of 11 controls plus the role/crypto control passing; its new peer-continuation control still fails. JavaScript replay matched all 207 original failures: **205 pass / 2 fail**; its broader 465 cases yielded 461 pass / 3 fail / 1 intentional skip. Final combined gates remain pending.
 
 ## Completion gates
@@ -135,10 +137,10 @@ Additional discovered blockers remain in scope until integrated proof:
 - [ ] IDB collection, storage correctness and root-to-peer continuation dependency controls.
 - [ ] Sticky activation across same-origin navigation, initialization, cross-origin and sandbox controls.
 - [ ] Child fragment clearing preserves the authored trailing hash; HTTP and srcdoc controls.
-- [ ] String timer ownership and code-generation admission (two original failures).
+- [x] String timer ownership and code-generation admission: `a893e18b` integrated with original three controls and exact nesting fixture green.
 - [ ] Dictionary admission/enumeration and link-load completion (two original failures).
 - [ ] Font registry initialization and peer-detach stability.
-- [ ] Observable host-error unknown-column overflow and safe realm attribution.
+- [x] Observable host-error unknown-column overflow and safe realm attribution: `29dc4233` integrated with independent three-control proof.
 - [ ] Stream sampling at the correct phase, guest brands and poisoned-hook isolation.
 - [ ] Popup managed-context fixture and timer-nesting fixture: preserve raw failures and prove corrected meaningful contracts.
 - [ ] History budget control uses supported push operation while retaining budget and atomicity assertions.

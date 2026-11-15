@@ -174,6 +174,23 @@ fn rehome<'s>(
     Ok(value)
 }
 
+/// Reporting preserves guest values and copies only safe native error fields.
+pub(super) fn report_value<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+) -> v8::Local<'s, v8::Value> {
+    if !infrastructure(scope, value) {
+        return value;
+    }
+    if !value.is_proxy() && value.is_native_error() {
+        if let Ok(error) = native_error(scope, value) {
+            return error;
+        }
+    }
+    let message = v8::String::new(scope, "Unsupported infrastructure exception").unwrap();
+    v8::Exception::error(scope, message)
+}
+
 fn observe_callback(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -329,6 +346,9 @@ fn own_string<'s>(
     object: v8::Local<'s, v8::Object>,
     name: &str,
 ) -> Option<v8::Local<'s, v8::String>> {
+    if object.is_proxy() {
+        return None;
+    }
     let name = v8::String::new(scope, name)?;
     let descriptor = object.get_own_property_descriptor(scope, name.into())?;
     let descriptor = v8::Local::<v8::Object>::try_from(descriptor).ok()?;

@@ -160,3 +160,60 @@ async fn a_retired_frames_task_base_is_not_reused() {
         .unwrap();
     assert_eq!(value, r#"["t0","t10"]"#);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn resumed_session_timer_tasks_finish_deep_reactions_before_the_next_task() {
+    let mut page = PageSession::open(
+        "<body><div id=target></div>",
+        "https://timer.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval(
+        r#"
+      globalThis.resumedOrder=[];
+      const target=document.getElementById('target');
+      new MutationObserver(()=>resumedOrder.push('observer')).observe(target,{attributes:true});
+      setTimeout(()=>{
+        resumedOrder.push('apply');
+        Promise.resolve().then(()=>Promise.resolve()).then(()=>{
+          resumedOrder.push('reaction');target.setAttribute('data-ready','yes');
+        });
+        setTimeout(()=>resumedOrder.push('event'),0);
+      },0);
+    "#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        page.eval_json_expression("resumedOrder").await.unwrap(),
+        r#"["apply","reaction","observer","event"]"#
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_private_timer_drain_inside_a_microtask_defers_to_the_host_task_boundary() {
+    let mut page = PageSession::open("<body>", "https://timer.test/", "", "", 5000)
+        .await
+        .unwrap();
+    page.eval_engine(
+        r#"
+      globalThis.microtaskOrder=[];
+      Promise.resolve().then(()=>{
+        microtaskOrder.push('microtask-start');
+        setTimeout(()=>microtaskOrder.push('timer'),0);
+        __tsNs.runTimers(10);
+        microtaskOrder.push('microtask-end');
+      }).then(()=>microtaskOrder.push('following-microtask'));
+    "#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        page.eval_json_expression("microtaskOrder").await.unwrap(),
+        r#"["microtask-start","microtask-end","following-microtask","timer"]"#
+    );
+}

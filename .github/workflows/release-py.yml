@@ -212,6 +212,7 @@ jobs:
           smoke = Path(os.environ['RUNNER_TEMP']) / 'direct-wheel-smoke'
           smoke.mkdir()
           shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_smoke.py', smoke / 'test_smoke.py')
+          shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_screenshots.py', smoke / 'test_screenshots.py')
           environment = smoke / 'venv'
           venv.EnvBuilder(with_pip=True).create(environment)
           python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
@@ -222,11 +223,11 @@ jobs:
           version = json.loads((root / 'package.json').read_text())['version']
           run('-I', '-c', "import importlib.metadata,json,sys; from pathlib import Path; import turbo_surf as ts; import turbo_surf._turbo_surf as native; assert ts.version()==importlib.metadata.version('turbo-surf')==sys.argv[1]; extension=Path(native.__file__).resolve(); assert extension.is_relative_to(Path(sys.prefix).resolve()); notices=Path(ts.__file__).with_name('THIRD_PARTY_NOTICES.md'); assert notices.is_file(); print(json.dumps({'installedVersion':ts.version(),'extension':str(extension),'notices':str(notices)}))", version)
           report = smoke / 'pytest.xml'
-          run('-I', '-m', 'pytest', str(smoke / 'test_smoke.py'), '--junitxml=' + str(report), '-v')
+          run('-I', '-m', 'pytest', str(smoke / 'test_smoke.py'), str(smoke / 'test_screenshots.py'), '--junitxml=' + str(report), '-v')
           cases = list(ET.parse(report).iter('testcase'))
-          if len(cases) != 10 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
-              raise SystemExit('Expected all ten offline installed-wheel tests to pass without skips')
-          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
+          if len(cases) != 14 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
+              raise SystemExit('Expected all fourteen offline installed-wheel tests to pass without skips')
+          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'screenshotTestSha256': hashlib.sha256((smoke / 'test_screenshots.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
           (root / 'dist' / 'installed-wheel.json').write_text(json.dumps(receipt, indent=2) + '\n')
           shutil.copy2(report, root / 'dist' / 'pytest.xml')
           print(json.dumps(receipt, indent=2))
@@ -344,6 +345,7 @@ jobs:
           smoke = Path(os.environ['RUNNER_TEMP']) / 'sdist-wheel-smoke'
           smoke.mkdir()
           shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_smoke.py', smoke / 'test_smoke.py')
+          shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_screenshots.py', smoke / 'test_screenshots.py')
           environment = smoke / 'venv'
           venv.EnvBuilder(with_pip=True).create(environment)
           python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
@@ -354,11 +356,11 @@ jobs:
           version = json.loads((root / 'package.json').read_text())['version']
           run('-I', '-c', "import importlib.metadata,json,sys; from pathlib import Path; import turbo_surf as ts; import turbo_surf._turbo_surf as native; assert ts.version()==importlib.metadata.version('turbo-surf')==sys.argv[1]; extension=Path(native.__file__).resolve(); assert extension.is_relative_to(Path(sys.prefix).resolve()); notices=Path(ts.__file__).with_name('THIRD_PARTY_NOTICES.md'); assert notices.is_file(); print(json.dumps({'installedVersion':ts.version(),'extension':str(extension),'notices':str(notices)}))", version)
           report = smoke / 'pytest.xml'
-          run('-I', '-m', 'pytest', str(smoke / 'test_smoke.py'), '--junitxml=' + str(report), '-v')
+          run('-I', '-m', 'pytest', str(smoke / 'test_smoke.py'), str(smoke / 'test_screenshots.py'), '--junitxml=' + str(report), '-v')
           cases = list(ET.parse(report).iter('testcase'))
-          if len(cases) != 10 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
-              raise SystemExit('Expected all ten offline installed-wheel tests to pass without skips')
-          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
+          if len(cases) != 14 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
+              raise SystemExit('Expected all fourteen offline installed-wheel tests to pass without skips')
+          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'screenshotTestSha256': hashlib.sha256((smoke / 'test_screenshots.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
           (root / 'sdist-wheels' / 'installed-wheel.json').write_text(json.dumps(receipt, indent=2) + '\n')
           shutil.copy2(report, root / 'sdist-wheels' / 'pytest.xml')
           print(json.dumps(receipt, indent=2))

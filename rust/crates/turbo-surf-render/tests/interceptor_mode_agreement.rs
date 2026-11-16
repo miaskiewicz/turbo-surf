@@ -7,7 +7,7 @@
 //! (turbo-surf#68): the setter/definer interceptors return `ReturnValue<()>` in the
 //! turbo-dom-v8 fork and `ReturnValue<Boolean>` in the native SDK (`SetterResult`).
 //! The native SDK links V8 without the fork's ShouldThrowOnError fix, so there the
-//! accessor check is ignored (`native-sdk-frame-read`) and only the frame read is checked.
+//! accessor check is ignored (`turbo_surf_native_proxy`) and only the frame read is checked.
 use std::cell::RefCell;
 use std::sync::Once;
 use turbo_dom_browser_env::test_support::frame_read_should_throw;
@@ -194,8 +194,8 @@ fn frame_read_matches_the_callers_language_mode() {
 
 #[test]
 #[cfg_attr(
-    feature = "native-sdk-frame-read",
-    ignore = "the linked V8 lacks the fork's ShouldThrowOnError fix (native-sdk-frame-read)"
+    turbo_surf_native_proxy,
+    ignore = "the native SDK engine lacks the fork's ShouldThrowOnError fix"
 )]
 fn fork_accessor_agrees_with_frame_read() {
     for (source, _, _) in CASES {

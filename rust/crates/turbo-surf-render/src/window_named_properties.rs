@@ -87,13 +87,13 @@ fn descriptor<'s>(
     v8::Intercepted::kYes
 }
 
-/// The setter/definer interceptor result type. `turbo-dom-v8` 150.4.0 passes
-/// `ReturnValue<()>`; the engine-154/155 native SDK (v8 152.2.0 over V8 15.5)
-/// reports assignment success as `ReturnValue<Boolean>` (turbo-surf#126). The
-/// SDK build helper enables `native-sdk-frame-read`, which selects it here.
-#[cfg(not(feature = "native-sdk-frame-read"))]
+/// The callback ABI follows the linked engine, independently of the optional
+/// frame-read policy. The engine-154/155 SDK reports assignment success through
+/// `ReturnValue<Boolean>`; the current fork uses `ReturnValue<()>` with either
+/// frame-read policy. The SDK build helper selects `turbo_surf_native_proxy`.
+#[cfg(not(turbo_surf_native_proxy))]
 type SetterReturn<'r> = v8::ReturnValue<'r, ()>;
-#[cfg(feature = "native-sdk-frame-read")]
+#[cfg(turbo_surf_native_proxy)]
 type SetterReturn<'r> = v8::ReturnValue<'r, v8::Boolean>;
 
 /// Blink's named property setter is "not supported": strict assignments throw,

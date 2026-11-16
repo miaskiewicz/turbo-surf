@@ -1580,19 +1580,6 @@ fn resource_csp_control() -> Value {
 async fn external_resource_reports_and_original_utf16_samples_match_chrome() {
     let actual = resource_csp_results().await;
     let expected = resource_csp_control();
-    #[cfg(not(turbo_surf_native_proxy))]
-    let expected = {
-        // The default SDK lacks the native callback; preserve the complete
-        // source-pinned oracle and compare its covered resource/sample rows.
-        let mut expected = expected;
-        let rows = expected["rows"].as_array_mut().unwrap();
-        assert_eq!(
-            rows.iter().filter(|row| row["blocked"] == "eval").count(),
-            2
-        );
-        rows.retain(|row| row["blocked"] != "eval");
-        expected
-    };
     assert_eq!(actual, expected);
 }
 #[tokio::test(flavor = "current_thread")]

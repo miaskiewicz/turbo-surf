@@ -476,3 +476,68 @@ The eligible-oracle receipts and source epochs are retained in `.worktrees/oracl
 205. `pixel/real-browser APIs reject honestly instead of silently passing` — `rust/playwright-shim/index.mjs:7081:5` (full-e2e-unreached)
 206. `page.screenshot produces a synthetic PNG without a browser` — `rust/playwright-shim/index.mjs:7081:5` (full-e2e-unreached)
 207. `native trace preserves trusted handler location activation before automatic retries` — `harness/detection/native.test.mjs:203:1` (full-detection)
+
+## Integrated c953 regression discovery — all residuals remain in scope
+
+This section records valid localhost-authorized discovery on frozen `c953e15c`. The earlier sandbox-denied run is invalid and receives no product pass/fail credit. Isolated fixed proofs do not replace a fresh integrated rerun. Original baseline cases above are never removed.
+
+### Rust assertion failures observed in the discovery shard
+
+1. `failed_later_frame_navigation_can_recover_on_the_same_host` — valid frozen discovery failure; see default-rust-regressions results/logs.
+2. `failed_replacement_initialization_releases_roots_and_same_host_can_retry` — valid frozen discovery failure; see default-rust-regressions results/logs.
+3. `external_resource_reports_and_original_utf16_samples_match_chrome` — valid frozen discovery failure; see default-rust-regressions results/logs.
+4. `dom_signature_exception_remains_an_error` — valid frozen discovery failure; see default-rust-regressions results/logs.
+5. `native_storage_task_budget_failure_is_atomic_and_recovers_after_delivery` — valid frozen discovery failure; see default-rust-regressions results/logs.
+6. `storage_delivery_uses_private_intrinsics_and_receiving_area` — valid frozen discovery failure; see default-rust-regressions results/logs.
+7. `storage_events_match_source_pinned_chrome` — valid frozen discovery failure; see default-rust-regressions results/logs.
+8. `storage_tasks_preserve_microtask_and_receiver_lifecycle` — valid frozen discovery failure; see default-rust-regressions results/logs.
+9. `trusted_storage_delivery_does_not_read_polluted_object_prototypes` — valid frozen discovery failure; see default-rust-regressions results/logs.
+10. `accepted_response_notices_survive_inbox_overflow` — valid frozen discovery failure; see default-rust-regressions results/logs.
+11. `response_clear_survives_a_full_multi_recipient_task_queue` — valid frozen discovery failure; see default-rust-regressions results/logs.
+12. `unrelated_origin_notices_do_not_stall_matching_delivery` — valid frozen discovery failure; see default-rust-regressions results/logs.
+13. `storage_units_partitioning_and_access_match_source_pinned_chrome` — valid frozen discovery failure; see default-rust-regressions results/logs.
+14. `native_stream_transfer_retirement_matches_chrome` — valid frozen discovery failure; see default-rust-regressions results/logs.
+15. `window_named_access_matches_chrome156` — valid frozen discovery failure; see default-rust-regressions results/logs.
+16. `borrowed_cookie_getter_uses_the_frame_request_path` — valid frozen discovery failure; see default-rust-regressions results/logs.
+
+### Timeout and crash obligations
+
+- Quiescence target timed out after its first explicit DOM-signature failure; the missing-helper case timed out and the remaining budget case initially had no outcome. All three original cases remain mandatory. Candidate `c2380ba0` integrated as `a2f3896d`: fresh focused 10 pass, strict pass, single-seam OFF stalls and byte-exact restored original 3 pass. Full updated regression rerun still required.
+- Four recapture cases abort in frozen Render lib: `a_mutation_between_capture_and_layout_is_laid_out_fresh`, `a_source_removed_after_its_capture_is_reported`, `a_stale_capture_is_not_served_from_the_layout_cache`, `a_tree_that_keeps_changing_under_its_capture_is_reported`. Test-hook owning-context fix `93b3ab8` integrated as `962152c0`; all four pass focused. Crash outcomes remain recorded, not erased.
+- Crash-affected cases were recovered individually: baseline 91 outcomes are 72 pass / 14 fail / 1 timeout / 4 crashes, zero unreported. Required default 408 outcomes are 389 pass / 14 fail / 1 timeout / 4 crashes. Whole-bin positive totals are a different denominator.
+
+### JavaScript discovery failures (18)
+
+1. `initial module top-level awaits can complete host fulfillment and route.fetch` — `rust/playwright-shim/host-routes.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-86.log`.
+2. `setContent on the retained native Document cannot reuse the earlier static seed` — `rust/playwright-shim/image-promotion.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-87.log`.
+3. `a pending peer Promise receives a storage task without another peer RPC` — `rust/playwright-shim/native-peer-events.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-94.log`.
+4. `shim page.evaluate awaits a storage Promise from another page` — `rust/playwright-shim/native-peer-events.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-94.log`.
+5. `late native image completion cannot replace the new document's resident bytes` — `rust/playwright-shim/screenshot-document-assets.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-98.log`.
+6. `resident image keys preserve URL strings without invoking object prototype setters` — `rust/playwright-shim/screenshot-resources.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-100.log`.
+7. `setContent uses parser CSP resource ordering and load completion (#386)` — `rust/playwright-shim/set-content.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-102.log`.
+8. `setContent preserves installed CSP and rejects load deadlines without replacing the realm (#386)` — `rust/playwright-shim/set-content.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-102.log`.
+9. `setContent clears old intrinsic metadata before same-URL image reloads (#386)` — `rust/playwright-shim/set-content.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-102.log`.
+10. `setContent retires old resources while activating replacement frames and resources (#386)` — `rust/playwright-shim/set-content.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-102.log`.
+11. `replacement parser preparation stays ordered beside custom-element dynamic scripts (#386)` — `rust/playwright-shim/set-content.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-102.log`.
+12. `addInitScript applies to every child frame (src, srcdoc, nested, dynamic, blob)` — `rust/playwright-shim/surface.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-104.log`.
+13. `page.exposeBinding fires when called from inside an iframe` — `rust/playwright-shim/surface.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-104.log`.
+14. `Frame URLs resolve relative src before URL lookup (#448)` — `rust/playwright-shim/surface.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-104.log`.
+15. `Live frame registry tracks nested frames and actual navigation URLs (#447)` — `rust/playwright-shim/surface.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-104.log`.
+16. `Frame reads reflect source documents and later live mutations (#445)` — `rust/playwright-shim/surface.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-104.log`.
+17. `in-flight screenshot assets cannot repopulate a reloaded document cache (#489)` — `rust/playwright-shim/surface.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-104.log`.
+18. `a navigation deadline does not close or replace its sibling popup` — `rust/playwright-shim/navigation-deadline.test.mjs`; retained log `/Users/grzegorz/github-flux/turbo-surf/.recovery/final-public-c953/js-regressions/job-115.log`.
+
+### Active fix families and additional candidate controls
+
+- [x] Frame rollback hook ownership: original two failures fixed by `eed5fcbb`, integrated `0336d449`; ON/OFF/ON reproduces the missing-receipt failures and restores both passes. Integrated rerun pending.
+- [x] CSP report oracle: obsolete filter removed, full unchanged 19-row oracle passes; `f0792961` integrated `d0c36469`. Integrated rerun pending.
+- [x] Recapture native callback crash fixture: owning-context hook corrected; integrated `962152c0`, focused four pass. Full library rerun pending.
+- [x] Owned navigation timeout normalization: `05e0bb5` integrated `f3de2a22`; sibling/deadline/security controls pass. Separate initial module timeout remains open.
+- [x] Quiescence selected timer progress/bounded churn: integrated `a2f3896d` with fresh-library and inverse proof. Earlier stale-library candidate run is invalid evidence, not a second code failure.
+- [ ] Storage recipient delivery: original events 5, inbox 3 and new selected-peer/FIFO controls 3 pass isolated; original partition case still fails valid authorized run with Owner entry failed. Both JS storage failures and partition require proof; no global peer drain or FIFO waiver.
+- [ ] Weak Promise-parent lifetime: fulfilled parents collected by GC lose known terminal state; original WindowNamed and profile duplicate fail. Actual pending/unseen parents must continue failing closed. Tests-first terminal-state fix and inverse pending.
+- [ ] Iframe native fetch registration lacks captured parent ownership lease: original borrowed-cookie and related JS unknown-ownership failures; narrow private-parent boundary fix awaiting proof. No generic entered-context fallback.
+- [ ] Retained stream retirement: original retirement oracle and Chrome-correct borrowed-method control pass isolated. Negative test requires actual sink-start barrier. GC control observed child alive before underlying close fired; genuine close barrier and same-budget GC test required before classifying/fixing a post-completion leak. Guard weakening is prohibited.
+- [ ] Initial module host fulfillment / route.fetch timeout: actual callback hits zero and only module-page HTTP observed; selected-context embedder handoff fix under review. Actor-wide pending checks must not abandon Root work because an unrelated peer has a binding.
+
+Evidence: `.recovery/final-public-c953/default-rust-regressions/results.json`, `default-required-case-coverage-restored.json`, `valid-js-failures.jsonl`, individual job logs, and isolated fix receipts. Every new candidate failure stays in this section and the detailed monotonic manifests until passing proof and integrated rerun. Full Rust/JS suites and coverage remain blocked.

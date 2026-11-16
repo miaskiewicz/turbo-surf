@@ -22,7 +22,11 @@ fn metadata() -> Value {
 fn solid(pixels: &[u8], color: [u8; 4]) {
     assert_eq!(pixels.len(), 8 * 8 * 4);
     assert!(
-        pixels.chunks_exact(4).all(|pixel| pixel == color),
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == color),
         "full-frame shader color {color:?}"
     );
 }

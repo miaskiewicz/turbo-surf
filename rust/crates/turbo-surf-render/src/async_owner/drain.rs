@@ -79,7 +79,35 @@ fn document_pending(
 
 enum Turn {
     Again,
+    Timer(u32),
     Complete,
+}
+
+#[derive(Clone, Copy)]
+enum Goal {
+    Complete,
+    Quiescence { timers: bool },
+}
+
+struct DrainOptions<'a> {
+    condition: Option<&'a str>,
+    completion: Option<&'a v8::Global<v8::Value>>,
+    goal: Goal,
+    real: bool,
+}
+
+#[derive(Default)]
+pub(in crate::runtime) struct QuiescenceTurn {
+    pub fired: u32,
+    pub busy: bool,
+}
+
+pub(in crate::runtime) async fn quiescence_turn(
+    rt: &mut JsRuntime,
+    root: u64,
+    timers: bool,
+) -> Result<QuiescenceTurn, String> {
+    drain_selected(rt, root, None, None, Goal::Quiescence { timers }).await
 }
 
 /// Poll the shared VM once, then decide whether to wait using native selected
@@ -91,12 +119,30 @@ pub(in crate::runtime) async fn drain(
     condition: Option<&str>,
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
+    drain_selected(rt, root, condition, completion, Goal::Complete)
+        .await
+        .map(|_| ())
+}
+
+async fn drain_selected(
+    rt: &mut JsRuntime,
+    root: u64,
+    condition: Option<&str>,
+    completion: Option<&v8::Global<v8::Value>>,
+    goal: Goal,
+) -> Result<QuiescenceTurn, String> {
     let real = rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
+    let options = DrainOptions {
+        condition,
+        completion,
+        goal,
+        real,
+    };
     let mut wake = None;
     checkpoint_window_timer(rt)?;
     loop {
         if completion.is_some_and(|promise| promise_settled(rt, promise)) {
-            return Ok(());
+            return Ok(QuiescenceTurn::default());
         }
         let selection = async_owner::selection(rt, root)?;
         let ran = run_queued_task(rt, &selection)?;
@@ -113,22 +159,21 @@ pub(in crate::runtime) async fn drain(
             if completion.is_some_and(|promise| promise_settled(rt, promise)) {
                 return std::task::Poll::Ready(Ok(Turn::Complete));
             }
-            match poll_selected_turn(
-                rt,
-                root,
-                condition,
-                completion.is_some(),
-                real,
-                cx,
-                &mut wake,
-            ) {
+            match poll_selected_turn(rt, root, &options, cx, &mut wake) {
                 Ok(turn) => turn.map(Ok),
                 Err(error) => std::task::Poll::Ready(Err(error)),
             }
         })
         .await?;
-        if matches!(turn, Turn::Complete) {
-            return Ok(());
+        match turn {
+            Turn::Complete if matches!(goal, Goal::Complete) => {
+                return Ok(QuiescenceTurn::default());
+            }
+            Turn::Complete => return quiescence_result(rt, root, 0),
+            Turn::Timer(fired) if matches!(goal, Goal::Quiescence { .. }) => {
+                return quiescence_result(rt, root, fired);
+            }
+            _ => {}
         }
         // A ready native queue must not starve the existing outer deadline.
         tokio::task::yield_now().await;
@@ -138,9 +183,7 @@ pub(in crate::runtime) async fn drain(
 fn poll_selected_turn(
     rt: &mut JsRuntime,
     root: u64,
-    condition: Option<&str>,
-    has_completion: bool,
-    real: bool,
+    options: &DrainOptions<'_>,
     cx: &mut std::task::Context<'_>,
     wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
 ) -> Result<std::task::Poll<Turn>, String> {
@@ -148,20 +191,35 @@ fn poll_selected_turn(
     if queued(rt, &selection) {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
-    if condition_complete(rt, root, condition)? {
+    if condition_complete(rt, root, options.condition)? {
         return Ok(std::task::Poll::Ready(Turn::Complete));
     }
     let busy = selected_busy(&selection);
-    let allow_advance = !real && !busy;
-    let timer = run_next_window_timer_in(rt, allow_advance, selection.contexts.clone());
+    let allow_advance = !options.real && !busy;
+    let timer = if matches!(options.goal, Goal::Quiescence { timers: false }) {
+        WindowTimerTurn::default()
+    } else {
+        run_next_window_timer_in(rt, allow_advance, selection.contexts.clone())
+    };
     if timer.fired != 0 {
         checkpoint_window_timer(rt)?;
-        return Ok(std::task::Poll::Ready(Turn::Again));
+        return Ok(std::task::Poll::Ready(Turn::Timer(timer.fired)));
     }
     if run_background_resource_task_in(rt, selection.contexts.clone()) != 0 {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
     drop(selection);
+    finish_selected_turn(rt, root, options, cx, wake, timer.deadline)
+}
+
+fn finish_selected_turn(
+    rt: &mut JsRuntime,
+    root: u64,
+    options: &DrainOptions<'_>,
+    cx: &mut std::task::Context<'_>,
+    wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
+    timer_deadline: Option<tokio::time::Instant>,
+) -> Result<std::task::Poll<Turn>, String> {
     // Trusted task turns may create new native work or record a failed owner
     // admission. Never decide quiescence from the pre-dispatch graph snapshot.
     let selection = async_owner::selection(rt, root)?;
@@ -171,13 +229,31 @@ fn poll_selected_turn(
     let pending = document_pending(rt, &selection.contexts)?;
     let busy = selected_busy(&selection);
     drop(selection);
-    if keep_pending(busy, pending, has_completion, condition) {
-        if park_on_window_timer_deadline(cx, wake, timer.deadline).is_some() {
+    if matches!(options.goal, Goal::Quiescence { timers: false })
+        || (matches!(options.goal, Goal::Quiescence { .. }) && !busy)
+    {
+        return Ok(std::task::Poll::Ready(Turn::Complete));
+    }
+    if keep_pending(
+        busy,
+        pending,
+        options.completion.is_some(),
+        options.condition,
+    ) {
+        if park_on_window_timer_deadline(cx, wake, timer_deadline).is_some() {
             return Ok(std::task::Poll::Ready(Turn::Again));
         }
         return Ok(std::task::Poll::Pending);
     }
     Ok(std::task::Poll::Ready(Turn::Complete))
+}
+
+fn quiescence_result(rt: &mut JsRuntime, root: u64, fired: u32) -> Result<QuiescenceTurn, String> {
+    let selection = async_owner::selection(rt, root)?;
+    Ok(QuiescenceTurn {
+        fired,
+        busy: selected_busy(&selection) || queued(rt, &selection),
+    })
 }
 
 fn condition_complete(

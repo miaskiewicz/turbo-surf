@@ -18802,14 +18802,14 @@ async fn drain_to_quiescence_with_scripts(
     let mut stable = 0usize;
     let mut last_sig = String::new();
     for _ in 0..MAX_ROUNDS {
-        let fired = quiescence_pump_scripts(rt, execute_document_scripts).await?;
-        let state = sample_quiescence_state(rt, fired)?;
-        if !state.still && !state.fired_any {
+        let turn = quiescence_pump_scripts(rt, execute_document_scripts).await?;
+        let state = sample_quiescence_state(rt, turn)?;
+        if !state.still && !state.fired_any && !state.awaiting_async {
             break; // genuinely idle
         }
         // A request is outstanding: keep pumping (don't let the stable-DOM early-out
         // fire) so the response's re-render — a modal close, a redirect — lands.
-        if state.awaiting_fetch {
+        if state.awaiting_async {
             stable = 0;
             continue;
         }
@@ -18829,11 +18829,11 @@ async fn drain_to_quiescence_with_scripts(
 /// One round's forward progress: run newly-injected classic + module scripts
 /// (when `execute_document_scripts` is set — the interaction path's safety
 /// valve), drain the event loop, fire any due Window timers, then drain again.
-/// Returns how many Window timers fired this round.
+/// Returns actual Window timer activity and remaining selected native work.
 async fn quiescence_pump_scripts(
     rt: &mut JsRuntime,
     execute_document_scripts: bool,
-) -> Result<u32, String> {
+) -> Result<async_owner::QuiescenceTurn, String> {
     // RUN any newly-injected <script>s, then drain. An interaction can pull a chunk at
     // runtime — Next's `dynamic(() => import('…'))` (lazy modals: AddVacationTimeModal,
     // etc.) appends a <script src> when the component first renders. Without running it
@@ -18842,14 +18842,36 @@ async fn quiescence_pump_scripts(
     if execute_document_scripts {
         hydrate_pass(rt)?;
     }
-    drain_event_loop(rt).await?;
+    let first = drain_quiescence_turn(rt, true).await?;
     if execute_document_scripts {
         let base = rt.op_state().borrow().borrow::<Base>().0.clone();
         drain_module_scripts(rt, &base).await?;
     }
-    let fired = run_window_timers(rt, 2000)?;
-    drain_event_loop(rt).await?;
-    Ok(fired)
+    let allowance = 2000u32
+        .checked_sub(first.fired)
+        .ok_or("Quiescence timer turn exceeded its native allowance")?;
+    let fired = first.fired + run_window_timers(rt, allowance)?;
+    let last = drain_quiescence_turn(rt, false).await?;
+    Ok(async_owner::QuiescenceTurn {
+        fired: fired + last.fired,
+        busy: last.busy,
+    })
+}
+
+async fn drain_quiescence_turn(
+    rt: &mut JsRuntime,
+    timers: bool,
+) -> Result<async_owner::QuiescenceTurn, String> {
+    if !async_owner::enabled(rt) {
+        drain_event_loop(rt).await?;
+        return Ok(async_owner::QuiescenceTurn::default());
+    }
+    let root = auxiliary_pages::event_log(&rt.op_state().borrow())
+        .root()
+        .ok_or("Native quiescence root is unavailable")?
+        .parse::<u64>()
+        .map_err(|_| "Native quiescence root is invalid")?;
+    async_owner::quiescence_turn(rt, root, timers).await
 }
 
 /// Observed state at the end of one quiescence round: whether JS still has
@@ -18858,21 +18880,24 @@ async fn quiescence_pump_scripts(
 struct QuiescenceSample {
     still: bool,
     fired_any: bool,
-    awaiting_fetch: bool,
+    awaiting_async: bool,
     sig: String,
 }
 
 /// Call the namespace predicates `pendingWork` / `domSig` / `pendingFetchCount`
 /// and fold them (together with the pump's fired-timer count) into a
 /// [`QuiescenceSample`].
-fn sample_quiescence_state(rt: &mut JsRuntime, fired: u32) -> Result<QuiescenceSample, String> {
+fn sample_quiescence_state(
+    rt: &mut JsRuntime,
+    turn: async_owner::QuiescenceTurn,
+) -> Result<QuiescenceSample, String> {
     let pending = namespace_call(rt, "pendingWork", &[])?;
     let fetches = namespace_call(rt, "pendingFetchCount", &[])?;
     let still = read_string(rt, pending)? == "1";
-    let awaiting_fetch = read_string(rt, fetches)? != "0";
-    // Idle rounds stop immediately; in-flight fetches reset stability regardless
-    // of DOM state. Neither path uses the potentially expensive control scan.
-    let sig = if (still || fired != 0) && !awaiting_fetch {
+    let awaiting_async = turn.busy || read_string(rt, fetches)? != "0";
+    // Idle rounds stop immediately; selected native work and in-flight fetches
+    // reset stability regardless of DOM state. Neither path uses the potentially expensive control scan.
+    let sig = if (still || turn.fired != 0) && !awaiting_async {
         let sig_v = namespace_call(rt, "domSig", &[])?;
         read_string(rt, sig_v)?
     } else {
@@ -18880,8 +18905,8 @@ fn sample_quiescence_state(rt: &mut JsRuntime, fired: u32) -> Result<QuiescenceS
     };
     Ok(QuiescenceSample {
         still,
-        fired_any: fired != 0,
-        awaiting_fetch,
+        fired_any: turn.fired != 0,
+        awaiting_async,
         sig,
     })
 }

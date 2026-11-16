@@ -41,6 +41,31 @@ test("owned navigation milestone timeouts preserve the timer cause and unrelated
   assert.equal(normalize(timer, "load", 31), timer);
 });
 
+test("navigation binding deadlines require the exact owned hub error", async () => {
+  const { LiveActorHub, ownsBindingDeadline } = await import("./actor-hub.mjs");
+  assert.equal(ownsBindingDeadline(new Error("unknown"), undefined, undefined), false);
+  const owner = {};
+  const deadline = Date.now() - 1;
+  let timer;
+  try {
+    LiveActorHub.prototype._bindingDeadline.call({}, deadline, false, owner);
+  } catch (error) {
+    timer = error;
+  }
+  assert.equal(timer?.name, "TimeoutError");
+  const normalize = Reflect.get(Page.prototype, "_navigationBindingError").bind(owner);
+  const navigation = normalize(timer, deadline, 30);
+  assert.equal(navigation.message, "Target navigation timeout after 30ms");
+  assert.equal(navigation.name, "TimeoutError");
+  assert.equal(navigation.cause, timer);
+  assert.equal(normalize(timer, deadline + 1, 30), timer);
+  const foreign = Reflect.get(Page.prototype, "_navigationBindingError").bind({});
+  assert.equal(foreign(timer, deadline, 30), timer);
+  const lookalike = Object.assign(new Error(timer.message), { name: "TimeoutError" });
+  for (const error of [lookalike, undefined, null, "rejected"])
+    assert.equal(normalize(error, deadline, 30), error);
+});
+
 async function fixture(run) {
   const timers = new Set();
   const server = createServer((request, response) => {

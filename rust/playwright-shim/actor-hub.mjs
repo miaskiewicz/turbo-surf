@@ -1,3 +1,10 @@
+const bindingDeadlines = new WeakMap();
+
+export function ownsBindingDeadline(error, owner, deadline) {
+  const entry = error instanceof Error ? bindingDeadlines.get(error) : undefined;
+  return entry !== undefined && entry.owner === owner && entry.deadline === deadline;
+}
+
 const decoded = (value) => (typeof value === "string" ? JSON.parse(value) : value);
 
 // One native actor owns multiple genuine browsing contexts. Only this hub consumes
@@ -244,6 +251,7 @@ export class LiveActorHub {
     const error = Object.assign(new Error("Timeout exceeded while waiting for host bindings"), {
       name: "TimeoutError",
     });
+    bindingDeadlines.set(error, { owner, deadline });
     if (cancelOnTimeout) {
       const pages = owner ? [owner] : this.pages.values();
       for (const page of pages) {

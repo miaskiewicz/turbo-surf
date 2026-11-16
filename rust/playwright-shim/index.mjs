@@ -53,7 +53,7 @@ import { scheduleBindingDrain, throwBindingDrainError } from "./binding-drain.mj
 import { captureAssets } from "./screenshot-resources.mjs";
 import { configureActorGeolocation } from "./context-emulation-forwarding.mjs";
 import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
-import { LiveActorHub } from "./actor-hub.mjs";
+import { LiveActorHub, ownsBindingDeadline } from "./actor-hub.mjs";
 import { NativeLoadState } from "./native-load-state.mjs";
 import { waitForTargetNetworkIdle } from "./target-network-idle.mjs";
 import { waitForEmitterEvent } from "./event-waiter.mjs";
@@ -3566,6 +3566,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
     );
   }
 
+  _navigationBindingError(error, deadline, timeout) {
+    if (!ownsBindingDeadline(error, this, deadline)) return error;
+    return Object.assign(
+      new Error(`Target navigation timeout after ${timeout}ms`, { cause: error }),
+      { name: "TimeoutError" },
+    );
+  }
+
   _navigationBindingDeadline(options) {
     const timeout = this._navigationTimeoutFor(options);
     return timeout === 0 ? Infinity : Date.now() + timeout;
@@ -3627,7 +3635,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._rejectNoContentNavigation(receipt, url);
       await this._actorHub.drain();
       await this._refreshFromSession(true);
-      await this._drainBindings(bindingDeadline, true, true);
+      await this._drainBindings(bindingDeadline, true, true).catch((error) => {
+        throw this._navigationBindingError(
+          error,
+          bindingDeadline,
+          this._navigationTimeoutFor(opts),
+        );
+      });
       if (milestone && receipt.sameDocument !== true) await milestone;
       if (opts.waitUntil === "networkidle")
         await this._waitForTargetNetworkIdle(

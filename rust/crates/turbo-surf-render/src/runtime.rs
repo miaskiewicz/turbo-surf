@@ -19974,19 +19974,20 @@ impl PageSession {
     #[doc(hidden)]
     pub fn fail_next_frame_initialization_for_testing(&mut self) {
         let _activation = self.rt.activation_key().enter();
+        let context = private_infrastructure::context(&mut self.rt)
+            .expect("active document for frame fault injection");
         deno_core::scope!(scope, self.rt);
-        scope
-            .get_current_context()
-            .set_slot(Rc::new(FailFrameInitializationForTesting));
+        v8::Local::new(scope, context).set_slot(Rc::new(FailFrameInitializationForTesting));
     }
 
     /// Consume the native test fault receipt without publishing guest state.
     #[doc(hidden)]
     pub fn take_frame_initialization_failure_for_testing(&mut self) -> bool {
         let _activation = self.rt.activation_key().enter();
+        let context = private_infrastructure::context(&mut self.rt)
+            .expect("active document for frame fault receipt");
         deno_core::scope!(scope, self.rt);
-        scope
-            .get_current_context()
+        v8::Local::new(scope, context)
             .remove_slot::<FailedFrameInitializationForTesting>()
             .is_some()
     }

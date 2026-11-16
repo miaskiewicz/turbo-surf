@@ -884,6 +884,15 @@ impl Capture<'_> {
         trace["formFallback"] = Value::Null;
         self.follow_observed_hops(page, window, native_form, trace)
             .await?;
+        let completed = NavigationCounters::read(page);
+        let completed_source = completed.source(native_before_input, false);
+        let native_form = native_form || completed_source == Some("native-form");
+        trace["nativeNavigation"] = json!({"beforeCommits":native_before_input.commits,"beforeForms":native_before_input.forms,"commits":completed.commits,"forms":completed.forms});
+        if native_form {
+            trace["navigationSource"] = json!("native-form");
+        } else if let Some(source) = completed_source {
+            trace["navigationSource"] = json!(source);
+        }
         self.observed_final_snapshot(page, trace).await?;
         if require_native_form(self.config) && !native_form {
             return Err(NATIVE_FORM_REQUIRED.into());
@@ -1296,6 +1305,119 @@ mod tests {
         assert!(requested.unwrap().is_ok());
         assert!(elapsed >= Duration::from_millis(200), "{elapsed:?}");
         assert_eq!(pending, json!(1));
+    }
+
+    async fn gated_navigation_response(
+        listener: tokio::net::TcpListener,
+        entered: tokio::sync::oneshot::Sender<()>,
+        released: tokio::sync::oneshot::Receiver<()>,
+    ) -> (String, Instant) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut header = Vec::new();
+        let mut chunk = [0; 1024];
+        while !header.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            assert!(header.len() < 16384);
+            let count = socket.read(&mut chunk).await.unwrap();
+            assert!(count > 0);
+            header.extend_from_slice(&chunk[..count]);
+        }
+        let request = String::from_utf8(header)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_owned();
+        entered.send(()).unwrap();
+        released.await.unwrap();
+        let body = "<body>late native response</body>";
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        socket.write_all(response.as_bytes()).await.unwrap();
+        (request, Instant::now())
+    }
+
+    async fn late_script_observation(require_form: bool) {
+        turbo_surf_mcp::initialize_render_hooks();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let (entered, seen) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(gated_navigation_response(listener, entered, released));
+        let mut page = PageSession::open_with_document_response_and_options(
+            "<body>source",
+            &base,
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &[],
+            Default::default(),
+            Default::default(),
+            None,
+            realtime_options(),
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        let before = NavigationCounters::read(&page);
+        assert_eq!((before.commits, before.forms), (0, 0));
+        let out = capture_fixture_directory();
+        let config = json!({"requireNativeFormNavigation":require_form});
+        let capture = Capture {
+            config: &config,
+            out: &out,
+            profile: fingerprint::default_profile(),
+            hints: ClientHints::default(),
+            storage: Default::default(),
+            budget: 5000,
+            init: String::new(),
+            wait_ms: 0,
+            cadence_ms: 0,
+        };
+        let mut trace = json!({"pages":[]});
+        let window = ObservationWindow::start(1000, 0, &mut trace);
+        page.eval_expression("location.assign('/late');void 0")
+            .await
+            .unwrap();
+        assert_eq!(NavigationCounters::read(&page).commits, 0);
+        let mut observation = Box::pin(capture.observe(&mut page, &window, before, &mut trace));
+        tokio::select! {
+            result = &mut observation => panic!("observation finished before response release: {result:?}"),
+            requested = tokio::time::timeout(Duration::from_secs(1), seen) => requested.unwrap().unwrap(),
+        }
+        release.send(()).unwrap();
+        let result = observation.await;
+        if require_form {
+            assert_eq!(result.unwrap_err().to_string(), NATIVE_FORM_REQUIRED);
+        } else {
+            result.unwrap();
+        }
+        let (request, finished) = server.await.unwrap();
+        assert_eq!(request, "GET /late HTTP/1.1");
+        assert!(finished < window.started + window.duration);
+        assert!(window.remaining().is_zero());
+        assert_eq!(page.auxiliary_root_id().unwrap(), root);
+        assert_eq!(page.navigation_snapshot().1, format!("{base}late"));
+        assert_eq!(page.form_navigation_count(), 0);
+        assert_eq!(page.navigation_snapshot().0, 1);
+        assert_eq!(trace["nativeNavigation"]["commits"], 1);
+        assert_eq!(trace["nativeNavigation"]["forms"], 0);
+        assert_eq!(trace["navigationSource"], "script");
+        assert_eq!(trace["formFallback"], Value::Null);
+        assert_eq!(trace["observation"]["followedNavigationHops"], Value::Null);
+        page.close();
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn observation_attributes_native_script_commit_after_window_entry() {
+        late_script_observation(false).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn late_script_commit_cannot_satisfy_native_form_requirement() {
+        late_script_observation(true).await;
     }
 
     fn capture_fixture_directory() -> std::path::PathBuf {

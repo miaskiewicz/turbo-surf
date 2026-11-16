@@ -684,7 +684,7 @@ fn refresh<'s>(
     input: &mut crate::live_layout_dom::NativeLayoutInput<'s>,
 ) -> Result<(), String> {
     #[cfg(test)]
-    recapture_tests::after_capture(scope);
+    recapture_tests::after_capture(scope, input.owner_context);
     if input.tree.lifecycle_observed && !crate::live_layout_dom::is_current(scope, input)? {
         return Err("native layout capture changed after lifecycle inspection".into());
     }
@@ -704,7 +704,7 @@ fn refresh<'s>(
         *input = fresh;
         input.tree.resource_query = resource_query;
         #[cfg(test)]
-        recapture_tests::after_capture(scope);
+        recapture_tests::after_capture(scope, input.owner_context);
     }
     Err("native layout tree kept changing during its capture".into())
 }
@@ -2371,7 +2371,10 @@ mod recapture_tests {
         static AFTER_CAPTURE: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
     }
 
-    pub(super) fn after_capture(scope: &mut v8::PinScope<'_, '_>) {
+    pub(super) fn after_capture<'s>(
+        scope: &mut v8::PinScope<'s, '_>,
+        owner_context: Option<v8::Local<'s, v8::Context>>,
+    ) {
         let source = AFTER_CAPTURE.with(|hook| {
             let mut hook = hook.borrow_mut();
             let (source, runs) = hook.as_mut()?;
@@ -2385,6 +2388,10 @@ mod recapture_tests {
         let Some(source) = source else {
             return;
         };
+        // Geometry ops can enter in the private service realm; the fixture
+        // mutates the actual document whose capture is being invalidated.
+        let context = owner_context.expect("the recapture fixture needs a document owner");
+        let scope = &mut v8::ContextScope::new(scope, context);
         let source = v8::String::new(scope, &source).unwrap();
         v8::Script::compile(scope, source, None)
             .and_then(|script| script.run(scope))

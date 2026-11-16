@@ -13,11 +13,11 @@ ShouldThrowOnError fixes formerly prepared here as `turbo-surf-v8`).
 | — | `turbo-dom-v8` (turbo-dom) | 150.4.x | prerequisite, not prepared here |
 | 1 | `turbo-surf-deno-v8` | 0.4.1 (0.4.0) | `rusty_v8` → registry `turbo-dom-v8 ~150.4` |
 | 2 | `turbo-surf-serde-v8` | 0.321.1 (0.321.0) | `v8` → forked facade |
-| 3 | `turbo-surf-deno-core` | 0.412.3 (0.412.0) | `v8`, `serde_v8` → forks |
-| 4 | `turbo-surf-deno-bench-util` | 0.253.3 (0.253.0) | `deno_core` → fork |
-| 5 | `turbo-surf-deno-crypto` | 0.273.3 (0.273.0) | `deno_core` → fork |
-| 6 | `turbo-surf-deno-webidl` | 0.259.3 (0.259.0) | `deno_core`, benchmark utility → forks |
-| 7 | `turbo-surf-deno-web` | 0.290.3 (0.290.0) | core, WebIDL and benchmark utility → forks |
+| 3 | `turbo-surf-deno-core` | 0.412.4 (0.412.0) | `v8`, `serde_v8` → forks |
+| 4 | `turbo-surf-deno-bench-util` | 0.253.4 (0.253.0) | `deno_core` → fork |
+| 5 | `turbo-surf-deno-crypto` | 0.273.4 (0.273.0) | `deno_core` → fork |
+| 6 | `turbo-surf-deno-webidl` | 0.259.4 (0.259.0) | `deno_core`, benchmark utility → forks |
+| 7 | `turbo-surf-deno-web` | 0.290.4 (0.290.0) | core, WebIDL and benchmark utility → forks |
 
 Keep the original library names and dependency aliases. Rust handles, op macros,
 serde conversions and native CryptoKey snapshots must share one runtime type
@@ -45,7 +45,7 @@ retirement, plus host-only inspector context registration. The generator patch
 changes only `runtime/jsruntime.rs`, `modules/map.rs`, and `inspector.rs`; published
 infrastructure JS and ops sources remain exact.
 
-Core 0.412.3 adds host-only cancellation of pending work for a live registered
+Core 0.412.4 adds host-only cancellation of pending work for a live registered
 module context while preserving its compiled map and loader. It rejects
 unregistered, inactive and busy contexts; its dependency leaves advance to .3
 only to keep exact core/type edges coherent. Facade/serde versions and embedded
@@ -168,3 +168,5 @@ replacement; it must resolve exactly one registry `turbo-dom-v8` 150.4.x and no
 `v8`, `v8x` or `turbo-surf-v8`. Stock V8 and
 the experimental native155 overlay require separate integration validation before
 claiming that both engine configurations remain supported.
+
+Core 0.412.4 adds native async-work observation, generation-checked lifecycle events and per-context module work inspection. Crypto 0.273.4 reports empty AES-GCM IVs as OperationError before mutation; other unsupported positive IV lengths retain their existing error. The Web, WebIDL and benchmark distributions advance only to retain the exact core type edge. Embedded upstream extension JavaScript is unchanged.

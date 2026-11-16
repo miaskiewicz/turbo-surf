@@ -26,11 +26,11 @@ PATCHES = ROOT / "patches"
 PACKAGES = [
     Package("deno_v8", "0.4.0", "turbo-surf-deno-v8", "0.4.1", None),
     Package("serde_v8", "0.321.0", "turbo-surf-serde-v8", "0.321.1", None),
-    Package("deno_core", "0.412.0", "turbo-surf-deno-core", "0.412.3", "deno_core.patch"),
-    Package("deno_bench_util", "0.253.0", "turbo-surf-deno-bench-util", "0.253.3", None),
-    Package("deno_crypto", "0.273.0", "turbo-surf-deno-crypto", "0.273.3", "deno_crypto.patch"),
-    Package("deno_web", "0.290.0", "turbo-surf-deno-web", "0.290.3", None),
-    Package("deno_webidl", "0.259.0", "turbo-surf-deno-webidl", "0.259.3", None),
+    Package("deno_core", "0.412.0", "turbo-surf-deno-core", "0.412.4", "deno_core.patch"),
+    Package("deno_bench_util", "0.253.0", "turbo-surf-deno-bench-util", "0.253.4", None),
+    Package("deno_crypto", "0.273.0", "turbo-surf-deno-crypto", "0.273.4", "deno_crypto.patch"),
+    Package("deno_web", "0.290.0", "turbo-surf-deno-web", "0.290.4", None),
+    Package("deno_webidl", "0.259.0", "turbo-surf-deno-webidl", "0.259.4", None),
 ]
 NAMES = {p.upstream: (p.publish, p.name) for p in PACKAGES}
 # Upstream `v8` (rusty_v8) edges become this registry requirement, never a path.

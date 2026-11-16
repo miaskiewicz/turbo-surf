@@ -45,7 +45,7 @@ class ExactArchives(unittest.TestCase):
                 "license": "MIT", "readme": "README.md", "license_file": None,
                 "features": {"default": ["v8"], "v8": ["dep:v8"]},
                 "dependencies": [{"name": "turbo-surf-deno-core", "rename": "deno_core",
-                    "req": "=0.412.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "req": "=0.412.4", "source": "registry+https://github.com/rust-lang/crates.io-index",
                     "features": ["reactor-tokio"], "optional": True, "uses_default_features": False,
                     "target": "cfg(unix)", "kind": "build"}]})
         self.metadata = self.root / "cargo-metadata.json"
@@ -57,6 +57,17 @@ class ExactArchives(unittest.TestCase):
         self.plan_path = self.root / "plan.json"
         self.plan_path.write_text(json.dumps(self.plan))
         self.sha = exact.digest(self.plan_path.read_bytes())
+
+    def test_packaged_lock_preserves_only_registry_dependencies_and_exact_root(self):
+        identity = exact.ORDER[0]
+        lock = f'[[package]]\nname="{identity[0]}"\nversion="{identity[1]}"\n'
+        exact.validate_lock({"Cargo.lock": lock.encode()}, identity)
+        remote = '[[package]]\nname="serde"\nversion="1.0.0"\nsource="registry+https://github.com/rust-lang/crates.io-index"\n'
+        exact.validate_lock({"Cargo.lock": (lock + remote).encode()}, identity)
+        for invalid in (remote, lock + lock, lock + remote.replace('registry+https://github.com/rust-lang/crates.io-index', 'git+https://example.invalid/repo'), lock + '[[package]]\nname="local"\nversion="1.0.0"\n'):
+            with self.subTest(lock=invalid), self.assertRaises(ValueError):
+                exact.validate_lock({"Cargo.lock": invalid.encode()}, identity)
+
 
     def invoke(self, **kwargs):
         defaults = {"token_provider": lambda: "unit-secret-not-real",
@@ -83,7 +94,7 @@ class ExactArchives(unittest.TestCase):
             package = next(p for p in self.plan["packages"] if p["name"] == metadata["name"])
             self.assertEqual(exact.digest(raw), package["archiveSha256"])
             self.assertEqual(raw, Path(package["archive"]).read_bytes())
-            self.assertEqual(metadata["deps"][0], {"name": "turbo-surf-deno-core", "version_req": "=0.412.3",
+            self.assertEqual(metadata["deps"][0], {"name": "turbo-surf-deno-core", "version_req": "=0.412.4",
                 "features": ["reactor-tokio"], "optional": True, "default_features": False,
                 "target": "cfg(unix)", "kind": "build", "registry": None, "explicit_name_in_toml": "deno_core"})
             self.assertEqual(metadata["features"], self.packages[0]["features"])
@@ -97,10 +108,10 @@ class ExactArchives(unittest.TestCase):
         with mock.patch("subprocess.run", side_effect=AssertionError("must not invoke cargo")):
             result = self.invoke(transport=transport, readback=lambda p, *_args: p["name"] in uploaded)
         self.assertEqual(requests, [p[0] for p in exact.ORDER])
-        self.assertEqual(len(result), 5)
+        self.assertEqual(len(result), len(exact.ORDER))
 
     def test_existing_exact_versions_need_no_credential(self):
-        self.assertEqual(len(self.invoke(token_provider=lambda: self.fail("credential read"))), 5)
+        self.assertEqual(len(self.invoke(token_provider=lambda: self.fail("credential read"))), len(exact.ORDER))
 
     def test_wrong_plan_sha_stops_before_credentials(self):
         with self.assertRaisesRegex(ValueError, "approved SHA"):

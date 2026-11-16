@@ -14,11 +14,12 @@ import urllib.request
 import urllib.error
 
 ENDPOINT = "https://crates.io/api/v1/crates/new"
-ORDER = [("turbo-surf-deno-core", "0.412.3"),
-         ("turbo-surf-deno-bench-util", "0.253.3"),
-         ("turbo-surf-deno-crypto", "0.273.3"),
-         ("turbo-surf-deno-webidl", "0.259.3"),
-         ("turbo-surf-deno-web", "0.290.3")]
+ORDER = [("turbo-dom-v8", "150.4.2"),
+         ("turbo-surf-deno-core", "0.412.4"),
+         ("turbo-surf-deno-bench-util", "0.253.4"),
+         ("turbo-surf-deno-crypto", "0.273.4"),
+         ("turbo-surf-deno-webidl", "0.259.4"),
+         ("turbo-surf-deno-web", "0.290.4")]
 LIMIT = 64 * 1024 * 1024
 
 
@@ -48,9 +49,23 @@ def archive_files(path):
                 if not key or key in files or size > LIMIT or len(files) >= 1024:
                     raise ValueError("Invalid archive inventory")
                 files[key] = source.extractfile(member).read()
-    if "Cargo.lock" in files:
-        raise ValueError("Exact mode requires the reviewed no-lock payload")
     return files
+
+
+def validate_lock(files, identity):
+    if "Cargo.lock" not in files:
+        return
+    packages = tomllib.loads(files["Cargo.lock"].decode()).get("package", [])
+    roots = 0
+    for package in packages:
+        if package.get("source") is None:
+            if (package.get("name"), package.get("version")) != identity:
+                raise ValueError("Packaged lock contains an unreviewed local package")
+            roots += 1
+        elif package["source"] != "registry+https://github.com/rust-lang/crates.io-index":
+            raise ValueError("Packaged lock contains a non-crates.io source")
+    if roots != 1:
+        raise ValueError("Packaged lock must identify exactly its own root")
 
 
 def relative_file(value, manifest_path):
@@ -85,7 +100,8 @@ def package_plan(archive, cargo_metadata):
     identity = manifest["package"]
     pair = (identity["name"], identity["version"])
     if pair not in ORDER or any(key in manifest for key in ("workspace", "patch")):
-        raise ValueError("Package identity or manifest is outside the reviewed five")
+        raise ValueError("Package identity or manifest is outside the reviewed six")
+    validate_lock(files, pair)
     matches = [p for p in cargo_metadata["packages"] if (p["name"], p["version"]) == pair]
     if len(matches) != 1:
         raise ValueError("Cargo metadata identity is not unique")
@@ -130,9 +146,9 @@ def build_plan(archives, metadata_path, expected_commit, evidence):
     raw_metadata = metadata_path.read_bytes()
     packages = [package_plan(p, json.loads(raw_metadata)) for p in archives]
     by_name = {p["name"]: p for p in packages}
-    if len(packages) != 5 or set(by_name) != {p[0] for p in ORDER}:
-        raise ValueError("Exact mode requires precisely the five reviewed versions")
-    return {"mode": "exact-reviewed-no-lock-archives", "endpoint": ENDPOINT,
+    if len(packages) != len(ORDER) or set(by_name) != {p[0] for p in ORDER}:
+        raise ValueError("Exact mode requires precisely the six reviewed versions")
+    return {"mode": "exact-reviewed-archives", "endpoint": ENDPOINT,
             "sourceCommit": expected_commit, "scriptSha256": digest(Path(__file__).read_bytes()),
             "standardPublisherSha256": digest(Path(__file__).with_name("publish.py").read_bytes()),
             "cargoMetadata": str(metadata_path), "cargoMetadataSha256": digest(raw_metadata),

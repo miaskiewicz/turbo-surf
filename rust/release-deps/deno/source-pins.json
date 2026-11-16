@@ -18,12 +18,12 @@
     "deno_core": {
       "archiveSha256": "580cb2e0d797d75ff3dfc4a8f2b14aa7470f0fa31654a09a83d4cbb42b5eb9b4",
       "version": "0.412.0",
-      "publishVersion": "0.412.3",
+      "publishVersion": "0.412.4",
       "candidateName": "turbo-surf-deno-core",
       "sourceUrl": "https://static.crates.io/crates/deno_core/deno_core-0.412.0.crate",
       "patchedFiles": {
         ".cargo_vcs_info.json": "ce5ede7bf6cc1ec6c65e3ff7fd9732c586aa50ba97369772a7596ea44a0958af",
-        "00_infra.js": "1fde54bf45c211dda0cb9d14eea8740f24f933e026e1be6b067d69df966b0bc2",
+        "00_infra.js": "89421769c04fb9d09790da351ffd2e56225f45f4d9475d675f9234ddb482499b",
         "00_primordials.js": "e860b55b869da0fac3093bccd4fde96a6ad843b55c132e5ab54e04ae2add0bb9",
         "01_core.js": "23a711b1a998d083c3027b5c72af9eaa8c3842fcba11ee824c8c31e4365c7159",
         "02_timers.js": "305596528c679be30d0ac61fa049ec0f1777c287054d119ff4b341575afac7f9",
@@ -38,6 +38,7 @@
         "arena/unique_arena.rs": "0ef9ff0a7f4b78ace6674f45778c4b00bd73a4849d6cab2c2e14190ac91ff85f",
         "async_cancel.rs": "9733cfa33cd4b4ac5e72d35b2ffc682c614e919dfd9384f9f8dea7ceaf722e6a",
         "async_cell.rs": "37ef7f3eee1737e9984a83101c774b7daaab97a065381f3b57a0087bc787d547",
+        "async_work.rs": "4ce1788b089d092f8e085461046d808bea43ec0d96ed229bcb9b6936266412c9",
         "benches/infra/arena.rs": "883b4e71030fc6f5e323e2cb3e16cbbb65ef28f332102db99eae445ab150e91c",
         "benches/ops/async.rs": "d04db1d7914b3ac1f59e85625bf4c7b703d4a93f8b649fdb1d1eda790a8d016e",
         "benches/ops/async_harness.js": "257378126dd83527b65f73e9339f42add183f3d8a8318104ff8aec551cf31165",
@@ -75,7 +76,7 @@
         "io/resource.rs": "588ad4b126b87e59d8fa43d35a9d345441b04e00aebab52bff9e4d02bd11d931",
         "io/resource_handle.rs": "4a239cc9acec0ab774149576a3cf27c09462df3a33d3474508b5cd6f888cf78a",
         "io/resource_table.rs": "d3db65f8e2be609b839f138d4661c4a34e0de651cf38a58821b56d7d061074a9",
-        "lib.rs": "f5b66be59e7c09fd4c381e1585b69aa5a184ee1b2a2ebd1c02a79bb41cc6da27",
+        "lib.rs": "3583ef8435000678579bd0c006662ee6d3304245c4f5ae053f25eb6a9bab38f2",
         "mod.js": "6850db621a5325d8737ad87d2d24cbc35b7010d5e5f36c88dc53c16610cc40e5",
         "module_specifier.rs": "64c176fd3a0b1176397cfca27c3a320c09e37aec5c963b432c97be412952c60f",
         "modules/import_graph.rs": "63909e7fc49bbc36393a70ad43ad4201ea3d46a7dc8eac4bf19f7427c93e5906",
@@ -107,9 +108,9 @@
         "modules/testdata/lazy_script_dep.js": "06f0f6edbead049405b902fe13cd7a6ff486ff371aac82f6bc0da427a9cd57f6",
         "modules/tests.rs": "39143b6225faba46e8f2e538f28c73c78faecf1c7105a70d9dfc07ead18552ac",
         "ops.rs": "a85541064411f7873c882b7e5e7e3ae69f10626ad5a34fa1be0cce53753dcb1a",
-        "ops_builtin.rs": "2a7988461f4c436010c83920a3f6fe5d257f7b43094ba6bfd23df36a96a6f941",
+        "ops_builtin.rs": "60842a9b2653f6ae29421b2e8a9bec66fde169d60093976c1d3eb8ef2056707c",
         "ops_builtin_types.rs": "354434c989a4be4156d861f5573c5f18fc7cb628fef073f958cc845c39447f2d",
-        "ops_builtin_v8.rs": "22b2f31e42bf386e0c0a8a4cfa30b2aff1a645bd4b8da44132dfec47c173af83",
+        "ops_builtin_v8.rs": "812d4625c04321315376f3b86e85da40e94d49dee773c01dab95017c009fc718",
         "ops_metrics.rs": "ef2972649ee2f1e634accdff30e839f7242b19628896ed5f83748a7eafb58af3",
         "reactor.rs": "c53b24a3e7b9137aee682590f5a2d4ae214b9f2e9702a1d80783f3cb4ad4681f",
         "reactor_tokio.rs": "ad405c561119f89f74670290cbc5f36d61f2be141c59115c34c3ebc290e025fb",
@@ -118,7 +119,7 @@
         "runtime/exception_state.rs": "c597ee83920cd72e00429cedb69a101d4553b4ad105016a83cbd61f86944282d",
         "runtime/host_defined_options.rs": "faa8815cb36f754507a18d334d21a61d7208f56f1bcd58d2f65e78ce15327ad4",
         "runtime/jsrealm.rs": "544ffcc738f98591923f747984e54c55cd39541a8a7c8da3e3c7010c25a26664",
-        "runtime/jsruntime.rs": "b5af6723e8564d9b5323dabf8f55ae38ca2d56a9f1fc142dc5e62398313883de",
+        "runtime/jsruntime.rs": "605c2fe93045f46007b2d091ba5097eda297efc0c4cacf0a89d459e6992d3d8a",
         "runtime/mod.rs": "a45976e54cb7964d1474e213c3e00a0abc8b317a945b3b7113da59acc600a01f",
         "runtime/op_driver/erased_future.rs": "a98110e03231817935cbb12ac496d8704ecec79a31c6f407149a40747f8ef16b",
         "runtime/op_driver/future_arena.rs": "703ca62677395ede8aecfd4ea2fe3613c3b5d72c6c9842246fafef33ed6b8341",
@@ -135,6 +136,7 @@
         "runtime/tests/jsrealm.rs": "1aa03fa308b926fb67913231d44d79e562086053adf9f5598bd05140fd65b6e4",
         "runtime/tests/misc.rs": "247471f85fdfebd4dcb4c18d1c502f97e3db58e45a1873e07b4ae42183abfc4d",
         "runtime/tests/mod.rs": "172953750e64b1b8f4539ed88f9780675817f614f6d5fd4a3972e2c6cb091a76",
+        "runtime/tests/module_pending_cancel.rs": "d665db42a5d2b4e2af58fe43c615dc29d6088448205a7d047d2e779806e07c5b",
         "runtime/tests/ops.rs": "dfc7090236003b617cd82b6e66f6c6fd10313e55b9fb8c9629a29f376d5c8f4a",
         "runtime/tests/snapshot.rs": "3682a87420c69f56ade7774256ed5e087dfd93f0774d2ec39fb1231361c3c81e",
         "runtime/v8_static_strings.rs": "631e492ba3676b147d1e918793a1f521d2100b085b055ceae49685997fe63716",
@@ -149,14 +151,13 @@
         "uv_compat/waker.rs": "78ecc75594e3341ab97e21d437461ad2f102056cf17577b44d8ffe3a09a0774f",
         "uv_compat.rs": "ca7a0c1f65729b549bd4656cdfeff5d3f83f40c673aec5be21147661389bcd1d",
         "web_timeout.rs": "0d4ed946f995661ffdfd250a27ca2d0e8c4b62f955110332ea4fa4fd29cb4a76",
-        "webidl.rs": "343777ff37606ad37911cf1b5456996473003c45d78668a1ff1b0fd451d9638a",
-        "runtime/tests/module_pending_cancel.rs": "d665db42a5d2b4e2af58fe43c615dc29d6088448205a7d047d2e779806e07c5b"
+        "webidl.rs": "343777ff37606ad37911cf1b5456996473003c45d78668a1ff1b0fd451d9638a"
       }
     },
     "deno_crypto": {
       "archiveSha256": "d9931d22328961b9a9c8d3b666a27312c1f3ddcc7ea78d8610ddfbc934ac61a0",
       "version": "0.273.0",
-      "publishVersion": "0.273.3",
+      "publishVersion": "0.273.4",
       "candidateName": "turbo-surf-deno-crypto",
       "sourceUrl": "https://static.crates.io/crates/deno_crypto/deno_crypto-0.273.0.crate",
       "embeddedSources": {
@@ -199,15 +200,15 @@
         "mldsa.rs": "7961679c8493d628db18d67079dd6363ae2818a75fe8e5590807e421a216aad2",
         "mlkem.rs": "d9931fd6ec6c4436d470775c44107da66cdd8ec9d023c733b445a5d19b68e353",
         "node_interop.rs": "8694b3201f9dacbbe5037ae6a0a325f4f61f3da12daf9f2bfca4b1044408d42d",
-        "shared.rs": "c7aa0bc0bf6483de43e3d3ae74ff9b30349f96a3dd4592e07fcd2809dc27235e",
+        "shared.rs": "3698bd546bb68c27e172b39ec10ed6d756495d8355319cfce42d9f3029e274fe",
         "slhdsa.rs": "8950505994e13ba52b109e08181f76fe4842a65e96812527a0ee8ea23c952103",
         "subtle_crypto.rs": "c8c78e184347774e0d18136a4ac55d59e4572a688773619ca094e6bd503fecf4",
-        "subtle_decrypt.rs": "5771832d8fd95eb13c2e4dd0670499a1ec6620f96f77952ac9a0996a2c270090",
+        "subtle_decrypt.rs": "aecd119811fea2b7955bb3e3ee239d80450499e4a9c0483543bf9d10e5ca57b3",
         "subtle_derive_bits.rs": "794afa965400966c1c954b1b4f0f392d85af8b003301f350016091453d28958c",
         "subtle_derive_key.rs": "11778bda8375f46ff8d56184e127ea5f49e4762c8e6cc2074d1aa9fa35ad8d27",
         "subtle_encapsulate.rs": "2a1288f6c91d6ce0358485b6d53a5dbe728f9a39c3649c35c5168a2b93b98680",
         "subtle_encapsulate_key.rs": "fd2a156afdedf8b8da46d43389d422bc4832196a9607d142f0b19d58b2f4dd27",
-        "subtle_encrypt.rs": "45a29649461f8a8488c45f850a37f952befeffd1bf55e441950bc512034584fb",
+        "subtle_encrypt.rs": "4a0d46835d6707647963b6fd23a3105063251572e4d227bbde95988dae61cc0c",
         "subtle_export_key.rs": "2568b8ce0ced8a065c01e594fd80ebd2e5775ba7dab4551dc06dbaeed0b4188d",
         "subtle_generate_key.rs": "4365db90f6604424bd634283bf8f40b8bc1cf719b22398d32b3d4fc73b21c381",
         "subtle_get_public_key.rs": "7265b97c1063571d1e8472b603de6d6f8469781f9913a90c5a7cf845f08dbc4b",
@@ -223,7 +224,7 @@
     "deno_web": {
       "archiveSha256": "7510967ba4ec695959c1a518748c3b564fd9ca7a8f3eb13bd397707a3ca232da",
       "version": "0.290.0",
-      "publishVersion": "0.290.3",
+      "publishVersion": "0.290.4",
       "candidateName": "turbo-surf-deno-web",
       "sourceUrl": "https://static.crates.io/crates/deno_web/deno_web-0.290.0.crate",
       "embeddedSources": {
@@ -393,7 +394,7 @@
     "deno_webidl": {
       "archiveSha256": "40af42313723a8d3114c4e5b007abd1cab4400a0b68929794c556b2e792409c7",
       "version": "0.259.0",
-      "publishVersion": "0.259.3",
+      "publishVersion": "0.259.4",
       "candidateName": "turbo-surf-deno-webidl",
       "sourceUrl": "https://static.crates.io/crates/deno_webidl/deno_webidl-0.259.0.crate",
       "embeddedSources": {
@@ -413,7 +414,7 @@
     "deno_bench_util": {
       "archiveSha256": "bffda5d737a78b757be8f3aa0ef3924399efe671813346174e44cf2e693570b3",
       "version": "0.253.0",
-      "publishVersion": "0.253.3",
+      "publishVersion": "0.253.4",
       "candidateName": "turbo-surf-deno-bench-util",
       "sourceUrl": "https://static.crates.io/crates/deno_bench_util/deno_bench_util-0.253.0.crate"
     }

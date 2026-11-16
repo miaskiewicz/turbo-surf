@@ -632,3 +632,266 @@
 +[dependencies.socket2]
 +version = "=0.6.4"
 +
+--- a/00_infra.js
++++ b/00_infra.js
+@@ -29,6 +29,9 @@
+     URIError,
+   } = window.__bootstrap.primordials;
+ 
++  let op_async_work_registered;
++  let op_async_work_settled;
++
+   // Promise ids must be non-negative and fit in an i32 (Rust's `PromiseId`);
+   // the increment in the async op stubs wraps back to 0 past 2^31 - 1.
+   let nextPromiseId = 0;
+@@ -58,6 +61,8 @@
+ 
+   function __initializeCoreMethods(submitLeakTrace_) {
+     submitLeakTrace = submitLeakTrace_;
++    // Native ops are bound between infra and core initialization.
++    ({ op_async_work_registered, op_async_work_settled } = window.Deno.core.ops);
+   }
+ 
+   const build = {
+@@ -169,6 +174,7 @@
+       },
+     );
+     wrappedPromise[promiseIdSymbol] = promiseId;
++    op_async_work_registered(promiseId, wrappedPromise);
+     return wrappedPromise;
+   }
+ 
+@@ -188,6 +194,7 @@
+       }
+       MapPrototypeDelete(promiseMap, promiseId);
+     }
++    op_async_work_settled(promiseId);
+     if (isOk) {
+       promise[0](res);
+     } else {
+--- a/async_work.rs
++++ b/async_work.rs
+@@ -0,0 +1,122 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++//! Host-only observations of genuine native asynchronous op promises.
++use std::collections::HashMap;
++use std::rc::Rc;
++
++/// Lifecycle of one real op-driver promise. Eagerly completed ops have no
++/// pending promise and do not emit these observations.
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum AsyncOpEvent {
++  Registered,
++  Refed,
++  Unrefed,
++  Settled,
++  TrackingFailed,
++}
++
++/// The Promise is supplied only on registration, before it leaves trusted core.
++/// Embedders must use weak handles and must not execute authored JavaScript from
++/// this callback. Promise IDs are opaque and may be reused after completion.
++pub struct AsyncOpObservation<'s> {
++  pub promise_id: i32,
++  pub generation: u64,
++  pub event: AsyncOpEvent,
++  pub promise: Option<v8::Local<'s, v8::Promise>>,
++}
++
++/// Native observers cannot throw a guest exception into op bookkeeping.
++#[derive(Clone)]
++pub struct AsyncOpObserver(
++  pub Rc<dyn for<'s, 'i> Fn(&mut v8::PinScope<'s, 'i>, AsyncOpObservation<'s>)>,
++);
++
++#[derive(Default)]
++struct ActiveOps {
++  generation: u64,
++  failed: bool,
++  entries: HashMap<i32, u64>,
++}
++
++impl ActiveOps {
++  fn observe(&mut self, id: i32, event: AsyncOpEvent) -> Option<u64> {
++    match event {
++      AsyncOpEvent::Registered => {
++        if self.entries.contains_key(&id) {
++          return None;
++        }
++        let Some(generation) = self.generation.checked_add(1) else {
++          self.failed = true;
++          return None;
++        };
++        self.generation = generation;
++        self.entries.insert(id, self.generation);
++        Some(self.generation)
++      }
++      AsyncOpEvent::Settled => self.entries.remove(&id),
++      AsyncOpEvent::Refed | AsyncOpEvent::Unrefed => self.entries.get(&id).copied(),
++      AsyncOpEvent::TrackingFailed => None,
++    }
++  }
++}
++
++pub(crate) fn notify<'s, 'i>(
++  scope: &mut v8::PinScope<'s, 'i>,
++  promise_id: i32,
++  event: AsyncOpEvent,
++  promise: Option<v8::Local<'s, v8::Promise>>,
++) {
++  let state = crate::JsRuntime::op_state_from(scope);
++  let (generation, event, observer) = {
++    let mut state = state.borrow_mut();
++    if !state.has::<ActiveOps>() {
++      state.put(ActiveOps::default());
++    }
++    let active = state.borrow_mut::<ActiveOps>();
++    let mut generation = active.observe(promise_id, event);
++    let event = if active.failed {
++      generation = Some(0);
++      AsyncOpEvent::TrackingFailed
++    } else {
++      event
++    };
++    let observer = state.try_borrow::<AsyncOpObserver>().cloned();
++    (generation, event, observer)
++  };
++  if let (Some(generation), Some(observer)) = (generation, observer) {
++    let promise = if event == AsyncOpEvent::Registered {
++      promise
++    } else {
++      None
++    };
++    (observer.0)(
++      scope,
++      AsyncOpObservation {
++        promise_id,
++        generation,
++        event,
++        promise,
++      },
++    );
++  }
++}
++
++#[cfg(test)]
++mod tests {
++  use super::{ActiveOps, AsyncOpEvent};
++
++  #[test]
++  fn native_generation_overflow_fails_closed_without_registering() {
++    let mut active = ActiveOps {
++      generation: u64::MAX,
++      ..Default::default()
++    };
++    assert_eq!(active.observe(7, AsyncOpEvent::Registered), None);
++    assert!(active.failed);
++    assert!(active.entries.is_empty());
++    assert_eq!(active.observe(8, AsyncOpEvent::Registered), None);
++    assert!(active.failed);
++    assert!(active.entries.is_empty());
++    assert_eq!(active.observe(-1, AsyncOpEvent::Refed), None);
++    assert!(active.failed);
++  }
++}
+--- a/lib.rs
++++ b/lib.rs
+@@ -22,6 +22,7 @@
+ mod external;
+ mod fast_string;
+ mod flags;
++mod async_work;
+ mod gotham_state;
+ mod inspector;
+ mod io;
+@@ -49,6 +50,7 @@
+ pub mod webidl;
+ 
+ // Re-exports
++pub use async_work::{AsyncOpEvent, AsyncOpObservation, AsyncOpObserver};
+ pub use anyhow;
+ pub use deno_ops::CppgcBase;
+ pub use deno_ops::CppgcInherits;
+@@ -323,3 +325,4 @@
+     );
+   }
+ }
++
+--- a/ops_builtin.rs
++++ b/ops_builtin.rs
+@@ -109,6 +109,8 @@
+   ops_builtin_v8::op_timer_track,
+   ops_builtin_v8::op_timer_untrack,
+   ops_builtin_v8::op_timer_now,
++  ops_builtin_v8::op_async_work_registered,
++  ops_builtin_v8::op_async_work_settled,
+   ops_builtin_v8::op_ref_op,
+   ops_builtin_v8::op_unref_op,
+   ops_builtin_v8::op_lazy_load_esm,
+--- a/ops_builtin_v8.rs
++++ b/ops_builtin_v8.rs
+@@ -51,16 +51,32 @@
+     f.map(|f| v8::Global::new(scope, f));
+ }
+ 
+-#[op2(fast)]
++#[op2(fast, reentrant)]
++pub fn op_async_work_registered<'s>(
++  scope: &mut v8::PinScope<'s, '_>,
++  promise_id: i32,
++  promise: v8::Local<'s, v8::Promise>,
++) {
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Registered, Some(promise));
++}
++
++#[op2(fast, reentrant)]
++pub fn op_async_work_settled(scope: &mut v8::PinScope, promise_id: i32) {
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Settled, None);
++}
++
++#[op2(fast, reentrant)]
+ pub fn op_ref_op(scope: &mut v8::PinScope, promise_id: i32) {
+   let context_state = JsRealm::state_from_scope(scope);
+   context_state.unrefed_ops.borrow_mut().remove(&promise_id);
+-}
+-
+-#[op2(fast)]
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Refed, None);
++}
++
++#[op2(fast, reentrant)]
+ pub fn op_unref_op(scope: &mut v8::PinScope, promise_id: i32) {
+   let context_state = JsRealm::state_from_scope(scope);
+   context_state.unrefed_ops.borrow_mut().insert(promise_id);
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Unrefed, None);
+ }
+ 
+ #[op2(fast)]
+--- a/runtime/jsruntime.rs
++++ b/runtime/jsruntime.rs
+@@ -934,6 +934,25 @@
+     false
+   }
+ 
++  /// Inspect only the actual live registered document's module work. This
++  /// does not poll other contexts or borrow their shared op-driver state.
++  /// An absent or retired registration is not reported as an idle document.
++  pub fn module_context_pending_work<'s>(
++    scope: &mut v8::PinScope<'s, '_>,
++    context: v8::Local<'s, v8::Context>,
++  ) -> Option<bool> {
++    let state = Self::state_from(scope);
++    let contexts = state.module_contexts.borrow();
++    contexts.iter().find(|entry| {
++      entry.active.get() && entry.context.to_local(scope) == Some(context)
++    }).map(|entry| {
++      entry.busy.get() != 0
++        || entry.modules.has_pending_dynamic_imports()
++        || entry.modules.has_pending_dyn_module_evaluation()
++        || entry.modules.has_pending_module_evaluation()
++    })
++  }
++
+   fn poll_module_contexts(
+     &self,
+     cx: &mut Context,

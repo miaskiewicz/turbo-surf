@@ -141,16 +141,16 @@ Additional discovered blockers remain in scope until integrated proof:
 
 - [ ] Async ownership: unrelated held peer must not block root evaluation; explicit peer dependencies and fire-and-forget crypto/streams must finish correctly.
 - [ ] IDB collection, storage correctness and root-to-peer continuation dependency controls.
-- [ ] Sticky activation across same-origin navigation, initialization, cross-origin and sandbox controls.
-- [ ] Child fragment clearing preserves the authored trailing hash; HTTP and srcdoc controls.
+- [x] Sticky activation across same-origin navigation, initialization, cross-origin and sandbox controls: `57e0355a` integrated after genuine-input security controls passed.
+- [x] Child fragment clearing preserves the authored trailing hash; HTTP and srcdoc controls: `a8e085f0` integrated after eight Rust and one unchanged Node control passed.
 - [x] String timer ownership and code-generation admission: `a893e18b` integrated with original three controls and exact nesting fixture green.
 - [x] Dictionary admission/enumeration and link-load completion: independent `28f3e069` integrated with both original failures and positive controls green.
 - [x] Font registry initialization and peer-detach stability: `24baa970` integrated with independent original and ownership controls green.
 - [x] Observable host-error unknown-column overflow and safe realm attribution: `29dc4233` integrated with independent three-control proof.
 - [x] Stream sampling at the correct phase, guest brands and poisoned-hook isolation: `fa38e0e7` integrated with independent 9/9 proof.
-- [ ] Popup managed-context fixture and timer-nesting fixture: preserve raw failures and prove corrected meaningful contracts.
-- [ ] History budget control uses supported push operation while retaining budget and atomicity assertions.
-- [ ] MCP form admission assertion and detection form-commit attribution.
+- [x] Popup managed-context fixture and timer-nesting fixture: `d08aac47` and `a893e18b` integrated; original failures retained and corrected contracts pass.
+- [x] History budget control uses supported push operation while retaining budget and atomicity assertions: `94effd92` integrated with the five policy controls green.
+- [x] MCP form admission assertion and detection form-commit attribution: `04581609` integrated with the unchanged physical-request and native-form controls green.
 - [x] Screenshot 61st-image fallback: independent 4/4 proof and test-only `6fdb37f8` are integrated; final combined rerun remains required.
 - [x] Independent navigation deadline/host ownership guards: `50c7f331` is integrated with independent 202-case proof; separate popup/load contracts also pass 20/20. GitHub issue closure is audited separately.
 - [x] Storage receiver/quota ownership, WebSocket buffer ownership and window-name isolation controls: `fc395053`, `c38209d8` and `39f4e46e` integrated with independent focused proofs.
@@ -159,11 +159,16 @@ Ignored/skipped audit obligations: native CSP three controls and native layout o
 
 ### Additional validation findings
 
-- [ ] **Late native navigation attribution** — the formerly dependency-gated `both collectors use a fixed Enter window for slow forms and delayed retries` oracle now actually runs and fails in `navigation-observation.test.mjs` (script-enter/native). The native actor commits the single `/search` response before the unchanged deadline, but capture retains counters sampled before its existing wait loop and reports `none` instead of `script`. The 12 eligible oracles executed **11 pass / 1 fail / zero skipped, missing or unrun**. A final-counter refresh and gated late-response control are being implemented; expected source and clocks remain unchanged.
+- [x] **Late native navigation attribution** — `89b36f35` integrated the final-counter refresh after the existing observation window. Three gated Rust controls, the unchanged full navigation oracle and four adjacent native controls pass (8/8); strict checks have zero warnings. All twelve eligible oracle contracts now have actual passing evidence across retained source epochs, not a newly claimed single twelve-case batch. The original assertion failure and interrupted timeout remain recorded; clocks and expectations are unchanged.
 - [ ] **Real compression stream exposure** — the combined async product's new fire-and-forget SHA256/gzip/HTTP control reaches crypto, then fails because `CompressionStream` is an existence-only placeholder rather than a constructor. The exact published `14_compression.js` and native operations are already pinned and available. Minimal private-backend wiring and constructor/roundtrip/error guards are under validation; the failing stream assertion is retained.
-- [ ] **Final async ownership matrix** — actual held/rejected peer controls and fresh combined IDB 13 controls pass on the private current-engine prototype. Error ownership, void native IO, module/dependency, cancellation/GC and lifecycle validation remain mandatory before dependency publication or merge. Early bootstrap/Infrastructure timer admission failures and their native diagnostics remain in the monotonic private receipts.
+- [ ] **Final async ownership matrix** — private current-engine proof now covers IDB/dependency/lifecycle 19, legacy void-IO/peer controls 4, crypto/stream error controls 3, unhandled-rejection controls 2, module/TLA controls 3 and hardened current-engine core controls 6. These passing receipts span explicit source revisions; they are not a final integrated full-suite run. Essential inverse/restored proof, pure boundary tests, strict checks, independent review and published dependency identity remain required before merge. Bootstrap, Infrastructure timer, JSON-read fixture and missing ScriptOrigin failures remain recorded.
+- [ ] **Zero-IV crypto error class** — native encryption/decryption returned `NotSupportedError`, while the exact Chrome 156 oracle returns `OperationError`. A narrow owned-dependency zero-length-only correction passes encryption, valid-ciphertext decryption, owning-realm and private-constructor controls. Publication, causal inverse/restored proof and integration remain pending; other unsupported lengths are unchanged.
+- [ ] **Authored script module referrer** — a real peer's relative dynamic import failed before HTTP because native authored compilation omitted ScriptOrigin. The reviewed actual-document URL fix passes all three original held/rejected/void-module controls on the private candidate. Integration and final gates remain pending.
+- [x] **Current-engine SDK callback ABI** — `0aa572fc` selects the interceptor callback ABI from the actual linked engine rather than the optional feature. Turning the fix off reproduces both E0631 errors; exact restoration compiles and seven native controls pass, including the formerly ignored current-feature case. Affected strict checks pass.
+- [x] **GPU control strict lint** — `fba7ec3a` preserves all 64 exact RGBA assertions using array views; full workspace all-feature strict checks and actual Metal controls pass.
+- [x] **Secure-upload fixture strict lint** — `e22a3877` removes only a redundant unit expression. Full all-feature strict checks and both credential/TLS controls pass.
 
-The eligible-oracle receipt is `.worktrees/oracle12-current/.recovery/oracle12/ACTUAL-12-RESULTS.json`; its new failure is appended to the monotonic regression set rather than replacing any of the 298 baseline cases below. GPU and all-feature profile validation is source-audited and queued; no hardware or profile pass is claimed before execution.
+The eligible-oracle receipts and source epochs are retained in `.worktrees/oracle12-current/.recovery/oracle12/MONOTONIC-LEDGER.json`; discoveries append to, rather than replace, the 298 baseline cases below. Actual feature proof includes core defaults-off, codec profiles, MCP/NAPI Metal pixels, CoreText and the current-engine SDK profile. The all-feature workspace check and strict checks pass. Python wheels and remaining isolated feature profiles are still required; no cross-platform or alternative-engine result is claimed.
 
 ### Rust assertion failures (78)
 

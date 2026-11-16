@@ -13,6 +13,9 @@ pub(super) fn ready_tasks(rt: &mut JsRuntime) -> Result<bool, String> {
 }
 
 pub(super) fn ready_tasks_for(rt: &mut JsRuntime, owner: Option<u64>) -> Result<bool, String> {
+    if indexeddb_store::run_task_for(rt, owner)? {
+        return Ok(true);
+    }
     if native_history::run_task_for(rt, owner)? {
         return Ok(true);
     }
@@ -62,6 +65,11 @@ impl BackgroundTurn {
         let event = rt.poll_event_loop(cx, Default::default());
         if let Poll::Ready(Err(error)) = &event {
             return Poll::Ready(Err(error.to_string()));
+        }
+        // Retirement is synchronous actor work; a matching journal entry needs
+        // another turn before this poll may park, without retaining its Waker.
+        if indexeddb_store::has_tasks_for(rt, None) {
+            return Poll::Ready(Ok(()));
         }
         if let Some(result) = task_result(drain_pending_storage_event(rt)) {
             return result;

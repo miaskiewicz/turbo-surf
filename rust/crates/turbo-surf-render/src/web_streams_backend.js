@@ -32,7 +32,10 @@
     set(rawOwner, shared);
   }
   if (!own(shared, "webBackend")) {
-    const streams = core.loadExtScript("ext:deno_web/06_streams.js");
+    const streams = {
+      ...core.loadExtScript("ext:deno_web/06_streams.js"),
+      ...core.loadExtScript("ext:deno_web/14_compression.js"),
+    };
     const abort = core.loadExtScript("ext:deno_web/03_abort_signal.js");
     core.loadExtScript("ext:deno_web/02_event.js");
     const exceptions = core.loadExtScript("ext:deno_web/01_dom_exception.js");
@@ -266,10 +269,8 @@
         function (...args) {
           try {
             const state = record(this, "StreamIterator");
-            return state.realm.result(
-              "Iterator",
-              member,
-              apply(state.raw[member], state.raw, args),
+            return state.realm.invoke(() =>
+              state.realm.result("Iterator", member, apply(state.raw[member], state.raw, args)),
             );
           } catch (error) {
             return rejectPromise(localError(error));
@@ -326,31 +327,36 @@
           if (typeof callback !== "function")
             throw new TypeErrorType("Underlying callback must be a function");
           return function (...args) {
-            const index =
-              (kind === "WritableStream" && member === "write") ||
-              (kind === "TransformStream" && member === "transform")
-                ? 1
-                : 0;
-            if (member !== "cancel" && member !== "abort" && member !== "close")
-              args[index] = wrap(
-                args[index],
-                controllerName(
+            return boundary.invoke(() => {
+              const index =
+                (kind === "WritableStream" && member === "write") ||
+                (kind === "TransformStream" && member === "transform")
+                  ? 1
+                  : 0;
+              if (member !== "cancel" && member !== "abort" && member !== "close")
+                args[index] = wrap(
                   args[index],
-                  kind === "WritableStream"
-                    ? "WritableStreamDefaultController"
-                    : kind === "TransformStream"
-                      ? "TransformStreamDefaultController"
-                      : "ReadableStreamDefaultController",
-                ),
-              );
-            try {
-              const outcome = apply(callback, source, args);
-              return new PromiseType((resolve, reject) =>
-                apply(then, resolvePromise(outcome), [resolve, (error) => reject(authored(error))]),
-              );
-            } catch (error) {
-              throw authored(error);
-            }
+                  controllerName(
+                    args[index],
+                    kind === "WritableStream"
+                      ? "WritableStreamDefaultController"
+                      : kind === "TransformStream"
+                        ? "TransformStreamDefaultController"
+                        : "ReadableStreamDefaultController",
+                  ),
+                );
+              try {
+                const outcome = apply(callback, source, args);
+                return new PromiseType((resolve, reject) =>
+                  apply(then, resolvePromise(outcome), [
+                    resolve,
+                    (error) => reject(authored(error)),
+                  ]),
+                );
+              } catch (error) {
+                throw authored(error);
+              }
+            });
           };
         },
         enumerable: true,
@@ -388,7 +394,13 @@
     return adapter;
   }
   const realmWindow = globalThis;
-  const realm = { result, localError, wrap, active: () => ops.op_window_active(realmWindow) };
+  const realm = {
+    result,
+    localError,
+    wrap,
+    invoke: boundary.invoke,
+    active: () => ops.op_window_active(realmWindow),
+  };
   const names = [
     "ReadableStream",
     "ReadableStreamDefaultReader",
@@ -403,6 +415,8 @@
     "TransformStreamDefaultController",
     "ByteLengthQueuingStrategy",
     "CountQueuingStrategy",
+    "CompressionStream",
+    "DecompressionStream",
   ];
   for (const name of names) {
     const Raw = backend.streams[name],
@@ -415,22 +429,26 @@
         "WritableStreamDefaultWriter",
         "ByteLengthQueuingStrategy",
         "CountQueuingStrategy",
+        "CompressionStream",
+        "DecompressionStream",
       ].includes(name);
     const ctor = make(
       function (...args) {
         if (!publicConstructor) throw new TypeErrorType("Illegal constructor");
         try {
-          if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
-            args[0] = sourceAdapter(args[0], name);
-          if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
-            args[1] = strategyAdapter(args[1]);
-          if (name === "TransformStream") args[2] = strategyAdapter(args[2]);
-          if (name === "ByteLengthQueuingStrategy" || name === "CountQueuingStrategy")
-            args[0] = strategyAdapter(args[0]);
-          if (name === "ReadableStreamDefaultReader" || name === "ReadableStreamBYOBReader")
-            args[0] = unwrap(args[0], "ReadableStream");
-          if (name === "WritableStreamDefaultWriter") args[0] = unwrap(args[0], "WritableStream");
-          save(this, name, construct(Raw, args));
+          return boundary.invoke(() => {
+            if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
+              args[0] = sourceAdapter(args[0], name);
+            if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
+              args[1] = strategyAdapter(args[1]);
+            if (name === "TransformStream") args[2] = strategyAdapter(args[2]);
+            if (name === "ByteLengthQueuingStrategy" || name === "CountQueuingStrategy")
+              args[0] = strategyAdapter(args[0]);
+            if (name === "ReadableStreamDefaultReader" || name === "ReadableStreamBYOBReader")
+              args[0] = unwrap(args[0], "ReadableStream");
+            if (name === "WritableStreamDefaultWriter") args[0] = unwrap(args[0], "WritableStream");
+            save(this, name, construct(Raw, args));
+          });
         } catch (error) {
           throw localError(error);
         }
@@ -468,10 +486,12 @@
                 if (member === "cancel")
                   state.realm.cancelPrefix = "Failed to execute 'cancel' on '" + name + "': ";
                 try {
-                  return state.realm.result(
-                    name,
-                    member,
-                    apply(native, state.raw, argumentsFor(name, member, args)),
+                  return state.realm.invoke(() =>
+                    state.realm.result(
+                      name,
+                      member,
+                      apply(native, state.raw, argumentsFor(name, member, args)),
+                    ),
                   );
                 } finally {
                   state.realm.cancelPrefix = previous;

@@ -1136,9 +1136,16 @@ pub(super) fn op_history_queue_task<'s>(
 }
 
 pub(super) fn has_tasks(state: &OpState) -> bool {
-    state
-        .try_borrow::<Histories>()
-        .is_some_and(|histories| !histories.tasks.is_empty())
+    has_tasks_for(state, None)
+}
+
+pub(super) fn has_tasks_for(state: &OpState, owner: Option<u64>) -> bool {
+    state.try_borrow::<Histories>().is_some_and(|histories| {
+        histories
+            .tasks
+            .iter()
+            .any(|task| owner.is_none_or(|owner| task.binding.target == owner))
+    })
 }
 
 fn execute_task(rt: &mut JsRuntime, task: &HistoryTask) -> Result<Option<u32>, String> {

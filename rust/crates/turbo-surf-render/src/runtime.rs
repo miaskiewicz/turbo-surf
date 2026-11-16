@@ -13,6 +13,8 @@
 //! Isolate-owned cleanup disposes native handles before V8 invalidation, including
 //! cached runtimes and independent sessions; an entry point never resets its peer.
 
+#[path = "indexeddb_store.rs"]
+mod indexeddb_store;
 #[path = "native_history.rs"]
 mod native_history;
 #[path = "session_history.rs"]
@@ -34,6 +36,11 @@ use private_boundary::{
 #[cfg(not(turbo_surf_native_proxy))]
 #[path = "registered_module_scripts.rs"]
 mod registered_module_scripts;
+
+#[path = "async_owner.rs"]
+mod async_owner;
+#[path = "selected_document_tasks.rs"]
+mod selected_document_tasks;
 
 #[path = "private_infrastructure.rs"]
 mod private_infrastructure;
@@ -202,6 +209,7 @@ impl Drop for OwnedRuntime {
             unsafe { self.0.v8_isolate().enter() };
         }
         let _native = crate::browser_env::activate_isolate(self.0.v8_isolate());
+        async_owner::uninstall(&mut self.0);
         crate::storage_gc::uninstall(self.0.v8_isolate());
         {
             deno_core::scope!(scope, self.0);
@@ -4976,6 +4984,9 @@ fn poll_auxiliary_document_tasks(
     cx: &mut std::task::Context<'_>,
     timer_wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
 ) -> Result<bool, String> {
+    if indexeddb_store::run_task_for(rt, owner)? {
+        return Ok(true);
+    }
     let contexts = auxiliary_task_contexts(rt, owner)?;
     // Auxiliary navigation must service real document tasks while its resource
     // promise is pending, without advancing clocks or admitting another Page.
@@ -5012,7 +5023,11 @@ fn run_next_window_timer_in(
     let mut next: Option<((f64, f64), v8::Local<v8::Context>)> = None;
     for context in contexts {
         let context = v8::Local::new(scope, context);
-        if context.get_slot::<FrameRetired>().is_some() {
+        if context.get_slot::<FrameRetired>().is_some()
+            || context
+                .get_slot::<private_boundary::Infrastructure>()
+                .is_some()
+        {
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
@@ -5043,9 +5058,15 @@ fn run_next_window_timer_in(
     }
     let task = WindowTimerTask::new(context);
     let active = &mut v8::ContextScope::new(scope, context);
-    let fired = call_frame_helper(active, "runNextTimer", &[])
-        .and_then(|value| value.uint32_value(active))
-        .unwrap_or(0);
+    let fired = async_owner::with_document(active, context, |active| {
+        call_frame_helper(active, "runNextTimer", &[])
+            .and_then(|value| value.uint32_value(active))
+            .unwrap_or(0)
+    })
+    .unwrap_or_else(|error| {
+        async_owner::task_failure(active, format!("Timer owner admission: {error}"));
+        0
+    });
     WindowTimerTurn {
         fired,
         deadline: None,
@@ -5068,7 +5089,21 @@ fn run_window_timers(rt: &mut JsRuntime, max: u32) -> Result<u32, String> {
         rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::Virtual;
     let mut total = 0;
     while total < max {
-        let turn = run_next_window_timer(rt, allow_advance);
+        let turn = if async_owner::enabled(rt) {
+            let root = auxiliary_pages::event_log(&rt.op_state().borrow())
+                .root()
+                .ok_or("Native timer root is unavailable")?
+                .parse::<u64>()
+                .map_err(|_| "Native timer root is invalid")?;
+            let selection = async_owner::selection(rt, root)?;
+            run_next_window_timer_in(
+                rt,
+                allow_advance && selection.pending_ops == 0,
+                selection.contexts,
+            )
+        } else {
+            run_next_window_timer(rt, allow_advance)
+        };
         if turn.fired == 0 {
             break;
         }
@@ -5102,15 +5137,25 @@ fn run_background_resource_task_in(
         let index = (start + offset) % contexts.len();
         let context = &contexts[index];
         let context = v8::Local::new(scope, context);
-        if context.get_slot::<FrameRetired>().is_some() {
+        if context.get_slot::<FrameRetired>().is_some()
+            || context
+                .get_slot::<private_boundary::Infrastructure>()
+                .is_some()
+        {
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
         let caught = std::pin::pin!(v8::TryCatch::new(active));
         let active = &mut caught.init();
-        let fired = call_frame_helper(active, "runNextBackgroundResourceTask", &[])
-            .and_then(|value| value.uint32_value(active))
-            .unwrap_or(0);
+        let fired = async_owner::with_document(active, context, |active| {
+            call_frame_helper(active, "runNextBackgroundResourceTask", &[])
+                .and_then(|value| value.uint32_value(active))
+                .unwrap_or(0)
+        })
+        .unwrap_or_else(|error| {
+            async_owner::task_failure(active, format!("Resource owner admission: {error}"));
+            0
+        });
         if fired > 0 || active.has_caught() {
             JsRuntime::op_state_from(active)
                 .borrow()
@@ -7492,6 +7537,7 @@ fn retire_frame_tree_impl<'s>(
                 storage_events::retire(context);
                 retire_frame_identity(scope, context, preserved);
                 turbo_dom_browser_env::host_internals::retire_context(context);
+                indexeddb_store::retire_context(scope, context);
                 resident_image_assets::retire(context);
                 initial_document_images::retire(scope, context);
                 context.set_slot(Rc::new(FrameRetired));
@@ -7641,6 +7687,7 @@ fn initialize_new_frame<'s>(
 
     let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
         storage_events::retire(context);
+        indexeddb_store::retire_context(scope, context);
         resident_image_assets::retire(context);
         initial_document_images::retire(scope, context);
         context.set_slot(Rc::new(FrameRetired));
@@ -8752,29 +8799,15 @@ fn storage_area(
     Ok(id)
 }
 
-/// IndexedDB backing stores (indexeddb.js), one per storage key: the same
-/// partitioning as DOM storage, so every same-partition realm shares the databases.
-#[derive(Default)]
-struct IdbRegistries(std::collections::HashMap<u32, v8::Global<v8::Object>>);
-#[op2(reentrant)]
-fn op_idb_registry<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
+/// Validate a factory's actual storage partition without retaining its realm.
+#[op2(nofast, reentrant)]
+fn op_idb_registry(
+    scope: &mut v8::PinScope,
     state: &mut OpState,
-    window: v8::Local<'s, v8::Object>,
+    window: v8::Local<v8::Object>,
     unpartitioned: bool,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
-    let id = storage_area(scope, state, window, false, unpartitioned)?;
-    if !state.has::<IdbRegistries>() {
-        state.put(IdbRegistries::default());
-    }
-    let registries = state.borrow_mut::<IdbRegistries>();
-    if let Some(registry) = registries.0.get(&id) {
-        return Ok(v8::Local::new(scope, registry));
-    }
-    let null = v8::null(scope).into();
-    let registry = v8::Object::with_prototype_and_properties(scope, null, &[], &[]);
-    registries.0.insert(id, v8::Global::new(scope, registry));
-    Ok(registry)
+) -> Result<u32, JsErrorBox> {
+    storage_area(scope, state, window, false, unpartitioned)
 }
 struct StorageFactory(v8::Weak<v8::Function>);
 #[op2(fast)]
@@ -9277,6 +9310,14 @@ fn op_route_promise_rejection(
     ) else {
         return false;
     };
+    // E is not a Window. Preserve core's default reporting for an unknown
+    // infrastructure rejection instead of queuing a task on its blank document.
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_some()
+    {
+        return false;
+    }
     // A page realm the report cannot reach (not yet tracked, or retired) is logged and
     // handled: a routing miss must never abort the session.
     let miss = || {
@@ -9586,6 +9627,12 @@ deno_core::extension!(
         op_form_navigation_blocked,
         op_storage_area,
         op_idb_registry,
+        indexeddb_store::op_idb_clone,
+        indexeddb_store::op_idb_load,
+        indexeddb_store::op_idb_save,
+        indexeddb_store::op_idb_delete,
+        indexeddb_store::op_idb_databases,
+        indexeddb_store::op_idb_live,
         crate::indexed_db::op_idb_dispatch,
         op_storage_factory,
         op_storage_object,
@@ -16324,8 +16371,7 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let scope = &mut v8::ContextScope::new(scope, context);
         window_origin(scope, context)
     };
-    private_infrastructure::execute(rt, &format!("globalThis.origin = {actual_origin:?}"))
-        .map_err(|e| e.to_string())?;
+    private_infrastructure::set_origin(rt, &actual_origin)?;
     install_dom_environment(rt, base)?;
     finish_dom_window(rt, base)?;
     Ok(())
@@ -16459,7 +16505,9 @@ fn namespace_call(
             HostArg::Value(value) => v8::Local::new(scope, value),
         })
         .collect();
-    if let Some(value) = call_frame_helper(scope, name, &values) {
+    if let Some(value) = async_owner::with_document(scope, context, |scope| {
+        call_frame_helper(scope, name, &values)
+    })? {
         return Ok(v8::Global::new(scope, value));
     }
     if scope.is_execution_terminating() {
@@ -16482,7 +16530,9 @@ pub(crate) fn execute_engine_script(
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
     v8::tc_scope!(let scope, scope);
-    if let Some(value) = crate::browser_env::run_engine_script(scope, source) {
+    if let Some(value) = async_owner::with_document(scope, context, |scope| {
+        crate::browser_env::run_engine_script(scope, source)
+    })? {
         return Ok(v8::Global::new(scope, value));
     }
     Err(scope
@@ -16686,7 +16736,11 @@ fn execute_frame_script(
             return Err(ClassicScriptFailure::host(&error))
         }
     };
-    let result = execute_frame_script_active(&mut scope, source_url, code);
+    let result = async_owner::with_document(&mut scope, context, |scope| {
+        execute_frame_script_active(scope, source_url, code)
+    })
+    .map_err(|error| ClassicScriptFailure::host(&error))
+    .and_then(|result| result);
     let outcome = guard
         .map(|guard| guard.finish(&mut scope))
         .unwrap_or(auxiliary_navigation::FrameExecutionOutcome::Completed);
@@ -17012,8 +17066,15 @@ fn evaluate_completion_condition(
 /// True when the event loop should yield back to the outer loop because a
 /// native-proxy module stage, a window message, or a pending classic-script
 /// job is queued.
-fn drive_pending_document_task(rt: &mut JsRuntime) -> Result<bool, String> {
-    if native_history::run_task(rt)? {
+fn drive_pending_document_task(rt: &mut JsRuntime, owner: Option<u64>) -> Result<bool, String> {
+    if indexeddb_store::run_task_for(rt, owner)? {
+        return Ok(true);
+    }
+    let history_task = match owner {
+        Some(owner) => native_history::run_task_for(rt, Some(owner)),
+        None => native_history::run_task(rt),
+    }?;
+    if history_task {
         return Ok(true);
     }
     #[cfg(turbo_surf_native_proxy)]
@@ -17022,8 +17083,10 @@ fn drive_pending_document_task(rt: &mut JsRuntime) -> Result<bool, String> {
     Ok(false)
 }
 
-fn has_pending_frame_work(rt: &JsRuntime) -> bool {
-    if native_history::has_tasks(&rt.op_state().borrow()) {
+fn has_pending_frame_work(rt: &JsRuntime, owner: Option<u64>) -> bool {
+    if indexeddb_store::has_tasks_for(rt, owner)
+        || native_history::has_tasks_for(&rt.op_state().borrow(), owner)
+    {
         return true;
     }
     #[cfg(turbo_surf_native_proxy)]
@@ -17418,6 +17481,26 @@ async fn drain_event_loop_until_completion(
     condition: Option<&str>,
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
+    let owner = auxiliary_pages::event_log(&rt.op_state().borrow())
+        .root()
+        .map(|root| {
+            root.parse::<u64>()
+                .map_err(|_| "Invalid native actor root identity")
+        })
+        .transpose()?;
+    drain_event_loop_until_completion_for(rt, condition, completion, owner).await
+}
+
+async fn drain_event_loop_until_completion_for(
+    rt: &mut JsRuntime,
+    condition: Option<&str>,
+    completion: Option<&v8::Global<v8::Value>>,
+    owner: Option<u64>,
+) -> Result<(), String> {
+    if async_owner::enabled(rt) {
+        let root = owner.ok_or("Native async root ownership is unavailable")?;
+        return async_owner::drain(rt, root, condition, completion).await;
+    }
     let real_timers =
         rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
     let mut frame_timer_budget = 200000u32;
@@ -17444,7 +17527,7 @@ async fn drain_event_loop_until_completion(
         if completion.is_some_and(|promise| promise_settled(rt, promise)) {
             return Ok(());
         }
-        if drive_pending_document_task(rt)? {
+        if drive_pending_document_task(rt, owner)? {
             continue;
         }
         let message = {
@@ -17481,7 +17564,7 @@ async fn drain_event_loop_until_completion(
             if completion.is_some_and(|promise| promise_settled(rt, promise)) {
                 return std::task::Poll::Ready(Some(Ok(())));
             }
-            if has_pending_frame_work(rt) {
+            if has_pending_frame_work(rt, owner) {
                 return std::task::Poll::Ready(None);
             }
 
@@ -19544,7 +19627,12 @@ impl PageSession {
             let _activation = self.rt.activation_key().enter();
             let _guest = private_infrastructure::context(&mut self.rt)?;
         }
-        let result = if let Some(target) = self.replaced_root_target() {
+        // The private runtime's initial guest root is auxiliary too. Its native
+        // identity selects the realm, but does not replace the session eval contract.
+        let result = if private_infrastructure::enabled(&self.rt) {
+            let key = self.rt.activation_key();
+            key.during(self.eval_active(script, engine)).await
+        } else if let Some(target) = self.replaced_root_target() {
             self.eval_replaced_root(target, script, engine).await
         } else {
             let key = self.rt.activation_key();
@@ -19588,9 +19676,7 @@ impl PageSession {
                     if engine {
                         execute_engine_script(&mut self.rt, script)?;
                     } else {
-                        self.rt
-                            .execute_script("<session-eval>", script.to_string())
-                            .map_err(|e| e.to_string())?;
+                        private_infrastructure::execute(&mut self.rt, script)?;
                     }
                     let base = self.rt.op_state().borrow().borrow::<Base>().0.clone();
                     resume_host_hydration(&mut self.rt, &base).await?;
@@ -19617,10 +19703,8 @@ impl PageSession {
         }
         let result = match drained {
             Err(e) if !(e.contains("terminat") || e.contains("execution")) => Err(e),
-            _ => self
-                .rt
-                .execute_script("<result>", READ)
-                .map_err(|e| budget_msg(&e.to_string(), budget))
+            _ => private_infrastructure::execute(&mut self.rt, READ)
+                .map_err(|e| budget_msg(&e, budget))
                 .and_then(|g| read_string(&mut self.rt, g)),
         };
         self.finish_history_command(result)
@@ -19870,11 +19954,20 @@ impl PageSession {
         crate::remote_handles::diagnostics(self.rt.v8_isolate())
     }
 
+    /// Native IDB continuation journal; this read never executes a document callback.
+    #[doc(hidden)]
+    pub fn indexeddb_diagnostics_for_testing(&self) -> serde_json::Value {
+        indexeddb_store::diagnostics(&self.rt)
+    }
+
     /// Host-only context registry accounting; never installed on guest globals.
     #[doc(hidden)]
     pub fn context_registry_diagnostics_for_testing(&mut self) -> serde_json::Value {
         let _activation = self.rt.activation_key().enter();
-        crate::context_ownership::diagnostics(self.rt.v8_isolate())
+        let root = private_infrastructure::context(&mut self.rt).ok();
+        deno_core::scope!(scope, self.rt);
+        let root = root.map(|root| v8::Local::new(scope, root));
+        crate::context_ownership::diagnostics(scope, root)
     }
 
     /// Inject one native replacement-bootstrap failure before guest publication.

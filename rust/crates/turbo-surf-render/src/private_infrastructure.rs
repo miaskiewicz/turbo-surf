@@ -56,6 +56,7 @@ pub(super) fn prepare(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), 
         "<!doctype html><html><head></head><body></body></html>",
         "about:blank",
     )?;
+    async_owner::install(rt)?;
     let guest = {
         deno_core::scope!(scope, rt);
         let source = scope.get_current_context();
@@ -134,7 +135,10 @@ pub(super) fn execute(rt: &mut JsRuntime, source: &str) -> Result<v8::Global<v8:
     let scope = &mut v8::ContextScope::new(scope, context);
     v8::tc_scope!(let scope, scope);
     let source = v8::String::new(scope, source).ok_or("Guest script allocation failed")?;
-    let value = v8::Script::compile(scope, source, None).and_then(|script| script.run(scope));
+    let origin = authored_script_origin(scope, context)?;
+    let value = async_owner::with_document(scope, context, |scope| {
+        v8::Script::compile(scope, source, Some(&origin)).and_then(|script| script.run(scope))
+    })?;
     value
         .map(|value| v8::Global::new(scope, value))
         .ok_or_else(|| {
@@ -143,4 +147,73 @@ pub(super) fn execute(rt: &mut JsRuntime, source: &str) -> Result<v8::Global<v8:
                 .map(|error| error.to_rust_string_lossy(scope))
                 .unwrap_or_else(|| "Guest script failed".into())
         })
+}
+
+// The blank infrastructure document is installed before any guest exists. Its
+// native origin fact does not require running an unowned script in E.
+pub(super) fn set_origin(rt: &mut JsRuntime, origin: &str) -> Result<(), String> {
+    let context = context(rt)?;
+    let initializing = !rt.op_state().borrow().has::<GuestRoot>();
+    deno_core::scope!(scope, rt);
+    let context = v8::Local::new(scope, context);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_some()
+    {
+        if !initializing {
+            return Err("Infrastructure origin cannot replace a guest".into());
+        }
+        return set_origin_in(scope, context, origin);
+    }
+    async_owner::with_document(scope, context, |scope| {
+        set_origin_in(scope, context, origin)
+    })?
+}
+
+fn set_origin_in<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    origin: &str,
+) -> Result<(), String> {
+    let key = v8::String::new(scope, "origin").ok_or("Native origin key unavailable")?;
+    let value = v8::String::new(scope, origin).ok_or("Native origin value unavailable")?;
+    if context.global(scope).set(scope, key.into(), value.into()) != Some(true) {
+        return Err("Native origin installation failed".to_owned());
+    }
+    Ok(())
+}
+
+/// Dynamic imports resolve from this document, never an anonymous evaluation
+/// name or an authored Window/Document getter.
+pub(super) fn authored_script_origin<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<v8::ScriptOrigin<'s>, String> {
+    let url = window_proxy::location_url(context)
+        .or_else(|| {
+            context
+                .get_slot::<FrameDocumentLocation>()
+                .map(|url| url.0.clone())
+        })
+        .or_else(|| {
+            context
+                .get_slot::<FrameDocumentUrl>()
+                .map(|url| url.0.clone())
+        })
+        .ok_or("Native document script URL is unavailable")?;
+    let resource = v8::String::new(scope, &url).ok_or("Native script URL allocation failed")?;
+    Ok(v8::ScriptOrigin::new(
+        scope,
+        resource.into(),
+        0,
+        0,
+        false,
+        0,
+        None,
+        false,
+        false,
+        false,
+        None,
+    ))
 }

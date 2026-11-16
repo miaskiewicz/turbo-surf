@@ -767,6 +767,7 @@ pub(super) fn retire_owned_resources<'s>(
     blob_urls::retire_context(scope, context);
     storage_events::retire(context);
     auxiliary_storage::retire(context);
+    indexeddb_store::retire_context(scope, context);
     resident_image_assets::retire(context);
     initial_document_images::retire(scope, context);
     context.set_slot(Rc::new(FrameRetired));
@@ -898,13 +899,23 @@ pub(super) fn execute_target(
     let context = context(scope, target)?;
     let scope = &mut v8::ContextScope::new(scope, context);
     v8::tc_scope!(let scope, scope);
-    let value = if engine {
-        crate::browser_env::run_engine_script(scope, source)
+    let origin = if engine {
+        None
     } else {
-        v8::String::new(scope, source).and_then(|source| {
-            v8::Script::compile(scope, source, None).and_then(|script| script.run(scope))
-        })
+        Some(private_infrastructure::authored_script_origin(
+            scope, context,
+        )?)
     };
+    let value = async_owner::with_document(scope, context, |scope| {
+        if engine {
+            crate::browser_env::run_engine_script(scope, source)
+        } else {
+            v8::String::new(scope, source).and_then(|source| {
+                v8::Script::compile(scope, source, origin.as_ref())
+                    .and_then(|script| script.run(scope))
+            })
+        }
+    })?;
     let value = value.ok_or_else(|| {
         if scope.has_terminated() || scope.is_execution_terminating() {
             return "Target script execution terminated".to_owned();
@@ -995,7 +1006,13 @@ impl PageSession {
                     JsRuntime::scoped_resolve(scope, value.clone())
                 };
                 execute_target(&mut self.rt, target, "__tsNs.resetTimerBudget();", true)?;
-                drain_event_loop_until_completion(&mut self.rt, None, Some(&value)).await?;
+                drain_event_loop_until_completion_for(
+                    &mut self.rt,
+                    None,
+                    Some(&value),
+                    Some(target.0),
+                )
+                .await?;
                 let value = self
                     .rt
                     .with_event_loop_promise(completion, Default::default())
@@ -1140,7 +1157,7 @@ impl PageSession {
             .eval_target_expression(target, expression, false, false)
             .await?;
         let cookies = self.cookies();
-        let messages = has_pending_frame_work(&self.rt);
+        let messages = has_pending_frame_work(&self.rt, Some(target));
         let _activation = self.rt.activation_key().enter();
         deno_core::scope!(scope, self.rt);
         let root = context(scope, AuxiliaryContextId(target))?;

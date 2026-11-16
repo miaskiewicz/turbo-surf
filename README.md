@@ -496,7 +496,7 @@ Native WebCrypto uses a reproducibly hardened Deno provider and genuine Rust
 X-Wing keys for Chrome 155's `MLKEM768-X25519`. Key permissions and private native
 cloning have adversarial regression coverage; the covered localhost algorithm
 queries and KEM roundtrips match Chrome 155. The render crate's `deno_crypto`
-alias resolves `turbo-surf-deno-crypto` 0.273.3 (upstream 0.273.0 plus the reviewed
+alias resolves `turbo-surf-deno-crypto` 0.273.4 (upstream 0.273.0 plus the reviewed
 patch), preserving the reviewed hardening and native clone API through its
 matching Deno/V8 registry graph. See the
 [provider provenance](rust/release-deps/deno/DENO_CRYPTO.md) and the
@@ -512,7 +512,7 @@ SHA-256 and length against reviewed pins. Installed-artifact JavaScript tests re
 a separate portability gate.
 
 The default render tier's `deno_core` alias resolves
-`turbo-surf-deno-core` 0.412.3. Its `v8` alias resolves the facade
+`turbo-surf-deno-core` 0.412.4. Its `v8` alias resolves the facade
 `turbo-surf-deno-v8` 0.4.1, backed by turbo-dom's teardown- and
 interceptor-hardened `turbo-dom-v8` 150.4.2 fork, the only V8 in the graph
 (native engine 15.0.245.2, corresponding to

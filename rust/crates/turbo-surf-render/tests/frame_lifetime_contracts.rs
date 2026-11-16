@@ -255,6 +255,7 @@ async fn initial_markup_frame_cannot_own_isolate_lifetime_crypto_metadata() {
     .unwrap();
     let realms = page
         .eval_json_expression(r#"(async()=>{
+          globalThis.lifetimeCryptoMark=crypto;
           const child=document.getElementById('f').contentWindow;
           const constructorError=(Constructor,ErrorClass)=>{try{new Constructor();return false}catch(error){return error instanceof ErrorClass}};
           const cloneError=(clone,ErrorClass,Other)=>{try{clone(()=>{});return false}catch(error){return error instanceof ErrorClass&&!(error instanceof Other)&&error.name==='DataCloneError'}};
@@ -283,8 +284,17 @@ async fn initial_markup_frame_cannot_own_isolate_lifetime_crypto_metadata() {
     for _ in 0..3 {
         page.collect_message_port_garbage_for_testing();
     }
+    assert_eq!(
+        page.eval_json_expression("crypto===globalThis.lifetimeCryptoMark")
+            .await
+            .unwrap(),
+        "true"
+    );
     let contexts = page.context_registry_diagnostics_for_testing();
-    assert_eq!(contexts["live"], 1, "{contexts}");
+    assert_eq!(contexts["guestRootKnown"], true, "{contexts}");
+    assert_eq!(contexts["liveGuestRoot"], 1, "{contexts}");
+    assert_eq!(contexts["liveOtherGuest"], 0, "{contexts}");
+    assert_eq!(contexts["liveInfrastructure"], 1, "{contexts}");
     assert_eq!(
         page.frame_lifecycle_diagnostics_for_testing()["hostContexts"],
         0

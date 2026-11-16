@@ -78,7 +78,7 @@ impl PageSession {
         let mut state = state.borrow_mut();
         let events = pending_events(&mut state);
         drop(state);
-        let messages = has_pending_frame_work(&self.rt);
+        let messages = has_pending_frame_work(&self.rt, self.replaced_root_target());
         let snapshot = current.is_none()
             || current != self.driver_snapshot
             || self.driver_cookies.as_ref() != Some(&cookies)

@@ -2,6 +2,9 @@
 
 ## [0.8.4] - Unreleased
 
+- Complete legacy root async evaluation using native document ownership and actual Promise dependencies, without waiting for unrelated popup work. Preserve borrowed crypto/stream error realms, module source URLs, peer IndexedDB continuations and retired-document collection.
+- Expose native CompressionStream and DecompressionStream through the existing private stream backend, and report empty AES-GCM IVs as owning-realm OperationError values.
+
 - Resolve native Location navigation against the trusted live document base, preserve same-document identity for repeated and empty fragments, and retain sandbox navigation checks.
 
 - Enforce dynamic-compilation CSP and Trusted Types through the default native V8 callback, preserving direct-eval lexical scope, Function-family identity and bounded violation delivery. Enable the three source-pinned native code-generation controls in the default gate.

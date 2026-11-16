@@ -770,6 +770,7 @@ struct TargetWorker<'a> {
     session: &'a mut PageSession,
     target: LiveTarget,
     primary: bool,
+    logical_root: bool,
     cancellation: tokio::sync::watch::Receiver<bool>,
     final_close: &'a mut Option<SyncSender<std::result::Result<(), String>>>,
     storage_work: &'a mut bool,
@@ -882,7 +883,9 @@ impl TargetWorker<'_> {
     fn execute_script(&mut self, job: LiveJob) {
         match job {
             LiveJob::Eval(script, reply) => {
-                let _ = reply.send(if self.primary {
+                // The logical Page root can live in an auxiliary V8 context.
+                // Legacy liveEval retains the full session drain contract there.
+                let _ = reply.send(if self.logical_root {
                     run_target_job(
                         self.rt,
                         self.cancellation.clone(),
@@ -1163,6 +1166,7 @@ fn run_actor_loop(
             session: &mut session,
             target,
             primary,
+            logical_root: target == root_target,
             cancellation,
             final_close: &mut final_close,
             storage_work: &mut storage_work,

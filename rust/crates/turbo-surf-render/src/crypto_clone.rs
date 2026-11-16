@@ -36,10 +36,30 @@ fn op_surf_is_window(scope: &mut v8::PinScope, value: v8::Local<v8::Value>) -> b
         .is_some_and(|context| object == context.global(scope))
 }
 
+#[derive(Clone, Copy)]
+enum StorageConsumer {
+    History,
+    IndexedDb,
+}
+impl StorageConsumer {
+    fn shared_error(self) -> &'static str {
+        match self {
+            Self::History => "Shared memory cannot be stored in session history",
+            Self::IndexedDb => "A SharedArrayBuffer can not be serialized for storage.",
+        }
+    }
+    fn wasm_error(self) -> &'static str {
+        match self {
+            Self::History => "WebAssembly modules cannot be stored in session history",
+            Self::IndexedDb => "A WebAssembly.Module can not be serialized for storage.",
+        }
+    }
+}
+
 #[derive(Default)]
 struct CloneHandles {
     local_clone: bool,
-    storage: bool,
+    storage: Option<StorageConsumer>,
     /// Chrome's "Failed to execute ..." prefix for the transfer-plan errors raised
     /// while serializing.
     prefix: std::cell::Cell<&'static str>,
@@ -444,10 +464,8 @@ impl v8::ValueSerializerImpl for Delegate {
         scope: &mut v8::PinScope<'s, 'i>,
         buffer: v8::Local<'s, v8::SharedArrayBuffer>,
     ) -> Option<u32> {
-        if self.0.storage {
-            let message =
-                v8::String::new(scope, "Shared memory cannot be stored in session history")
-                    .unwrap();
+        if let Some(consumer) = self.0.storage {
+            let message = v8::String::new(scope, consumer.shared_error()).unwrap();
             self.throw_data_clone_error(scope, message);
             return None;
         }
@@ -472,12 +490,8 @@ impl v8::ValueSerializerImpl for Delegate {
         scope: &mut v8::PinScope<'s, 'i>,
         module: v8::Local<v8::WasmModuleObject>,
     ) -> Option<u32> {
-        if self.0.storage {
-            let message = v8::String::new(
-                scope,
-                "WebAssembly modules cannot be stored in session history",
-            )
-            .unwrap();
+        if let Some(consumer) = self.0.storage {
+            let message = v8::String::new(scope, consumer.wasm_error()).unwrap();
             self.throw_data_clone_error(scope, message);
             return None;
         }
@@ -973,7 +987,7 @@ pub(crate) fn prepare_transfer<'s>(
     } else {
         ""
     };
-    prepare_transfer_with_mode(scope, value, transfer, sender, false, false, prefix)
+    prepare_transfer_with_mode(scope, value, transfer, sender, false, None, prefix)
 }
 
 fn prepare_transfer_with_mode<'s>(
@@ -982,7 +996,7 @@ fn prepare_transfer_with_mode<'s>(
     transfer: Option<v8::Local<'s, v8::Value>>,
     sender: Option<v8::Local<v8::Object>>,
     local_clone: bool,
-    storage: bool,
+    storage: Option<StorageConsumer>,
     serialization_prefix: &str,
 ) -> Result<PreparedClone<'s>, JsErrorBox> {
     let prefix = clone_prefix(local_clone, sender.is_some());
@@ -1065,8 +1079,16 @@ pub(crate) fn serialize_history_state<'s>(
     limit: usize,
     prefix: &str,
 ) -> Result<CloneSnapshot, JsErrorBox> {
-    let snapshot =
-        prepare_transfer_with_mode(scope, value, None, None, false, true, prefix)?.commit(scope)?;
+    let snapshot = prepare_transfer_with_mode(
+        scope,
+        value,
+        None,
+        None,
+        false,
+        Some(StorageConsumer::History),
+        prefix,
+    )?
+    .commit(scope)?;
     if snapshot.size_bytes() > limit {
         return Err(JsErrorBox::new(
             "DOMExceptionDataCloneError",
@@ -1074,6 +1096,24 @@ pub(crate) fn serialize_history_state<'s>(
         ));
     }
     Ok(snapshot)
+}
+
+/// IndexedDB validates the storage clone synchronously before creating a request.
+pub(crate) fn serialize_indexeddb_state<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+    prefix: &str,
+) -> Result<CloneSnapshot, JsErrorBox> {
+    prepare_transfer_with_mode(
+        scope,
+        value,
+        None,
+        None,
+        true,
+        Some(StorageConsumer::IndexedDb),
+        prefix,
+    )?
+    .commit(scope)
 }
 
 pub(crate) fn deserialize<'s>(
@@ -1164,7 +1204,7 @@ fn op_surf_structured_clone<'s>(
     v8::tc_scope!(let scope, scope);
     // Local cloning completes transfers before deserialization rejects forbidden
     // shared memory; messaging rejects during serialization instead.
-    let result = prepare_transfer_with_mode(scope, value, transfer, None, true, false, prefix)
+    let result = prepare_transfer_with_mode(scope, value, transfer, None, true, None, prefix)
         .and_then(|prepared| prepared.commit(scope))
         .and_then(|snapshot| deserialize(scope, &snapshot));
     if scope.has_caught() || scope.has_terminated() {

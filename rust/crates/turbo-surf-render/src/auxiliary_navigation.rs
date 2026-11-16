@@ -970,7 +970,8 @@ impl PageSession {
             let settled = loads.iter().any(|(target, promise)| {
                 !matches!(promise_result(&mut self.rt, *target, promise), Ok(false))
             });
-            if !ready.is_empty() || settled || host_task || has_pending_frame_work(&self.rt) {
+            if !ready.is_empty() || settled || host_task || has_pending_frame_work(&self.rt, owner)
+            {
                 Poll::Ready(Ok(ready))
             } else {
                 Poll::Pending

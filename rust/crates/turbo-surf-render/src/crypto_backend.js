@@ -284,44 +284,50 @@
             error: localError,
             result: resultKey,
             observe: boundary.observe,
+            invoke: boundary.invoke,
           };
-          return new owner.promise((resolve, reject) => {
-            try {
-              if (!record || !own(record, "cryptoOwner"))
-                throw new LocalTypeError("Illegal invocation");
-              if (args.length < arity)
-                throw new LocalTypeError(name + " requires " + arity + " arguments");
-              const normalized = profile.admit(name, args);
-              const hybridResult = hybrid.handles(name, normalized)
-                ? hybrid.run(name, normalized, receiver)
-                : undefined;
-              const value = hybridResult ? hybridResult.value : apply(native, receiver, normalized);
-              const complete = (value) => {
+          return owner.invoke(
+            () =>
+              new owner.promise((resolve, reject) => {
                 try {
-                  resolve(owner.result(name, value));
+                  if (!record || !own(record, "cryptoOwner"))
+                    throw new LocalTypeError("Illegal invocation");
+                  if (args.length < arity)
+                    throw new LocalTypeError(name + " requires " + arity + " arguments");
+                  const normalized = profile.admit(name, args);
+                  const hybridResult = hybrid.handles(name, normalized)
+                    ? hybrid.run(name, normalized, receiver)
+                    : undefined;
+                  const value = hybridResult
+                    ? hybridResult.value
+                    : apply(native, receiver, normalized);
+                  const complete = (value) => {
+                    try {
+                      resolve(owner.result(name, value));
+                    } catch (error) {
+                      reject(owner.error(error));
+                    }
+                  };
+                  // Borrow the captured native then; guest parent Promise prototypes must
+                  // not substitute a foreign input key as a native operation result.
+                  if (
+                    hybridResult
+                      ? !hybridResult.async
+                      : name === "importKey" ||
+                        name === "getPublicKey" ||
+                        name === "unwrapKey" ||
+                        name === "encapsulateKey" ||
+                        name === "decapsulateKey"
+                  )
+                    complete(value);
+                  else if (ops.op_value_is_promise(value) && ops.op_infrastructure_origin(value))
+                    owner.observe(value, complete, (error) => reject(owner.error(error)));
+                  else apply(then, value, [complete, (error) => reject(owner.error(error))]);
                 } catch (error) {
                   reject(owner.error(error));
                 }
-              };
-              // Borrow the captured native then; guest parent Promise prototypes must
-              // not substitute a foreign input key as a native operation result.
-              if (
-                hybridResult
-                  ? !hybridResult.async
-                  : name === "importKey" ||
-                    name === "getPublicKey" ||
-                    name === "unwrapKey" ||
-                    name === "encapsulateKey" ||
-                    name === "decapsulateKey"
-              )
-                complete(value);
-              else if (ops.op_value_is_promise(value) && ops.op_infrastructure_origin(value))
-                owner.observe(value, complete, (error) => reject(owner.error(error)));
-              else apply(then, value, [complete, (error) => reject(owner.error(error))]);
-            } catch (error) {
-              reject(owner.error(error));
-            }
-          });
+              }),
+          );
         },
         name,
         arity,
@@ -340,6 +346,7 @@
       error: localError,
       result: resultKey,
       observe: boundary.observe,
+      invoke: boundary.invoke,
     },
   });
   set(subtle, subtleRecord);

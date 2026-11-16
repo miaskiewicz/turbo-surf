@@ -23,6 +23,7 @@
     StringValue = String;
   const timeout = globalThis.setTimeout,
     clone = ops.op_surf_structured_clone,
+    cloneForStorage = ops.op_idb_clone,
     realm = globalThis,
     // turbo-dom#381: embedder-settable parent hook so the binding walks
     // request -> transaction -> database for us, running capture -> AT_TARGET ->
@@ -117,27 +118,28 @@
       return undefined;
     }
   };
+  const arrayKey = (value, seen) => {
+    seen = seen || [];
+    for (let at = 0; at < seen.length; at++) if (seen[at] === value) return null;
+    seen[seen.length] = value;
+    const length = value.length,
+      items = [];
+    for (let at = 0; at < length; at++) {
+      if (!hasOwn(value, at)) return null;
+      const item = toKey(value[at], seen);
+      if (!item) return null;
+      items[at] = item;
+    }
+    seen.length--;
+    return { t: ARRAY, v: items };
+  };
   const toKey = (value, seen) => {
     if (typeof value === "number") return value === value ? { t: NUMBER, v: value } : null;
     if (typeof value === "string") return { t: STRING, v: value };
     if (value === null || typeof value !== "object") return null;
     const time = dateValue(value);
     if (time !== undefined) return time === time ? { t: DATE, v: time } : null;
-    if (isArray(value)) {
-      seen = seen || [];
-      for (let at = 0; at < seen.length; at++) if (seen[at] === value) return null;
-      seen[seen.length] = value;
-      const length = value.length,
-        items = [];
-      for (let at = 0; at < length; at++) {
-        if (!hasOwn(value, at)) return null;
-        const item = toKey(value[at], seen);
-        if (!item) return null;
-        items[at] = item;
-      }
-      seen.length--;
-      return { t: ARRAY, v: items };
-    }
+    if (isArray(value)) return arrayKey(value, seen);
     const bytes = bufferBytes(value);
     if (bytes) {
       const copy = [];
@@ -579,18 +581,116 @@
     return state;
   };
 
+  // Committed data lives in native clone snapshots. Façades and pending work
+  // remain owned by their actual document, never by a native strong JS root.
+  const localRoots = new Set();
+  const setAdd = Set.prototype.add,
+    setDelete = Set.prototype.delete;
+  const hold = (value) => {
+    apply(setAdd, localRoots, [value]);
+    return value;
+  };
+  const release = (value) => apply(setDelete, localRoots, [value]);
+  const arrayFilter = Array.prototype.filter,
+    arraySlice = Array.prototype.slice;
+  const arraySome = Array.prototype.some,
+    arrayFind = Array.prototype.find;
+  const arrayValues = Array.prototype[Symbol.iterator];
+  const setPrototype = Object.setPrototypeOf;
+  const liveArray = (array) => {
+    setPrototype(array, null);
+    const methods = [
+      [
+        "filter",
+        function (predicate) {
+          return liveArray(apply(arrayFilter, this, [predicate]));
+        },
+      ],
+      [
+        "slice",
+        function (...args) {
+          return liveArray(apply(arraySlice, this, args));
+        },
+      ],
+      [
+        "some",
+        function (predicate) {
+          return apply(arraySome, this, [predicate]);
+        },
+      ],
+      [
+        "find",
+        function (predicate) {
+          return apply(arrayFind, this, [predicate]);
+        },
+      ],
+      [Symbol.iterator, arrayValues],
+    ];
+    for (let i = 0; i < methods.length; i++)
+      define(array, methods[i][0], { __proto__: null, value: methods[i][1] });
+    return array;
+  };
+  const live = (registry, name, kind, action, value) =>
+    ops.op_idb_live(realm, registry.unpartitioned, name, kind, action, value);
+  const dbLive = (db, kind, action, value) => live(db.registry, db.name, kind, action, value);
+  const connectLists = (db) => {
+    const names = ["connections", "transactions", "waiters"];
+    for (let i = 0; i < names.length; i++) {
+      const kind = i + 1;
+      define(db, names[i], {
+        __proto__: null,
+        get: () => liveArray(dbLive(db, kind, 0)),
+        set: (value) => dbLive(db, kind, 1, value),
+      });
+    }
+    return db;
+  };
+  const loadStore = (db, name) => ops.op_idb_load(realm, db.registry.unpartitioned, db.name, name);
+  const loadDatabase = (registry, name, force = false) => {
+    const saved = ops.op_idb_load(realm, registry.unpartitioned, name);
+    let db = registry.dbs[name];
+    if (!db)
+      db = registry.dbs[name] = connectLists({ name, version: 0, stores: create(null), registry });
+    if (force || db.version !== (saved?.version || 0) || !db.loaded) {
+      db.version = saved?.version || 0;
+      db.stores = create(null);
+      for (const name of saved?.names || []) db.stores[name] = loadStore(db, name);
+      db.loaded = true;
+    }
+    return db;
+  };
+  const deleteBacking = (registry, name) => ops.op_idb_delete(realm, registry.unpartitioned, name);
+  const refreshTransaction = (transaction) => {
+    if (transaction.mode === "versionchange") return;
+    for (const name of transaction.scope) {
+      const saved = loadStore(transaction.db, name);
+      if (!saved) continue;
+      const store = transaction.db.stores[name];
+      store.records = saved.records;
+      store.current = saved.current;
+      for (const name of keysOf(store.indexes))
+        store.indexes[name].entries = saved.indexes[name].entries;
+    }
+  };
+  const persistTransaction = (transaction) => {
+    if (transaction.mode === "readonly") return;
+    const db = transaction.db;
+    const replace = transaction.mode === "versionchange";
+    const names = replace ? keysOf(db.stores) : transaction.scope;
+    const data = create(null);
+    for (const name of names) data[name] = db.stores[name];
+    ops.op_idb_save(realm, db.registry.unpartitioned, db.name, db.version, names, data, replace);
+  };
+
   // ---- factory -------------------------------------------------------------------------------
   const registryOf = (factory) => {
     if (!factory.registry) {
       let registry;
       try {
-        registry = ops.op_idb_registry(realm, factory.unpartitioned);
+        ops.op_idb_registry(realm, factory.unpartitioned);
+        registry = { unpartitioned: factory.unpartitioned, dbs: create(null) };
       } catch {
         throw new Exception("The user denied permission to access the database.", "SecurityError");
-      }
-      if (!registry.dbs) {
-        registry.dbs = create(null);
-        registry.queues = create(null);
       }
       factory.registry = registry;
     }
@@ -606,14 +706,16 @@
     configurable: true,
   });
   const queueOperation = (registry, name, operation) => {
-    const queue = registry.queues[name] || (registry.queues[name] = []);
-    queue[queue.length] = operation;
-    if (queue.length === 1) lateTask(() => operation.run());
+    hold(operation);
+    operation.schedule = (first) => (first ? lateTask : task)(() => operation.run());
+    operation.release = () => release(operation);
+    if (live(registry, name, 0, 2, operation) === 1) operation.schedule(true);
   };
   const nextOperation = (registry, name) => {
-    const queue = registry.queues[name];
-    queue.shift();
-    if (queue.length) task(() => queue[0].run());
+    const completed = live(registry, name, 0, 3);
+    completed?.release();
+    const next = live(registry, name, 0, 0)[0];
+    next?.schedule(false);
   };
   // Fires versionchange at the other connections, then blocked while any stays open, and runs
   // `proceed` once every one has closed.
@@ -625,13 +727,15 @@
       if (!connection.closePending)
         connection.fire("versionchange", versionEvent(db.version, newVersion));
     if (open().length) fire(request.public, "blocked", versionEvent(db.version, newVersion));
-    if (open().length)
-      db.waiters[db.waiters.length] = () => {
+    if (open().length) {
+      const waiter = hold(() => {
         if (open().length) return false;
+        release(waiter);
         task(proceed);
         return true;
-      };
-    else proceed();
+      });
+      dbLive(db, 3, 2, waiter);
+    } else proceed();
   };
   const finishOpen = (request, kind, value) => {
     request.readyState = "done";
@@ -647,17 +751,8 @@
   const openDatabase = (factory, request, name, version) => {
     const registry = registryOf(factory);
     const run = () => {
-      let db = registry.dbs[name];
-      const created = !db;
-      if (!db)
-        db = registry.dbs[name] = {
-          name,
-          version: 0,
-          stores: create(null),
-          connections: [],
-          transactions: [],
-          waiters: [],
-        };
+      const created = !ops.op_idb_load(realm, registry.unpartitioned, name);
+      const db = loadDatabase(registry, name);
       if (version === undefined) version = db.version || 1;
       const done = () => nextOperation(registry, name);
       if (version < db.version) {
@@ -677,6 +772,7 @@
         return done();
       }
       awaitClosed(db, connection, request, version, () => {
+        loadDatabase(registry, name, true);
         const oldVersion = db.version;
         const snapshot = snapshotDatabase(db);
         db.version = version;
@@ -688,8 +784,11 @@
         request.readyState = "done";
         transaction.onFinish = (aborted) => {
           if (aborted) {
-            if (created) delete registry.dbs[name];
+            if (created) {
+              delete registry.dbs[name];
+            }
             connection.closed = true;
+            release(connection);
             connection.version = oldVersion || 0;
             request.transaction = null;
             task(() => {
@@ -738,10 +837,14 @@
     const registry = registryOf(factory);
     queueOperation(registry, name, {
       run() {
-        const db = registry.dbs[name];
+        const saved = ops.op_idb_load(realm, registry.unpartitioned, name);
+        const db = saved ? loadDatabase(registry, name) : null;
         const finish = () => {
           const oldVersion = db ? db.version : 0;
-          if (db) delete registry.dbs[name];
+          if (db) {
+            delete registry.dbs[name];
+            deleteBacking(registry, name);
+          }
           request.readyState = "done";
           request.result = undefined;
           fire(request.public, "success", versionEvent(oldVersion, null));
@@ -797,8 +900,7 @@
     return new PromiseType((resolve) =>
       lateTask(() => {
         const list = [];
-        for (const name of keysOf(registry.dbs)) {
-          const db = registry.dbs[name];
+        for (const db of ops.op_idb_databases(realm, registry.unpartitioned)) {
           if (db.version > 0) list[list.length] = { name: db.name, version: db.version };
         }
         resolve(list);
@@ -865,7 +967,8 @@
     };
     connection.public = newTarget(IDBDatabase.prototype, connection);
     connection.fire = (type, options) => fire(connection.public, type, options);
-    db.connections[db.connections.length] = connection;
+    hold(connection);
+    dbLive(db, 1, 2, connection);
     return connection;
   };
   const closeConnection = (connection) => {
@@ -876,9 +979,10 @@
       connection.closed = true;
       const db = connection.db;
       db.connections = db.connections.filter((other) => other !== connection);
+      release(connection);
       const waiters = db.waiters;
       db.waiters = [];
-      for (const waiter of waiters) if (!waiter()) db.waiters[db.waiters.length] = waiter;
+      for (const waiter of waiters) if (!waiter()) dbLive(db, 3, 2, waiter);
     };
     connection.onIdle = finish;
     finish();
@@ -1053,7 +1157,9 @@
     transaction.public = newTarget(IDBTransaction.prototype, transaction);
     // Chain for the engine-walked event path (turbo-dom#381): transaction -> database.
     setParent(transaction.public, () => transaction.connection.public);
-    connection.db.transactions[connection.db.transactions.length] = transaction;
+    hold(transaction);
+    transaction.pump = () => pump(transaction);
+    dbLive(connection.db, 2, 2, transaction);
     return transaction;
   };
   const overlaps = (left, right) => left.scope.some((name) => right.scope.indexOf(name) >= 0);
@@ -1074,14 +1180,21 @@
     transaction.state = "finished";
     const db = transaction.db;
     db.transactions = db.transactions.filter((other) => other !== transaction);
+    release(transaction);
     if (transaction.onFinish) transaction.onFinish(aborted);
     if (transaction.connection.onIdle) transaction.connection.onIdle();
-    for (const other of db.transactions.slice()) pump(other);
+    for (const other of db.transactions.slice()) other.pump();
   };
   const commit = (transaction) => {
     transaction.state = "committing";
     task(() => {
       if (transaction.state !== "committing") return;
+      try {
+        persistTransaction(transaction);
+      } catch (error) {
+        abortTransaction(transaction, error);
+        return;
+      }
       transaction.state = "finished";
       fire(transaction.public, "complete", {});
       finishTransaction(transaction, false);
@@ -1091,6 +1204,7 @@
     if (transaction.scheduled || transaction.state === "finished") return;
     if (!transaction.started) {
       if (!canStart(transaction)) return;
+      refreshTransaction(transaction);
       transaction.started = true;
     }
     if (transaction.requests.length) {
@@ -1267,7 +1381,7 @@
   };
   const read = (value) => clone(value, realm, undefined, "");
   const storeValue = (iface, method, value) =>
-    clone(value, realm, undefined, `Failed to execute '${method}' on '${iface}': `);
+    cloneForStorage(value, realm, `Failed to execute '${method}' on '${iface}': `);
   // Writes one record (put/add/cursor update) after the generator and constraint checks.
   const storeRecord = (transaction, store, value, key, noOverwrite) => {
     if (!key) {
@@ -1700,6 +1814,21 @@
         cursor.request = request;
         return request.public;
       });
+  const cursorRowMatches = (cursor, row, key, primaryKey, forward, unique) => {
+    const direction = forward ? 1 : -1;
+    if (cursor.position) {
+      const order = compare(row[0], cursor.position) * direction;
+      if (order < 0) return false;
+      if (order === 0) {
+        if (unique || !cursor.source.index) return false;
+        if (compare(row[1], cursor.objectPosition) * direction <= 0) return false;
+      }
+    }
+    if (!key) return true;
+    const order = compare(row[0], key) * direction;
+    if (order < 0) return false;
+    return !(primaryKey && order === 0 && compare(row[1], primaryKey) < 0);
+  };
   // Moves the cursor `count` steps (to `key`/`primaryKey` when given); null when exhausted.
   const iterate = (cursor, key, primaryKey, count) => {
     const forward = cursor.direction === "next" || cursor.direction === "nextunique";
@@ -1707,20 +1836,7 @@
     const rows = sourceRows(cursor.source, cursor.range, cursor.direction);
     let found = null;
     for (const row of rows) {
-      if (cursor.position) {
-        const order = compare(row[0], cursor.position) * (forward ? 1 : -1);
-        if (order < 0) continue;
-        if (order === 0) {
-          if (unique) continue;
-          if (!cursor.source.index) continue;
-          if (compare(row[1], cursor.objectPosition) * (forward ? 1 : -1) <= 0) continue;
-        }
-      }
-      if (key) {
-        const order = compare(row[0], key) * (forward ? 1 : -1);
-        if (order < 0) continue;
-        if (primaryKey && order === 0 && compare(row[1], primaryKey) < 0) continue;
-      }
+      if (!cursorRowMatches(cursor, row, key, primaryKey, forward, unique)) continue;
       found = row;
       if (--count === 0) break;
     }

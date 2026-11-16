@@ -145,14 +145,35 @@ pub(crate) fn sweep_collected(scope: &mut v8::PinScope) {
     }
 }
 
-pub(crate) fn diagnostics(isolate: &v8::Isolate) -> serde_json::Value {
-    let Some(contexts) = isolate.get_slot::<Contexts>() else {
-        return serde_json::json!({"registered":0,"live":0,"cleared":0});
-    };
-    let cleared = contexts
-        .0
-        .iter()
-        .filter(|context| context.is_empty())
-        .count();
-    serde_json::json!({"registered":contexts.0.len(),"live":contexts.0.len()-cleared,"cleared":cleared})
+pub(crate) fn diagnostics<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    guest_root: Option<v8::Local<'s, v8::Context>>,
+) -> serde_json::Value {
+    let contexts = scope
+        .get_slot::<Contexts>()
+        .map(|contexts| contexts.0.clone())
+        .unwrap_or_default();
+    let mut cleared = 0;
+    let mut infrastructure = 0;
+    let mut root = 0;
+    let mut other = 0;
+    for context in &contexts {
+        let Some(context) = context.to_local(scope) else {
+            cleared += 1;
+            continue;
+        };
+        if context
+            .get_slot::<crate::runtime::private_boundary::Infrastructure>()
+            .is_some()
+        {
+            infrastructure += 1;
+        } else if Some(context) == guest_root {
+            root += 1;
+        } else {
+            other += 1;
+        }
+    }
+    serde_json::json!({"registered":contexts.len(),"live":contexts.len()-cleared,"cleared":cleared,
+        "liveInfrastructure":infrastructure,"liveGuestRoot":root,"liveOtherGuest":other,
+        "guestRootKnown":guest_root.is_some()})
 }

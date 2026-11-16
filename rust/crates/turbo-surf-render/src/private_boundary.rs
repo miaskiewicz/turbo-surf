@@ -1,7 +1,7 @@
 //! Only native context provenance admits infrastructure values to the guest bridge.
 use super::*;
 
-pub(super) struct Infrastructure;
+pub(crate) struct Infrastructure;
 
 #[op2(fast)]
 pub(super) fn op_infrastructure_active(state: &OpState) -> bool {
@@ -93,7 +93,12 @@ pub(crate) fn capabilities<'s>(
         .constructor_behavior(v8::ConstructorBehavior::Throw)
         .build(scope)
         .ok_or("Private boundary capability allocation failed")?;
-    for (name, function) in [("rehome", rehome), ("observe", observe)] {
+    let invoke = v8::Function::builder(invoke_callback)
+        .data(token.into())
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+        .ok_or("Private boundary capability allocation failed")?;
+    for (name, function) in [("rehome", rehome), ("observe", observe), ("invoke", invoke)] {
         let name = v8::String::new(scope, name).unwrap();
         if result.create_data_property(scope, name.into(), function.into()) != Some(true) {
             return Err("Private boundary capability installation failed".into());
@@ -191,6 +196,34 @@ pub(super) fn report_value<'s>(
     v8::Exception::error(scope, message)
 }
 
+// The trusted frontend closure retains original receiver/arguments/newTarget.
+// Its capability's native owner is authenticated before any E algorithm runs.
+fn invoke_callback(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let data = v8::Local::new(scope, args.data());
+    let context = match owner(scope, data) {
+        Ok(context) => context,
+        Err(error) => return fail(scope, error),
+    };
+    let Ok(thunk) = v8::Local::<v8::Function>::try_from(args.get(0)) else {
+        return fail(scope, unsupported());
+    };
+    let invoked = async_owner::with_document(scope, context, |scope| {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let receiver = v8::undefined(scope);
+        thunk.call(scope, receiver.into(), &[])
+    });
+    match invoked {
+        Ok(Some(value)) => result.set(value),
+        // Preserve the actual pending exception, including an authored value.
+        Ok(None) => {}
+        Err(error) => fail(scope, JsErrorBox::type_error(error)),
+    }
+}
+
 fn observe_callback(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -211,10 +244,12 @@ fn observe_callback(
             v8::Local::<v8::Function>::try_from(fulfilled_value).map_err(|_| unsupported())?;
         let rejected =
             v8::Local::<v8::Function>::try_from(rejected_value).map_err(|_| unsupported())?;
-        let scope = &mut v8::ContextScope::new(scope, context);
-        promise
-            .then2(scope, fulfilled, rejected)
-            .ok_or_else(unsupported)?;
+        async_owner::with_document(scope, context, |scope| {
+            let scope = &mut v8::ContextScope::new(scope, context);
+            promise.then2(scope, fulfilled, rejected)
+        })
+        .map_err(JsErrorBox::type_error)?
+        .ok_or_else(unsupported)?;
         Ok(())
     });
     if let Err(error) = observed {

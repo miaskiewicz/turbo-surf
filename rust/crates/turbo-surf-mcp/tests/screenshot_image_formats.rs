@@ -85,6 +85,9 @@ fn mismatches(select: fn(&str) -> bool, decoded: fn(&str) -> bool) -> Vec<String
                 (true, false) => mismatches.push(format!(
                     "{map}: {id} ({x},{y}): expected {chrome:?}, got {got:?}"
                 )),
+                (false, false) if got != [220, 220, 220, 255] => mismatches.push(format!(
+                    "{map}: {id} ({x},{y}): expected neutral placeholder [220,220,220,255], got {got:?}"
+                )),
                 _ => {}
             }
         }

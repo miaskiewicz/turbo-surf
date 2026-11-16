@@ -57,10 +57,7 @@ async fn a_trusted_tls_peer_without_http2_cannot_receive_a_streamed_upload() {
                 if matches!(
                     error.kind(),
                     std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
-                ) =>
-            {
-                ()
-            }
+                ) => {}
             outcome => panic!("HTTP/1 peer received upload traffic: {outcome:?}"),
         }
     });

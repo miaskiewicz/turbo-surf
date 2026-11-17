@@ -1,7 +1,7 @@
 //! Native document tasks for an authenticated async dependency selection.
 use super::*;
 
-fn context_target<'s>(
+pub(super) fn context_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
 ) -> Result<u64, String> {
@@ -52,6 +52,9 @@ pub(super) fn selected_task_targets(
 }
 
 pub(super) fn run_selected_tasks(rt: &mut JsRuntime, targets: &[u64]) -> Result<bool, String> {
+    if storage_events::selected::run(rt, targets)? {
+        return Ok(true);
+    }
     for target in targets {
         if indexeddb_store::run_task_for(rt, Some(*target))?
             || native_history::run_task_for(rt, Some(*target))?
@@ -62,9 +65,12 @@ pub(super) fn run_selected_tasks(rt: &mut JsRuntime, targets: &[u64]) -> Result<
     Ok(false)
 }
 
-pub(super) fn has_selected_tasks(rt: &JsRuntime, targets: &[u64]) -> bool {
-    targets.iter().any(|target| {
+pub(super) fn has_selected_tasks(rt: &mut JsRuntime, targets: &[u64]) -> Result<bool, String> {
+    if storage_events::selected::pending(rt, targets)? {
+        return Ok(true);
+    }
+    Ok(targets.iter().any(|target| {
         indexeddb_store::has_tasks_for(rt, Some(*target))
             || native_history::has_tasks_for(&rt.op_state().borrow(), Some(*target))
-    })
+    }))
 }

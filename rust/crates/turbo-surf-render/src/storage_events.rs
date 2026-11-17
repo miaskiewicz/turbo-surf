@@ -4,6 +4,9 @@ use crate::storage_inbox::{broadcast_commit, payload_bytes, InboxError, Membersh
 pub(super) use crate::storage_inbox::{Inbox, Mutation};
 use std::sync::Arc;
 
+#[path = "storage_selected.rs"]
+pub(super) mod selected;
+
 impl From<InboxError> for JsErrorBox {
     fn from(error: InboxError) -> Self {
         match error {
@@ -323,6 +326,10 @@ pub(super) fn deliver_next(scope: &mut v8::PinScope) -> Result<u32, JsErrorBox> 
         }
         task
     };
+    dispatch_task(scope, task)
+}
+
+fn dispatch_task(scope: &mut v8::PinScope, task: Option<Task>) -> Result<u32, JsErrorBox> {
     let Some(task) = task else {
         return Ok(0);
     };
@@ -350,7 +357,10 @@ pub(super) fn deliver_next(scope: &mut v8::PinScope) -> Result<u32, JsErrorBox> 
     // guest handler can reenter dispatch and admit another bounded batch.
     drop(task);
     let receiver = v8::undefined(scope).into();
-    callback.call(scope, receiver, &[key, old, new, url, session]);
+    async_owner::with_document(scope, context, |scope| {
+        callback.call(scope, receiver, &[key, old, new, url, session]);
+    })
+    .map_err(JsErrorBox::generic)?;
     Ok(1)
 }
 

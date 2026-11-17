@@ -39,13 +39,13 @@ fn run_queued_task(rt: &mut JsRuntime, selection: &async_owner::Selection) -> Re
     Ok(false)
 }
 
-fn queued(rt: &JsRuntime, selection: &async_owner::Selection) -> bool {
-    if selected_document_tasks::has_selected_tasks(rt, &selection.targets) {
-        return true;
+fn queued(rt: &mut JsRuntime, selection: &async_owner::Selection) -> Result<bool, String> {
+    if selected_document_tasks::has_selected_tasks(rt, &selection.targets)? {
+        return Ok(true);
     }
     let state = rt.op_state();
     let state = state.borrow();
-    state
+    Ok(state
         .borrow::<FrameContexts>()
         .messages
         .iter()
@@ -54,7 +54,7 @@ fn queued(rt: &JsRuntime, selection: &async_owner::Selection) -> bool {
             .borrow::<ClassicScripts>()
             .jobs
             .iter()
-            .any(|job| selected(&job.context, &selection.contexts))
+            .any(|job| selected(&job.context, &selection.contexts)))
 }
 
 fn document_pending(
@@ -100,6 +100,7 @@ struct DrainOptions<'a> {
 pub(in crate::runtime) struct QuiescenceTurn {
     pub fired: u32,
     pub busy: bool,
+    pub host_reply: bool,
 }
 
 pub(in crate::runtime) async fn quiescence_turn(
@@ -138,6 +139,7 @@ async fn drain_selected(
         goal,
         real,
     };
+    let storage_waiter = storage_events::waiter(&rt.op_state().borrow());
     let mut wake = None;
     checkpoint_window_timer(rt)?;
     loop {
@@ -158,6 +160,11 @@ async fn drain_selected(
             }
             if completion.is_some_and(|promise| promise_settled(rt, promise)) {
                 return std::task::Poll::Ready(Ok(Turn::Complete));
+            }
+            if let Some(waiter) = storage_waiter.as_ref() {
+                // Register before the selected readiness check, without treating
+                // an unrelated notice as permission to dispatch peer tasks.
+                waiter.register(cx);
             }
             match poll_selected_turn(rt, root, &options, cx, &mut wake) {
                 Ok(turn) => turn.map(Ok),
@@ -188,7 +195,7 @@ fn poll_selected_turn(
     wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
 ) -> Result<std::task::Poll<Turn>, String> {
     let selection = async_owner::selection(rt, root)?;
-    if queued(rt, &selection) {
+    if queued(rt, &selection)? {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
     if condition_complete(rt, root, options.condition)? {
@@ -225,7 +232,7 @@ fn finish_selected_turn(
     // Trusted task turns may create new native work or record a failed owner
     // admission. Never decide quiescence from the pre-dispatch graph snapshot.
     let selection = async_owner::selection(rt, root)?;
-    if queued(rt, &selection) {
+    if queued(rt, &selection)? {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
     let pending = document_pending(rt, &selection.contexts)?;
@@ -261,7 +268,8 @@ fn quiescence_result(rt: &mut JsRuntime, root: u64, fired: u32) -> Result<Quiesc
     let selection = async_owner::selection(rt, root)?;
     Ok(QuiescenceTurn {
         fired,
-        busy: selected_busy(&selection) || queued(rt, &selection),
+        busy: selected_busy(&selection) || queued(rt, &selection)?,
+        host_reply: crate::shim_bindings::pending_in(rt, &selection.contexts),
     })
 }
 

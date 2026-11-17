@@ -5084,6 +5084,14 @@ fn checkpoint_window_timer(rt: &mut JsRuntime) -> Result<(), String> {
 }
 
 fn run_window_timers(rt: &mut JsRuntime, max: u32) -> Result<u32, String> {
+    Ok(run_window_timer_tasks(rt, max, false)?.fired)
+}
+
+fn run_window_timer_tasks(
+    rt: &mut JsRuntime,
+    max: u32,
+    interleave: bool,
+) -> Result<async_owner::QuiescenceTurn, String> {
     checkpoint_window_timer(rt)?;
     let allow_advance =
         rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::Virtual;
@@ -5096,6 +5104,19 @@ fn run_window_timers(rt: &mut JsRuntime, max: u32) -> Result<u32, String> {
                 .parse::<u64>()
                 .map_err(|_| "Native timer root is invalid")?;
             let selection = async_owner::selection(rt, root)?;
+            if interleave {
+                if crate::shim_bindings::pending_in(rt, &selection.contexts) {
+                    return Ok(async_owner::QuiescenceTurn {
+                        fired: total,
+                        busy: true,
+                        host_reply: true,
+                    });
+                }
+                if selected_document_tasks::run_selected_tasks(rt, &selection.targets)? {
+                    checkpoint_window_timer(rt)?;
+                    continue;
+                }
+            }
             run_next_window_timer_in(
                 rt,
                 allow_advance && selection.pending_ops == 0,
@@ -5110,7 +5131,10 @@ fn run_window_timers(rt: &mut JsRuntime, max: u32) -> Result<u32, String> {
         total += turn.fired;
         checkpoint_window_timer(rt)?;
     }
-    Ok(total)
+    Ok(async_owner::QuiescenceTurn {
+        fired: total,
+        ..Default::default()
+    })
 }
 
 fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
@@ -18805,6 +18829,9 @@ async fn drain_to_quiescence_with_scripts(
     let mut last_sig = String::new();
     for _ in 0..MAX_ROUNDS {
         let turn = quiescence_pump_scripts(rt, execute_document_scripts).await?;
+        if turn.host_reply {
+            return Ok(());
+        }
         let state = sample_quiescence_state(rt, turn)?;
         if !state.still && !state.fired_any && !state.awaiting_async {
             break; // genuinely idle
@@ -18845,6 +18872,9 @@ async fn quiescence_pump_scripts(
         hydrate_pass(rt)?;
     }
     let first = drain_quiescence_turn(rt, true).await?;
+    if first.host_reply {
+        return Ok(first);
+    }
     if execute_document_scripts {
         let base = rt.op_state().borrow().borrow::<Base>().0.clone();
         drain_module_scripts(rt, &base).await?;
@@ -18852,12 +18882,28 @@ async fn quiescence_pump_scripts(
     let allowance = 2000u32
         .checked_sub(first.fired)
         .ok_or("Quiescence timer turn exceeded its native allowance")?;
-    let fired = first.fired + run_window_timers(rt, allowance)?;
-    let last = drain_quiescence_turn(rt, false).await?;
-    Ok(async_owner::QuiescenceTurn {
-        fired: fired + last.fired,
-        busy: last.busy,
-    })
+    let mut rest = run_quiescence_timers(rt, allowance).await?;
+    rest.fired += first.fired;
+    Ok(rest)
+}
+
+async fn run_quiescence_timers(
+    rt: &mut JsRuntime,
+    allowance: u32,
+) -> Result<async_owner::QuiescenceTurn, String> {
+    let first = drain_quiescence_turn(rt, false).await?;
+    if first.host_reply {
+        return Ok(first);
+    }
+    // Reuse each timer's authenticated selection for native task interleaving,
+    // rather than polling the complete VM between otherwise empty callbacks.
+    let timers = run_window_timer_tasks(rt, allowance, true)?;
+    if timers.host_reply {
+        return Ok(timers);
+    }
+    let mut last = drain_quiescence_turn(rt, false).await?;
+    last.fired += timers.fired;
+    Ok(last)
 }
 
 async fn drain_quiescence_turn(

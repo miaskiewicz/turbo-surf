@@ -19,9 +19,13 @@ globalThis.hostWait = () => {
 "#;
 
 async fn page(html: &str) -> PageSession {
+    page_at(html, "http://127.0.0.1/").await
+}
+
+async fn page_at(html: &str, base: &str) -> PageSession {
     PageSession::open_with_document_response_and_host_script(
         html,
-        "http://127.0.0.1/",
+        base,
         "",
         "",
         5000,
@@ -182,5 +186,68 @@ async fn collecting_a_host_reply_does_not_reenter_document_hydration() {
     assert_eq!(
         page.hydration_diagnostics().progress.phase,
         HydrationPhase::Complete
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unrelated_peer_host_reply_does_not_abandon_owned_native_io() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let wire = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+            let mut byte = [0];
+            assert_eq!(socket.read(&mut byte).await.unwrap(), 1);
+            request.push(byte[0]);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nowned-result",
+            )
+            .await
+            .unwrap();
+        String::from_utf8(request).unwrap()
+    });
+    let mut page = page_at("<body>root</body>", &base).await;
+    let root = page.auxiliary_root_id().unwrap();
+    page.eval_expression("window.open('about:blank','host-peer');void 0")
+        .await
+        .unwrap();
+    let peer = page
+        .auxiliary_event_log()
+        .pages()
+        .into_iter()
+        .find(|info| info.source_page.as_deref() == Some(&root.to_string()))
+        .unwrap()
+        .target
+        .parse::<u64>()
+        .unwrap();
+    page.eval_target_engine(peer, HOST, false).await.unwrap();
+    assert_eq!(
+        page.eval_target_expression(peer, "globalThis.peerReply=hostWait();'held'", false, false)
+            .await
+            .unwrap(),
+        "held"
+    );
+    let pending = "return Object.keys(__tsNs.shimBindings.pending).length";
+    assert_eq!(page.read_target_engine(peer, pending).unwrap(), "1");
+    let result = page
+        .eval("void(async()=>{globalThis.__RESULT=await(await fetch('/owned')).text()})();")
+        .await
+        .unwrap();
+    assert_eq!(result, "owned-result");
+    assert!(wire.await.unwrap().starts_with("GET /owned HTTP/1.1\r\n"));
+    assert_eq!(page.read_target_engine(peer, pending).unwrap(), "1");
+    page.eval_target_engine(peer, "__tsNs.finishHost('peer-ready');", false)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.eval_target_expression(peer, "peerReply", false, false)
+            .await
+            .unwrap(),
+        "peer-ready"
     );
 }

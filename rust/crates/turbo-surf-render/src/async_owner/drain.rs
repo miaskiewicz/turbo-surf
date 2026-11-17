@@ -195,7 +195,9 @@ fn poll_selected_turn(
         return Ok(std::task::Poll::Ready(Turn::Complete));
     }
     let busy = selected_busy(&selection);
-    let allow_advance = !options.real && !busy;
+    let host_pending =
+        options.completion.is_none() && crate::shim_bindings::pending_in(rt, &selection.contexts);
+    let allow_advance = !options.real && !busy && !host_pending;
     let timer = if matches!(options.goal, Goal::Quiescence { timers: false }) {
         WindowTimerTurn::default()
     } else {
@@ -228,7 +230,14 @@ fn finish_selected_turn(
     }
     let pending = document_pending(rt, &selection.contexts)?;
     let busy = selected_busy(&selection);
+    let host_pending =
+        options.completion.is_none() && crate::shim_bindings::pending_in(rt, &selection.contexts);
     drop(selection);
+    // A selected embedder reply requires returning the actor to its driver.
+    // Explicit Promise collectors still wait for their actual completion.
+    if host_pending {
+        return Ok(std::task::Poll::Ready(Turn::Complete));
+    }
     if matches!(options.goal, Goal::Quiescence { timers: false })
         || (matches!(options.goal, Goal::Quiescence { .. }) && !busy)
     {

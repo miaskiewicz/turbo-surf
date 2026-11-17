@@ -89,6 +89,17 @@ pub(crate) fn pending(rt: &JsRuntime) -> bool {
     pending
 }
 
+pub(crate) fn pending_in(rt: &mut JsRuntime, contexts: &[v8::Global<v8::Context>]) -> bool {
+    deno_core::scope!(scope, rt);
+    contexts.iter().any(|context| {
+        let context = v8::Local::new(scope, context);
+        !crate::runtime::native_frame_is_retired(context)
+            && context
+                .get_slot::<BindingWork>()
+                .is_some_and(|work| work.0.count.get() > 0)
+    })
+}
+
 pub(crate) fn retire(context: v8::Local<v8::Context>) {
     if let Some(work) = context.get_slot::<BindingWork>() {
         work.0.clear();

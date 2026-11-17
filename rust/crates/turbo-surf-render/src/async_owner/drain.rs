@@ -147,7 +147,7 @@ async fn drain_selected(
         if completion.is_some_and(|promise| promise_settled(rt, promise)) {
             return Ok(QuiescenceTurn::default());
         }
-        let selection = async_owner::selection(rt, root)?;
+        let selection = select_for_drain(rt, root, &options)?;
         let ran = run_queued_task(rt, &selection)?;
         drop(selection);
         if ran {
@@ -195,14 +195,34 @@ fn poll_selected_turn(
     cx: &mut std::task::Context<'_>,
     wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
 ) -> Result<std::task::Poll<Turn>, String> {
-    let selection = async_owner::selection(rt, root)?;
+    let selection = select_for_drain(rt, root, options)?;
+    if requested_complete(rt, options) {
+        return Ok(std::task::Poll::Ready(Turn::Complete));
+    }
     if queued(rt, &selection)? {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
     if condition_complete(rt, root, options.condition)? {
         return Ok(std::task::Poll::Ready(Turn::Complete));
     }
-    let busy = selected_busy(&selection);
+    let timer = selected_timer_turn(rt, options, &selection)?;
+    if timer.fired != 0 {
+        checkpoint_window_timer(rt)?;
+        return Ok(std::task::Poll::Ready(Turn::Timer(timer.fired)));
+    }
+    if run_background_resource_task_in(rt, selection.contexts.clone()) != 0 {
+        return Ok(std::task::Poll::Ready(Turn::Again));
+    }
+    drop(selection);
+    finish_selected_turn(rt, root, options, cx, wake, timer.deadline)
+}
+
+fn selected_timer_turn(
+    rt: &mut JsRuntime,
+    options: &DrainOptions<'_>,
+    selection: &async_owner::Selection,
+) -> Result<WindowTimerTurn, String> {
+    let busy = selected_busy(selection);
     let host_pending =
         options.completion.is_none() && crate::shim_bindings::pending_in(rt, &selection.contexts);
     // Only selected documents can delay their virtual Window tasks. A peer
@@ -214,15 +234,7 @@ fn poll_selected_turn(
     } else {
         run_next_window_timer_in(rt, allow_advance, selection.contexts.clone())
     };
-    if timer.fired != 0 {
-        checkpoint_window_timer(rt)?;
-        return Ok(std::task::Poll::Ready(Turn::Timer(timer.fired)));
-    }
-    if run_background_resource_task_in(rt, selection.contexts.clone()) != 0 {
-        return Ok(std::task::Poll::Ready(Turn::Again));
-    }
-    drop(selection);
-    finish_selected_turn(rt, root, options, cx, wake, timer.deadline)
+    Ok(timer)
 }
 
 fn finish_selected_turn(
@@ -235,7 +247,10 @@ fn finish_selected_turn(
 ) -> Result<std::task::Poll<Turn>, String> {
     // Trusted task turns may create new native work or record a failed owner
     // admission. Never decide quiescence from the pre-dispatch graph snapshot.
-    let selection = async_owner::selection(rt, root)?;
+    let selection = select_for_drain(rt, root, options)?;
+    if requested_complete(rt, options) {
+        return Ok(std::task::Poll::Ready(Turn::Complete));
+    }
     if queued(rt, &selection)? {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
@@ -295,6 +310,55 @@ fn condition_complete(
         call_frame_helper(scope, name, &[]).map(|value| value.to_rust_string_lossy(scope) == "true")
     })?
     .ok_or_else(|| "Selected document completion predicate is unavailable".into())
+}
+
+fn select_for_drain(
+    rt: &mut JsRuntime,
+    root: u64,
+    options: &DrainOptions<'_>,
+) -> Result<async_owner::Selection, String> {
+    let awaiting = matches!(options.goal, Goal::Complete)
+        && options.completion.is_some()
+        && options.condition.is_none();
+    if !awaiting {
+        return async_owner::selection(rt, root);
+    }
+    let selection = async_owner::completion_selection(rt, root)?;
+    if !selection.blocked_reactions
+        || requested_complete(rt, options)
+        || selected_busy(&selection)
+        || queued(rt, &selection)?
+        || selected_timer_pending(rt, &selection.contexts)?
+    {
+        return Ok(selection);
+    }
+    Err("Native async work has unclassified ownership".into())
+}
+
+fn requested_complete(rt: &mut JsRuntime, options: &DrainOptions<'_>) -> bool {
+    options
+        .completion
+        .is_some_and(|completion| promise_settled(rt, completion))
+}
+
+fn selected_timer_pending(
+    rt: &mut JsRuntime,
+    contexts: &[v8::Global<v8::Context>],
+) -> Result<bool, String> {
+    deno_core::scope!(scope, rt);
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        let active = &mut v8::ContextScope::new(scope, context);
+        let pending = async_owner::with_document(active, context, |active| {
+            call_frame_helper(active, "timerNextDue", &[])
+                .map(|value| timer_order_key(active, value).is_some())
+        })?
+        .ok_or("Selected timer readiness is unavailable")?;
+        if pending {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn selected_busy(selection: &async_owner::Selection) -> bool {

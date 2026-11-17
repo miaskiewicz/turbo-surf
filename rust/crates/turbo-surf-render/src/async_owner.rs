@@ -34,6 +34,7 @@ pub(super) struct Selection {
     pub pending_ops: usize,
     pub runnable: bool,
     pub modules: bool,
+    pub blocked_reactions: bool,
 }
 
 fn tracker(scope: &v8::PinScope) -> Option<Rc<RefCell<State>>> {
@@ -285,11 +286,25 @@ pub(super) fn with_retained_stream<'s, T>(
         .map_err(str::to_owned)
 }
 
+#[derive(Clone, Copy)]
+enum ReactionSelection {
+    Strict,
+    AwaitCompletion,
+}
+
+struct SelectedContexts {
+    contexts: Vec<v8::Global<v8::Context>>,
+    pending_ops: usize,
+    runnable: bool,
+    blocked_reactions: bool,
+}
+
 fn selected_contexts<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &mut State,
     roots: &[v8::Global<v8::Context>],
-) -> Result<(Vec<v8::Global<v8::Context>>, usize, bool), String> {
+    reactions: ReactionSelection,
+) -> Result<SelectedContexts, String> {
     if let Some(error) = &state.failure {
         return Err(error.clone());
     }
@@ -310,7 +325,9 @@ fn selected_contexts<'s>(
     }
     if snapshot.inconsistent_owners
         || snapshot.unknown_ops != 0
-        || snapshot.unknown_reaction_parents != 0
+        || (snapshot.unknown_reaction_parents != 0
+            && (matches!(reactions, ReactionSelection::Strict)
+                || snapshot.unknown_reaction_parents != snapshot.collected_root_reaction_parents))
     {
         return Err("Native async work has unclassified ownership".into());
     }
@@ -330,20 +347,37 @@ fn selected_contexts<'s>(
         }
         contexts.push(v8::Global::new(scope, context));
     }
-    Ok((
+    Ok(SelectedContexts {
         contexts,
-        snapshot.selected_ops,
-        snapshot.runnable_reactions != 0,
-    ))
+        pending_ops: snapshot.selected_ops,
+        runnable: snapshot.runnable_reactions != 0,
+        blocked_reactions: snapshot.unknown_reaction_parents != 0,
+    })
 }
 
 pub(super) fn selection(rt: &mut JsRuntime, target: u64) -> Result<Selection, String> {
+    select_work(rt, target, ReactionSelection::Strict)
+}
+
+pub(super) fn completion_selection(rt: &mut JsRuntime, target: u64) -> Result<Selection, String> {
+    select_work(rt, target, ReactionSelection::AwaitCompletion)
+}
+
+fn select_work(
+    rt: &mut JsRuntime,
+    target: u64,
+    reactions: ReactionSelection,
+) -> Result<Selection, String> {
     let roots = auxiliary_task_contexts(rt, Some(target))?;
-    let (contexts, pending_ops, runnable, modules) = {
+    let (contexts, pending_ops, runnable, modules, blocked_reactions) = {
         deno_core::scope!(scope, rt);
         let shared = tracker(scope).ok_or("Native async ownership is unavailable")?;
-        let (contexts, pending_ops, runnable) =
-            selected_contexts(scope, &mut shared.borrow_mut(), &roots)?;
+        let SelectedContexts {
+            contexts,
+            pending_ops,
+            runnable,
+            blocked_reactions,
+        } = selected_contexts(scope, &mut shared.borrow_mut(), &roots, reactions)?;
         let mut modules = false;
         for context in &contexts {
             let context = v8::Local::new(scope, context);
@@ -352,7 +386,7 @@ pub(super) fn selection(rt: &mut JsRuntime, target: u64) -> Result<Selection, St
                     .ok_or("Native async module owner is unavailable")?;
             }
         }
-        (contexts, pending_ops, runnable, modules)
+        (contexts, pending_ops, runnable, modules, blocked_reactions)
     };
     let targets = selected_document_tasks::selected_task_targets(rt, &contexts)?;
     Ok(Selection {
@@ -361,6 +395,7 @@ pub(super) fn selection(rt: &mut JsRuntime, target: u64) -> Result<Selection, St
         pending_ops,
         runnable,
         modules,
+        blocked_reactions,
     })
 }
 

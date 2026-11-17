@@ -73,6 +73,7 @@ pub struct WorkSnapshot {
     pub runnable_reactions: usize,
     pub inconsistent_owners: bool,
     pub unknown_reaction_parents: usize,
+    pub collected_root_reaction_parents: usize,
     pub tracking_error: Option<&'static str>,
 }
 
@@ -328,7 +329,33 @@ impl PromiseWork {
                         .is_some_and(|parent| self.state(scope, parent).is_none())
             })
             .count();
+        result.collected_root_reaction_parents = self
+            .nodes
+            .iter()
+            .filter(|(id, node)| self.collected_root_parent(scope, roots, **id, node))
+            .count();
         result
+    }
+
+    fn collected_root_parent(
+        &self,
+        scope: &mut v8::PinScope,
+        roots: &HashSet<OwnerId>,
+        id: u32,
+        node: &Node,
+    ) -> bool {
+        if node.reacted
+            || !node.owner.is_some_and(|owner| roots.contains(&owner))
+            || !self.pending(scope, id)
+        {
+            return false;
+        }
+        let Some(parent) = node.parent.and_then(|parent| self.nodes.get(&parent)) else {
+            return false;
+        };
+        parent.owner == node.owner
+            && parent.promise.to_local(scope).is_none()
+            && parent.terminal.get().is_none()
     }
 
     pub fn prune(&mut self, scope: &mut v8::PinScope) {

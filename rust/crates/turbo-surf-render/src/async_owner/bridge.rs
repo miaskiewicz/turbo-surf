@@ -94,7 +94,9 @@ impl OwnerAsyncContext {
             .ok_or("Owner getter failed")
     }
 
-    /// The token MUST already resolve to an actual live document via WeakOwners.
+    /// The caller authenticates the token through WeakOwners. Document-task
+    /// entry requires a live owner; the private retained-stream path reuses an
+    /// existing identity without readmitting retired document tasks.
     /// A JS exception is represented by the caller's R (usually Option/Result).
     /// No graph/registry RefCell borrow may be held across this reentrant call.
     pub fn with_owner<'s, R>(

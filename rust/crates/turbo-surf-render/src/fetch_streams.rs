@@ -111,6 +111,9 @@ fn prepare<'s>(
     let context = document
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::type_error("Fetch realm unavailable"))?;
+    if context.get_slot::<super::FrameRetired>().is_some() {
+        return Err(JsErrorBox::type_error("Fetch document has been retired"));
+    }
     let policy = crate::runtime::snapshot_fetch_policy(context);
     let frame = super::request_frame_metadata(scope, context, host);
     if !state.has::<Jobs>() {

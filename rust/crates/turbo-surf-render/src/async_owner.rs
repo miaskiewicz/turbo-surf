@@ -22,6 +22,7 @@ struct State {
     owners: WeakOwners,
     work: PromiseWork,
     failure: Option<String>,
+    retained_streams: HashSet<OwnerId>,
 }
 
 #[derive(Clone)]
@@ -171,6 +172,7 @@ pub(super) fn install(rt: &mut JsRuntime) -> Result<(), String> {
             owners: WeakOwners::new(scope),
             work: PromiseWork::new(scope),
             failure: None,
+            retained_streams: HashSet::new(),
         }))
     };
     let observed = Rc::downgrade(&shared);
@@ -237,6 +239,52 @@ pub(super) fn with_document<'s, T>(
         .map_err(str::to_owned)
 }
 
+// A retained stream is an existing JS algorithm, not renewed document admission.
+fn valid_retained_stream_document(
+    scope: &mut v8::PinScope,
+    context: v8::Local<v8::Context>,
+) -> bool {
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_some()
+        || context.get_slot::<CspHandle>().is_none()
+    {
+        return false;
+    }
+    context
+        .get_slot::<ActiveDocument>()
+        .and_then(|document| document.0.to_local(scope))
+        .is_some_and(|document| document.get_creation_context(scope) == Some(context))
+}
+
+pub(super) fn with_retained_stream<'s, T>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    run: impl FnOnce(&mut v8::PinScope<'s, '_>) -> T,
+) -> Result<T, String> {
+    if !valid_retained_stream_document(scope, context) {
+        return Err("Retained stream document is unavailable".into());
+    }
+    let Some(shared) = tracker(scope) else {
+        return with_document(scope, context, run);
+    };
+    let (token, bridge) = {
+        let mut state = shared.borrow_mut();
+        let registered = if context.get_slot::<FrameRetired>().is_some() {
+            state.owners.retained_stream(scope, context)
+        } else {
+            state.owners.register(scope, context, valid_document)
+        };
+        let (owner, token) = registered.ok_or("Retained stream owner is unavailable")?;
+        state.retained_streams.insert(owner);
+        (v8::Global::new(scope, token), state.bridge.clone())
+    };
+    let token = v8::Local::new(scope, token);
+    bridge
+        .with_owner(scope, token.into(), run)
+        .map_err(str::to_owned)
+}
+
 fn selected_contexts<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &mut State,
@@ -246,6 +294,9 @@ fn selected_contexts<'s>(
         return Err(error.clone());
     }
     state.owners.prune(scope);
+    state
+        .retained_streams
+        .retain(|owner| state.owners.contains(*owner));
     let mut owners = HashSet::new();
     for context in roots {
         let context = v8::Local::new(scope, context);
@@ -267,8 +318,16 @@ fn selected_contexts<'s>(
     for owner in snapshot.owners {
         let context = state
             .owners
-            .context(scope, owner, valid_document)
+            .context(scope, owner, valid_retained_stream_document)
             .ok_or("Native async dependency document is closed")?;
+        if context.get_slot::<FrameRetired>().is_some() {
+            if !state.retained_streams.contains(&owner) {
+                return Err("Native async dependency document is closed".into());
+            }
+            // Its native Promise edges remain classified; no retired timer,
+            // resource, message, history or IDB task enters the selection.
+            continue;
+        }
         contexts.push(v8::Global::new(scope, context));
     }
     Ok((

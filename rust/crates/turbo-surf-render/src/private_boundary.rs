@@ -28,11 +28,9 @@ fn capture_owner(scope: &mut v8::PinScope) -> Result<u32, String> {
         state.put(BoundaryOwners::default());
     }
     let owners = state.borrow_mut::<BoundaryOwners>();
-    owners.contexts.retain(|_, owner| {
-        owner
-            .to_local(scope)
-            .is_some_and(|context| context.get_slot::<FrameRetired>().is_none())
-    });
+    owners
+        .contexts
+        .retain(|_, owner| owner.to_local(scope).is_some());
     owners.next = owners
         .next
         .checked_add(1)
@@ -98,7 +96,29 @@ pub(crate) fn capabilities<'s>(
         .constructor_behavior(v8::ConstructorBehavior::Throw)
         .build(scope)
         .ok_or("Private boundary capability allocation failed")?;
-    for (name, function) in [("rehome", rehome), ("observe", observe), ("invoke", invoke)] {
+    let stream_invoke = v8::Function::builder(stream_invoke_callback)
+        .data(token.into())
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+        .ok_or("Private stream capability allocation failed")?;
+    let stream_observe = v8::Function::builder(stream_observe_callback)
+        .data(token.into())
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+        .ok_or("Private stream capability allocation failed")?;
+    let stream_rehome = v8::Function::builder(stream_rehome_callback)
+        .data(token.into())
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+        .ok_or("Private stream capability allocation failed")?;
+    for (name, function) in [
+        ("rehome", rehome),
+        ("observe", observe),
+        ("invoke", invoke),
+        ("streamInvoke", stream_invoke),
+        ("streamObserve", stream_observe),
+        ("streamRehome", stream_rehome),
+    ] {
         let name = v8::String::new(scope, name).unwrap();
         if result.create_data_property(scope, name.into(), function.into()) != Some(true) {
             return Err("Private boundary capability installation failed".into());
@@ -107,7 +127,7 @@ pub(crate) fn capabilities<'s>(
     Ok(result)
 }
 
-fn owner<'s>(
+fn owner_context<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     data: v8::Local<'s, v8::Value>,
 ) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
@@ -128,6 +148,14 @@ fn owner<'s>(
         .cloned()
         .ok_or_else(unsupported)?;
     let context = weak.to_local(scope).ok_or_else(unsupported)?;
+    Ok(context)
+}
+
+fn owner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    data: v8::Local<'s, v8::Value>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    let context = owner_context(scope, data)?;
     if context.get_slot::<Infrastructure>().is_some()
         || context.get_slot::<FrameRetired>().is_some()
         || context.get_slot::<CspHandle>().is_none()
@@ -137,6 +165,131 @@ fn owner<'s>(
         ));
     }
     Ok(context)
+}
+
+fn stream_owner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    data: v8::Local<'s, v8::Value>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    let context = owner_context(scope, data)?;
+    if context.get_slot::<Infrastructure>().is_some() || context.get_slot::<CspHandle>().is_none() {
+        return Err(unsupported());
+    }
+    let document = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|document| document.0.to_local(scope))
+        .ok_or_else(unsupported)?;
+    if document.get_creation_context(scope) != Some(context) {
+        return Err(unsupported());
+    }
+    Ok(context)
+}
+
+fn stream_frontend(scope: &mut v8::PinScope, function: v8::Local<v8::Function>) -> bool {
+    let Some(context) = function.get_creation_context(scope) else {
+        return false;
+    };
+    if context.get_slot::<Infrastructure>().is_some() || context.get_slot::<CspHandle>().is_none() {
+        return false;
+    }
+    let Some(document) = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|document| document.0.to_local(scope))
+    else {
+        return false;
+    };
+    if document.get_creation_context(scope) != Some(context) {
+        return false;
+    }
+    JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<BoundaryOwners>()
+        .contexts
+        .values()
+        .any(|known| known.to_local(scope) == Some(context))
+}
+
+fn stream_rehome_callback(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let value = v8::Local::new(scope, args.get(0));
+    let data = v8::Local::new(scope, args.data());
+    let context = stream_owner(scope, data);
+    match context.and_then(|context| {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        rehome(scope, value)
+    }) {
+        Ok(value) => result.set(value),
+        Err(error) => fail(scope, error),
+    }
+}
+
+fn stream_invoke_callback(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let data = v8::Local::new(scope, args.data());
+    let thunk_value = v8::Local::new(scope, args.get(0));
+    let context = match stream_owner(scope, data) {
+        Ok(context) => context,
+        Err(error) => return fail(scope, error),
+    };
+    let Ok(thunk) = v8::Local::<v8::Function>::try_from(thunk_value) else {
+        return fail(scope, unsupported());
+    };
+    // A borrowed frontend method can create its private service thunk in a
+    // different guest realm. The receiver's bound token still owns the lease.
+    if !stream_frontend(scope, thunk) {
+        return fail(scope, unsupported());
+    }
+    let invoked = async_owner::with_retained_stream(scope, context, |scope| {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let receiver = v8::undefined(scope);
+        thunk.call(scope, receiver.into(), &[])
+    });
+    match invoked {
+        Ok(Some(value)) => result.set(value),
+        Ok(None) => {}
+        Err(error) => fail(scope, JsErrorBox::type_error(error)),
+    }
+}
+
+fn stream_observe_callback(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _: v8::ReturnValue,
+) {
+    let data = v8::Local::new(scope, args.data());
+    let promise_value = v8::Local::new(scope, args.get(0));
+    let fulfilled_value = v8::Local::new(scope, args.get(1));
+    let rejected_value = v8::Local::new(scope, args.get(2));
+    let observed = stream_owner(scope, data).and_then(|context| {
+        let promise =
+            v8::Local::<v8::Promise>::try_from(promise_value).map_err(|_| unsupported())?;
+        if !infrastructure(scope, promise.into()) {
+            return Err(unsupported());
+        }
+        let fulfilled =
+            v8::Local::<v8::Function>::try_from(fulfilled_value).map_err(|_| unsupported())?;
+        let rejected =
+            v8::Local::<v8::Function>::try_from(rejected_value).map_err(|_| unsupported())?;
+        if !stream_frontend(scope, fulfilled) || !stream_frontend(scope, rejected) {
+            return Err(unsupported());
+        }
+        async_owner::with_retained_stream(scope, context, |scope| {
+            let scope = &mut v8::ContextScope::new(scope, context);
+            promise.then2(scope, fulfilled, rejected)
+        })
+        .map_err(JsErrorBox::type_error)?
+        .ok_or_else(unsupported)?;
+        Ok(())
+    });
+    if let Err(error) = observed {
+        fail(scope, error);
+    }
 }
 
 fn fail(scope: &mut v8::PinScope, error: JsErrorBox) {

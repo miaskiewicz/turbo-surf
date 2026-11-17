@@ -111,6 +111,18 @@ impl WeakOwners {
         .then_some((owner, token))
     }
 
+    pub fn retained_stream<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        context: v8::Local<'s, v8::Context>,
+    ) -> Option<(OwnerId, v8::Local<'s, v8::Object>)> {
+        self.existing(scope, context)
+    }
+
+    pub fn contains(&self, owner: OwnerId) -> bool {
+        self.contexts.contains_key(&owner)
+    }
+
     pub fn resolve<'s>(
         &self,
         scope: &mut v8::PinScope<'s, '_>,

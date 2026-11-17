@@ -122,7 +122,7 @@
     if (!ops.op_infrastructure_active()) return legacyError(error);
     if (!ops.op_infrastructure_origin(error) || backend.authoredHas(error)) return error;
     try {
-      return boundary.rehome(error);
+      return boundary.streamRehome(error);
     } catch {
       try {
         return new Exception(
@@ -171,10 +171,10 @@
     return save(create(constructors[name].prototype), name, raw);
   };
   const boundaryValue = (value) =>
-    ops.op_infrastructure_origin(value) ? boundary.rehome(value) : value;
+    ops.op_infrastructure_origin(value) ? boundary.streamRehome(value) : value;
   const observe = (value, fulfilled, rejected) => {
     if (ops.op_value_is_promise(value) && ops.op_infrastructure_origin(value))
-      return boundary.observe(value, fulfilled, rejected);
+      return boundary.streamObserve(value, fulfilled, rejected);
     return apply(then, resolvePromise(value), [fulfilled, rejected]);
   };
   const promise = (value, convert = boundaryValue) =>
@@ -327,7 +327,7 @@
           if (typeof callback !== "function")
             throw new TypeErrorType("Underlying callback must be a function");
           return function (...args) {
-            return boundary.invoke(() => {
+            return boundary.streamInvoke(() => {
               const index =
                 (kind === "WritableStream" && member === "write") ||
                 (kind === "TransformStream" && member === "transform")
@@ -398,7 +398,7 @@
     result,
     localError,
     wrap,
-    invoke: boundary.invoke,
+    invoke: boundary.streamInvoke,
     active: () => ops.op_window_active(realmWindow),
   };
   const names = [
@@ -436,7 +436,7 @@
       function (...args) {
         if (!publicConstructor) throw new TypeErrorType("Illegal constructor");
         try {
-          return boundary.invoke(() => {
+          return boundary.streamInvoke(() => {
             if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
               args[0] = sourceAdapter(args[0], name);
             if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))

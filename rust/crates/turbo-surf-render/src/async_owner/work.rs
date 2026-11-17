@@ -1,5 +1,6 @@
 //! Native Promise work selected through authenticated weak document leases.
 use deno_core::{v8, AsyncOpEvent, AsyncOpObservation};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -19,11 +20,43 @@ pub enum PromiseTurn {
     Resolve,
 }
 
+#[derive(Clone, Copy)]
+enum TerminalPromiseState {
+    Fulfilled,
+    Rejected,
+}
+
+impl TerminalPromiseState {
+    fn observed(state: &v8::PromiseState) -> Option<Self> {
+        match state {
+            v8::PromiseState::Pending => None,
+            v8::PromiseState::Fulfilled => Some(Self::Fulfilled),
+            v8::PromiseState::Rejected => Some(Self::Rejected),
+        }
+    }
+
+    fn native(self) -> v8::PromiseState {
+        match self {
+            Self::Fulfilled => v8::PromiseState::Fulfilled,
+            Self::Rejected => v8::PromiseState::Rejected,
+        }
+    }
+}
+
 struct Node {
     promise: v8::Weak<v8::Promise>,
     owner: Option<OwnerId>,
     parent: Option<u32>,
     reacted: bool,
+    terminal: Cell<Option<TerminalPromiseState>>,
+}
+
+impl Node {
+    fn observe_terminal(&self, state: &v8::PromiseState) {
+        if let Some(terminal) = TerminalPromiseState::observed(state) {
+            self.terminal.set(Some(terminal));
+        }
+    }
 }
 
 struct NativeOp {
@@ -96,12 +129,14 @@ impl PromiseWork {
                 self.sequence
             }
         };
-        self.nodes.entry(id).or_insert_with(|| Node {
+        let node = self.nodes.entry(id).or_insert_with(|| Node {
             promise: v8::Weak::new(scope, promise),
             owner: None,
             parent: None,
             reacted: false,
+            terminal: Cell::new(None),
         });
+        node.observe_terminal(&promise.state());
         Some(id)
     }
 
@@ -189,10 +224,15 @@ impl PromiseWork {
     }
 
     fn state(&self, scope: &mut v8::PinScope, node: u32) -> Option<v8::PromiseState> {
-        self.nodes
-            .get(&node)
-            .and_then(|node| node.promise.to_local(scope))
-            .map(|promise| promise.state())
+        let node = self.nodes.get(&node)?;
+        if let Some(promise) = node.promise.to_local(scope) {
+            let state = promise.state();
+            node.observe_terminal(&state);
+            return Some(state);
+        }
+        // Queued reactions may outlive their collected parent. Only an actual
+        // native terminal observation survives; pending/unseen parents stay unknown.
+        node.terminal.get().map(TerminalPromiseState::native)
     }
 
     fn pending(&self, scope: &mut v8::PinScope, node: u32) -> bool {

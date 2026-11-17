@@ -14305,7 +14305,9 @@ __G.domSig = (() => {
           const init = __stringify({__proto__:null,cancel_id:cancelId,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(__document):undefined});
           const request = record.navigationRequest; record.navigationRequest = "";
           let response;
-          try { response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init); }
+          // The iframe request belongs to this captured parent document, not the
+          // private realm that owns the native op wrapper.
+          try { response = await __boundary.invoke(() => ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init)); }
           finally { if (cancelId) ops.op_fetch_release(cancelId); }
           if (request && ops.op_form_navigation_blocked(request) && record.epoch === epoch) { record.loaded = true; return; }
           if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }

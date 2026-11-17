@@ -321,25 +321,66 @@ test(
 );
 
 test(
-  "unimplemented compression names expose no usable constructor",
+  "compression constructors roundtrip bytes without exposing the private realm",
   { timeout: 10000, skip: !newPage },
   async () => {
     await withBoundaryPage(async (page) => {
-      const actual = await page.evaluate(() => {
-        const unavailable = (constructor) => {
+      const actual = await page.evaluate(async () => {
+        const owned = (value) =>
+          value.constructor.constructor("return globalThis")() === globalThis;
+        const constructors = [CompressionStream, DecompressionStream];
+        const streams = constructors.map((constructor) => Reflect.construct(constructor, ["gzip"]));
+        const brands = streams.map(
+          (stream, index) =>
+            stream instanceof constructors[index] &&
+            stream.readable instanceof ReadableStream &&
+            stream.writable instanceof WritableStream &&
+            owned(stream) &&
+            owned(stream.readable) &&
+            owned(stream.writable),
+        );
+        const formatErrors = constructors.map((constructor) => {
           try {
-            Reflect.construct(constructor, ["gzip"]);
+            Reflect.construct(constructor, ["unsupported"]);
             return false;
           } catch (error) {
-            return error instanceof TypeError && /not a constructor/.test(error.message);
+            return error instanceof TypeError && owned(error);
           }
-        };
+        });
+        const receiverErrors = constructors.map((constructor) => {
+          try {
+            Object.getOwnPropertyDescriptor(constructor.prototype, "readable").get.call({});
+            return false;
+          } catch (error) {
+            return error instanceof TypeError && owned(error);
+          }
+        });
+        const decoded = new Blob([new Uint8Array([4, 5, 6])])
+          .stream()
+          .pipeThrough(streams[0])
+          .pipeThrough(streams[1]);
+        const pending = new Response(decoded).arrayBuffer();
+        const promiseOwned = pending instanceof Promise && owned(pending);
+        const bytes = await pending;
         return {
-          compression: unavailable(globalThis.CompressionStream),
-          decompression: unavailable(globalThis.DecompressionStream),
+          brands,
+          formatErrors,
+          receiverErrors,
+          promiseOwned,
+          bufferOwned: bytes instanceof ArrayBuffer && owned(bytes),
+          bytes: Array.from(new Uint8Array(bytes)),
+          privateCore: typeof Deno,
         };
       });
-      assert.deepEqual(actual, { compression: true, decompression: true });
+      assert.deepEqual(actual, {
+        brands: [true, true],
+        formatErrors: [true, true],
+        receiverErrors: [true, true],
+        promiseOwned: true,
+        bufferOwned: true,
+        bytes: [4, 5, 6],
+        privateCore: "undefined",
+      });
     });
   },
 );

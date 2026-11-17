@@ -361,9 +361,9 @@ impl Session {
 
     // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
     // inputs whose IDL `indeterminate` flag is `true`. Best-effort: a parse / JSON
-    // failure in the one-shot probe leaves the list empty (no IDL overlay). The probe
-    // itself cannot throw, so `eval_json_expression` only errors on execution-budget
-    // termination the host side couldn't recover from.
+    // failure in the one-shot probe leaves the list empty (no IDL overlay). Guest
+    // replacement of a query helper or interrupted execution can reject the probe;
+    // neither should invent IDL state for the static screenshot.
     async fn snapshot_indeterminate_inputs(
         page: &mut turbo_surf_render::PageSession,
     ) -> Vec<usize> {
@@ -856,35 +856,6 @@ impl Session {
     // to elements + their box centers) or explicit coords. `steps` is inline, or a saved `routine`
     // (e.g. "google-serp") with `params` substituted. This is the general "string interactions
     // together on a loaded page" capability; the google flow is just one saved routine.
-    // Native form commits are handled before this lookup. Only follow a JS
-    // location change; serializing a form would bypass canceled/invalid/CSP-blocked
-    // submission and could replay a POST as an unrelated GET.
-    fn interaction_nav_target(&self, base: &str) -> Option<String> {
-        let tree = self.tree.as_ref()?;
-        let body = *tree.query_selector_all("body").first()?;
-        let attr = |k: &str| {
-            tree.get_attribute(body, k)
-                .map(|s| s.to_string())
-                .filter(|s| !s.is_empty())
-        };
-        let norm = |u: &str| {
-            u.trim_end_matches('/')
-                .split('#')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        };
-        let base_n = norm(base);
-        let is_nav =
-            |u: &str| (u.starts_with("http://") || u.starts_with("https://")) && norm(u) != base_n;
-        if let Some(loc) = attr("data-hi-location") {
-            if is_nav(&loc) {
-                return Some(loc);
-            }
-        }
-        None
-    }
-
     async fn human_interact(&mut self, args: &Value) -> Result<Value, String> {
         let (steps, routine_opts) = resolve_interaction_steps(args)?;
         // Opts: explicit args win over the routine's defaults.
@@ -924,19 +895,8 @@ impl Session {
                 "navigated": true, "navigated_to": self.url.clone(),
             }));
         }
-        // FOLLOW a navigation the interaction triggered (fill-a-form-then-submit only yields a
-        // result page if someone actually loads the target). Fetch it natively THROUGH the session
-        // — the jar carries the cookies the page just set (e.g. a freshly-minted session cookie),
-        // with a Referer of the originating page and a coherent sec-fetch-site, exactly as a real
-        // in-page submit would. `fetch_into` handles consent/challenge + re-renders per the mode.
-        if let Some(target) = self.interaction_nav_target(&base) {
-            let followed = self.fetch_into(&target, None, None).await;
-            followed?;
-            return Ok(json!({
-                "ok": true, "completed": completed, "steps": n_steps,
-                "navigated": true, "navigated_to": self.url.clone(),
-            }));
-        }
+        // Only native navigation admission can follow a request. A DOM marker is
+        // authored content, even when the interaction driver wrote it originally.
         Ok(json!({ "ok": true, "completed": completed, "steps": n_steps, "navigated": false }))
     }
 
@@ -3970,6 +3930,113 @@ mod tests {
         let failure = session.render_script_with_completion(&rendered, &source,
             "new Promise((_,reject)=>setTimeout(()=>reject(new Error('human completion failed')),10))", true).await.unwrap_err();
         assert!(failure.contains("human completion failed"), "{failure}");
+    }
+
+    #[tokio::test]
+    async fn coverage_indeterminate_probe_survives_an_authored_selector_error() {
+        let mut page = turbo_surf_render::PageSession::open(
+            "<input id=control type=checkbox>",
+            "https://example.test/",
+            "",
+            "",
+            5000,
+        )
+        .await
+        .unwrap();
+        page.eval("document.querySelector('#control').indeterminate=true;void 0")
+            .await
+            .unwrap();
+        assert_eq!(
+            Session::snapshot_indeterminate_inputs(&mut page).await,
+            vec![0]
+        );
+        page.eval(
+            "document.querySelectorAll=()=>{throw new Error('authored selector failure')};void 0",
+        )
+        .await
+        .unwrap();
+        assert!(Session::snapshot_indeterminate_inputs(&mut page)
+            .await
+            .is_empty());
+        page.eval("delete document.querySelectorAll;void 0")
+            .await
+            .unwrap();
+        assert_eq!(
+            Session::snapshot_indeterminate_inputs(&mut page).await,
+            vec![0]
+        );
+        page.close();
+    }
+
+    #[tokio::test]
+    async fn coverage_human_interaction_ignores_a_forged_navigation_hint() {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/source", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let wire = requests.clone();
+        let server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let wire = wire.clone();
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                        let mut bytes = [0; 1024];
+                        let count = socket.read(&mut bytes).await.unwrap();
+                        if count == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&bytes[..count]);
+                    }
+                    wire.lock()
+                        .unwrap()
+                        .push(String::from_utf8_lossy(&request).into_owned());
+                    let body = "<body id=forged>not an admitted navigation</body>";
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        let mut session = Session::new();
+        session.load(
+            &base,
+            r#"<body id=source><script>
+            const nativeSet = Element.prototype.setAttribute;
+            document.body.setAttribute = function(name, value) {
+                return nativeSet.call(this, name, name === 'data-hi-location'
+                    ? new URL('/forged', location.href).href : value);
+            };
+            document.cookie='script=kept; Path=/';
+        </script></body>"#,
+        );
+        session.jar.add("seed", "kept", "127.0.0.1", "/", None);
+        let result = session
+            .human_interact(&json!({
+                "steps": [{"wait": 0}], "startDelay": 0, "startJitter": 0
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            result["navigated"], false,
+            "a mutable DOM hint is not navigation admission: {result}"
+        );
+        assert_eq!(session.last_render_navigation_count, 0);
+        assert_eq!(session.url, base);
+        assert!(session.requests.is_empty());
+        assert!(session.back.is_empty());
+        assert_eq!(session.dom_history.len(), 1);
+        assert!(session.tree().unwrap().query_selector("#source").is_some());
+        let cookies = session.jar.cookie_header(&base, 0.0);
+        assert!(
+            cookies.contains("seed=kept") && cookies.contains("script=kept"),
+            "{cookies}"
+        );
+        assert!(
+            requests.lock().unwrap().is_empty(),
+            "unadmitted destination was fetched"
+        );
+        server.abort();
     }
 
     // human_interact FOLLOWS the navigation a form-submit interaction triggers: filling the

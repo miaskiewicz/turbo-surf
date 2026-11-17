@@ -141,6 +141,12 @@ async fn drain_selected(
         real,
     };
     let storage_waiter = storage_events::waiter(&rt.op_state().borrow());
+    let emulation_changed = rt
+        .op_state()
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .with_emulation(|options| options.changed.clone());
+    let mut emulation_waiter = Box::pin(emulation_changed.clone().notified_owned());
     let mut wake = None;
     checkpoint_window_timer(rt)?;
     loop {
@@ -155,6 +161,11 @@ async fn drain_selected(
             continue;
         }
         let turn = std::future::poll_fn(|cx| {
+            context_geolocation::register_change_waiter(
+                &mut emulation_waiter,
+                &emulation_changed,
+                cx,
+            );
             let polled = rt.poll_event_loop(cx, deno_core::PollEventLoopOptions::default());
             if let std::task::Poll::Ready(Err(error)) = polled {
                 return std::task::Poll::Ready(Err(error.to_string()));

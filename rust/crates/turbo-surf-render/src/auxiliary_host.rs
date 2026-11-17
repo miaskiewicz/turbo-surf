@@ -260,14 +260,7 @@ fn navigate<'s>(
     let Some(text) = value.to_string(scope) else {
         return false;
     };
-    let base = source
-        .get_slot::<FrameScriptPolicy>()
-        .map(|policy| policy.base.clone())
-        .or_else(|| {
-            source
-                .get_slot::<FrameDocumentUrl>()
-                .map(|url| url.0.clone())
-        });
+    let base = window_proxy::navigation_base(scope, source);
     let Some(url) = base
         .and_then(|base| ModuleSpecifier::parse(&base).ok())
         .and_then(|base| base.join(&text.to_rust_string_lossy(scope)).ok())

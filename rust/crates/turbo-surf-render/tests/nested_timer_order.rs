@@ -23,3 +23,38 @@ async fn nested_timers_queue_behind_due_siblings_in_chrome_order() {
     let log = page.eval_json_expression("log").await.unwrap();
     assert_eq!(log, CHROME_156);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn nested_clamp_uses_task_deadlines_after_a_host_pause() {
+    let mut page = PageSession::open("<body>", "https://order.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let root = page.auxiliary_root_id().unwrap();
+    page.read_target_engine(root, &format!("{SCRIPT};return 'armed'"))
+        .unwrap();
+    let mut reached = false;
+    for _ in 0..32 {
+        assert_eq!(
+            page.read_target_engine(root, "return __tsNs.runTimers(1)")
+                .unwrap(),
+            "1"
+        );
+        reached = page
+            .read_target_engine(root, "return log[log.length-1]==='n6'")
+            .unwrap()
+            == "true";
+        if reached {
+            break;
+        }
+    }
+    assert!(
+        reached,
+        "the controlled pause must precede the first clamped timer"
+    );
+    // Host work between virtual tasks must not become time spent inside the
+    // agent: n7's nested deadline remains before the already-queued p30.
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    page.read_target_engine(root, "return __tsNs.runTimers(200)")
+        .unwrap();
+    assert_eq!(page.eval_json_expression("log").await.unwrap(), CHROME_156);
+}

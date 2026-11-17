@@ -10608,10 +10608,10 @@ let __taskEpoch = 0;
 // work (microtasks / the React scheduler) still drains promptly (it never advances the
 // clock); only delayed polls are time-gated.
 const __timerNow = () => ops.op_timer_clock();
-// The clock an unclamped timer queued by a timer task (or its microtasks) counts its
+// The clock a timer queued by a timer task (or its microtasks) counts its
 // delay from: that task's own due time, not the host's elapsed real time, so a loaded host cannot reorder a task queued by a
-// task behind a rendering frame queued earlier (turbo-surf#101). The nesting clamp, timers
-// outside timer tasks and real-time window timers use the live clock.
+// task behind a rendering frame queued earlier (turbo-surf#101). This also applies to
+// the nesting clamp; timers outside tasks and real-time timers use the live clock.
 let __taskBase = null, __taskBaseEpoch = -1;
 // Only while the host runs a timer task (and its microtask checkpoint) in this realm; a
 // rendering frame's own tasks keep the live clock.
@@ -10641,7 +10641,7 @@ const __timerGet = Map.prototype.get.bind(__activeTimers), __timerSet = Map.prot
 // overtakes a zero-delay task queued before it.
 let __lastTaskDue = -Infinity;
 const __timerDue = (nesting, delay, rendering) => {
-  if (nesting > 6) return __timerNow() + __timerMax(4, delay);
+  if (nesting > 6) return __taskClock() + __timerMax(4, delay);
   const due = __taskClock() + delay;
   if (delay !== 0 || rendering) return due;
   return __lastTaskDue = __timerMax(due, __lastTaskDue);

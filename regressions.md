@@ -630,3 +630,22 @@ The private additive V23 inventory preserves all prior required cases and adds a
 Validated post-discovery repairs have been additively integrated (the original private proof commits remain referenced here): geolocation `c8fea5a1` restores only the legacy host-change notification subscription (exact original counter-failure baseline, 21 unique ON controls and strict checks pass); lifecycle `f8e307fe` enters the actual document lease for native lifecycle dispatch (both exact UNKNOWN failures and 25 controls pass); layout `bd3c7c40` uses two bounded post-load turns without changing 5000ms budgets, animation policy or certificates (both failures and all 25 controls pass). Compression correction `e2b48c17` changes only the stale test contract: the stronger case and full seven-case privacy file pass on the unchanged native addon. Actor repair `b61d0782` passes both unchanged original read controls plus twelve adjacent controls and strict checks. Abort reason repair `34303d66` passes seventeen original/new identity and lifetime controls; independent reason-conversion and retired-owner-guard inverses reproduce their exact original and lifetime failures, and exact restoration passes. Preserve all historical failures above; isolated success is not final integrated full-suite credit.
 
 Current integrated fix mapping: abort reason `34303d66`, geolocation `0bd2c1a8`, layout `2aa46d2f`, lifecycle `3bc15108`, actor reads `b61d0782`, compression test contract `3aa9ab57`. All nine recorded full-suite failures have reviewed repairs and focused proofs. A new fresh integrated build must execute all nine failure selectors (with the explicit compression rename) and every expanded required regression before the full Rust/JS suites are rerun. No prior-source proof substitutes for this run; coverage remains last.
+
+
+## Nested timer ordering discovered by the full 145d suite
+
+## Full workspace discovery: nested timer tail order
+
+- Source: `145d15b2596dfdbf688974457d432dc7f4a6b27e` (four public DOM pins `06c6f204`, registry V8 `150.4.2`, Deno `.4`).
+- Case: `turbo-surf-render::nested_timer_order::nested_timers_queue_behind_due_siblings_in_chrome_order`.
+- Full run: session `47235`; target finished **0 passed / 1 failed / 0 ignored**, 3.89 s.
+- Assertion: `rust/crates/turbo-surf-render/tests/nested_timer_order.rs:24`.
+- Exact discrepancy: actual tail `n7,p30,n8`; unchanged pinned control expects `n7,n8,p30`. All earlier events match.
+- Evidence: `.recovery/final-fixed-next/full-gates/failure-nested_timer_order.log`; full raw log `rust-workspace.log` in the same directory.
+- Immutable baseline: `.recovery/final-fixed-next/artifacts/full145d-failed__nested_timer_order`, SHA-256 `2c50a2fa53ec9d8cd749785eab416656436058b3e5bab86f538f7f542367a217`; strict signature and independent CoW provenance in `failed-nested-timer-artifact.json`.
+- Status: **OPEN**, root cause unproven; isolated source owner `locator_count`. No golden, ordering, timeout, nesting-clamp or budget waiver. No fix or passing future-graph proof claimed.
+- Inventory: V26 preserves all prior 947 IDs and adds this actual failure: **948 eligible / 950 audit / 161 jobs**, independent additive source GO `e77aab64`.
+- The prior 947-case regression PASS receipt remains sealed and is not rewritten. Current full run continues without fail-fast; coverage remains blocked.
+
+
+Validated repair: `22bf0c1e` anchors clamped nested virtual timers to the running task deadline. The unchanged original Chrome order and deterministic host-pause control pass, together with 25 timer adjacency controls; the exact clamp-only baseline reproduces the same `n7,p30,n8` tail, and restored ON passes. RealTime semantics, nesting threshold, 4 ms clamp, FIFO order, and the original 5000 ms budget remain unchanged. Independent semantic review accepted the repair. The full 145d Rust run completed with 2009 pass / 1 fail / 7 explicit no-pass ignores; full JS completed with 1057 pass / 0 fail / 3 intentional no-pass skips. Those receipts remain sealed. Fresh integrated execution of all 965 required cases and both full suites is pending; prior focused proofs do not count as that execution.

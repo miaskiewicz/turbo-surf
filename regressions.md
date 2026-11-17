@@ -1,10 +1,29 @@
 # Release regressions
 
-Target: `release/v0.8.4`. Updated 2026-11-15.
+Target: `release/v0.8.4`. Updated 2026-11-17.
 
 Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component proof and their fixes are merged.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
-All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. No tag or publication has been authorized.
+All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. Required supporting dependency publication was explicitly authorized and completed; no Surf release tag is authorized.
+
+## Current integrated repair state
+
+All failures observed in the frozen `c953e15c` discovery now have reviewed, integrated component repairs. This is **not** a claim that the new combined source passes the regression set. Preserve the failed discovery receipts and rerun every required case on the next single public-graph build before running full suites or coverage.
+
+| Observed family | Integrated repair and focused evidence |
+|---|---|
+| Frame rollback fault injection | `0336d449`: actual document fault hooks; unchanged two tests pass, disabling the fix reproduces both missing receipts, restoration passes. |
+| Complete default CSP resource reports | `d0c36469`: removes obsolete filtering and compares all 19 unchanged Chrome rows; original and full-oracle sibling pass. |
+| Four layout recapture crashes | `962152c0`: test-only mutation hooks enter their captured document; all four unchanged recapture controls pass. |
+| Navigation timeout provenance | `f3de2a22`: authentic owner/deadline errors retain navigation meaning; original sibling-popup and deadline/peer controls pass. |
+| Bounded quiescence and signature errors | `a2f3896d`: fresh original three plus seven ownership controls pass; single-seam OFF stalls, exact restoration passes. The earlier stale-library candidate run remains invalid evidence. |
+| Retained streams and realm collection | `208a139e`: original retirement oracle, genuine completion/GC, borrowed realm, task-denial and transport controls pass (17 distinct cases); specific OFF fails and restoration passes. |
+| Collected terminal promise parents and iframe fetch ownership | `85237e27`, `f7c774f4`: original named-window/cookie controls and five adjacent controls pass; each independent inverse reproduces its specific unknown-ownership error. Pending/unseen parents still fail closed. |
+| Initial module host-reply handoff | `700f12e1`: 34 controls pass, including original fulfill/route.fetch and unrelated-peer isolation; disabling only handoff reproduces the original navigation timeout. |
+| Storage delivery, FIFO and timer interleaving | `35c3b88d`: 51 same-candidate controls pass, including original partition, storage events, JS peer wakeups and unchanged 200ms watchdog. Essential delivery OFF reproduces both JS failures; restoration passes. Waiter-only OFF was inconclusive and is not claimed as causal proof. |
+| Child external-classic fetch ownership | `bd068102`: original classic and adjacent cases plus native parent/child authority negatives pass; raw-fetch-only OFF reproduces the original unknown-ownership error, exact restoration passes. |
+
+The public dependency graph uses native `turbo-dom-v8` 150.4.2 and the reviewed Deno `.4` family. Exact canonical archive checksums, source/license audits and actual public-registry consumers are retained. The next all-known inventory is 843 eligible obligations across 141 jobs (845 audit IDs retain two current-profile-ineligible entries without PASS credit). Required sequence: **all-known regressions 100% green → independent combined review → full Rust and JS suites green → coverage**. Any new failure is appended and fixed; no required failure may become a skip.
 
 ## Original cases
 

@@ -57,16 +57,17 @@ fn queued(rt: &mut JsRuntime, selection: &async_owner::Selection) -> Result<bool
             .any(|job| selected(&job.context, &selection.contexts)))
 }
 
-fn document_pending(
+fn document_predicate(
     rt: &mut JsRuntime,
     contexts: &[v8::Global<v8::Context>],
+    name: &str,
 ) -> Result<bool, String> {
     deno_core::scope!(scope, rt);
     for context in contexts {
         let context = v8::Local::new(scope, context);
         let scope = &mut v8::ContextScope::new(scope, context);
         let pending = async_owner::with_document(scope, context, |scope| {
-            call_frame_helper(scope, "pendingWork", &[])
+            call_frame_helper(scope, name, &[])
                 .map(|value| value.to_rust_string_lossy(scope) == "1")
         })?
         .ok_or("Selected async document work predicate is unavailable")?;
@@ -204,7 +205,10 @@ fn poll_selected_turn(
     let busy = selected_busy(&selection);
     let host_pending =
         options.completion.is_none() && crate::shim_bindings::pending_in(rt, &selection.contexts);
-    let allow_advance = !options.real && !busy && !host_pending;
+    // Only selected documents can delay their virtual Window tasks. A peer
+    // system timer is not authority to hold this collector open.
+    let native_timeouts = document_predicate(rt, &selection.contexts, "pendingNativeTimeouts")?;
+    let allow_advance = !options.real && !busy && !host_pending && !native_timeouts;
     let timer = if matches!(options.goal, Goal::Quiescence { timers: false }) {
         WindowTimerTurn::default()
     } else {
@@ -235,7 +239,7 @@ fn finish_selected_turn(
     if queued(rt, &selection)? {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
-    let pending = document_pending(rt, &selection.contexts)?;
+    let pending = document_predicate(rt, &selection.contexts, "pendingWork")?;
     let busy = selected_busy(&selection);
     let host_pending =
         options.completion.is_none() && crate::shim_bindings::pending_in(rt, &selection.contexts);

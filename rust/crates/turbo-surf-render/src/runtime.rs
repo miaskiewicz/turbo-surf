@@ -11331,6 +11331,7 @@ const __resourceDiagnosticError=error=>__hostPolicyFailure(error)?"Network origi
   __requestInit = value => {const item=requests.get(value);return item?{...item,body:item.body.raw,bodyIsStream:item.body.sourceStream}:value;};
 }
 __web = __webFactory(__core, __G.makeNativeFunction, __boundary);
+__G.pendingNativeTimeouts = () => __web.hasPendingTimeouts() ? "1" : "0";
 const __FetchReadable=ReadableStream;
 const __FetchPromise=Promise,__FetchPromiseRace=Promise.race.bind(Promise),__FetchThen=Function.prototype.call.bind(Promise.prototype.then);
 const __ReadableGetReader=ReadableStream.prototype.getReader,__ReadableTee=ReadableStream.prototype.tee;

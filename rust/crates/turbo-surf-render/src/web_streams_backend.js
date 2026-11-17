@@ -23,7 +23,8 @@
   // Pending timeout signals belong to their document heap, never a native root.
   const pendingTimeouts = new Set(),
     retainTimeout = Set.prototype.add.bind(pendingTimeouts),
-    releaseTimeout = Set.prototype.delete.bind(pendingTimeouts);
+    releaseTimeout = Set.prototype.delete.bind(pendingTimeouts),
+    timeoutCount = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
   const rawOwner = ops.Crypto;
   let shared = get(rawOwner);
   if (!shared) {
@@ -71,6 +72,26 @@
       return listener;
     };
     backend.cleanup = (raw, listener) => apply(rawRemove, raw, ["abort", listener]);
+    // Keep the timer's retained source and forwarding closure in the main realm.
+    // Guest frontends are reached only through the existing native weak bridge.
+    backend.timeout = (millis) => {
+      const controller = new abort.AbortController();
+      const timer = apply(abort.AbortSignal.timeout, abort.AbortSignal, [millis]);
+      apply(rawAdd, timer, [
+        "abort",
+        () => {
+          backend.hostAbort = true;
+          try {
+            apply(backend.controller.abort.value, controller, [
+              new exceptions.DOMException("signal timed out", "TimeoutError"),
+            ]);
+          } finally {
+            backend.hostAbort = false;
+          }
+        },
+      ]);
+      return apply(backend.controller.signal.get, controller, []);
+    };
     const frontMap = new WeakMap(),
       frontGet = WeakMap.prototype.get.bind(frontMap),
       frontSet = WeakMap.prototype.set.bind(frontMap),
@@ -703,27 +724,7 @@
               millis = trunc(millis);
               if (millis < 0 || millis > 9007199254740991)
                 throw fail("Value is outside the 'unsigned long long' value range.");
-              // The official unrefed timer drives a signal that carries Blink's reason.
-              const controller = new backend.abort.AbortController();
-              const timer = apply(backend.abort.AbortSignal.timeout, backend.abort.AbortSignal, [
-                millis,
-              ]);
-              apply(backend.signal.addEventListener.value, timer, [
-                "abort",
-                () => {
-                  // Blink signals the timeout from a task: each signal (the
-                  // source, then each dependent) dispatches from the host.
-                  backend.hostAbort = true;
-                  try {
-                    apply(backend.controller.abort.value, controller, [
-                      new Exception("signal timed out", "TimeoutError"),
-                    ]);
-                  } finally {
-                    backend.hostAbort = false;
-                  }
-                },
-              ]);
-              const front = signalFront(apply(backend.controller.signal.get, controller, []));
+              const front = signalFront(backend.timeout(millis));
               retainTimeout(front);
               return front;
             }
@@ -799,6 +800,9 @@
   define(globalThis, "AbortSignal", { value: Signal, writable: true, configurable: true });
   define(globalThis, "AbortController", { value: Controller, writable: true, configurable: true });
   return {
+    hasPendingTimeouts() {
+      return apply(timeoutCount, pendingTimeouts, []) > 0;
+    },
     transferBackend() {
       const streams = backend.streams;
       const transformDescriptors = descriptors(streams.TransformStream.prototype);

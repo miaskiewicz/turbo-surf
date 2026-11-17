@@ -1098,3 +1098,7 @@ mod fragment_tests {
         assert!(!set_fragment_component(&mut url, "#"));
     }
 }
+
+#[cfg(test)]
+#[path = "frame_location_factory_tests.rs"]
+mod factory_tests;

@@ -1449,4 +1449,407 @@ mod tests {
         assert!(!initialization_is_terminal(true, false));
         assert!(!initialization_is_terminal(false, true));
     }
+
+    async fn attempt_page() -> PageSession {
+        PageSession::open(
+            "<body><iframe id=first></iframe><iframe id=second></iframe></body>",
+            "https://deadline.test/",
+            "",
+            "",
+            5000,
+        )
+        .await
+        .unwrap()
+    }
+
+    fn host(page: &mut PageSession, target: u64, id: &str) -> v8::Global<v8::Value> {
+        auxiliary_pages::execute_target(
+            &mut page.rt,
+            AuxiliaryContextId(target),
+            &format!("document.getElementById('{id}')"),
+            false,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn frame_attempt_tokens_are_host_bound_superseded_and_terminal() {
+        let mut page = attempt_page().await;
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        let first = host(&mut page, target, "first");
+        let second = host(&mut page, target, "second");
+        deno_core::scope!(scope, &mut page.rt);
+        let parent = auxiliary_pages::context(scope, AuxiliaryContextId(target)).unwrap();
+        let scope = &mut v8::ContextScope::new(scope, parent);
+        let first = v8::Local::new(scope, first).to_object(scope).unwrap();
+        let second = v8::Local::new(scope, second).to_object(scope).unwrap();
+        let old = new_frame_attempt(scope, parent, first).unwrap();
+        assert!(frame_attempt_active(scope, parent, first, old).unwrap());
+        assert_eq!(
+            frame_attempt_active(scope, parent, second, old).unwrap_err(),
+            "Frame load attempt ownership changed"
+        );
+        let forged = v8::Object::new(scope);
+        assert_eq!(
+            check_frame_attempt(scope, parent, first, forged).unwrap_err(),
+            "Unknown frame load attempt"
+        );
+        assert_eq!(
+            new_frame_attempt(scope, parent, forged).unwrap_err(),
+            "Frame attempt requires a native host"
+        );
+        let current = new_frame_attempt(scope, parent, first).unwrap();
+        assert!(!frame_attempt_active(scope, parent, first, old).unwrap());
+        assert_eq!(
+            complete_frame_attempt(scope, parent, first, old).unwrap_err(),
+            "Frame load attempt is cancelled"
+        );
+        complete_frame_attempt(scope, parent, first, current).unwrap();
+        assert!(frame_attempt_active(scope, parent, first, current).unwrap());
+        assert!(frame_execution_deadline(scope, parent, first, current)
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn source_goal_completion_requires_the_exact_navigation_lease() {
+        let mut page = attempt_page().await;
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        let deadline =
+            DriverDeadline::start(&mut page.rt, 5000, 71, target, ExecutionGoal::Complete);
+        {
+            deno_core::scope!(scope, &mut page.rt);
+            let root = auxiliary_pages::context(scope, AuxiliaryContextId(target)).unwrap();
+            capture_source_lease(scope, root, target, 71).unwrap();
+            assert_eq!(
+                capture_source_lease(scope, root, target + 1, 71).unwrap_err(),
+                "Navigation source target ownership changed"
+            );
+        }
+        finish_source_goal(&mut page.rt, target, 72, ExecutionGoal::Complete);
+        finish_source_goal(&mut page.rt, target, 71, ExecutionGoal::Interactive);
+        assert!(!deadline
+            .shared
+            .borrow()
+            .borrow::<Active>()
+            .settled
+            .load(Ordering::Acquire));
+        finish_source_goal(&mut page.rt, target, 71, ExecutionGoal::Complete);
+        assert!(deadline
+            .shared
+            .borrow()
+            .borrow::<Active>()
+            .settled
+            .load(Ordering::Acquire));
+        assert!(!expired(&page.rt));
+        drop(deadline);
+        assert!(!expired(&page.rt));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn frame_setup_budget_distinguishes_commit_from_load_and_foreign_generation() {
+        let mut page = attempt_page().await;
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        for goal in [ExecutionGoal::Commit, ExecutionGoal::Complete] {
+            let deadline = DriverDeadline::start(&mut page.rt, 5000, 81, target, goal);
+            let setup = TrustedSetup::enter(&mut page.rt, target, 81).unwrap();
+            {
+                deno_core::scope!(scope, &mut page.rt);
+                let root = auxiliary_pages::context(scope, AuxiliaryContextId(target)).unwrap();
+                let budget = attempt_budget(scope, root);
+                assert!(budget.expiry.is_some());
+                assert_eq!(budget.clock.is_some(), goal == ExecutionGoal::Complete);
+                assert!(Arc::ptr_eq(
+                    budget.settled.as_ref().unwrap(),
+                    &deadline.shared.borrow().borrow::<Active>().settled
+                ));
+            }
+            setup.finish().unwrap();
+            drop(deadline);
+        }
+        let deadline =
+            DriverDeadline::start(&mut page.rt, 5000, 91, target, ExecutionGoal::Complete);
+        let setup = TrustedSetup::enter(&mut page.rt, target, 92).unwrap();
+        {
+            deno_core::scope!(scope, &mut page.rt);
+            let root = auxiliary_pages::context(scope, AuxiliaryContextId(target)).unwrap();
+            let budget = attempt_budget(scope, root);
+            assert!(budget.clock.is_none());
+            assert!(budget.expiry.is_none());
+        }
+        setup.finish().unwrap();
+        drop(deadline);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn deferred_initialization_tracks_the_actual_child_once_and_finishes_it() {
+        let mut page = attempt_page().await;
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        let child_document = auxiliary_pages::execute_target(
+            &mut page.rt,
+            AuxiliaryContextId(target),
+            "document.getElementById('first').contentDocument",
+            false,
+        )
+        .unwrap();
+        let deadline =
+            DriverDeadline::start(&mut page.rt, 5000, 101, target, ExecutionGoal::Complete);
+        let setup = TrustedSetup::enter(&mut page.rt, target, 101).unwrap();
+        {
+            deno_core::scope!(scope, &mut page.rt);
+            let root = auxiliary_pages::context(scope, AuxiliaryContextId(target)).unwrap();
+            assert_eq!(
+                current_frame_stamp(scope, root, 101).unwrap_err(),
+                "Deferred initialization has no live child-frame owner"
+            );
+            let document = v8::Local::new(scope, child_document)
+                .to_object(scope)
+                .unwrap();
+            let child = document.get_creation_context(scope).unwrap();
+            assert_ne!(root, child);
+            let scope = &mut v8::ContextScope::new(scope, child);
+            assert!(defer_frame_init(scope, true).unwrap());
+            assert!(defer_frame_init(scope, false).unwrap());
+            let shared = JsRuntime::op_state_from(scope);
+            {
+                let state = shared.borrow();
+                let active = state.borrow::<Active>();
+                assert_eq!(active.frames.len(), 1);
+                assert!(active.frames[0].native_init);
+                assert!(!active.frames[0].finished);
+            }
+            finish_frame_init(scope);
+            assert!(shared.borrow().borrow::<Active>().frames[0].finished);
+        }
+        assert!(deadline.unfinished_frames().frames.is_empty());
+        setup.finish().unwrap();
+        drop(deadline);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn interrupted_child_classic_script_retires_only_its_attempt_and_same_host_can_retry() {
+        let mut page = attempt_page().await;
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        page.eval_expression("globalThis.deadlineSiblingDocument=document.getElementById('second').contentDocument;deadlineSiblingDocument.body.textContent='sibling-survived';'seeded'")
+            .await.unwrap();
+        let first = host(&mut page, target, "first");
+        let child_document = auxiliary_pages::execute_target(
+            &mut page.rt,
+            AuxiliaryContextId(target),
+            "document.getElementById('first').contentDocument",
+            false,
+        )
+        .unwrap();
+        let deadline =
+            DriverDeadline::start(&mut page.rt, 1000, 111, target, ExecutionGoal::Complete);
+        let setup = TrustedSetup::enter(&mut page.rt, target, 111).unwrap();
+        let (child, _token) = {
+            deno_core::scope!(scope, &mut page.rt);
+            let parent = auxiliary_pages::context(scope, AuxiliaryContextId(target)).unwrap();
+            let scope = &mut v8::ContextScope::new(scope, parent);
+            let first = v8::Local::new(scope, first).to_object(scope).unwrap();
+            let document = v8::Local::new(scope, child_document)
+                .to_object(scope)
+                .unwrap();
+            let child = document.get_creation_context(scope).unwrap();
+            let token = new_frame_attempt(scope, parent, first).unwrap();
+            bind_frame_execution(scope, child, parent, first, token).unwrap();
+            (v8::Global::new(scope, child), v8::Global::new(scope, token))
+        };
+        setup.finish().unwrap();
+        let clock = deadline.clock.clone();
+        drop(deadline);
+        assert!(!Watchdog::any_active(page.rt.v8_isolate()));
+        assert!(page
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<Active>()
+            .clock
+            .is_none());
+        let source: Vec<u16> = "globalThis.deadlineScriptStarted=true;for (;;) {}"
+            .encode_utf16()
+            .collect();
+        let failure = execute_frame_script(
+            &mut page.rt,
+            child.clone(),
+            "https://deadline.test/endless.js",
+            &source,
+        )
+        .expect_err("native deadline must interrupt the actual child script");
+        assert!(clock.lock().unwrap().expired);
+        assert!(
+            failure.deadline_cancelled || failure.deferred_interruption,
+            "captured frame deadline must cancel or defer its interrupted child"
+        );
+        assert_eq!(failure.interrupted, failure.deferred_interruption);
+        assert!(!Watchdog::any_active(page.rt.v8_isolate()));
+        assert!(page
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<Active>()
+            .clock
+            .is_none());
+        page.rt.v8_isolate().cancel_terminate_execution();
+        {
+            deno_core::scope!(scope, &mut page.rt);
+            let child = v8::Local::new(scope, &child);
+            let scope = &mut v8::ContextScope::new(scope, child);
+            let key = v8::String::new(scope, "deadlineScriptStarted").unwrap();
+            let descriptor = child
+                .global(scope)
+                .get_own_property_descriptor(scope, key.into())
+                .expect("script must actually start before its deadline")
+                .to_object(scope)
+                .unwrap();
+            let value = v8::String::new(scope, "value").unwrap();
+            assert!(descriptor.get(scope, value.into()).unwrap().is_true());
+        }
+        retire_interrupted_frames(&mut page.rt);
+        page.eval_expression(
+            "document.getElementById('first').srcdoc='<body>retried';'root-alive'",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            page.eval_expression(
+                "document.getElementById('first').contentDocument.body.textContent",
+            )
+            .await
+            .unwrap(),
+            "retried"
+        );
+        assert_eq!(
+            page.eval_expression(
+                "String(document.getElementById('second').contentDocument===deadlineSiblingDocument)+':'+deadlineSiblingDocument.body.textContent",
+            )
+            .await
+            .unwrap(),
+            "true:sibling-survived"
+        );
+    }
+
+    fn capture_deferred_child(page: &mut PageSession, target: u64) -> DriverDeadline {
+        let child_document = auxiliary_pages::execute_target(
+            &mut page.rt,
+            AuxiliaryContextId(target),
+            "document.getElementById('first').contentDocument",
+            false,
+        )
+        .unwrap();
+        let deadline =
+            DriverDeadline::start(&mut page.rt, 5000, 121, target, ExecutionGoal::Complete);
+        let setup = TrustedSetup::enter(&mut page.rt, target, 121).unwrap();
+        {
+            deno_core::scope!(scope, &mut page.rt);
+            let root = auxiliary_pages::context(scope, AuxiliaryContextId(target)).unwrap();
+            capture_source_lease(scope, root, target, 121).unwrap();
+            let document = v8::Local::new(scope, child_document)
+                .to_object(scope)
+                .unwrap();
+            let child = document.get_creation_context(scope).unwrap();
+            assert_ne!(root, child);
+            let scope = &mut v8::ContextScope::new(scope, child);
+            assert!(defer_frame_init(scope, false).unwrap());
+        }
+        setup.finish().unwrap();
+        deadline
+    }
+
+    async fn remember_sibling(page: &mut PageSession) {
+        assert_eq!(page.eval_expression(
+            "globalThis.savedDeadlineSibling=document.getElementById('second').contentDocument;savedDeadlineSibling.body.textContent='intact';'saved'",
+        ).await.unwrap(), "saved");
+    }
+
+    async fn assert_sibling(page: &mut PageSession) {
+        assert_eq!(page.eval_expression(
+            "String(document.getElementById('second').contentDocument===savedDeadlineSibling)+':'+savedDeadlineSibling.body.textContent",
+        ).await.unwrap(), "true:intact");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn unfinished_snapshot_retires_only_its_actual_frame_document() {
+        let mut page = attempt_page().await;
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        remember_sibling(&mut page).await;
+        let deadline = capture_deferred_child(&mut page, target);
+        let frames = deadline.unfinished_frames();
+        assert_eq!(frames.frames.len(), 1);
+        drop(deadline);
+        frames.retire(&mut page.rt);
+        assert_eq!(
+            page.frame_lifecycle_diagnostics_for_testing()["hostContexts"],
+            1
+        );
+        assert_sibling(&mut page).await;
+        page.eval_expression("document.getElementById('first').srcdoc='<body>new owner';'retry'")
+            .await
+            .unwrap();
+        assert_eq!(
+            page.eval_expression(
+                "document.getElementById('first').contentDocument.body.textContent"
+            )
+            .await
+            .unwrap(),
+            "new owner"
+        );
+        assert_sibling(&mut page).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn deferred_snapshot_cannot_retire_a_later_same_host_document() {
+        let mut page = attempt_page().await;
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        remember_sibling(&mut page).await;
+        let deadline = capture_deferred_child(&mut page, target);
+        let frames = deadline.unfinished_frames();
+        assert_eq!(frames.frames.len(), 1);
+        drop(deadline);
+        assert_eq!(page.eval_expression("new Promise(resolve=>{const frame=document.getElementById('first');frame.onload=()=>{if(frame.contentDocument.body.textContent!=='replacement')return;frame.onload=null;globalThis.savedReplacement=frame.contentDocument;resolve('replaced')};frame.srcdoc='<body>replacement'})")
+            .await.unwrap(), "replaced");
+        frames.retire(&mut page.rt);
+        assert_eq!(page.eval_expression("String(document.getElementById('first').contentDocument===savedReplacement)+':'+savedReplacement.body.textContent")
+            .await.unwrap(), "true:replacement");
+        assert_sibling(&mut page).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn deferred_child_initialization_runs_under_its_captured_source_lease() {
+        let mut page = PageSession::open_with_init_script(
+            "<body><iframe id=first></iframe><iframe id=second></iframe></body>",
+            "https://deadline.test/",
+            "",
+            "",
+            5000,
+            "globalThis.deadlineInitCount=(globalThis.deadlineInitCount||0)+1",
+        )
+        .await
+        .unwrap();
+        let target = page.replaced_root_target().unwrap();
+        let _activation = page.rt.activation_key().enter();
+        assert_eq!(
+            page.eval_expression(
+                "String(document.getElementById('first').contentWindow.deadlineInitCount)"
+            )
+            .await
+            .unwrap(),
+            "1"
+        );
+        let deadline = capture_deferred_child(&mut page, target);
+        assert_eq!(deadline.unfinished_frames().frames.len(), 1);
+        run_deferred_frames(&mut page.rt).unwrap();
+        assert!(deadline.unfinished_frames().frames.is_empty());
+        drop(deadline);
+        assert_eq!(page.eval_expression("String(document.getElementById('first').contentWindow.deadlineInitCount)+':'+document.getElementById('second').contentWindow.deadlineInitCount")
+            .await.unwrap(), "2:1");
+    }
 }

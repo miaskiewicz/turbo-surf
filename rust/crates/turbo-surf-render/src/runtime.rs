@@ -13486,7 +13486,7 @@ function __startResourceScript(element, prepared) {
     __trackResource(next);
   } else __trackResource(__G.execScriptEl(element, prepared));
 }
-ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;__retireCspViolationTasks();__dictionaryRetireTasks();ops.op_retire_resource_document(__document);ops.op_install_resource_consumer(__document,event=>__documentBaseMutation(event,()=>{}),__documentRuntimeState);}});
+ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;__retireCspViolationTasks();__dictionaryRetireTasks();ops.op_retire_resource_document(__document,event=>__documentBaseMutation(event,()=>{}));}});
 const __cspStyleSheetGetter=(()=>{
   for(let prototype=HTMLStyleElement.prototype;prototype;prototype=Object.getPrototypeOf(prototype)){
     const descriptor=Object.getOwnPropertyDescriptor(prototype,"sheet");

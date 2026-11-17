@@ -14180,7 +14180,7 @@ __G.domSig = (() => {
         if(script.module){await ops.op_frame_module(cw,script.index);return;}
         if(!ops.op_frame_script_allowed(cw,script.index)){if(script.src)ops.op_frame_script_event(cw,script.index,false);return;}
         if (script.src) {
-          const response = await ops.op_fetch(script.src, __stringify({ __proto__:null, destination: "script", source: frameUrl, frame_script: true, integrity:script.integrity, ...ops.op_document_cookie_site(cw), csp:ops.op_csp_context(cw), opaque_origin:ops.op_window_opaque(cw), mode:script.crossorigin===null?"no-cors":"cors", credentials:script.crossorigin!==null&&script.crossorigin.toLowerCase()!=="use-credentials"?"same-origin":"include" }));
+          const response = await __boundary.invokeFrame(cw, () => ops.op_fetch(script.src, __stringify({ __proto__:null, destination: "script", source: frameUrl, frame_script: true, integrity:script.integrity, ...ops.op_document_cookie_site(cw), csp:ops.op_csp_context(cw), opaque_origin:ops.op_window_opaque(cw), mode:script.crossorigin===null?"no-cors":"cors", credentials:script.crossorigin!==null&&script.crossorigin.toLowerCase()!=="use-credentials"?"same-origin":"include" })));
           if (response && response.ok) {
             downloaded=true;
             await runVmInRealm(cw, response.body, response.final_url || script.src, response.frame_script || 0, script.index);
@@ -20031,6 +20031,54 @@ impl PageSession {
     #[doc(hidden)]
     pub fn indexeddb_diagnostics_for_testing(&self) -> serde_json::Value {
         indexeddb_store::diagnostics(&self.rt)
+    }
+
+    /// Host-only private frame-boundary admission probe; never installed on a Window.
+    #[doc(hidden)]
+    pub fn frame_boundary_admission_for_testing(
+        &mut self,
+        parent_name: Option<&str>,
+        window_name: &str,
+    ) -> bool {
+        let _activation = self.rt.activation_key().enter();
+        let root = match private_infrastructure::context(&mut self.rt) {
+            Ok(root) => root,
+            Err(_) => return false,
+        };
+        let infrastructure = self.rt.main_context();
+        deno_core::scope!(scope, self.rt);
+        let root = v8::Local::new(scope, root);
+        let scope = &mut v8::ContextScope::new(scope, root);
+        let global = root.global(scope);
+        let parent = match parent_name {
+            None => root,
+            Some(name) => {
+                let Some(value) = private_boundary::frame_probe::own_value(scope, global, name)
+                else {
+                    return false;
+                };
+                let Ok(window) = v8::Local::<v8::Object>::try_from(value) else {
+                    return false;
+                };
+                let Some(context) = window.get_creation_context(scope) else {
+                    return false;
+                };
+                if !window.strict_equals(context.global(scope).into()) {
+                    return false;
+                }
+                context
+            }
+        };
+        let window = if window_name == "@infrastructure" {
+            v8::Local::new(scope, infrastructure).global(scope).into()
+        } else {
+            let Some(value) = private_boundary::frame_probe::own_value(scope, global, window_name)
+            else {
+                return false;
+            };
+            value
+        };
+        private_boundary::frame_probe::admitted(scope, parent, window)
     }
 
     /// Host-only context registry accounting; never installed on guest globals.

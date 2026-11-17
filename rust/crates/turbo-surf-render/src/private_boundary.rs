@@ -96,6 +96,11 @@ pub(crate) fn capabilities<'s>(
         .constructor_behavior(v8::ConstructorBehavior::Throw)
         .build(scope)
         .ok_or("Private boundary capability allocation failed")?;
+    let frame_invoke = v8::Function::builder(frame_invoke_callback)
+        .data(token.into())
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+        .ok_or("Private frame capability allocation failed")?;
     let stream_invoke = v8::Function::builder(stream_invoke_callback)
         .data(token.into())
         .constructor_behavior(v8::ConstructorBehavior::Throw)
@@ -115,6 +120,7 @@ pub(crate) fn capabilities<'s>(
         ("rehome", rehome),
         ("observe", observe),
         ("invoke", invoke),
+        ("invokeFrame", frame_invoke),
         ("streamInvoke", stream_invoke),
         ("streamObserve", stream_observe),
         ("streamRehome", stream_rehome),
@@ -377,6 +383,72 @@ fn invoke_callback(
     }
 }
 
+fn frame_owner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    window: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    let child = window.get_creation_context(scope).ok_or_else(unsupported)?;
+    if !window.strict_equals(child.global(scope).into())
+        || child.get_slot::<FrameContextMarker>().is_none()
+        || child.get_slot::<FrameRetired>().is_some()
+        || child.get_slot::<CspHandle>().is_none()
+    {
+        return Err(unsupported());
+    }
+    let actual_parent = child
+        .get_slot::<FrameParent>()
+        .and_then(|link| link.0.to_local(scope))
+        .ok_or_else(unsupported)?;
+    if actual_parent != parent {
+        return Err(unsupported());
+    }
+    let parent_core = parent
+        .get_slot::<RuntimeCore>()
+        .and_then(|core| core.0.to_local(scope));
+    let child_core = child
+        .get_slot::<RuntimeCore>()
+        .and_then(|core| core.0.to_local(scope));
+    if !parent_core
+        .zip(child_core)
+        .is_some_and(|(a, b)| a.strict_equals(b.into()))
+    {
+        return Err(unsupported());
+    }
+    Ok(child)
+}
+
+fn frame_invoke_callback(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let data = v8::Local::new(scope, args.data());
+    let window_value = v8::Local::new(scope, args.get(0));
+    let thunk_value = v8::Local::new(scope, args.get(1));
+    let context = owner(scope, data).and_then(|parent| {
+        let window = v8::Local::<v8::Object>::try_from(window_value).map_err(|_| unsupported())?;
+        frame_owner(scope, parent, window)
+    });
+    let context = match context {
+        Ok(context) => context,
+        Err(error) => return fail(scope, error),
+    };
+    let Ok(thunk) = v8::Local::<v8::Function>::try_from(thunk_value) else {
+        return fail(scope, unsupported());
+    };
+    let invoked = async_owner::with_document(scope, context, |scope| {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let receiver = v8::undefined(scope);
+        thunk.call(scope, receiver.into(), &[])
+    });
+    match invoked {
+        Ok(Some(value)) => result.set(value),
+        Ok(None) => {}
+        Err(error) => fail(scope, JsErrorBox::type_error(error)),
+    }
+}
+
 fn observe_callback(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -569,3 +641,6 @@ fn native_error<'s>(
     };
     Ok(error)
 }
+
+#[path = "private_boundary/frame_probe.rs"]
+pub(crate) mod frame_probe;

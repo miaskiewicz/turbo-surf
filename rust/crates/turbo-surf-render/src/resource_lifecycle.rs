@@ -89,6 +89,9 @@ fn consume_with_lease(
     args: v8::FunctionCallbackArguments,
     mut result: v8::ReturnValue,
 ) {
+    if scope.is_execution_terminating() {
+        return;
+    }
     let data = v8::Local::new(scope, args.data());
     let Some((context, callback)) = consumer_parts(scope, data) else {
         async_owner::task_failure(scope, "Resource consumer document is unavailable".into());
@@ -103,7 +106,10 @@ fn consume_with_lease(
     }) {
         Ok(Some(value)) => result.set(value),
         Ok(None) => {}
-        Err(error) => async_owner::task_failure(scope, error),
+        Err(error) if !scope.is_execution_terminating() => async_owner::task_failure(scope, error),
+        // Termination can begin during owner entry. Preserve the interruption
+        // without turning it into a sticky failure on the next operation.
+        Err(_) => {}
     }
 }
 

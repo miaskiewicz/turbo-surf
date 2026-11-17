@@ -839,8 +839,10 @@ impl PageSession {
         let context = context(scope, AuxiliaryContextId(target))?;
         let scope = &mut v8::ContextScope::new(scope, context);
         v8::tc_scope!(let scope, scope);
-        let value = crate::browser_env::run_engine_script(scope, source)
-            .ok_or("Target engine script failed")?;
+        let value = async_owner::with_document(scope, context, |scope| {
+            crate::browser_env::run_engine_script(scope, source)
+        })?
+        .ok_or("Target engine script failed")?;
         if value.is_promise() {
             return Err("Target engine read must return a synchronous value".into());
         }

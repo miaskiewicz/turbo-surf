@@ -193,7 +193,7 @@ version = "=0.321.0"
                          {k: (v["version"], v["candidateName"], v["publishVersion"]) for k, v in pins.items()})
         for package in prepare.PACKAGES:
             major, minor, patch_level = package.version.split(".")
-            revision = 1 if package.upstream in {"deno_v8", "serde_v8"} else 4
+            revision = 1 if package.upstream in {"deno_v8", "serde_v8"} else 5
             self.assertEqual(package.publish, f"{major}.{minor}.{int(patch_level) + revision}")
         self.assertEqual({k for k, v in pins.items() if "embeddedSources" in v}, prepare.EMBEDDED_LEAVES)
         self.assertFalse((ROOT / "v8-teardown-tests.patch").exists())
@@ -224,7 +224,7 @@ features = ["reactor-tokio", "v8_use_custom_libcxx"]
                 self.assertFalse(core["default-features"])
                 self.assertEqual(core["features"], ["reactor-tokio", "v8_use_custom_libcxx"])
                 self.assertEqual(core["package"], "turbo-surf-deno-core")
-                self.assertEqual(core["version"], "=0.412.4")
+                self.assertEqual(core["version"], "=0.412.5")
                 self.assertEqual(core["path"], "../turbo-surf-deno-core")
                 self.assertEqual(result["package"]["license"], "MIT")
                 self.assertEqual(result["package"]["version"], package.publish)
@@ -412,7 +412,7 @@ name = "encoding"
 path = "benches/encoding.rs"
 
 [dependencies.deno_core]
-version = "=0.412.4"
+version = "=0.412.5"
 default-features = false
 package = "turbo-surf-deno-core"
 path = "../turbo-surf-deno-core"
@@ -428,7 +428,7 @@ path = "../turbo-surf-deno-webidl"
         self.assertEqual(result["lib"]["path"], "lib.rs")
         self.assertEqual(result["bench"][0]["path"], "benches/encoding.rs")
         self.assertNotIn("path", result["dependencies"]["deno_core"])
-        self.assertEqual(result["dependencies"]["deno_core"]["version"], "=0.412.4")
+        self.assertEqual(result["dependencies"]["deno_core"]["version"], "=0.412.5")
         self.assertNotIn("path", result["target"]["cfg(windows)"]["dev-dependencies"]["deno_webidl"])
         with self.assertRaisesRegex(ValueError, "more than dependency paths"):
             # An inline dependency path would survive line removal; refuse it.

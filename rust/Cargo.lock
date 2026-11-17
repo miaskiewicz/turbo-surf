@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2669,7 +2669,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5993,9 +5993,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-core"
-version = "0.412.4"
+version = "0.412.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46f9a4c448825fd3e3cf0b3b0fa8d784601358cf1eb022c66559431836d3e744"
+checksum = "aec0d1bc4faf42bd3e909accb722be36071d003eb7a2922b4c7dadf400f08ef1"
 dependencies = [
  "anyhow",
  "base64",
@@ -6035,9 +6035,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-crypto"
-version = "0.273.4"
+version = "0.273.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1fa8c9be11b5ec56a177f503b5747144d6a4ab617aece66264c70d197a3f6f3"
+checksum = "3e41071b0c3d2214b855bcee010d8e4a8b7794f26a403730d998b1d7f6d6226c"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6091,9 +6091,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-web"
-version = "0.290.4"
+version = "0.290.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e334be5ea82da94a934a95f493825d86bf11cea90562ad1e8475d088c8435d"
+checksum = "a730d7c90b0589279ba34ec805a8ab4cdd6315ab874cd3ded6fa7bfc8e1421ae"
 dependencies = [
  "async-trait",
  "brotli 6.0.0",
@@ -6114,9 +6114,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-deno-webidl"
-version = "0.259.4"
+version = "0.259.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d1988981048d229e2ac47db443ea171b8c1e4a34bd7929062bd7786edd395c8"
+checksum = "4cff9ad1e37bc862289d58599ac3e5e75ac4f783141021979dd085eb9edd82a1"
 dependencies = [
  "turbo-surf-deno-core",
 ]
@@ -6877,7 +6877,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

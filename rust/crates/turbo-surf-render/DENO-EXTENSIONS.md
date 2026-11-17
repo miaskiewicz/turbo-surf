@@ -5,9 +5,9 @@ Deno distributions:
 
 | Rust alias | Package | Version | Upstream crate |
 | --- | --- | --- | --- |
-| `deno_web` | `turbo-surf-deno-web` | 0.290.4 | `deno_web` 0.290.0 |
-| `deno_webidl` | `turbo-surf-deno-webidl` | 0.259.4 | `deno_webidl` 0.259.0 |
-| `deno_crypto` | `turbo-surf-deno-crypto` | 0.273.4 | `deno_crypto` 0.273.0 (+ reviewed patch) |
+| `deno_web` | `turbo-surf-deno-web` | 0.290.5 | `deno_web` 0.290.0 |
+| `deno_webidl` | `turbo-surf-deno-webidl` | 0.259.5 | `deno_webidl` 0.259.0 |
+| `deno_crypto` | `turbo-surf-deno-crypto` | 0.273.5 | `deno_crypto` 0.273.0 (+ reviewed patch) |
 
 The upstream archives' checksums are pinned in
 `rust/release-deps/deno/source-pins.json`; the 0.x.4 distributions preserve the JavaScript bytes

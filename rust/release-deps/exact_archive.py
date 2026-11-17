@@ -14,12 +14,11 @@ import urllib.request
 import urllib.error
 
 ENDPOINT = "https://crates.io/api/v1/crates/new"
-ORDER = [("turbo-dom-v8", "150.4.2"),
-         ("turbo-surf-deno-core", "0.412.4"),
-         ("turbo-surf-deno-bench-util", "0.253.4"),
-         ("turbo-surf-deno-crypto", "0.273.4"),
-         ("turbo-surf-deno-webidl", "0.259.4"),
-         ("turbo-surf-deno-web", "0.290.4")]
+ORDER = [("turbo-surf-deno-core", "0.412.5"),
+         ("turbo-surf-deno-bench-util", "0.253.5"),
+         ("turbo-surf-deno-crypto", "0.273.5"),
+         ("turbo-surf-deno-webidl", "0.259.5"),
+         ("turbo-surf-deno-web", "0.290.5")]
 LIMIT = 64 * 1024 * 1024
 
 
@@ -100,7 +99,7 @@ def package_plan(archive, cargo_metadata):
     identity = manifest["package"]
     pair = (identity["name"], identity["version"])
     if pair not in ORDER or any(key in manifest for key in ("workspace", "patch")):
-        raise ValueError("Package identity or manifest is outside the reviewed six")
+        raise ValueError("Package identity or manifest is outside the reviewed five")
     validate_lock(files, pair)
     matches = [p for p in cargo_metadata["packages"] if (p["name"], p["version"]) == pair]
     if len(matches) != 1:
@@ -147,7 +146,7 @@ def build_plan(archives, metadata_path, expected_commit, evidence):
     packages = [package_plan(p, json.loads(raw_metadata)) for p in archives]
     by_name = {p["name"]: p for p in packages}
     if len(packages) != len(ORDER) or set(by_name) != {p[0] for p in ORDER}:
-        raise ValueError("Exact mode requires precisely the six reviewed versions")
+        raise ValueError("Exact mode requires precisely the five reviewed versions")
     return {"mode": "exact-reviewed-archives", "endpoint": ENDPOINT,
             "sourceCommit": expected_commit, "scriptSha256": digest(Path(__file__).read_bytes()),
             "standardPublisherSha256": digest(Path(__file__).with_name("publish.py").read_bytes()),

@@ -4816,17 +4816,19 @@ fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object
 // A native guard also clears it on watchdog errors without executing more JS or
 // retaining the owning frame context after the checkpoint.
 struct WindowTimerTask {
+    context: v8::Global<v8::Context>,
     nesting: Rc<WindowTimerNesting>,
     previous: u32,
     previous_task: bool,
 }
 impl WindowTimerTask {
-    fn new(context: v8::Local<v8::Context>) -> Self {
+    fn new(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) -> Self {
         let nesting = window_timer_nesting(context);
         let previous = nesting.level.get();
         let previous_task = nesting.task.replace(true);
 
         Self {
+            context: v8::Global::new(scope, context),
             nesting,
             previous,
             previous_task,
@@ -4998,7 +5000,7 @@ fn poll_auxiliary_document_tasks(
         WindowTimerTurn::default()
     };
     if turn.fired > 0 {
-        checkpoint_window_timer(rt)?;
+        checkpoint_window_timer_turn(rt, &turn)?;
         return Ok(true);
     }
     if run_background_resource_task_in(rt, contexts) > 0 {
@@ -5056,7 +5058,7 @@ fn run_next_window_timer_in(
             };
         }
     }
-    let task = WindowTimerTask::new(context);
+    let task = WindowTimerTask::new(scope, context);
     let active = &mut v8::ContextScope::new(scope, context);
     let fired = async_owner::with_document(active, context, |active| {
         call_frame_helper(active, "runNextTimer", &[])
@@ -5077,6 +5079,18 @@ fn run_next_window_timer_in(
 // selecting another timer, including timers owned by a different frame realm.
 fn checkpoint_window_timer(rt: &mut JsRuntime) -> Result<(), String> {
     rt.v8_isolate().perform_microtask_checkpoint();
+    if rt.v8_isolate().is_execution_terminating() {
+        return Err("Timer task microtasks were interrupted".into());
+    }
+    Ok(())
+}
+
+fn checkpoint_window_timer_turn(rt: &mut JsRuntime, turn: &WindowTimerTurn) -> Result<(), String> {
+    checkpoint_window_timer(rt)?;
+    if let Some(task) = &turn._task {
+        rt.scoped_rejection_checkpoint(&task.context)
+            .map_err(|error| error.to_string())?;
+    }
     if rt.v8_isolate().is_execution_terminating() {
         return Err("Timer task microtasks were interrupted".into());
     }
@@ -5129,7 +5143,7 @@ fn run_window_timer_tasks(
             break;
         }
         total += turn.fired;
-        checkpoint_window_timer(rt)?;
+        checkpoint_window_timer_turn(rt, &turn)?;
     }
     Ok(async_owner::QuiescenceTurn {
         fired: total,
@@ -7807,7 +7821,7 @@ fn op_run_local_timers<'s>(
         && !active.is_execution_terminating()
         && context.get_slot::<FrameRetired>().is_none()
     {
-        let _task = WindowTimerTask::new(context);
+        let _task = WindowTimerTask::new(active, context);
         let next = call_frame_helper(active, "runNextTimer", &[])
             .and_then(|value| value.uint32_value(active))
             .unwrap_or(0);
@@ -16998,7 +17012,7 @@ fn run_due_window_timers(
     if turn.fired == 0 {
         return WindowTimerStep::Idle(turn.deadline);
     }
-    match checkpoint_window_timer(rt) {
+    match checkpoint_window_timer_turn(rt, &turn) {
         Ok(()) => WindowTimerStep::Fired(std::task::Poll::Ready(None)),
         Err(error) => WindowTimerStep::Fired(std::task::Poll::Ready(Some(Err(error)))),
     }

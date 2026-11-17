@@ -45,7 +45,7 @@ class ExactArchives(unittest.TestCase):
                 "license": "MIT", "readme": "README.md", "license_file": None,
                 "features": {"default": ["v8"], "v8": ["dep:v8"]},
                 "dependencies": [{"name": "turbo-surf-deno-core", "rename": "deno_core",
-                    "req": "=0.412.4", "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "req": "=0.412.5", "source": "registry+https://github.com/rust-lang/crates.io-index",
                     "features": ["reactor-tokio"], "optional": True, "uses_default_features": False,
                     "target": "cfg(unix)", "kind": "build"}]})
         self.metadata = self.root / "cargo-metadata.json"
@@ -94,7 +94,7 @@ class ExactArchives(unittest.TestCase):
             package = next(p for p in self.plan["packages"] if p["name"] == metadata["name"])
             self.assertEqual(exact.digest(raw), package["archiveSha256"])
             self.assertEqual(raw, Path(package["archive"]).read_bytes())
-            self.assertEqual(metadata["deps"][0], {"name": "turbo-surf-deno-core", "version_req": "=0.412.4",
+            self.assertEqual(metadata["deps"][0], {"name": "turbo-surf-deno-core", "version_req": "=0.412.5",
                 "features": ["reactor-tokio"], "optional": True, "default_features": False,
                 "target": "cfg(unix)", "kind": "build", "registry": None, "explicit_name_in_toml": "deno_core"})
             self.assertEqual(metadata["features"], self.packages[0]["features"])

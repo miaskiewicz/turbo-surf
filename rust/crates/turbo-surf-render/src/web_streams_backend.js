@@ -74,12 +74,15 @@
     backend.cleanup = (raw, listener) => apply(rawRemove, raw, ["abort", listener]);
     // Keep the timer's retained source and forwarding closure in the main realm.
     // Guest frontends are reached only through the existing native weak bridge.
-    backend.timeout = (millis) => {
+    backend.timeout = (millis, window) => {
+      const owner = new WeakRef(window);
       const controller = new abort.AbortController();
       const timer = apply(abort.AbortSignal.timeout, abort.AbortSignal, [millis]);
       apply(rawAdd, timer, [
         "abort",
         () => {
+          const window = apply(deref, owner, []);
+          if (!window || !ops.op_window_active(window)) return;
           backend.hostAbort = true;
           try {
             apply(backend.controller.abort.value, controller, [
@@ -101,6 +104,16 @@
       return weak === undefined ? undefined : apply(deref, weak, []);
     };
     backend.frontSet = (raw, front) => frontSet(raw, new WeakRef(front));
+    const reasons = new WeakMap(),
+      reasonGet = WeakMap.prototype.get.bind(reasons),
+      reasonSet = WeakMap.prototype.set.bind(reasons);
+    backend.reasonGet = (raw) => {
+      const reference = reasonGet(raw);
+      return reference === undefined ? undefined : apply(deref, reference, []);
+    };
+    backend.reasonSet = (raw, reason) => reasonSet(raw, new WeakRef(reason));
+    backend.sourceRef = (front) => new WeakRef(front);
+    backend.sourceGet = (reference) => apply(deref, reference, []);
     define(backend, "authoredHas", { value: WeakSet.prototype.has.bind(backend.authoredErrors) });
     define(backend, "authoredAdd", { value: WeakSet.prototype.add.bind(backend.authoredErrors) });
     define(shared, "webBackend", { value: backend });
@@ -549,7 +562,7 @@
   Object.setPrototypeOf(Signal.prototype, EventTarget.prototype);
   Object.setPrototypeOf(Signal, EventTarget);
   constructors.AbortSignal = Signal;
-  function signalFront(raw) {
+  function signalFront(raw, reasonSources) {
     const previous = getFront(raw);
     if (previous) return previous;
     const controller = new ControllerBefore(),
@@ -557,6 +570,7 @@
     Object.setPrototypeOf(front, Signal.prototype);
     save(front, "AbortSignal", raw);
     const state = record(front, "AbortSignal");
+    state.reasonSources = reasonSources;
     state.dispatch = () => {
       releaseTimeout(front);
       return apply(oldAbort, controller, [signalReason(front)]);
@@ -599,16 +613,39 @@
       }
     define(Signal.prototype, name, copy);
   }
+  function sourceReason(sources, rawReason) {
+    for (let index = 0; index < sources.count; index++) {
+      const source = backend.sourceGet(sources.values[index]);
+      if (!source) continue;
+      const state = record(source, "AbortSignal");
+      if (!apply(backend.signal.aborted.get, state.raw, [])) continue;
+      if (apply(backend.signal.reason.get, state.raw, []) === rawReason)
+        return { __proto__: null, value: signalReason(source) };
+    }
+  }
+  function translatedSignalReason(state, rawReason) {
+    const infrastructure = ops.op_infrastructure_origin(rawReason);
+    if (infrastructure) {
+      const existing = backend.reasonGet(rawReason);
+      if (existing !== undefined) return existing;
+    }
+    const source = state.reasonSources && sourceReason(state.reasonSources, rawReason);
+    if (state.reasonSources && infrastructure && !source)
+      throw new TypeErrorType("Abort reason source is no longer available");
+    const reason = state.realm.localError(source ? source.value : rawReason);
+    if (infrastructure) backend.reasonSet(rawReason, reason);
+    return reason;
+  }
   function signalReason(front) {
     const state = record(front, "AbortSignal");
     if (!apply(backend.signal.aborted.get, state.raw, [])) return undefined;
-    // All dependent raw reasons are assigned before the parent's abort event.
-    // Translate once so reason identity survives the later frontend dispatch.
-    if (!own(state, "translatedReason"))
+    if (!own(state, "translatedReason")) {
       define(state, "translatedReason", {
         __proto__: null,
-        value: state.realm.localError(apply(backend.signal.reason.get, state.raw, [])),
+        value: translatedSignalReason(state, apply(backend.signal.reason.get, state.raw, [])),
       });
+      state.reasonSources = undefined;
+    }
     return state.translatedReason;
   }
   define(Signal.prototype, "reason", {
@@ -645,6 +682,7 @@
       value: make(
         function (...args) {
           try {
+            let reasonSources;
             if (name === "any") {
               const fail = (message) =>
                 new TypeErrorType("Failed to execute 'any' on 'AbortSignal': " + message);
@@ -652,7 +690,8 @@
               const input = args[0];
               if (input === null || (typeof input !== "object" && typeof input !== "function"))
                 throw fail("The provided value cannot be converted to a sequence.");
-              const values = create(null);
+              const values = create(null),
+                sourceFronts = create(null);
               let count = 0;
               const convert = (value) => {
                 let raw;
@@ -662,6 +701,7 @@
                   throw fail("Failed to convert value to 'AbortSignal'.");
                 }
                 // Sequence conversion does not IteratorClose on a brand error.
+                define(sourceFronts, count, { __proto__: null, value: backend.sourceRef(value) });
                 define(values, count++, { __proto__: null, value: raw });
               };
               if (isArray(input) && !core.isProxy(input)) {
@@ -706,6 +746,7 @@
                 },
               });
               args[0] = iterable;
+              reasonSources = { __proto__: null, values: sourceFronts, count };
             }
             if (name === "timeout") {
               const fail = (message) =>
@@ -724,7 +765,7 @@
               millis = trunc(millis);
               if (millis < 0 || millis > 9007199254740991)
                 throw fail("Value is outside the 'unsigned long long' value range.");
-              const front = signalFront(backend.timeout(millis));
+              const front = signalFront(backend.timeout(millis, realmWindow));
               retainTimeout(front);
               return front;
             }
@@ -733,6 +774,7 @@
               args[0] = new Exception("signal is aborted without reason", "AbortError");
             const front = signalFront(
               apply(backend.abort.AbortSignal[name], backend.abort.AbortSignal, args),
+              reasonSources,
             );
             return front;
           } catch (error) {

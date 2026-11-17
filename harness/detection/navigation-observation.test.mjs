@@ -87,6 +87,20 @@ function assertDocumentResponse(runtime, trace, output, final, label) {
   }
 }
 
+function assertPartialRetryTerminal(final, observation, terminal, html, label) {
+  assert.equal(final.browserFixture, null, label);
+  assert.equal(final.readyState, "loading", label);
+  assert.equal(typeof final.guestUrl, "string", label);
+  assert.equal(final.guestUrl, final.url, label);
+  assert.equal(new URL(final.url).pathname, "/terminal", label);
+  assert.equal(terminal?.status, 429, label);
+  assert.equal(terminal.requestUrl, new URL(final.url).pathname + new URL(final.url).search, label);
+  assert(terminal.timeMs <= observation.deadlineMs, label);
+  assert(terminal.timeMs < observation.snapshotStartedMs, label);
+  const assignment = `globalThis.__browserFixture=${JSON.stringify(terminal.timerEvidence).replaceAll("<", "\\u003c")}`;
+  assert(html.includes(`<script>${assignment}</script>`), label);
+}
+
 function assertRetryOutcome(runtime, fixture, trace, output, seen, label) {
   const observation = trace.observation;
   const final = trace.pages.at(-1);
@@ -120,6 +134,28 @@ function assertRetryOutcome(runtime, fixture, trace, output, seen, label) {
     }
   }
   const clock = final.browserFixture;
+  if (clock === null && final.status === 429) {
+    const terminal = terminalEvents.find(
+      (event) => event.requestUrl === finalUrl.pathname + finalUrl.search,
+    );
+    assertPartialRetryTerminal(
+      final,
+      observation,
+      terminal,
+      readFileSync(join(output, `${final.phase}.html`), "utf8"),
+      label,
+    );
+    console.log(
+      "Partial retry terminal",
+      JSON.stringify({
+        runtime,
+        url: final.url,
+        readyState: final.readyState,
+        runtimeClockExecuted: false,
+      }),
+    );
+    return;
+  }
   assert.equal(clock?.delayMs, fixture.delay, label);
   assert(Number.isFinite(clock.timerCreatedDate), label);
   assert(Number.isFinite(clock.timerCreatedPerformance), label);
@@ -268,6 +304,46 @@ test("retry evidence rejects stale documents, fabricated terminals and early tim
       ]),
     /timer fired before/,
   );
+});
+
+test("partial terminal evidence requires its current document and exact pending script", () => {
+  const clock = {
+    delayMs: 600,
+    timerCreatedDate: 1000,
+    timerCreatedPerformance: 0,
+    timerFiredDate: 1600,
+    timerFiredPerformance: 600,
+  };
+  const final = {
+    browserFixture: null,
+    readyState: "loading",
+    url: "http://fixture.test/terminal?timer=record",
+    guestUrl: "http://fixture.test/terminal?timer=record",
+  };
+  const observation = { deadlineMs: 1850, snapshotStartedMs: 1900 };
+  const terminal = {
+    status: 429,
+    requestUrl: "/terminal?timer=record",
+    timeMs: 1700,
+    timerEvidence: clock,
+  };
+  const html = `<body>Terminal fixture<script>globalThis.__browserFixture=${JSON.stringify(clock)}</script>`;
+  const check = (page = final, event = terminal, body = html) =>
+    assertPartialRetryTerminal(page, observation, event, body, "partial");
+  check();
+  for (const changed of [
+    { ...final, readyState: "complete" },
+    { ...final, guestUrl: "http://fixture.test/search" },
+    { ...final, browserFixture: {} },
+    { ...final, guestUrl: undefined },
+  ])
+    assert.throws(() => check(changed));
+  assert.throws(() => check(final, { ...terminal, status: 200 }));
+  assert.throws(() => check(final, { ...terminal, requestUrl: "/terminal?timer=forged" }));
+  assert.throws(() => check(final, { ...terminal, timeMs: 2000 }));
+  assert.throws(() => check(final, { ...terminal, timeMs: 1875 }));
+  assert.throws(() => check(final, terminal, "<body>stale"));
+  assert.throws(() => check(final, terminal, html.replace('"delayMs":600', '"delayMs":1')));
 });
 
 function navigationConfig(origin, fixture) {

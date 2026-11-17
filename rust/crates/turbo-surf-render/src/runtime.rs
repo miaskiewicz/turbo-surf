@@ -18503,13 +18503,15 @@ async fn run_post_load_hydration_pumps(rt: &mut JsRuntime, base: &str) -> Result
             return Ok(());
         }
         hydrate_pass(rt)?;
-        drain_event_loop(rt).await?;
-        if crate::shim_bindings::pending(rt) {
+        // A background frame loop must yield to the bounded hydration pump,
+        // not turn its first iteration into an unbounded timer collector.
+        let first = drain_quiescence_turn(rt, true).await?;
+        if post_load_turn_handoff(rt, &first) {
             return Ok(());
         }
         drain_module_scripts(rt, base).await?;
-        drain_event_loop(rt).await?;
-        if crate::shim_bindings::pending(rt) {
+        let last = drain_quiescence_turn(rt, true).await?;
+        if post_load_turn_handoff(rt, &last) {
             return Ok(());
         }
         rt.op_state()
@@ -18517,11 +18519,16 @@ async fn run_post_load_hydration_pumps(rt: &mut JsRuntime, base: &str) -> Result
             .borrow_mut::<HydrationProgress>()
             .completed_pumps = round + 1;
         let pending = namespace_call(rt, "pendingWork", &[])?;
-        if read_string(rt, pending)? != "1" {
+        if !first.busy && !last.busy && read_string(rt, pending)? != "1" {
             break;
         }
+        tokio::task::yield_now().await;
     }
     Ok(())
+}
+
+fn post_load_turn_handoff(rt: &JsRuntime, turn: &async_owner::QuiescenceTurn) -> bool {
+    turn.host_reply || crate::shim_bindings::pending(rt)
 }
 
 async fn hydrate_installed_document(

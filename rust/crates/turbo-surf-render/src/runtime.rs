@@ -18307,7 +18307,7 @@ fn run_lifecycle(rt: &mut JsRuntime, phase: &str) -> Result<(), String> {
     let mut scope = scope.init();
     let context = v8::Local::new(&scope, context);
     let scope = &mut v8::ContextScope::new(&mut scope, context);
-    call_frame_helper(scope, phase, &[])
+    async_owner::with_document(scope, context, |scope| call_frame_helper(scope, phase, &[]))?
         .map(|_| ())
         .ok_or_else(|| format!("Native lifecycle {phase} failed"))
 }

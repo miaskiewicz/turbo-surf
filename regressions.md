@@ -572,3 +572,17 @@ The complete frozen `deb94a60` campaign covered 843 required IDs exactly once: *
 - A candidate surface process without the official `--test-force-exit` flag was stopped after idle completion. This was a **runner-mode mismatch**, not a proven product regression. All raw stop/sample evidence remains in `.recovery/final-known-next/CANDIDATE-CLEANUP-OPEN.json`; the exact official argv subsequently exits cleanly with 204 passes and one intentional skip. No cleanup workaround was introduced.
 
 Candidate authority phases remain hash-pinned in `.recovery/final-known-next/CANDIDATE-AUTHORITY-FAIL.json`. The monotonic V14 inventory contains **851 required IDs, 853 audit IDs and 144 jobs**, including four producer controls. It has no final integrated pass credit. The staged Surf consumer uses explicit private producer paths and is not public dependency proof. A fresh final public-graph regression run must pass every required case before full Rust/JS suites; coverage follows only after those suites pass.
+
+## Public 551cb98e regression run — three Rust failures
+
+The current public-graph discovery completed 69 default Rust jobs with **855 passed, 3 failed**, zero reported ignored tests or crashes. These whole-bin totals are distinct from the required-case count. All three failures remain in scope; no passing earlier epoch substitutes for a repaired integrated rerun.
+
+| Status | Test | Observed failure | Owner / proof |
+| --- | --- | --- | --- |
+| Open | `isolation_policy::csp_task_capacity_is_bounded_and_recovers_after_dispatch` | Original capacity limit triggers correctly; subsequent recovery fails with `Owner entry failed` at line 1220. Root cause under native-only diagnosis; do not change the 4096 limit or assertions. | Surf async owner; `.recovery/final-known-v12/early-ready-regressions/job-23.log` (32 pass / 1 fail). |
+| Open | `fetch_streams::timeout_abort_listener_survives_collection_until_delivery` | Expected timeout/abort delivery after collection is false at line 266. Timer/dispatch ownership diagnosis pending; no GC or time-budget waiver. | Native capability helper; `.recovery/final-known-v12/early-ready-regressions/job-14.log` (4 pass / 1 fail). |
+| Open | `stream_transfers::native_stream_transfer_retirement_matches_chrome` | `Native async work has unclassified ownership` at line 99. Investigate this exact final-graph case, preserving the earlier retirement and security controls. | Stream owner; `.recovery/final-known-v12/remaining-default-regressions/job-37.log` (8 pass / 1 fail). |
+
+The fetch-timeout failure was discovered as an adjacent test outside the prior 851 required IDs. Append it monotonically to the required manifest; it is not excluded merely because the old manifest omitted it. CSP capacity and stream retirement are already required. The corrected manifest therefore has 852 executable required IDs, with no duplicate stream entry. Preserve exact names, source/artifact hashes and original logs. Full Rust/JS suites and coverage remain blocked until every known required regression passes on one updated integrated build.
+
+This ledger update is prepared in an isolated documentation worktree while the root's tracked `551cb98e` bytes remain frozen for active regression discovery. Integrate the update at the discovery boundary, then bind the next build to its new commit.

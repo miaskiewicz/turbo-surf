@@ -1024,9 +1024,7 @@ class Locator {
     return (await this._readElement((element) => element.innerText)) ?? "";
   }
   async innerHTML() {
-    await this._prepareQuery();
-    if (this._needsQuery()) return this._readElement((element) => element.innerHTML);
-    return this._singleMatch()?.html ?? null;
+    return this._readElement((element) => element.innerHTML);
   }
   async allTextContents() {
     await this._prepareQuery();

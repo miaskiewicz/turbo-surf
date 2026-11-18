@@ -593,6 +593,20 @@ mod tests {
             .is_err());
     }
     #[test]
+    fn media_queries_reject_trailing_tokens_and_preserve_known_host_capability_errors() {
+        let view = viewport();
+        assert!(!view.matches("screen trailing-token").unwrap());
+        assert!(!view.matches("(width:800px) trailing-token").unwrap());
+        assert!(view.matches("(width:800px)").unwrap());
+        for query in ["(resolution:1dppx)", "(color-gamut:srgb)"] {
+            assert!(view.matches(query).unwrap_err().contains("host capability"));
+        }
+        assert!(!view.matches("(1px < unknown-feature < 1000px)").unwrap());
+        assert!(view.matches("(1px < width < 1000px)").unwrap());
+        assert!(view.matches("screen, (resolution:1dppx)").unwrap());
+    }
+
+    #[test]
     fn captured_host_modes_use_real_keyword_and_boolean_semantics() {
         let host = HostMedia {
             forced_colors: Some(true),

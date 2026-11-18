@@ -829,6 +829,32 @@ mod definition_tests {
     }
 
     #[test]
+    fn font_shorthand_tracks_used_faces_and_quoted_animation_names_remain_enforced() {
+        let _ = take_used_fonts();
+        let font = "@font-face{font-family:'Contract Face';src:url(face.woff2)}";
+        let definitions = Definitions::collect(&[crate::live_stylesheets::ActiveRule {
+            text: font.into(),
+            scoped: None,
+            resource: Some(definition(font).unwrap()),
+            containers: Vec::new(),
+        }]);
+        let unused = ComputedStyle::from_pairs([("font", "italic 16px/20px 'Other Face'")]);
+        validate_style(&unused, &definitions, &mut Seen::new()).unwrap();
+        assert!(take_used_fonts().is_empty());
+        let used = ComputedStyle::from_pairs([("font", "italic 16px/20px 'Contract Face'")]);
+        validate_style(&used, &definitions, &mut Seen::new()).unwrap();
+        assert_eq!(take_used_fonts(), vec!["contract face"]);
+
+        let animation = animation_definitions("@keyframes 'moving face'{to{width:80px}}");
+        let used = ComputedStyle::from_pairs([("animation-name", "'moving face'")]);
+        assert!(validate_style(&used, &animation, &mut Seen::new())
+            .unwrap_err()
+            .contains("animation resource"));
+        let unused = ComputedStyle::from_pairs([("animation-name", "'other face'")]);
+        validate_style(&unused, &animation, &mut Seen::new()).unwrap();
+    }
+
+    #[test]
     fn resource_rules_classify_by_what_they_can_define() {
         let cases = [
             (

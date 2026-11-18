@@ -2429,6 +2429,18 @@ mod recapture_tests {
         page.close();
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn document_hit_test_recaptures_a_source_mutated_after_its_capture() {
+        let mut page = page().await;
+        mutate_after_capture(WIDEN, 1);
+        let hit = "globalThis.__RESULT=document.elementFromPoint(30,5).id";
+        assert_eq!(page.eval(hit).await.unwrap(), "a");
+        assert!(!pending());
+        assert_eq!(page.eval(hit).await.unwrap(), "a");
+        assert_eq!(page.eval(WIDTH).await.unwrap(), "50");
+        page.close();
+    }
+
     /// Before S5 this read returned the cached layout of the outdated capture (10).
     #[tokio::test(flavor = "current_thread")]
     async fn a_stale_capture_is_not_served_from_the_layout_cache() {

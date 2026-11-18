@@ -870,12 +870,13 @@ impl PageSession {
     /// One interruptible actor turn. The jobs and hydration phases remain owned
     /// by OpState if the caller is dropped to service another target's command.
     pub(super) async fn service_auxiliary_navigation(&mut self) -> Result<(), String> {
-        self.service_auxiliary_navigation_scoped(None).await
+        self.service_auxiliary_navigation_scoped(None, None).await
     }
 
     async fn service_auxiliary_navigation_scoped(
         &mut self,
         owner: Option<u64>,
+        waiter: Option<u64>,
     ) -> Result<(), String> {
         let budget = self.budget_ms;
         let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
@@ -883,7 +884,7 @@ impl PageSession {
         let result = key
             .during(tokio::time::timeout(
                 std::time::Duration::from_millis(budget),
-                self.service_auxiliary_navigation_active(owner),
+                self.service_auxiliary_navigation_active(owner, waiter),
             ))
             .await;
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
@@ -900,9 +901,24 @@ impl PageSession {
         self.finish_history_command(result)
     }
 
+    fn has_pending_auxiliary_work_for(&self, owner: Option<u64>) -> bool {
+        match owner {
+            Some(target) => self
+                .rt
+                .op_state()
+                .borrow()
+                .try_borrow::<State>()
+                .is_some_and(|state| {
+                    state.jobs.contains_key(&target) || state.loading.contains_key(&target)
+                }),
+            None => self.has_pending_auxiliary_work(),
+        }
+    }
+
     async fn service_auxiliary_navigation_active(
         &mut self,
         owner: Option<u64>,
+        waiter: Option<u64>,
     ) -> Result<(), String> {
         loop {
             let navigation = {
@@ -930,17 +946,7 @@ impl PageSession {
             });
             start(&mut self.rt, navigation, mode, self.budget_ms)?;
         }
-        let pending = {
-            let shared = self.rt.op_state();
-            let shared = shared.borrow();
-            match owner {
-                Some(target) => shared.try_borrow::<State>().is_some_and(|state| {
-                    state.jobs.contains_key(&target) || state.loading.contains_key(&target)
-                }),
-                None => self.has_pending_auxiliary_work(),
-            }
-        };
-        if !pending {
+        if !self.has_pending_auxiliary_work_for(owner) {
             return Ok(());
         }
         self.rt.v8_isolate().perform_microtask_checkpoint();
@@ -970,7 +976,22 @@ impl PageSession {
             let settled = loads.iter().any(|(target, promise)| {
                 !matches!(promise_result(&mut self.rt, *target, promise), Ok(false))
             });
-            if !ready.is_empty() || settled || host_task || has_pending_frame_work(&self.rt, owner)
+            // Guest callbacks can close a target during either checkpoint. Wake
+            // only this driver's result; a peer's result must not settle its wait.
+            let terminal = waiter.is_some_and(|generation| {
+                self.rt
+                    .op_state()
+                    .borrow()
+                    .borrow::<State>()
+                    .results
+                    .contains_key(&generation)
+            });
+            if terminal
+                || !self.has_pending_auxiliary_work_for(owner)
+                || !ready.is_empty()
+                || settled
+                || host_task
+                || has_pending_frame_work(&self.rt, owner)
             {
                 Poll::Ready(Ok(ready))
             } else {
@@ -1163,7 +1184,7 @@ impl PageSession {
                 .loading
                 .contains_key(&target)
         {
-            self.service_auxiliary_navigation_scoped(owned_completion.then_some(target))
+            self.service_auxiliary_navigation_scoped(owned_completion.then_some(target), None)
                 .await?;
         }
         Ok(receipt)
@@ -1311,7 +1332,7 @@ impl PageSession {
                                 else { NavigationWaitError::Driver(error) }
                             });
                         }
-                        self.service_auxiliary_navigation_scoped(owner).await.map_err(NavigationWaitError::Driver)?;
+                        self.service_auxiliary_navigation_scoped(owner, Some(generation)).await.map_err(NavigationWaitError::Driver)?;
                     }
                 },
             ))
@@ -1641,7 +1662,8 @@ impl PageSession {
             }
         }
         self.admit_actor_form_navigations_scoped(Some(root))?;
-        self.service_auxiliary_navigation_scoped(Some(root)).await?;
+        self.service_auxiliary_navigation_scoped(Some(root), None)
+            .await?;
         let shared = self.rt.op_state();
         let state = shared.borrow();
         let revision = state

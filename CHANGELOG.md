@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Settle closed navigation waiters after guest checkpoints without waiting for unrelated target work.
+
 - Adopt the native layout correction for quirks-mode root and body viewport sizing, preserving explicit viewport geometry without changing standards-mode content boxes.
 
 - Return actual child markup from Locator and Frame innerHTML reads, preserving missing-element results and live document ownership.

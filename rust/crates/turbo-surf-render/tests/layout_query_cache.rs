@@ -65,9 +65,32 @@ async fn profiled_page(
     html: &str,
 ) -> (PageSession, serde_json::Value, ProfileDirectory) {
     let directory = ProfileDirectory::new(name);
-    let page = PageSession::open(html, "https://query-cache.test/", "", "", 5000)
-        .await
-        .unwrap();
+    let started = std::time::Instant::now();
+    let opened = PageSession::open(html, "https://query-cache.test/", "", "", 5000).await;
+    let failed = match &opened {
+        Ok(page) => page.hydration_diagnostics().budget_exceeded,
+        Err(_) => true,
+    };
+    if failed {
+        match &opened {
+            Ok(page) => eprintln!(
+                "LAYOUT_QUERY_CACHE_DIAG name={name} open_result=retained_ok elapsed_open_ms={} hydration={:?}",
+                started.elapsed().as_millis(),
+                page.hydration_diagnostics()
+            ),
+            Err(error) => eprintln!(
+                "LAYOUT_QUERY_CACHE_DIAG name={name} open_result=error elapsed_open_ms={} error={error:?}",
+                started.elapsed().as_millis()
+            ),
+        }
+        let profile = std::fs::read_dir(&directory.path).ok().and_then(|entries| {
+            entries.filter_map(Result::ok).find_map(|entry| {
+                std::fs::read_to_string(entry.path().join("layout-profile.json")).ok()
+            })
+        });
+        eprintln!("LAYOUT_QUERY_CACHE_DIAG name={name} native_profile={profile:?}");
+    }
+    let page = opened.unwrap();
     assert!(!page.hydration_diagnostics().budget_exceeded);
     let profile = directory.read();
     (page, profile, directory)

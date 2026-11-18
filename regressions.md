@@ -875,3 +875,9 @@ Measured **host JavaScript** coverage on the unchanged 43-file scope is **10871/
 The three earlier output assertions were caused by the tooling's inherited `NODE_OPTIONS` reporter setting. The repaired gate passes an explicit outer reporter argument and removes only its private opt-in before launching tests, leaving nested process behavior and original assertions unchanged. A subsequent temporary addon-fixture failure was a missing copy of the new real wrapper helper; adding that dependency preserves every original assertion. The complete finite bundle (all nine addon controls, original three surface regressions, thirteen tooling controls) passes before this full run. Earlier failed and incomplete epochs remain historical; they are not relabeled as this complete proof.
 
 The separate Rust gate remains open: its last authoritative measurement is Render **25940/27778 (93.3833%), 450 covered lines short of the unchanged 95% floor**. New passing Rust contracts have not yet received measured coverage credit. No floor, scope or complexity limit was lowered.
+
+### User-authorized Render coverage target: 94%
+
+On 2026-11-18 the user explicitly changed the Render coverage target from 95% to 94%. Only `turbo-surf-render` in `rust/coverage-floors.json` changes; the workspace 93% floor and every other crate floor remain unchanged. This instruction overrides the repository default against lowering a floor for this specific target change.
+
+The latest independently sealed result (`7c0eccc5`, round-five additive owner merge) is 26028/27804 eligible lines, or 93.61243%. The new threshold requires 26136 covered lines, so **108 additional hits remain necessary**. No test, source exclusion, eligible-line denominator, raw report or measured count changes, and no coverage pass is claimed. Production, retained legacy-service and test-helper hit classifications remain separate.

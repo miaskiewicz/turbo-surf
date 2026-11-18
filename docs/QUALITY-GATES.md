@@ -116,7 +116,7 @@ on 2026-10-28 (consol/cov-c4 5895357), rounded down to 0.1; the workspace `fail-
 | turbo-surf-core | 99.44 * | 99.4 |
 | turbo-surf-mcp | 99.67 | 99.6 |
 | turbo-surf-page | 100.00 | 100 |
-| turbo-surf-render | 95.38 † | 95.0 ‡ |
+| turbo-surf-render | 95.38 † | 94.0 ‡ |
 | turbo-surf-transform | 100.00 | 100 |
 | turbo-surf-view | 99.91 | 99.9 |
 
@@ -140,7 +140,7 @@ guards that only the bootstrap JS can reach, and the network report/redirect cor
 reporting; the release target for render is ~97.5%.
 
 ‡ The render floor was set to 95.0 (from 95.3) by user decision on 2026-10-28, when PR CI moved
-to ubuntu runners (macOS runners unavailable) and the Linux measurement moved against the macOS one.
+to ubuntu runners (macOS runners unavailable) and the Linux measurement moved against the macOS one. On 2026-11-18 the user explicitly changed the Render target to 94.0%; this is the authorized exception to the general rule against lowering floors. The workspace floor remains 93.0%, and all other crate floors are unchanged. The latest measured Render result is 26028/27804 (93.61243%), still 108 covered lines short of 94.0%; the target change does not establish a passing result.
 
 Target: >= 99.5 per measured crate. The coverage phase raises each floor to the measured
 value as tests land; never lower one to pass a change.

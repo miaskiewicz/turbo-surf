@@ -135,6 +135,9 @@ function assertRetryOutcome(runtime, fixture, trace, output, seen, label) {
   }
   const clock = final.browserFixture;
   if (clock === null && final.status === 429) {
+    assert.equal(runtime, "native", label);
+    assert.deepEqual(trace.errors, [], label);
+    assert.deepEqual(trace.collectorErrors ?? [], [], label);
     const terminal = terminalEvents.find(
       (event) => event.requestUrl === finalUrl.pathname + finalUrl.search,
     );
@@ -154,7 +157,7 @@ function assertRetryOutcome(runtime, fixture, trace, output, seen, label) {
         runtimeClockExecuted: false,
       }),
     );
-    return;
+    return "loading";
   }
   assert.equal(clock?.delayMs, fixture.delay, label);
   assert(Number.isFinite(clock.timerCreatedDate), label);
@@ -346,6 +349,133 @@ test("partial terminal evidence requires its current document and exact pending 
   assert.throws(() => check(final, terminal, html.replace('"delayMs":600', '"delayMs":1')));
 });
 
+test("final retry validation preserves only an authenticated loading terminal phase", () => {
+  const output = mkdtempSync(join(tmpdir(), "retry-final-phase-"));
+  const url = "http://fixture.test/terminal?timer=record";
+  const clock = {
+    delayMs: 20,
+    timerCreatedDate: 1000,
+    timerCreatedPerformance: 0,
+    timerFiredDate: 1025,
+    timerFiredPerformance: 25,
+  };
+  const fixture = { name: "partial-final", kind: "retry", delay: 20, results: 0 };
+  const trace = {
+    captureComplete: true,
+    collectorErrors: [],
+    errors: [],
+    config: { url: "http://fixture.test/", observationMs: 1000 },
+    actions: Array.from({ length: 6 }, () => ({ startedMs: 900 })),
+    observation: {
+      policy: "fixed-deadline-before-enter",
+      requestedMs: 1000,
+      completed: true,
+      elapsedMs: 1000,
+      overrunMs: 0,
+      deadlineMs: 1900,
+      snapshotStartedMs: 2000,
+      pendingNavigation: false,
+    },
+    pages: [
+      {
+        phase: "native-final",
+        url,
+        guestUrl: url,
+        status: 429,
+        results: 0,
+        readyState: "loading",
+        browserFixture: null,
+      },
+    ],
+  };
+  const terminal = {
+    path: "/terminal",
+    requestUrl: "/terminal?timer=record",
+    status: 429,
+    timeMs: 1700,
+    timerEvidence: clock,
+  };
+  const network = [
+    { event: "request", id: 1, url, explicit_headers: { "sec-fetch-dest": "document" } },
+    { event: "response", id: 1, final_url: url, status: 429 },
+  ];
+  const check = (
+    ownTrace = trace,
+    ownFixture = fixture,
+    ownTerminal = terminal,
+    ownRuntime = "native",
+  ) =>
+    assertFinalDocument({
+      runtime: ownRuntime,
+      fixture: ownFixture,
+      trace: ownTrace,
+      output,
+      seen: [ownTerminal],
+      label: "final-partial",
+    });
+  try {
+    writeFileSync(join(output, "network.jsonl"), network.map(JSON.stringify).join("\n"));
+    writeFileSync(
+      join(output, "native-final.html"),
+      `<body>Terminal fixture<script>globalThis.__browserFixture=${JSON.stringify(clock)}</script>`,
+    );
+    assert.equal(check(), trace.pages[0]);
+    for (const change of [
+      { browserFixture: clock },
+      { browserFixture: undefined },
+      { readyState: "complete" },
+      { guestUrl: "http://fixture.test/old" },
+    ]) {
+      const invalid = structuredClone(trace);
+      Object.assign(invalid.pages[0], change);
+      assert.throws(() => check(invalid));
+    }
+    assert.throws(() => check(trace, { ...fixture, kind: "background", status: 429 }));
+    for (const field of ["errors", "collectorErrors"]) {
+      const invalid = structuredClone(trace);
+      invalid[field].push({ message: "fixture error" });
+      assert.throws(() => check(invalid));
+    }
+    const wrongStatus = structuredClone(trace);
+    wrongStatus.pages[0].status = 200;
+    assert.throws(() => check(wrongStatus));
+    const wrongUrl = structuredClone(trace);
+    wrongUrl.pages[0].url = "http://fixture.test/terminal?timer=other";
+    wrongUrl.pages[0].guestUrl = wrongUrl.pages[0].url;
+    assert.throws(() => check(wrongUrl));
+    const chromeTrace = structuredClone(trace);
+    Object.assign(chromeTrace.pages[0], {
+      statusSource: "cdp-main-document-loader",
+      statusDocumentUrl: url,
+    });
+    chromeTrace.responses = [{ type: "document", url, status: 429 }];
+    assert.throws(() => check(chromeTrace, fixture, terminal, "chrome"));
+
+    assert.throws(() => check(trace, fixture, { ...terminal, timeMs: 1950 }));
+    assert.throws(
+      () =>
+        check(trace, fixture, {
+          ...terminal,
+          timerEvidence: { ...clock, timerFiredPerformance: 19 },
+        }),
+      /timer fired before/,
+    );
+    assert.throws(() =>
+      check(trace, fixture, { ...terminal, timerEvidence: { ...clock, timerFiredDate: 1019 } }),
+    );
+    writeFileSync(join(output, "native-final.html"), "<body>wrong pending document</body>");
+    assert.throws(() => check());
+    writeFileSync(
+      join(output, "native-final.html"),
+      `<body>Terminal fixture<script>globalThis.__browserFixture=${JSON.stringify(clock)}</script>`,
+    );
+    writeFileSync(join(output, "network.jsonl"), JSON.stringify(network[0]));
+    assert.throws(() => check());
+  } finally {
+    rmSync(output, { recursive: true, force: true });
+  }
+});
+
 function navigationConfig(origin, fixture) {
   return {
     url: origin + (fixture.oldResult ? "/existing-search" : "/"),
@@ -409,7 +539,9 @@ const mayStillLoad = (fixture, final) =>
 
 function assertFinalDocument({ runtime, fixture, trace, output, seen, label }) {
   const final = trace.pages.at(-1);
-  if (fixture.kind === "retry") assertRetryOutcome(runtime, fixture, trace, output, seen, label);
+  let retryReadyState;
+  if (fixture.kind === "retry")
+    retryReadyState = assertRetryOutcome(runtime, fixture, trace, output, seen, label);
   else assert.equal(final.status, fixture.status, label);
   if (fixture.kind === "redirect") {
     assertDocumentResponse(runtime, trace, output, final, label);
@@ -420,7 +552,9 @@ function assertFinalDocument({ runtime, fixture, trace, output, seen, label }) {
     );
   }
   assert.equal(final.results, fixture.results, label);
-  if (mayStillLoad(fixture, final))
+  // Only the causal retry validator admits a terminal awaiting its parser turn.
+  if (retryReadyState === "loading") assert.equal(final.readyState, "loading", label);
+  else if (mayStillLoad(fixture, final))
     assert(["interactive", "complete"].includes(final.readyState), label);
   else assert.equal(final.readyState, "complete", label);
   assert.equal(

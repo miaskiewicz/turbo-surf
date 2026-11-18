@@ -212,7 +212,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: chrome-oracle-launch-diagnostics
-          path: /tmp/turbo-*/chrome-stderr.log
+          path: |
+            /tmp/turbo-*/chrome-stderr.log
+            /tmp/detection-navigation-observation-*/*/chrome-stderr.log
           if-no-files-found: warn
 
   # --------------------------------------------------------------------------

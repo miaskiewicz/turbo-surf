@@ -545,3 +545,7 @@ pub(super) async fn op_fetch_read(state: Rc<RefCell<OpState>>, id: u32) -> Chunk
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fetch_streams/cancellation_contracts.rs"]
+mod cancellation_contracts;

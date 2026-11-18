@@ -10650,11 +10650,9 @@ const __consoleLog = type => (...args) => {
 };
 globalThis.console = {log:__consoleLog('log'),info:__consoleLog('info'),warn:__consoleLog('warning'),error:__consoleLog('error'),debug:__consoleLog('debug'),dir:__consoleLog('dir'),trace:__consoleLog('trace'),clear:__consoleLog('clear')};
 
-const __timers = [];
-Object.setPrototypeOf(__timers, null);
-const __timerPush = Array.prototype.push.bind(__timers);
-const __timerSplice = Array.prototype.splice.bind(__timers);
-const __timerFindIndex = Array.prototype.findIndex.bind(__timers);
+"##,
+    include_str!("timer_queue.js"),
+    r##"
 const __timerApply = Reflect.apply;
 const __timerMax = Math.max;
 let __tid = 1;
@@ -10747,7 +10745,7 @@ globalThis.clearTimeout=(id)=>{
   id=(+id)|0;if(id===0)return;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
 };
 globalThis.clearInterval=globalThis.clearTimeout;
-ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;__timerClear();ops.op_timer_set_nesting(__timerDocument,0);}});
+ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timerClearQueue();__timerClear();ops.op_timer_set_nesting(__timerDocument,0);}});
 // The origin-relative clock combines elapsed native monotonic time with the virtual
 // timer scheduler. Timers advance their scheduled delay; synchronous work consumes
 // real elapsed time. Date/rAF/Event timestamps share this navigation origin.
@@ -10913,24 +10911,9 @@ globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) =
 ops.op_install_microtask_queue(globalThis);
 const __nextLocalTimer = () => {
   if (!__timers.length || ops.op_window_message_pending()) return -1;
-  let index=0;
-  for(let i=1;i<__timers.length;i++){
-    const timer=__timers[i], best=__timers[index];
-    if(timer.due<best.due||(timer.due===best.due&&timer.sequence<best.sequence))index=i;
-  }
+  const index=__nextTimerIndex();
   const due=__timers[index].due;
   return !__realWindowTimers && due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
-};
-// A timer task's nested timers count from the latest due time among the timers already
-// due with it (within the same millisecond of its own due time): in Chrome the parent
-// runs no earlier than those siblings were due, so a nested zero-delay timer queues
-// behind an equal-delay sibling set slightly later by the live clock (turbo-surf#118).
-// Rendering frames are not siblings (turbo-surf#101); only queued dues are read, never
-// the live clock, so the order stays deterministic.
-const __taskBaseFor = (due) => {
-  let base=due;
-  for(let i=0;i<__timers.length;i++){const t=__timers[i];if(!t.rendering&&t.due>base&&t.due<due+1)base=t.due;}
-  return base;
 };
 const __runLocalTimers = (max=100000,keepTask=false) => {
   let fired=0;

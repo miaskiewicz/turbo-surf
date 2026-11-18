@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Avoid repeated full timer-queue scans for ordered task bursts, preserving CSP violation capacity, release-before-reentry, timer ordering and execution budgets.
+
 - Hand timer-only post-load work to the existing full quiescence phase instead of exhausting initial hydration pumps, while preserving fetch completion, dynamic scripts, animation callbacks and finite animations.
 
 - Roll back unpublished frame allocations after interrupted creation, preserving healthy root input, installed frames and peers without admitting incomplete document owners.

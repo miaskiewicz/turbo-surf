@@ -148,3 +148,7 @@ impl PageSession {
         Ok(String::new())
     }
 }
+
+#[cfg(test)]
+#[path = "background_work/message_contracts.rs"]
+mod message_contracts;

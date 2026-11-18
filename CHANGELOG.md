@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Update native DOM, layout and raster together, including canvas background and quirks layout corrections.
+
 - Settle closed navigation waiters after guest checkpoints without waiting for unrelated target work.
 
 - Adopt the native layout correction for quirks-mode root and body viewport sizing, preserving explicit viewport geometry without changing standards-mode content boxes.

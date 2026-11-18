@@ -82,7 +82,11 @@
       ".worktrees/**",
       ".recovery/**",
       ".scratch/**",
-      ".claude/**"
+      ".claude/**",
+      "harness/detection/abort-timeout-reason-lifetime-probe.js",
+      "harness/detection/abort-timeout-reason-probe.js",
+      "harness/detection/csp-native-tt-keyword-probe.js",
+      "harness/detection/csp-native-tt-probe.js"
     ]
   }
 }

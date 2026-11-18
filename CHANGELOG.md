@@ -10,6 +10,8 @@
 
 - Preserve posted-message order against later timers in virtual-time pages by using the running task clock across windows; keep real-time scheduling and existing document authority unchanged.
 
+- Preserve ordered nested-frame history notifications after completed page commands, including consecutive changes to the same URL.
+
 - Settle interrupted initial-hydration script waiters before returning a retained partial page, so later healthy evaluations remain usable within their original execution budget.
 
 - Update native DOM, layout and raster together, including canvas background and quirks layout corrections.

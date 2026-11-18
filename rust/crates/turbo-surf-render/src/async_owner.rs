@@ -315,9 +315,15 @@ fn selected_contexts<'s>(
     let mut owners = HashSet::new();
     for context in roots {
         let context = v8::Local::new(scope, context);
-        owners.insert(
-            document_owner(scope, state, context).ok_or("Native async root is unavailable")?,
-        );
+        let owner = document_owner(scope, state, context);
+        if owner.is_none() {
+            let reason =
+                document_error(scope, context).unwrap_or("native owner registration unavailable");
+            let root = auxiliary_pages::top_level_identity(scope, context).map(|id| id.0);
+            let diagnostic = document_diagnostic(scope, context, reason);
+            eprintln!("INTERRUPTED_FRAME_OWNER_DIAG root={root:?} selected={} terminating={} {diagnostic}", roots.len(), scope.is_execution_terminating());
+        }
+        owners.insert(owner.ok_or("Native async root is unavailable")?);
     }
     let snapshot = state.work.snapshot(scope, &owners);
     if let Some(error) = snapshot.tracking_error {

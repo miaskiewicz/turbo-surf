@@ -60,7 +60,7 @@
     "crawl-bench:js": "node harness/crawlers/run.mjs --set=js",
     "coverage:js": "npm run build:addon && node scripts/run-js-coverage.mjs",
     "coverage:js:report": "node --expose-internals scripts/aggregate-js-coverage.cjs",
-    "test:coverage:js": "node --test scripts/js-coverage.test.cjs scripts/js-test-completeness.test.cjs"
+    "test:coverage:js": "node --test scripts/js-coverage.test.cjs scripts/js-test-completeness.test.cjs scripts/run-node-tests.test.cjs"
   },
   "publishConfig": {
     "access": "public"

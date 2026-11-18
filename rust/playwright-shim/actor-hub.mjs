@@ -50,8 +50,11 @@ export class LiveActorHub {
     return this.pending;
   }
 
-  drain() {
-    if (this.pending) return this.pending;
+  drain(afterCurrent = false) {
+    if (this.pending) {
+      // A completed command can publish events after the in-flight batch was captured.
+      return afterCurrent ? this.pending.then(() => this.drain()) : this.pending;
+    }
     this.pending = this._drain().finally(() => {
       this.pending = null;
     });
@@ -59,10 +62,10 @@ export class LiveActorHub {
   }
 
   async _drain() {
-    if (!this.active) return;
+    if (!this.active || this.nativeClosed) return;
     const state = decoded(await this.native.liveAuxiliaryState(this.actor));
     await this.applyState(state);
-    if (!this.active || this.capability !== "supported") return;
+    if (!this.active || this.nativeClosed || this.capability !== "supported") return;
     const raw = await this.native.liveNetworkLog(this.actor);
     if (!raw) return;
     const batch = decoded(raw);

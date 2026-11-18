@@ -3048,7 +3048,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (this._html.includes("<iframe")) await this._refreshRequestFrames(collect);
     else this._frameEntries = undefined;
     this._syncFrames();
-    await this._drainNetworkEvents();
+    await this._drainNetworkEvents(true);
     await this._followDocumentNavigation(historyNavigation, rscNavigation, previousUrl);
   }
 
@@ -3148,9 +3148,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (this._networkPump === pump) this._networkPump = null;
     }
   }
-  async _drainNetworkEvents() {
+  async _drainNetworkEvents(afterCurrent = false) {
     if (this._actorHub && this._actorHub.capability !== "unsupported")
-      return this._actorHub.drain();
+      return this._actorHub.drain(afterCurrent);
     if (native.liveAuxiliaryState && this._openingSession && !this._actorHub) return;
     if (this._networkDrain) return this._networkDrain;
     this._networkDrain = this._readNetworkEvents();
@@ -4016,7 +4016,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       ),
     );
     if (tracked.needsSync) await this._refreshFromSession();
-    else if (tracked.events || this._auxiliaryActor) await this._drainNetworkEvents();
+    else if (tracked.events || this._auxiliaryActor) await this._drainNetworkEvents(true);
     const result = JSON.parse(tracked.value);
     if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);

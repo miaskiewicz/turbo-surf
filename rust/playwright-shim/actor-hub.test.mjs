@@ -822,3 +822,157 @@ test("an owned callback rejection is not lost when collection empties", async ()
     (error) => error === failure,
   );
 });
+
+const historyState = (events, closed = false) => ({
+  actor: 7,
+  capability: { kind: "supported" },
+  root: "100",
+  pages: [],
+  events,
+  closed,
+});
+const historyEvent = (revision, url) => ({
+  kind: "historyChanged",
+  target: "100",
+  document: "71",
+  revision: String(revision),
+  url,
+});
+
+test("a post-command drain reads fresh notifications after an older captured batch", async () => {
+  const f = fixture();
+  const delivered = [];
+  f.callbacks.historyChanged = (_page, event) => delivered.push([event.revision, event.url]);
+  let release;
+  const queued = [historyEvent(1, "/first"), historyEvent(2, "/second")];
+  let calls = 0;
+  f.native.liveAuxiliaryState = async () => {
+    const captured = historyState(queued.splice(0));
+    if (++calls === 1) {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      return JSON.stringify(captured);
+    }
+    return JSON.stringify(captured);
+  };
+  const background = f.hub.drain();
+  queued.push(historyEvent(3, "/second"));
+  const command = f.hub.drain(true);
+  const otherCommand = f.hub.drain(true);
+  release();
+  await Promise.all([background, command, otherCommand]);
+  assert.equal(calls, 2);
+  assert.deepEqual(delivered, [
+    ["1", "/first"],
+    ["2", "/second"],
+    ["3", "/second"],
+  ]);
+});
+
+test("a post-command drain observes notifications published during initialization", async () => {
+  const f = fixture();
+  const delivered = [];
+  let release;
+  let started;
+  const entered = new Promise((resolve) => {
+    started = resolve;
+  });
+  f.callbacks.historyChanged = async (_page, event) => {
+    delivered.push(event.revision);
+    if (event.revision === "1") {
+      started();
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+  };
+  const initial = f.hub.initialize(historyState([historyEvent(1, "/first")]));
+  await entered;
+  f.snapshots.push(historyState([historyEvent(2, "/second")]));
+  const command = f.hub.drain(true);
+  release();
+  await Promise.all([initial, command]);
+  assert.deepEqual(delivered, ["1", "2"]);
+});
+
+test("a post-command drain does not read native state or network after actor close", async () => {
+  const f = fixture();
+  let release;
+  let calls = 0;
+  f.native.liveAuxiliaryState = async () => {
+    calls++;
+    await new Promise((resolve) => {
+      release = resolve;
+    });
+    return JSON.stringify(historyState([]));
+  };
+  f.native.liveNetworkLog = () => {
+    throw new Error("network read after native close");
+  };
+  f.native.liveActorClose = () =>
+    JSON.stringify(historyState([{ kind: "closed", target: "100" }], true));
+  const background = f.hub.drain();
+  const command = f.hub.drain(true);
+  const closing = f.hub.close();
+  release();
+  await Promise.all([background, command, closing]);
+  assert.equal(calls, 1);
+  assert.equal(f.hub.active, false);
+  assert.equal(f.hub.pages.size, 0);
+  assert.equal(f.root.closed, true);
+});
+
+test("a post-command drain preserves a failed batch and a later request can recover", async () => {
+  const f = fixture();
+  const failure = new Error("captured state failed");
+  let reject;
+  let calls = 0;
+  f.native.liveAuxiliaryState = () => {
+    calls++;
+    return new Promise((_resolve, fail) => {
+      reject = fail;
+    });
+  };
+  const background = assert.rejects(f.hub.drain(), (error) => error === failure);
+  const command = assert.rejects(f.hub.drain(true), (error) => error === failure);
+  reject(failure);
+  await Promise.all([background, command]);
+  assert.equal(calls, 1);
+  f.native.liveAuxiliaryState = async () => JSON.stringify(historyState([]));
+  await f.hub.drain(true);
+  assert.equal(f.hub.pending, null);
+  assert.equal(f.hub.active, true);
+});
+
+test("a later command gets its own barrier after a followup batch was captured", async () => {
+  const f = fixture();
+  const delivered = [];
+  const queued = [historyEvent(1, "/first"), historyEvent(2, "/second")];
+  const releases = [];
+  f.callbacks.historyChanged = (_page, event) => delivered.push(event.revision);
+  let calls = 0;
+  f.native.liveAuxiliaryState = async () => {
+    const captured = historyState(queued.splice(0));
+    calls++;
+    await new Promise((resolve) => {
+      releases.push(resolve);
+    });
+    return JSON.stringify(captured);
+  };
+  const background = f.hub.drain();
+  queued.push(historyEvent(3, "/second"));
+  const command = f.hub.drain(true);
+  releases[0]();
+  await background;
+  assert.equal(calls, 2);
+  queued.push(historyEvent(4, "/second"));
+  const later = f.hub.drain(true);
+  releases[1]();
+  await command;
+  assert.equal(calls, 3);
+  assert.deepEqual(delivered, ["1", "2", "3"]);
+  releases[2]();
+  await later;
+  assert.deepEqual(delivered, ["1", "2", "3", "4"]);
+});

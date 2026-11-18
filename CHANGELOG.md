@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Roll back unpublished frame allocations after interrupted creation, preserving healthy root input, installed frames and peers without admitting incomplete document owners.
+
 - Reap owned web-server processes before checking their groups, and bound transient Darwin group-retirement probes by the existing shutdown deadline while preserving descendant termination and permission errors.
 
 - Settle interrupted initial-hydration script waiters before returning a retained partial page, so later healthy evaluations remain usable within their original execution budget.

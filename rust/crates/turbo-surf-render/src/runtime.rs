@@ -7495,6 +7495,32 @@ fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'
     retire_frame_tree_impl(scope, previous, true, false);
 }
 
+// Frame allocation and document installation are separate synchronous native ops.
+// If their caller was interrupted between them, no legitimate provisional frame
+// can resume after the fully-unwound command boundary.
+fn retire_uninstalled_frame_allocations(rt: &mut JsRuntime) {
+    let contexts = rt
+        .op_state()
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    deno_core::scope!(scope, rt);
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameContextMarker>().is_some()
+            && context.get_slot::<FrameParent>().is_some()
+            && context.get_slot::<FrameRetired>().is_none()
+            && context.get_slot::<FrameConfigured>().is_none()
+            && context.get_slot::<CspHandle>().is_none()
+            && context.get_slot::<ActiveDocument>().is_none()
+            && turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_none()
+        {
+            retire_failed_frame_tree(scope, context);
+        }
+    }
+}
+
 // Failed initialization has no published document or runnable guest task. Stop
 // native ownership without invoking partially installed JavaScript helpers.
 fn retire_failed_frame_tree<'s>(
@@ -20843,3 +20869,7 @@ mod runtime_registered_host_ops_tests;
 #[cfg(test)]
 #[path = "runtime_source_normalization_tests.rs"]
 mod runtime_source_normalization_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "runtime_provisional_frame_tests.rs"]
+mod runtime_provisional_frame_tests;

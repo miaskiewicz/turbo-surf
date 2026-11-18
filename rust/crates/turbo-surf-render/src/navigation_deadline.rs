@@ -927,6 +927,7 @@ pub(super) fn retire_interrupted_frames(rt: &mut OwnedRuntime) {
         return;
     }
     let _activation = rt.activation_key().enter();
+    retire_uninstalled_frame_allocations(rt);
     settle_deferred_classic_interruptions(rt);
     let frames = {
         let mut state = shared.borrow_mut();

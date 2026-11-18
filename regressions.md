@@ -723,3 +723,5 @@ All 22 next Render contracts now pass after reviewed, source-backed fixture corr
 
 
 Producer issue backfills: [turbo-dom #514](https://github.com/miaskiewicz/turbo-dom/issues/514) records the already repaired adopted-image creator-realm state defect (fix 625472a, public descendant 06c6); [turbo-dom #515](https://github.com/miaskiewicz/turbo-dom/issues/515) records the already repaired Window getter receiver defect (public fix 2e195dac). These tickets were filed after the fixes and explicitly preserve that chronology. Future producer defects require a detailed issue before a fix request.
+
+Producer confirmation: both #514 and #515 are closed as completed and assigned to the v0.8.4 milestone (#6). Public `release/0.8.4` head `2e195dac` contains `06c6`; its exact CI run [44202084318](https://github.com/miaskiewicz/turbo-dom/actions/runs/44202084318) passed all 26 jobs.

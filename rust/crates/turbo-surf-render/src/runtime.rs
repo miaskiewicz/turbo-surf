@@ -19597,6 +19597,7 @@ impl PageSession {
             // non-budget errors (install/parse) still fail the open.
             Err(e) if budget_exceeded || rt.v8_isolate().is_execution_terminating() => {
                 rt.v8_isolate().cancel_terminate_execution();
+                auxiliary_navigation::retire_interrupted_frames(&mut rt);
                 Ok(PageSession {
                     driver_snapshot: None,
                     driver_cookies: None,

@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Settle interrupted initial-hydration script waiters before returning a retained partial page, so later healthy evaluations remain usable within their original execution budget.
+
 - Update native DOM, layout and raster together, including canvas background and quirks layout corrections.
 
 - Settle closed navigation waiters after guest checkpoints without waiting for unrelated target work.

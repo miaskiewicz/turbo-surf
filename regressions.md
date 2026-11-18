@@ -928,3 +928,22 @@ The pending background control above was a fixture protocol mismatch: the native
 ### Explicit user Render target: 93.7%
 
 The user explicitly set the Render gate to 93.7% on 2026-11-18, replacing 94% for this crate only. Workspace 93% and every other crate floor remain unchanged. The existing official owner merge (`a948c10bc2afa65808794698f02f1034c95675b92b83558cced3d8ae19ab23c2`) measures 26189/27939 Render lines, 93.73635%, and passes the requested 93.7% floor. This policy-only change does not alter raw reports, counts, eligibility, exclusions or production/test source; the older failing 94% assessment remains intact. Fresh final-graph full Rust and JavaScript validation remains a separate requirement.
+
+
+## Full workspace CSP hydration diagnostic — pending classification
+
+On the pushed final DOM 688 graph, full workspace session 12450 observed `hydration_diagnostics_are_native_and_only_report_real_budget_termination` fail at `rust/crates/turbo-surf-render/tests/csp.rs:153`: the follow-up public evaluation returned `Err("Owner entry failed")`. The preceding real infinite-script hydration under the original 50 ms budget, native budget/open-error diagnostics and reached partial markup assertions had passed. The CSP binary completed 5 pass / 1 fail in 5.95 s; the outer workspace run continues with `--no-fail-fast`.
+
+This occurred during explicitly user-authorized parallel Rust and JS native runs. Timing contention, fixture premise and production cause remain **unproven**. No assertion, budget, error policy or production code has been changed. The exact full-workspace-feature CSP executable, actual registration list and source are preserved for an unchanged isolated rerun only after both native workloads end; no rebuild will substitute for that artifact.
+
+Immutable evidence: `/Users/grzegorz/github-flux/turbo-surf/.worktrees/producer-688-prep/.recovery/full-workspace-attempts/20261118T132000Z-61c71141/full-workspace.log` (failure block 2974–2986), and `CSP-FAILURE-ISOLATION/PLAN.json` with signed executable/source hashes. The active source remains `c575bdf4924a4c3aa39499bfe3c0e72c920bf06d`; full-suite and coverage green claims are not established by this pending experiment.
+
+## Retained initial-hydration script waiter settlement
+
+The full Rust run on frozen `c575bdf4` observed `csp::hydration_diagnostics_are_native_and_only_report_real_budget_termination` fail at the first healthy Root evaluation after its intentional 50ms runaway-script interruption. The partial DOM and native budget diagnostics were present, but the evaluation returned `Owner entry failed`. An unchanged signed-artifact parallel reproduction failed identically; neither the original test nor its budget was changed.
+
+Native-only diagnostics established the cause: the constructor returned a retained session with one queued `DeferredClassicInterruption`; the next evaluation resumed `initialHydrateDone` with that same unresolved real script waiter until its own 50ms watchdog expired. Its existing command-boundary cleanup finally emptied the queue. The Root context was not retired, and this was not the hypothesized successful-open branch retaining a V8 termination flag.
+
+The one-line repair invokes the existing guarded interrupted-work cleanup after the constructor's watchdog has joined and termination has been cleared, before publishing the retained session. The helper settles the actual interrupted classic-script waiter while retaining its existing Root/peer/document ownership checks. There is no generic-error suppression, observation pump, timeout change, or synthetic lifecycle event. All temporary diagnostic changes are excluded.
+
+The unchanged original CSP test passes on the clean signed candidate (`attempt-20261118T144900Z-clean-on-87780d35`, one pass, zero failures/ignores, 0.97s). The complete CSP target passes six cases, and 41 ownership/classic/deadline adjacencies pass with zero failures or ignores. Render and NAPI all-target Clippy with warnings denied, workspace formatting and runtime complexity 15 pass (`STRICT/FINAL` under the same clean candidate attempt). Independent semantic review approved the repair. These targeted results do not claim a new full-workspace pass. Existing regression coverage exercises the repaired boundary directly; no duplicate implementation-mirroring test is added.

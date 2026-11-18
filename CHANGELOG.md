@@ -59,11 +59,10 @@
   returns before a held script completes and genuine load follows its release.
 
 This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
-The release candidate consumes `turbo-dom`, `turbo-dom-browser-env`,
-`turbo-dom-layout`, and `turbo-dom-raster` from the exact `release/0.8.4` revision
-`af946ea0f8f8e0fe8d50b6470b33dbe2068393f6`. The dependency graph uses one
-`turbo-dom-v8` 150.4.2 from the exact generated crate-root revision
-`03839d09726f6e184d72ef83e7e73a1c2ef8d7f9`. Combined release validation is still in
+The v0.8.4 release requires the published `turbo-dom`, `turbo-dom-browser-env`,
+`turbo-dom-layout`, and `turbo-dom-raster` 0.8.4 distributions and one registry
+`turbo-dom-v8` 150.4.2. Development Git candidate results remain separate from
+validation of that final registry graph. Combined release validation is still in
 progress; the entries below describe changes already integrated into the release
 branch.
 
@@ -74,7 +73,7 @@ branch.
 
 - Execute initial and replacement native Page modules in registered document-owned
   module maps, isolating inline-source authority and cancelling retired module work.
-  Consume the published core 0.412.2 and matching extension dependency closure.
+  Consume the published core 0.412.5 and matching extension dependency closure.
 
 - Allocate opaque geometry and Web Audio values in their actual frontend realm,
   preserving borrowed constructors, subclass prototypes and guest stream identity

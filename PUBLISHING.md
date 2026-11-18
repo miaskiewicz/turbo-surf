@@ -68,18 +68,20 @@ changelog entries and unrelated dependency versions must retain their own versio
    separate. When reusing a prior result, retain a bridge proving its actual
    compiled inputs and resolved feature graph still match.
 3. Complete the [actual packaged-consumer procedure](./rust/release-deps/surf-consumer/README.md).
-   Publish and verify the named dependencies first: from turbo-dom, turbo-dom-v8,
-   turbo-dom, turbo-dom-layout, turbo-dom-raster and turbo-dom-browser-env; then
-   the twelve here: the seven Deno-family 0.x.1 (turbo-surf-deno-v8 0.4.1,
-   turbo-surf-serde-v8 0.321.1, turbo-surf-deno-core 0.412.1,
-   turbo-surf-deno-bench-util 0.253.1, turbo-surf-deno-crypto 0.273.1,
-   turbo-surf-deno-web 0.290.1, turbo-surf-deno-webidl 0.259.1) + five transport.
-   The Surf product tags do not publish those dependencies. Then drop the
-   pre-publish `[patch.crates-io]` table in `rust/Cargo.toml` and re-lock with a
-   targeted `cargo update -p` for the turbo-dom crates and the Deno family (exact
-   commands: [v0.6.0 pre-tag steps](#v060-pre-tag-steps-turbo-dom-consolidation); for
-   0.7.0 the same with the turbo-dom 0.7.0 crates, the Deno family already published). Then
-   verify all five Surf library distributions
+   Require real-registry verification of the exact dependencies in the selected
+   release lockfile. For v0.8.4 these include turbo-dom, turbo-dom-layout,
+   turbo-dom-raster and turbo-dom-browser-env 0.8.4, turbo-dom-v8 150.4.2,
+   turbo-surf-deno-v8 0.4.1, turbo-surf-serde-v8 0.321.1,
+   turbo-surf-deno-core 0.412.5, turbo-surf-deno-crypto 0.273.5,
+   turbo-surf-deno-web 0.290.5 and turbo-surf-deno-webidl 0.259.5, plus the named
+   transport packages. The preparation-only benchmark distribution is
+   turbo-surf-deno-bench-util 0.253.5; its publication does not mean it is in
+   Surf's runtime graph. The Surf product tags do not publish these dependencies.
+   Remove development `[patch.crates-io]` overrides and resolve the published
+   versions with targeted Cargo updates. Preserve unrelated lock records, verify
+   the real archive checksums, and require the release guard to accept the final
+   registry graph. The dated v0.6.0 steps below describe that earlier release;
+   they are not v0.8.4 dependency identities. Then verify all five Surf library distributions
    in one normal invocation, with Cargo compilation verification enabled and no
    directory-source replacement:
 
@@ -305,10 +307,10 @@ implementation are unchanged. The unchanged upstream package version identifies
 that baseline, not a new registry release. The reviewed distributable transport packages preserve this
 source under the named `turbo-surf-*` dependency family. Core and render consume
 those published packages through seven explicit Cargo aliases; the transport
-and Deno families have no root source overrides. This integration branch does
-still patch the four turbo-dom crates to
-`b1f604013287382ca2cc82c823603199027df4ea`; remove that development patch only
-after the matching registry prerequisites are available and verified.
+and Deno families have no root source overrides. Development revisions of the
+four DOM crates are candidate evidence only. The v0.8.4 release checkout must
+resolve those crates from their published 0.8.4 distributions, with no root Git
+patches or directory-source replacement.
 
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile
 (`cargo build --locked`). Release authorization does not establish registry
@@ -350,27 +352,26 @@ their existing versions and preserves all other lock records apart from the
 core/render dependency references. The previously tested Git candidates remain
 dated provenance, not current dependency metadata. Since the turbo-dom
 consolidation, layout comes from `turbo-dom-layout` and the screenshot tier
-from `turbo-dom-raster`; the current manifests require 0.8.4 and the integration
-branch resolves them through the development patch above. turbo-surf no longer
+from `turbo-dom-raster`; the current manifests require 0.8.4. The release guard
+requires the published registry graph described above. turbo-surf no longer
 depends on turbo-html2pdf.
 
-The current lockfile resolves turbo-dom's `turbo-dom-v8` 150.4.1, a generated fork
+The current lockfile resolves turbo-dom's registry `turbo-dom-v8` 150.4.2, a generated fork
 of the RustyV8 150.4 family (patches + pins + generator in turbo-dom's
 `crates/turbo-dom-v8`) carrying the native weak-handle teardown hardening and the
 interceptor ShouldThrowOnError fix. Those ownership fixes are required by the
 retained regressions; silently resolving the unpatched upstream crate would lose
 them. The release graph must use exactly one `turbo-dom-v8` through the matching
-turbo-surf-deno-v8 0.4.1 / deno_core 0.412.1 packages (`scripts/check-single-v8.sh`).
+turbo-surf-deno-v8 0.4.1 / deno_core 0.412.5 packages (`scripts/check-single-v8.sh`).
 Workspace binary tests cannot substitute for clean downstream package tests.
 
-All thirteen named dependency distributions are now published and payload-verified
-by [the exact reviewed dependency run](https://github.com/miaskiewicz/turbo-surf/actions/runs/39590311206).
-Its thirteen normal package verifications and eleven fresh registry consumer
-tests pass without ignored tests. An independent audit compares every actual
-archive with that run's own verified plan, including runtime/license bytes and
-complete normalized manifest semantics. The integrated lockfile uses their real
-registry checksums. Actual Surf archives, wheels and source-tarball consumers
-remain separate product release gates below.
+The [earlier reviewed dependency run](https://github.com/miaskiewicz/turbo-surf/actions/runs/39590311206)
+verified thirteen dependency distributions and eleven fresh registry consumers
+without ignored tests. That is historical baseline evidence, not verification of
+later dependency versions. For the selected v0.8.4 lockfile, compare the actual
+published archives and checksums against their own reviewed sources, including
+runtime/license bytes and normalized manifest semantics. Actual Surf archives,
+wheels and source-tarball consumers remain separate product release gates below.
 
 Source preparation, publication and successful consumers are separate checks.
 Require the actual named dependency versions to be available and verified before
@@ -380,12 +381,14 @@ it does not verify per-platform binaries staged by release CI.
 ## Distributable dependency preparation
 
 [`rust/release-deps/`](./rust/release-deps/README.md) prepares five renamed
-transport packages and the seven-package Deno/crypto closure (0.x.1, upstream + 1
-patch), including the benchmark dependency needed to retain test type identity.
+transport packages and the seven-package Deno/crypto closure, including the
+benchmark dependency needed to retain test type identity. Exact published
+versions are defined by the preparation manifests and selected release lockfile;
+the current family includes the 0.x.5 core/extension distributions listed above.
 The native V8 binding is the external prerequisite `turbo-dom-v8` 150.4.x,
 published from the turbo-dom repository before the Deno family; `turbo-surf-v8`
-is retired (its published versions stay untouched). Before release, consumer PRs
-`[patch.crates-io]` the candidates by Git `rev` from the orphan branch
+is retired (its published versions stay untouched). Before dependency publication,
+consumer PRs may test `[patch.crates-io]` candidates by Git `rev` from the orphan branch
 `consolidation/deno-candidates` (`rust/release-deps/push-candidates.sh`). Source and license
 checks, actual normalized archives, compilation/runtime controls and real
 published-consumer checks are distinct prerequisites. Preparing an archive with

@@ -23,13 +23,6 @@ async fn message_sources_are_the_incumbent_window_like_chrome156() {
     // Includes the synchronous posts child-realm code makes when the top realm calls
     // into it (`a.eval(...)`, a child-realm function, nested, sibling): the source is
     // the incumbent (calling frame's) realm, not the entered one (turbo-surf#90).
-    if actual["rows"] != control["rows"] {
-        let clocks = page.read_engine(r#"return [window,window.frames[0],window.frames[1],window.frames[0].frames[0]].map((realm,index)=>({index,pending:__tsNs.shimBindingNamespace(realm).pendingWork(),performanceNow:realm.performance.now(),dateNow:realm.Date.now()}));"#);
-        eprintln!(
-            "WINDOW_MESSAGE_SOURCE_COMPLETION_DIAG actual={actual} clocks={clocks:?} events={}",
-            page.drain_network_log()
-        );
-    }
     assert_eq!(actual["rows"], control["rows"]);
 }
 

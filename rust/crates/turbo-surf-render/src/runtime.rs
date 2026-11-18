@@ -4797,12 +4797,10 @@ fn op_timer_publish_task_base(
 /// The publisher's task must still be running (its base is cleared when it ends).
 #[op2(fast)]
 fn op_timer_agent_task_base(state: &mut OpState) -> f64 {
-    match &*state.borrow::<TimerClock>().task_base.borrow() {
-        Some(published) if published.nesting.task.get() => {
-            published.nesting.published.get().unwrap_or(f64::NAN)
-        }
-        _ => f64::NAN,
-    }
+    state
+        .borrow::<TimerClock>()
+        .active_task_base()
+        .unwrap_or(f64::NAN)
 }
 
 #[op2(fast)]
@@ -4875,6 +4873,30 @@ struct PublishedTaskBase {
 impl TimerClock {
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64() * 1000.0 + self.advance.get()
+    }
+    fn active_task_base(&self) -> Option<f64> {
+        self.task_base
+            .borrow()
+            .as_ref()
+            .filter(|published| published.nesting.task.get())
+            .and_then(|published| published.nesting.published.get())
+    }
+    fn posted_message_due(&self, source: v8::Local<v8::Context>) -> f64 {
+        if self.mode == WindowTimerMode::Virtual {
+            // Match the private Window timer clock: the current realm's task,
+            // then its agent's active task, then elapsed time outside a task.
+            let local = source
+                .get_slot::<WindowTimerNesting>()
+                .filter(|nesting| nesting.task.get())
+                .and_then(|nesting| nesting.published.get());
+            if let Some(base) = local
+                .filter(|base| base.is_finite())
+                .or_else(|| self.active_task_base().filter(|base| base.is_finite()))
+            {
+                return base;
+            }
+        }
+        self.now()
     }
     fn next_sequence(&self) -> f64 {
         let next = self.sequence.get() + 1.0;
@@ -6232,7 +6254,7 @@ fn queue_window_message<'s>(
         let state = JsRuntime::op_state_from(scope);
         let state = state.borrow();
         let clock = state.borrow::<TimerClock>();
-        (clock.now(), clock.next_sequence())
+        (clock.posted_message_due(source), clock.next_sequence())
     };
     // Structured serialization/transfer precedes the inactive-target check.
     // A payload getter can retire the destination while serialization runs.

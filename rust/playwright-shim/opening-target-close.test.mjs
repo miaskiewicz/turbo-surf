@@ -5,6 +5,71 @@ import test from "node:test";
 import { BrowserContext, Page } from "./index.mjs";
 const native = createRequire(import.meta.url)("../crates/turbo-surf-napi/index.js");
 
+for (const mode of ["closed-root", "closed-root-and-popup", "open", "status-error"])
+  test(`actor-open attachment boundary: ${mode}`, { timeout: 10000 }, async () => {
+    const server = createServer((_request, response) =>
+      response.end(
+        mode === "closed-root-and-popup"
+          ? '<script>window.open("about:blank")</script>'
+          : "<title>attached</title>",
+      ),
+    );
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const context = new BrowserContext();
+    const page = await context.newPage();
+    const savedStatus = native.liveInitialHydrationStatus;
+    let attached, resume;
+    const attaching = new Promise((resolve) => (attached = resolve));
+    const attachment = new Promise((resolve) => (resume = resolve));
+    const complete = page._completeActorOpen.bind(page);
+    page._completeActorOpen = async (session) => {
+      await complete(session);
+      attached();
+      await attachment;
+    };
+    let navigation;
+    try {
+      const popupEvent = mode === "closed-root-and-popup" ? page.waitForEvent("popup") : null;
+      navigation = page.goto(`http://127.0.0.1:${server.address().port}`, {
+        waitUntil: "networkidle",
+      });
+      navigation.catch(() => {});
+      await Promise.race([
+        attaching,
+        navigation.then(() => {
+          throw new Error("Navigation completed without the attachment boundary");
+        }),
+      ]);
+      if (mode === "closed-root") await page.close();
+      if (mode === "closed-root-and-popup") {
+        const popup = await popupEvent;
+        await Promise.all([page.close(), popup.close()]);
+        assert.equal(popup.isClosed(), true);
+      }
+      if (mode === "status-error")
+        native.liveInitialHydrationStatus = () => {
+          throw new Error("fixture status failed");
+        };
+      resume();
+      if (mode === "open") {
+        await navigation;
+        assert.equal(page.isClosed(), false);
+        assert.equal(await page.title(), "attached");
+      } else {
+        const expected = mode === "status-error" ? /fixture status failed/ : /closed|cancel/i;
+        await assert.rejects(navigation, expected);
+        if (mode !== "status-error") assert.equal(page.isClosed(), true);
+      }
+    } finally {
+      resume();
+      await navigation?.catch(() => {});
+      native.liveInitialHydrationStatus = savedStatus;
+      await context.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
 for (const mode of ["fetch", "classic-script"])
   test(
     `closing an opening root cancels its ${mode} body and preserves its actual popup`,

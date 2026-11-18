@@ -2945,6 +2945,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
       this._session = session;
       await this._completeActorOpen(session);
+      if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);
       const initialTimeout = this._initialHydrationTimeout(session);

@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Reject navigation as closed when page disposal completes during live-session attachment, preserving successful initialization and unrelated native errors.
+
 - Avoid repeated full timer-queue scans for ordered task bursts, preserving CSP violation capacity, release-before-reentry, timer ordering and execution budgets.
 
 - Hand timer-only post-load work to the existing full quiescence phase instead of exhausting initial hydration pumps, while preserving fetch completion, dynamic scripts, animation callbacks and finite animations.

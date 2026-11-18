@@ -142,7 +142,7 @@ async function aggregate(directory) {
       testError ||
         inventoryError ||
         completenessError ||
-        "JS coverage below 90% (lines, branches and functions)",
+        "JS coverage below configured line, branch or function floors",
     );
 }
 

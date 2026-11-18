@@ -14,9 +14,10 @@ const {
   checkRun,
   checkLoaded,
   verifySources,
+  thresholdBasisPoints,
 } = require("./js-coverage.cjs");
 
-function report(covered = 90, total = 100) {
+function report(covered = 100, total = 100) {
   const counts = {};
   for (const metric of ["Line", "Branch", "Function"]) {
     counts[`total${metric}Count`] = total;
@@ -26,14 +27,48 @@ function report(covered = 90, total = 100) {
 }
 const check = (value) => checkSummary(value, "/fixture", ["a.js"]);
 
-test("all three metrics must meet the exact unrounded 90% floor", () => {
+test("line floor is exactly 92.5% while branches and functions retain their 90% floors", () => {
+  assert.deepEqual(scope.floors, { lines: 92.5, branches: 90, functions: 90 });
   assert.equal(check(report()).pass, true);
-  assert.equal(check(report(100)).pass, true);
-  for (const metric of ["Line", "Branch", "Function"]) {
-    const value = report(90000, 100000);
-    value.files[0][`covered${metric}Count`] = 89999;
-    value.totals[`covered${metric}Count`] = 89999;
+  for (const [metric, below] of [
+    ["Line", 92499],
+    ["Branch", 89999],
+    ["Function", 89999],
+  ]) {
+    const value = report(100000, 100000);
+    value.files[0][`covered${metric}Count`] = below;
+    value.totals[`covered${metric}Count`] = below;
     assert.equal(check(value).pass, false);
+  }
+});
+
+test("92.49% fails, 92.5% passes and 92.51% passes without rounding", () => {
+  for (const [covered, pass] of [
+    [9249, false],
+    [9250, true],
+    [9251, true],
+  ]) {
+    const value = report(9000, 10000);
+    value.files[0].coveredLineCount = covered;
+    value.totals.coveredLineCount = covered;
+    assert.equal(check(value).pass, pass);
+    assert.equal(check(value).metrics.branches.pass, true);
+    assert.equal(check(value).metrics.functions.pass, true);
+  }
+});
+
+test("thresholds use exact basis points and reject invalid or unsupported values", () => {
+  for (const [value, points] of [
+    [0, 0n],
+    [0.01, 1n],
+    [90, 9000n],
+    [92.5, 9250n],
+    [92.49, 9249n],
+    [100, 10000n],
+  ])
+    assert.equal(thresholdBasisPoints(value), points);
+  for (const value of [undefined, null, "92.5", true, {}, NaN, Infinity, -1, 100.01, 92.501]) {
+    assert.throws(() => thresholdBasisPoints(value), /Coverage floor/);
   }
 });
 

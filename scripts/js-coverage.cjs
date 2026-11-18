@@ -57,6 +57,22 @@ function validateCount(row, metric) {
   return { total, covered };
 }
 
+function thresholdBasisPoints(value) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 100 ||
+    !/^\d+(?:\.\d{1,2})?$/.test(String(value))
+  ) {
+    throw new Error(
+      "Coverage floor must be a number from 0 to 100 with at most two decimal places",
+    );
+  }
+  const [whole, fraction = ""] = String(value).split(".");
+  return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+}
+
 function checkSummary(summary, root, files = scope.files) {
   if (!summary || !Array.isArray(summary.files) || !summary.totals)
     throw new Error("Missing coverage report");
@@ -78,7 +94,7 @@ function checkSummary(summary, root, files = scope.files) {
       total,
       percent: (covered * 100) / total,
       floor: scope.floors[metric],
-      pass: BigInt(covered) * 100n >= BigInt(total) * BigInt(scope.floors[metric]),
+      pass: BigInt(covered) * 10000n >= BigInt(total) * thresholdBasisPoints(scope.floors[metric]),
     };
   }
   return { metrics: results, pass: Object.values(results).every((r) => r.pass) };
@@ -104,4 +120,13 @@ function checkRun(run) {
   }
 }
 
-module.exports = { scope, sha, snapshot, verifySources, checkSummary, checkRun, checkLoaded };
+module.exports = {
+  scope,
+  sha,
+  snapshot,
+  verifySources,
+  checkSummary,
+  checkRun,
+  checkLoaded,
+  thresholdBasisPoints,
+};

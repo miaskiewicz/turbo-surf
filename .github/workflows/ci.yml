@@ -187,7 +187,7 @@ jobs:
         run: |
           cargo build --release -p turbo-surf-mcp --example detection_trace
           echo "TURBO_SURF_DETECTION_BINARY=$PWD/target/release/examples/detection_trace" >> "$GITHUB_ENV"
-      - name: JS tests + host coverage (lines, branches, functions >= 90%)
+      - name: JS tests + host coverage (lines >= 92.5%, branches/functions >= 90%)
         run: npm run coverage:js
       - name: Retain JS coverage reports
         if: always()

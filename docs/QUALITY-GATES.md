@@ -61,9 +61,11 @@ and coverage tooling are outside this product scope. Error handling, unsupported
 platforms and fallback paths inside product files remain included. New tracked
 runtime files cause a scope-drift error until the inventory is reviewed and updated.
 
-All three aggregate metrics must independently meet **90% lines, 90% branches and
-90% functions**. The checker compares integer counts without rounding, so 89.999%
-fails. Zero totals, incomplete inventories, missing/malformed raw reports, changed
+All three aggregate metrics must independently meet **92.5% lines, 90% branches and
+90% functions**. Floors accept numbers from 0 to 100 with at most two decimal
+places. The checker converts decimal thresholds to exact integer basis points and
+compares integer counts without rounding: 92.49% fails the line floor, 92.5%
+passes, and 89.999% still fails either 90% floor. Zero totals, incomplete inventories, missing/malformed raw reports, changed
 source hashes and failed test commands cannot pass. Unloaded files remain in the
 line denominator with zero hits and also fail inventory completeness: their nested
 function/branch counts cannot be inferred from V8 runtime data. Execute those

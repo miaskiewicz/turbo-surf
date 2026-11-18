@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26.11.0
           cache: npm
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: actions/setup-python@v5
@@ -52,6 +52,8 @@ jobs:
         run: python3 harness/detection/verify-audio-sources.py
       - name: Release smoke supervisor tests
         run: python3 -B scripts/test_smoke_mcp_release.py
+      - name: JS coverage checker tests
+        run: npm run test:coverage:js
       - name: Coverage floor tests
         run: python3 -B scripts/test_check_coverage_floors.py
       - name: Coverage shard tests
@@ -158,7 +160,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26.11.0
           cache: npm
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: actions/setup-python@v5
@@ -174,10 +176,15 @@ jobs:
           key: napi
       - name: Install
         run: npm ci
-      - name: Playwright shim + E2E tests (local Cargo addon)
-        run: npm run test:playwright
-      - name: Detection tests
-        run: npm run test:detection
+      - name: JS tests + host coverage (lines, branches, functions >= 90%)
+        run: npm run coverage:js
+      - name: Retain JS coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-js
+          path: coverage/js
+          if-no-files-found: error
 
   # --------------------------------------------------------------------------
   # Coverage shards (instrumented builds — must compile independently)

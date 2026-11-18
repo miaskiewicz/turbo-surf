@@ -30,6 +30,42 @@ Default, feature-specific and native SDK builds are distinct configurations; see
 [build features](./BUILD-FEATURES.md) and the
 [Chrome parity runbook](../harness/detection/CHROME-PARITY-RUNBOOK.md).
 
+## JavaScript host coverage
+
+Run `npm run coverage:js` with **Node 26.11.0** and the normal Rust build toolchain.
+It builds the release addon, then runs the existing complete shim/E2E and detection
+commands once with `NODE_V8_COVERAGE`. Existing test deadlines and addon selection
+remain in `scripts/test-playwright.mjs`. CI runs this command in the Playwright job.
+A nonzero test command always fails the coverage gate, even when percentages pass.
+
+`scripts/js-coverage-scope.json` records the same 43 product files as the earlier
+host measurements: `cli.js`, `index.js`, the NAPI JS loader and Playwright shim
+runtime/runner utilities. Existing server and fixture utilities in that inventory
+remain measured. Test cases, the popup application fixture, developer harnesses
+and coverage tooling are outside this product scope. Error handling, unsupported
+platforms and fallback paths inside product files remain included. New tracked
+runtime files cause a scope-drift error until the inventory is reviewed and updated.
+
+All three aggregate metrics must independently meet **90% lines, 90% branches and
+90% functions**. The checker compares integer counts without rounding, so 89.999%
+fails. Zero totals, incomplete inventories, missing/malformed raw reports, changed
+source hashes and failed test commands cannot pass. Unloaded files remain in the
+line denominator with zero hits and also fail inventory completeness: their nested
+function/branch counts cannot be inferred from V8 runtime data. Execute those
+entrypoints rather than excluding them. Loaded files use Node's native V8 coverage
+semantics; this measures host Node JS, not Rust or guest JS in the separate isolate.
+
+Each run requires a new output directory (default `coverage/js`; remove an old
+local output deliberately or pass another path to `node scripts/run-js-coverage.mjs`).
+It retains raw V8 files, source hashes, test command exits, detailed `coverage.json`,
+`lcov.info` and the exact counts/status in `gate.json`. To aggregate an existing run
+without repeating tests, use `npm run coverage:js:report -- /absolute/run/directory`
+with `NODE_V8_COVERAGE` unset. Source bytes must still match that run. The merger
+uses Node's version-pinned internal coverage API and needs no extra dependency.
+`npm run test:coverage:js` exercises exact thresholds, invalid inputs, failed tests,
+unloaded-entry rejection and real V8 aggregation over all 43 fixture files.
+These commands define the gate; they do not assert that a current product run is green.
+
 ## Coverage
 
 Line coverage of the Rust workspace is measured by `cargo tarpaulin` with the LLVM engine

@@ -63,7 +63,8 @@ See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 
 Since 0.6.0 turbo-surf keeps no copies of shared engine code: it links the
 [turbo-dom](https://github.com/miaskiewicz/turbo-dom) crates that turbo-test and
-turbo-html2pdf use too —
+turbo-html2pdf use too. The Rust release graph consumes the published crates.io
+0.8.4 releases of the four DOM crates, pinned by the lockfile checksums —
 
 - **`turbo-dom`** — HTML parser, copy-on-write DOM, CSSOM and the one selector engine;
 - **`turbo-dom-layout`** — style cascade and layout behind live geometry
@@ -512,7 +513,7 @@ SHA-256 and length against reviewed pins. Installed-artifact JavaScript tests re
 a separate portability gate.
 
 The default render tier's `deno_core` alias resolves
-`turbo-surf-deno-core` 0.412.4. Its `v8` alias resolves the facade
+`turbo-surf-deno-core` 0.412.5. Its `v8` alias resolves the facade
 `turbo-surf-deno-v8` 0.4.1, backed by turbo-dom's teardown- and
 interceptor-hardened `turbo-dom-v8` 150.4.2 fork, the only V8 in the graph
 (native engine 15.0.245.2, corresponding to

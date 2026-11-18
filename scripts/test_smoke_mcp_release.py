@@ -392,15 +392,16 @@ class PythonSourceCheckoutTests(_GitCheckoutCase):
 
     PATH_HASHES = {
         'rust/crates/turbo-surf-py/tests/test_smoke.py': 'a2688b317b60774242bd37427349af9195797c5dd31f5dfa146d87ec6e6aeab5',
-        'rust/crates/turbo-surf-py/python/turbo_surf/__init__.py': 'f5a9ca6ea8e257b955e7f47f17806a8f77d9a6ccaf46ebc5f6582d22eb70af3b',
-        'rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi': '51d0c7d4788ac137f90dee9c1b27c48209bc598e59e65dc0a279d3b65d74a2bf',
+        'rust/crates/turbo-surf-py/tests/test_screenshots.py': '6c54260455a763ec8ab083fbb2307f13ffa7d7965b62a3a44329792a7b1a45d3',
+        'rust/crates/turbo-surf-py/python/turbo_surf/__init__.py': 'bed3291853126a71ebc7c4bfba110726ef16b882a826a14531175cd72176d579',
+        'rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi': '6c40724928cafb076c38775cd19941d7a95f98fa8a78e151f63b31ec77ab00a4',
     }
 
     def setUp(self):
         super().setUp()
         for name, expected in self.PATH_HASHES.items():
             self.read_asset(Path(name), expected)
-        self.assertEqual(len(self.assets), 3)
+        self.assertEqual(len(self.assets), 4)
         self.rules = {(name + " text eol=lf").encode() for name in self.PATH_HASHES}
         self.write_assets()
 
@@ -410,7 +411,7 @@ class PythonSourceCheckoutTests(_GitCheckoutCase):
         values = self.git("check-attr", "-z", "text", "eol", "--", *self.assets).decode().split("\0")
         self.assertEqual(values[-1], "")
         rows = [values[index:index + 3] for index in range(0, len(values) - 1, 3)]
-        self.assertEqual(len(rows), 6)
+        self.assertEqual(len(rows), 8)
         self.assertEqual({row[0] for row in rows}, set(self.assets))
         self.assertTrue(all((row[1], row[2]) in (("text", "set"), ("eol", "lf")) for row in rows))
 

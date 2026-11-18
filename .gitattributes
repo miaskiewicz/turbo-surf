@@ -25,6 +25,7 @@ rust/crates/turbo-surf-render/tests/*.rs text eol=lf
 
 # Authored Python wheel payloads and smoke receipt hashes use canonical LF.
 rust/crates/turbo-surf-py/tests/test_smoke.py text eol=lf
+rust/crates/turbo-surf-py/tests/test_screenshots.py text eol=lf
 rust/crates/turbo-surf-py/python/turbo_surf/__init__.py text eol=lf
 rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi text eol=lf
 

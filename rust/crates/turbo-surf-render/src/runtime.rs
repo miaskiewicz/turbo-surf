@@ -19796,7 +19796,7 @@ impl PageSession {
         let budget = self.budget_ms;
         let drained = {
             let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
-            with_async_execution_budget(
+            let drained = with_async_execution_budget(
                 self.options.window_timer_mode == WindowTimerMode::RealTime,
                 budget,
                 &watchdog.exceeded,
@@ -19811,7 +19811,19 @@ impl PageSession {
                     drain_to_quiescence(&mut self.rt).await
                 },
             )
-            .await
+            .await;
+            let before_exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+            let before_terminating = self.rt.v8_isolate().is_execution_terminating();
+            let exceeded = watchdog.exceeded.clone();
+            drop(watchdog);
+            if let Err(error) = &drained {
+                eprintln!(
+                    "ACTION_RECOVERY_DIAG eval_active before_join_exceeded={before_exceeded} before_join_terminating={before_terminating} after_join_exceeded={} after_join_terminating={} error={error:?}",
+                    exceeded.load(std::sync::atomic::Ordering::Relaxed),
+                    self.rt.v8_isolate().is_execution_terminating(),
+                );
+            }
+            drained
         };
         // The watchdog may have terminated mid-drain. Clear that terminate state so the
         // isolate is usable again, then read the result BEST-EFFORT: an interaction's

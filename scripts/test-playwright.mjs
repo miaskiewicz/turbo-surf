@@ -16,6 +16,7 @@ function run(command, args) {
 }
 
 const controls = await run(process.execPath, [
+  fileURLToPath(new URL("./run-node-tests.mjs", import.meta.url)),
   "--test",
   fileURLToPath(new URL("./local-addon.test.mjs", import.meta.url)),
 ]);

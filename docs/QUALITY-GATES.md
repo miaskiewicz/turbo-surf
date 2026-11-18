@@ -37,7 +37,8 @@ It builds the release addon, then runs the existing complete shim/E2E and detect
 commands once with `NODE_V8_COVERAGE`. Existing test deadlines and addon selection
 remain in `scripts/test-playwright.mjs`. CI runs this command in the Playwright job.
 A nonzero test command always fails the coverage gate, even when percentages pass.
-The supervisor records TAP logs with a reporter-only Node option, verifies all
+The supervisor records TAP logs with an explicit reporter argument on each outer
+Node test command, verifies all
 registered Node files loaded, and binds their bytes and package selectors to the
 run. It requires all three Playwright/control summaries, the detection summary
 and both nonempty offline Python helper runs. Failed/cancelled/todo/empty runs and
@@ -48,6 +49,9 @@ inputs must therefore be supplied for this complete gate; they cannot silently
 skip required detection controls. CI installs the already locked Chrome/Patchright
 oracle dependencies and builds the native `detection_trace` example. Relevant
 environment presence and value hashes are retained without logging their values.
+`scripts/run-node-tests.mjs` consumes the coverage reporter opt-in before launching
+the test process. Nested test probes inherit the caller's original `NODE_OPTIONS`
+and reporter behavior; the coverage gate never changes that environment variable.
 
 `scripts/js-coverage-scope.json` records the same 43 product files as the earlier
 host measurements: `cli.js`, `index.js`, the NAPI JS loader and Playwright shim

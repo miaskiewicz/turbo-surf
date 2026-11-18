@@ -49,7 +49,7 @@ async function main() {
   const env = {
     ...process.env,
     NODE_V8_COVERAGE: raw,
-    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --test-reporter=tap`.trim(),
+    TURBO_SURF_JS_COVERAGE_TAP: "1",
   };
   record.executionInputs = completeness.executionInputs(root, env);
   for (const [name, args] of [

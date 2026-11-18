@@ -12,6 +12,7 @@ const testPattern = /(?:\.(?:test|spec)|\/test)\.[cm]?js$/;
 
 const environmentKeys = [
   "NODE_OPTIONS",
+  "TURBO_SURF_JS_COVERAGE_TAP",
   "NODE_V8_COVERAGE",
   "TURBO_SURF_NAPI_PATH",
   "TURBO_SURF_DETECTION_BINARY",

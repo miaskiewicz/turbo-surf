@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Capture URL and URLSearchParams string conversions before authored scripts can replace the global String constructor, while retaining user-defined coercions and mutation errors.
+
 - Preserve retained stream operations after source-frame retirement, keep retired document tasks and fetches inadmissible, and release the frontend realm after the actual source sink closes.
 
 - Complete legacy root async evaluation using native document ownership and actual Promise dependencies, without waiting for unrelated popup work. Preserve borrowed crypto/stream error realms, module source URLs, peer IndexedDB continuations and retired-document collection.

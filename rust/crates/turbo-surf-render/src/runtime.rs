@@ -12695,17 +12695,17 @@ if (typeof globalThis.URLSearchParams === "undefined") {
       let pairs=[];
       if(init instanceof URLSearchParams)pairs=__urlPairs(init).map(pair=>pair.slice());
       else if(init != null && typeof init === "object") {
-        if(typeof init[Symbol.iterator] === "function") for(const pair of init){const values=Array.from(pair);if(values.length!==2)throw new TypeError("Search parameter pairs require two values");pairs.push(values.map(String));}
-        else pairs=Object.entries(init).map(([key,value])=>[key,String(value)]);
-      } else pairs=ops.op_url_params_parse(String(init).replace(/^\?/,""));
+        if(typeof init[Symbol.iterator] === "function") for(const pair of init){const values=Array.from(pair);if(values.length!==2)throw new TypeError("Search parameter pairs require two values");pairs.push(values.map(__String));}
+        else pairs=Object.entries(init).map(([key,value])=>[key,__String(value)]);
+      } else pairs=ops.op_url_params_parse(__String(init).replace(/^\?/,""));
       __urlParamStates.set(this,pairs);
     }
-    append(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");__urlPairs(this).push([String(key),String(value)]);__urlParamsChanged(this);}
-    delete(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");key=String(key);__urlParamStates.set(this,__urlPairs(this).filter(pair=>pair[0]!==key||(value!==undefined&&pair[1]!==String(value))));__urlParamsChanged(this);}
-    get(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).find(pair=>pair[0]===String(key))?.[1]??null;}
-    getAll(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).filter(pair=>pair[0]===String(key)).map(pair=>pair[1]);}
-    has(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).some(pair=>pair[0]===String(key)&&(value===undefined||pair[1]===String(value)));}
-    set(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");key=String(key);value=String(value);let found=false;const pairs=[];for(const pair of __urlPairs(this)){if(pair[0]!==key)pairs.push(pair);else if(!found){pairs.push([key,value]);found=true;}}if(!found)pairs.push([key,value]);__urlParamStates.set(this,pairs);__urlParamsChanged(this);}
+    append(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");__urlPairs(this).push([__String(key),__String(value)]);__urlParamsChanged(this);}
+    delete(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");key=__String(key);__urlParamStates.set(this,__urlPairs(this).filter(pair=>pair[0]!==key||(value!==undefined&&pair[1]!==__String(value))));__urlParamsChanged(this);}
+    get(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).find(pair=>pair[0]===__String(key))?.[1]??null;}
+    getAll(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).filter(pair=>pair[0]===__String(key)).map(pair=>pair[1]);}
+    has(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).some(pair=>pair[0]===__String(key)&&(value===undefined||pair[1]===__String(value)));}
+    set(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");key=__String(key);value=__String(value);let found=false;const pairs=[];for(const pair of __urlPairs(this)){if(pair[0]!==key)pairs.push(pair);else if(!found){pairs.push([key,value]);found=true;}}if(!found)pairs.push([key,value]);__urlParamStates.set(this,pairs);__urlParamsChanged(this);}
     sort() {__urlPairs(this).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);__urlParamsChanged(this);}
     forEach(callback,thisArg = undefined) {if(typeof callback!=="function")throw new TypeError("A callback required");for(let index=0;index<__urlPairs(this).length;index++){const pair=__urlPairs(this)[index];callback.call(thisArg,pair[1],pair[0],this);}}
     keys() {return __urlIterate(this,"key");}
@@ -12720,10 +12720,10 @@ if (typeof globalThis.URLSearchParams === "undefined") {
 if (typeof globalThis.URL === "undefined") {
   const states = __interfaceMap("URL");
   const state = (receiver) => { const value = states.get(receiver); if (!value) throw new TypeError("Illegal invocation"); return value; };
-  const parse = (input, base = "") => ops.op_surf_url_parse(String(input), base);
+  const parse = (input, base = "") => ops.op_surf_url_parse(__String(input), base);
   const update = (receiver, key, value) => {
     const current = state(receiver);
-    current.parts = parse(ops.op_url_update(receiver.href, key, String(value)));
+    current.parts = parse(ops.op_url_update(receiver.href, key, __String(value)));
     // URL.searchParams keeps its identity across URL mutations.
     const replacement = new URLSearchParams(current.parts.search);
     __urlParamStates.set(current.params,__urlPairs(replacement));
@@ -12731,7 +12731,7 @@ if (typeof globalThis.URL === "undefined") {
   globalThis.URL = class URL {
     constructor(url, base = undefined) {
       if (!arguments.length) throw new TypeError("URL requires an input");
-      const parts = parse(url, base === undefined ? "" : String(base));
+      const parts = parse(url, base === undefined ? "" : __String(base));
       const params=new URLSearchParams(parts.search),current={parts,params};
       states.set(this,current);
       __urlParamOwners.set(params,()=>{current.parts=parse(ops.op_url_update(current.parts.href,"search",params.toString()));});

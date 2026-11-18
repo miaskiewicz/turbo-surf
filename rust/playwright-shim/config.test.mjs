@@ -29,17 +29,11 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, "bin/turbo-surf-test.mjs");
 
-// FIXME(turbo-surf#305): on GitHub Actions this file hangs after all tests
-// pass (open handles from spawned subprocesses whose stdio pipes survive
-// SIGKILL on the runner). The 300s file-level timeout fires, marking the file
-// as cancelled and failing the run. Skip on CI; local coverage retained.
-const CI = !!process.env.CI;
-
 function tmp() {
   return mkdtempSync(join(tmpdir(), "surf-cli-"));
 }
 
-test("normalizeConfig: defaults for an empty config", { skip: CI }, () => {
+test("normalizeConfig: defaults for an empty config", () => {
   const c = normalizeConfig({}, "/root");
   assert.equal(c.rootDir, "/root");
   assert.equal(c.testDir, "/root");
@@ -51,7 +45,7 @@ test("normalizeConfig: defaults for an empty config", { skip: CI }, () => {
   assert.equal(c.projects[0].name, "default");
 });
 
-test("normalizeConfig: projects inherit top-level use + are overridable", { skip: CI }, () => {
+test("normalizeConfig: projects inherit top-level use + are overridable", () => {
   const c = normalizeConfig(
     {
       testDir: "./e2e",
@@ -73,7 +67,7 @@ test("normalizeConfig: projects inherit top-level use + are overridable", { skip
   assert.deepEqual(c.reporter, [["html", { outputFile: "r.html" }], ["list"]]);
 });
 
-test("globToRegex: *, **, ?, @(a|b), {a,b}", { skip: CI }, () => {
+test("globToRegex: *, **, ?, @(a|b), {a,b}", () => {
   assert.ok(globToRegex("*.mjs").test("a.mjs"));
   assert.ok(!globToRegex("*.mjs").test("a/b.mjs"));
   assert.ok(globToRegex("**/*.mjs").test("a/b/c.mjs"));
@@ -88,7 +82,7 @@ test("globToRegex: *, **, ?, @(a|b), {a,b}", { skip: CI }, () => {
   assert.ok(matchAny("foo/node_modules/x.mjs", ["**/node_modules/**"]));
 });
 
-test("discoverTests: walks testDir, honors match/ignore", { skip: CI }, () => {
+test("discoverTests: walks testDir, honors match/ignore", () => {
   const root = tmp();
   for (const rel of [
     "a.spec.mjs",
@@ -109,7 +103,7 @@ test("discoverTests: walks testDir, honors match/ignore", { skip: CI }, () => {
   assert.deepEqual(names.toSorted(), ["a.spec.mjs", "nested/b.test.mjs"]);
 });
 
-test("loadConfig: imports an .mjs and normalizes it", { skip: CI }, async () => {
+test("loadConfig: imports an .mjs and normalizes it", async () => {
   const root = tmp();
   writeFileSync(
     join(root, "playwright.config.mjs"),
@@ -126,7 +120,7 @@ test("loadConfig: imports an .mjs and normalizes it", { skip: CI }, async () => 
   assert.equal(findConfig(root), join(root, "playwright.config.mjs"));
 });
 
-test("webServer: spawn, wait until ready, teardown", { skip: CI, timeout: 30_000 }, async () => {
+test("webServer: spawn, wait until ready, teardown", { timeout: 30_000 }, async () => {
   const port = await freePort();
   const root = tmp();
   const script = join(root, "server.mjs");
@@ -149,7 +143,7 @@ test("webServer: spawn, wait until ready, teardown", { skip: CI, timeout: 30_000
 
 test(
   "CLI end-to-end: loads config, runs test files per project, reports exit",
-  { skip: CI, timeout: 30_000 },
+  { timeout: 30_000 },
   async () => {
     const root = tmp();
     await mkdir(join(root, "t"), { recursive: true });
@@ -181,22 +175,18 @@ test(
   },
 );
 
-test(
-  "CLI: --list-only prints the discovered files and exits 0",
-  { skip: CI, timeout: 30_000 },
-  async () => {
-    const root = tmp();
-    await mkdir(join(root, "t"), { recursive: true });
-    writeFileSync(join(root, "t/a.spec.mjs"), "import 'node:test';");
-    writeFileSync(join(root, "playwright.config.mjs"), `export default { testDir: './t' };`);
-    const { code, stdout } = await runCli(
-      ["--config", join(root, "playwright.config.mjs"), "--list-only"],
-      root,
-    );
-    assert.equal(code, 0);
-    assert.match(stdout, /a\.spec\.mjs/);
-  },
-);
+test("CLI: --list-only prints the discovered files and exits 0", { timeout: 30_000 }, async () => {
+  const root = tmp();
+  await mkdir(join(root, "t"), { recursive: true });
+  writeFileSync(join(root, "t/a.spec.mjs"), "import 'node:test';");
+  writeFileSync(join(root, "playwright.config.mjs"), `export default { testDir: './t' };`);
+  const { code, stdout } = await runCli(
+    ["--config", join(root, "playwright.config.mjs"), "--list-only"],
+    root,
+  );
+  assert.equal(code, 0);
+  assert.match(stdout, /a\.spec\.mjs/);
+});
 
 test("CLI: html reporter writes a playwright-report.html", async () => {
   const root = tmp();

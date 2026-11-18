@@ -20792,3 +20792,23 @@ mod runtime_document_contract_tests;
 #[cfg(test)]
 #[path = "security_error_registration_tests.rs"]
 mod security_error_registration_tests;
+
+#[cfg(test)]
+#[path = "registered_fetch_prepare_tests.rs"]
+mod registered_fetch_prepare_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_document_lifecycle_tests.rs"]
+mod runtime_registered_document_lifecycle_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_navigation_tests.rs"]
+mod runtime_registered_navigation_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_geometry_tests.rs"]
+mod runtime_registered_geometry_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_resource_deadline_tests.rs"]
+mod registered_resource_deadline_tests;

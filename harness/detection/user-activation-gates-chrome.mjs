@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { cdpConnection } from "./cdp-connection.mjs";
-import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
+import { chromeExtensionArgs, chromeExtraArgs } from "./chrome-launch-policy.mjs";
 
 const [casesArgument, outputArgument] = process.argv.slice(2);
 if (!casesArgument || !outputArgument)
@@ -61,6 +61,7 @@ try {
       foregroundFrames: true,
       headless: true,
     }),
+    ...chromeExtraArgs({}),
     "about:blank",
   ];
   chrome = spawn(

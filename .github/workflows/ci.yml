@@ -184,8 +184,12 @@ jobs:
         run: |
           sudo apt-get install -y xvfb xauth
           npm ci --prefix scripts/browser-sidecar
-          npx --no-install playwright install --with-deps chromium
-          node -e "console.log('TURBO_SURF_CHROME_PATH=' + require('playwright').chromium.executablePath())" >> "$GITHUB_ENV"
+          npx --no-install playwright install-deps chromium
+          curl --fail --location --retry 3 https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/linux64/chrome-linux64.zip --output "$RUNNER_TEMP/chrome-linux64.zip"
+          echo "e6c94490f0b6b337225aeb2d2a5034858516b7017356980ba94f5176d8774a50  $RUNNER_TEMP/chrome-linux64.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/chrome-linux64.zip" -d "$RUNNER_TEMP/chrome-oracle"
+          "$RUNNER_TEMP/chrome-oracle/chrome-linux64/chrome" --version | grep -F '156.0.8078.47'
+          echo "TURBO_SURF_CHROME_PATH=$RUNNER_TEMP/chrome-oracle/chrome-linux64/chrome" >> "$GITHUB_ENV"
           echo "TURBO_SURF_CHROME_HEADLESS=1" >> "$GITHUB_ENV"
       - name: Build native detection collector
         working-directory: rust

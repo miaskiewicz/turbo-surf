@@ -27,7 +27,7 @@ lto = "thin"
 
 # Native DOM candidate; the reviewed Deno/native V8 distributions use registry versions.
 [patch.crates-io]
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "2e195dac6e56eb94863b0c27421b5c7e2580277d" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "2e195dac6e56eb94863b0c27421b5c7e2580277d" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "2e195dac6e56eb94863b0c27421b5c7e2580277d" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "2e195dac6e56eb94863b0c27421b5c7e2580277d" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "fb6957adcb6597426e36ca0c740fcdab872f343c" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "fb6957adcb6597426e36ca0c740fcdab872f343c" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "fb6957adcb6597426e36ca0c740fcdab872f343c" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "fb6957adcb6597426e36ca0c740fcdab872f343c" }

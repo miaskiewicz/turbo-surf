@@ -64,3 +64,30 @@ async fn positioned_scroll_target_moves_container_but_fixed_target_does_not() {
         .unwrap();
     assert_eq!(result, "[true,0,0]");
 }
+
+#[tokio::test]
+async fn explicit_viewport_options_set_actual_window_and_root_dimensions() {
+    let mut session = PageSession::open_with_document_response_and_options(
+        "<style>html,body{margin:0}</style><p>viewport</p>",
+        "https://geometry.test/viewport",
+        "",
+        "",
+        5_000,
+        "",
+        Default::default(),
+        &[],
+        Default::default(),
+        Default::default(),
+        None,
+        turbo_surf_render::PageSessionOptions {
+            viewport: Some([640, 480]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let result = session.eval_json_expression(
+        "[window.innerWidth, window.innerHeight, document.documentElement.clientWidth, document.documentElement.clientHeight]",
+    ).await.unwrap();
+    assert_eq!(result, "[640,480,640,480]");
+}

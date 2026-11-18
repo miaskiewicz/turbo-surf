@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Adopt the native layout correction for quirks-mode root and body viewport sizing, preserving explicit viewport geometry without changing standards-mode content boxes.
+
 - Return actual child markup from Locator and Frame innerHTML reads, preserving missing-element results and live document ownership.
 
 - Deliver Page.dispatchEvent through the existing live Locator dispatch path, preserving event initialization, settlement and missing-target errors.

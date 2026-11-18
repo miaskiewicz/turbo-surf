@@ -176,6 +176,17 @@ jobs:
           key: napi
       - name: Install
         run: npm ci
+      - name: Install locked detection oracle tools
+        run: |
+          npm ci --prefix scripts/browser-sidecar
+          npx --no-install playwright install --with-deps chromium
+          node -e "console.log('TURBO_SURF_CHROME_PATH=' + require('playwright').chromium.executablePath())" >> "$GITHUB_ENV"
+          echo "TURBO_SURF_CHROME_HEADLESS=1" >> "$GITHUB_ENV"
+      - name: Build native detection collector
+        working-directory: rust
+        run: |
+          cargo build --release -p turbo-surf-mcp --example detection_trace
+          echo "TURBO_SURF_DETECTION_BINARY=$PWD/target/release/examples/detection_trace" >> "$GITHUB_ENV"
       - name: JS tests + host coverage (lines, branches, functions >= 90%)
         run: npm run coverage:js
       - name: Retain JS coverage reports

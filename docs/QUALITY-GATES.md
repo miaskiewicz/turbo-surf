@@ -37,6 +37,17 @@ It builds the release addon, then runs the existing complete shim/E2E and detect
 commands once with `NODE_V8_COVERAGE`. Existing test deadlines and addon selection
 remain in `scripts/test-playwright.mjs`. CI runs this command in the Playwright job.
 A nonzero test command always fails the coverage gate, even when percentages pass.
+The supervisor records TAP logs with a reporter-only Node option, verifies all
+registered Node files loaded, and binds their bytes and package selectors to the
+run. It requires all three Playwright/control summaries, the detection summary
+and both nonempty offline Python helper runs. Failed/cancelled/todo/empty runs and
+unregistered-file fallback results fail. Only the three existing intentional skips
+are accepted by exact name/reason/count: `skipped test does not run` once and
+`ordinary must not run` (`excluded by focused tests`) twice. Missing optional
+inputs must therefore be supplied for this complete gate; they cannot silently
+skip required detection controls. CI installs the already locked Chrome/Patchright
+oracle dependencies and builds the native `detection_trace` example. Relevant
+environment presence and value hashes are retained without logging their values.
 
 `scripts/js-coverage-scope.json` records the same 43 product files as the earlier
 host measurements: `cli.js`, `index.js`, the NAPI JS loader and Playwright shim
@@ -58,7 +69,7 @@ semantics; this measures host Node JS, not Rust or guest JS in the separate isol
 Each run requires a new output directory (default `coverage/js`; remove an old
 local output deliberately or pass another path to `node scripts/run-js-coverage.mjs`).
 It retains raw V8 files, source hashes, test command exits, detailed `coverage.json`,
-`lcov.info` and the exact counts/status in `gate.json`. To aggregate an existing run
+`lcov.info` and the exact counts/status in `gate.json`, including command log pins and completeness results. To aggregate an existing run
 without repeating tests, use `npm run coverage:js:report -- /absolute/run/directory`
 with `NODE_V8_COVERAGE` unset. Source bytes must still match that run. The merger
 uses Node's version-pinned internal coverage API and needs no extra dependency.

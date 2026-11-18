@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const { checkCompleteness } = require("./js-test-completeness.cjs");
 const path = require("node:path");
 const { pathToFileURL, fileURLToPath } = require("node:url");
 const { Readable } = require("node:stream");
@@ -95,6 +96,13 @@ async function aggregate(directory) {
   } catch (error) {
     testError = error.message;
   }
+  let completeness = null;
+  let completenessError = null;
+  try {
+    completeness = checkCompleteness(run, loaded);
+  } catch (error) {
+    completenessError = error.message;
+  }
   const receipt = {
     nodeVersion: process.version,
     nodeBinarySha256: sha(process.execPath),
@@ -103,15 +111,18 @@ async function aggregate(directory) {
     checkerSha256: sha(path.join(__dirname, "js-coverage.cjs")),
     sourceRoot: run.root,
     commands: run.commands,
+    executionInputs: run.executionInputs,
     scope: "product-launcher-shim-binding",
     raw: pins,
     sources: run.sources,
     metrics: gate.metrics,
-    testsPassed: testError === null,
+    testsPassed: testError === null && completenessError === null,
+    completeness,
+    completenessError,
     testError,
     unloadedFiles,
     inventoryError,
-    pass: gate.pass && testError === null && inventoryError === null,
+    pass: gate.pass && testError === null && inventoryError === null && completenessError === null,
     limitation:
       "Node-host V8 coverage only. Unloaded files have zero-covered lines; nested function/branch counts are runtime-dependent, not statically inferred. No native or guest-isolate coverage claim.",
   };
@@ -128,7 +139,10 @@ async function aggregate(directory) {
   console.log(JSON.stringify(receipt.metrics, null, 2));
   if (!receipt.pass)
     throw new Error(
-      testError || inventoryError || "JS coverage below 90% (lines, branches and functions)",
+      testError ||
+        inventoryError ||
+        completenessError ||
+        "JS coverage below 90% (lines, branches and functions)",
     );
 }
 

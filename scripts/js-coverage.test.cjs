@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { testInventory } = require("./js-test-completeness.cjs");
 const {
   scope,
   sha,
@@ -97,12 +98,47 @@ function fixture(t) {
       "function example(x) { if (x) return 1; return 2; }\nexample(true);\n",
     );
   }
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "scripts/local-addon.test.mjs"),
+    "export const loaded = true;\n",
+  );
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        "test:shim": "node --test scripts/local-addon.test.mjs",
+        "test:e2e": "node --test scripts/local-addon.test.mjs",
+        "test:detection": "node --test scripts/local-addon.test.mjs",
+      },
+    }),
+  );
+  const summary = (extra = "", tests = 1, skipped = 0) =>
+    `ok 1 - fixture behavior\n${extra}# tests ${tests}\n# pass 1\n# fail 0\n# cancelled 0\n# skipped ${skipped}\n# todo 0\n`;
+  const logs = {
+    playwright:
+      summary() +
+      summary("ok 2 - skipped test does not run # SKIP\n", 2, 1) +
+      summary(
+        "ok 2 - ordinary must not run # SKIP excluded by focused tests\nok 3 - ordinary must not run # SKIP excluded by focused tests\n",
+        3,
+        2,
+      ),
+    detection: summary() + "Ran 1 test in 0.1s\nOK\nRan 1 test in 0.1s\nOK\n",
+  };
+  for (const [name, text] of Object.entries(logs))
+    fs.writeFileSync(path.join(directory, `${name}.log`), text);
   const sources = scope.files.map((file) => ({ path: file, sha256: sha(path.join(root, file)) }));
-  const commands = [
-    { name: "playwright", exit: 0 },
-    { name: "detection", exit: 0 },
-  ];
-  fs.writeFileSync(path.join(directory, "run.json"), JSON.stringify({ root, sources, commands }));
+  const commands = ["playwright", "detection"].map((name) => ({
+    name,
+    exit: 0,
+    log: path.join(directory, `${name}.log`),
+    logSha256: sha(path.join(directory, `${name}.log`)),
+  }));
+  fs.writeFileSync(
+    path.join(directory, "run.json"),
+    JSON.stringify({ root, sources, commands, ...testInventory(root) }),
+  );
   return { directory, root, sources };
 }
 
@@ -152,7 +188,7 @@ test("real V8 merge retains all 43 files, including zero-hit unloaded sources", 
   assert.equal(summary.files.length, 43);
   assert.equal(summary.files.filter((f) => f.coveredLineCount === 0).length, 42);
   const gate = JSON.parse(fs.readFileSync(path.join(directory, "gate.json"), "utf8"));
-  assert.equal(gate.testsPassed, true);
+  assert.equal(gate.testsPassed, false);
   assert.equal(gate.unloadedFiles.length, 42);
   assert.equal(gate.pass, false);
   assert.ok(gate.metrics.lines.total > gate.metrics.lines.covered);
@@ -175,7 +211,7 @@ test("real complete V8 inventory passes, but failed tests still reject high cove
   const run = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   run.sources = scope.files.map((file) => ({ path: file, sha256: sha(path.join(root, file)) }));
   fs.writeFileSync(manifestPath, JSON.stringify(run));
-  const urls = scope.files.map(
+  const urls = [...scope.files, "scripts/local-addon.test.mjs"].map(
     (file) => require("node:url").pathToFileURL(path.join(root, file)).href,
   );
   const executed = spawnSync(

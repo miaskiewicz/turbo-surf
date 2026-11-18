@@ -178,6 +178,7 @@ jobs:
         run: npm ci
       - name: Install locked detection oracle tools
         run: |
+          sudo apt-get install -y xvfb xauth
           npm ci --prefix scripts/browser-sidecar
           npx --no-install playwright install --with-deps chromium
           node -e "console.log('TURBO_SURF_CHROME_PATH=' + require('playwright').chromium.executablePath())" >> "$GITHUB_ENV"
@@ -188,7 +189,9 @@ jobs:
           cargo build --release -p turbo-surf-mcp --example detection_trace
           echo "TURBO_SURF_DETECTION_BINARY=$PWD/target/release/examples/detection_trace" >> "$GITHUB_ENV"
       - name: JS tests + host coverage (lines >= 92.5%, branches/functions >= 90%)
-        run: npm run coverage:js
+        # Oracle controls intentionally launch headed Chrome even when other
+        # collectors use headless mode; keep their real display available.
+        run: xvfb-run --auto-servernum npm run coverage:js
       - name: Retain JS coverage reports
         if: always()
         uses: actions/upload-artifact@v4

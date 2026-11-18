@@ -116,7 +116,7 @@ on 2026-10-28 (consol/cov-c4 5895357), rounded down to 0.1; the workspace `fail-
 | turbo-surf-core | 99.44 * | 99.4 |
 | turbo-surf-mcp | 99.67 | 99.6 |
 | turbo-surf-page | 100.00 | 100 |
-| turbo-surf-render | 95.38 † | 94.0 ‡ |
+| turbo-surf-render | 95.38 † | 93.7 ‡ |
 | turbo-surf-transform | 100.00 | 100 |
 | turbo-surf-view | 99.91 | 99.9 |
 
@@ -228,3 +228,6 @@ re-captures its controls in the same change.
 The refactor history records the original backlog as cleared (the last entry
 closed #154). Run both complexity commands against the revision under review;
 that historical result does not establish the current candidate gate.
+
+
+On 2026-11-18 the user explicitly replaced the Render-only 94% target with **93.7%**. This specific authorization overrides the default against lowering floors; workspace 93% and all other crate floors stay unchanged. The independently sealed Render result 26189/27939 (93.73635%) clears 93.7% without changing any report, source exclusion, eligible-line denominator or count. The earlier 94% result remains historical.

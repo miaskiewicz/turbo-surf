@@ -30,9 +30,14 @@ const KNOWN_GAPS: &[&str] = &[
 
 fn control() -> Value {
     let control: Value = serde_json::from_str(CONTROL).unwrap();
+    let collector_pin = if control.get("compatibleCollectorSha256").is_some() {
+        "compatibleCollectorSha256"
+    } else {
+        "collectorSha256"
+    };
     for (name, bytes) in [
         ("casesSha256", CASES.as_bytes()),
-        ("collectorSha256", COLLECTOR),
+        (collector_pin, COLLECTOR),
     ] {
         assert_eq!(
             control[name],

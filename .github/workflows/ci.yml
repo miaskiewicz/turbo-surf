@@ -193,6 +193,10 @@ jobs:
           cargo build --release -p turbo-surf-mcp --example detection_trace
           echo "TURBO_SURF_DETECTION_BINARY=$PWD/target/release/examples/detection_trace" >> "$GITHUB_ENV"
       - name: JS tests + host coverage (lines >= 92.5%, branches/functions >= 90%)
+        env:
+          # Hosted Ubuntu blocks the raw oracle's user-namespace sandbox. These
+          # disposable controls serve authored localhost fixtures only.
+          TURBO_SURF_CHROME_ARGS: --no-sandbox
         # Oracle controls intentionally launch headed Chrome even when other
         # collectors use headless mode; keep their real display available.
         run: xvfb-run --auto-servernum npm run coverage:js

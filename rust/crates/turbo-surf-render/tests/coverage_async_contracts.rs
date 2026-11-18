@@ -126,3 +126,57 @@ async fn nested_crypto_in_an_algorithm_getter_keeps_independent_owners_and_autho
         json!({"reads":1,"sync":false,"promise":true,"same":true,"nestedRoot":true,"nestedHex":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","childHex":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn cross_realm_pipe_abort_with_prevention_keeps_both_streams_usable() {
+    let mut page = PageSession::open("<body>", "https://async-pipe.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let result = page.eval_json_expression(r#"(async()=>{
+      const frame=document.createElement('iframe');document.body.append(frame);const child=frame.contentWindow;
+      let controller;const events=[];
+      const source=new child.ReadableStream({start(value){controller=value;},cancel(){events.push('cancel');}});
+      const sink=new child.WritableStream({write(value){events.push('write:'+value);},abort(){events.push('abort');},close(){events.push('close');}});
+      const aborter=new AbortController(),reason={owner:'root-pipe-abort'};
+      const pending=ReadableStream.prototype.pipeTo.call(source,sink,{signal:aborter.signal,preventAbort:true,preventCancel:true});
+      const brand=pending instanceof child.Promise&&!(pending instanceof Promise),rootBrand=pending instanceof Promise&&!(pending instanceof child.Promise),locked=source.locked&&sink.locked;
+      aborter.abort(reason);let same=false;try{await pending;}catch(error){same=error===reason;}
+      const unlocked=!source.locked&&!sink.locked,reader=source.getReader();controller.enqueue(23);
+      const item=await reader.read();reader.releaseLock();
+      const writer=sink.getWriter();await writer.write(29);await writer.close();writer.releaseLock();
+      const result={brand,rootBrand,locked,same,unlocked,item:[item.value,item.done],events,finalUnlocked:!source.locked&&!sink.locked};frame.remove();return result;
+    })()"#).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&result).unwrap(),
+        json!({"brand":true,"rootBrand":false,"locked":true,"same":true,"unlocked":true,"item":[23,false],"events":["write:29","close"],"finalUnlocked":true})
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_iterator_early_return_preserves_prevent_cancel_and_reason_identity() {
+    let mut page = PageSession::open("<body>", "https://async-iterator.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let result = page.eval_json_expression(r#"(async()=>{
+      const frame=document.createElement('iframe');document.body.append(frame);const child=frame.contentWindow;
+      const reason={owner:'root-iterator-return'},rows=[];
+      for(const preventCancel of [true,false]){
+        let controller,calls=0,same=false;
+        const source=new child.ReadableStream({start(value){controller=value;value.enqueue(11);},cancel(value){calls++;same=value===reason;}});
+        const iterator=ReadableStream.prototype.values.call(source,{preventCancel});
+        const pending=iterator.next(),brand=pending instanceof child.Promise&&!(pending instanceof Promise),rootBrand=pending instanceof Promise&&!(pending instanceof child.Promise);
+        const first=await pending,returned=await iterator.return(reason),unlocked=!source.locked;
+        let reusable=false;
+        if(preventCancel){controller.enqueue(17);const reader=source.getReader();const next=await reader.read();reusable=next.value===17&&!next.done;reader.releaseLock();}
+        rows.push({preventCancel,brand,rootBrand,first:[first.value,first.done],returned:returned.done&&returned.value===reason,calls,same,unlocked,reusable});
+      }
+      frame.remove();return rows;
+    })()"#).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&result).unwrap(),
+        json!([
+          {"preventCancel":true,"brand":true,"rootBrand":false,"first":[11,false],"returned":true,"calls":0,"same":false,"unlocked":true,"reusable":true},
+          {"preventCancel":false,"brand":true,"rootBrand":false,"first":[11,false],"returned":true,"calls":1,"same":true,"unlocked":true,"reusable":false}
+        ])
+    );
+}

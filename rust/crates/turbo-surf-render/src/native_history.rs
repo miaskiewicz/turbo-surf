@@ -1512,3 +1512,11 @@ pub(super) fn op_history_traverse<'s>(
     }
     result_record(scope, result)
 }
+
+#[cfg(test)]
+#[path = "native_history/coverage_contracts.rs"]
+mod coverage_contracts;
+
+#[cfg(test)]
+#[path = "native_history/serialization_contracts.rs"]
+mod serialization_contracts;

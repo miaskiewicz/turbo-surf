@@ -294,3 +294,171 @@ async fn protected_factory_top_navigation_obeys_real_sandbox_permissions() {
         }
     }
 }
+
+struct FactoryWireServer {
+    origin: String,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for FactoryWireServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn factory_wire_server() -> FactoryWireServer {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let journal = requests.clone();
+    let task = tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut bytes = Vec::new();
+            while !bytes.windows(4).any(|part| part == b"\r\n\r\n") {
+                let mut chunk = [0; 1024];
+                let count = socket.read(&mut chunk).await.unwrap();
+                assert_ne!(count, 0, "request closed before headers");
+                bytes.extend_from_slice(&chunk[..count]);
+                assert!(bytes.len() < 65_536);
+            }
+            let request = String::from_utf8(bytes).unwrap();
+            let target = request
+                .lines()
+                .next()
+                .unwrap()
+                .split_whitespace()
+                .nth(1)
+                .unwrap();
+            journal.lock().unwrap().push(target.to_owned());
+            let body = if target == "/root-barrier" {
+                "root-progress"
+            } else {
+                "<!doctype html><title>physical-frame</title><p>loaded</p>"
+            };
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    FactoryWireServer {
+        origin,
+        requests,
+        task,
+    }
+}
+
+fn check_current_factory(page: &mut PageSession, expected_url: &str, source: &str) -> u64 {
+    let _activation = page.rt.activation_key().enter();
+    let root = private_infrastructure::context(&mut page.rt).unwrap();
+    let frames = page
+        .rt
+        .op_state()
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    deno_core::scope!(scope, &mut page.rt);
+    let root = v8::Local::new(scope, root);
+    let child = frames
+        .iter()
+        .map(|frame| v8::Local::new(scope, frame))
+        .find(|context| {
+            context.get_slot::<FrameParent>().is_some()
+                && !native_frame_is_retired(*context)
+                && window_proxy::location_url(*context).as_deref() == Some(expected_url)
+        })
+        .expect("current genuine frame document at the observed loaded URL");
+    let document = child
+        .get_slot::<ActiveDocument>()
+        .unwrap()
+        .0
+        .to_local(scope)
+        .unwrap();
+    assert_eq!(document.get_creation_context(scope), Some(child));
+    let document_id = turbo_dom_browser_env::host_internals::document_id_of(scope, document);
+    let own = window_proxy::protected_location(scope, root).unwrap();
+    let target = window_proxy::protected_location(scope, child).unwrap();
+    assert_eq!(target.get_creation_context(scope), Some(child));
+    let scope = &mut v8::ContextScope::new(scope, root);
+    let source = v8::String::new(scope, source).unwrap();
+    let value = v8::Script::compile(scope, source, None)
+        .unwrap()
+        .run(scope)
+        .unwrap();
+    let function = v8::Local::<v8::Function>::try_from(value).unwrap();
+    let undefined = v8::undefined(scope);
+    assert!(function
+        .call(scope, undefined.into(), &[own.into(), target.into()])
+        .is_some_and(|value| value.is_true()));
+    document_id
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn retired_protected_factory_cannot_fetch_after_a_live_frame_and_root_progress_barrier() {
+    let server = factory_wire_server().await;
+    let root_url = format!("{}/start", server.origin);
+    let mut page = PageSession::open(
+        "<body><iframe srcdoc='<body>initial'></iframe></body>",
+        &root_url,
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let initial_document = check_current_factory(
+        &mut page,
+        "about:srcdoc",
+        r#"(function(own, child) {
+      const frame=document.querySelector('iframe');
+      globalThis.factoryFrameLoad=new Promise(resolve=>frame.addEventListener('load',()=>resolve(frame.contentDocument.title),{once:true}));
+      child.href='/frame-live';
+      return true;
+    })"#,
+    );
+    let loaded = page.eval_json_expression("factoryFrameLoad").await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&loaded).unwrap(),
+        "physical-frame"
+    );
+    assert_eq!(*server.requests.lock().unwrap(), ["/frame-live"]);
+    let live_document = check_current_factory(
+        &mut page,
+        &format!("{}/frame-live", server.origin),
+        r#"(function(own, child) {
+      const frame=document.querySelector('iframe');
+      globalThis.removedFactoryWindow=frame.contentWindow;
+      frame.remove();
+      if(!removedFactoryWindow.closed)return false;
+      child.href='/retired-href';
+      child.replace('/retired-replace');
+      child.reload();
+      return true;
+    })"#,
+    );
+    assert_ne!(
+        live_document, initial_document,
+        "retired calls must use the NEW physically loaded document factory"
+    );
+    let progress = page
+        .eval_json_expression(
+            r#"(async()=>{
+      const body=await (await fetch('/root-barrier')).text();
+      await new Promise(resolve=>setTimeout(resolve,0));
+      return {body,closed:removedFactoryWindow.closed,frames:frames.length,href:location.href};
+    })()"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&progress).unwrap(),
+        serde_json::json!({
+            "body":"root-progress","closed":true,"frames":0,"href":root_url
+        })
+    );
+    assert_eq!(
+        *server.requests.lock().unwrap(),
+        ["/frame-live", "/root-barrier"]
+    );
+}

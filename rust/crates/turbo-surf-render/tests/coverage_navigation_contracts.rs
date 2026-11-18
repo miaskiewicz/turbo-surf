@@ -138,3 +138,70 @@ async fn completed_navigation_failure_is_delivered_only_to_its_matching_action_r
     );
     assert_ne!(revision(&page, root), admitted);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn completed_driver_failure_remains_an_error_for_its_matching_action_revision() {
+    let server = fixture::Server::start().await;
+    let mut page = fixture::open(&server.origin, Default::default()).await;
+    let root = page.auxiliary_root_id().unwrap();
+    let peer = fixture::child(&mut page).await;
+    page.configure_target_bootstrap(
+        root,
+        turbo_surf_render::AuxiliaryBootstrap {
+            engine_init_script: "throw new Error('driver-contract-fault')".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let baseline = revision(&page, root);
+    page.eval_target_engine(root, "location.assign('/driver-fault');", false)
+        .await
+        .unwrap();
+    let admitted = revision(&page, root);
+    assert_ne!(admitted, baseline);
+    let failure = complete_failed_root(&mut page).await;
+    assert!(failure.contains("driver bootstrap"), "{failure}");
+    assert_eq!(
+        server
+            .requests()
+            .iter()
+            .map(|request| request.target.clone())
+            .collect::<Vec<_>>(),
+        ["/driver-fault"]
+    );
+    assert!(!page.has_pending_auxiliary_work());
+    assert_eq!(revision(&page, root), admitted);
+    let error = page
+        .dispatch_target_engine_since(root, "", Some(&baseline))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error, failure,
+        "a completed driver failure must not become navigation-failed or released"
+    );
+    let no_signal: Value = serde_json::from_str(
+        &page
+            .dispatch_target_engine_since(root, "", Some(&admitted))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(no_signal, json!({"status":"released"}));
+    page.configure_target_bootstrap(root, Default::default())
+        .unwrap();
+    page.dispatch_target_engine(root, "location.assign('/recovered-driver');")
+        .await
+        .unwrap();
+    fixture::settle(&mut page).await;
+    assert_eq!(title(&mut page, root), "recovered-driver");
+    assert_eq!(title(&mut page, peer), "original");
+    assert_eq!(page.auxiliary_root_id().unwrap(), root);
+    assert_eq!(
+        server
+            .requests()
+            .iter()
+            .map(|request| request.target.clone())
+            .collect::<Vec<_>>(),
+        ["/driver-fault", "/recovered-driver"]
+    );
+}

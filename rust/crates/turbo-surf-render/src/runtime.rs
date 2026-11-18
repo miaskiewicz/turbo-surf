@@ -16789,6 +16789,10 @@ fn execute_frame_script(
         .unwrap_or(auxiliary_navigation::FrameExecutionOutcome::Completed);
     if outcome == auxiliary_navigation::FrameExecutionOutcome::Interrupted
         || scope.is_execution_terminating()
+        || result
+            .as_ref()
+            .err()
+            .is_some_and(|failure| failure.interrupted)
     {
         auxiliary_navigation::queue_interrupted_frame(&mut scope, context, None);
         let mut failure = ClassicScriptFailure::host("Frame script execution was interrupted");
@@ -20813,3 +20817,7 @@ mod runtime_registered_geometry_tests;
 #[cfg(test)]
 #[path = "runtime_registered_resource_deadline_tests.rs"]
 mod registered_resource_deadline_tests;
+
+#[cfg(test)]
+#[path = "runtime_queued_classic_interruption_tests.rs"]
+mod runtime_queued_classic_interruption_tests;

@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Retire interrupted child-script work consistently after watchdog cancellation, preserving healthy roots and peers and settling queued waiters.
+
 - Keep URL construction and updates independent of a page-replaced URLSearchParams constructor.
 
 - Capture URL and URLSearchParams string conversions before authored scripts can replace the global String constructor, while retaining user-defined coercions and mutation errors.

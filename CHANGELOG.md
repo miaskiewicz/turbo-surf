@@ -3,6 +3,7 @@
 ## [0.8.4] - Unreleased
 
 - Capture URL and URLSearchParams string conversions before authored scripts can replace the global String constructor, while retaining user-defined coercions and mutation errors.
+- Preserve canonical DOMException types and messages for native SecurityError rejections, including cross-origin private frame operations.
 
 - Preserve retained stream operations after source-frame retirement, keep retired document tasks and fetches inadmissible, and release the frontend realm after the actual source sink closes.
 

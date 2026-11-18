@@ -10059,6 +10059,7 @@ if (!__G.isFrame && !__G.isAuxiliary) {
     "InvalidAccessError",
     "NotSupportedError",
     "OperationError",
+    "SecurityError",
     "SyntaxError",
     "QuotaExceededError",
     "TypeMismatchError",
@@ -20787,3 +20788,7 @@ mod frame_source_tests {
 #[cfg(test)]
 #[path = "runtime_document_contract_tests.rs"]
 mod runtime_document_contract_tests;
+
+#[cfg(test)]
+#[path = "security_error_registration_tests.rs"]
+mod security_error_registration_tests;

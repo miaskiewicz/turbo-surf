@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Deliver Page.dispatchEvent through the existing live Locator dispatch path, preserving event initialization, settlement and missing-target errors.
+
 - Retire interrupted child-script work consistently after watchdog cancellation, preserving healthy roots and peers and settling queued waiters.
 
 - Keep URL construction and updates independent of a page-replaced URLSearchParams constructor.

@@ -4151,7 +4151,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
   async focus(selector) {
     return this.locator(selector).focus();
   }
-  async dispatchEvent() {}
+  async dispatchEvent(selector, type, eventInit, options) {
+    return this.locator(selector).dispatchEvent(type, eventInit, options);
+  }
 
   async _followIntent(intent) {
     try {

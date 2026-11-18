@@ -445,3 +445,7 @@ mod tests {
 #[cfg(test)]
 #[path = "native_history_ops_coverage_contracts.rs"]
 mod coverage_contracts;
+
+#[cfg(test)]
+#[path = "native_history_registered_lifecycle_tests.rs"]
+mod registered_lifecycle_tests;

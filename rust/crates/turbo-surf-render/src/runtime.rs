@@ -20559,6 +20559,7 @@ mod window_timer_task_tests {
                         target.setTimeout(()=>{{
                           rows.push(performance.now()-created);
                           if(rows.length===12)return;
+                          if(kind==='busy'&&rows.length===6){{const started=performance.now();while(performance.now()-started<8){{}}}}
                           if(kind.endsWith('Promise')||kind==='promise')Promise.resolve().then(schedule);
                           else if(kind.endsWith('QueueMicrotask')||kind==='queueMicrotask')queueMicrotask(schedule);
                           else schedule();
@@ -20585,6 +20586,20 @@ mod window_timer_task_tests {
             };
             assert_eq!(nesting.level.get(), expected, "{kind} task {index}");
             checkpoint_window_timer(&mut page.rt).unwrap();
+            if !kind.starts_with("crossRealm") && kind != "interval" && (5..11).contains(&index) {
+                let base = nesting.published.get().expect("running timer task base");
+                deno_core::scope!(scope, page.rt);
+                let context = v8::Local::new(scope, &turn._task.as_ref().unwrap().context);
+                let active = &mut v8::ContextScope::new(scope, context);
+                let next = call_frame_helper(active, "timerNextDue", &[])
+                    .and_then(|value| timer_order_key(active, value))
+                    .expect("next real nested timer");
+                assert!(
+                    next.0 >= base + 4.0,
+                    "{kind} task {index}: due={} base={base}",
+                    next.0
+                );
+            }
             assert_eq!(nesting.level.get(), expected, "{kind} checkpoint {index}");
             drop(turn);
             assert_eq!(nesting.level.get(), 0, "{kind} finished task {index}");
@@ -20593,16 +20608,13 @@ mod window_timer_task_tests {
         let rows: Vec<f64> =
             serde_json::from_str(&read_string(&mut page.rt, value).unwrap()).unwrap();
         assert_eq!(rows.len(), 12);
-        if !kind.starts_with("crossRealm") && kind != "interval" {
-            // The public clock has a 100us grid; creation-time sampling and host
-            // work can add sub-millisecond noise relative to the task deadline.
-            // Compare the nominal 4ms clamp at whole-millisecond precision. No
-            // wall-time upper bound applies to unclamped tasks or the host.
-            assert!(
-                rows[6..].iter().all(|delay| delay.round() >= 4.0),
-                "{kind}: {rows:?}"
-            );
-        }
+        // Virtual timers are clamped from the running task's published deadline,
+        // not this live-clock sample after host or callback work. The native due
+        // assertions above verify the exact clamp without a wall-time tolerance.
+        assert!(
+            rows.iter().all(|delay| delay.is_finite() && *delay >= 0.0),
+            "{kind}: {rows:?}"
+        );
         assert_eq!(run_next_window_timer(&mut page.rt, true).fired, 0);
     }
 
@@ -20685,6 +20697,7 @@ mod window_timer_task_tests {
                 .block_on(async {
                     for kind in [
                         "direct",
+                        "busy",
                         "promise",
                         "queueMicrotask",
                         "crossRealm",

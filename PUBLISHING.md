@@ -130,7 +130,7 @@ changelog entries and unrelated dependency versions must retain their own versio
    treats manual dispatch as publication: select the exact matching `v*` tag;
    it checks release metadata and uses `cargo publish --locked` for all five crates.
    Do not dispatch that workflow as a dry run. Every Python platform job installs its
-   exact wheel outside the checkout and requires all ten existing offline smoke
+   exact wheel outside the checkout and requires all fourteen existing offline smoke/screenshot
    tests to pass without skips. The sdist job builds a wheel from the actual
    source tarball with an empty Cargo home and the normal registry, then installs
    and tests that wheel before uploading the sdist. Retain artifact hashes,

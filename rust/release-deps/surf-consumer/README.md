@@ -159,13 +159,15 @@ PY
 
 These calls contain no external resources and require no network after
 installation. They are artifact-consumer checks, not a live crawler/Google test.
-Also copy `rust/crates/turbo-surf-py/tests/test_smoke.py` into a private test
-directory outside the checkout. Install pytest only in the same smoke venv and
-run all ten existing offline cases for **each** installed wheel:
+Also copy `rust/crates/turbo-surf-py/tests/test_smoke.py` and
+`rust/crates/turbo-surf-py/tests/test_screenshots.py` into a private test directory
+outside the checkout. Install pytest only in the same smoke venv and
+run all fourteen existing offline smoke and screenshot cases for **each** installed wheel:
 
 ```sh
 "$SMOKE_ENV/bin/python" -m pip install 'pytest>=7'
-"$SMOKE_ENV/bin/python" -I -m pytest "$SMOKE_TESTS/test_smoke.py"
+"$SMOKE_ENV/bin/python" -I -m pytest "$SMOKE_TESTS/test_smoke.py" \
+  "$SMOKE_TESTS/test_screenshots.py"
 ```
 
 The version case binds the extension's actual version to installed distribution

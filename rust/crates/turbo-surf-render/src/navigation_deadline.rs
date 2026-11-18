@@ -277,6 +277,13 @@ impl Drop for TrustedSetup {
         }
     }
 }
+pub(super) fn diagnostic_active(rt: &JsRuntime) -> bool {
+    rt.op_state()
+        .borrow()
+        .try_borrow::<Active>()
+        .is_some_and(|active| active.clock.is_some())
+}
+
 pub(super) fn expired(rt: &JsRuntime) -> bool {
     let shared = rt.op_state();
     let clock = shared

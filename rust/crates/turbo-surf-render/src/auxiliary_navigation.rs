@@ -3,6 +3,11 @@
 use super::*;
 #[path = "navigation_deadline.rs"]
 mod navigation_deadline;
+
+pub(super) fn diagnostic_driver_active(rt: &JsRuntime) -> bool {
+    navigation_deadline::diagnostic_active(rt)
+}
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;

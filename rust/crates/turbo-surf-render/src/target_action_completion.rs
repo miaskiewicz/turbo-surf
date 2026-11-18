@@ -79,7 +79,9 @@ impl PageSession {
             .or_else(|| snapshot["navigationRevision"].as_str())
             .ok_or("Native navigation baseline is unavailable")?
             .to_owned();
-        tokio::time::timeout(std::time::Duration::from_millis(budget), async {
+        let diagnostic_started = std::time::Instant::now();
+        let diagnostic_initial_termination = self.rt.v8_isolate().is_execution_terminating();
+        let result = tokio::time::timeout(std::time::Duration::from_millis(budget), async {
             let result = if source.is_empty() {
                 String::new()
             } else {
@@ -96,7 +98,10 @@ impl PageSession {
                 auxiliary_navigation::ActionCompletion::NavigationFailed(error) => Err(error),
             }
         })
-        .await
-        .map_err(|_| format!("Target interaction timeout after {budget}ms"))?
+        .await;
+        if !matches!(&result, Ok(Ok(_))) {
+            eprintln!("ACTION_RECOVERY_DIAG action target={target} signal_only={signal_only} outer_timeout={} initial_terminating={diagnostic_initial_termination} terminating={} session_guard={} driver_guard={} elapsed_us={} budget={budget}", result.is_err(), self.rt.v8_isolate().is_execution_terminating(), Watchdog::any_active(self.rt.v8_isolate()), auxiliary_navigation::diagnostic_driver_active(&self.rt), diagnostic_started.elapsed().as_micros());
+        }
+        result.map_err(|_| format!("Target interaction timeout after {budget}ms"))?
     }
 }

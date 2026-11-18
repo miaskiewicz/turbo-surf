@@ -107,8 +107,16 @@ impl OwnerAsyncContext {
     ) -> Result<R, &'static str> {
         let previous = scope.get_continuation_preserved_embedder_data();
         let entered = self.enter_owner(scope, authenticated_token);
-        if entered.is_err() {
+        if let Err(stage) = entered {
+            eprintln!(
+                "ACTION_RECOVERY_DIAG bridge stage={stage} terminating_before_restore={}",
+                scope.is_execution_terminating()
+            );
             scope.set_continuation_preserved_embedder_data(previous);
+            eprintln!(
+                "ACTION_RECOVERY_DIAG bridge terminating_after_restore={}",
+                scope.is_execution_terminating()
+            );
             return Err("Owner entry failed");
         }
         let result = run(scope);

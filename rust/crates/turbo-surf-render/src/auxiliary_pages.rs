@@ -987,6 +987,9 @@ impl PageSession {
     ) -> Result<String, String> {
         auxiliary_navigation::reconcile_expired_source_modules(&mut self.rt, target)?;
         let target = AuxiliaryContextId(target);
+        let diagnostic_started = std::time::Instant::now();
+        let diagnostic_initial_termination = self.rt.v8_isolate().is_execution_terminating();
+        let mut diagnostic_phase = "execute";
         let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
@@ -999,6 +1002,7 @@ impl PageSession {
                     expression.to_owned()
                 };
                 let value = execute_target(&mut self.rt, target, &source, engine)?;
+                diagnostic_phase = "resolve";
                 // Promise observers must belong to the live target realm: a backing
                 // replacement can leave JsRuntime's original main context detached.
                 let completion = {
@@ -1007,7 +1011,9 @@ impl PageSession {
                     let scope = &mut v8::ContextScope::new(scope, context);
                     JsRuntime::scoped_resolve(scope, value.clone())
                 };
+                diagnostic_phase = "reset";
                 execute_target(&mut self.rt, target, "__tsNs.resetTimerBudget();", true)?;
+                diagnostic_phase = "drain";
                 drain_event_loop_until_completion_for(
                     &mut self.rt,
                     None,
@@ -1015,16 +1021,22 @@ impl PageSession {
                     Some(target.0),
                 )
                 .await?;
+                diagnostic_phase = "promise";
                 let value = self
                     .rt
                     .with_event_loop_promise(completion, Default::default())
                     .await
                     .map_err(|error| error.to_string())?;
+                diagnostic_phase = "result";
                 target_result(&mut self.rt, target, value, json)
             })
             .await;
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        let diagnostic_exceeded = watchdog.exceeded.clone();
         drop(watchdog);
+        if !matches!(&result, Ok(Ok(_))) {
+            eprintln!("ACTION_RECOVERY_DIAG eval target={} phase={diagnostic_phase} outer_timeout={} initial_terminating={diagnostic_initial_termination} exceeded_before_join={exceeded} exceeded_after_join={} terminating={} session_guard={} driver_guard={} elapsed_us={} budget={}", target.0, result.is_err(), diagnostic_exceeded.load(std::sync::atomic::Ordering::Relaxed), self.rt.v8_isolate().is_execution_terminating(), Watchdog::any_active(self.rt.v8_isolate()), auxiliary_navigation::diagnostic_driver_active(&self.rt), diagnostic_started.elapsed().as_micros(), self.budget_ms);
+        }
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         let result = if exceeded {

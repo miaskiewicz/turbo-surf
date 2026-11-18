@@ -119,6 +119,14 @@ changelog entries and unrelated dependency versions must retain their own versio
    without `.env`. It requires the exact release version and real DOM, native
    random-byte and stream behavior, with private Deno globals hidden. Initialization
    alone cannot establish that installed JavaScript modules are usable.
+   Each host also loads its actual staged `.node` under Node 20 and checks the
+   native version, real V8 DOM mutation, crypto, streams and hidden Deno globals.
+   All four platform archives and the thin launcher archive are packed and
+   hash-verified before any npm publication. The aggregate job extracts the exact
+   launcher and Linux platform tarballs into a private consumer directory, runs
+   that extracted CLI and addon, and retains their receipts. Publish jobs consume
+   only those verified tarballs and require an actual push of the exact release
+   tag; a manual workflow dispatch cannot return a publishable artifact.
    Before publication, npm packs the assembled package, verifies its integrity,
    all four binaries, launchers and license files, extracts that exact tarball
    outside the checkout and repeats the same three-request JavaScript smoke through

@@ -91,15 +91,15 @@ version = "0.259.0"
 """
         web = next(p for p in deno.PACKAGES if p.upstream == 'deno_web')
         result = tomllib.loads(deno.manifest(source, web))
-        self.assertEqual(result['package']['version'], '0.290.4')
-        self.assertEqual(result['dependencies']['deno_core']['version'], '=0.412.4')
+        self.assertEqual(result['package']['version'], '0.290.5')
+        self.assertEqual(result['dependencies']['deno_core']['version'], '=0.412.5')
         self.assertEqual(result['lib']['name'], 'deno_web')
         self.assertEqual(result['dependencies']['deno_core']['package'], 'turbo-surf-deno-core')
         self.assertEqual(result['features'], {'default': ['v8'], 'v8': ['deno_core/v8']})
         self.assertFalse(result['dependencies']['deno_core']['default-features'])
         self.assertEqual(result['dev-dependencies']['deno_bench_util']['package'], 'turbo-surf-deno-bench-util')
         self.assertEqual(result['target']['cfg(windows)']['dev-dependencies']['deno_webidl']['package'], 'turbo-surf-deno-webidl')
-        self.assertEqual(result['dev-dependencies']['deno_bench_util']['version'], '=0.253.4')
+        self.assertEqual(result['dev-dependencies']['deno_bench_util']['version'], '=0.253.5')
 
     def test_source_acquisition_rejects_existing_paths_and_cargo_home(self):
         with tempfile.TemporaryDirectory() as temporary:

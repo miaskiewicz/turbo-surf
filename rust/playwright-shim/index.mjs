@@ -6108,7 +6108,13 @@ class BaseExpect {
     this._neg = !!negated;
   }
   _ok(pass, message) {
-    if (pass === this._neg) throw new Error(message);
+    if (pass !== this._neg) return;
+    if (this._retryError) {
+      throw new Error(`${message}: ${this._retryError.message ?? this._retryError}`, {
+        cause: this._retryError,
+      });
+    }
+    throw new Error(message);
   }
   // Web-first assertion retry: re-evaluate `thunk` (re-pumping the live app between
   // tries) until it satisfies the (possibly negated) expectation or `timeout`
@@ -6120,11 +6126,16 @@ class BaseExpect {
     const page =
       this._v && (this._v._page ?? (typeof this._v._redrain === "function" ? this._v : null));
     const start = Date.now();
+    this._retryError = undefined;
     const run = async () => {
       try {
-        return !!(await thunk());
+        const pass = !!(await thunk());
+        // A later valid observation supersedes any transient read failure.
+        this._retryError = undefined;
+        return pass;
       } catch (error) {
         if (/strict mode violation/i.test(error.message)) throw error;
+        this._retryError = error;
         return false;
       }
     };

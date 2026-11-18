@@ -685,3 +685,19 @@ Raw full logs live under `.recovery/final-coverage-next/js-after-covered-97285df
 ### Additional history failure during unchanged reproduction
 
 `history-groups.test.mjs::restored groups retain duplicate entry identity and replacement/forward semantics` is OPEN: an unchanged eight-process cohort with the original `NODE_V8_COVERAGE` environment produced 87 pass / one failure; this case timed out waiting for `load` at the unchanged 5000 ms limit. The original cross-group back/forward case passed in that cohort, so a shared cause is **not established**. Exact evidence: `.worktrees/history-groups-97285/.recovery/history-groups/covered-cohort-3.log` (session 15657). Source and immutable addon remain identical to the failed full 97285 run. Low-overhead buffered host event, waiter-registration and navigation-identity diagnostics are next; no assertion or timeout has been changed.
+### 2026-11-18: catalog product-list visibility (full JS 97285)
+
+- Case: `rust/playwright-shim/e2e/catalog.spec.mjs::product list shows every product`, line 16.
+- Actual unchanged full-suite failure: `expected element to be visible`, 5117.721917ms; frozen source `97285df75c5bf30809b5fd7025460a6c69be3667`, fresh signed native addon.
+- Receipt: `.recovery/final-coverage-next/js-after-covered-97285df7/full-gates/test:e2e-1.log`, line 33 onward.
+- Status: cause unproven; exact single-spec reproduction queued behind active native detection. No selector, timeout, or visibility assertion waiver.
+- Fixture is static server-rendered `<ul data-testid="product-list">` with three real `<li>` children. Investigation must distinguish native geometry/visibility from live-locator identity before assigning a producer bug.
+- Follow-up: exact immutable single spec passed 4/4; original dropin/auth/catalog prefix passed 9/9 plus five repeats (45/45); complete original e2e order passed 55/0F/2S without coverage, then unchanged frozen source with original recorded environment and fresh `NODE_V8_COVERAGE` passed 55/0F/2S. Three bounded covered diagnostic full-order repetitions each passed 55/0F/2S. Across these runs the catalog first case passed 12 attempts; original failure remains open/unexplained, not marked fixed.
+- Diagnostic limitation: expect retry swallows non-strict errors; original generic visibility timeout does not prove zero geometry. Isolated catch-only diagnostics retain/rethrow first and last `isVisible()` errors and collect DOM/ancestor style/rects on final failure. No production workaround or assertion change.
+
+### 2026-11-18: locator retry hides persistent underlying read exceptions
+
+- Proven independently of the intermittent catalog case: `BaseExpect._retry` discards non-strict read exceptions and `_ok` replaces them with a generic assertion failure.
+- New `assertion-retry-diagnostics.test.mjs` reproduces the missing error cause: red 4 passed / 1 failed; persistent read error's exact identity was lost. Fix retains the latest erroneous observation as assertion cause/message and clears it after every valid observation, including false.
+- Green 5/5 controls: transient error→true recovers; persistent errors preserve exact latest cause; transient error→valid false exhausts without stale cause; ordinary false keeps existing diagnostic; strict errors escape immediately. Retry timing, timeout, predicate and negation behavior are unchanged.
+- This diagnostics fix does not establish or resolve the original catalog failure's root cause.

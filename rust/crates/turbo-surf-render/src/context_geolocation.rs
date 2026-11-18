@@ -132,3 +132,90 @@ pub(super) fn register_change_waiter(
         }
     }
 }
+
+#[cfg(test)]
+mod observer_contracts {
+    use super::*;
+
+    fn observing_page(page: &mut PageSession) -> bool {
+        let _activation = page.rt.activation_key().enter();
+        observing(&mut page.rt)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn observer_detection_tracks_real_watch_registration_clear_and_retirement() {
+        let storage = BrowserStorage::default();
+        storage.configure_emulation(r#"{"permissions":[{"permissions":["geolocation"]}],"geolocation":{"latitude":1,"longitude":2}}"#).unwrap();
+        let mut page = PageSession::open_with_browsing_state(
+            "<!doctype html><iframe srcdoc='<body>child</body>'></iframe>",
+            "http://localhost/",
+            "",
+            "",
+            3000,
+            "",
+            Default::default(),
+            &[],
+            storage.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(!observing_page(&mut page));
+        assert_eq!(
+            page.eval_json_expression(
+                r#"new Promise(resolve=>{
+          globalThis.savedGeo=navigator.geolocation;
+          globalThis.rootWatch=savedGeo.watchPosition(position=>resolve(position.coords.latitude));
+        })"#
+            )
+            .await
+            .unwrap(),
+            "1"
+        );
+        assert!(observing_page(&mut page));
+        page.read_engine(r#"
+          globalThis.navigatorDescriptor=Object.getOwnPropertyDescriptor(globalThis,'navigator');
+          Object.defineProperty(globalThis,'navigator',{configurable:true,get(){throw Error('authored navigator getter')}});
+          return true;
+        "#).unwrap();
+        assert!(
+            observing_page(&mut page),
+            "private observer lookup must not use authored navigator getters"
+        );
+        page.read_engine(
+            r#"
+          savedGeo.clearWatch(rootWatch);
+          Object.defineProperty(globalThis,'navigator',navigatorDescriptor);
+          return true;
+        "#,
+        )
+        .unwrap();
+        assert!(!observing_page(&mut page));
+        assert_eq!(page.eval_json_expression(r#"new Promise(resolve=>{
+          const child=document.querySelector('iframe').contentWindow;
+          globalThis.frameSamples=[];
+          child.navigator.geolocation.watchPosition(position=>{frameSamples.push(position.coords.latitude);resolve(frameSamples)});
+        })"#).await.unwrap(), "[1]");
+        assert!(observing_page(&mut page));
+        page.read_engine("document.querySelector('iframe').remove();return true;")
+            .unwrap();
+        assert!(
+            !observing_page(&mut page),
+            "retired child watches must not keep a collector alive"
+        );
+        storage.configure_emulation(r#"{"permissions":[{"permissions":["geolocation"]}],"geolocation":{"latitude":3,"longitude":2}}"#).unwrap();
+        assert_eq!(
+            page.eval_json_expression(
+                "new Promise(resolve=>setTimeout(()=>resolve(frameSamples),1))"
+            )
+            .await
+            .unwrap(),
+            "[1]"
+        );
+        assert_eq!(page.eval_json_expression("new Promise(resolve=>navigator.geolocation.getCurrentPosition(position=>resolve(position.coords.latitude)))").await.unwrap(), "3");
+        assert!(
+            !observing_page(&mut page),
+            "one-shot completion must release its observation"
+        );
+        page.close();
+    }
+}

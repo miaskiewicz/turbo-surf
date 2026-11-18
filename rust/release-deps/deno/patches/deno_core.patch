@@ -895,3 +895,494 @@
    fn poll_module_contexts(
      &self,
      cx: &mut Context,
+--- a/01_core.js
++++ b/01_core.js
+@@ -18,0 +19 @@
++    ReflectApply,
+@@ -475,0 +477,5 @@
++  function __scopedRejectionCallback(markEntered, callback, args) {
++    markEntered();
++    return ReflectApply(callback, undefined, args);
++  }
++
+@@ -1069,0 +1076 @@
++    __scopedRejectionCallback,
+--- a/async_work.rs
++++ b/async_work.rs
+@@ -26,0 +27,3 @@
++type AsyncOpCallback =
++  dyn for<'s, 'i> Fn(&mut v8::PinScope<'s, 'i>, AsyncOpObservation<'s>);
++
+@@ -29,3 +32 @@
+-pub struct AsyncOpObserver(
+-  pub Rc<dyn for<'s, 'i> Fn(&mut v8::PinScope<'s, 'i>, AsyncOpObservation<'s>)>,
+-);
++pub struct AsyncOpObserver(pub Rc<AsyncOpCallback>);
+--- a/lib.rs
++++ b/lib.rs
+@@ -192,0 +193 @@
++pub use crate::runtime::ScopedRejectionCheckpoint;
+--- a/runtime/exception_state.rs
++++ b/runtime/exception_state.rs
+@@ -11,0 +12 @@
++  pub(crate) scoped_rejection_callback_entered: Cell<bool>,
+--- a/runtime/jsrealm.rs
++++ b/runtime/jsrealm.rs
+@@ -87,0 +88 @@
++  pub(crate) js_scoped_rejection_cb: RefCell<Option<v8::Global<v8::Function>>>,
+@@ -211,0 +213 @@
++      js_scoped_rejection_cb: Default::default(),
+@@ -354,0 +357 @@
++    std::mem::take(&mut *state.js_scoped_rejection_cb.borrow_mut());
+--- a/runtime/jsruntime.rs
++++ b/runtime/jsruntime.rs
+@@ -1898,0 +1899 @@
++      scoped_rejection_cb,
+@@ -1937,0 +1939,3 @@
++      );
++      let scoped_rejection_cb: v8::Local<v8::Function> = bindings::get(
++        scope, core_obj, SCOPED_REJECTION_CALLBACK, "Deno.core.__scopedRejectionCallback",
+@@ -2090,0 +2095 @@
++        v8::Global::new(scope, scoped_rejection_cb),
+@@ -2116,0 +2122 @@
++    state_rc.js_scoped_rejection_cb.borrow_mut().replace(scoped_rejection_cb);
+@@ -4133,0 +4140,4 @@
++
++#[path = "rejection_checkpoint.rs"]
++mod rejection_checkpoint;
++pub use rejection_checkpoint::ScopedRejectionCheckpoint;
+--- a/runtime/mod.rs
++++ b/runtime/mod.rs
+@@ -40,0 +41 @@
++pub use jsruntime::ScopedRejectionCheckpoint;
+--- /dev/null
++++ b/runtime/rejection_checkpoint.rs
+@@ -0,0 +1,424 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++use super::*;
++
++/// Work performed by an embedder's document-task rejection checkpoint.
++#[derive(Debug, Default, PartialEq, Eq)]
++pub struct ScopedRejectionCheckpoint {
++  pub handled: usize,
++  pub unhandled: usize,
++  pub deferred_ticks: bool,
++  pub deferred_termination: bool,
++}
++
++fn take_context_rows<T>(
++  scope: &mut v8::PinScope,
++  queue: &RefCell<VecDeque<T>>,
++  context: v8::Local<v8::Context>,
++  promise: impl Fn(&T) -> &v8::Global<v8::Promise>,
++) -> VecDeque<T> {
++  let rows = std::mem::take(&mut *queue.borrow_mut());
++  let mut selected = VecDeque::new();
++  let mut deferred = VecDeque::new();
++  for row in rows {
++    let value = v8::Local::new(scope, promise(&row));
++    if value.get_creation_context(scope) == Some(context) {
++      selected.push_back(row);
++    } else {
++      deferred.push_back(row);
++    }
++  }
++  queue.borrow_mut().extend(deferred);
++  selected
++}
++
++fn prepend_rows<T>(queue: &RefCell<VecDeque<T>>, mut rows: VecDeque<T>) {
++  rows.append(&mut *queue.borrow_mut());
++  *queue.borrow_mut() = rows;
++}
++
++fn mark_callback_entry(
++  scope: &mut v8::PinScope,
++  _args: v8::FunctionCallbackArguments,
++  _result: v8::ReturnValue,
++) {
++  JsRealm::exception_state_from_scope(scope)
++    .scoped_rejection_callback_entered
++    .set(true);
++}
++
++struct CallbackEntry<'a> {
++  flag: &'a std::cell::Cell<bool>,
++  previous: bool,
++}
++impl Drop for CallbackEntry<'_> {
++  fn drop(&mut self) {
++    self.flag.set(self.previous);
++  }
++}
++
++fn call_scoped_callback<'s>(
++  scope: &mut v8::PinScope<'s, '_>,
++  callback: v8::Local<'s, v8::Function>,
++  trampoline: &v8::Global<v8::Function>,
++  args: &[v8::Local<'s, v8::Value>],
++  entered: &std::cell::Cell<bool>,
++) -> (Option<v8::Local<'s, v8::Value>>, bool) {
++  // Entry means a dispatch attempt began, not that the user handler completed.
++  // A nested checkpoint restores this attempt's marker when it returns.
++  let marker = CallbackEntry {
++    flag: entered,
++    previous: entered.replace(false),
++  };
++  let value = (|| {
++    let mark = v8::Function::new(scope, mark_callback_entry)?;
++    let values = v8::Array::new_with_elements(scope, args);
++    let trampoline = v8::Local::new(scope, trampoline);
++    let undefined = v8::undefined(scope).into();
++    trampoline.call(
++      scope,
++      undefined,
++      &[mark.into(), callback.into(), values.into()],
++    )
++  })();
++  (value, marker.flag.get())
++}
++
++impl JsRuntime {
++  /// Report pending Promise rejection events from one exact context after its
++  /// task's microtask checkpoint, without polling native work or other contexts.
++  ///
++  /// nextTick processing is isolate-wide. If it is pending, leave the reports
++  /// queued for the ordinary event loop so a nextTick handler can still catch a
++  /// rejection before it is reported. The core drain's historically named
++  /// macrotask phase contains only nextTick/microtask work; it does not own a
++  /// separate macrotask callback queue. Foreign-context reports remain queued.
++  pub fn scoped_rejection_checkpoint(
++    &mut self,
++    context: &v8::Global<v8::Context>,
++  ) -> Result<ScopedRejectionCheckpoint, Box<JsError>> {
++    let mut result = ScopedRejectionCheckpoint::default();
++    if self.v8_isolate().is_execution_terminating() {
++      result.deferred_termination = true;
++      return Ok(result);
++    }
++    let state = self.inner.main_realm.0.context_state.clone();
++    if state.has_tick_scheduled() {
++      result.deferred_ticks = true;
++      return Ok(result);
++    }
++    scope!(scope, self);
++    let context = v8::Local::new(scope, context);
++    let exceptions = &state.exception_state;
++    let trampoline = state.js_scoped_rejection_cb.borrow().clone().unwrap();
++    let mut handled = take_context_rows(
++      scope,
++      &exceptions.pending_handled_promise_rejections,
++      context,
++      |row| &row.0,
++    );
++    while let Some((promise, reason)) = handled.pop_front() {
++      let callback = exceptions.js_handled_promise_rejection_cb.borrow().clone();
++      if let Some(callback) = callback {
++        v8::tc_scope!(let caught, scope);
++        let callback = v8::Local::new(caught, callback);
++        let args = [
++          v8::Local::new(caught, &promise).into(),
++          v8::Local::new(caught, &reason),
++        ];
++        let (_, entered) = call_scoped_callback(
++          caught,
++          callback,
++          &trampoline,
++          &args,
++          &exceptions.scoped_rejection_callback_entered,
++        );
++        if caught.has_terminated() || caught.is_execution_terminating() {
++          if !entered {
++            handled.push_front((promise, reason));
++          }
++          prepend_rows(&exceptions.pending_handled_promise_rejections, handled);
++          result.deferred_termination = true;
++          return Ok(result);
++        }
++        if let Some(exception) = caught.exception() {
++          prepend_rows(&exceptions.pending_handled_promise_rejections, handled);
++          return exception_to_err_result(caught, exception, false, true);
++        }
++      }
++      result.handled += 1;
++    }
++    if state.has_tick_scheduled() {
++      result.deferred_ticks = true;
++      return Ok(result);
++    }
++    let mut unhandled = take_context_rows(
++      scope,
++      &exceptions.pending_promise_rejections,
++      context,
++      |row| &row.0,
++    );
++    let callback = state.js_handle_rejections_cb.borrow().clone();
++    while let Some((promise, reason, stack)) = unhandled.pop_front() {
++      v8::tc_scope!(let caught, scope);
++      let callback = v8::Local::new(caught, callback.as_ref().unwrap());
++      let args = [
++        v8::Local::new(caught, &promise).into(),
++        v8::Local::new(caught, &reason),
++        v8::Local::new(caught, &stack),
++      ];
++      let (_, entered) = call_scoped_callback(
++        caught,
++        callback,
++        &trampoline,
++        &args,
++        &exceptions.scoped_rejection_callback_entered,
++      );
++      if caught.has_terminated() || caught.is_execution_terminating() {
++        if !entered {
++          unhandled.push_front((promise, reason, stack));
++        }
++        prepend_rows(&exceptions.pending_promise_rejections, unhandled);
++        result.deferred_termination = true;
++        return Ok(result);
++      }
++      if let Some(exception) = caught.exception() {
++        prepend_rows(&exceptions.pending_promise_rejections, unhandled);
++        return exception_to_err_result(caught, exception, false, true);
++      }
++      result.unhandled += 1;
++    }
++    scope.perform_microtask_checkpoint();
++    Ok(result)
++  }
++}
++
++#[cfg(test)]
++mod tests {
++  use super::*;
++
++  fn install(runtime: &mut JsRuntime) {
++    runtime
++      .execute_script(
++        "checkpoint_test",
++        r#"
++      globalThis.rows=[];
++      Deno.core.setUnhandledPromiseRejectionHandler(()=>{rows.push('unhandled');return true});
++      Deno.core.setHandledPromiseRejectionHandler(()=>rows.push('handled'));
++      globalThis.rejected=Promise.reject(42);
++    "#,
++      )
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++  }
++
++  fn rows(runtime: &mut JsRuntime) -> String {
++    let value = runtime
++      .execute_script("checkpoint_rows", "JSON.stringify(rows)")
++      .unwrap();
++    scope!(scope, runtime);
++    v8::Local::new(scope, value).to_rust_string_lossy(scope)
++  }
++
++  #[test]
++  fn checkpoint_keeps_foreign_reports_queued() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    let foreign = {
++      scope!(scope, &mut runtime);
++      let context = v8::Context::new(scope, Default::default());
++      v8::Global::new(scope, context)
++    };
++    let result = runtime.scoped_rejection_checkpoint(&foreign).unwrap();
++    assert_eq!(result, ScopedRejectionCheckpoint::default());
++    assert_eq!(rows(&mut runtime), "[]");
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++    assert_eq!(rows(&mut runtime), "[\"unhandled\"]");
++  }
++
++  #[test]
++  fn checkpoint_preserves_later_handled_notification() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++    runtime
++      .execute_script("catch_later", "rejected.catch(()=>{})")
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .handled,
++      1
++    );
++    assert_eq!(rows(&mut runtime), "[\"unhandled\",\"handled\"]");
++  }
++
++  #[tokio::test]
++  async fn checkpoint_defers_to_pending_next_tick_handler() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    runtime.execute_script("tick_catch", r#"
++      Deno.core.queueNextTick({callback:()=>rejected.catch(()=>{}),args:undefined,snapshot:undefined});
++    "#).unwrap();
++    let context = runtime.main_context();
++    let result = runtime.scoped_rejection_checkpoint(&context).unwrap();
++    assert!(result.deferred_ticks);
++    assert_eq!(result.unhandled, 0);
++    runtime.run_event_loop(Default::default()).await.unwrap();
++    assert_eq!(rows(&mut runtime), "[]");
++  }
++  #[test]
++  fn checkpoint_retains_unprocessed_handled_rows_after_throw() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    runtime
++      .execute_script("second_rejection", "globalThis.second=Promise.reject(43)")
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      2
++    );
++    runtime
++      .execute_script(
++        "handled_throw",
++        r#"
++      Deno.core.setHandledPromiseRejectionHandler(()=>{throw new Error('handled callback')});
++      rejected.catch(()=>{});second.catch(()=>{});
++    "#,
++      )
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    assert!(runtime.scoped_rejection_checkpoint(&context).is_err());
++    runtime
++      .execute_script(
++        "handled_restore",
++        "Deno.core.setHandledPromiseRejectionHandler(()=>rows.push('handled'))",
++      )
++      .unwrap();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .handled,
++      1
++    );
++    assert_eq!(
++      rows(&mut runtime),
++      "[\"unhandled\",\"unhandled\",\"handled\"]"
++    );
++  }
++
++  #[test]
++  fn checkpoint_preserves_reports_during_termination() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    let context = runtime.main_context();
++    runtime
++      .v8_isolate()
++      .thread_safe_handle()
++      .terminate_execution();
++    assert!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .deferred_termination
++    );
++    runtime.v8_isolate().cancel_terminate_execution();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++  }
++  fn terminate_handler(
++    scope: &mut v8::PinScope,
++    _args: v8::FunctionCallbackArguments,
++    _result: v8::ReturnValue,
++  ) {
++    scope.terminate_execution();
++  }
++
++  #[test]
++  fn checkpoint_does_not_repeat_an_entered_terminating_handler() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    {
++      scope!(scope, &mut runtime);
++      let stop = v8::Function::new(scope, terminate_handler).unwrap();
++      let context = scope.get_current_context();
++      let key = v8::String::new(scope, "stopCheckpoint").unwrap();
++      context.global(scope).set(scope, key.into(), stop.into());
++    }
++    runtime.execute_script("second_and_stop", r#"
++      globalThis.second=Promise.reject(43);
++      Deno.core.setUnhandledPromiseRejectionHandler((_promise,reason)=>{rows.push(reason);stopCheckpoint();return true});
++    "#).unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    let context = runtime.main_context();
++    assert!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .deferred_termination
++    );
++    runtime.v8_isolate().cancel_terminate_execution();
++    runtime.execute_script("restore_reporter", "Deno.core.setUnhandledPromiseRejectionHandler((_promise,reason)=>{rows.push(reason);return true})").unwrap();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++    assert_eq!(rows(&mut runtime), "[42,43]");
++  }
++
++  #[test]
++  fn checkpoint_keeps_microtasks_after_the_complete_report_batch() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    runtime
++      .execute_script(
++        "batch_microtasks",
++        r#"
++      globalThis.second=Promise.reject(43);
++      Deno.core.setUnhandledPromiseRejectionHandler((_promise,reason)=>{
++        rows.push(reason);Promise.resolve().then(()=>rows.push('micro'+reason));return true;
++      });
++    "#,
++      )
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      2
++    );
++    assert_eq!(rows(&mut runtime), "[42,43,\"micro42\",\"micro43\"]");
++  }
++}
+--- a/runtime/v8_static_strings.rs
++++ b/runtime/v8_static_strings.rs
+@@ -32,0 +33 @@
++  SCOPED_REJECTION_CALLBACK = "__scopedRejectionCallback",

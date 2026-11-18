@@ -276,3 +276,7 @@ pub(super) fn op_execute_inline_script<'s>(
     restore_current_script(scope, document, previous);
     result
 }
+
+#[cfg(test)]
+#[path = "resource_lifecycle/coverage_contracts.rs"]
+mod coverage_contracts;

@@ -644,3 +644,7 @@ fn native_error<'s>(
 
 #[path = "private_boundary/frame_probe.rs"]
 pub(crate) mod frame_probe;
+
+#[cfg(test)]
+#[path = "private_boundary/native_guard_tests.rs"]
+mod native_guard_tests;

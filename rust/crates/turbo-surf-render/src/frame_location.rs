@@ -155,7 +155,7 @@ fn deny_navigation<'s>(
     );
 }
 
-fn navigation_base<'s>(
+pub(super) fn navigation_base<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     source: v8::Local<'s, v8::Context>,
 ) -> Option<String> {
@@ -1098,3 +1098,7 @@ mod fragment_tests {
         assert!(!set_fragment_component(&mut url, "#"));
     }
 }
+
+#[cfg(test)]
+#[path = "frame_location_factory_tests.rs"]
+mod factory_tests;

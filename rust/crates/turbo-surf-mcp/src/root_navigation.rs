@@ -31,3 +31,14 @@ pub(super) async fn finish(
     .await
     .map_err(|_| "Root navigation exceeded the render execution deadline".to_owned())?
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coverage_uninitialized_network_accounting_is_an_error() {
+        let error = pending(&NetworkEventLog::default(), "unknown-root").unwrap_err();
+        assert_eq!(error, "Root navigation accounting unavailable: Native Page network ownership is not initialized");
+    }
+}

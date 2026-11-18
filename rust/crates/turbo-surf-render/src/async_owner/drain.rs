@@ -218,7 +218,7 @@ fn poll_selected_turn(
     }
     let timer = selected_timer_turn(rt, options, &selection)?;
     if timer.fired != 0 {
-        checkpoint_window_timer(rt)?;
+        checkpoint_window_timer_turn(rt, &timer)?;
         return Ok(std::task::Poll::Ready(Turn::Timer(timer.fired)));
     }
     if run_background_resource_task_in(rt, selection.contexts.clone()) != 0 {

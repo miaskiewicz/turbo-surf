@@ -13,11 +13,11 @@ ShouldThrowOnError fixes formerly prepared here as `turbo-surf-v8`).
 | — | `turbo-dom-v8` (turbo-dom) | 150.4.x | prerequisite, not prepared here |
 | 1 | `turbo-surf-deno-v8` | 0.4.1 (0.4.0) | `rusty_v8` → registry `turbo-dom-v8 ~150.4` |
 | 2 | `turbo-surf-serde-v8` | 0.321.1 (0.321.0) | `v8` → forked facade |
-| 3 | `turbo-surf-deno-core` | 0.412.4 (0.412.0) | `v8`, `serde_v8` → forks |
-| 4 | `turbo-surf-deno-bench-util` | 0.253.4 (0.253.0) | `deno_core` → fork |
-| 5 | `turbo-surf-deno-crypto` | 0.273.4 (0.273.0) | `deno_core` → fork |
-| 6 | `turbo-surf-deno-webidl` | 0.259.4 (0.259.0) | `deno_core`, benchmark utility → forks |
-| 7 | `turbo-surf-deno-web` | 0.290.4 (0.290.0) | core, WebIDL and benchmark utility → forks |
+| 3 | `turbo-surf-deno-core` | 0.412.5 (0.412.0) | `v8`, `serde_v8` → forks |
+| 4 | `turbo-surf-deno-bench-util` | 0.253.5 (0.253.0) | `deno_core` → fork |
+| 5 | `turbo-surf-deno-crypto` | 0.273.5 (0.273.0) | `deno_core` → fork |
+| 6 | `turbo-surf-deno-webidl` | 0.259.5 (0.259.0) | `deno_core`, benchmark utility → forks |
+| 7 | `turbo-surf-deno-web` | 0.290.5 (0.290.0) | core, WebIDL and benchmark utility → forks |
 
 Keep the original library names and dependency aliases. Rust handles, op macros,
 serde conversions and native CryptoKey snapshots must share one runtime type
@@ -170,3 +170,13 @@ the experimental native155 overlay require separate integration validation befor
 claiming that both engine configurations remain supported.
 
 Core 0.412.4 adds native async-work observation, generation-checked lifecycle events and per-context module work inspection. Crypto 0.273.4 reports empty AES-GCM IVs as OperationError before mutation; other unsupported positive IV lengths retain their existing error. The Web, WebIDL and benchmark distributions advance only to retain the exact core type edge. Embedded upstream extension JavaScript is unchanged.
+
+Core 0.412.5 adds an embedder checkpoint for pending Promise rejection reports
+from one exact creation context. It preserves handled/unhandled ordering, defers
+when nextTick work is pending, and never polls native operations or timers. A
+captured core-JS trampoline marks actual dispatch entry so termination before
+entry preserves queued reports; an entered attempt is not repeated. This is an
+explicit owned-core JavaScript patch, not an unchanged-upstream-source claim.
+The four dependent distributions advance to .5 only to retain exact core/type
+edges; their embedded extension JavaScript, facade/serde and native V8 identities
+remain unchanged. Archive publication requires the reviewed proof packet.

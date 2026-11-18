@@ -4,6 +4,13 @@ use turbo_dom_browser_env::host_internals::NamedMutationResult;
 #[path = "frame_location.rs"]
 mod location;
 
+pub(super) fn navigation_base<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::Context>,
+) -> Option<String> {
+    location::navigation_base(scope, source)
+}
+
 struct Proxy(v8::Weak<v8::Object>);
 struct Origin(v8::Weak<v8::Value>);
 struct ExceptionConstructor(v8::Weak<v8::Function>);

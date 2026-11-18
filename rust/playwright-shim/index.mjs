@@ -2995,7 +2995,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       );
       if (!href) return;
       const current = JSON.parse(href);
-      this._url = historyNavigation?.url ?? current.url;
+      if (!hasNativeHistory(this)) this._url = historyNavigation?.url ?? current.url;
       this._requestContextId = current.id;
       this._requestFrames ??= new Map();
       if (current.id) this._requestFrames.set(current.id, this.mainFrame());

@@ -439,3 +439,52 @@ test("initial empty history remains non-traversable after pushState before its f
     assert.deepEqual(requests, ["/host", "/real"]);
   });
 });
+
+test(
+  "late request-context snapshots cannot replace an authoritative native history URL",
+  { timeout: 10000 },
+  async () => {
+    await historyFixture(async ({ root, base, requests }) => {
+      const page = await popup(root);
+      let captured;
+      let release;
+      const capturedSnapshot = new Promise((resolve) => {
+        captured = resolve;
+      });
+      const released = new Promise((resolve) => {
+        release = resolve;
+      });
+      const collect = page._collectSession;
+      let held = false;
+      page._collectSession = async function (...args) {
+        const result = await collect.apply(this, args);
+        if (!held && args[1].includes("requestFrameSnapshot")) {
+          held = true;
+          captured();
+          await released;
+        }
+        return result;
+      };
+      const olderRefresh = page._refreshFromSession();
+      olderRefresh.catch(() => {});
+      try {
+        await capturedSnapshot;
+        await assign(page, "/two");
+        await page.waitForURL(`${base}/two`, { timeout: 5000 });
+        await page.evaluate(() => {
+          window.currentMarker = marker;
+        });
+        release();
+        await olderRefresh;
+        assert.equal(page.url(), `${base}/two`);
+        assert.equal(await page.evaluate(() => location.pathname), "/two");
+        assert.equal(await page.evaluate(() => marker === currentMarker), true);
+        assert.deepEqual(requests, ["/host", "/one", "/two"]);
+      } finally {
+        release();
+        page._collectSession = collect;
+        await olderRefresh.catch(() => {});
+      }
+    });
+  },
+);

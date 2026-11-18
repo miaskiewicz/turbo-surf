@@ -701,3 +701,8 @@ Raw full logs live under `.recovery/final-coverage-next/js-after-covered-97285df
 - New `assertion-retry-diagnostics.test.mjs` reproduces the missing error cause: red 4 passed / 1 failed; persistent read error's exact identity was lost. Fix retains the latest erroneous observation as assertion cause/message and clears it after every valid observation, including false.
 - Green 5/5 controls: transient error→true recovers; persistent errors preserve exact latest cause; transient error→valid false exhausts without stale cause; ordinary false keeps existing diagnostic; strict errors escape immediately. Retry timing, timeout, predicate and negation behavior are unchanged.
 - This diagnostics fix does not establish or resolve the original catalog failure's root cause.
+
+
+### New module-deadline control awaiting classification
+
+`navigation_deadline_module_tests::completing_a_real_module_source_releases_its_descendant_budget` timed out at its original source deadline (`navigation_deadline_module_tests.rs:269`, 5.55 s) during the new 22-control behavior validation, session 55978. The preceding five Location contracts and module-expiry control passed; 15 disjoint controls were initially unrun after the stop-on-failure boundary. An earlier localhost bind permission denial was setup-only and is recorded separately. The new timeout is OPEN pending source-author classification as a real product issue or an incorrect fixture premise. No source deadline, assertion, or expectation has been increased or waived; this does not block integration of the independently proven history URL repair.

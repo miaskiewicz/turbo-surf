@@ -223,7 +223,7 @@ test(
       const release = join(root, "rust/target/release");
       for (const directory of [scripts, bin, crate, release])
         mkdirSync(directory, { recursive: true });
-      for (const file of ["local-addon.mjs", "test-playwright.mjs"])
+      for (const file of ["local-addon.mjs", "test-playwright.mjs", "run-node-tests.mjs"])
         cpSync(new URL(file, import.meta.url), join(scripts, file));
       writeFileSync(
         join(scripts, "local-addon.test.mjs"),

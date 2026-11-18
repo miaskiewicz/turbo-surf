@@ -680,3 +680,8 @@ The subsequent full JavaScript run completed all **177 files: 1055 pass, two fai
 - `e2e/catalog.spec.mjs::product list shows every product`: line 16 timed out waiting for a product to be visible (5117 ms). An isolated rerun passed; original ordering/concurrency reproduction continues, with no assertion or timeout waiver.
 
 Raw full logs live under `.recovery/final-coverage-next/js-after-covered-97285df7/full-gates/`; the immutable source/addon/trace and both failure records are pinned by `new-js-failure-ledger.json` (SHA `618779eb`, `.recovery/final-regression-driver-v33/`). Tracking adds both selectors monotonically; it is not an extra regression execution gate. Fix diagnostics take priority over the prepared 22 coverage controls.
+
+
+### Additional history failure during unchanged reproduction
+
+`history-groups.test.mjs::restored groups retain duplicate entry identity and replacement/forward semantics` is OPEN: an unchanged eight-process cohort with the original `NODE_V8_COVERAGE` environment produced 87 pass / one failure; this case timed out waiting for `load` at the unchanged 5000 ms limit. The original cross-group back/forward case passed in that cohort, so a shared cause is **not established**. Exact evidence: `.worktrees/history-groups-97285/.recovery/history-groups/covered-cohort-3.log` (session 15657). Source and immutable addon remain identical to the failed full 97285 run. Low-overhead buffered host event, waiter-registration and navigation-identity diagnostics are next; no assertion or timeout has been changed.

@@ -290,14 +290,22 @@ function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function ownedServerAlive(child) {
+async function ownedServerAlive(child, deadline) {
   if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
-  try {
-    process.kill(-child.pid, 0);
-    return true;
-  } catch (error) {
-    if (error.code === "ESRCH") return false;
-    throw error;
+  let firstPermissionError;
+  for (;;) {
+    try {
+      process.kill(-child.pid, 0);
+      return true;
+    } catch (error) {
+      if (error.code === "ESRCH") return false;
+      const reaped = child.exitCode !== null || child.signalCode !== null;
+      if (error.code !== "EPERM" || !reaped) throw error;
+      firstPermissionError ??= error;
+      if (Date.now() >= deadline) throw firstPermissionError;
+      // Darwin may finish retiring the process group after the owned child's exit callback.
+      await delay(Math.min(10, deadline - Date.now()));
+    }
   }
 }
 
@@ -317,6 +325,20 @@ async function signalOwnedServer(child, signal) {
   }
 }
 
+async function waitForOwnedServerExit(child, deadline) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  // Reap the shell before probing its group; Darwin can reject probes of an unreaped zombie.
+  await new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      child.removeListener("exit", done);
+      resolve();
+    };
+    const timer = setTimeout(done, Math.max(0, deadline - Date.now()));
+    child.once("exit", done);
+  });
+}
+
 export async function stopWebServers(handles) {
   for (const h of handles) {
     if (!h?.child) continue;
@@ -324,8 +346,9 @@ export async function stopWebServers(handles) {
     const tmo = h.server.gracefulShutdown?.timeout ?? 5000;
     await signalOwnedServer(h.child, sig);
     const deadline = Date.now() + tmo;
-    while (ownedServerAlive(h.child) && Date.now() < deadline) await delay(50);
-    if (ownedServerAlive(h.child)) await signalOwnedServer(h.child, "SIGKILL");
+    await waitForOwnedServerExit(h.child, deadline);
+    while ((await ownedServerAlive(h.child, deadline)) && Date.now() < deadline) await delay(50);
+    if (await ownedServerAlive(h.child, deadline)) await signalOwnedServer(h.child, "SIGKILL");
   }
 }
 

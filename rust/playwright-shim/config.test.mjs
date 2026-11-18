@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -601,3 +602,152 @@ test("workers configuration supports integers, percentages and project caps", ()
     );
   }
 });
+
+test(
+  "webServer waits for its owned child exit before probing the process group",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 987654,
+      exitCode: null,
+      signalCode: null,
+    });
+    const events = [];
+    t.mock.method(process, "kill", (pid, signal) => {
+      assert.equal(pid, -child.pid);
+      if (signal === "SIGTERM") {
+        events.push("signal");
+        setImmediate(() => {
+          child.signalCode = "SIGTERM";
+          events.push("exit");
+          child.emit("exit", null, "SIGTERM");
+        });
+        return true;
+      }
+      assert.equal(signal, 0);
+      assert.notEqual(
+        child.signalCode,
+        null,
+        "the owned child exit callback must run before group probing",
+      );
+      events.push("probe");
+      throw Object.assign(new Error("group gone"), { code: "ESRCH" });
+    });
+    await stopWebServers([
+      { child, server: { gracefulShutdown: { signal: "SIGTERM", timeout: 100 } } },
+    ]);
+    assert.deepEqual(events, ["signal", "exit", "probe", "probe"]);
+  },
+);
+
+test(
+  "webServer still escalates when its owned child ignores the graceful signal",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 987654,
+      exitCode: null,
+      signalCode: null,
+    });
+    const signals = [];
+    t.mock.method(process, "kill", (pid, signal) => {
+      assert.equal(pid, -child.pid);
+      signals.push(signal);
+      return true;
+    });
+    await stopWebServers([
+      { child, server: { gracefulShutdown: { signal: "SIGTERM", timeout: 5 } } },
+    ]);
+    assert.equal(signals[0], "SIGTERM");
+    assert.equal(signals.at(-1), "SIGKILL");
+    assert.ok(signals.includes(0));
+  },
+);
+
+test(
+  "webServer does not confuse a reaped shell with surviving descendants",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const child = Object.assign(new EventEmitter(), { pid: 987654, exitCode: 0, signalCode: null });
+    const signals = [];
+    t.mock.method(process, "kill", (pid, signal) => {
+      assert.equal(pid, -child.pid);
+      signals.push(signal);
+      return true;
+    });
+    await stopWebServers([
+      { child, server: { gracefulShutdown: { signal: "SIGTERM", timeout: 5 } } },
+    ]);
+    assert.equal(signals.at(-1), "SIGKILL");
+    assert.ok(signals.includes(0));
+  },
+);
+
+test(
+  "webServer still reports an inaccessible process group after its child exits",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const child = Object.assign(new EventEmitter(), { pid: 987654, exitCode: 0, signalCode: null });
+    const denied = Object.assign(new Error("group inaccessible"), { code: "EPERM" });
+    t.mock.method(process, "kill", (pid, signal) => {
+      assert.equal(pid, -child.pid);
+      if (signal === 0) throw denied;
+      return true;
+    });
+    await assert.rejects(
+      stopWebServers([{ child, server: { gracefulShutdown: { signal: "SIGTERM", timeout: 5 } } }]),
+      (error) => error === denied,
+    );
+  },
+);
+
+test(
+  "webServer resolves a transient reaped-group permission probe only after ESRCH",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const child = Object.assign(new EventEmitter(), { pid: 987654, exitCode: 0, signalCode: null });
+    let probes = 0;
+    t.mock.method(process, "kill", (pid, signal) => {
+      assert.equal(pid, -child.pid);
+      if (signal !== 0) {
+        assert.equal(signal, "SIGTERM");
+        return true;
+      }
+      probes++;
+      throw Object.assign(new Error(probes === 1 ? "group retiring" : "group gone"), {
+        code: probes === 1 ? "EPERM" : "ESRCH",
+      });
+    });
+    await stopWebServers([
+      { child, server: { gracefulShutdown: { signal: "SIGTERM", timeout: 100 } } },
+    ]);
+    assert.equal(probes, 3);
+  },
+);
+
+test(
+  "webServer does not retry permission probes before its owned child has exited",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 987654,
+      exitCode: null,
+      signalCode: null,
+    });
+    const denied = Object.assign(new Error("unreaped group inaccessible"), { code: "EPERM" });
+    let probes = 0;
+    t.mock.method(process, "kill", (pid, signal) => {
+      assert.equal(pid, -child.pid);
+      if (signal === 0) {
+        probes++;
+        throw denied;
+      }
+      return true;
+    });
+    await assert.rejects(
+      stopWebServers([{ child, server: { gracefulShutdown: { signal: "SIGTERM", timeout: 5 } } }]),
+      (error) => error === denied,
+    );
+    assert.equal(probes, 1);
+  },
+);

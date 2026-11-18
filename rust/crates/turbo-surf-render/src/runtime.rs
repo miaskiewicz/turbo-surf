@@ -20783,3 +20783,7 @@ mod frame_source_tests {
         assert_eq!(&plaintext[bodies[0].0..bodies[0].1], "a");
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_document_contract_tests.rs"]
+mod runtime_document_contract_tests;

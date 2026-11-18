@@ -1853,3 +1853,7 @@ mod tests {
             .await.unwrap(), "2:1");
     }
 }
+
+#[cfg(test)]
+#[path = "navigation_deadline_module_tests.rs"]
+mod module_tests;

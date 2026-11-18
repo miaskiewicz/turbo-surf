@@ -4,52 +4,20 @@ pub mod fixture;
 use serde_json::{json, Value};
 use turbo_surf_render::PageSession;
 
+// Cold document/bootstrap work is setup, not the runaway operation under test.
+const SETUP_BUDGET_MS: u64 = 5_000;
+const OPERATION_BUDGET_MS: u64 = 250;
+
 async fn open() -> PageSession {
-    let started = std::time::Instant::now();
-    let result = PageSession::open(
+    PageSession::open(
         "<!doctype html><title>root</title><p>retained root</p>",
         "https://target-budget.test/",
         "",
         "",
-        250,
+        SETUP_BUDGET_MS,
     )
-    .await;
-    let report = result.as_ref().map(|page| page.hydration_diagnostics());
-    if report.as_ref().map_or(true, |diagnostics| {
-        diagnostics.budget_exceeded || diagnostics.open_error.is_some()
-    }) {
-        eprintln!(
-            "popup setup root: budget_ms=250 elapsed_ms={} diagnostics={report:?}",
-            started.elapsed().as_millis()
-        );
-    }
-    result.unwrap()
-}
-
-async fn child(page: &mut PageSession) -> u64 {
-    let root = page.auxiliary_root_id().unwrap().to_string();
-    let before = page.hydration_diagnostics().clone();
-    let started = std::time::Instant::now();
-    let result = page
-        .eval("globalThis.child=window.open('', 'contract-child');child.document.title='original';")
-        .await;
-    if result.is_err() {
-        let elapsed = started.elapsed().as_millis();
-        let after = page.hydration_diagnostics().clone();
-        let pages = page.auxiliary_event_log().pages();
-        eprintln!(
-            "popup setup child: budget_ms=250 elapsed_ms={elapsed} result={result:?} before={before:?} after={after:?} pages={pages:?}"
-        );
-    }
-    result.unwrap();
-    page.auxiliary_event_log()
-        .pages()
-        .into_iter()
-        .find(|info| info.source_page.as_deref() == Some(&root) && !info.closed)
-        .unwrap()
-        .target
-        .parse()
-        .unwrap()
+    .await
+    .unwrap()
 }
 
 fn read(page: &mut PageSession, target: u64, source: &str) -> Value {
@@ -60,11 +28,13 @@ fn read(page: &mut PageSession, target: u64, source: &str) -> Value {
 async fn a_target_engine_read_watchdog_preserves_reached_state_and_other_pages() {
     let mut page = open().await;
     let root = page.auxiliary_root_id().unwrap();
-    let child = child(&mut page).await;
+    let child = fixture::child(&mut page).await;
+    page.set_execution_budget_for_testing(OPERATION_BUDGET_MS);
     let error = page
         .read_target_engine(child, "globalThis.reachedRead=17;while(true){}")
         .unwrap_err();
     assert_eq!(error, "Target engine read exceeded session budget");
+    page.set_execution_budget_for_testing(SETUP_BUDGET_MS);
     assert_eq!(
         read(&mut page, root, "return [document.title,window.closed]"),
         json!(["root", false])
@@ -85,7 +55,8 @@ async fn a_target_engine_read_watchdog_preserves_reached_state_and_other_pages()
 async fn a_target_authored_script_watchdog_rejects_without_poisoning_next_evaluation() {
     let mut page = open().await;
     let root = page.auxiliary_root_id().unwrap();
-    let child = child(&mut page).await;
+    let child = fixture::child(&mut page).await;
+    page.set_execution_budget_for_testing(OPERATION_BUDGET_MS);
     let error = page
         .eval_target_script(
             child,
@@ -94,6 +65,7 @@ async fn a_target_authored_script_watchdog_rejects_without_poisoning_next_evalua
         .await
         .unwrap_err();
     assert_eq!(error, "Target script exceeded session budget");
+    page.set_execution_budget_for_testing(SETUP_BUDGET_MS);
     assert_eq!(
         read(&mut page, child, "return document.title"),
         "reached before timeout"
@@ -116,7 +88,7 @@ async fn a_target_authored_script_watchdog_rejects_without_poisoning_next_evalua
 async fn content_script_timeout_keeps_the_root_live_and_accepts_a_later_replacement() {
     let mut page = open().await;
     let root = page.auxiliary_root_id().unwrap();
-    let child = child(&mut page).await;
+    let child = fixture::child(&mut page).await;
     let error = page
         .set_target_content(
             child,
@@ -156,7 +128,7 @@ async fn content_script_timeout_keeps_the_root_live_and_accepts_a_later_replacem
 async fn polling_an_actor_after_root_close_services_its_actual_surviving_child() {
     let mut page = open().await;
     let root = page.auxiliary_root_id().unwrap();
-    let child = child(&mut page).await;
+    let child = fixture::child(&mut page).await;
     assert_eq!(
         read(
             &mut page,

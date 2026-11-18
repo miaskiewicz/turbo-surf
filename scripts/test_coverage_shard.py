@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """coverage-shard.py chunking and report union."""
 import importlib.util
+import json
+from contextlib import chdir, redirect_stdout, redirect_stderr
+import tempfile
+import io
+from unittest import mock
 from pathlib import Path
 import unittest
 
@@ -46,6 +51,59 @@ class ShardTests(unittest.TestCase):
         for bad in (["x", "s", "--chunks", "2", "a", "b"], ["x", "s", "--chunks", "0", "a"], ["x", "s"]):
             with self.assertRaises(SystemExit):
                 SHARD.parse(bad)
+
+
+class ChunkExecutionTests(unittest.TestCase):
+    def run_slice(self, statuses, missing_report=None):
+        with tempfile.TemporaryDirectory() as temporary, chdir(temporary), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            tests = Path("crates/c/tests")
+            tests.mkdir(parents=True)
+            for name in ("a", "b", "c", "d"):
+                (tests / f"{name}.rs").touch()
+            path = Path("target/cov/report-render/tarpaulin-report.json")
+            path.parent.mkdir(parents=True)
+            calls = []
+
+            def run(args):
+                index = len(calls)
+                calls.append(args)
+                self.assertFalse(path.exists(), "Each chunk must produce its own report")
+                if index != missing_report:
+                    path.write_text(json.dumps(report(["a.rs"], [(index + 1, 1)])))
+                return statuses[index]
+
+            with mock.patch.object(SHARD.subprocess, "call", side_effect=run):
+                status = SHARD.run_chunked(CONFIG, "render", "c", 4, 0, 2)
+            return status, json.loads(path.read_text()), calls
+
+    def test_sliced_failure_still_exports_merged_reports_and_fails(self):
+        status, merged, calls = self.run_slice([0, 3])
+        self.assertEqual(status, 3)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual((merged["covered"], merged["coverable"]), (2, 2))
+        self.assertTrue(all("--no-fail-fast" in args for args in calls))
+
+    def test_later_success_does_not_erase_an_earlier_failed_chunk(self):
+        status, merged, calls = self.run_slice([7, 0])
+        self.assertEqual(status, 7)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(merged["covered"], 2)
+
+    def test_successful_slice_unions_every_chunk(self):
+        status, merged, calls = self.run_slice([0, 0])
+        self.assertEqual(status, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([row["line"] for row in merged["files"][0]["traces"]], [1, 2])
+        self.assertNotIn("--fail-under", calls[0])
+        self.assertEqual(calls[0][calls[0].index("--config") + 1], "/dev/null")
+
+    def test_missing_chunk_report_cannot_reuse_the_previous_chunk(self):
+        for missing in (0, 1):
+            with self.subTest(missing=missing):
+                status, merged, calls = self.run_slice([0, 0], missing_report=missing)
+                self.assertEqual(status, 1)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual((merged["covered"], merged["coverable"]), (1, 1))
 
 
 if __name__ == "__main__":

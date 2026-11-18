@@ -106,22 +106,23 @@ def run_chunked(config, shard, crate, chunks, slice_index=0, slice_total=1):
     reports, status = [], 0
     for i, targets in enumerate(all_targets):
         shutil.rmtree(profraws, ignore_errors=True)
+        report_path.unlink(missing_ok=True)
         args = tarpaulin_args(config, shard, [crate], targets)
         print(f"chunk {i + 1}/{len(all_targets)}: " + " ".join(args), flush=True)
         rc = subprocess.call(args)
         status = rc or status
-        with open(report_path) as f:
-            reports.append(json.load(f))
+        if report_path.exists():
+            with open(report_path) as f:
+                reports.append(json.load(f))
+        else:
+            print(f"{shard}: chunk {i + 1} produced no coverage report", file=sys.stderr)
+            status = status or 1
     shutil.rmtree(profraws, ignore_errors=True)
     merged = union_reports(reports)
     with open(report_path, "w") as f:
         json.dump(merged, f)
     print(f"{shard}: {merged['coverage']:.2f}% ({merged['covered']}/{merged['coverable']}) over {len(reports)} chunk(s)")
-    # When sliced, individual tarpaulin runs see partial coverage and may exit
-    # non-zero for threshold or spurious "Test failed during run" errors. The
-    # merge step enforces the real threshold; only report the JSON was produced.
-    if slice_total > 1:
-        return 0 if report_path.exists() else 1
+    # Shards disable thresholds; a report cannot turn failed tests into success.
     return status
 
 

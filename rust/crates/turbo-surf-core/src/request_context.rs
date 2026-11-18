@@ -1075,7 +1075,9 @@ mod configured_transport_tests {
     fn transport_without_runtime_returns_an_error_instead_of_panicking() {
         let hints = ClientHints::default();
         for result in [hints.manual_client(), hints.upload_client()] {
-            let error = result.err().expect("transport must require a runtime");
+            let Err(error) = result else {
+                panic!("transport must require a runtime");
+            };
             assert_eq!(error.code, crate::net::ErrorCode::Network);
             assert_eq!(
                 error.message,

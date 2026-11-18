@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Hand timer-only post-load work to the existing full quiescence phase instead of exhausting initial hydration pumps, while preserving fetch completion, dynamic scripts, animation callbacks and finite animations.
+
 - Roll back unpublished frame allocations after interrupted creation, preserving healthy root input, installed frames and peers without admitting incomplete document owners.
 
 - Reap owned web-server processes before checking their groups, and bound transient Darwin group-retirement probes by the existing shutdown deadline while preserving descendant termination and permission errors.

@@ -18557,12 +18557,9 @@ fn hydrate_pass(rt: &mut JsRuntime) -> Result<v8::Global<v8::Value>, String> {
     )
 }
 
-/// The unified post-load pump: a single "run scripts+timers, then drain" pass
-/// isn't enough for a real SPA (React kicks a fetch → yields → the fetch
-/// resolves → React schedules more work via a MessageChannel → …). Loop until
-/// the namespace predicate `pendingWork` goes false or the pump budget runs
-/// out. Split from [`hydrate_installed_document`] to keep it under the
-/// complexity gate.
+/// Continue post-load hydration while selected native work remains. Timer-only
+/// queues hand off to the following full quiescence phase, which also runs any
+/// scripts, modules and native work those timers create.
 async fn run_post_load_hydration_pumps(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     const MAX_PUMPS: usize = 500;
     // Host callbacks can only settle after this actor yields back to its driver.
@@ -18586,8 +18583,9 @@ async fn run_post_load_hydration_pumps(rt: &mut JsRuntime, base: &str) -> Result
             .borrow_mut()
             .borrow_mut::<HydrationProgress>()
             .completed_pumps = round + 1;
-        let pending = namespace_call(rt, "pendingWork", &[])?;
-        if !first.busy && !last.busy && read_string(rt, pending)? != "1" {
+        // Raw timer queues need not become empty (for example, a running CSS
+        // animation). Full quiescence still drains them after this native-work phase.
+        if !first.busy && !last.busy {
             break;
         }
         tokio::task::yield_now().await;

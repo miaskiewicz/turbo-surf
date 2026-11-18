@@ -20821,3 +20821,11 @@ mod registered_resource_deadline_tests;
 #[cfg(test)]
 #[path = "runtime_queued_classic_interruption_tests.rs"]
 mod runtime_queued_classic_interruption_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_host_ops_tests.rs"]
+mod runtime_registered_host_ops_tests;
+
+#[cfg(test)]
+#[path = "runtime_source_normalization_tests.rs"]
+mod runtime_source_normalization_tests;

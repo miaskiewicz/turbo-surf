@@ -12719,6 +12719,7 @@ if (typeof globalThis.URLSearchParams === "undefined") {
   Object.defineProperty(URLSearchParams.prototype,Symbol.toStringTag,{value:"URLSearchParams",configurable:true});
 }
 if (typeof globalThis.URL === "undefined") {
+  const NativeURLSearchParams = globalThis.URLSearchParams;
   const states = __interfaceMap("URL");
   const state = (receiver) => { const value = states.get(receiver); if (!value) throw new TypeError("Illegal invocation"); return value; };
   const parse = (input, base = "") => ops.op_surf_url_parse(__String(input), base);
@@ -12726,19 +12727,19 @@ if (typeof globalThis.URL === "undefined") {
     const current = state(receiver);
     current.parts = parse(ops.op_url_update(receiver.href, key, __String(value)));
     // URL.searchParams keeps its identity across URL mutations.
-    const replacement = new URLSearchParams(current.parts.search);
+    const replacement = new NativeURLSearchParams(current.parts.search);
     __urlParamStates.set(current.params,__urlPairs(replacement));
   };
   globalThis.URL = class URL {
     constructor(url, base = undefined) {
       if (!arguments.length) throw new TypeError("URL requires an input");
       const parts = parse(url, base === undefined ? "" : __String(base));
-      const params=new URLSearchParams(parts.search),current={parts,params};
+      const params=new NativeURLSearchParams(parts.search),current={parts,params};
       states.set(this,current);
       __urlParamOwners.set(params,()=>{current.parts=parse(ops.op_url_update(current.parts.href,"search",params.toString()));});
     }
     get href() {return state(this).parts.href;}
-    set href(value) { const current = state(this), parts = parse(value); current.parts = parts; __urlParamStates.set(current.params,__urlPairs(new URLSearchParams(parts.search))); }
+    set href(value) { const current = state(this), parts = parse(value); current.parts = parts; __urlParamStates.set(current.params,__urlPairs(new NativeURLSearchParams(parts.search))); }
     get origin() { return state(this).parts.origin; }
     get searchParams() { return state(this).params; }
     get search() {return state(this).parts.search;}

@@ -2,6 +2,8 @@
 
 ## [0.8.4] - Unreleased
 
+- Keep URL construction and updates independent of a page-replaced URLSearchParams constructor.
+
 - Capture URL and URLSearchParams string conversions before authored scripts can replace the global String constructor, while retaining user-defined coercions and mutation errors.
 - Preserve canonical DOMException types and messages for native SecurityError rejections, including cross-origin private frame operations.
 

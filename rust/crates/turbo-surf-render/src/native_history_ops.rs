@@ -441,3 +441,7 @@ mod tests {
         assert_ne!(selection(&history, 20, 1).unwrap().row, old);
     }
 }
+
+#[cfg(test)]
+#[path = "native_history_ops_coverage_contracts.rs"]
+mod coverage_contracts;

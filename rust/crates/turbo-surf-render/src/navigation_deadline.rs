@@ -1857,3 +1857,7 @@ mod tests {
 #[cfg(test)]
 #[path = "navigation_deadline_module_tests.rs"]
 mod module_tests;
+
+#[cfg(test)]
+#[path = "navigation_deadline_coverage_contracts.rs"]
+mod coverage_contracts;

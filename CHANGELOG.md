@@ -8,6 +8,8 @@
 
 - Reap owned web-server processes before checking their groups, and bound transient Darwin group-retirement probes by the existing shutdown deadline while preserving descendant termination and permission errors.
 
+- Preserve posted-message order against later timers in virtual-time pages by using the running task clock across windows; keep real-time scheduling and existing document authority unchanged.
+
 - Settle interrupted initial-hydration script waiters before returning a retained partial page, so later healthy evaluations remain usable within their original execution budget.
 
 - Update native DOM, layout and raster together, including canvas background and quirks layout corrections.

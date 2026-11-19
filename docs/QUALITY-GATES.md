@@ -53,8 +53,8 @@ environment presence and value hashes are retained without logging their values.
 the test process. Nested test probes inherit the caller's original `NODE_OPTIONS`
 and reporter behavior; the coverage gate never changes that environment variable.
 
-`scripts/js-coverage-scope.json` records the same 43 product files as the earlier
-host measurements: `cli.js`, `index.js`, the NAPI JS loader and Playwright shim
+`scripts/js-coverage-scope.json` records 44 product files, including the test-output
+runtime added after the earlier 43-file measurements: `cli.js`, `index.js`, the NAPI JS loader and Playwright shim
 runtime/runner utilities. Existing server and fixture utilities in that inventory
 remain measured. Test cases, the popup application fixture, developer harnesses
 and coverage tooling are outside this product scope. Error handling, unsupported

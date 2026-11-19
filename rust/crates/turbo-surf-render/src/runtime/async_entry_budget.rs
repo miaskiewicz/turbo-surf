@@ -28,32 +28,36 @@ impl AsyncEntryBudget {
             budget_ms,
         }
     }
-    pub(super) async fn run<T>(
-        &self,
+    // Finish constructing the drain state before polling it. Keeping it inline
+    // inflates every forwarding constructor's frame during cold V8 bootstrap.
+    pub(super) fn run<'a, T: 'a>(
+        &'a self,
         enforce_deadline: bool,
-        future: impl std::future::Future<Output = Result<T, String>>,
-    ) -> Result<T, String> {
-        if self
-            .caller_deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
-            return Err("Execution interrupted by the navigation caller deadline".into());
-        }
-        let budget = self.caller_deadline.map_or(self.budget_ms, |deadline| {
-            self.budget_ms.min(
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .max(1) as u64,
+        future: impl std::future::Future<Output = Result<T, String>> + 'a,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<T, String>> + 'a>> {
+        Box::pin(async move {
+            if self
+                .caller_deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                return Err("Execution interrupted by the navigation caller deadline".into());
+            }
+            let budget = self.caller_deadline.map_or(self.budget_ms, |deadline| {
+                self.budget_ms.min(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis()
+                        .max(1) as u64,
+                )
+            });
+            with_async_execution_budget(
+                enforce_deadline || self.caller.is_some(),
+                budget,
+                &self.aggregate_exceeded,
+                self.execution.run(future),
             )
-        });
-        with_async_execution_budget(
-            enforce_deadline || self.caller.is_some(),
-            budget,
-            &self.aggregate_exceeded,
-            self.execution.run(future),
-        )
-        .await
+            .await
+        })
     }
     pub(super) fn finish(self) -> EntryOutcome {
         let interrupted = self.execution.interrupted();

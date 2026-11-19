@@ -4124,7 +4124,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       } catch(error) { return JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); } })()`,
       ),
     );
-    if (tracked.needsSync) await this._refreshFromSession();
+    // The authored result is settled; metadata must not wait for unrelated page work.
+    if (tracked.needsSync) await this._refreshFromSession(true);
     else if (tracked.events || this._auxiliaryActor) await this._drainNetworkEvents(true);
     const result = JSON.parse(tracked.value);
     if (result.error) throw decodeEvaluationError(result.error);

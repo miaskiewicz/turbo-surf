@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.5] - 2026-11-19
+
+- Preserve executable permissions for native npm CLI binaries on macOS and Linux before creating the platform tarballs.
+- Reject non-executable Unix binaries in archive validation, and run extracted/installed smoke tests without repairing permissions.
+- Packaging-only hotfix; the engine implementation and turbo-dom 0.8.4 dependency are unchanged.
+
 ## [0.8.4] - 2026-11-19
 
 - Refresh actor readiness after native opening completes, reject navigation closed during final metadata refresh, and honor network-idle waits on the initial actor navigation.

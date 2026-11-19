@@ -1,12 +1,23 @@
 # Release regressions
 
-Target: `release/v0.8.4`. Updated 2026-11-19.
+Target: `release/v0.8.5`. Updated 2026-11-19.
 
 Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component proof and their fixes are merged.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. Required supporting dependency publication was explicitly authorized and completed; Surf publication is authorized only after the final release gates and artifact proofs pass.
 
-## Latest integrated repair batch — final gates pending
+## v0.8.5 packaging-only hotfix
+
+- [x] Reproduce the published npm v0.8.4 Unix CLI failure with a normal installation: the native executable is mode `0644` and launching fails with `EACCES`.
+- [x] Identify the masking proof: the old extracted-tarball smoke added execute permission before launching. Preserve the broken published archive and installed failure evidence.
+- [x] Fix staging before packing (`31f9ecd4`): set all three Unix executables to `0755`, verify actual tar-member permissions, and remove the extracted-consumer permission repair. Windows staging is unchanged.
+- [x] Validate actual TDD: seven baseline failures become twelve passing packaging controls; all 27 supervisor controls pass. A fresh untouched candidate installation passes CLI, NAPI, facade, native runtime and signature checks. Its payload bytes equal the published v0.8.4 bytes; only the native executable mode changes.
+- [ ] Complete v0.8.5 CI and exact release-artifact checks, including untouched Unix executable consumers.
+- [ ] Publish and verify the actual v0.8.5 registry packages, then deprecate npm v0.8.4 with an upgrade notice.
+
+The v0.8.4 engine gates completed successfully: local Rust **2,185 passed / 0 failed / 7 intentional ignores**, JS **1,172 passed / 0 failed / 3 intentional skips**, current PR/push/main CI green, published Rust and Python consumers verified. The post-publication npm permission failure is the sole hotfix scope. Engine implementation, turbo-dom 0.8.4, Deno and V8 dependencies remain unchanged. The older pending-gate snapshots below are historical evidence, not additional unresolved v0.8.5 work.
+
+## v0.8.4 integrated repair batch — historical pre-gate snapshot
 
 The current batch adds the actual actor-opening readiness barrier, final-refresh close guard and initial-navigation network-idle wait. Genuine native controls reproduce each defect before its fix; the registered opening/close controls and existing network-idle controls pass **19 / 0**, with the original tests and timeout limits retained. These component results do not replace the next complete JS run.
 

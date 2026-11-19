@@ -2389,6 +2389,8 @@ const NETWORK_EVENTS = [
   "console",
   "dialog",
 ];
+const supersededInitialHydrationErrors = new WeakSet();
+
 class Page {
   constructor(context) {
     this._html = "";
@@ -2815,12 +2817,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
-  _openLiveSession(timeoutMs) {
+  _openLiveSession(timeoutMs, initialGoal) {
     if (this._closed) throw new Error("Page session closed");
     if (this._openingSession) return this._openingSession.promise;
     if (this._auxiliaryActor && this._session != null) return Promise.resolve();
     if (this._session != null) this._closeSession();
-    const opening = { id: native.liveNetworkLogCreate() };
+    const opening = { id: native.liveNetworkLogCreate(), initialGoal };
     this._openingSession = opening;
     this._openingNetworkId = opening.id;
     this._updateNetworkPump();
@@ -2845,6 +2847,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return JSON.stringify({
       ...this._documentResponse,
       hostNetworkLog: opening.id,
+      initialHydrationGoal: opening.initialGoal,
       rootHistory: this._driverHistorySnapshot(),
       retainInitialHydrationTimeout: Boolean(native.liveInitialHydrationStatus),
       auxiliaryPolicy: this._context._auxiliaryPolicy,
@@ -2870,13 +2873,15 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _failedActorOpen(opening) {
-    const actor = this._actorHub;
+    if (!this._ownsInitialOpening(opening)) return;
+    const actor = opening.actorHub ?? this._actorHub;
     if (actor) {
       try {
         await actor.drain();
       } catch {}
+      if (!this._ownsInitialOpening(opening)) return;
       if (actor.capability === "supported") {
-        if (this._targetId != null) await actor.closeTarget(this._targetId);
+        if (opening.targetId != null) await actor.closeTarget(opening.targetId);
         return;
       }
       actor.releaseRoot(new Error("Root initialization failed"));
@@ -2911,12 +2916,29 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _settleFailedLiveOpen(error, opening) {
+    if (!this._ownsInitialOpening(opening) || supersededInitialHydrationErrors.has(error)) return;
     if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
     if (this._openingClosePromise) await this._openingClosePromise;
     else if (!this._canRetainTimedOutActor(error)) {
       await this._failedActorOpen(opening);
       if (this._openingSession === opening) this._failPendingNetworkResponses(error.message);
     }
+  }
+
+  _ownsInitialOpening(opening) {
+    return (
+      this._openingSession === opening &&
+      !opening.superseded &&
+      (opening.targetId === undefined || this._targetId === opening.targetId) &&
+      (opening.session === undefined || this._session === opening.session) &&
+      (!opening.actorHub || this._actorHub === opening.actorHub)
+    );
+  }
+
+  _assertInitialOpening(opening) {
+    this._throwIfOpeningClosed();
+    if (!this._ownsInitialOpening(opening))
+      throw new Error("Page session changed during initialization");
   }
 
   _throwIfOpeningClosed() {
@@ -2942,21 +2964,28 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._imageCache?.documentToken,
       );
       await this._observeActorOpen(opened, opening);
+      this._assertInitialOpening(opening);
+      opening.actorHub = this._actorHub;
+      opening.targetId = this._targetId;
       const session = await opened;
       if (this._closed || this._openingSession !== opening) {
         native.liveClose(session);
         throw new Error("Page session closed");
       }
       this._session = session;
+      opening.session = session;
+      opening.targetId = this._targetId;
       await this._completeActorOpen(session);
-      this._throwIfOpeningClosed();
+      this._assertInitialOpening(opening);
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);
       const initialTimeout = this._initialHydrationTimeout(session);
       if (initialTimeout != null) throw new Error(`navigation timeout after ${initialTimeout}ms`);
       await this._refreshFromSession(true);
-      await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
-      this._throwIfOpeningClosed();
+      this._assertInitialOpening(opening);
+      const deadline = timeoutMs > 0 ? started + timeoutMs : Infinity;
+      await this._finishInitialHydration(opening, session, deadline);
+      this._assertInitialOpening(opening);
       if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
         if (!this._auxiliaryActor) this._closeSession();
         throw new Error(`navigation timeout after ${timeoutMs}ms`);
@@ -2970,6 +2999,31 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._openingNetworkId = null;
       }
       this._updateNetworkPump();
+    }
+  }
+
+  async _finishInitialHydration(opening, session, deadline) {
+    this._assertInitialOpening(opening);
+    if (opening.initialGoal !== "load") {
+      await this._drainBindings(deadline);
+      this._assertInitialOpening(opening);
+      return;
+    }
+    if (typeof native.liveContinueInitialHydration !== "function")
+      throw new Error("Native initial-load continuation capability is unsupported");
+    for (;;) {
+      const outcome = await native.liveContinueInitialHydration(session);
+      this._assertInitialOpening(opening);
+      if (outcome === "reached") return;
+      if (outcome === "superseded") {
+        const error = new Error("Initial navigation document was replaced or retired");
+        supersededInitialHydrationErrors.add(error);
+        throw error;
+      }
+      if (outcome !== "host-reply")
+        throw new Error("Invalid native initial-load continuation result");
+      await this._drainBindings(deadline);
+      this._assertInitialOpening(opening);
     }
   }
 
@@ -3623,6 +3677,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _navigateActorTarget(url, method, body, opts = {}) {
+    if (this._openingSession) this._openingSession.superseded = true;
     const navigationStarted = performance.now();
     const session = this._session;
     const bindingDeadline = this._navigationBindingDeadline(opts);
@@ -3856,6 +3911,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     error.name = "TimeoutError";
     throw error;
   }
+  _initialNavigationGoal(opts) {
+    return opts?.waitUntil == null || opts.waitUntil === "load" ? "load" : undefined;
+  }
   _needsObservedHydration(opts) {
     return (
       !this._live &&
@@ -3909,7 +3967,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // wait short-circuits on a real response instead of timing out with
     // the synthetic 200 fallback. Harmless when nothing is waiting.
     else if (this._needsObservedHydration(opts)) {
-      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
+      await this._openLiveSession(
+        this._remainingNavigationTimeout(opts, started),
+        this._initialNavigationGoal(opts),
+      );
     }
     return resp;
   }

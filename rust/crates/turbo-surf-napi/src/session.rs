@@ -219,6 +219,7 @@ use turbo_surf_render::{
 };
 
 enum LiveJob {
+    ContinueInitial(SyncSender<std::result::Result<String, String>>),
     Content(
         String,
         String,
@@ -266,6 +267,9 @@ impl LiveJob {
 
     fn reject(self, error: String) {
         match self {
+            Self::ContinueInitial(reply) => {
+                let _ = reply.send(Err(error));
+            }
             Self::Content(_, _, _, reply)
             | Self::Resize(_, _, reply)
             | Self::Navigate(_, _, _, reply)
@@ -375,6 +379,7 @@ struct LiveActor {
     emulation: turbo_surf_render::ContextEmulationHandle,
     opening: AtomicBool,
     initial_hydration_timeout: Mutex<Option<u32>>,
+    initial_hydration_progress: Mutex<Option<turbo_surf_render::HydrationProgress>>,
     started: AtomicBool,
     closing_calls: AtomicUsize,
     finished: Arc<(Mutex<bool>, Condvar)>,
@@ -500,6 +505,7 @@ fn prepare_live_actor(
         emulation,
         opening: AtomicBool::new(true),
         initial_hydration_timeout: Mutex::new(None),
+        initial_hydration_progress: Mutex::new(None),
         started: AtomicBool::new(false),
         closing_calls: AtomicUsize::new(0),
         finished: Arc::new((Mutex::new(false), Condvar::new())),
@@ -634,7 +640,30 @@ pub fn live_initial_hydration_status(id: u32) -> Result<String> {
         .initial_hydration_timeout
         .lock()
         .map_err(|_| Error::from_reason("initial hydration status poisoned"))?;
-    Ok(serde_json::json!({"timedOut": timeout.is_some(), "timeoutMs": *timeout}).to_string())
+    let progress = actor
+        .initial_hydration_progress
+        .lock()
+        .map_err(|_| Error::from_reason("initial hydration progress poisoned"))?;
+    let progress = progress
+        .as_ref()
+        .ok_or_else(|| Error::from_reason("initial hydration progress is unavailable"))?;
+    Ok(
+        serde_json::json!({"timedOut": timeout.is_some(), "timeoutMs": *timeout,
+        "initialProgress":progress})
+        .to_string(),
+    )
+}
+
+fn cache_initial_hydration_progress(
+    actor: &LiveActor,
+    session: &PageSession,
+) -> std::result::Result<(), String> {
+    *actor
+        .initial_hydration_progress
+        .lock()
+        .map_err(|_| "initial hydration progress poisoned".to_owned())? =
+        Some(session.hydration_diagnostics().progress.clone());
+    Ok(())
 }
 
 fn initial_hydration_root(actor: &LiveActor) -> Result<LiveTarget> {
@@ -882,6 +911,19 @@ impl TargetWorker<'_> {
     }
     fn execute_script(&mut self, job: LiveJob) {
         match job {
+            LiveJob::ContinueInitial(reply) => {
+                let result = if self.logical_root {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.continue_initial_hydration(),
+                    )
+                    .map(|outcome| outcome.as_str().to_owned())
+                } else {
+                    Err("Initial hydration requires the actor root".into())
+                };
+                let _ = reply.send(result);
+            }
             LiveJob::Eval(script, reply) => {
                 // The logical Page root can live in an auxiliary V8 context.
                 // Legacy liveEval retains the full session drain contract there.
@@ -1188,6 +1230,7 @@ pub struct LiveOpenTask {
     opening_guard: OpeningActorGuard,
     max_resource_bytes: Option<u32>,
     initial_timeout_ms: Option<u32>,
+    initial_deadline: Option<std::time::Instant>,
     window_timer_mode: WindowTimerMode,
     response: crate::document_response::DocumentResponse,
     init_script: String,
@@ -1240,6 +1283,8 @@ impl Task for LiveOpenTask {
         let auxiliary = actor.auxiliary.clone();
         let history_log = actor.history_log.clone();
         let worker_actor = actor.clone();
+        let initial_goal = self.response.initial_hydration_goal;
+        let initial_deadline = self.initial_deadline;
         let retain_initial_timeout = self.response.retain_initial_hydration_timeout;
         let auxiliary_policy = self.response.auxiliary_policy.unwrap_or_default();
         let root_bootstrap = AuxiliaryBootstrap {
@@ -1281,6 +1326,8 @@ impl Task for LiveOpenTask {
                     response.metadata,
                     None,
                     PageSessionOptions {
+                        initial_hydration_goal: initial_goal,
+                        initial_hydration_deadline: initial_deadline,
                         animation_policy: None,
                         max_resource_bytes: max_resource_bytes.map(|bytes| bytes as usize),
                         initial_hydration_budget_ms: initial_timeout_ms.map(u64::from),
@@ -1339,7 +1386,10 @@ impl Task for LiveOpenTask {
                         };
                         *status = Some(timeout);
                     }
-                    let root = match initialized_root_target(&mut s) {
+                    let root = match initialized_root_target(&mut s).and_then(|root| {
+                        cache_initial_hydration_progress(&worker_actor, &s)?;
+                        Ok(root)
+                    }) {
                         Ok(root) => root,
                         Err(error) => {
                             s.close();
@@ -1454,6 +1504,9 @@ pub fn live_open(
     real_time_timers: Option<bool>,
     image_document: Option<u32>,
 ) -> Result<AsyncTask<LiveOpenTask>> {
+    let initial_deadline = timeout_ms.filter(|timeout| *timeout > 0).map(|timeout| {
+        std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout))
+    });
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
     crate::ensure_render_init();
@@ -1470,6 +1523,7 @@ pub fn live_open(
         opening_guard,
         max_resource_bytes,
         initial_timeout_ms: timeout_ms.filter(|timeout| *timeout > 0),
+        initial_deadline,
         window_timer_mode: if real_time_timers.unwrap_or(false) {
             WindowTimerMode::RealTime
         } else {
@@ -1510,6 +1564,31 @@ impl Task for LiveResizeTask {
     fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
         Ok(value)
     }
+}
+
+pub struct LiveInitialHydrationTask {
+    id: u32,
+}
+#[napi]
+impl Task for LiveInitialHydrationTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(self.id, LiveJob::ContinueInitial(reply)).map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("initial hydration worker dropped reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+/// Continue only this actor's original opening document toward its requested load goal.
+#[napi]
+pub fn live_continue_initial_hydration(id: u32) -> Result<AsyncTask<LiveInitialHydrationTask>> {
+    let _ = live_initial_hydration_status(id)?;
+    Ok(AsyncTask::new(LiveInitialHydrationTask { id }))
 }
 
 /// Update a live session's private host viewport and deliver rendering steps.

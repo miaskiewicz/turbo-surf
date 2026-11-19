@@ -4,7 +4,7 @@
 
 - Preserve executable permissions for native npm CLI binaries on macOS and Linux before creating the platform tarballs.
 - Reject non-executable Unix binaries in archive validation, and run extracted/installed smoke tests without repairing permissions.
-- Packaging-only hotfix; the engine implementation and turbo-dom 0.8.4 dependency are unchanged.
+- Finish observed default/load navigation at the actual document load milestone while retaining background requests and their later DOM updates. Initial host callbacks retain the original caller deadline and document ownership; Rust/MCP hydration and later interaction quiescence remain unchanged.
 
 ## [0.8.4] - 2026-11-19
 

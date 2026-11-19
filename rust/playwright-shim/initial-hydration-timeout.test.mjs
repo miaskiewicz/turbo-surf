@@ -68,7 +68,9 @@ test("navigation binding deadlines require the exact owned hub error", async () 
 
 async function fixture(run) {
   const timers = new Set();
+  const requests = [];
   const server = createServer((request, response) => {
+    requests.push(request.url);
     if (request.url === "/slow.js") {
       const timer = setTimeout(() => {
         timers.delete(timer);
@@ -95,7 +97,7 @@ async function fixture(run) {
       true,
     );
   try {
-    await run({ base, open });
+    await run({ base, open, requests });
   } finally {
     for (const timer of timers) clearTimeout(timer);
     server.closeAllConnections();
@@ -109,12 +111,15 @@ test("initial timeout keeps legacy native open rejection by default", () =>
   }));
 
 test("retained initial timeout keeps the actual native target usable", () =>
-  fixture(async ({ base, open }) => {
+  fixture(async ({ base, open, requests }) => {
     const actor = await open({ retainInitialHydrationTimeout: true });
     try {
-      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), {
+      assert.ok(requests.includes("/slow.js"), "the actual parser script request must start");
+      const initialStatus = JSON.parse(native.liveInitialHydrationStatus(actor));
+      assert.deepEqual(initialStatus, {
         timedOut: true,
         timeoutMs: 30,
+        initialProgress: { phase: "parser-and-deferred-scripts", completed_pumps: 0 },
       });
       const initial = JSON.parse(native.liveAuxiliaryState(actor));
       assert.equal(typeof initial.root, "string");
@@ -132,6 +137,7 @@ test("retained initial timeout keeps the actual native target usable", () =>
         JSON.parse(native.liveReadEngine(actor, "return document.body.textContent")),
         "ready",
       );
+      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), initialStatus);
     } finally {
       native.liveActorClose(actor);
     }
@@ -156,10 +162,18 @@ test("initial timeout status cannot be borrowed through children or a retired ro
   fixture(async ({ open }) => {
     const actor = await open({ retainInitialHydrationTimeout: true }, "<body>root</body>", 1000);
     try {
-      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), {
+      const initialStatus = JSON.parse(native.liveInitialHydrationStatus(actor));
+      assert.deepEqual(initialStatus, {
         timedOut: false,
         timeoutMs: null,
+        initialProgress: {
+          phase: "complete",
+          completed_pumps: initialStatus.initialProgress?.completed_pumps,
+        },
       });
+      assert.ok(Number.isSafeInteger(initialStatus.initialProgress.completed_pumps));
+      assert.ok(initialStatus.initialProgress.completed_pumps >= 0);
+      assert.ok(initialStatus.initialProgress.completed_pumps <= 500);
       await native.liveEvalEngineExpression(
         actor,
         "(() => { window.open('about:blank', 'status-child'); return true; })()",

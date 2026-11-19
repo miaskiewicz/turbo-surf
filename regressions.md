@@ -6,6 +6,12 @@ Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component pr
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. Required supporting dependency publication was explicitly authorized and completed; no Surf release tag is authorized.
 
+## Background timer wake versus task completion — independent API defect
+
+`BackgroundTurn` previously converted an already-ready timer sleep into successful task completion even though no callback had run. The shared parking helper instead documents that it wakes the caller for another poll to select the due task. A deterministic unit contract uses the same genuinely completed Tokio `Sleep` and its deadline, then a counting waker: the wake prerequisite passes, and baseline fails only because it returns `Some(Ready(Ok(())))` instead of remaining pending. No paused clock, synthetic owner or guest bridge is used.
+
+The narrow fix leaves the caller pending after that ready wake; the helper already requests the next poll. Baseline **0 / 1** becomes **1 / 0**, and the original unchanged real-PageSession recovery control passes with its original **500 ms** operation budget and **3 s** outer bound. Adjacent form-admission and realtime timer controls pass **17 / 0**. Focused Render library/recovery-target and NAPI library Clippy checks with denied warnings, formatting and CC15 all pass; the combined all-target sweep remains a final-gate obligation. Private-target receipts are under `.worktrees/background-timer-wake-recovery/.recovery/background-wake/{baseline,on,competing-on}`. This independent production defect does not prove which task completed in the historical `d813` full-run recovery failure; the separate fixture contract is tracked when its correction is integrated.
+
 ## Current integrated repair snapshot — 2026-11-19
 
 Canonical local source `203bf5da8b1251584f3f070fe1108c392a3903e9` contains the following reviewed repairs. They are **FIX READY / WAIT NEW COMBINED LINUX AND LOCAL FULL GATES**, not a publish-ready or new combined-suite result. Diagnostic cleanup and final source freeze are still separate pending steps.

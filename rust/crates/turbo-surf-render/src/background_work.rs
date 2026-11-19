@@ -57,6 +57,15 @@ fn task_result(
 }
 
 impl BackgroundTurn {
+    fn park_timer(
+        &mut self,
+        cx: &mut Context<'_>,
+        deadline: Option<tokio::time::Instant>,
+    ) -> Option<Poll<Result<(), String>>> {
+        // A ready sleep has only scheduled another poll; no callback has run yet.
+        park_on_window_timer_deadline(cx, &mut self.timer, deadline).map(|_| Poll::Pending)
+    }
+
     fn poll(&mut self, rt: &mut JsRuntime, cx: &mut Context<'_>) -> Poll<Result<(), String>> {
         rt.v8_isolate().perform_microtask_checkpoint();
         if ready_tasks(rt)? {
@@ -84,8 +93,8 @@ impl BackgroundTurn {
                     return task_result(Some(outcome)).unwrap_or(Poll::Ready(Ok(())));
                 }
                 WindowTimerStep::Idle(deadline) => {
-                    if park_on_window_timer_deadline(cx, &mut self.timer, deadline).is_some() {
-                        return Poll::Ready(Ok(()));
+                    if let Some(result) = self.park_timer(cx, deadline) {
+                        return result;
                     }
                 }
             }
@@ -152,3 +161,54 @@ impl PageSession {
 #[cfg(test)]
 #[path = "background_work/message_contracts.rs"]
 mod message_contracts;
+
+#[cfg(test)]
+mod timer_wake_contracts {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::task::{Wake, Waker};
+
+    #[derive(Default)]
+    struct WakeCount(AtomicUsize);
+
+    impl Wake for WakeCount {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[tokio::test]
+    async fn expired_timer_deadline_requests_a_repoll_without_completing_background_work() {
+        let count = Arc::new(WakeCount::default());
+        let waker = Waker::from(count.clone());
+        let mut cx = Context::from_waker(&waker);
+        let deadline = tokio::time::Instant::now();
+        let mut sleep = Box::pin(tokio::time::sleep_until(deadline));
+        sleep.as_mut().await;
+        let mut turn = BackgroundTurn {
+            timer: Some((deadline, sleep)),
+            ..Default::default()
+        };
+        let outcome = turn.park_timer(&mut cx, Some(deadline));
+        assert!(
+            count.0.load(Ordering::Relaxed) > 0,
+            "the real ready sleep must request another poll"
+        );
+        assert!(
+            matches!(outcome, Some(Poll::Pending)),
+            "a deadline wake is not an executed background task: {outcome:?}"
+        );
+        assert!(turn.park_timer(&mut cx, None).is_none());
+        assert!(
+            turn.timer.is_none(),
+            "removing the deadline releases its sleep"
+        );
+    }
+}

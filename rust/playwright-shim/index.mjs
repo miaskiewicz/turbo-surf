@@ -3050,6 +3050,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
     else this._frameEntries = undefined;
     this._syncFrames();
     await this._drainNetworkEvents(true);
+    // Metadata reads can reenter authored DOM methods after the initial frame-discovery snapshot.
+    if (!this._closed && this._session != null) this._html = native.liveSerialize(this._session);
     await this._followDocumentNavigation(historyNavigation, rscNavigation, previousUrl);
   }
 

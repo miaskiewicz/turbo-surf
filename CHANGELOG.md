@@ -2,6 +2,8 @@
 
 ## [0.8.5] - 2026-11-19
 
+- Reuse per-node retention marks during native Promise graph maintenance, avoiding repeated membership hashing while preserving pending work, native operations and ancestor dependencies.
+
 - Reduce repeated scans during large native Promise reaction bursts, retaining pending owners and ancestor dependencies while bounding transient bookkeeping beside a live graph.
 
 - Keep budgeted runtime drain futures on the heap before polling so cold MCP rendering fits an ordinary 2 MiB host thread, retaining caller deadlines and hard execution limits.

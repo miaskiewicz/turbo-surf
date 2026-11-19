@@ -48,12 +48,25 @@ struct Node {
     owner: Option<OwnerId>,
     parent: Option<u32>,
     reacted: bool,
+    retained_for_prune: bool,
     terminal: Cell<Option<TerminalPromiseState>>,
     #[cfg(test)]
     native_state_observations: Cell<usize>,
 }
 
 impl Node {
+    fn state(&self, scope: &mut v8::PinScope) -> Option<v8::PromiseState> {
+        if let Some(terminal) = self.terminal.get() {
+            return Some(terminal.native());
+        }
+        if let Some(promise) = self.promise.to_local(scope) {
+            return Some(self.observe_native_state(promise));
+        }
+        // Queued reactions may outlive their collected parent. Only an actual
+        // native terminal observation survives; pending/unseen parents stay unknown.
+        self.terminal.get().map(TerminalPromiseState::native)
+    }
+
     fn observe_native_state(&self, promise: v8::Local<v8::Promise>) -> v8::PromiseState {
         if let Some(terminal) = self.terminal.get() {
             return terminal.native();
@@ -101,6 +114,7 @@ struct PruneMeasurements {
     peak_candidates: usize,
     live_after_prune: usize,
     peak_nodes: usize,
+    bulk_membership_lookups: usize,
 }
 
 pub struct PromiseWork {
@@ -167,6 +181,7 @@ impl PromiseWork {
             owner: None,
             parent: None,
             reacted: false,
+            retained_for_prune: false,
             terminal: Cell::new(None),
             #[cfg(test)]
             native_state_observations: Cell::new(0),
@@ -263,16 +278,7 @@ impl PromiseWork {
     }
 
     fn state(&self, scope: &mut v8::PinScope, node: u32) -> Option<v8::PromiseState> {
-        let node = self.nodes.get(&node)?;
-        if let Some(terminal) = node.terminal.get() {
-            return Some(terminal.native());
-        }
-        if let Some(promise) = node.promise.to_local(scope) {
-            return Some(node.observe_native_state(promise));
-        }
-        // Queued reactions may outlive their collected parent. Only an actual
-        // native terminal observation survives; pending/unseen parents stay unknown.
-        node.terminal.get().map(TerminalPromiseState::native)
+        self.nodes.get(&node)?.state(scope)
     }
 
     fn pending(&self, scope: &mut v8::PinScope, node: u32) -> bool {
@@ -397,22 +403,36 @@ impl PromiseWork {
             && parent.terminal.get().is_none()
     }
 
+    fn mark_for_prune(nodes: &mut HashMap<u32, Node>, id: u32, frontier: &mut Vec<u32>) {
+        let Some(node) = nodes.get_mut(&id) else {
+            return;
+        };
+        if !node.retained_for_prune {
+            node.retained_for_prune = true;
+            frontier.push(id);
+        }
+    }
+
     pub fn prune(&mut self, scope: &mut v8::PinScope) {
         self.maintenance = 0;
+        let mut frontier = Vec::new();
         #[cfg(test)]
-        let candidates = Cell::new(0);
-        let mut keep: HashSet<u32> = self
-            .nodes
-            .keys()
-            .copied()
-            .filter(|id| {
-                #[cfg(test)]
-                candidates.set(candidates.get() + 1);
-                self.pending(scope, *id)
-            })
-            .collect();
-        keep.extend(self.ops.values().map(|op| op.node));
-        let mut frontier: Vec<_> = keep.iter().copied().collect();
+        let mut candidates = 0;
+        for (id, node) in &mut self.nodes {
+            #[cfg(test)]
+            {
+                candidates += 1;
+            }
+            // This mark belongs only to this complete maintenance pass. No JS
+            // runs between clearing it and retaining the dependency closure.
+            node.retained_for_prune = node.state(scope) == Some(v8::PromiseState::Pending);
+            if node.retained_for_prune {
+                frontier.push(*id);
+            }
+        }
+        for op in self.ops.values() {
+            Self::mark_for_prune(&mut self.nodes, op.node, &mut frontier);
+        }
         #[cfg(test)]
         let mut ancestors = 0;
         while let Some(id) = frontier.pop() {
@@ -421,17 +441,15 @@ impl PromiseWork {
                 ancestors += 1;
             }
             if let Some(parent) = self.nodes.get(&id).and_then(|node| node.parent) {
-                if keep.insert(parent) {
-                    frontier.push(parent);
-                }
+                Self::mark_for_prune(&mut self.nodes, parent, &mut frontier);
             }
         }
         #[cfg(test)]
         let retained_candidates = Cell::new(0);
-        self.nodes.retain(|id, _| {
+        self.nodes.retain(|_, node| {
             #[cfg(test)]
             retained_candidates.set(retained_candidates.get() + 1);
-            keep.contains(id)
+            node.retained_for_prune
         });
         // Charge graph-wide maintenance in proportion to the live graph, while
         // keeping a small graph responsive to collected/settled nodes.
@@ -439,12 +457,10 @@ impl PromiseWork {
         #[cfg(test)]
         {
             self.prune_measurements.calls += 1;
-            self.prune_measurements.peak_candidates = self
-                .prune_measurements
-                .peak_candidates
-                .max(candidates.get());
+            self.prune_measurements.peak_candidates =
+                self.prune_measurements.peak_candidates.max(candidates);
             self.prune_measurements.live_after_prune = self.nodes.len();
-            self.prune_measurements.candidates += candidates.get();
+            self.prune_measurements.candidates += candidates;
             self.prune_measurements.ancestors += ancestors;
             self.prune_measurements.retained_candidates += retained_candidates.get();
         }

@@ -73,6 +73,10 @@ async fn scaling(fanout: bool) {
     assert!(large.candidates <= small.candidates * 10,
         "fourfold graph size must not reproduce quadratic repeated scans: small={small:?} large={large:?}");
     let largest = workload(32768, fanout).await;
+    assert_eq!(
+        largest.bulk_membership_lookups, 0,
+        "whole-graph scans must use already-visited native nodes instead of per-node membership hashing"
+    );
     let per_node_scan_budget = if fanout { 40 } else { 24 };
     assert!(
         largest.candidates <= 32768 * per_node_scan_budget,

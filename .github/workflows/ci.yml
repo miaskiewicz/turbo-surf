@@ -1,16 +1,14 @@
 name: CI
 
 on:
-  push:
-    branches: [main, 'release/**']
+  # Opening or updating a PR runs CI; standalone branch pushes do not.
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push to the same PR cancels its superseded run; push, tag and release
-# (workflow_call) runs are never cancelled.
+# A newer push to the same PR cancels its superseded run.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

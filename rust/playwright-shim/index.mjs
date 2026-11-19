@@ -1404,7 +1404,7 @@ class Locator {
       if (completed.error || typeof completed.navigationRevision !== "string")
         throw new Error(completed.error ?? "Native navigation baseline is unavailable");
       if (completed.navigationRevision !== state.navigationRevision)
-        await owner._refreshFromSession();
+        await owner._refreshFromSession(true);
       else await owner._drainNetworkEvents();
     }
     return result;
@@ -3551,8 +3551,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // keyboard (key-event dispatch) and other live-only side effects.
   async _sessionEval(script, { waitForBindings = true } = {}) {
     if (this._session == null) return undefined;
-    const r = await native.liveEvalEngine(this._session, script);
-    await this._refreshFromSession();
+    // Raw input must deliver its remaining events before a replacement finishes loading.
+    const r = await native.liveEvalEngine(this._session, script, !waitForBindings);
+    await this._refreshFromSession(!waitForBindings);
     if (waitForBindings) await this._drainBindings();
     else scheduleBindingDrain(this);
     return r;

@@ -33,14 +33,14 @@ for answer in answers:print(json.dumps(answer),flush=True)
 '''
 
 
-def archive(root, name, files):
+def archive(root, name, files, binary_mode=0o755):
     path = root / (name + '.tgz')
     with tarfile.open(path, 'w:gz') as stream:
         for relative, content in files.items():
             data = content.encode()
             member = tarfile.TarInfo('package/' + relative)
             member.size = len(data)
-            member.mode = 0o755 if relative == 'turbo-surf-mcp' else 0o644
+            member.mode = binary_mode if relative == 'turbo-surf-mcp' else 0o644
             stream.addfile(member, io.BytesIO(data))
     return {'archive': str(path), 'sha256': MODULE.sha(path)}
 
@@ -88,6 +88,59 @@ class ArchiveRoutingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'changed before execution'):
             MODULE.smoke_tarballs(thin, self.platform, output, VERSION, COMMIT, self.checkout)
         self.assertFalse((output / 'installed-launcher').exists())
+
+    def test_nonexecutable_packed_binary_is_rejected_without_repair(self):
+        thin = archive(self.root, 'thin-mode', {'package.json': json.dumps({'name': 'turbo-surf', 'version': VERSION}), 'cli.js': CLI})
+        broken = archive(self.root, 'platform-mode', {'package.json': json.dumps({'name': '@miaskiewicz/turbo-surf-linux-x64', 'version': VERSION}), 'turbo-surf-mcp': FAKE}, binary_mode=0o644)
+        output = self.root / 'mode-proof'
+        output.mkdir()
+        with self.assertRaisesRegex(ValueError, 'executable mode'):
+            MODULE.smoke_tarballs(thin, broken, output, VERSION, COMMIT, self.checkout)
+        installed = output / 'installed-launcher/package/node_modules/@miaskiewicz/turbo-surf-linux-x64/turbo-surf-mcp'
+        self.assertEqual(installed.stat().st_mode & 0o777, 0o644)
+
+    def test_actual_npm_pack_rejects_nonexecutable_unix_payload(self):
+        for platform in ('darwin-arm64', 'linux-x64', 'linux-arm64'):
+            with self.subTest(platform=platform):
+                source = self.root / ('bad-mode-' + platform)
+                source.mkdir()
+                name = '@miaskiewicz/turbo-surf-' + platform
+                (source / 'package.json').write_text(json.dumps({'name': name, 'version': VERSION, 'files': ['turbo-surf-mcp']}))
+                binary = source / 'turbo-surf-mcp'
+                binary.write_text(FAKE)
+                binary.chmod(0o644)
+                with self.assertRaisesRegex(ValueError, 'executable mode'):
+                    MODULE.pack(source, self.root / ('bad-packed-' + platform), name, VERSION, {'package.json', 'turbo-surf-mcp'})
+
+    def test_downloaded_modes_are_fixed_only_before_packing_unix_platforms(self):
+        artifacts = self.root / 'artifacts'
+        root = self.root / 'platform-root'
+        root.mkdir()
+        (root / 'LICENSE').write_text('fixture license')
+        (root / 'THIRD_PARTY_NOTICES.md').write_text('fixture notices')
+        output = self.root / 'staged'
+        for platform, (os_name, arch, binary_name, addon_name) in MODULE.PLATFORMS.items():
+            with self.subTest(platform=platform):
+                metadata = root / 'npm' / platform
+                metadata.mkdir(parents=True)
+                (metadata / 'package.json').write_text(json.dumps({'name': '@miaskiewicz/turbo-surf-' + platform, 'version': VERSION, 'os': [os_name], 'cpu': [arch], 'files': [binary_name, addon_name, 'LICENSE', 'THIRD_PARTY_NOTICES.md']}))
+                artifact = artifacts / ('bin-' + platform)
+                artifact.mkdir(parents=True)
+                binary = artifact / ('turbo-surf-mcp-' + platform + ('.exe' if os_name == 'win32' else ''))
+                addon = artifact / addon_name
+                binary.write_bytes(b'actual-downloaded-binary-fixture')
+                addon.write_bytes(b'actual-downloaded-addon-fixture')
+                binary.chmod(0o644)
+                mcp = {'sourceCommit': COMMIT, 'expectedVersion': VERSION, 'initializeVerified': True, 'javascriptVerified': True, 'artifactUnchanged': True, 'commandFileSha256': {'producer': MODULE.sha(binary)}}
+                napi = {'passed': True, 'sourceCommit': COMMIT, 'expectedVersion': VERSION, 'addonSha256': MODULE.sha(addon), 'platform': os_name, 'arch': arch, 'result': {'answer': 42, 'text': 'Native 42', 'crypto': True, 'stream': True, 'private': True}}
+                (artifact / 'mcp-smoke.json').write_text(json.dumps(mcp))
+                (artifact / 'napi-smoke.json').write_text(json.dumps(napi))
+                result = MODULE.prepare_platform(root, artifacts, output, platform, VERSION, COMMIT)
+                with tarfile.open(result['archive']) as packed:
+                    self.assertEqual(packed.getmember('package/' + binary_name).mode & 0o777, 0o644 if os_name == 'win32' else 0o755)
+                    self.assertEqual(packed.extractfile('package/' + binary_name).read(), binary.read_bytes())
+                    self.assertEqual(packed.extractfile('package/' + addon_name).read(), addon.read_bytes())
+                self.assertEqual(binary.stat().st_mode & 0o777, 0o644)
 
     def test_actual_npm_pack_binds_bytes_and_skips_package_scripts(self):
         source = self.root / 'pack-source'

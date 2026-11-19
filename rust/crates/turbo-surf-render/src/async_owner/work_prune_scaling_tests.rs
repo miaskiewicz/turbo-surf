@@ -72,7 +72,12 @@ async fn scaling(fanout: bool) {
     let large = workload(8192, fanout).await;
     assert!(large.candidates <= small.candidates * 10,
         "fourfold graph size must not reproduce quadratic repeated scans: small={small:?} large={large:?}");
-    workload(32768, fanout).await;
+    let largest = workload(32768, fanout).await;
+    let per_node_scan_budget = if fanout { 40 } else { 24 };
+    assert!(
+        largest.candidates <= 32768 * per_node_scan_budget,
+        "large reaction bursts must amortize actual whole-graph scans: {largest:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -104,6 +109,17 @@ async fn pending_graph_is_retained_then_small_graph_maintenance_recovers() {
     assert!(
         prune_live_metadata(&mut page) >= 8192,
         "genuine pending owned promises survive maintenance"
+    );
+    let retained = prune_live_metadata(&mut page);
+    measurements(&mut page, true);
+    assert_eq!(page.eval_json_expression("(async()=>{let sum=0;for(let batch=0;batch<8;batch++){const values=await Promise.all(Array.from({length:1024},(_,i)=>Promise.resolve(i).then(x=>x+1)));sum+=values.reduce((a,b)=>a+b,0)}return sum})()").await.unwrap(), (8 * 1024 * 1025 / 2).to_string());
+    let transient = measurements(&mut page, false);
+    eprintln!("PRUNE_RETAINED live={retained} counts={transient:?}");
+    assert!(transient.peak_nodes <= 2 * retained,
+        "settled bursts must not indefinitely accumulate weak metadata beside the live pending graph: retained={retained} counts={transient:?}");
+    assert!(
+        prune_live_metadata(&mut page) >= 8192,
+        "transient maintenance cannot retire the held genuine pending promises"
     );
     assert_eq!(page.eval_json_expression("(async()=>{const joined=Promise.all(pendingPromises);for(const resolve of completions)resolve(7);delete globalThis.pendingPromises;delete globalThis.completions;return (await joined).reduce((a,b)=>a+b,0)})()").await.unwrap(), (8192 * 7).to_string());
     assert!(

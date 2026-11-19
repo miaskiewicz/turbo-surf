@@ -2,6 +2,8 @@
 
 ## [0.8.5] - 2026-11-19
 
+- Reduce repeated scans during large native Promise reaction bursts, retaining pending owners and ancestor dependencies while bounding transient bookkeeping beside a live graph.
+
 - Keep budgeted runtime drain futures on the heap before polling so cold MCP rendering fits an ordinary 2 MiB host thread, retaining caller deadlines and hard execution limits.
 - Keep click/key actions at document commit and synchronous DOM/evaluation metadata reads independent of unrelated pending page work; normalize opening-close races by the original opening identity.
 - Stop initial hydration and host-reply continuation at safe aggregate budget boundaries, while retaining hard execution limits and the original explicit caller deadline. Report pre-expired openings with truthful zero-pump progress instead of panicking.

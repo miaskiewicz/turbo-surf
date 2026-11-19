@@ -100,6 +100,7 @@ struct PruneMeasurements {
     retained_candidates: usize,
     peak_candidates: usize,
     live_after_prune: usize,
+    peak_nodes: usize,
 }
 
 pub struct PromiseWork {
@@ -171,6 +172,11 @@ impl PromiseWork {
             native_state_observations: Cell::new(0),
         });
         node.observe_native_state(promise);
+        #[cfg(test)]
+        {
+            self.prune_measurements.peak_nodes =
+                self.prune_measurements.peak_nodes.max(self.nodes.len());
+        }
         Some(id)
     }
 
@@ -429,7 +435,7 @@ impl PromiseWork {
         });
         // Charge graph-wide maintenance in proportion to the live graph, while
         // keeping a small graph responsive to collected/settled nodes.
-        self.next_maintenance = (self.nodes.len() / 4).max(1024);
+        self.next_maintenance = self.nodes.len().max(1024);
         #[cfg(test)]
         {
             self.prune_measurements.calls += 1;

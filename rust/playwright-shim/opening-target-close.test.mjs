@@ -451,3 +451,61 @@ test(
     }
   },
 );
+
+test(
+  "closing a root after actual opening refresh cancels its pending navigation",
+  { timeout: 10000 },
+  async () => {
+    const server = createServer((_request, response) =>
+      response.end('<script>window.open("about:blank")</script>'),
+    );
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const context = new BrowserContext();
+    const page = await context.newPage();
+    let reached, resume;
+    const refreshed = new Promise((resolve) => (reached = resolve));
+    const paused = new Promise((resolve) => (resume = resolve));
+    const actualRefresh = page._refreshFromSession.bind(page);
+    let first = true;
+    page._refreshFromSession = async (...args) => {
+      const value = await actualRefresh(...args);
+      if (first) {
+        first = false;
+        assert.equal(args[0], true, "the actual initial opening refresh must reach the boundary");
+        reached();
+        await paused;
+      }
+      return value;
+    };
+    let navigation;
+    let outcome = "pending";
+    try {
+      const popupEvent = page.waitForEvent("popup");
+      navigation = page.goto(`http://127.0.0.1:${server.address().port}`, {
+        waitUntil: "networkidle",
+      });
+      navigation.then(
+        () => {
+          outcome = "fulfilled";
+        },
+        () => {
+          outcome = "rejected";
+        },
+      );
+      const [popup] = await Promise.all([popupEvent, refreshed]);
+      assert.equal(outcome, "pending");
+      await page.close();
+      assert.equal(page.isClosed(), true);
+      assert.equal(popup.isClosed(), false);
+      resume();
+      await assert.rejects(navigation, /closed|cancel/i);
+      assert.equal(await popup.evaluate(() => 42), 42);
+    } finally {
+      resume();
+      await navigation?.catch(() => {});
+      await context.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);

@@ -2919,6 +2919,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
+  _throwIfOpeningClosed() {
+    if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
+  }
+
   async _startLiveSession(timeoutMs, opening) {
     const started = Date.now();
     try {
@@ -2945,13 +2949,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
       }
       this._session = session;
       await this._completeActorOpen(session);
-      if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
+      this._throwIfOpeningClosed();
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);
       const initialTimeout = this._initialHydrationTimeout(session);
       if (initialTimeout != null) throw new Error(`navigation timeout after ${initialTimeout}ms`);
       await this._refreshFromSession(true);
       await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
+      this._throwIfOpeningClosed();
       if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
         if (!this._auxiliaryActor) this._closeSession();
         throw new Error(`navigation timeout after ${timeoutMs}ms`);

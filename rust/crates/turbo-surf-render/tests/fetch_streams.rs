@@ -271,12 +271,33 @@ async fn timeout_abort_listener_survives_collection_until_delivery() {
     );
 }
 
+struct RetiredTimeoutFailureDiagnostics {
+    frames_before_gc: serde_json::Value,
+    contexts_before_gc: serde_json::Value,
+}
+
+impl Drop for RetiredTimeoutFailureDiagnostics {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!(
+                "retired-timeout pre-gc native frames={} contexts={}",
+                self.frames_before_gc, self.contexts_before_gc
+            );
+        }
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn pending_timeout_does_not_root_retired_document() {
     let mut page = PageSession::open("<body>", "https://timeout-lifetime.test/", "", "", 5000)
         .await
         .unwrap();
     page.eval_expression("(()=>{const frame=document.createElement('iframe');document.body.append(frame);const child=frame.contentWindow;const signal=child.AbortSignal.timeout(60000);signal.addEventListener('abort',()=>{});globalThis.timeoutRealmRefs=[new WeakRef(child),new WeakRef(signal)];frame.remove();return 'prepared';})()").await.unwrap();
+    // Capture native registry counts without another guest turn or WeakRef read.
+    let _failure_diagnostics = RetiredTimeoutFailureDiagnostics {
+        frames_before_gc: page.frame_lifecycle_diagnostics_for_testing(),
+        contexts_before_gc: page.context_registry_diagnostics_for_testing(),
+    };
     for _ in 0..3 {
         page.collect_message_port_garbage_for_testing();
     }

@@ -160,15 +160,41 @@ async fn collecting_a_host_reply_does_not_reenter_document_hydration() {
     let mut page =
         page(r#"<body><script type="module">globalThis.result=await hostWait()</script>"#).await;
     let phase = page.hydration_diagnostics().progress.phase;
-    page.collect_engine(
-        "globalThis.collectTicks=0;setTimeout(()=>collectTicks++,0);globalThis.__RESULT='';",
-    )
-    .await
-    .unwrap();
+    // Earlier ready work may consume a collector's single timer turn.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(5000);
+    let collection = async {
+        page.collect_engine(
+            "globalThis.earlierCollectTicks=0;setTimeout(()=>earlierCollectTicks++,0);globalThis.collectTicks=0;setTimeout(()=>collectTicks++,0);globalThis.__RESULT='';",
+        )
+        .await
+        .unwrap();
+        assert_eq!(page.hydration_diagnostics().progress.phase, phase);
+        loop {
+            let ticks = page.read_engine("return globalThis.collectTicks").unwrap();
+            if ticks == "1" {
+                break;
+            }
+            assert_eq!(ticks, "0", "the guest timer must run exactly once");
+            page.collect_engine("globalThis.__RESULT='';")
+                .await
+                .unwrap();
+            assert_eq!(page.hydration_diagnostics().progress.phase, phase);
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::time::timeout_at(deadline, collection)
+        .await
+        .expect("collectors must service the queued timer within the original session budget");
+    assert!(tokio::time::Instant::now() <= deadline);
     assert_eq!(
         page.eval_expression("collectTicks").await.unwrap(),
         "1",
         "a collector must keep servicing due guest timers while host work is paused"
+    );
+    assert_eq!(
+        page.read_engine("return globalThis.earlierCollectTicks")
+            .unwrap(),
+        "1"
     );
     page.collect_engine("__tsNs.finishHost('ready');globalThis.__RESULT='collected';")
         .await

@@ -5,6 +5,7 @@
 - Refresh dirty page snapshots after iframe metadata reads and network callbacks, so authored DOM reentrancy cannot leave `page.content()` behind the live document.
 
 - Reject navigation as closed when page disposal completes during live-session attachment, preserving successful initialization and unrelated native errors.
+- Make the paused-host collector regression wait for its actual queued timer within the original budget, checking that each collector turn leaves document hydration paused even when older rendering work runs first.
 
 - Avoid repeated full timer-queue scans for ordered task bursts, preserving CSP violation capacity, release-before-reentry, timer ordering and execution budgets.
 

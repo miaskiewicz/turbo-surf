@@ -1374,6 +1374,7 @@ impl PageSession {
             "replaceDocumentContent",
             &[HostArg::Value(content)],
         )?;
+        auxiliary_navigation::cancel(&mut self.rt.op_state().borrow_mut(), target.0);
         self.eval_target_expression(target.0, "__tsNs.hydrate(300,200000,true)", true, false)
             .await?;
         target_call(&mut self.rt, target, "dispatchDocumentInteractive", &[])?;

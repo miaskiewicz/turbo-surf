@@ -118,6 +118,10 @@ impl PollExecutionBudget {
     pub(super) fn expired(&self) -> bool {
         self.expired.load(Ordering::Relaxed) || Instant::now() >= self.deadline
     }
+    // Error provenance differs from a healthy last poll merely finishing late.
+    pub(super) fn stopped_at_boundary(&self) -> bool {
+        self.expired.load(Ordering::Relaxed)
+    }
     pub(super) async fn run<T>(
         &self,
         future: impl std::future::Future<Output = Result<T, String>>,

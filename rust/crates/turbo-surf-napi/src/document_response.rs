@@ -5,6 +5,8 @@ use turbo_surf_render::{AuxiliaryResourcePolicy, DocumentResponseMetadata};
 #[derive(Clone, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct DocumentResponse {
+    #[serde(rename = "initialHydrationGoal")]
+    pub initial_hydration_goal: turbo_surf_render::InitialHydrationGoal,
     #[serde(flatten)]
     pub metadata: DocumentResponseMetadata,
     pub headers: Vec<(String, String)>,

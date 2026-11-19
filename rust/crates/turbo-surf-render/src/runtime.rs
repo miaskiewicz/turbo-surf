@@ -39,6 +39,9 @@ mod registered_module_scripts;
 
 #[path = "async_owner.rs"]
 mod async_owner;
+#[path = "initial_hydration.rs"]
+mod initial_hydration;
+pub use initial_hydration::{InitialHydrationGoal, InitialHydrationOutcome};
 #[path = "selected_document_tasks.rs"]
 mod selected_document_tasks;
 
@@ -4729,6 +4732,8 @@ pub enum WindowTimerMode {
 /// Host-owned policy installed before any document or frame script executes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PageSessionOptions {
+    pub initial_hydration_goal: InitialHydrationGoal,
+    pub initial_hydration_deadline: Option<std::time::Instant>,
     /// Explicit per-runtime override; otherwise inherit the browsing profile's
     /// animation presentation policy. Installed before every Window's scripts.
     pub animation_policy: Option<crate::AnimationPolicy>,
@@ -18421,7 +18426,12 @@ pub async fn render_hydrate_with_budget(
     rt.park();
     let key = rt.activation_key();
     let result = key
-        .during(hydrate_installed_document(&mut rt, base, ""))
+        .during(hydrate_installed_document(
+            &mut rt,
+            base,
+            "",
+            InitialHydrationGoal::Quiescent,
+        ))
         .await;
     let _activation = key.enter();
     drop(watchdog);
@@ -18599,6 +18609,7 @@ async fn hydrate_installed_document(
     rt: &mut JsRuntime,
     base: &str,
     init_script: &str,
+    goal: InitialHydrationGoal,
 ) -> Result<String, String> {
     rt.op_state().borrow_mut().put(HydrationProgress::default());
     hydration_phase(rt, HydrationPhase::DocumentLoading);
@@ -18619,13 +18630,23 @@ async fn hydrate_installed_document(
     }
     hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
     namespace_call(rt, "startInitialHydrate", &[])?;
-    resume_host_hydration(rt, base).await?;
+    resume_host_hydration_until(rt, base, goal).await?;
     Ok(crate::browser_env::document_html())
 }
 
 async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
+    resume_host_hydration_until(rt, base, InitialHydrationGoal::Quiescent).await
+}
+async fn resume_host_hydration_until(
+    rt: &mut JsRuntime,
+    base: &str,
+    goal: InitialHydrationGoal,
+) -> Result<(), String> {
     loop {
         let phase = rt.op_state().borrow().borrow::<HydrationProgress>().phase;
+        if initial_hydration::load_reached(goal, phase) {
+            return Ok(());
+        }
         let next = match phase {
             HydrationPhase::ParserAndDeferredScripts => {
                 drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
@@ -18658,6 +18679,10 @@ async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), Str
             }
             _ => return Ok(()),
         };
+        if initial_hydration::load_reached(goal, next) {
+            hydration_phase(rt, next);
+            return Ok(());
+        }
         if crate::shim_bindings::pending(rt) {
             return Ok(());
         }
@@ -19594,8 +19619,17 @@ impl PageSession {
         let initial_budget_ms = options
             .initial_hydration_budget_ms
             .map_or(budget_ms, |limit| limit.min(budget_ms));
+        let initial_goal = options.initial_hydration_goal;
+        initial_hydration::begin(
+            &mut rt,
+            initial_goal,
+            options.initial_hydration_deadline,
+            options.initial_hydration_budget_ms,
+        )?;
         let options = PageSessionOptions {
             initial_hydration_budget_ms: None,
+            initial_hydration_goal: InitialHydrationGoal::Quiescent,
+            initial_hydration_deadline: None,
             ..options
         };
         let watchdog = Watchdog::start(rt.v8_isolate(), initial_budget_ms);
@@ -19606,7 +19640,12 @@ impl PageSession {
             enforce_initial_deadline,
             initial_budget_ms,
             &exceeded,
-            key.during(hydrate_installed_document(&mut rt, base, init_script)),
+            key.during(hydrate_installed_document(
+                &mut rt,
+                base,
+                init_script,
+                initial_goal,
+            )),
         )
         .await;
         drop(watchdog);

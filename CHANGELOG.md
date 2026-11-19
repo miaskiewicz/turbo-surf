@@ -3,6 +3,7 @@
 ## [0.8.4] - Unreleased
 
 - Refresh actor readiness after native opening completes, reject navigation closed during final metadata refresh, and honor network-idle waits on the initial actor navigation.
+- Check realtime timer-wait interruption against the requested completion marker rather than treating unrelated background-task completion as that timer.
 
 - Validate background watchdog recovery against its actual completion marker across competing tasks, retaining the original execution budget and total recovery deadline.
 

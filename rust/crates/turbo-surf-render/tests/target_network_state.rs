@@ -260,26 +260,43 @@ async fn realtime_page(base: &str) -> PageSession {
 
 #[tokio::test]
 async fn background_turn_waits_for_real_timer_and_can_be_interrupted() {
+    async fn wait_for_done(page: &mut PageSession, root: u64) -> Result<(), String> {
+        loop {
+            page.poll_background_work().await?;
+            if background_string(page, root, "return String(globalThis.done)") == "true" {
+                return Ok(());
+            }
+        }
+    }
+
     let mut page = realtime_page("http://127.0.0.1:1/").await;
     let root = page.auxiliary_root_id().unwrap();
     page.read_target_engine(
         root,
-        "globalThis.done=false;setTimeout(()=>{globalThis.done=true},100);return '';",
+        "globalThis.done=false;globalThis.benign=0;setTimeout(()=>{benign++},0);setTimeout(()=>{globalThis.done=true},100);return '';",
     )
     .unwrap();
-    assert!(tokio::time::timeout(
+    let early = tokio::time::timeout(
         std::time::Duration::from_millis(20),
-        page.poll_background_work()
+        wait_for_done(&mut page, root),
     )
-    .await
-    .is_err());
+    .await;
+    assert_eq!(
+        background_string(&mut page, root, "return String(globalThis.benign)"),
+        "1"
+    );
+    assert_eq!(
+        background_string(&mut page, root, "return String(globalThis.done)"),
+        "false"
+    );
+    assert!(early.is_err(), "target wait must remain pending: {early:?}");
     assert_eq!(
         background_string(&mut page, root, "return String(globalThis.done)"),
         "false"
     );
     tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        page.poll_background_work(),
+        wait_for_done(&mut page, root),
     )
     .await
     .unwrap()

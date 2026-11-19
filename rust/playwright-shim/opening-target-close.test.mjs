@@ -509,3 +509,76 @@ test(
     }
   },
 );
+
+test(
+  "initial networkidle waits for a held fetch body after the page is usable",
+  { timeout: 10000 },
+  async () => {
+    let release;
+    const held = new Promise((resolve) => (release = resolve));
+    let bodies = 0;
+    const server = createServer(async (request, response) => {
+      if (request.url === "/held") {
+        bodies++;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.flushHeaders();
+        await held;
+        response.end('{"ok":true}');
+      } else {
+        response.end('<script>fetch("/held").catch(()=>{});</script>');
+      }
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const context = new BrowserContext();
+    const page = await context.newPage();
+    let navigation;
+    let outcome = "pending";
+    let resolveOpening, rejectOpening, initialOpening;
+    const openingFinished = new Promise((resolve, reject) => {
+      resolveOpening = resolve;
+      rejectOpening = reject;
+    });
+    openingFinished.catch(() => {});
+    const actualOpen = page._openLiveSession.bind(page);
+    page._openLiveSession = (...args) => {
+      const opening = actualOpen(...args);
+      if (!initialOpening) {
+        initialOpening = opening;
+        opening.then(resolveOpening, rejectOpening);
+      }
+      return opening;
+    };
+    try {
+      const headers = page.waitForResponse((response) => response.url() === `${origin}/held`);
+      navigation = page.goto(origin, { waitUntil: "networkidle" });
+      navigation.then(
+        () => {
+          outcome = "fulfilled";
+        },
+        () => {
+          outcome = "rejected";
+        },
+      );
+      const response = await headers;
+      await openingFinished;
+      assert.equal(await page.evaluate(() => 42), 42);
+      assert.equal(bodies, 1);
+      assert.equal(
+        outcome,
+        "pending",
+        "an active response body must prevent initial networkidle even after actual page evaluation works",
+      );
+      release();
+      await navigation;
+      assert.equal(outcome, "fulfilled");
+      assert.deepEqual(await response.json(), { ok: true });
+    } finally {
+      release();
+      await navigation?.catch(() => {});
+      await context.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);

@@ -3672,9 +3672,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _waitForTargetNetworkIdle(timeout) {
-    await waitForTargetNetworkIdle(() => JSON.parse(native.liveTargetNetworkState(this._session)), {
-      timeout,
-    });
+    await waitForTargetNetworkIdle(
+      () => {
+        if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
+        return JSON.parse(native.liveTargetNetworkState(this._session));
+      },
+      { timeout },
+    );
   }
 
   _didNativeClose() {
@@ -3882,8 +3886,22 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // dashboards) appears, and keep it mounted so clicks/fills dispatch real events into
     // the running app. Default/'load'/'commit' stay raw (cheap fetch) — hydrating EVERY
     // goto is both slow and unnecessary for static pages.
-    if (opts?.waitUntil === "networkidle")
+    if (opts?.waitUntil === "networkidle") {
+      const initialActor = !this._auxiliaryActor;
       await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
+      // Existing native target navigation already waits for its own networkidle.
+      if (initialActor && this._auxiliaryActor) {
+        try {
+          await this._waitForTargetNetworkIdle(
+            this._remainingNavigationTimeout(opts, started) ?? 0,
+          );
+        } catch (error) {
+          if (this._closed) throw new Error("Page session closed");
+          throw error;
+        }
+        if (this._closed) throw new Error("Page session closed");
+      }
+    }
     // If a `waitForResponse` / `waitForRequest` is already subscribed when the
     // caller does `Promise.all([waitForResponse(...), goto(url)])` without
     // `waitUntil:'networkidle'`, the inline-script fetches that the predicate

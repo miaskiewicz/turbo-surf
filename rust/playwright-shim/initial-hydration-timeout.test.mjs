@@ -190,3 +190,25 @@ test("initial timeout status cannot be borrowed through children or a retired ro
       native.liveActorClose(actor);
     }
   }));
+
+test("hard execution interruption propagates the original error after cached diagnostics", async () => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent('<!doctype html><p id="reached">Reached state</p>');
+    const interruption = new Error("Execution interrupted by the session execution budget");
+    const collect = page._collectSession;
+    // One native transport rejection; subsequent collection remains real. The
+    // old catch refreshed successfully and silently turned this into success.
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(interruption);
+    };
+    await assert.rejects(page._redrain(), (error) => error === interruption);
+    assert.ok(page._html.includes("Reached state"));
+    assert.equal(typeof interruption.hydrationDiagnostics, "object");
+  } finally {
+    await context.close();
+  }
+});

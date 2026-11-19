@@ -3145,8 +3145,24 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (this._session == null) return;
     try {
       await this._collectSession(this._session, "globalThis.__RESULT = '';");
-    } catch {
-      /* terminated mid-drain — refresh reads best-effort state */
+    } catch (error) {
+      if (
+        String(error?.message ?? error).includes(
+          "Execution interrupted by the session execution budget",
+        )
+      ) {
+        try {
+          this._html = native.liveSerialize(this._session);
+          if (native.liveInitialHydrationStatus)
+            error.hydrationDiagnostics = JSON.parse(
+              native.liveInitialHydrationStatus(this._session),
+            );
+        } catch {
+          /* Keep the original interruption if cached diagnostics are unavailable. */
+        }
+        throw error;
+      }
+      /* Aggregate drain expiry can still expose reached state. */
     }
     await this._refreshFromSession();
     await this._drainBindings();

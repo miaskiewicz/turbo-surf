@@ -18891,6 +18891,10 @@ mod watchdog_cancellation_tests {
     }
 }
 
+#[path = "runtime/execution_budget.rs"]
+mod execution_budget;
+use execution_budget::PollExecutionBudget;
+
 // The V8 watchdog interrupts synchronous work; an opted-in async deadline also
 // wakes a session awaiting a timer or native I/O beyond that same budget.
 async fn with_async_execution_budget<T>(
@@ -18937,6 +18941,7 @@ async fn drain_to_quiescence_with_scripts(
     let mut stable = 0usize;
     let mut last_sig = String::new();
     for _ in 0..MAX_ROUNDS {
+        tokio::task::yield_now().await;
         let turn = quiescence_pump_scripts(rt, execute_document_scripts).await?;
         if turn.host_reply {
             return Ok(());
@@ -18984,6 +18989,7 @@ async fn quiescence_pump_scripts(
     if first.host_reply {
         return Ok(first);
     }
+    tokio::task::yield_now().await;
     if execute_document_scripts {
         let base = rt.op_state().borrow().borrow::<Base>().0.clone();
         drain_module_scripts(rt, &base).await?;
@@ -19006,12 +19012,20 @@ async fn run_quiescence_timers(
     }
     // Reuse each timer's authenticated selection for native task interleaving,
     // rather than polling the complete VM between otherwise empty callbacks.
-    let timers = run_window_timer_tasks(rt, allowance, true)?;
-    if timers.host_reply {
-        return Ok(timers);
+    let mut fired = 0;
+    for _ in 0..allowance {
+        let turn = run_window_timer_tasks(rt, 1, true)?;
+        fired += turn.fired;
+        if turn.host_reply {
+            return Ok(async_owner::QuiescenceTurn { fired, ..turn });
+        }
+        if turn.fired == 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
     }
     let mut last = drain_quiescence_turn(rt, false).await?;
-    last.fired += timers.fired;
+    last.fired += fired;
     Ok(last)
 }
 
@@ -19863,13 +19877,14 @@ impl PageSession {
     async fn eval_active(&mut self, script: &str, engine: bool) -> Result<String, String> {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
-        let (drained, exceeded) = {
-            let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
-            let drained = with_async_execution_budget(
-                self.options.window_timer_mode == WindowTimerMode::RealTime,
+        let execution = PollExecutionBudget::new(self.rt.v8_isolate(), budget);
+        let deadline_exceeded = std::sync::atomic::AtomicBool::new(false);
+        let drained = {
+            with_async_execution_budget(
+                true,
                 budget,
-                &watchdog.exceeded,
-                async {
+                &deadline_exceeded,
+                execution.run(async {
                     if engine {
                         execute_engine_script(&mut self.rt, script)?;
                     } else {
@@ -19878,19 +19893,17 @@ impl PageSession {
                     let base = self.rt.op_state().borrow().borrow::<Base>().0.clone();
                     resume_host_hydration(&mut self.rt, &base).await?;
                     drain_to_quiescence(&mut self.rt).await
-                },
+                }),
             )
-            .await;
-            let exceeded = watchdog.exceeded.clone();
-            drop(watchdog);
-            let exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
-            (drained, exceeded)
+            .await
         };
-        // The watchdog may have terminated mid-drain. Clear that terminate state so the
-        // isolate is usable again, then read the result BEST-EFFORT: an interaction's
-        // important effects (the login POST, a client navigation) land early in the
-        // drain — the budget is normally hit later on background churn (analytics
-        // polling, React's idle scheduler). Returning the reached state beats throwing.
+        let interrupted = execution.interrupted();
+        let exceeded = interrupted
+            || execution.expired()
+            || deadline_exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(execution);
+        // Stop only between healthy task turns. A hard guest interruption cannot
+        // promise usable framework state; aggregate expiry retains reached state.
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         self.hydration_diagnostics.progress = self
@@ -19899,7 +19912,11 @@ impl PageSession {
             .borrow()
             .borrow::<HydrationProgress>()
             .clone();
-        if let Err(error) = self.finish_history_command(Ok(())) {
+        let history = self.finish_history_command(Ok(()));
+        if interrupted {
+            return Err("Execution interrupted by the session execution budget".into());
+        }
+        if let Err(error) = history {
             return Err(drained.err().unwrap_or(error));
         }
         let result = match drained {

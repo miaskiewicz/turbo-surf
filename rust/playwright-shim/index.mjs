@@ -14,6 +14,7 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
+import { createTestOutput } from "./test-output.mjs";
 import {
   handleEvaluation,
   hasJSHandles,
@@ -7137,7 +7138,7 @@ function startAttemptPhase(info) {
 }
 
 async function executeAttempt(plan, t) {
-  const info = makeTestInfo(plan.name);
+  const info = makeTestInfo(plan.name, plan);
   startAttemptPhase(info);
   if (plan.expectedFailure) info.expectedStatus = "failed";
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
@@ -7167,7 +7168,7 @@ async function executeAttempt(plan, t) {
 }
 
 async function invokeWorkerHook(fn, plan) {
-  const info = makeTestInfo("worker hook");
+  const info = makeTestInfo("worker hook", plan);
   startAttemptPhase(info);
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
   const fixtures = await openFixtures(plan.baseDefs, defs, info, undefined, true);
@@ -7342,12 +7343,19 @@ function makeDescribe() {
   return d;
 }
 
-function makeTestInfo(title) {
+function makeTestInfo(title, plan) {
+  const output = createTestOutput(workerAttempt, [
+    ...(plan?.frames ?? []).map((frame) => frame.title),
+    title,
+  ]);
   const info = {
     title,
-    titlePath: [title],
-    outputDir: "/tmp",
-    outputPath: (...p) => ["/tmp", ...p].join("/"),
+    file: output.file,
+    titlePath: output.titlePath,
+    get outputDir() {
+      return output.outputDir;
+    },
+    outputPath: (...p) => output.outputPath(...p),
     snapshotPath: (...p) => ["/tmp", ...p].join("/"),
     attach: async (name, options) => {
       const attachment = { name, contentType: options.contentType ?? "application/octet-stream" };
@@ -7375,7 +7383,7 @@ function makeTestInfo(title) {
     status: "passed",
     expectedStatus: "passed",
     retry: workerAttempt?.retry ?? 0,
-    project: { name: process.env.TURBO_PW_PROJECT_NAME ?? "turbo-surf" },
+    project: output.project,
   };
   return info;
 }

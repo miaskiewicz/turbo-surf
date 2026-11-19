@@ -5207,13 +5207,15 @@ fn run_background_resource_task_in(
         let active = &mut v8::ContextScope::new(scope, context);
         let caught = std::pin::pin!(v8::TryCatch::new(active));
         let active = &mut caught.init();
-        let fired = async_owner::with_document(active, context, |active| {
+        let fired = async_owner::with_document_admission(active, context, |active| {
             call_frame_helper(active, "runNextBackgroundResourceTask", &[])
                 .and_then(|value| value.uint32_value(active))
                 .unwrap_or(0)
         })
         .unwrap_or_else(|error| {
-            async_owner::task_failure(active, format!("Resource owner admission: {error}"));
+            if let async_owner::AdmissionError::Authority(error) = error {
+                async_owner::task_failure(active, format!("Resource owner admission: {error}"));
+            }
             0
         });
         if fired > 0 || active.has_caught() {
@@ -18755,6 +18757,8 @@ struct ActiveWatchdogs(Vec<std::sync::Weak<std::sync::atomic::AtomicBool>>);
 
 struct Watchdog {
     exceeded: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(all(test, not(turbo_surf_native_proxy)))]
+    termination_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
     done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -18777,6 +18781,10 @@ impl Watchdog {
         active.0.retain(|flag| flag.strong_count() > 0);
         active.0.push(std::sync::Arc::downgrade(&done));
         let timed_out = exceeded.clone();
+        #[cfg(all(test, not(turbo_surf_native_proxy)))]
+        let termination_requested = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        #[cfg(all(test, not(turbo_surf_native_proxy)))]
+        let requested = termination_requested.clone();
         let thread = std::thread::spawn(move || {
             let start = std::time::Instant::now();
             while !watch.load(Ordering::Relaxed) {
@@ -18785,12 +18793,16 @@ impl Watchdog {
                     // Nested native callbacks can clear V8's termination state.
                     // Keep the deadline enforced until the owner joins this guard.
                     handle.terminate_execution();
+                    #[cfg(all(test, not(turbo_surf_native_proxy)))]
+                    requested.store(true, Ordering::Release);
                 }
                 std::thread::park_timeout(std::time::Duration::from_millis(2));
             }
         });
         Watchdog {
             exceeded,
+            #[cfg(all(test, not(turbo_surf_native_proxy)))]
+            termination_requested,
             done,
             thread: Some(thread),
         }
@@ -18823,6 +18835,8 @@ mod watchdog_cancellation_tests {
         let waiting = worker.thread().clone();
         let watchdog = Watchdog {
             exceeded: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(turbo_surf_native_proxy))]
+            termination_requested: Arc::new(AtomicBool::new(false)),
             done: Arc::new(AtomicBool::new(false)),
             thread: Some(worker),
         };
@@ -20889,3 +20903,7 @@ mod runtime_source_normalization_tests;
 #[cfg(all(test, not(turbo_surf_native_proxy)))]
 #[path = "runtime_provisional_frame_tests.rs"]
 mod runtime_provisional_frame_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "runtime_admission_cancellation_tests.rs"]
+mod admission_cancellation_tests;

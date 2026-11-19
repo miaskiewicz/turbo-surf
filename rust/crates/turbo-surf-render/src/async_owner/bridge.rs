@@ -1,6 +1,19 @@
 //! Captured infrastructure async-context helpers; document entry is authenticated by the caller.
 use deno_core::v8;
 
+pub(super) enum OwnerEntryFailure {
+    Interrupted,
+    Authority(&'static str),
+}
+impl OwnerEntryFailure {
+    fn detail(&self) -> &'static str {
+        match self {
+            Self::Interrupted => "Owner entry failed",
+            Self::Authority(reason) => reason,
+        }
+    }
+}
+
 pub struct OwnerAsyncContext {
     context: v8::Weak<v8::Context>,
     enter: v8::Weak<v8::Function>,
@@ -104,10 +117,11 @@ impl OwnerAsyncContext {
         scope: &mut v8::PinScope<'s, '_>,
         authenticated_token: v8::Local<'s, v8::Value>,
         run: impl FnOnce(&mut v8::PinScope<'s, '_>) -> R,
-    ) -> Result<R, &'static str> {
+    ) -> Result<R, OwnerEntryFailure> {
         let previous = scope.get_continuation_preserved_embedder_data();
         let entered = self.enter_owner(scope, authenticated_token);
-        if let Err(stage) = entered {
+        if let Err(failure) = entered {
+            let stage = failure.detail();
             eprintln!(
                 "ACTION_RECOVERY_DIAG bridge stage={stage} terminating_before_restore={}",
                 scope.is_execution_terminating()
@@ -117,7 +131,7 @@ impl OwnerAsyncContext {
                 "ACTION_RECOVERY_DIAG bridge terminating_after_restore={}",
                 scope.is_execution_terminating()
             );
-            return Err("Owner entry failed");
+            return Err(failure);
         }
         let result = run(scope);
         // Native restore remains available even with a pending guest exception
@@ -130,25 +144,29 @@ impl OwnerAsyncContext {
         &self,
         scope: &mut v8::PinScope<'s, '_>,
         token: v8::Local<'s, v8::Value>,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), OwnerEntryFailure> {
         let context = self
             .context
             .to_local(scope)
-            .ok_or("Owner service realm closed")?;
+            .ok_or(OwnerEntryFailure::Authority("Owner service realm closed"))?;
         let enter = self
             .enter
             .to_local(scope)
-            .ok_or("Owner setter unavailable")?;
+            .ok_or(OwnerEntryFailure::Authority("Owner setter unavailable"))?;
         // Check the complete captured capability set, including restore. The
         // normal restoration path uses the native setter to preserve exceptions.
         self.restore
             .to_local(scope)
-            .ok_or("Owner restore unavailable")?;
+            .ok_or(OwnerEntryFailure::Authority("Owner restore unavailable"))?;
         let scope = &mut v8::ContextScope::new(scope, context);
         let receiver = v8::undefined(scope);
-        enter
-            .call(scope, receiver.into(), &[token])
-            .ok_or("Owner entry failed")?;
+        if enter.call(scope, receiver.into(), &[token]).is_none() {
+            return Err(if scope.is_execution_terminating() {
+                OwnerEntryFailure::Interrupted
+            } else {
+                OwnerEntryFailure::Authority("Owner entry failed")
+            });
+        }
         Ok(())
     }
 }

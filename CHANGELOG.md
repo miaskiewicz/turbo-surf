@@ -3,6 +3,7 @@
 ## [0.8.4] - Unreleased
 
 - Retain reached interaction effects when the operation's own watchdog interrupts selected document work, without hiding the same native predicate error when its deadline has not expired.
+- Keep input recovery usable when an execution interruption blocks resource owner entry, while retaining genuine document authority failures and the original cancellation budgets.
 
 - Refresh dirty page snapshots after iframe metadata reads and network callbacks, so authored DOM reentrancy cannot leave `page.content()` behind the live document.
 

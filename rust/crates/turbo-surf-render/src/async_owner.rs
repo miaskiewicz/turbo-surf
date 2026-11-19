@@ -208,36 +208,68 @@ pub(super) fn uninstall(rt: &mut JsRuntime) {
     }
 }
 
+pub(super) enum AdmissionError {
+    Interrupted,
+    Authority(String),
+}
+impl AdmissionError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Interrupted => "Owner entry failed".into(),
+            Self::Authority(error) => error,
+        }
+    }
+}
+
 pub(super) fn with_document<'s, T>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
     run: impl FnOnce(&mut v8::PinScope<'s, '_>) -> T,
 ) -> Result<T, String> {
+    with_document_admission(scope, context, run).map_err(AdmissionError::into_message)
+}
+
+pub(super) fn with_document_admission<'s, T>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    run: impl FnOnce(&mut v8::PinScope<'s, '_>) -> T,
+) -> Result<T, AdmissionError> {
     let Some(shared) = tracker(scope) else {
         if JsRuntime::op_state_from(scope)
             .borrow()
             .has::<private_boundary::Infrastructure>()
         {
-            return Err("Native async ownership is unavailable".into());
+            return Err(AdmissionError::Authority(
+                "Native async ownership is unavailable".into(),
+            ));
         }
         return Ok(run(scope));
     };
     if let Some(reason) = document_error(scope, context) {
-        return Err(document_diagnostic(scope, context, reason));
+        return Err(AdmissionError::Authority(document_diagnostic(
+            scope, context, reason,
+        )));
     }
     let (token, bridge) = {
         let mut state = shared.borrow_mut();
         let (owner, token) = state
             .owners
             .register(scope, context, valid_document)
-            .ok_or("Native async owner registration is unavailable")?;
+            .ok_or_else(|| {
+                AdmissionError::Authority("Native async owner registration is unavailable".into())
+            })?;
         let _ = owner;
         (v8::Global::new(scope, token), state.bridge.clone())
     };
     let token = v8::Local::new(scope, token);
     bridge
         .with_owner(scope, token.into(), run)
-        .map_err(str::to_owned)
+        .map_err(|failure| match failure {
+            bridge::OwnerEntryFailure::Interrupted => AdmissionError::Interrupted,
+            bridge::OwnerEntryFailure::Authority(_) => {
+                AdmissionError::Authority("Owner entry failed".into())
+            }
+        })
 }
 
 // A retained stream is an existing JS algorithm, not renewed document admission.
@@ -283,7 +315,7 @@ pub(super) fn with_retained_stream<'s, T>(
     let token = v8::Local::new(scope, token);
     bridge
         .with_owner(scope, token.into(), run)
-        .map_err(str::to_owned)
+        .map_err(|_| "Owner entry failed".to_owned())
 }
 
 #[derive(Clone, Copy)]

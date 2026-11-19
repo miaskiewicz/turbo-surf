@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2669,7 +2669,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4172,27 +4172,6 @@ name = "range-alloc"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
-
-[[package]]
-name = "rav1d"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1932f060d5e7bd49dc9f8b272c1dc5e9ce0ffe141c28be900265d3989b36c9ed"
-dependencies = [
- "assert_matches",
- "atomig",
- "bitflags 2.13.0",
- "cc",
- "cfg-if",
- "libc",
- "nasm-rs",
- "parking_lot",
- "paste",
- "raw-cpuid",
- "strum 0.26.3",
- "to_method",
- "zerocopy 0.7.35",
-]
 
 [[package]]
 name = "raw-cpuid"
@@ -5835,9 +5814,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d61bf3bd1ee7505be5c15e9650dce4a6cf5c806c57241607364d9a2d5fe83d89"
+checksum = "ef6a245f5a1754b082ea8315a324cc3dd0ddb233d5b1a585822b8aad7011092b"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5851,9 +5830,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-browser-env"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95916651d1b2ec804e7196d1a19d20f248f6224ce1cdaac4b0b2b028c1d57946"
+checksum = "139e4eaedad32a93b5172b976d4ca7a1aef739f9e9b9622a5d38c83628c6928f"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5870,9 +5849,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-layout"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e5e43dec8de414fcc890408d1522a42f96bb3900845e0c62a5a508b71882867"
+checksum = "0fd97e1fa43f50f44b3b7b153431cf28d5bb1517d5dd66a067aeb97864ec670d"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5893,9 +5872,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-raster"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "409f8f8e6bf8e801c7a36357368f51ac728463f934ca5101661be38c7889f4cc"
+checksum = "4d83e4423209d050db963faf828b5b7d1299cedec8ab4584eee1990ebc28c548"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5907,12 +5886,33 @@ dependencies = [
  "lyon_tessellation",
  "naga",
  "pollster",
- "rav1d",
  "serde_json",
  "tiny-skia",
  "ttf-parser",
  "turbo-dom-layout",
+ "turbo-dom-rav1d",
  "wgpu",
+]
+
+[[package]]
+name = "turbo-dom-rav1d"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef5440d3ad35bb7045c7b27222a26f88b02ac4466180aa8931c6dcd1ba2237ea"
+dependencies = [
+ "assert_matches",
+ "atomig",
+ "bitflags 2.13.0",
+ "cc",
+ "cfg-if",
+ "libc",
+ "nasm-rs",
+ "parking_lot",
+ "paste",
+ "raw-cpuid",
+ "strum 0.26.3",
+ "to_method",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -6881,7 +6881,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -5,6 +5,8 @@
 - Preserve executable permissions for native npm CLI binaries on macOS and Linux before creating the platform tarballs.
 - Reject non-executable Unix binaries in archive validation, and run extracted/installed smoke tests without repairing permissions.
 - Finish observed default/load navigation at the actual document load milestone while retaining background requests and their later DOM updates. Initial host callbacks retain the original caller deadline and document ownership; Rust/MCP hydration and later interaction quiescence remain unchanged.
+- Update the DOM, layout, raster and browser bindings to the published turbo-dom 0.8.5 crates, retaining the single V8 150.4.2 dependency.
+- Verify retired timeout-signal collection after actual frame-load cancellation has unwound, retaining the original collection assertions and checking the real timeout adapter against a strong-reference inverse.
 
 ## [0.8.4] - 2026-11-19
 

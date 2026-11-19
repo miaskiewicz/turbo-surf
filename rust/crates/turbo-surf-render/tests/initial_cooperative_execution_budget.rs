@@ -105,6 +105,8 @@ fn check(page: &mut PageSession, hard: bool, result: &Result<String, String>, ta
 struct Fixture {
     origin: String,
     release_at: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+    admitted: std::sync::Arc<tokio::sync::Notify>,
+    release: std::sync::Arc<tokio::sync::Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Fixture {
@@ -112,23 +114,36 @@ impl Fixture {
         Self::with_html(html(hard, false)).await
     }
     async fn with_html(body: String) -> Self {
+        Self::with_gate(body, false).await
+    }
+    async fn with_gate(body: String, held: bool) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}/", listener.local_addr().unwrap());
         let release_at = std::sync::Arc::new(std::sync::Mutex::new(None));
         let gate_clock = release_at.clone();
+        let admitted = std::sync::Arc::new(tokio::sync::Notify::new());
+        let release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let requested = admitted.clone();
+        let released = release.clone();
         let task = tokio::spawn(async move {
             let mut connections = tokio::task::JoinSet::new();
             while let Ok((mut socket, _)) = listener.accept().await {
                 let document = body.clone();
                 let clock = gate_clock.clone();
+                let requested = requested.clone();
+                let released = released.clone();
                 connections.spawn(async move {
                     use tokio::io::{AsyncReadExt,AsyncWriteExt};
                     let mut request=[0;4096];let size=socket.read(&mut request).await.unwrap();
                     let gate=String::from_utf8_lossy(&request[..size]).starts_with("GET /gate ");
                     let (kind,body)=if gate {
+                        requested.notify_one();
+                        if held { released.notified().await; }
+                        else {
                         let release=*clock.lock().unwrap();
                         if let Some(release)=release { tokio::time::sleep_until(tokio::time::Instant::from_std(release)).await; }
                         else { tokio::time::sleep(std::time::Duration::from_millis(140)).await; }
+                        }
                         ("text/plain","ready".to_owned())
                     } else {("text/html",document)};
                     let response=format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
@@ -140,7 +155,31 @@ impl Fixture {
             origin,
             task,
             release_at,
+            admitted,
+            release,
         }
+    }
+    async fn admit(&self, page: &mut PageSession) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let admitted = self.admitted.notified();
+            tokio::pin!(admitted);
+            loop {
+                tokio::select! {
+                    biased;
+                    () = &mut admitted => break,
+                    result = page.poll_background_work() => { result.unwrap(); }
+                }
+            }
+        })
+        .await
+        .expect("the native gate request must be admitted before the measured continuation");
+    }
+    fn release_after(&self, delay: std::time::Duration) {
+        let release = self.release.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            release.notify_one();
+        });
     }
 }
 impl Drop for Fixture {
@@ -150,11 +189,20 @@ impl Drop for Fixture {
 }
 
 async fn contract(continuation: bool, hard: bool) {
-    let fixture = Fixture::start(hard).await;
-    let mut page = open(&html(hard, continuation), continuation, &fixture.origin).await;
+    let document = if continuation {
+        format!("<!doctype html><body><script type=module>{}const response=fetch('/gate');await hostWait();await response.then(r=>r.text());runTurn();</script>", callback(hard))
+    } else {
+        html(hard, false)
+    };
+    let fixture = Fixture::with_gate(document.clone(), continuation).await;
+    let mut page = open(&document, continuation, &fixture.origin).await;
     let result: Result<String, String> = if continuation {
+        fixture.admit(&mut page).await;
+        assert_eq!(state(&mut page, None)["entered"], 0);
         page.read_engine("__tsNs.finishHost();return true;")
             .unwrap();
+        // Time the held native reply from this entry, after cold request admission.
+        fixture.release_after(std::time::Duration::from_millis(140));
         page.continue_initial_hydration()
             .await
             .map(|value| value.as_str().into())
@@ -166,6 +214,12 @@ async fn contract(continuation: bool, hard: bool) {
         );
         Err(diagnostic.open_error.clone().unwrap())
     };
+    if continuation && !hard {
+        assert_eq!(
+            result.as_ref().unwrap_err(),
+            &format!("navigation timeout after {BUDGET}ms")
+        );
+    }
     check(&mut page, hard, &result, None);
     page.close();
 }

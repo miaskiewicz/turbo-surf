@@ -226,9 +226,26 @@ pub(super) enum ActionCompletion {
     NavigationFailed(String),
 }
 
+#[derive(Debug, PartialEq)]
 enum NavigationWaitError {
     Navigation(String),
     Driver(String),
+}
+
+fn finish_navigation_wait(
+    result: Result<String, NavigationWaitError>,
+    cleanup: Result<(), String>,
+    caller_expired: bool,
+) -> Result<String, NavigationWaitError> {
+    let interrupted = matches!(&result, Err(NavigationWaitError::Driver(error))
+        if error == "Execution interrupted by the session execution budget");
+    if caller_expired || interrupted {
+        return result;
+    }
+    match cleanup {
+        Ok(()) => result,
+        Err(error) => Err(NavigationWaitError::Driver(error)),
+    }
 }
 
 enum ActionTerminalError {
@@ -1508,6 +1525,7 @@ impl PageSession {
             let _activation = key.enter();
             frames.retire(&mut self.rt);
         }
+        let caller_expired = exceeded || result.is_err();
         let result = if exceeded {
             Err(NavigationWaitError::Driver(format!(
                 "Target navigation timeout after {budget}ms"
@@ -1519,10 +1537,8 @@ impl PageSession {
                 )))
             })
         };
-        let result = match self.finish_history_command(Ok(())) {
-            Ok(()) => result,
-            Err(error) => Err(NavigationWaitError::Driver(error)),
-        };
+        let cleanup = self.finish_history_command(Ok(()));
+        let result = finish_navigation_wait(result, cleanup, caller_expired);
         waiter.completed = result.is_ok();
         result
     }
@@ -1860,6 +1876,62 @@ impl PageSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_completion_error_priority_preserves_owned_interruptions() {
+        let hard = "Execution interrupted by the session execution budget";
+        let cases = [
+            (
+                Ok("receipt".into()),
+                false,
+                Err(NavigationWaitError::Driver("cleanup".into())),
+            ),
+            (
+                Err(NavigationWaitError::Navigation("HTTP failed".into())),
+                false,
+                Err(NavigationWaitError::Driver("cleanup".into())),
+            ),
+            (
+                Err(NavigationWaitError::Driver(
+                    "ordinary driver failure".into(),
+                )),
+                false,
+                Err(NavigationWaitError::Driver("cleanup".into())),
+            ),
+            (
+                Err(NavigationWaitError::Driver(hard.into())),
+                false,
+                Err(NavigationWaitError::Driver(hard.into())),
+            ),
+            (
+                Err(NavigationWaitError::Driver(
+                    "Target navigation timeout after 1000ms".into(),
+                )),
+                true,
+                Err(NavigationWaitError::Driver(
+                    "Target navigation timeout after 1000ms".into(),
+                )),
+            ),
+        ];
+        for (result, caller_expired, expected) in cases {
+            assert_eq!(
+                finish_navigation_wait(result, Err("cleanup".into()), caller_expired),
+                expected
+            );
+        }
+        assert_eq!(
+            finish_navigation_wait(Ok("receipt".into()), Ok(()), false),
+            Ok("receipt".into())
+        );
+        assert_eq!(
+            finish_navigation_wait(
+                Err(NavigationWaitError::Navigation("HTTP failed".into())),
+                Ok(()),
+                false
+            ),
+            Err(NavigationWaitError::Navigation("HTTP failed".into()))
+        );
+    }
 
     #[test]
     fn target_history_traversal_and_replacement_preserve_independent_entries() {

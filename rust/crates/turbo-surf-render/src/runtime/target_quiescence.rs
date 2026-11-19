@@ -4,7 +4,12 @@ use turbo_dom_browser_env::host_internals::AuxiliaryContextId;
 
 fn capability(rt: &mut JsRuntime, target: u64, name: &str) -> Result<String, String> {
     let value = auxiliary_pages::target_call(rt, AuxiliaryContextId(target), name, &[])?;
-    read_string(rt, value)
+    // The actor root may have closed while this independent Page remains live.
+    deno_core::scope!(scope, rt);
+    let context = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let value = v8::Local::new(scope, value);
+    Ok(value.to_rust_string_lossy(scope))
 }
 
 struct Sample {

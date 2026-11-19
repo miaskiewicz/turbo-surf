@@ -17,6 +17,13 @@ All additional bugs found during this work are explicitly in scope and tracked b
 
 The v0.8.4 engine gates completed successfully: local Rust **2,185 passed / 0 failed / 7 intentional ignores**, JS **1,172 passed / 0 failed / 3 intentional skips**, current PR/push/main CI green, published Rust and Python consumers verified. The post-publication npm permission failure is the sole hotfix scope. Engine implementation, turbo-dom 0.8.4, Deno and V8 dependencies remain unchanged. The older pending-gate snapshots below are historical evidence, not additional unresolved v0.8.5 work.
 
+## Independent collector correction — validated and integrated
+
+- [x] Prove that an admitted native root navigation with response headers held can disappear from the guest navigation field while the collector incorrectly reports the fixed observation complete. The deterministic real-PageSession control observes the actual HTTP request and native target's `pendingNavigation: true`; the original collector then fails the expected incomplete-result assertion.
+- [x] Correct only `turbo-surf-mcp/examples/detection_trace.rs`: record the native root's host-owned network state after the final snapshot and retain a native-root pending marker when no guest destination remains. Existing guest pending destinations are preserved; no URL is invented and native identity errors propagate. Engine behavior, observation windows, execution budgets and assertions are unchanged.
+- [x] Validate baseline RED → all nine example controls GREEN → recording-call-only inverse RED → restored nine GREEN, with target Clippy, formatting and complexity checks passing. Evidence: `.worktrees/detection-pending-root-navigation/.recovery/held-navigation/FINAL.json` (SHA256 `5e4a30828f0a023abc97a7e764f3985b675856c1e7e706845fadc8819ea1cc6d`).
+- [x] Integrate the reviewed collector correction into `release/v0.8.5` after express user approval. This adds only collector reporting and its deterministic regression to the packaging repair; engine implementation and dependency sources remain unchanged. Whether it caused the repeated CI `navigation-observation.test.mjs:186` failures remains unproven; interruption between recording `timerFiredDate` and assigning `location.href` is a separate alternative.
+
 ## v0.8.4 integrated repair batch — historical pre-gate snapshot
 
 The current batch adds the actual actor-opening readiness barrier, final-refresh close guard and initial-navigation network-idle wait. Genuine native controls reproduce each defect before its fix; the registered opening/close controls and existing network-idle controls pass **19 / 0**, with the original tests and timeout limits retained. These component results do not replace the next complete JS run.

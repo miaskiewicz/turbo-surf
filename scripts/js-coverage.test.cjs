@@ -177,6 +177,18 @@ function fixture(t) {
   return { directory, root, sources };
 }
 
+test("an unregistered shim regression cannot disappear from the full test inventory", (t) => {
+  const { root } = fixture(t);
+  const file = "rust/playwright-shim/new-regression.test.mjs";
+  fs.writeFileSync(path.join(root, file), "export const regression = true;\n");
+  assert.throws(() => testInventory(root), /Unregistered shim test file/);
+  const packagePath = path.join(root, "package.json");
+  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  pkg.scripts["test:shim"] += ` ${file}`;
+  fs.writeFileSync(packagePath, JSON.stringify(pkg));
+  assert.ok(testInventory(root).testSources.some((source) => source.path === file));
+});
+
 function aggregate(directory) {
   const env = { ...process.env };
   delete env.NODE_V8_COVERAGE;

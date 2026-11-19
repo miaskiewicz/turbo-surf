@@ -62,6 +62,9 @@ function testInventory(root) {
       for (const file of matches) files.add(file);
     }
   }
+  for (const file of fs.globSync("rust/playwright-shim/*.test.mjs", { cwd: root })) {
+    if (!files.has(file)) throw new Error(`Unregistered shim test file: ${file}`);
+  }
   return {
     packageSha256: digest(packageBytes),
     testSources: [...files]

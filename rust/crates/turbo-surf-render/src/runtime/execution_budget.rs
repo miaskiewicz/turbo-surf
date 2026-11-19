@@ -116,7 +116,7 @@ impl PollExecutionBudget {
         self.supervisor.exceeded.load(Ordering::Relaxed)
     }
     pub(super) fn expired(&self) -> bool {
-        self.expired.load(Ordering::Relaxed)
+        self.expired.load(Ordering::Relaxed) || Instant::now() >= self.deadline
     }
     pub(super) async fn run<T>(
         &self,
@@ -184,5 +184,50 @@ mod tests {
         drop(supervisor.arm());
         assert!(fired_rx.recv_timeout(Duration::from_millis(30)).is_err());
         assert!(!supervisor.exceeded.load(Ordering::Relaxed));
+    }
+}
+
+#[cfg(test)]
+mod expression_contracts {
+    use super::*;
+    use crate::DocumentResponseMetadata;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn root_expression_fallback_observes_its_own_deadline_between_healthy_tasks() {
+        let mut page = PageSession::open_with_document_response_and_options(
+            "<!doctype html><p>Owned expression</p>",
+            "https://expression-budget.test/",
+            "",
+            "",
+            100,
+            "",
+            Default::default(),
+            &[],
+            BrowserStorage::default(),
+            DocumentResponseMetadata::default(),
+            None,
+            PageSessionOptions {
+                window_timer_mode: WindowTimerMode::RealTime,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        page.read_engine("globalThis.active=false;globalThis.entered=0;globalThis.done=new Promise(resolve=>{const task=()=>{entered++;active=true;try{const end=performance.now()+70;while(performance.now()<end){}}finally{active=false}setTimeout(task,0)};setTimeout(task,0)});return true;").unwrap();
+        let key = page.rt.activation_key();
+        let error = key
+            .during(page.eval_expression_active("done", false, true))
+            .await
+            .unwrap_err();
+        assert_eq!(error, "Expression exceeded the session execution budget");
+        assert!(
+            page.read_engine("return entered;")
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(page.read_engine("return active;").unwrap(), "false");
+        page.close();
     }
 }

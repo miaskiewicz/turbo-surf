@@ -13735,6 +13735,35 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     if (!ranScript && fired === 0) break;
   }
 };
+// Retain the actual script pass in its owning Window across driver host-reply
+// handoffs. Native task turns, not this Promise, own interaction timer execution.
+let __interactionHydrate = null;
+const __interactionHydrateState = () => {
+  if (__interactionHydrate && __interactionHydrate.generation !== __resourceDocumentGeneration) __interactionHydrate = null;
+  return __interactionHydrate;
+};
+const __observeInteractionHydrate = async (state, promise) => {
+  try { await promise; }
+  catch (error) { state.failed = true; state.error = error; }
+  finally { state.pending = false; state.promise = null; }
+};
+const __startInteractionHydrate = () => {
+  const current = __interactionHydrateState();
+  if (current && (current.pending || current.failed)) return;
+  const state = {generation:__resourceDocumentGeneration, pending:true, failed:false, error:null, promise:null};
+  __interactionHydrate = state;
+  state.promise = __G.hydrate(1, 1, false);
+  __observeInteractionHydrate(state, state.promise);
+};
+const __interactionHydratePending = () => {
+  const state = __interactionHydrateState();
+  if (state && state.failed) {
+    const error = state.error; state.failed = false; state.error = null;
+    throw error;
+  }
+  return state && state.pending ? "1" : "0";
+};
+ops.op_set_host_capabilities({startInteractionHydrate:__startInteractionHydrate, interactionHydratePending:__interactionHydratePending});
 // The parser pass of the initial load; the host's load gate polls its completion
 // (turbo-surf#87: through these functions, not page-reachable `.finally`/globals).
 let __initialHydrated = false;
@@ -18894,6 +18923,8 @@ mod watchdog_cancellation_tests {
 #[path = "runtime/execution_budget.rs"]
 mod execution_budget;
 use execution_budget::PollExecutionBudget;
+#[path = "runtime/target_quiescence.rs"]
+mod target_quiescence;
 
 // The V8 watchdog interrupts synchronous work; an opted-in async deadline also
 // wakes a session awaiting a timer or native I/O beyond that same budget.
@@ -19985,9 +20016,10 @@ impl PageSession {
         if self.closed {
             return Err("Page session is closed".into());
         }
-        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
+        let execution = PollExecutionBudget::new(self.rt.v8_isolate(), self.budget_ms);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(self.budget_ms),
+            execution.run(async {
                 let value = if engine {
                     let body = format!(
                         "return (\n{}\n)",
@@ -20012,20 +20044,29 @@ impl PageSession {
                 } else {
                     read_string(&mut self.rt, value)
                 }
-            })
-            .await;
-        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
-        drop(watchdog);
+            }),
+        )
+        .await;
+        let interrupted = execution.interrupted();
+        let expired = execution.expired();
+        drop(execution);
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = if exceeded {
+        let result = if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else if expired {
             Err("Expression exceeded the session execution budget".into())
         } else {
             result.unwrap_or_else(|_| {
                 Err("Expression exceeded the session execution budget".to_owned())
             })
         };
-        self.finish_history_command(result)
+        let result = self.finish_history_command(result);
+        if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else {
+            result
+        }
     }
 
     /// Deliver embedder input through a private native dispatch capability.

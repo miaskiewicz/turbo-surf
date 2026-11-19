@@ -19881,6 +19881,12 @@ impl PageSession {
             key.during(self.eval_active(script, engine)).await
         };
         self.publish_auxiliary_state();
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Execution interrupted by the session execution budget")
+        {
+            return result;
+        }
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
         result
@@ -20002,6 +20008,12 @@ impl PageSession {
                 .await
         };
         self.publish_auxiliary_state();
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Execution interrupted by the session execution budget")
+        {
+            return result;
+        }
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
         result

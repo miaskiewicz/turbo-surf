@@ -220,6 +220,17 @@ jobs:
             /tmp/turbo-*/chrome-stderr.log
             /tmp/detection-navigation-observation-*/*/chrome-stderr.log
           if-no-files-found: warn
+      - name: Retain failed navigation observation captures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-observation-diagnostics
+          path: |
+            /tmp/detection-navigation-observation-*/server-events.json
+            /tmp/detection-navigation-observation-*/*/trace.json
+            /tmp/detection-navigation-observation-*/*/network.jsonl
+            /tmp/detection-navigation-observation-*/*/*.html
+          if-no-files-found: warn
 
   # --------------------------------------------------------------------------
   # Coverage shards (instrumented builds — must compile independently)

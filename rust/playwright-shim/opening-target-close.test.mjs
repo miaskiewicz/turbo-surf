@@ -287,3 +287,167 @@ test(
     }
   },
 );
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((pass, fail) => {
+    resolve = pass;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+// Delivery gates retain the native result itself; no actor identity or state is synthesized.
+function holdActualOpeningSnapshot(page) {
+  const originalState = native.liveAuxiliaryState;
+  const originalAuxWait = native.liveAuxiliaryWait;
+  const originalNetworkWait = native.liveNetworkLogWait;
+  const snapshot = deferred();
+  const releaseSnapshot = deferred();
+  const releaseWaits = deferred();
+  let freezeWaits = false;
+  let captureNext = false;
+  const observed = { heldWaits: 0, snapshot: null };
+  const wait =
+    (original) =>
+    async (...args) => {
+      const actual = await original(...args);
+      if (freezeWaits && args[0] === page._actorHub?.actor) {
+        observed.heldWaits++;
+        await releaseWaits.promise;
+      }
+      return actual;
+    };
+  native.liveAuxiliaryWait = wait(originalAuxWait);
+  native.liveNetworkLogWait = wait(originalNetworkWait);
+  native.liveAuxiliaryState = (session) => {
+    const actual = originalState(session);
+    if (!captureNext || session !== page._actorHub?.actor) return actual;
+    captureNext = false;
+    const metadata = JSON.parse(actual);
+    if (metadata.opening !== true || metadata.closed) {
+      snapshot.reject(new Error("Fixture did not capture an actual live opening actor"));
+      return actual;
+    }
+    observed.snapshot = metadata;
+    snapshot.resolve(metadata);
+    return releaseSnapshot.promise.then(() => actual);
+  };
+  return {
+    observed,
+    snapshot: snapshot.promise,
+    freeze() {
+      freezeWaits = true;
+    },
+    capture() {
+      captureNext = true;
+    },
+    releaseSnapshot: releaseSnapshot.resolve,
+    restore() {
+      freezeWaits = false;
+      releaseWaits.resolve();
+      releaseSnapshot.resolve();
+      native.liveAuxiliaryState = originalState;
+      native.liveAuxiliaryWait = originalAuxWait;
+      native.liveNetworkLogWait = originalNetworkWait;
+    },
+  };
+}
+
+test(
+  "completed native opening publishes readiness after an older held actor snapshot",
+  { timeout: 10000 },
+  async (t) => {
+    const scriptBody = deferred();
+    const server = createServer(async (request, response) => {
+      response.setHeader(
+        "content-type",
+        request.url === "/held.js" ? "text/javascript" : "text/html",
+      );
+      if (request.url === "/held.js") {
+        response.writeHead(200);
+        response.flushHeaders();
+        await scriptBody.promise;
+        response.end("globalThis.attachmentScriptCompleted=true;");
+      } else response.end('<title>actual readiness</title><script src="/held.js"></script>');
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const context = new BrowserContext();
+    const page = await context.newPage();
+    const entered = deferred();
+    const attached = deferred();
+    const releaseAttachment = deferred();
+    const complete = page._completeActorOpen.bind(page);
+    page._completeActorOpen = async (session) => {
+      entered.resolve(session);
+      await complete(session);
+      attached.resolve(session);
+      await releaseAttachment.promise;
+    };
+    const controlled = holdActualOpeningSnapshot(page);
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    let navigation, older;
+    try {
+      const headers = page.waitForResponse((response) => response.url() === `${origin}/held.js`);
+      navigation = page.goto(origin, { waitUntil: "networkidle" });
+      navigation.catch(() => {});
+      assert.equal((await headers).status(), 200);
+      const actor = page._actorHub;
+      assert.equal(actor.opening, true);
+      let ready = false;
+      actor.ready.then(
+        () => {
+          ready = true;
+        },
+        () => {},
+      );
+      controlled.freeze();
+      await actor.drain();
+      assert.equal(
+        actor.pending,
+        null,
+        "fixture must start its held snapshot on an idle real actor",
+      );
+      controlled.capture();
+      older = actor.drain();
+      older.catch(() => {});
+      const captured = await controlled.snapshot;
+      assert.equal(captured.actor, actor.actor);
+      assert.equal(captured.opening, true);
+      assert.equal(ready, false);
+      scriptBody.resolve();
+      const completedSession = await entered.promise;
+      assert.equal(completedSession, page._session);
+      controlled.releaseSnapshot();
+      await attached.promise;
+      t.diagnostic(
+        JSON.stringify({
+          oldOpening: captured.opening,
+          oldRevision: captured.revision,
+          heldNativeWaits: controlled.observed.heldWaits,
+          readyAfterActualAttachment: ready,
+        }),
+      );
+      assert.equal(
+        ready,
+        true,
+        "completed native attachment must consume a fresh opening:false receipt",
+      );
+      await page.close();
+      assert.equal(page.isClosed(), true);
+      releaseAttachment.resolve();
+      await assert.rejects(navigation, /closed|cancel/i);
+      await older;
+    } finally {
+      scriptBody.resolve();
+      controlled.restore();
+      releaseAttachment.resolve();
+      await older?.catch(() => {});
+      await page._actorHub?.drain(true).catch(() => {});
+      await navigation?.catch(() => {});
+      await context.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);

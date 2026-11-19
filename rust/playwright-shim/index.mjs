@@ -5750,7 +5750,7 @@ class BrowserContext {
     page._targetId = actor.root;
     page._stopNetworkPump();
     if (initial) await actor.initialize(initial);
-    else await actor.drain();
+    else await actor.drain(!opening);
     if (!opening) {
       for (const alias of actor.retiringAliases ?? []) native.liveClose(alias);
       actor.retiringAliases?.clear();

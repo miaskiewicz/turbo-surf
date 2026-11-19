@@ -154,3 +154,137 @@ async fn structural_resource_authority_failure_remains_fail_closed() {
         .unwrap_err();
     assert!(error.contains("missing native document policy"), "{error}");
 }
+
+#[derive(Default)]
+struct TimerAdmissionFence {
+    armed: bool,
+    selected_due: Option<f64>,
+    interrupted_entry: bool,
+    entry_failed: bool,
+    caught_termination: bool,
+    admission_failed: bool,
+    guard: Option<Watchdog>,
+}
+
+pub(super) fn timer_admission_fence(scope: &mut v8::PinScope, due: f64) {
+    if !scope
+        .get_slot::<TimerAdmissionFence>()
+        .is_some_and(|fence| fence.armed)
+    {
+        return;
+    }
+    let guard = Watchdog::start(scope, 100);
+    let end = Instant::now() + Duration::from_secs(5);
+    while !guard.termination_requested.load(Ordering::Acquire) {
+        assert!(
+            Instant::now() < end,
+            "actual timer guard must request termination"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let fence = scope.get_slot_mut::<TimerAdmissionFence>().unwrap();
+    fence.armed = false;
+    fence.selected_due = Some(due);
+    fence.guard = Some(guard);
+}
+
+pub(super) fn observe_timer_admission_error(scope: &mut v8::PinScope, caught_termination: bool) {
+    let rawstop = scope.is_execution_terminating();
+    if let Some(fence) = scope.get_slot_mut::<TimerAdmissionFence>() {
+        fence.entry_failed = true;
+        fence.caught_termination = caught_termination;
+        fence.interrupted_entry = rawstop;
+    }
+}
+
+pub(super) fn observe_timer_caller_error(scope: &mut v8::PinScope) {
+    if let Some(fence) = scope.get_slot_mut::<TimerAdmissionFence>() {
+        fence.admission_failed = true;
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn interrupted_timer_admission_does_not_poison_later_input() {
+    let mut page = page().await;
+    page.read_engine(
+        "globalThis.timerAdmissionRuns=0;setTimeout(()=>timerAdmissionRuns++,0);return 'armed'",
+    )
+    .unwrap();
+    let key = page.rt.activation_key();
+    let active = key.enter();
+    let context = private_infrastructure::context(&mut page.rt).unwrap();
+    {
+        deno_core::scope!(scope, page.rt);
+        let local = v8::Local::new(scope, &context);
+        assert!(local.get_slot::<CspHandle>().is_some());
+        assert!(local.get_slot::<ActiveDocument>().is_some());
+        assert!(local.get_slot::<FrameRetired>().is_none());
+        assert!(local
+            .get_slot::<private_boundary::Infrastructure>()
+            .is_none());
+    }
+    page.rt.v8_isolate().set_slot(TimerAdmissionFence {
+        armed: true,
+        ..Default::default()
+    });
+    let turn = run_next_window_timer_in(&mut page.rt, true, vec![context]);
+    assert_eq!(turn.fired, 0);
+    drop(turn);
+    let mut fence = page
+        .rt
+        .v8_isolate()
+        .remove_slot::<TimerAdmissionFence>()
+        .unwrap();
+    assert!(fence.selected_due.unwrap().is_finite());
+    finish_guard(&mut page, fence.guard.take().unwrap());
+    eprintln!(
+        "TIMER_ADMISSION_NATIVE entry_failed={} rawstop={} caught_termination={} caller_failed={}",
+        fence.entry_failed,
+        fence.interrupted_entry,
+        fence.caught_termination,
+        fence.admission_failed
+    );
+    drop(active);
+    assert_eq!(page.read_engine("return timerAdmissionRuns").unwrap(), "0");
+    let recovery = page
+        .input(&serde_json::json!([{"focus":"#q"},{"type":"owner"}]))
+        .await;
+    eprintln!("TIMER_ADMISSION_RECOVERY ok={}", recovery.is_ok());
+    assert!(fence.entry_failed && (fence.interrupted_entry || fence.caught_termination) && fence.admission_failed,
+        "actual interrupted admission precondition: entry={} raw={} caller={}; recovery={recovery:?}", fence.entry_failed, fence.interrupted_entry, fence.admission_failed);
+    recovery.unwrap();
+    assert_eq!(
+        page.eval_expression("timerAdmissionRuns").await.unwrap(),
+        "1"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn structural_timer_authority_failure_remains_fail_closed() {
+    let mut page = page().await;
+    page.eval("globalThis.admissionHost=document.createElement('iframe');")
+        .await
+        .unwrap();
+    let key = page.rt.activation_key();
+    let active = key.enter();
+    let context = provisional_context(&mut page);
+    {
+        deno_core::scope!(scope, page.rt);
+        let local = v8::Local::new(scope, &context);
+        // Admission-level negative: this provisional realm is not a runnable timer.
+        let turn = admit_window_timer(scope, local);
+        assert_eq!(turn.fired, 0);
+    }
+    auxiliary_navigation::retire_interrupted_frames(&mut page.rt);
+    drop(active);
+    assert_eq!(
+        page.read_engine("return document.querySelector('#q')!==null")
+            .unwrap(),
+        "true"
+    );
+    let error = page
+        .input(&serde_json::json!([{"focus":"#q"},{"type":"owner"}]))
+        .await
+        .unwrap_err();
+    assert!(error.contains("missing native document policy"), "{error}");
+}

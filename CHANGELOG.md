@@ -5,6 +5,7 @@
 - Validate background watchdog recovery against its actual completion marker across competing tasks, retaining the original execution budget and total recovery deadline.
 
 - Keep realtime background work pending when a ready timer deadline only schedules a repoll, instead of reporting that a callback has already run.
+- Keep healthy page recovery usable after an interrupted timer-owner entry, preserving the actual termination exception and retaining genuine document authority failures.
 
 - Retain reached interaction effects when the operation's own watchdog interrupts selected document work, without hiding the same native predicate error when its deadline has not expired.
 - Keep input recovery usable when an execution interruption blocks resource owner entry, while retaining genuine document authority failures and the original cancellation budgets.

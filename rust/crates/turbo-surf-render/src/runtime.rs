@@ -5080,15 +5080,28 @@ fn run_next_window_timer_in(
             };
         }
     }
+    #[cfg(all(test, not(turbo_surf_native_proxy)))]
+    admission_cancellation_tests::timer_admission_fence(scope, due);
+    admit_window_timer(scope, context)
+}
+
+fn admit_window_timer<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> WindowTimerTurn {
     let task = WindowTimerTask::new(scope, context);
     let active = &mut v8::ContextScope::new(scope, context);
-    let fired = async_owner::with_document(active, context, |active| {
+    let fired = async_owner::with_document_admission(active, context, |active| {
         call_frame_helper(active, "runNextTimer", &[])
             .and_then(|value| value.uint32_value(active))
             .unwrap_or(0)
     })
     .unwrap_or_else(|error| {
-        async_owner::task_failure(active, format!("Timer owner admission: {error}"));
+        #[cfg(all(test, not(turbo_surf_native_proxy)))]
+        admission_cancellation_tests::observe_timer_caller_error(active);
+        if let async_owner::AdmissionError::Authority(error) = error {
+            async_owner::task_failure(active, format!("Timer owner admission: {error}"));
+        }
         0
     });
     WindowTimerTurn {

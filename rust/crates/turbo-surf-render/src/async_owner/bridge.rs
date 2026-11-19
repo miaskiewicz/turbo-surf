@@ -143,8 +143,24 @@ impl OwnerAsyncContext {
             .ok_or(OwnerEntryFailure::Authority)?;
         let scope = &mut v8::ContextScope::new(scope, context);
         let receiver = v8::undefined(scope);
-        if enter.call(scope, receiver.into(), &[token]).is_none() {
-            return Err(if scope.is_execution_terminating() {
+        let (failed, interrupted) = {
+            v8::tc_scope!(let caught, scope);
+            let failed = enter.call(caught, receiver.into(), &[token]).is_none();
+            let interrupted = caught.has_terminated() || caught.is_execution_terminating();
+            #[cfg(all(test, not(turbo_surf_native_proxy)))]
+            if failed {
+                let terminated = caught.has_terminated();
+                super::super::admission_cancellation_tests::observe_timer_admission_error(
+                    caught, terminated,
+                );
+            }
+            if caught.has_caught() || caught.has_terminated() {
+                caught.rethrow();
+            }
+            (failed, interrupted)
+        };
+        if failed {
+            return Err(if interrupted {
                 OwnerEntryFailure::Interrupted
             } else {
                 OwnerEntryFailure::Authority

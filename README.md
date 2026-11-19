@@ -706,6 +706,20 @@ benchmarks (install `playwright` + `crawlee` ad-hoc for the competitor engines).
 
 ### Gates
 
+Branch CI runs automatically when a PR is opened, reopened, or updated, regardless
+of its target branch. A branch push without an open PR does not start CI.
+To run the full CI workflow without a PR, use **Actions → CI → Run workflow** and
+select the branch, or dispatch it with GitHub CLI:
+
+```sh
+gh workflow run ci.yml --repo miaskiewicz/turbo-surf --ref release/v0.8.5
+gh run list --repo miaskiewicz/turbo-surf --workflow ci.yml --branch release/v0.8.5 --event workflow_dispatch
+```
+
+Replace the ref with your branch. It must contain the `workflow_dispatch` trigger;
+merge the latest `main` into older branches first. Manual CI on a branch does not
+publish packages. Release-tag and explicit manual release workflows remain separate.
+
 PR CI (`.github/workflows/ci.yml`) runs on ubuntu:
 
 - **lint + test** on Node 22 (launcher lint, the Rust workspace, and Playwright shim).

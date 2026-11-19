@@ -15,12 +15,9 @@ name: release-dependencies
 
 on:
   pull_request:
-    branches: [main]
     paths:
       - .github/workflows/release-dependencies.yml
       - rust/release-deps/**
-  push:
-    branches: [codex/release-dependencies-v054]
   workflow_dispatch:
     inputs:
       mode:

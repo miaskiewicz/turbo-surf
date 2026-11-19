@@ -25,7 +25,7 @@ async fn real_background_watchdog_preserves_reached_dom_and_allows_a_later_turn(
     .await
     .unwrap();
     let root = page.auxiliary_root_id().unwrap();
-    page.read_engine("setTimeout(()=>{document.getElementById('state').textContent='reached';while(true){}},0);return true;").unwrap();
+    page.read_engine("globalThis.otherTasks=0;setTimeout(()=>{document.getElementById('state').textContent='reached';while(true){}},0);setTimeout(()=>{otherTasks++},100);return true;").unwrap();
     let failure = tokio::time::timeout(
         std::time::Duration::from_secs(3),
         page.poll_background_work(),
@@ -41,13 +41,21 @@ async fn real_background_watchdog_preserves_reached_dom_and_allows_a_later_turn(
     );
     assert_eq!(page.auxiliary_root_id().unwrap(), root);
     page.read_engine("setTimeout(()=>{document.getElementById('state').textContent+=' recovered'},0);return true;").unwrap();
-    tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        page.poll_background_work(),
-    )
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            page.poll_background_work().await?;
+            let state = page.read_engine("return document.getElementById('state').textContent;")?;
+            assert_eq!(page.auxiliary_root_id().unwrap(), root);
+            if state == "\"reached recovered\"" {
+                return Ok::<(), String>(());
+            }
+            assert_eq!(state, "\"reached\"");
+        }
+    })
     .await
     .unwrap()
     .unwrap();
+    assert_eq!(page.read_engine("return otherTasks;").unwrap(), "1");
     assert_eq!(
         page.read_engine("return document.getElementById('state').textContent;")
             .unwrap(),

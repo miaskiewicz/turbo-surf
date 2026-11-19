@@ -6,6 +6,14 @@ Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component pr
 
 All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. Required supporting dependency publication was explicitly authorized and completed; no Surf release tag is authorized.
 
+## Background watchdog recovery — matching-task fixture contract
+
+The background API completes one actual task, which need not be the timer a caller just scheduled. A genuine competing-task control registers the infinite zero-delay task first and a benign 100 ms task second, then keeps the original **500 ms** watchdog operation. After interruption, the benign task is already older than the newly scheduled recovery timer. Under the old single-poll assertion, the actual watchdog error, reached DOM, root identity and benign counter **1** all pass, then the recovered-DOM expectation fails: **0 / 1**. This proves the single-turn assumption is invalid without fabricating clock, ownership or queue state.
+
+The corrected fixture collects real background turns until the actual recovery marker within the same **single 3 s total bound**, propagating errors and checking root identity and unchanged reached state on every intervening turn. It retains the original final DOM assertion and verifies the benign task ran exactly once. The same reordered competing-task control passes **1 / 0**. The earlier candidate that registered the benign timer first could fail before entering the intended watchdog task under load; that receipt is preserved as an **invalid precondition**, not causal RED or a fix failure. Accepted matched source pins are baseline `84c4c2e4` and corrected `c5c1380b`, with receipts under `.worktrees/background-timer-wake-recovery/.recovery/background-wake/competing-reordered-{baseline,on}`.
+
+This is separate from the independently proven ready-wake API bug below. The historical `d813` full-run failure has the same unmet recovery milestone, but its exact completed task was not recorded; neither component claims that missing branch witness. Both component scopes pass focused strict checks; combined full gates remain required.
+
 ## Background timer wake versus task completion — independent API defect
 
 `BackgroundTurn` previously converted an already-ready timer sleep into successful task completion even though no callback had run. The shared parking helper instead documents that it wakes the caller for another poll to select the due task. A deterministic unit contract uses the same genuinely completed Tokio `Sleep` and its deadline, then a counting waker: the wake prerequisite passes, and baseline fails only because it returns `Some(Ready(Ok(())))` instead of remaining pending. No paused clock, synthetic owner or guest bridge is used.

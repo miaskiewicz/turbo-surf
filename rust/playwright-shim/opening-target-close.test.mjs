@@ -70,6 +70,84 @@ for (const mode of ["closed-root", "closed-root-and-popup", "open", "status-erro
     }
   });
 
+for (const mode of ["closed-root", "closed-root-and-popup", "replaced-root", "live-native-fault"])
+  test(
+    `rejected actor attachment retains lifecycle ownership: ${mode}`,
+    { timeout: 10000 },
+    async () => {
+      const server = createServer((_request, response) =>
+        response.end(
+          '<title>attachment rejection</title><script>window.open("about:blank")</script>',
+        ),
+      );
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const context = new BrowserContext();
+      const page = await context.newPage();
+      const attached = deferred();
+      const release = deferred();
+      const attach = context._attachActor.bind(context);
+      const nativeFault = new Error("no such live session");
+      let actualFailure;
+      context._attachActor = async (target, session, opening) => {
+        await attach(target, session, opening);
+        if (target !== page || opening) return;
+        attached.resolve();
+        await release.promise;
+        if (mode === "live-native-fault" || mode === "replaced-root") throw nativeFault;
+        try {
+          native.liveSerialize(session);
+        } catch (error) {
+          actualFailure = error;
+          throw error;
+        }
+        assert.fail("the retired root alias must reject a real native read");
+      };
+      let navigation;
+      try {
+        const popupEvent = page.waitForEvent("popup");
+        navigation = page.goto(`http://127.0.0.1:${server.address().port}`, {
+          waitUntil: "networkidle",
+        });
+        navigation.catch(() => {});
+        const [popup] = await Promise.all([popupEvent, attached.promise]);
+        if (mode === "closed-root") await page.close();
+        if (mode === "closed-root-and-popup") await Promise.all([page.close(), popup.close()]);
+        if (mode === "replaced-root") {
+          await page.goto(`http://127.0.0.1:${server.address().port}/replacement`);
+          release.resolve();
+          await assert.rejects(navigation, (error) => {
+            assert.match(error.message, /changed during initialization/);
+            assert.equal(error.cause, nativeFault);
+            return true;
+          });
+          assert.equal(page.isClosed(), false);
+          assert.equal(await page.title(), "attachment rejection");
+        } else if (mode === "live-native-fault") {
+          assert.equal(page.isClosed(), false);
+          release.resolve();
+          await assert.rejects(navigation, (error) => error === nativeFault);
+        } else {
+          assert.equal(page.isClosed(), true);
+          release.resolve();
+          await assert.rejects(navigation, (error) => {
+            assert.match(error.message, /closed|cancel/i);
+            assert.equal(error.cause, actualFailure);
+            return true;
+          });
+          if (mode === "closed-root") assert.equal(await popup.evaluate(() => 42), 42);
+          else assert.equal(popup.isClosed(), true);
+        }
+      } finally {
+        release.resolve();
+        await navigation?.catch(() => {});
+        context._attachActor = attach;
+        await context.close();
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    },
+  );
+
 for (const mode of ["fetch", "classic-script"])
   test(
     `closing an opening root cancels its ${mode} body and preserves its actual popup`,

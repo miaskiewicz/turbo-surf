@@ -2870,10 +2870,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (native.liveAuxiliaryState) await this._context._attachActor(this, opening.id, true);
   }
 
-  async _completeActorOpen(session) {
+  async _completeActorOpen(session, opening = this._openingSession) {
     if (!native.liveAuxiliaryState) return;
+    this._assertInitialOpening(opening);
     this._actorHub.opening = false;
-    await this._context._attachActor(this, session);
+    try {
+      await this._context._attachActor(this, session);
+    } catch (error) {
+      // Target retirement can reject attachment before its normal post-await
+      // ownership check. Preserve the native error when this opening is still live.
+      this._assertInitialOpening(opening, { cause: error });
+      throw error;
+    }
   }
 
   async _failedActorOpen(opening) {
@@ -2939,14 +2947,14 @@ return String(globalThis.__RESULT ?? ""); })()`,
     );
   }
 
-  _assertInitialOpening(opening) {
-    this._throwIfOpeningClosed();
+  _assertInitialOpening(opening, options) {
+    this._throwIfOpeningClosed(options);
     if (!this._ownsInitialOpening(opening))
-      throw new Error("Page session changed during initialization");
+      throw new Error("Page session changed during initialization", options);
   }
 
-  _throwIfOpeningClosed() {
-    if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
+  _throwIfOpeningClosed(options) {
+    if (this._closed || this._openingClosePromise) throw new Error("Page session closed", options);
   }
 
   async _startLiveSession(timeoutMs, opening) {
@@ -2979,7 +2987,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._session = session;
       opening.session = session;
       opening.targetId = this._targetId;
-      await this._completeActorOpen(session);
+      await this._completeActorOpen(session, opening);
       this._assertInitialOpening(opening);
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);

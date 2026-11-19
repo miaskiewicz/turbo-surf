@@ -212,3 +212,66 @@ test("hard execution interruption propagates the original error after cached dia
     await context.close();
   }
 });
+
+test("failed cached hydration diagnostics cannot replace a hard interruption", async (t) => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent("<!doctype html><p>State retained before interruption</p>");
+    const interruption = new Error("Execution interrupted by the session execution budget");
+    const collect = page._collectSession;
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(interruption);
+    };
+    t.mock.method(native, "liveInitialHydrationStatus", () => {
+      throw new Error("diagnostic transport unavailable");
+    });
+    await assert.rejects(page._redrain(), (error) => error === interruption);
+    assert.ok(page._html.includes("State retained before interruption"));
+    assert.equal(interruption.hydrationDiagnostics, undefined);
+  } finally {
+    await context.close();
+  }
+});
+
+test("primitive hard interruption rejection retains its identity", async () => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent("<!doctype html><p>Reached state</p>");
+    const interruption = "Execution interrupted by the session execution budget";
+    const collect = page._collectSession;
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(interruption);
+    };
+    await assert.rejects(page._redrain(), (error) => error === interruption);
+    assert.ok(page._html.includes("Reached state"));
+  } finally {
+    await context.close();
+  }
+});
+
+test("aggregate drain expiry still refreshes state from the actual live document", async () => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent("<!doctype html><p>Actual live document</p>");
+    page._html = "<p>Old serialized state</p>";
+    const collect = page._collectSession;
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(new Error("Driver collection exceeded its aggregate drain budget"));
+    };
+    await page._redrain();
+    assert.ok(page._html.includes("Actual live document"));
+    assert.ok(!page._html.includes("Old serialized state"));
+    assert.equal(await page.locator("p").textContent(), "Actual live document");
+  } finally {
+    await context.close();
+  }
+});

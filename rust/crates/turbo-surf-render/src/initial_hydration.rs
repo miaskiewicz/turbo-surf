@@ -144,24 +144,24 @@ impl PageSession {
         let budget = remaining.map_or(self.budget_ms, |time| {
             self.budget_ms.min(time.as_millis().max(1) as u64)
         });
-        let guard = Watchdog::start(self.rt.v8_isolate(), budget);
+        let execution = AsyncEntryBudget::new(self.rt.v8_isolate(), budget, pending.deadline);
         let base = self.rt.op_state().borrow().borrow::<Base>().0.clone();
-        let result = with_async_execution_budget(
-            true,
-            budget,
-            &guard.exceeded,
-            resume_host_hydration_until(&mut self.rt, &base, InitialHydrationGoal::Load),
-        )
-        .await;
-        let exceeded = guard.exceeded.clone();
-        drop(guard);
-        let exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        let result = execution
+            .run(
+                true,
+                resume_host_hydration_until(&mut self.rt, &base, InitialHydrationGoal::Load),
+            )
+            .await;
+        let outcome = execution.finish();
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        if outcome.interrupted {
+            return Err(outcome.error(String::new()));
+        }
         if !validate(&mut self.rt, &pending)? {
             return Ok(InitialHydrationOutcome::Superseded);
         }
-        if exceeded {
+        if outcome.exceeded {
             return Err(format!(
                 "navigation timeout after {}ms",
                 pending.timeout_ms.unwrap_or(self.budget_ms)

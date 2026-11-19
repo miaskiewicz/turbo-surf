@@ -18836,6 +18836,16 @@ impl Watchdog {
             .is_some_and(|active| active.0.iter().any(|flag| flag.strong_count() > 0))
     }
     fn start(isolate: &mut v8::Isolate, budget_ms: u64) -> Self {
+        Self::start_clock(isolate, budget_ms, None)
+    }
+    fn until(isolate: &mut v8::Isolate, deadline: std::time::Instant) -> Self {
+        Self::start_clock(isolate, 0, Some(deadline))
+    }
+    fn start_clock(
+        isolate: &mut v8::Isolate,
+        budget_ms: u64,
+        absolute: Option<std::time::Instant>,
+    ) -> Self {
         let handle = isolate.thread_safe_handle();
         use std::sync::atomic::Ordering;
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -18855,7 +18865,10 @@ impl Watchdog {
         let thread = std::thread::spawn(move || {
             let start = std::time::Instant::now();
             while !watch.load(Ordering::Relaxed) {
-                if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                if absolute.map_or_else(
+                    || start.elapsed() >= std::time::Duration::from_millis(budget_ms),
+                    |deadline| std::time::Instant::now() >= deadline,
+                ) {
                     timed_out.store(true, Ordering::Relaxed);
                     // Nested native callbacks can clear V8's termination state.
                     // Keep the deadline enforced until the owner joins this guard.
@@ -18923,8 +18936,11 @@ mod watchdog_cancellation_tests {
 #[path = "runtime/execution_budget.rs"]
 mod execution_budget;
 use execution_budget::PollExecutionBudget;
+#[path = "runtime/async_entry_budget.rs"]
+mod async_entry_budget;
 #[path = "runtime/target_quiescence.rs"]
 mod target_quiescence;
+use async_entry_budget::AsyncEntryBudget;
 
 // The V8 watchdog interrupts synchronous work; an opted-in async deadline also
 // wakes a session awaiting a timer or native I/O beyond that same budget.
@@ -19665,6 +19681,7 @@ impl PageSession {
             .initial_hydration_budget_ms
             .map_or(budget_ms, |limit| limit.min(budget_ms));
         let initial_goal = options.initial_hydration_goal;
+        let caller_deadline = options.initial_hydration_deadline;
         initial_hydration::begin(
             &mut rt,
             initial_goal,
@@ -19677,29 +19694,28 @@ impl PageSession {
             initial_hydration_deadline: None,
             ..options
         };
-        let watchdog = Watchdog::start(rt.v8_isolate(), initial_budget_ms);
-        let exceeded = watchdog.exceeded.clone();
+        rt.op_state().borrow_mut().put(HydrationProgress::default());
+        let execution = AsyncEntryBudget::new(rt.v8_isolate(), initial_budget_ms, caller_deadline);
         rt.park();
         let key = rt.activation_key();
-        let result = with_async_execution_budget(
-            enforce_initial_deadline,
-            initial_budget_ms,
-            &exceeded,
-            key.during(hydrate_installed_document(
-                &mut rt,
-                base,
-                init_script,
-                initial_goal,
-            )),
-        )
-        .await;
-        drop(watchdog);
+        let result = execution
+            .run(
+                enforce_initial_deadline,
+                key.during(hydrate_installed_document(
+                    &mut rt,
+                    base,
+                    init_script,
+                    initial_goal,
+                )),
+            )
+            .await;
+        let outcome = execution.finish();
         if let Some(inventory) = &mut script_inventory {
             let _activation = key.enter();
             inventory.stop_profile();
             inventory.flush();
         }
-        let budget_exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        let budget_exceeded = outcome.exceeded;
         let progress = rt.op_state().borrow().borrow::<HydrationProgress>().clone();
         let unsupported_csp = {
             let _activation = rt.activation_key().enter();
@@ -19722,7 +19738,9 @@ impl PageSession {
                     budget_exceeded,
                     progress,
                     open_error: budget_exceeded.then(|| {
-                        format!("Hydration exceeded its {initial_budget_ms}ms execution budget")
+                        outcome.error(format!(
+                            "Hydration exceeded its {initial_budget_ms}ms execution budget"
+                        ))
                     }),
                     unsupported_csp,
                 },
@@ -19747,11 +19765,11 @@ impl PageSession {
                     hydration_diagnostics: HydrationDiagnostics {
                         budget_exceeded,
                         progress,
-                        open_error: Some(if budget_exceeded {
+                        open_error: Some(outcome.error(if budget_exceeded {
                             format!("render budget exceeded ({initial_budget_ms}ms): {e}")
                         } else {
                             e
-                        }),
+                        })),
                         unsupported_csp,
                     },
                     budget_ms,

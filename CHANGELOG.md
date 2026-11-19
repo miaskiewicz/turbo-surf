@@ -2,6 +2,8 @@
 
 ## [0.8.5] - 2026-11-19
 
+- Stop initial hydration and host-reply continuation at safe aggregate budget boundaries, while retaining hard execution limits and the original explicit caller deadline. Report pre-expired openings with truthful zero-pump progress instead of panicking.
+
 - Reuse observed fulfilled and rejected Promise states in native async-work bookkeeping, avoiding repeated V8 reads while retaining live checks for pending and unknown Promises.
 
 - Preserve executable permissions for native npm CLI binaries on macOS and Linux before creating the platform tarballs.

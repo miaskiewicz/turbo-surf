@@ -11,6 +11,12 @@ images, and pre-load host replies, while retaining later background work in the
 same actor. Explicit network-idle waits still require idle work. Rust and MCP
 openings default to full hydration quiescence, as do later interaction drains.
 
+Initial hydration and its host-reply continuation stop internal aggregate drains
+between future polls. A single uninterrupted execution remains hard bounded, and
+an explicit caller deadline remains an independent hard deadline. An opening
+whose caller deadline has already expired reports document-loading progress with
+zero pumps and executes no guest scripts.
+
 Initial continuation is bound to the original native document and the caller's
 original deadline. Native execution segments retain the session execution cap;
 replacing or closing the document rejects the old continuation. The cached

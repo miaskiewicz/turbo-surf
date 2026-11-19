@@ -91,6 +91,17 @@ pub struct WorkSnapshot {
     pub tracking_error: Option<&'static str>,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+struct PruneMeasurements {
+    calls: usize,
+    candidates: usize,
+    ancestors: usize,
+    retained_candidates: usize,
+    peak_candidates: usize,
+    live_after_prune: usize,
+}
+
 pub struct PromiseWork {
     key: v8::Global<v8::Private>,
     sequence: u32,
@@ -98,7 +109,10 @@ pub struct PromiseWork {
     ops: HashMap<(i32, u64), NativeOp>,
     inconsistent_owners: bool,
     tracking_error: Option<&'static str>,
-    maintenance: u16,
+    maintenance: usize,
+    next_maintenance: usize,
+    #[cfg(test)]
+    prune_measurements: PruneMeasurements,
 }
 
 impl PromiseWork {
@@ -112,6 +126,9 @@ impl PromiseWork {
             inconsistent_owners: false,
             tracking_error: None,
             maintenance: 0,
+            next_maintenance: 1024,
+            #[cfg(test)]
+            prune_measurements: PruneMeasurements::default(),
         }
     }
 
@@ -183,9 +200,8 @@ impl PromiseWork {
             // use the hook alone to declare a Promise settled.
             PromiseTurn::Before | PromiseTurn::Resolve => {}
         }
-        self.maintenance += 1;
-        if self.maintenance == 1024 {
-            self.maintenance = 0;
+        self.maintenance = self.maintenance.saturating_add(1);
+        if self.maintenance >= self.next_maintenance {
             self.prune(scope);
         }
     }
@@ -376,25 +392,63 @@ impl PromiseWork {
     }
 
     pub fn prune(&mut self, scope: &mut v8::PinScope) {
+        self.maintenance = 0;
+        #[cfg(test)]
+        let candidates = Cell::new(0);
         let mut keep: HashSet<u32> = self
             .nodes
             .keys()
             .copied()
-            .filter(|id| self.pending(scope, *id))
+            .filter(|id| {
+                #[cfg(test)]
+                candidates.set(candidates.get() + 1);
+                self.pending(scope, *id)
+            })
             .collect();
         keep.extend(self.ops.values().map(|op| op.node));
         let mut frontier: Vec<_> = keep.iter().copied().collect();
+        #[cfg(test)]
+        let mut ancestors = 0;
         while let Some(id) = frontier.pop() {
+            #[cfg(test)]
+            {
+                ancestors += 1;
+            }
             if let Some(parent) = self.nodes.get(&id).and_then(|node| node.parent) {
                 if keep.insert(parent) {
                     frontier.push(parent);
                 }
             }
         }
-        self.nodes.retain(|id, _| keep.contains(id));
+        #[cfg(test)]
+        let retained_candidates = Cell::new(0);
+        self.nodes.retain(|id, _| {
+            #[cfg(test)]
+            retained_candidates.set(retained_candidates.get() + 1);
+            keep.contains(id)
+        });
+        // Charge graph-wide maintenance in proportion to the live graph, while
+        // keeping a small graph responsive to collected/settled nodes.
+        self.next_maintenance = (self.nodes.len() / 4).max(1024);
+        #[cfg(test)]
+        {
+            self.prune_measurements.calls += 1;
+            self.prune_measurements.peak_candidates = self
+                .prune_measurements
+                .peak_candidates
+                .max(candidates.get());
+            self.prune_measurements.live_after_prune = self.nodes.len();
+            self.prune_measurements.candidates += candidates.get();
+            self.prune_measurements.ancestors += ancestors;
+            self.prune_measurements.retained_candidates += retained_candidates.get();
+        }
     }
 }
 
 #[cfg(all(test, not(turbo_surf_native_proxy)))]
 #[path = "work_terminal_cache_tests.rs"]
 mod terminal_cache_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "work_prune_scaling_tests.rs"]
+mod prune_scaling_tests;

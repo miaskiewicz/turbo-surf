@@ -3,6 +3,7 @@
 ## [0.8.5] - 2026-11-19
 
 - Stop initial hydration and host-reply continuation at safe aggregate budget boundaries, while retaining hard execution limits and the original explicit caller deadline. Report pre-expired openings with truthful zero-pump progress instead of panicking.
+- Amortize native Promise graph maintenance against the retained graph size, preserving pending work and ancestor ownership while avoiding repeated whole-graph scans in large reaction bursts.
 
 - Reuse observed fulfilled and rejected Promise states in native async-work bookkeeping, avoiding repeated V8 reads while retaining live checks for pending and unknown Promises.
 

@@ -19797,7 +19797,7 @@ impl PageSession {
     async fn eval_active(&mut self, script: &str, engine: bool) -> Result<String, String> {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
-        let drained = {
+        let (drained, exceeded) = {
             let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
             let drained = with_async_execution_budget(
                 self.options.window_timer_mode == WindowTimerMode::RealTime,
@@ -19819,14 +19819,15 @@ impl PageSession {
             let before_terminating = self.rt.v8_isolate().is_execution_terminating();
             let exceeded = watchdog.exceeded.clone();
             drop(watchdog);
+            let exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
             if let Err(error) = &drained {
                 eprintln!(
                     "ACTION_RECOVERY_DIAG eval_active before_join_exceeded={before_exceeded} before_join_terminating={before_terminating} after_join_exceeded={} after_join_terminating={} error={error:?}",
-                    exceeded.load(std::sync::atomic::Ordering::Relaxed),
+                    exceeded,
                     self.rt.v8_isolate().is_execution_terminating(),
                 );
             }
-            drained
+            (drained, exceeded)
         };
         // The watchdog may have terminated mid-drain. Clear that terminate state so the
         // isolate is usable again, then read the result BEST-EFFORT: an interaction's
@@ -19845,7 +19846,7 @@ impl PageSession {
             return Err(drained.err().unwrap_or(error));
         }
         let result = match drained {
-            Err(e) if !(e.contains("terminat") || e.contains("execution")) => Err(e),
+            Err(e) if !exceeded && !(e.contains("terminat") || e.contains("execution")) => Err(e),
             _ => private_infrastructure::execute(&mut self.rt, READ)
                 .map_err(|e| budget_msg(&e, budget))
                 .and_then(|g| read_string(&mut self.rt, g)),

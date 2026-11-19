@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -148,6 +148,113 @@ test("CLI forwards explicit alias preloads through isolated attempts", async () 
     );
     assert.match(result.stdout, /# pass 1/);
     assert.equal(await readFile(join(directory, "body.txt"), "utf8"), "passed");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+async function runArtifactCli(directory) {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_OPTIONS;
+  return exec(process.execPath, [cli, "--config", join(directory, "playwright.config.mjs")], {
+    env,
+    cwd: directory,
+    timeout: 20000,
+  });
+}
+
+test("real CLI preserves same-named artifacts across files, projects and retries", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "surf-output-attempts-"));
+  const artifactName = `${basename(directory)}-failure.json`;
+  try {
+    await mkdir(join(directory, "specs/left"), { recursive: true });
+    await mkdir(join(directory, "specs/right"), { recursive: true });
+    await writeFile(
+      join(directory, "playwright.config.mjs"),
+      `export default { testDir:'specs',testMatch:'**/*.spec.mjs',workers:2,retries:1,outputDir:'artifacts',projects:[{name:'alpha/a'},{name:'alpha-a',outputDir:'alternate'}] };`,
+    );
+    const manifest = join(directory, "attempts.jsonl");
+    const source = `import {test} from '@playwright/test';
+      import {writeFileSync,appendFileSync} from 'node:fs';import {fileURLToPath} from 'node:url';
+      test.describe('shared suite',()=>{
+        test.afterEach((_fixtures,info)=>{
+          const data={actualFile:fileURLToPath(import.meta.url),file:info.file,project:info.project.name,retry:info.retry,titlePath:info.titlePath,outputDir:info.outputDir,status:info.status};
+          const path=info.outputPath(${JSON.stringify(artifactName)});
+          writeFileSync(path,JSON.stringify(data));
+          appendFileSync(${JSON.stringify(manifest)},JSON.stringify({path,data})+'\\n');
+        });
+        test('same title',(_fixtures,info)=>{if(info.retry===0)throw Error('intentional first-attempt failure')});
+      });`;
+    for (const side of ["left", "right"])
+      await writeFile(join(directory, "specs", side, "same.spec.mjs"), source);
+    await runArtifactCli(directory);
+    const rows = (await readFile(manifest, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(rows.length, 8);
+    assert.equal(
+      new Set(rows.map((row) => row.path)).size,
+      8,
+      "every real test/project/retry must retain its own artifact",
+    );
+    for (const row of rows) {
+      assert.equal(basename(row.path), artifactName);
+      const expectedRoot = join(
+        directory,
+        row.data.project === "alpha/a" ? "artifacts" : "alternate",
+      );
+      assert.equal(dirname(row.data.outputDir), expectedRoot);
+      assert.equal(dirname(row.path), row.data.outputDir);
+      assert.equal(row.data.file, row.data.actualFile);
+      assert.deepEqual(row.data.titlePath, [
+        relative(await realpath(join(directory, "specs")), row.data.actualFile),
+        "shared suite",
+        "same title",
+      ]);
+      assert.equal(row.data.status, row.data.retry === 0 ? "failed" : "passed");
+      assert.deepEqual(JSON.parse(await readFile(row.path, "utf8")), row.data);
+    }
+    assert.equal(new Set(rows.map((row) => row.data.actualFile)).size, 2);
+    assert.deepEqual([...new Set(rows.map((row) => row.data.retry))].sort(), [0, 1]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    await rm(join("/tmp", artifactName), { force: true });
+  }
+});
+
+test("real CLI defaults to contained test-results paths and rejects symlink escapes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "surf-output-containment-"));
+  try {
+    await mkdir(join(directory, "specs"));
+    await writeFile(
+      join(directory, "playwright.config.mjs"),
+      "export default {testDir:'specs',testMatch:'*.spec.mjs',workers:1};",
+    );
+    const report = join(directory, "result.json");
+    await writeFile(
+      join(directory, "specs/contained.spec.mjs"),
+      `import {test} from '@playwright/test';import assert from 'node:assert/strict';import {writeFileSync,mkdirSync,symlinkSync,readdirSync} from 'node:fs';import {join} from 'node:path';
+      test('contained output',(_fixtures,info)=>{
+        const outside=${JSON.stringify(join(directory, "outside"))};mkdirSync(outside);
+        assert.throws(()=>info.outputPath('..','escaped.json'),/output directory/i);
+        assert.throws(()=>info.outputPath(outside,'absolute.json'),/output directory/i);
+        assert.throws(()=>info.outputPath(info.outputDir+'-sibling','prefix.json'),/output directory/i);
+        const nested=info.outputPath('nested','kept.json');writeFileSync(nested,'owned');
+        assert.equal(info.outputPath(join(info.outputDir,'nested','kept.json')),nested);
+        assert.equal(info.outputPath(),info.outputDir);
+        symlinkSync(outside,info.outputPath('jump'),process.platform==='win32'?'junction':'dir');
+        assert.throws(()=>info.outputPath('jump','escaped.json'),/symbolic link/i);
+        assert.deepEqual(readdirSync(outside),[]);
+        writeFileSync(${JSON.stringify(report)},JSON.stringify({outputDir:info.outputDir,nested,file:info.file}));
+      });`,
+    );
+    await runArtifactCli(directory);
+    const result = JSON.parse(await readFile(report, "utf8"));
+    assert.equal(dirname(result.outputDir), join(directory, "test-results"));
+    assert.equal(result.file, await realpath(join(directory, "specs/contained.spec.mjs")));
+    assert.equal(await readFile(result.nested, "utf8"), "owned");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

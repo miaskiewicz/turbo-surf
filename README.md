@@ -83,12 +83,10 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-Status: **v0.8.4 release candidate in progress**.
-This release branch pins the shared DOM crates to the exact revision recorded in
-[CHANGELOG.md](./CHANGELOG.md); the resolved DOM version is 0.8.4. This is not a
-claim that v0.8.4 has been published or that final integrated validation is green.
-Registry install commands select published artifacts; use a source build and its
-local launcher/runner to exercise this unreleased candidate.
+Status: **v0.8.4 release**.
+Version 0.8.4 uses the published turbo-dom 0.8.4 crates. See
+[CHANGELOG.md](./CHANGELOG.md) for release changes and
+[PUBLISHING.md](./PUBLISHING.md) for release validation and artifact verification.
 The engine includes hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl

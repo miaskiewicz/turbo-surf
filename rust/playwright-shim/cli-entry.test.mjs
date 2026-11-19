@@ -259,3 +259,112 @@ test("real CLI defaults to contained test-results paths and rejects symlink esca
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("real CLI forwards merged project settings to each isolated test process", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "surf-project-settings-"));
+  try {
+    await mkdir(join(directory, "specs"));
+    const report = join(directory, "projects.jsonl");
+    await writeFile(
+      join(directory, "playwright.config.mjs"),
+      `export default {testDir:'specs',testMatch:'*.spec.mjs',workers:2,timeout:4321,retries:1,outputDir:'artifacts',use:{baseURL:'http://base.example.test',locale:'en-GB',userAgent:'inherited-agent',testIdAttribute:'data-base-id'},projects:[{name:'inherited',workers:1},{name:'override',timeout:5432,retries:2,outputDir:'alternate',use:{locale:'fr-FR',userAgent:'override-agent',testIdAttribute:'data-project-id'}}]};`,
+    );
+    await writeFile(
+      join(directory, "specs/settings.spec.mjs"),
+      `import test from 'node:test';import {appendFileSync} from 'node:fs';
+      test('actual project process',()=>appendFileSync(${JSON.stringify(report)},JSON.stringify({name:process.env.TURBO_PW_PROJECT_NAME,project:JSON.parse(process.env.TURBO_PW_PROJECT),execution:JSON.parse(process.env.TURBO_PW_EXECUTION),use:JSON.parse(process.env.TURBO_PW_USE),baseURL:process.env.TURBO_SHIM_BASE_URL,locale:process.env.TURBO_SHIM_LOCALE,userAgent:process.env.TURBO_SHIM_USER_AGENT,testIdAttribute:process.env.TURBO_SHIM_TESTID_ATTR,nodeOptions:process.env.NODE_OPTIONS,args:process.execArgv})+'\\n'));`,
+    );
+    await runArtifactCli(directory);
+    const rows = (await readFile(report, "utf8")).trim().split("\n").map(JSON.parse);
+    assert.deepEqual(
+      rows.map((row) => row.name),
+      ["inherited", "override"],
+    );
+    for (const row of rows) {
+      const overridden = row.name === "override";
+      const use = {
+        baseURL: "http://base.example.test",
+        locale: overridden ? "fr-FR" : "en-GB",
+        userAgent: overridden ? "override-agent" : "inherited-agent",
+        testIdAttribute: overridden ? "data-project-id" : "data-base-id",
+      };
+      assert.deepEqual(row.use, use);
+      for (const [key, value] of Object.entries(use)) assert.equal(row[key], value);
+      assert.deepEqual(row.project, {
+        name: row.name,
+        testDir: join(directory, "specs"),
+        outputDir: join(directory, overridden ? "alternate" : "artifacts"),
+      });
+      assert.deepEqual(row.execution, {
+        timeout: overridden ? 5432 : 4321,
+        retries: overridden ? 2 : 1,
+      });
+      assert.equal(row.nodeOptions, undefined);
+      assert.ok(row.args.includes(`--test-concurrency=${overridden ? 2 : 1}`));
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("real CLI runs global teardown when the setup cleanup rejects", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "surf-cleanup-rejection-"));
+  try {
+    await mkdir(join(directory, "specs"));
+    const order = join(directory, "order.txt");
+    await writeFile(
+      join(directory, "playwright.config.mjs"),
+      `export default {testDir:'specs',testMatch:'*.spec.mjs',workers:1,globalSetup:'./setup.mjs',globalTeardown:'./teardown.mjs'};`,
+    );
+    await writeFile(
+      join(directory, "setup.mjs"),
+      `import {appendFileSync} from 'node:fs';export default ()=>{appendFileSync(${JSON.stringify(order)},'setup\\n');return ()=>{appendFileSync(${JSON.stringify(order)},'cleanup\\n');throw Error('owned setup cleanup rejected')}};`,
+    );
+    await writeFile(
+      join(directory, "teardown.mjs"),
+      `import {appendFileSync} from 'node:fs';export default ()=>appendFileSync(${JSON.stringify(order)},'teardown\\n');`,
+    );
+    await writeFile(
+      join(directory, "specs/body.spec.mjs"),
+      `import test from 'node:test';import {appendFileSync} from 'node:fs';test('body completes',()=>appendFileSync(${JSON.stringify(order)},'body\\n'));`,
+    );
+    await assert.rejects(runArtifactCli(directory), (error) => {
+      assert.equal(error.code, 1);
+      assert.match(error.stdout, /body completes/);
+      assert.match(error.stderr, /owned setup cleanup rejected/);
+      return true;
+    });
+    assert.equal(await readFile(order, "utf8"), "setup\nbody\ncleanup\nteardown\n");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("real CLI HTML reports actual pass, failure and skip results with escaped names", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "surf-html-outcomes-"));
+  try {
+    await mkdir(join(directory, "specs"));
+    const report = join(directory, "actual-results.html");
+    await writeFile(
+      join(directory, "playwright.config.mjs"),
+      `export default {testDir:'specs',testMatch:'*.spec.mjs',workers:1,reporter:[['html',{outputFile:${JSON.stringify(report)}}]]};`,
+    );
+    await writeFile(
+      join(directory, "specs/outcomes.spec.mjs"),
+      `import test from 'node:test';test('passing <button>&',()=>{});test.skip('skipped <button>&',()=>{throw Error('skipped body ran')});test('failing <button>&',()=>{throw Error('expected child failure')});`,
+    );
+    await assert.rejects(runArtifactCli(directory), (error) => {
+      assert.equal(error.code, 1);
+      assert.match(error.stdout, /expected child failure/);
+      return true;
+    });
+    const html = await readFile(report, "utf8");
+    assert.match(html, /1 passed · 1 failed · 1 skipped/);
+    for (const label of ["passing", "skipped", "failing"])
+      assert.ok(html.includes(`${label} &lt;button&gt;&amp;`));
+    assert.equal(html.includes("<button>"), false);
+    assert.equal(html.includes("skipped body ran"), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

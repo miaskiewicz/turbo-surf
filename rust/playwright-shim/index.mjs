@@ -1112,12 +1112,15 @@ class Locator {
             (node) => node.node === match.node,
           );
     if (index == null) return null;
-    const script = `globalThis.__RESULT = (() => {
+    const expression = `(() => {
       try { const element = ${live ? "__tsNs.tcLocatorAll()" : "document.querySelectorAll('*')"}[${index}];
         return JSON.stringify({value: element ? (${fn.toString()})(element) : null});
       } catch (error) { return JSON.stringify({error: String(error.message)}); }
     })()`;
-    const raw = live ? await this._page._evalEngine(script) : native.evaluate(this._html, script);
+    // A DOM accessor observes reached state without settling unrelated page work.
+    const raw = live
+      ? await this._page._readEngineAsync(`return ${expression};`)
+      : native.evaluate(this._html, `globalThis.__RESULT = ${expression}`);
     const result = JSON.parse(raw);
     if (result.error) throw new Error(result.error);
     return result.value;

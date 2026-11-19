@@ -87,6 +87,26 @@ test(
 );
 
 test(
+  "live element reads observe loaded state while the same page retains a held response",
+  { timeout: 10000 },
+  async (t) => {
+    const f = await boundaryFixture(false);
+    t.after(() => f.close());
+    const navigation = f.page.goto(f.origin, { waitUntil: "load", timeout: 1500 });
+    navigation.catch(() => {});
+    await Promise.all([f.loaded, f.requested]);
+    await navigation;
+    const heading = f.page.locator("h1");
+    assert.equal(await heading.innerText(), "Before");
+    assert.equal(await heading.innerHTML(), "Before");
+    assert.equal(await heading.isEnabled(), true);
+    assert.equal(await heading.isEmpty(), false);
+    assert.deepEqual(f.state, { released: false, requests: 1 });
+    await delivered(f);
+  },
+);
+
+test(
   "a genuine exposed-function rejection reaches the authored module before load",
   { timeout: 10000 },
   async (t) => {

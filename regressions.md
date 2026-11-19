@@ -4,7 +4,15 @@ Target: `release/v0.8.4`. Updated 2026-11-19.
 
 Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component proof and their fixes are merged.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.
 
-All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. Required supporting dependency publication was explicitly authorized and completed; no Surf release tag is authorized.
+All additional bugs found during this work are explicitly in scope and tracked below until fixed and validated. No deferrals. Payroll/backend/frontend tests and service changes remain paused until a new express go-ahead. Required supporting dependency publication was explicitly authorized and completed; Surf publication is authorized only after the final release gates and artifact proofs pass.
+
+## Latest integrated repair batch — final gates pending
+
+The current batch adds the actual actor-opening readiness barrier, final-refresh close guard and initial-navigation network-idle wait. Genuine native controls reproduce each defect before its fix; the registered opening/close controls and existing network-idle controls pass **19 / 0**, with the original tests and timeout limits retained. These component results do not replace the next complete JS run.
+
+Timer-owner recovery now preserves the actual caught termination exception and uses typed interruption provenance without clearing genuine authority failures. The matched native baseline fails, the fix passes **12** resource/timer/private-owner/quiescence controls, a caller-only inverse fails while preserving the catch/rethrow, and the exact restored source passes all **12** again. Clippy, formatting and complexity checks pass. The separate background API and matching-task fixture repairs below also have component proof.
+
+The ongoing older frozen `d813` full Rust run has observed failures in `coverage_background_recovery` and `target_network_state::background_turn_waits_for_real_timer_and_can_be_interrupted`. It continues without fail-fast. The latter single-poll assertion is being checked on the repaired background API; its cause is not inferred from the shared symptom. Old `d813` package, Python and binary artifacts retain their recorded source identity and must not be relabelled as artifacts for new native source.
 
 ## Background watchdog recovery — matching-task fixture contract
 
@@ -20,7 +28,7 @@ This is separate from the independently proven ready-wake API bug below. The his
 
 The narrow fix leaves the caller pending after that ready wake; the helper already requests the next poll. Baseline **0 / 1** becomes **1 / 0**, and the original unchanged real-PageSession recovery control passes with its original **500 ms** operation budget and **3 s** outer bound. Adjacent form-admission and realtime timer controls pass **17 / 0**. Focused Render library/recovery-target and NAPI library Clippy checks with denied warnings, formatting and CC15 all pass; the combined all-target sweep remains a final-gate obligation. Private-target receipts are under `.worktrees/background-timer-wake-recovery/.recovery/background-wake/{baseline,on,competing-on}`. This independent production defect does not prove which task completed in the historical `d813` full-run recovery failure; the separate fixture contract is tracked when its correction is integrated.
 
-## Current integrated repair snapshot — 2026-11-19
+## Earlier integrated repair snapshot — 2026-11-19
 
 Canonical local source `203bf5da8b1251584f3f070fe1108c392a3903e9` contains the following reviewed repairs. They are **FIX READY / WAIT NEW COMBINED LINUX AND LOCAL FULL GATES**, not a publish-ready or new combined-suite result. Diagnostic cleanup and final source freeze are still separate pending steps.
 

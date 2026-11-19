@@ -15,6 +15,9 @@ import tarfile
 SPEC = importlib.util.spec_from_file_location('release_smoke', Path(__file__).with_name('smoke-mcp-release.py'))
 SMOKE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SMOKE)
+INSTALL_SPEC = importlib.util.spec_from_file_location('installed_npm_smoke', Path(__file__).with_name('smoke-installed-npm.py'))
+INSTALLED = importlib.util.module_from_spec(INSTALL_SPEC)
+INSTALL_SPEC.loader.exec_module(INSTALLED)
 PLATFORMS = {
     'darwin-arm64': ('darwin', 'arm64', 'turbo-surf-mcp', 'turbo-surf.darwin-arm64.node'),
     'linux-x64': ('linux', 'x64', 'turbo-surf-mcp', 'turbo-surf.linux-x64-gnu.node'),
@@ -166,6 +169,11 @@ def smoke_tarballs(thin, platform, output, version, commit, checkout):
     return {'entrypoint': str(cli), 'extractedPackage': str(installed), 'platformPackage': str(target), 'receipt': receipt}
 
 
+def smoke_installed_tarballs(thin, platform, output, version, commit):
+    # The registered signal handler and the child supervisor must share ownership.
+    return INSTALLED.smoke(thin['archive'], platform['archive'], output, version, commit, SMOKE.smoke)
+
+
 def prepare(root, artifacts, output, version, commit):
     output.mkdir(parents=True)
     metadata = json.loads((root / 'package.json').read_text())
@@ -177,11 +185,12 @@ def prepare(root, artifacts, output, version, commit):
     required.update('rust/crates/turbo-surf-napi/' + name for name in ('index.d.ts', 'package.json', 'LICENSE', 'README.md'))
     thin = pack(root, output / 'thin-launcher', 'turbo-surf', version, required)
     smoke = smoke_tarballs(thin, platforms['linux-x64'], output, version, commit, root)
+    installed = smoke_installed_tarballs(thin, platforms['linux-x64'], output / 'normal-install', version, commit)
     napi = output / 'packaged-napi-smoke.json'
     subprocess.run(['node', str(root / 'scripts/smoke-napi-release.mjs'), str(Path(smoke['platformPackage']) / PLATFORMS['linux-x64'][3]), version, commit, str(napi)], check=True, timeout=60)
     for record in [thin, *platforms.values()]:
         record['archive'] = str(Path(record['archive']).relative_to(output))
-    receipt = {'passed': True, 'sourceCommit': commit, 'version': version, 'thin': thin, 'platforms': platforms, 'consumer': smoke, 'packagedNapiReceiptSha256': sha(napi), 'allNativeBuildsVerified': True}
+    receipt = {'passed': True, 'sourceCommit': commit, 'version': version, 'thin': thin, 'platforms': platforms, 'consumer': smoke, 'installedConsumer': installed, 'packagedNapiReceiptSha256': sha(napi), 'allNativeBuildsVerified': True}
     write(output / 'FINAL.json', receipt)
     return receipt
 

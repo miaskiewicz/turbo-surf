@@ -108,6 +108,8 @@ def run_chunked(config, shard, crate, chunks, slice_index=0, slice_total=1):
         shutil.rmtree(profraws, ignore_errors=True)
         report_path.unlink(missing_ok=True)
         args = tarpaulin_args(config, shard, [crate], targets)
+        if i > 0:
+            args.append("--skip-clean")
         print(f"chunk {i + 1}/{len(all_targets)}: " + " ".join(args), flush=True)
         rc = subprocess.call(args)
         status = rc or status

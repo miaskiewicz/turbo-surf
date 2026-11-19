@@ -101,8 +101,9 @@ each crate keeps its own shard's coverable lines, a line is covered when any sha
 and applies the workspace `fail-under` and the per-crate floors to the merge. The render
 shard is split into `render-a` and `render-b`, each passing `--chunks 4` and
 `--slice 0/2` or `--slice 1/2`; their reports are unioned before the crate merge.
-Each runner builds once, then deletes profraws between its chunks; every test
-process writes a profraw of all instrumented code (one unsplit run filled the
+Each runner's first chunk keeps Tarpaulin's default clean; later chunks use
+`--skip-clean` to reuse that instrumented build, while deleting profraws between
+chunks. Every test process writes a profraw of all instrumented code (one unsplit run filled the
 145G runner disk). The resulting chunk reports are unioned.
 
 Then every crate must meet its own floor (`rust/coverage-floors.json`, checked by

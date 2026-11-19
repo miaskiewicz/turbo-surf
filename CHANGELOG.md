@@ -2,6 +2,8 @@
 
 ## [0.8.5] - 2026-11-19
 
+- Keep budgeted runtime drain futures on the heap before polling so cold MCP rendering fits an ordinary 2 MiB host thread, retaining caller deadlines and hard execution limits.
+- Keep click/key actions at document commit and synchronous DOM/evaluation metadata reads independent of unrelated pending page work; normalize opening-close races by the original opening identity.
 - Stop initial hydration and host-reply continuation at safe aggregate budget boundaries, while retaining hard execution limits and the original explicit caller deadline. Report pre-expired openings with truthful zero-pump progress instead of panicking.
 - Amortize native Promise graph maintenance against the retained graph size, preserving pending work and ancestor ownership while avoiding repeated whole-graph scans in large reaction bursts.
 - Retain navigation initialization as owned pending work after trusted document installation, so response waiting does not interrupt a healthy initialization callback. Preserve caller deadlines, hard interruption errors and cancellation when a document is replaced or closed.

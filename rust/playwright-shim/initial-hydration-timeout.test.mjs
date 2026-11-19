@@ -66,15 +66,23 @@ test("navigation binding deadlines require the exact owned hub error", async () 
     assert.equal(normalize(error, deadline, 30), error);
 });
 
-async function fixture(run) {
+async function fixture(run, holdScript = false) {
+  let scriptRequested;
+  const requested = new Promise((resolve) => (scriptRequested = resolve));
+  let heldResponse;
   const timers = new Set();
   const requests = [];
   const server = createServer((request, response) => {
     requests.push(request.url);
     if (request.url === "/slow.js") {
+      response.setHeader("content-type", "application/javascript");
+      scriptRequested();
+      if (holdScript) {
+        heldResponse = response;
+        return;
+      }
       const timer = setTimeout(() => {
         timers.delete(timer);
-        response.setHeader("content-type", "application/javascript");
         response.end("document.body.dataset.late='old'");
       }, 180);
       timers.add(timer);
@@ -97,7 +105,15 @@ async function fixture(run) {
       true,
     );
   try {
-    await run({ base, open, requests });
+    await run({
+      base,
+      open,
+      requests,
+      requested,
+      releaseScript() {
+        heldResponse?.end("document.body.dataset.late='old'");
+      },
+    });
   } finally {
     for (const timer of timers) clearTimeout(timer);
     server.closeAllConnections();
@@ -114,13 +130,18 @@ test("retained initial timeout keeps the actual native target usable", () =>
   fixture(async ({ base, open, requests }) => {
     const actor = await open({ retainInitialHydrationTimeout: true });
     try {
-      assert.ok(requests.includes("/slow.js"), "the actual parser script request must start");
       const initialStatus = JSON.parse(native.liveInitialHydrationStatus(actor));
+      // The absolute caller deadline includes native runtime setup. A cold
+      // opening may expire before the hydration future admits a parser request.
+      const phase = initialStatus.initialProgress.phase;
+      assert.ok(["document-loading", "parser-and-deferred-scripts"].includes(phase));
       assert.deepEqual(initialStatus, {
         timedOut: true,
         timeoutMs: 30,
-        initialProgress: { phase: "parser-and-deferred-scripts", completed_pumps: 0 },
+        initialProgress: { phase, completed_pumps: 0 },
       });
+      if (phase === "document-loading") assert.deepEqual(requests, []);
+      else assert.ok(requests.includes("/slow.js"), "the parser request must actually start");
       const initial = JSON.parse(native.liveAuxiliaryState(actor));
       assert.equal(typeof initial.root, "string");
       const receipt = JSON.parse(
@@ -143,6 +164,62 @@ test("retained initial timeout keeps the actual native target usable", () =>
     }
     assert.throws(() => native.liveInitialHydrationStatus(actor), /closed|no such live actor/);
   }));
+
+test("retained parser timeout retires an actually admitted held script", () =>
+  fixture(async ({ base, open, requests, requested, releaseScript }) => {
+    // This independent admission case allows runtime setup, then holds EOF until
+    // the original absolute caller deadline expires. The 30ms case above stays unchanged.
+    const opening = open(
+      { retainInitialHydrationTimeout: true },
+      '<body><script src="/slow.js"></script></body>',
+      1500,
+    );
+    await Promise.race([
+      requested,
+      opening.then((actor) => {
+        if (!requests.includes("/slow.js")) {
+          native.liveActorClose(actor);
+          assert.fail("initial opening expired before parser request admission");
+        }
+      }),
+    ]);
+    assert.deepEqual(requests, ["/slow.js"]);
+    const actor = await opening;
+    try {
+      const initialStatus = JSON.parse(native.liveInitialHydrationStatus(actor));
+      assert.deepEqual(initialStatus, {
+        timedOut: true,
+        timeoutMs: 1500,
+        initialProgress: { phase: "parser-and-deferred-scripts", completed_pumps: 0 },
+      });
+      const initial = JSON.parse(native.liveAuxiliaryState(actor));
+      const receipt = JSON.parse(
+        await native.liveNavigateTarget(
+          actor,
+          `${base}/ready`,
+          "replace",
+          JSON.stringify({ timeoutMs: 1000, waitUntil: "load" }),
+        ),
+      );
+      releaseScript();
+      await native.liveEvalEngine(actor, "return document.body.textContent", true);
+      assert.equal(receipt.status, 200);
+      assert.equal(JSON.parse(native.liveAuxiliaryState(actor)).root, initial.root);
+      assert.deepEqual(
+        JSON.parse(
+          native.liveReadEngine(
+            actor,
+            "return [document.body.textContent, document.body.dataset.late ?? null]",
+          ),
+        ),
+        ["ready", null],
+      );
+      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), initialStatus);
+    } finally {
+      native.liveActorClose(actor);
+    }
+    assert.throws(() => native.liveInitialHydrationStatus(actor), /closed|no such live actor/);
+  }, true));
 
 test("initial timeout status rejects pending and unknown actors", () =>
   fixture(async ({ open }) => {

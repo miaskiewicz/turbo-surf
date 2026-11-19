@@ -3530,7 +3530,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._session,
       interactionScript(selector, index ?? 0, kind, value, strict),
     );
-    await this._refreshFromSession();
+    // Dispatch already waits for document commit; metadata must not wait for load.
+    await this._refreshFromSession(true);
     // Surface the NO_MATCH signal before draining so a binding-handler
     // rejection that happens to be in the queue can't shadow the original
     // locator failure. Drain is best-effort; a throwing binding writes to

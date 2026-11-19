@@ -266,7 +266,7 @@ pub(super) fn with_document_admission<'s, T>(
         .with_owner(scope, token.into(), run)
         .map_err(|failure| match failure {
             bridge::OwnerEntryFailure::Interrupted => AdmissionError::Interrupted,
-            bridge::OwnerEntryFailure::Authority(_) => {
+            bridge::OwnerEntryFailure::Authority => {
                 AdmissionError::Authority("Owner entry failed".into())
             }
         })

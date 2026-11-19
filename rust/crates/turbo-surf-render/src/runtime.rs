@@ -19829,18 +19829,9 @@ impl PageSession {
                 },
             )
             .await;
-            let before_exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
-            let before_terminating = self.rt.v8_isolate().is_execution_terminating();
             let exceeded = watchdog.exceeded.clone();
             drop(watchdog);
             let exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
-            if let Err(error) = &drained {
-                eprintln!(
-                    "ACTION_RECOVERY_DIAG eval_active before_join_exceeded={before_exceeded} before_join_terminating={before_terminating} after_join_exceeded={} after_join_terminating={} error={error:?}",
-                    exceeded,
-                    self.rt.v8_isolate().is_execution_terminating(),
-                );
-            }
             (drained, exceeded)
         };
         // The watchdog may have terminated mid-drain. Clear that terminate state so the

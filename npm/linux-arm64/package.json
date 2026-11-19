@@ -1,6 +1,6 @@
 {
   "name": "@miaskiewicz/turbo-surf-linux-arm64",
-  "version": "0.8.2",
+  "version": "0.8.4",
   "description": "turbo-surf platform binaries for Linux ARM64",
   "license": "MIT",
   "repository": "github:miaskiewicz/turbo-surf",

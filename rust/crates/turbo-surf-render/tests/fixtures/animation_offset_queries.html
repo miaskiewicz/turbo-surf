@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><style>
+body { margin:0; font:16px sans-serif; }
+#container { position:relative; width:200px; height:100px; }
+#probe { position:absolute; left:11px; top:7px; width:20px; height:10px; }
+#listbox { position:relative; width:100px; height:30px; overflow:auto; }
+.option { height:20px; }
+#background { overflow:hidden; width:40px; height:40px; }
+#dot { width:8px; height:8px; }
+@keyframes pulse { from { transform:scale(.5); } to { transform:scale(1); } }
+@keyframes mixed { from { transform:scale(.5); width:8px; } to { transform:scale(1); width:12px; } }
+</style></head><body>
+<div id="container"><div id="probe"></div></div>
+<div id="listbox" role="listbox"><div class="option" role="option">First</div><div id="selected" class="option" role="option">Second</div></div>
+<div id="background"><div id="dot"></div></div>
+</body></html>

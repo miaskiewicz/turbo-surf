@@ -13,6 +13,9 @@
     PlainEvent = __hostEvent,
     Message = __hostMessageEvent,
     BlobType = globalThis.Blob;
+  const Bytes = Uint8Array,
+    buffer = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Bytes.prototype), "buffer").get;
+  const binaryBuffer = (bytes) => apply(buffer, new Bytes(bytes), []);
   const LocationURL = globalThis.URL,
     StringValue = String,
     encoder = new TextEncoder(),
@@ -83,7 +86,15 @@
     }
   };
   const terminal = (kind) => kind === "closed" || kind === "failed" || kind === "gone";
-  __G.webSocketTransport = { parseSocketURL, checkProtocols, socketOrigin, pump, terminal, string };
+  __G.webSocketTransport = {
+    parseSocketURL,
+    checkProtocols,
+    socketOrigin,
+    pump,
+    terminal,
+    string,
+    binaryBuffer,
+  };
   const WebSocket = __defineInterface(
     "WebSocket",
     1,
@@ -141,9 +152,7 @@
   const messageData = (record, event) => {
     if (event.kind === "text") return event.text;
     const bytes = event.bytes;
-    return record.binaryType === "blob"
-      ? new BlobType([bytes])
-      : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    return record.binaryType === "blob" ? new BlobType([bytes]) : binaryBuffer(bytes);
   };
   const receivers = {
     __proto__: null,

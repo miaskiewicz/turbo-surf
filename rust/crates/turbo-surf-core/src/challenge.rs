@@ -105,6 +105,16 @@ pub enum SolveError {
     VisualChallenge,
 }
 
+pub(crate) fn check_host_solver_policy() -> Result<(), SolveError> {
+    if crate::network_policy::configured() {
+        Err(SolveError::Http(
+            "Challenge solvers are disabled by host network policy".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 impl std::fmt::Display for SolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -181,6 +191,7 @@ impl ChallengeSolver for FallbackSolver {
         "fallback"
     }
     async fn solve(&self, ch: &Challenge, ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         match self.primary.solve(ch, ctx).await {
             Ok(t) => Ok(t),
             Err(_) => self.fallback.solve(ch, ctx).await,
@@ -396,6 +407,7 @@ impl ChallengeSolver for ScrapflySolver {
     }
 
     async fn solve(&self, ch: &Challenge, ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         // GET /scrape?key=..&url=..&asp=true&render_js=true[&proxy_pool=..]
         let mut url = format!(
             "{}/scrape?key={}&asp=true&render_js=true&url={}",
@@ -522,6 +534,7 @@ impl ChallengeSolver for HyperSolver {
     }
 
     async fn solve(&self, ch: &Challenge, ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         if ch.vendor != Vendor::Akamai {
             // Only the Akamai sensor lane is wired to the real API; let the caller
             // fall back for DataDome/Kasada/CF/AWS.
@@ -599,6 +612,7 @@ impl ChallengeSolver for BrowserSolver {
     }
 
     async fn solve(&self, ch: &Challenge, ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         use tokio::io::AsyncWriteExt;
         let req = serde_json::json!({
             "url": ch.page_url,
@@ -699,6 +713,9 @@ pub fn solver_from_env_pow(
     pow: Option<Box<dyn PowEngine>>,
     recaptcha: Option<Box<dyn RecaptchaEngine>>,
 ) -> Option<Box<dyn ChallengeSolver>> {
+    if crate::network_policy::configured() {
+        return None;
+    }
     load_dotenv();
     let hyper = std::env::var("HYPER_API_KEY")
         .ok()

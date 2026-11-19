@@ -65,7 +65,6 @@ fn divergences(path: String, actual: &Value, expected: &Value, out: &mut Vec<Str
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "FIXME(turbo-surf#298 / turbo-dom#488): per-listener microtask checkpoint doesn't fire for V8-native AbortSignal.timeout; turbo-dom's polyfill install silently no-ops inside surf's install_with_html bootstrap (IIFE reaches __engineTaskScope at event_listeners.js:346 but not the defineProperty at :386). Surf-side engine_task_scope wrap + op_engine_task_scope stay in place; test un-ignores once turbo-dom#488's polyfill-install fix lands"]
 async fn abort_signal_any_and_timeout_match_chrome156() {
     let expected = control();
     let mut page = PageSession::open(
@@ -87,4 +86,61 @@ async fn abort_signal_any_and_timeout_match_chrome156() {
     let mut found = Vec::new();
     divergences(String::new(), &actual, &expected, &mut found);
     assert_eq!(found, KNOWN_GAPS, "divergences from the Chrome control");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn timeout_reason_identity_and_lifetime_match_chrome156() {
+    use turbo_surf_core::request_context::ClientHints;
+    use turbo_surf_render::{
+        BrowserStorage, DocumentResponseMetadata, PageSessionOptions, WindowTimerMode,
+    };
+    let probe = include_str!("../../../../harness/detection/abort-timeout-reason-probe.js");
+    let lifetime =
+        include_str!("../../../../harness/detection/abort-timeout-reason-lifetime-probe.js");
+    let expected: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/abort-timeout-reason-chrome156.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        expected["probeSha256"],
+        format!("{:x}", Sha256::digest(probe))
+    );
+    assert_eq!(
+        expected["lifetimeProbeSha256"],
+        format!("{:x}", Sha256::digest(lifetime))
+    );
+    assert_eq!(
+        expected["version"]["product"],
+        "HeadlessChrome/156.0.8078.47"
+    );
+    let mut page = PageSession::open_with_document_response_and_options(
+        "<!doctype html><body>",
+        "https://abort-reason.test/",
+        "",
+        "",
+        20000,
+        "",
+        ClientHints::default(),
+        &[],
+        BrowserStorage::default(),
+        DocumentResponseMetadata::default(),
+        None,
+        PageSessionOptions {
+            window_timer_mode: WindowTimerMode::RealTime,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let actual: Value =
+        serde_json::from_str(&page.eval_expression(probe.trim()).await.unwrap()).unwrap();
+    let expected_result: Value =
+        serde_json::from_str(expected["result"].as_str().unwrap()).unwrap();
+    assert_eq!(actual, expected_result);
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    let actual: Value =
+        serde_json::from_str(&page.eval_expression(lifetime.trim()).await.unwrap()).unwrap();
+    assert_eq!(actual, expected["lifetime"]);
 }

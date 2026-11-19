@@ -38,6 +38,37 @@ macOS (arm64), and Windows (x64). Linux wheels require glibc 2.28 or later
 (`manylinux_2_28`). The CPython 3.8+ abi3 contract is unchanged; it does not imply
 compatibility with older Linux C libraries.
 
+## Source builds and feature profile
+
+Use Rust 1.98.0 and maturin (the build backend requires `>=1.9.3,<2.0`; release CI
+uses 1.15.0). From the repository root:
+
+```sh
+maturin build --release --manifest-path rust/crates/turbo-surf-py/Cargo.toml
+# Or install into an active virtual environment:
+maturin develop --release --manifest-path rust/crates/turbo-surf-py/Cargo.toml
+```
+
+The crate defaults to `avif` and `jxl` screenshot pixel decoders. Its independent
+resource client uses reqwest/rustls: view/render disable core's default
+impersonation feature. A workspace build that also selects MCP/NAPI can unify
+BoringSSL back in, so validate a standalone wheel separately. Native V8 and
+C++20 audio still need their build toolchains; this is not a pure-Python wheel.
+
+`pyproject.toml` enables `pyo3/extension-module` for wheel construction, while the
+crate selects `abi3-py38`. Keep the extension-module feature out of ordinary
+workspace test/link assumptions. The Python `test` extra installs pytest; it does
+not change the engine's Cargo features.
+
+Optional `gpu-metal`, `coretext` and `native-sdk-frame-read` forward to the
+raster/render crates. They are off in the stock wheel workflow. Python exposes
+synthetic raster screenshot functions, but its current `evaluate`/`render`
+initialization does not install guest canvas or WebGL execution callbacks.
+Enabling a raster feature alone therefore does not establish a guest GPU bridge.
+See [Build features](../../../docs/BUILD-FEATURES.md) for all defaults,
+forwarding, platform/toolchain requirements and [GPU bridge](../../../docs/GPU-BRIDGE.md)
+for the execution boundary.
+
 ## API
 
 | function | returns | notes |

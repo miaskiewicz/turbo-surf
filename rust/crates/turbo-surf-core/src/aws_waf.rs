@@ -111,6 +111,7 @@ impl ChallengeSolver for AwsWafSolver {
     }
 
     async fn solve(&self, ch: &Challenge, _ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         // Fetch the challenge page + classify the tier.
         let resp = self
             .client

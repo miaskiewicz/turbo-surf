@@ -12,6 +12,8 @@ import tarfile
 import tempfile
 import urllib.request
 
+from window_proxy_compat import enable as enable_window_proxy_compat
+
 HERE = Path(__file__).resolve().parent
 VERSIONS = [('deno_core', '0.412.0', 'deno_core'), ('deno_v8', '0.4.0', 'deno_v8'), ('v8', '152.2.0', 'v8-exact')]
 
@@ -114,6 +116,7 @@ def main():
     parser.add_argument('--profile', choices=['154', '155'], default='154')
     parser.add_argument('--profile-file', type=Path, help='Use an additional revision-pinned profile with the selected Chrome major')
     parser.add_argument('--cache', type=Path, default=Path.home() / '.cache' / 'turbo-surf-engine')
+    parser.add_argument('--window-proxy-compat', action='store_true', help='Source-verify existing SDK WindowProxy primitives and record the explicit 150.4.2 alias capability; native gates remain required')
     parser.add_argument('--adopt', action='store_true', help='Verify and record an existing prepared experiment')
     args = parser.parse_args()
     profile = json.loads(args.profile_file.read_text()) if args.profile_file else profile_for(args.profile)
@@ -184,9 +187,15 @@ def main():
         verify_applied_patch(root / 'v8-exact', 'clt.patch')
         if (root / 'v8-exact/build/config/apple/clt_sdk_info.py').read_bytes() != (HERE / 'clt_sdk_info.py').read_bytes():
             raise SystemExit('Prepared CLT adapter differs from the saved source')
+    compatibility = None
+    if args.window_proxy_compat:
+        compatibility = enable_window_proxy_compat(root / 'v8-exact', profile)
+    elif 'FORK_WINDOW_PROXY' in (root / 'v8-exact/src/lib.rs').read_text():
+        raise SystemExit('Use --window-proxy-compat to verify an SDK capability marker')
     config = '[patch.crates-io]\n' + ''.join(name + ' = { path = ' + json.dumps(str(root / name)) + ' }\n' for name in ['deno_core', 'deno_v8'])
     (root / 'cargo-config.toml').write_text(config)
-    (root / 'provenance.json').write_text(json.dumps({**profile, 'sdkVersion': '152.2.0', 'denoCoreVersion': '0.412.0', 'patches': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (HERE / 'patches').glob('*.patch')}}, indent=2) + '\n')
+    capability = {'windowProxyCompatibility': compatibility} if compatibility else {}
+    (root / 'provenance.json').write_text(json.dumps({**profile, **capability, 'sdkVersion': '152.2.0', 'denoCoreVersion': '0.412.0', 'patches': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (HERE / 'patches').glob('*.patch')}}, indent=2) + '\n')
     print(root / 'cargo-config.toml')
 
 if __name__ == '__main__':

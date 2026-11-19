@@ -29,6 +29,8 @@ use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
 mod enid;
+mod render_policy;
+mod root_navigation;
 use enid::{EnidCache, EnidCookie};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -359,9 +361,9 @@ impl Session {
 
     // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
     // inputs whose IDL `indeterminate` flag is `true`. Best-effort: a parse / JSON
-    // failure in the one-shot probe leaves the list empty (no IDL overlay). The probe
-    // itself cannot throw, so `eval_json_expression` only errors on execution-budget
-    // termination the host side couldn't recover from.
+    // failure in the one-shot probe leaves the list empty (no IDL overlay). Guest
+    // replacement of a query helper or interrupted execution can reject the probe;
+    // neither should invent IDL state for the static screenshot.
     async fn snapshot_indeterminate_inputs(
         page: &mut turbo_surf_render::PageSession,
     ) -> Vec<usize> {
@@ -681,7 +683,11 @@ impl Session {
         script: &str,
         await_final_program: bool,
     ) -> Result<String, String> {
-        let mut page = turbo_surf_render::PageSession::open_with_document_response(
+        let render_deadline = tokio::time::Instant::now()
+            + std::time::Duration::from_millis(turbo_surf_render::DEFAULT_RENDER_BUDGET_MS);
+        // Keep initialization state off nested MCP dispatch frames so V8 lazy
+        // extension startup retains its native stack headroom.
+        let mut page = Box::pin(turbo_surf_render::PageSession::open_with_document_response(
             html,
             base,
             &self.jar.storage_state(),
@@ -692,7 +698,7 @@ impl Session {
             &self.response_headers,
             self.browsing_storage.clone(),
             self.response_metadata.clone(),
-        )
+        ))
         .await?;
         let mut program_error = None;
         let mut programs = script
@@ -712,9 +718,13 @@ impl Session {
                 break;
             }
         }
+        if let Err(error) = root_navigation::finish(&mut page, render_deadline).await {
+            program_error.get_or_insert(error);
+        }
         let (count, url, metadata) = page.navigation_snapshot();
         let headers = page.response_headers_snapshot();
-        let html = page.serialize();
+        let root = page.auxiliary_root_id()?;
+        let html = page.serialize_target(root)?;
         let cookies = page.cookies();
         // Snapshot the live IDL `indeterminate` flag on `<input>` elements (tree-order
         // over `document.querySelectorAll('input')`); the serialized HTML does not
@@ -846,35 +856,6 @@ impl Session {
     // to elements + their box centers) or explicit coords. `steps` is inline, or a saved `routine`
     // (e.g. "google-serp") with `params` substituted. This is the general "string interactions
     // together on a loaded page" capability; the google flow is just one saved routine.
-    // Native form commits are handled before this lookup. Only follow a JS
-    // location change; serializing a form would bypass canceled/invalid/CSP-blocked
-    // submission and could replay a POST as an unrelated GET.
-    fn interaction_nav_target(&self, base: &str) -> Option<String> {
-        let tree = self.tree.as_ref()?;
-        let body = *tree.query_selector_all("body").first()?;
-        let attr = |k: &str| {
-            tree.get_attribute(body, k)
-                .map(|s| s.to_string())
-                .filter(|s| !s.is_empty())
-        };
-        let norm = |u: &str| {
-            u.trim_end_matches('/')
-                .split('#')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        };
-        let base_n = norm(base);
-        let is_nav =
-            |u: &str| (u.starts_with("http://") || u.starts_with("https://")) && norm(u) != base_n;
-        if let Some(loc) = attr("data-hi-location") {
-            if is_nav(&loc) {
-                return Some(loc);
-            }
-        }
-        None
-    }
-
     async fn human_interact(&mut self, args: &Value) -> Result<Value, String> {
         let (steps, routine_opts) = resolve_interaction_steps(args)?;
         // Opts: explicit args win over the routine's defaults.
@@ -914,19 +895,8 @@ impl Session {
                 "navigated": true, "navigated_to": self.url.clone(),
             }));
         }
-        // FOLLOW a navigation the interaction triggered (fill-a-form-then-submit only yields a
-        // result page if someone actually loads the target). Fetch it natively THROUGH the session
-        // — the jar carries the cookies the page just set (e.g. a freshly-minted session cookie),
-        // with a Referer of the originating page and a coherent sec-fetch-site, exactly as a real
-        // in-page submit would. `fetch_into` handles consent/challenge + re-renders per the mode.
-        if let Some(target) = self.interaction_nav_target(&base) {
-            let followed = self.fetch_into(&target, None, None).await;
-            followed?;
-            return Ok(json!({
-                "ok": true, "completed": completed, "steps": n_steps,
-                "navigated": true, "navigated_to": self.url.clone(),
-            }));
-        }
+        // Only native navigation admission can follow a request. A DOM marker is
+        // authored content, even when the interaction driver wrote it originally.
         Ok(json!({ "ok": true, "completed": completed, "steps": n_steps, "navigated": false }))
     }
 
@@ -3147,7 +3117,7 @@ pub fn tools() -> Value {
              vendor, languages, hardwareConcurrency, deviceMemory, chromeMajor, \
              connection, userAgentData, screen, devicePixelRatio). {} resets.",
         ),
-        ("set_mode", "Set JS render mode (no-js | fast | secure)"),
+        ("set_mode", "Set JS render mode (no-js | fast | secure), optionally animations (enabled | disabled) for future render sessions"),
         (
             "render",
             "Run the page's own scripts (or a given script) + re-render",
@@ -3276,8 +3246,7 @@ fn call_sync_session_tool(
             json!({ "ok": true })
         }
         "set_mode" => {
-            session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
-            json!({ "mode": session.mode })
+            return Some(render_policy::set_mode(session, args));
         }
         "set_bypass_consent" => {
             // Toggle consent-wall cookie seeding (google/youtube interstitial).
@@ -3310,6 +3279,20 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
     if let Some(res) = call_sync_session_tool(session, name, args) {
         return res;
     }
+    boxed_tool_call(session, name, args).await
+}
+
+// Construct large dispatch state before polling it, so the construction frame
+// does not occupy the same stack as a nested V8 runtime initialization.
+fn boxed_tool_call<'a>(
+    session: &'a mut Session,
+    name: &'a str,
+    args: &'a Value,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<Value, String>> + 'a>> {
+    Box::pin(call_async_tool(session, name, args))
+}
+
+async fn call_async_tool(session: &mut Session, name: &str, args: &Value) -> Result<Value, String> {
     let sel = || arg_str(args, "selector").ok_or_else(|| format!("{name}: missing 'selector'"));
     let val = || arg_str(args, "value").unwrap_or("").to_string();
     let script = || arg_str(args, "script").ok_or_else(|| format!("{name}: missing 'script'"));
@@ -3949,6 +3932,113 @@ mod tests {
         assert!(failure.contains("human completion failed"), "{failure}");
     }
 
+    #[tokio::test]
+    async fn coverage_indeterminate_probe_survives_an_authored_selector_error() {
+        let mut page = turbo_surf_render::PageSession::open(
+            "<input id=control type=checkbox>",
+            "https://example.test/",
+            "",
+            "",
+            5000,
+        )
+        .await
+        .unwrap();
+        page.eval("document.querySelector('#control').indeterminate=true;void 0")
+            .await
+            .unwrap();
+        assert_eq!(
+            Session::snapshot_indeterminate_inputs(&mut page).await,
+            vec![0]
+        );
+        page.eval(
+            "document.querySelectorAll=()=>{throw new Error('authored selector failure')};void 0",
+        )
+        .await
+        .unwrap();
+        assert!(Session::snapshot_indeterminate_inputs(&mut page)
+            .await
+            .is_empty());
+        page.eval("delete document.querySelectorAll;void 0")
+            .await
+            .unwrap();
+        assert_eq!(
+            Session::snapshot_indeterminate_inputs(&mut page).await,
+            vec![0]
+        );
+        page.close();
+    }
+
+    #[tokio::test]
+    async fn coverage_human_interaction_ignores_a_forged_navigation_hint() {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/source", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let wire = requests.clone();
+        let server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let wire = wire.clone();
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                        let mut bytes = [0; 1024];
+                        let count = socket.read(&mut bytes).await.unwrap();
+                        if count == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&bytes[..count]);
+                    }
+                    wire.lock()
+                        .unwrap()
+                        .push(String::from_utf8_lossy(&request).into_owned());
+                    let body = "<body id=forged>not an admitted navigation</body>";
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        let mut session = Session::new();
+        session.load(
+            &base,
+            r#"<body id=source><script>
+            const nativeSet = Element.prototype.setAttribute;
+            document.body.setAttribute = function(name, value) {
+                return nativeSet.call(this, name, name === 'data-hi-location'
+                    ? new URL('/forged', location.href).href : value);
+            };
+            document.cookie='script=kept; Path=/';
+        </script></body>"#,
+        );
+        session.jar.add("seed", "kept", "127.0.0.1", "/", None);
+        let result = session
+            .human_interact(&json!({
+                "steps": [{"wait": 0}], "startDelay": 0, "startJitter": 0
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            result["navigated"], false,
+            "a mutable DOM hint is not navigation admission: {result}"
+        );
+        assert_eq!(session.last_render_navigation_count, 0);
+        assert_eq!(session.url, base);
+        assert!(session.requests.is_empty());
+        assert!(session.back.is_empty());
+        assert_eq!(session.dom_history.len(), 1);
+        assert!(session.tree().unwrap().query_selector("#source").is_some());
+        let cookies = session.jar.cookie_header(&base, 0.0);
+        assert!(
+            cookies.contains("seed=kept") && cookies.contains("script=kept"),
+            "{cookies}"
+        );
+        assert!(
+            requests.lock().unwrap().is_empty(),
+            "unadmitted destination was fetched"
+        );
+        server.abort();
+    }
+
     // human_interact FOLLOWS the navigation a form-submit interaction triggers: filling the
     // search box + clicking submit loads the native form response and retains its actual
     // navigation URL (jar/cookies carried), so the result page is what ends up loaded —
@@ -3986,6 +4076,280 @@ mod tests {
         assert!(
             dom.contains("Results for weather"),
             "loaded the results page for the typed query: {dom}"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_follows_root_location_before_collecting_its_document() {
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut session = Session::new();
+        session.goto(&base).await.unwrap();
+        let source = serialize_doc(session.tree().unwrap());
+        let html = session
+            .render_script(&source, &base, "location.replace('/results?q=queued');")
+            .await
+            .unwrap();
+        assert!(html.contains("Results for queued"), "{html}");
+        assert!(
+            session.url.ends_with("/results?q=queued"),
+            "{}",
+            session.url
+        );
+        assert_eq!(session.last_render_navigation_count, 1);
+    }
+
+    #[tokio::test]
+    async fn root_navigation_surfaces_its_actual_http_failure() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let rejected = format!("http://{}/rejected", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+        });
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut session = Session::new();
+        session.goto(&base).await.unwrap();
+        let source = serialize_doc(session.tree().unwrap());
+        let result = session
+            .render_script(
+                &source,
+                &base,
+                &format!(
+                    "location.replace({});",
+                    serde_json::to_string(&rejected).unwrap()
+                ),
+            )
+            .await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result
+            .unwrap_err()
+            .contains("Native target navigation failed"));
+    }
+
+    async fn start_actual_peer_request(
+        page: &mut turbo_surf_render::PageSession,
+        seen: &mut tokio::sync::oneshot::Receiver<()>,
+    ) {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                tokio::select! {
+                    requested = &mut *seen => { requested.unwrap(); break; }
+                    step = page.poll_owned_work() => { step.unwrap(); }
+                }
+            }
+        })
+        .await
+        .expect("peer fixture must start actual native HTTP before root work");
+    }
+
+    async fn root_finishes_with_actual_peer_work(reject: bool) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let peer_url = format!("http://{}/peer", listener.local_addr().unwrap());
+        let (requested, mut seen) = tokio::sync::oneshot::channel();
+        let (release, failure) = tokio::sync::oneshot::channel();
+        let mut server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+            let _ = requested.send(());
+            if reject {
+                let _ = failure.await;
+                return;
+            }
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\na")
+                .await;
+            std::future::pending::<()>().await;
+        });
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut page = turbo_surf_render::PageSession::open("<body>root", &base, "", "", 60_000)
+            .await
+            .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        page.eval_expression(&format!(
+            "window.open({},'peer');void 0",
+            serde_json::to_string(&peer_url).unwrap()
+        ))
+        .await
+        .unwrap();
+        let peer = page
+            .auxiliary_event_log()
+            .pages()
+            .into_iter()
+            .find(|info| info.source_page.as_deref() == Some(&root.to_string()))
+            .unwrap()
+            .target;
+        start_actual_peer_request(&mut page, &mut seen).await;
+        assert_eq!(
+            page.network_event_log().target_network_state(&peer)["pendingNavigation"],
+            true
+        );
+        page.eval_expression("location.replace('/results?q=root');void 0")
+            .await
+            .unwrap();
+        if reject {
+            let _ = release.send(());
+            tokio::time::timeout(std::time::Duration::from_secs(1), &mut server)
+                .await
+                .expect("rejected peer must close before root progress")
+                .unwrap();
+        }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = super::root_navigation::finish(&mut page, deadline).await;
+        let html = page.serialize_target(root).unwrap();
+        let peer_pending =
+            page.network_event_log().target_network_state(&peer)["pendingNavigation"].clone();
+        server.abort();
+        result.unwrap();
+        assert!(html.contains("Results for root"), "{html}");
+        assert!(page.navigation_snapshot().1.ends_with("/results?q=root"));
+        if !reject {
+            assert_eq!(peer_pending, true);
+        }
+    }
+
+    #[tokio::test]
+    async fn root_navigation_does_not_wait_for_actual_held_peer_body() {
+        root_finishes_with_actual_peer_work(false).await;
+    }
+
+    #[tokio::test]
+    async fn root_navigation_does_not_inherit_actual_peer_request_failure() {
+        root_finishes_with_actual_peer_work(true).await;
+    }
+
+    #[tokio::test]
+    async fn root_navigation_finishes_its_form_without_admitting_a_peer_form() {
+        let (base, requests, server) = spawn_post_lifecycle_server().await;
+        let mut page = turbo_surf_render::PageSession::open(
+            "<body><form method=post><input name=q value=root></form>",
+            &base,
+            "",
+            "",
+            60_000,
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        page.eval_expression("window.open('about:blank','peer');void 0")
+            .await
+            .unwrap();
+        let peer = page
+            .auxiliary_event_log()
+            .pages()
+            .into_iter()
+            .find(|info| info.source_page.as_deref() == Some(&root.to_string()))
+            .unwrap()
+            .target;
+        let peer_id = peer.parse::<u64>().unwrap();
+        page.eval_target_expression(peer_id, &format!(
+            "document.body.innerHTML='<form method=post action=\"{}\"><input name=q value=peer></form>';document.querySelector('form').submit();void 0", base), false, false).await.unwrap();
+        page.eval_target_expression(
+            root,
+            "document.querySelector('form').submit();void 0",
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let log = page.network_event_log();
+        assert_eq!(
+            log.target_network_state(&root.to_string())["pendingNavigation"],
+            true
+        );
+        assert_eq!(log.target_network_state(&peer)["pendingNavigation"], true);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = super::root_navigation::finish(&mut page, deadline).await;
+        let html = page.serialize_target(root).unwrap();
+        let pending = log.target_network_state(&peer)["pendingNavigation"].clone();
+        server.abort();
+        result.unwrap();
+        assert!(html.contains("id=\"posted\""), "{html}");
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![("POST".to_owned(), "q=root".to_owned())]
+        );
+        assert_eq!(pending, true);
+    }
+
+    #[tokio::test]
+    async fn root_navigation_keeps_a_peer_history_task_queued_until_its_own_turn() {
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut page = turbo_surf_render::PageSession::open("<body>root", &base, "", "", 60_000)
+            .await
+            .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        page.eval_expression("window.open('about:blank','peer');void 0")
+            .await
+            .unwrap();
+        let peer = page
+            .auxiliary_event_log()
+            .pages()
+            .into_iter()
+            .find(|info| info.source_page.as_deref() == Some(&root.to_string()))
+            .unwrap()
+            .target;
+        let peer = peer.parse::<u64>().unwrap();
+        page.navigate_target(peer, &format!("{base}peer"), "push")
+            .await
+            .unwrap();
+        page.eval_target_expression(peer,
+            "history.pushState(null,'','/peer-a');history.pushState(null,'','/peer-b');history.back();void 0",
+            false, false).await.unwrap();
+        let peer_url = |page: &mut turbo_surf_render::PageSession| {
+            serde_json::from_str::<String>(
+                &page
+                    .read_target_engine(peer, "return location.href")
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        assert!(peer_url(&mut page).ends_with("/peer-b"));
+        page.eval_target_expression(
+            root,
+            "location.replace('/results?q=root');void 0",
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        super::root_navigation::finish(&mut page, deadline)
+            .await
+            .unwrap();
+        assert!(page
+            .serialize_target(root)
+            .unwrap()
+            .contains("Results for root"));
+        assert!(peer_url(&mut page).ends_with("/peer-b"));
+        let progressed = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while !peer_url(&mut page).ends_with("/peer-a") {
+                if let Ok(result) = tokio::time::timeout(
+                    std::time::Duration::from_millis(25),
+                    page.poll_owned_work(),
+                )
+                .await
+                {
+                    result.unwrap();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(
+            progressed.is_ok(),
+            "the peer history task must remain executable in a later generic turn; actual {}",
+            peer_url(&mut page)
         );
     }
 
@@ -4214,7 +4578,7 @@ mod tests {
                         ),
                         _ => ("", "", "<input name=q value=unexpected>"),
                     };
-                    let html = format!("<body><form action=/action method=post {attributes}>{control}<button type=submit>Go</button></form></body>");
+                    let html = format!("<title>{path}</title><body><form action=/action method=post {attributes}>{control}<button type=submit>Go</button></form></body>");
                     let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{html}", html.len());
                     socket.write_all(response.as_bytes()).await.unwrap();
                 });
@@ -4245,7 +4609,8 @@ mod tests {
             "canceled, invalid and policy-blocked submissions must issue no action request"
         );
         let mut session = Session::new();
-        session.goto(&format!("{origin}/javascript")).await.unwrap();
+        let source = format!("{origin}/javascript");
+        session.goto(&source).await.unwrap();
         let result = call_tool(
             &mut session,
             "human_interact",
@@ -4260,7 +4625,18 @@ mod tests {
             "explicit JavaScript location navigation remains supported: {result}"
         );
         assert_eq!(session.url, format!("{origin}/client-target"));
-        assert_eq!(session.last_render_navigation_count, 0);
+        assert_eq!(
+            session.last_render_navigation_count, 1,
+            "the explicit Location must commit once natively without submitting the canceled form"
+        );
+        assert_eq!(
+            session.requests,
+            vec![source.clone(), format!("{origin}/client-target")],
+            "the installed native Location response is recorded exactly once"
+        );
+        assert_eq!(session.back, vec![source]);
+        assert_eq!(session.response_metadata.status, 200);
+        assert_eq!(title_of(session.tree.as_ref().unwrap()), "/client-target");
         assert_eq!(
             *requests.lock().unwrap(),
             vec![

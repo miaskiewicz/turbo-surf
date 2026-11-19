@@ -16,8 +16,8 @@ test results and failures. Keep prepublication staging and registry results dist
 
 ## Before registry publication
 
-First require successful publication and real-registry verification of all
-thirteen named Deno/transport dependencies and the DOM/layout prerequisites.
+First require successful publication and real-registry verification of the
+named Deno/transport dependencies and the DOM/layout prerequisites.
 Integrate their registry requirements and the updated lockfile in the selected
 release checkout. No workspace patches or source replacements may supply them.
 The Surf crates themselves do not have to be published yet.
@@ -54,14 +54,14 @@ After successful verification, create a private directory source from the
 
 ```sh
 python3 -B rust/release-deps/stage.py --output "$RELEASE_STAGE" \
-  --candidate-archive "$ARCHIVES/turbo-surf-core-0.7.0.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-view-0.7.0.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-page-0.7.0.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-render-0.7.0.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-mcp-0.7.0.crate"
+  --candidate-archive "$ARCHIVES/turbo-surf-core-0.8.4.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-view-0.8.4.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-page-0.8.4.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-render-0.8.4.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-mcp-0.8.4.crate"
 ```
 
-Append one `--candidate-archive` for **each** of the thirteen actual dependency
+Append one `--candidate-archive` for **each** of the actual dependency
 distributions, retaining their verified archive identities even after publication. Standard
 dependencies in this stage are validated cache wrappers, not workspace patches.
 The published DOM/layout crate archives must also be available, with their real
@@ -116,7 +116,7 @@ PYO3_PYTHON="$BUILD_ENV/bin/python" "$BUILD_ENV/bin/maturin" build --release \
 ```
 
 Unpack and inspect the sdist before compiling it. Its pyproject and Cargo version
-must be 0.7.0; Python source, all workspace/path dependencies needed for a source
+must be 0.8.4; Python source, all workspace/path dependencies needed for a source
 build, and licenses/notices must be present. It must not require missing external
 checkout paths or workspace patches. Build a wheel **from that tarball**, outside
 the checkout, with a fresh Cargo home and no source replacements:
@@ -142,7 +142,7 @@ from pathlib import Path
 import turbo_surf as ts
 import turbo_surf._turbo_surf as native
 
-assert importlib.metadata.version('turbo-surf') == ts.version() == '0.7.0'
+assert importlib.metadata.version('turbo-surf') == ts.version() == '0.8.4'
 assert Path(native.__file__).is_file()
 html = '<title>Packaged wheel</title><body><div id="root">Before</div><a href="/next">Next</a></body>'
 assert ts.title(html) == 'Packaged wheel'
@@ -159,15 +159,17 @@ PY
 
 These calls contain no external resources and require no network after
 installation. They are artifact-consumer checks, not a live crawler/Google test.
-Also copy `rust/crates/turbo-surf-py/tests/test_smoke.py` into a private test
-directory outside the checkout. Install pytest only in the same smoke venv and
-run all ten existing offline cases for **each** installed wheel:
+Also copy `rust/crates/turbo-surf-py/tests/test_smoke.py` and
+`rust/crates/turbo-surf-py/tests/test_screenshots.py` into a private test directory
+outside the checkout. Install pytest only in the same smoke venv and
+run all fourteen existing offline smoke and screenshot cases for **each** installed wheel:
 
 ```sh
 "$SMOKE_ENV/bin/python" -m pip install 'pytest>=7'
-"$SMOKE_ENV/bin/python" -I -m pytest "$SMOKE_TESTS/test_smoke.py"
+"$SMOKE_ENV/bin/python" -I -m pytest "$SMOKE_TESTS/test_smoke.py" \
+  "$SMOKE_TESTS/test_screenshots.py"
 ```
 
 The version case binds the extension's actual version to installed distribution
-metadata; the explicit 0.7.0 assertion above additionally checks release identity.
+metadata; the explicit 0.8.4 assertion above additionally checks release identity.
 Keep the direct-wheel and source-tarball-rebuilt-wheel outcomes separate.

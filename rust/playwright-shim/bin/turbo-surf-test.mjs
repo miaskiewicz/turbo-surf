@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { nodePreloadArgs } from "../node-preloads.mjs";
 // `turbo-surf test` entry — the shim's answer to `npx playwright test`. Reads a
 // `playwright.config.*`, boots any `webServer`s, and runs each project as a
 // `node --import ../register.mjs --test …` sweep. See config.mjs for scope.
 
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,8 +14,10 @@ import {
   discoverTests,
   findConfig,
   loadConfig,
+  orderProjects,
   startWebServers,
   stopWebServers,
+  testRunnerFlags,
 } from "../config.mjs";
 
 const SHIM_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,6 +32,7 @@ export async function run(argv) {
       project: { type: "string", multiple: true },
       reporter: { type: "string" },
       "list-only": { type: "boolean" },
+      "pass-with-no-tests": { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -40,21 +45,43 @@ export async function run(argv) {
     console.error("turbo-surf-test: no playwright.config.* found (pass --config)");
     return 2;
   }
+  await import("../register.mjs");
   const config = await loadConfig(configPath);
   const reporter = values.reporter ? [[values.reporter]] : config.reporter;
-  const chosen = values.project
-    ? config.projects.filter((p) => values.project.includes(p.name))
-    : config.projects;
+  const supportedReporters = new Set(["list", "spec", "tap", "dot", "html"]);
+  for (const [kind] of reporter) {
+    if (!supportedReporters.has(kind)) {
+      throw new Error(
+        `turbo-surf-test: unsupported reporter ${kind}; supported: ${[...supportedReporters].join(", ")}`,
+      );
+    }
+  }
+  const chosen = orderProjects(config.projects, values.project);
   if (!chosen.length) {
     console.error(`turbo-surf-test: no projects matched ${JSON.stringify(values.project)}`);
     return 2;
   }
-  const webHandles = await startWebServers(config.webServer, (m) =>
-    console.log(`[webServer] ${m}`),
-  );
+  for (const project of chosen) testRunnerFlags(project);
+  const webHandles = [];
+  let globalCleanup;
+  let hooksStarted = false;
   let failed = 0;
+  let matchedFiles = 0;
+  const failedProjects = new Set();
   try {
+    if (!values["list-only"]) {
+      webHandles.push(
+        ...(await startWebServers(config.webServer, (m) => console.log(`[webServer] ${m}`))),
+      );
+      hooksStarted = true;
+      globalCleanup = await runGlobalHook(config.globalSetup, config);
+    }
     for (const project of chosen) {
+      if ((project.dependencies ?? []).some((name) => failedProjects.has(name))) {
+        console.log(`[${project.name}] skipped because a dependency failed`);
+        failedProjects.add(project.name);
+        continue;
+      }
       const files = positionals.length
         ? positionals.map((p) => resolve(p))
         : discoverTests(project);
@@ -62,17 +89,47 @@ export async function run(argv) {
         console.log(`[${project.name}] no test files matched`);
         continue;
       }
+      matchedFiles += files.length;
       if (values["list-only"]) {
         for (const f of files) console.log(`[${project.name}] ${f}`);
         continue;
       }
       const code = await runProject(project, files, reporter);
-      if (code !== 0) failed++;
+      if (code !== 0) {
+        failed++;
+        failedProjects.add(project.name);
+      }
     }
   } finally {
-    await stopWebServers(webHandles);
+    await teardownRun(config, globalCleanup, webHandles, hooksStarted);
+  }
+  if (!matchedFiles && !values["pass-with-no-tests"]) {
+    console.error("turbo-surf-test: No tests found");
+    return 1;
   }
   return failed ? 1 : 0;
+}
+
+async function teardownRun(config, globalCleanup, webHandles, hooksStarted) {
+  try {
+    if (typeof globalCleanup === "function") await globalCleanup();
+  } finally {
+    try {
+      if (hooksStarted) await runGlobalHook(config.globalTeardown, config);
+    } finally {
+      await stopWebServers(webHandles);
+    }
+  }
+}
+
+async function runGlobalHook(hook, config) {
+  if (!hook) return;
+  const fn =
+    typeof hook === "function"
+      ? hook
+      : (await import(pathToFileURL(resolve(config.rootDir, hook)).href)).default;
+  if (typeof fn !== "function") throw new Error("Global setup/teardown must export a function");
+  return fn(config);
 }
 
 function runProject(project, files, reporter) {
@@ -84,6 +141,7 @@ function runProject(project, files, reporter) {
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_OPTIONS;
   env.TURBO_PW_PROJECT_NAME = project.name;
+  env.TURBO_PW_EXECUTION = JSON.stringify({ timeout: project.timeout, retries: project.retries });
   env.TURBO_PW_USE = JSON.stringify(use);
   // Playwright's canonical `use` keys that the shim already reads — forward them
   // so fixtures see the merged project config without a code change in-suite.
@@ -96,11 +154,13 @@ function runProject(project, files, reporter) {
   const captureTap = kind === "html";
   const nodeReporter = reporterToNode(kind);
   const args = [
+    ...nodePreloadArgs(process.execArgv, process.env.NODE_OPTIONS, [REGISTER]),
     "--import",
     REGISTER,
     "--test",
     `--test-reporter=${nodeReporter}`,
     "--test-reporter-destination=stdout",
+    ...testRunnerFlags(project),
     ...files,
   ];
   return new Promise((resolveP) => {
@@ -178,12 +238,13 @@ usage: turbo-surf-test [options] [files...]
       --project <name>   run only projects with this name (repeatable)
       --reporter <name>  list | spec | tap | dot | html (overrides config)
       --list-only        print the files that would run, don't run them
+      --pass-with-no-tests  allow a successful run with no matching files
   -h, --help             show this help
 `);
 }
 
 // Direct invocation entry (not when imported as a library).
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (e) => {

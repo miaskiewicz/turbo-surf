@@ -36,6 +36,8 @@ pub(super) fn op_install_resource_consumer(
     callback: v8::Local<v8::Function>,
     state: v8::Local<v8::Object>,
 ) -> bool {
+    let document = v8::Local::new(scope, document);
+    let callback = v8::Local::new(scope, callback);
     if state.is_proxy() || state.get_creation_context(scope) != document.get_creation_context(scope)
     {
         return false;
@@ -46,7 +48,69 @@ pub(super) fn op_install_resource_consumer(
     if document.set_private(scope, key, state.into()) != Some(true) {
         return false;
     }
+    let Some(callback) = leased_consumer(scope, document, callback) else {
+        return false;
+    };
     crate::browser_env::install_mutation_consumer(scope, document, callback)
+}
+
+fn leased_consumer<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    callback: v8::Local<'s, v8::Function>,
+) -> Option<v8::Local<'s, v8::Function>> {
+    let context = document.get_creation_context(scope)?;
+    // Preserve the producer's original callback provenance check before wrapping.
+    if callback.get_creation_context(scope) != Some(context) {
+        return None;
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let data = v8::Array::new_with_elements(scope, &[document.into(), callback.into()]);
+    v8::Function::builder(consume_with_lease)
+        .data(data.into())
+        .build(scope)
+}
+
+fn consumer_parts<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    data: v8::Local<'s, v8::Value>,
+) -> Option<(v8::Local<'s, v8::Context>, v8::Local<'s, v8::Function>)> {
+    let data = v8::Local::<v8::Array>::try_from(data).ok()?;
+    let document = v8::Local::<v8::Object>::try_from(data.get_index(scope, 0)?).ok()?;
+    let callback = v8::Local::<v8::Function>::try_from(data.get_index(scope, 1)?).ok()?;
+    let context = document.get_creation_context(scope)?;
+    let active = context.get_slot::<ActiveDocument>()?.0.to_local(scope)?;
+    (active == document && callback.get_creation_context(scope) == Some(context))
+        .then_some((context, callback))
+}
+
+fn consume_with_lease(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    if scope.is_execution_terminating() {
+        return;
+    }
+    let data = v8::Local::new(scope, args.data());
+    let Some((context, callback)) = consumer_parts(scope, data) else {
+        async_owner::task_failure(scope, "Resource consumer document is unavailable".into());
+        return;
+    };
+    let values: Vec<_> = (0..args.length()).map(|index| args.get(index)).collect();
+    // The producer invokes its consumer with an undefined receiver.
+    let receiver = v8::undefined(scope);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    match async_owner::with_document(scope, context, |scope| {
+        callback.call(scope, receiver.into(), &values)
+    }) {
+        Ok(Some(value)) => result.set(value),
+        Ok(None) => {}
+        Err(error) if !scope.is_execution_terminating() => async_owner::task_failure(scope, error),
+        // Termination can begin during owner entry. Preserve the interruption
+        // without turning it into a sticky failure on the next operation.
+        Err(_) => {}
+    }
 }
 
 fn state_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
@@ -88,9 +152,17 @@ pub(super) fn restore_current_script<'s>(
 pub(super) fn op_retire_resource_document(
     scope: &mut v8::PinScope,
     document: v8::Local<v8::Object>,
-) {
-    crate::browser_env::set_document_resource_active(scope, document, false);
+    callback: v8::Local<v8::Function>,
+) -> bool {
+    if callback.get_creation_context(scope) != document.get_creation_context(scope)
+        || !crate::browser_env::set_document_resource_active(scope, document, false)
+    {
+        return false;
+    }
     crate::browser_env::remove_mutation_consumer(scope, document);
+    // Retained Documents still update their base; this captured passive consumer
+    // never admits resources and must not acquire a retired document's lease.
+    crate::browser_env::install_mutation_consumer(scope, document, callback)
 }
 
 #[op2(reentrant)]
@@ -204,3 +276,7 @@ pub(super) fn op_execute_inline_script<'s>(
     restore_current_script(scope, document, previous);
     result
 }
+
+#[cfg(test)]
+#[path = "resource_lifecycle/coverage_contracts.rs"]
+mod coverage_contracts;

@@ -8,7 +8,10 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { cpus } from "node:os";
 import { pathToFileURL } from "node:url";
+import { validateArtifactOptions } from "./artifact-options.mjs";
+import { executionOptions } from "./attempt-process.mjs";
 
 const DEFAULT_CONFIG_NAMES = [
   "playwright.config.ts",
@@ -42,19 +45,63 @@ export function normalizeConfig(raw, rootDir) {
   const testMatch = toArray(r.testMatch) ?? DEFAULT_TEST_MATCH;
   const testIgnore = toArray(r.testIgnore) ?? DEFAULT_TEST_IGNORE;
   const reporter = normalizeReporter(r.reporter);
-  const webServer = normalizeWebServer(r.webServer);
+  const webServer = normalizeWebServer(r.webServer, rootDir);
   const use = r.use ?? {};
+  const workers = normalizeWorkers(r.workers ?? "50%");
   const rawProjects = Array.isArray(r.projects) ? r.projects : [];
   const projects = rawProjects.length
     ? rawProjects.map((p) => ({
         name: String(p.name ?? "default"),
+        workers: Math.min(workers, normalizeWorkers(p.workers ?? workers)),
+        timeout: p.timeout ?? r.timeout ?? 30000,
+        retries: p.retries ?? r.retries ?? 0,
+        dependencies: p.dependencies ?? [],
+        grep: toArray(p.grep ?? r.grep),
+        grepInvert: toArray(p.grepInvert ?? r.grepInvert),
         use: { ...use, ...p.use },
         testDir: p.testDir ? resolve(rootDir, p.testDir) : testDir,
         testMatch: toArray(p.testMatch) ?? testMatch,
         testIgnore: toArray(p.testIgnore) ?? testIgnore,
       }))
-    : [{ name: "default", use, testDir, testMatch, testIgnore }];
-  return { rootDir, testDir, testMatch, testIgnore, reporter, webServer, use, projects };
+    : [
+        {
+          name: "default",
+          workers,
+          timeout: r.timeout ?? 30000,
+          retries: r.retries ?? 0,
+          use,
+          testDir,
+          testMatch,
+          testIgnore,
+          grep: toArray(r.grep),
+          grepInvert: toArray(r.grepInvert),
+        },
+      ];
+  return {
+    rootDir,
+    testDir,
+    testMatch,
+    testIgnore,
+    reporter,
+    webServer,
+    use,
+    projects,
+    workers,
+    globalSetup: r.globalSetup,
+    globalTeardown: r.globalTeardown,
+  };
+}
+
+function normalizeWorkers(value) {
+  if (typeof value === "string" && /^\d+%$/.test(value)) {
+    const percent = Number(value.slice(0, -1));
+    if (percent > 0 && Number.isFinite(percent))
+      return Math.max(1, Math.floor((cpus().length * percent) / 100));
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  throw new Error(
+    `turbo-surf-test: workers must be a positive integer or percentage; received ${String(value)}`,
+  );
 }
 
 function toArray(v) {
@@ -71,13 +118,13 @@ function normalizeReporter(r) {
   return [[String(r)]];
 }
 
-function normalizeWebServer(w) {
+function normalizeWebServer(w, rootDir) {
   if (!w) return [];
   return (Array.isArray(w) ? w : [w]).map((s) => ({
     command: s.command,
     url: s.url,
     port: s.port,
-    cwd: s.cwd,
+    cwd: resolve(rootDir, s.cwd ?? "."),
     env: s.env ?? {},
     timeout: s.timeout ?? 60_000,
     reuseExistingServer: s.reuseExistingServer ?? false,
@@ -140,8 +187,14 @@ function escapeLiteral(s) {
   return s.replace(/[.+^$|()[\]\\]/g, (c) => `\\${c}`);
 }
 
-export function matchAny(path, globs) {
-  return globs.some((g) => globToRegex(g).test(path));
+export function matchAny(path, globs, absolutePath = path) {
+  return globs.some((pattern) => {
+    if (!(pattern instanceof RegExp)) return globToRegex(pattern).test(path);
+    pattern.lastIndex = 0;
+    const matched = pattern.test(absolutePath);
+    pattern.lastIndex = 0;
+    return matched;
+  });
 }
 
 export function discoverTests(project) {
@@ -154,8 +207,8 @@ export function discoverTests(project) {
         walk(p);
       } else if (ent.isFile()) {
         const rel = relative(project.testDir, p).split(sep).join("/");
-        if (matchAny(rel, project.testIgnore)) continue;
-        if (matchAny(rel, project.testMatch)) files.push(p);
+        if (matchAny(rel, project.testIgnore, p)) continue;
+        if (matchAny(rel, project.testMatch, p)) files.push(p);
       }
     }
   };
@@ -185,6 +238,7 @@ async function startWebServer(s, log) {
   }
   const child = spawn(s.command, {
     shell: true,
+    detached: process.platform !== "win32",
     cwd: s.cwd,
     env: { ...process.env, ...s.env },
     stdio: "inherit",
@@ -198,7 +252,7 @@ async function startWebServer(s, log) {
     }
     await delay(200);
   }
-  child.kill("SIGTERM");
+  await stopWebServers([{ child, server: s }]);
   throw new Error(`webServer timed out after ${s.timeout}ms waiting for ${probeURL(s)}`);
 }
 
@@ -210,15 +264,79 @@ async function probe(s) {
   const url = probeURL(s);
   if (!url) return false;
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
-    return r.status < 500;
+    const parsed = new URL(url);
+    const status = await probeStatus(parsed);
+    if (status === 404 && parsed.pathname === "/") {
+      parsed.pathname = "/index.html";
+      return readyStatus(await probeStatus(parsed));
+    }
+    return readyStatus(status);
   } catch {
     return false;
   }
 }
 
+async function probeStatus(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+  await response.body?.cancel();
+  return response.status;
+}
+
+function readyStatus(status) {
+  return status >= 200 && status <= 403;
+}
+
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+async function ownedServerAlive(child, deadline) {
+  if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
+  let firstPermissionError;
+  for (;;) {
+    try {
+      process.kill(-child.pid, 0);
+      return true;
+    } catch (error) {
+      if (error.code === "ESRCH") return false;
+      const reaped = child.exitCode !== null || child.signalCode !== null;
+      if (error.code !== "EPERM" || !reaped) throw error;
+      firstPermissionError ??= error;
+      if (Date.now() >= deadline) throw firstPermissionError;
+      // Darwin may finish retiring the process group after the owned child's exit callback.
+      await delay(Math.min(10, deadline - Date.now()));
+    }
+  }
+}
+
+async function signalOwnedServer(child, signal) {
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    await new Promise((resolve) => {
+      killer.once("exit", resolve);
+      killer.once("error", resolve);
+    });
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
+
+async function waitForOwnedServerExit(child, deadline) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  // Reap the shell before probing its group; Darwin can reject probes of an unreaped zombie.
+  await new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      child.removeListener("exit", done);
+      resolve();
+    };
+    const timer = setTimeout(done, Math.max(0, deadline - Date.now()));
+    child.once("exit", done);
+  });
 }
 
 export async function stopWebServers(handles) {
@@ -226,9 +344,59 @@ export async function stopWebServers(handles) {
     if (!h?.child) continue;
     const sig = h.server.gracefulShutdown?.signal ?? "SIGTERM";
     const tmo = h.server.gracefulShutdown?.timeout ?? 5000;
-    h.child.kill(sig);
+    await signalOwnedServer(h.child, sig);
     const deadline = Date.now() + tmo;
-    while (h.child.exitCode === null && Date.now() < deadline) await delay(50);
-    if (h.child.exitCode === null) h.child.kill("SIGKILL");
+    await waitForOwnedServerExit(h.child, deadline);
+    while ((await ownedServerAlive(h.child, deadline)) && Date.now() < deadline) await delay(50);
+    if (await ownedServerAlive(h.child, deadline)) await signalOwnedServer(h.child, "SIGKILL");
   }
+}
+
+export function orderProjects(projects, selectedNames) {
+  const byName = new Map(projects.map((project) => [project.name, project]));
+  const ordered = [];
+  const visiting = new Set();
+  const visited = new Set();
+  const visit = (project) => {
+    if (visited.has(project.name)) return;
+    if (visiting.has(project.name)) throw new Error(`Project dependency cycle at ${project.name}`);
+    visiting.add(project.name);
+    for (const name of project.dependencies ?? []) {
+      const dependency = byName.get(name);
+      if (!dependency) throw new Error(`Unknown dependency ${name} for project ${project.name}`);
+      visit(dependency);
+    }
+    visiting.delete(project.name);
+    visited.add(project.name);
+    ordered.push(project);
+  };
+  for (const project of projects) {
+    if (!selectedNames || selectedNames.includes(project.name)) visit(project);
+  }
+  return ordered;
+}
+
+export function testRunnerFlags(project, version = process.versions.node) {
+  executionOptions([
+    { execution: { timeout: project.timeout ?? 30000, retries: project.retries ?? 0 } },
+  ]);
+  validateArtifactOptions(project.use);
+  const [major, minor] = version.split(".").map(Number);
+  const forceExit = major >= 22 || (major === 20 && minor >= 14);
+  if (!forceExit) {
+    throw new Error(
+      `turbo-surf-test requires Node.js 20.14+ or 22+ for completed-test worker shutdown; current ${version}`,
+    );
+  }
+  if (project.grepInvert?.length && !(major > 22 || (major === 22 && minor >= 1))) {
+    throw new Error(`turbo-surf-test: grepInvert requires Node.js 22.1+; current ${version}`);
+  }
+  return [
+    "--test-force-exit",
+    ...(project.workers === undefined
+      ? []
+      : [`--test-concurrency=${normalizeWorkers(project.workers)}`]),
+    ...(project.grep ?? []).map((pattern) => `--test-name-pattern=${pattern}`),
+    ...(project.grepInvert ?? []).map((pattern) => `--test-skip-pattern=${pattern}`),
+  ];
 }

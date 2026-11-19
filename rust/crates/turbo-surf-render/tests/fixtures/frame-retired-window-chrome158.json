@@ -1,0 +1,69 @@
+{
+  "version": "158.0.8127.18",
+  "parent": "http://127.0.0.1:50033",
+  "child": "http://127.0.0.1:50034",
+  "observations": {
+    "identity": {
+      "ok": true,
+      "value": true
+    },
+    "currentDocument": {
+      "ok": false,
+      "name": "SecurityError",
+      "message": "Failed to read a named property 'document' from 'Window': Blocked a frame with origin \"http://127.0.0.1:50033\" from accessing a cross-origin frame."
+    },
+    "oldWindowDocument": {
+      "ok": false,
+      "name": "SecurityError",
+      "message": "Failed to read a named property 'document' from 'Window': Blocked a frame with origin \"http://127.0.0.1:50033\" from accessing a cross-origin frame."
+    },
+    "oldDocumentDefaultView": {
+      "ok": true,
+      "value": false
+    },
+    "oldDocumentDefaultViewNull": {
+      "ok": true,
+      "value": true
+    },
+    "retainedOldDocument": {
+      "ok": true,
+      "value": "old"
+    },
+    "retiredLiteral": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "no access"
+    },
+    "retiredChildDirect": {
+      "ok": true,
+      "value": true
+    },
+    "oldFunctionGlobalIdentity": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "no access"
+    },
+    "oldFunctionRemoteSecret": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "no access"
+    },
+    "oldFunctionGlobalDocument": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "no access"
+    },
+    "oldFunctionDirectDocument": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "no access"
+    },
+    "retiredChild": {
+      "ok": false,
+      "name": "TypeError",
+      "message": "no access"
+    },
+    "oldTimerRan": false,
+    "oldScriptRan": false
+  }
+}

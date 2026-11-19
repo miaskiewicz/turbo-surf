@@ -1,5 +1,8 @@
 //! Match selectors before slot placement changes physical ancestry. Snapshot
 //! targets retain native identity and the original encapsulation depth.
+#[path = "live_layout_nesting.rs"]
+mod nesting;
+
 use crate::live_layout::source_id;
 use crate::live_layout_composed::Composition;
 use crate::live_stylesheets::{RuleSnapshot, SheetSnapshot};
@@ -23,6 +26,7 @@ pub(crate) fn prepare_sheet(
     graph: &Composition,
     sheet: &mut SheetSnapshot,
 ) -> Result<(), String> {
+    sheet.rules = nesting::flatten(std::mem::take(&mut sheet.rules))?;
     for rule in &mut sheet.rules {
         if rule.kind == 1 {
             rule.scoped = Some(prepare_rule(tree, document, root, graph, rule)?);
@@ -534,6 +538,125 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn nested_rules_keep_scoped_targets_and_conditional_groups() {
+        let tree = Tree::parse("<body><section class=parent><input id=inside class=child></section><input id=outside class=child></body>");
+        let graph = Composition::scopes(&tree).unwrap();
+        let mut sheet: SheetSnapshot = serde_json::from_value(serde_json::json!({"rules":[{"type":1,"cssText":".parent { width:10px; & > .child { width:20px; } @media screen { & > .child { height:5px; } } }"}]})).unwrap();
+        prepare_sheet(&tree, 1, tree.root(), &graph, &mut sheet).unwrap();
+        assert_eq!(sheet.rules.len(), 3);
+        assert_eq!(
+            sheet.rules[1]
+                .scoped
+                .as_ref()
+                .unwrap()
+                .targets
+                .iter()
+                .map(|target| target.source)
+                .collect::<Vec<_>>(),
+            vec![source_id(1, tree.get_element_by_id("inside").unwrap())]
+        );
+        assert_eq!(sheet.rules[2].kind, 4);
+        assert!(sheet.rules[2]
+            .prelude
+            .as_deref()
+            .unwrap()
+            .starts_with("@media screen"));
+        assert_eq!(
+            sheet.rules[2].rules.as_ref().unwrap()[0]
+                .scoped
+                .as_ref()
+                .unwrap()
+                .targets
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn nested_selector_lists_keep_max_specificity_and_declaration_order() {
+        let tree =
+            Tree::parse("<body><div class=parent><span id=child class=child></span></div></body>");
+        let graph = Composition::scopes(&tree).unwrap();
+        let mut sheet: SheetSnapshot = serde_json::from_value(serde_json::json!({"rules":[{"type":1,"cssText":".parent, #absent { & > .child { width:20px; } }"},{"type":1,"cssText":".parent { width:10px; & { width:20px; } width:30px; }"}]})).unwrap();
+        prepare_sheet(&tree, 1, tree.root(), &graph, &mut sheet).unwrap();
+        assert_eq!(
+            sheet.rules[0].scoped.as_ref().unwrap().targets[0].specificity,
+            (1, 1, 0)
+        );
+        let values = sheet.rules[1..]
+            .iter()
+            .flat_map(|rule| &rule.scoped.as_ref().unwrap().declarations)
+            .map(|decl| decl.value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(values, ["10px", "20px", "30px"]);
+    }
+
+    #[test]
+    fn nested_shadow_rules_do_not_escape_their_original_tree_scope() {
+        let mut tree =
+            Tree::parse("<body><div id=host></div><input class=child id=outside></body>");
+        let host = tree.get_element_by_id("host").unwrap();
+        let shadow = tree.attach_shadow(host);
+        let child = tree.create_element("input");
+        tree.set_attribute(child, "class", "child");
+        tree.append_child(shadow, child);
+        let graph = Composition::scopes(&tree).unwrap();
+        let mut sheet: SheetSnapshot = serde_json::from_value(serde_json::json!({"rules":[{"type":1,"cssText":":host { display:block; @media print { display:none; } & > .child { width:20px; } }"}]})).unwrap();
+        prepare_sheet(&tree, 1, shadow, &graph, &mut sheet).unwrap();
+        assert_eq!(sheet.rules.len(), 3);
+        assert_eq!(
+            sheet.rules[0].scoped.as_ref().unwrap().targets[0].source,
+            source_id(1, host)
+        );
+        assert_eq!(
+            sheet.rules[2]
+                .scoped
+                .as_ref()
+                .unwrap()
+                .targets
+                .iter()
+                .map(|target| target.source)
+                .collect::<Vec<_>>(),
+            vec![source_id(1, child)]
+        );
+        assert_eq!(sheet.rules[1].prelude.as_deref(), Some("@media print"));
+    }
+
+    #[test]
+    fn nested_supports_and_container_conditions_remain_grouped() {
+        let tree = Tree::parse("<body><div class=parent><span class=child></span></div></body>");
+        let graph = Composition::scopes(&tree).unwrap();
+        let mut sheet: SheetSnapshot = serde_json::from_value(serde_json::json!({"rules":[{"type":1,"cssText":".parent { @supports (display:grid) { & .child { width:20px; } } @container wide (min-width: 10px) { & .child { height:4px; } } }"}]})).unwrap();
+        prepare_sheet(&tree, 1, tree.root(), &graph, &mut sheet).unwrap();
+        assert_eq!(sheet.rules.len(), 2);
+        assert_eq!(sheet.rules[0].kind, 12);
+        assert!(sheet.rules[0]
+            .prelude
+            .as_deref()
+            .unwrap()
+            .starts_with("@supports"));
+        assert!(crate::live_stylesheets::is_container(&sheet.rules[1]));
+        assert_eq!(
+            sheet.rules[0].rules.as_ref().unwrap()[0]
+                .scoped
+                .as_ref()
+                .unwrap()
+                .targets
+                .len(),
+            1
+        );
+        assert_eq!(
+            sheet.rules[1].rules.as_ref().unwrap()[0]
+                .scoped
+                .as_ref()
+                .unwrap()
+                .targets
+                .len(),
+            1
+        );
     }
 
     fn legacy_targets(tree: &Tree, root: Handle, graph: &Composition, css: &str) -> Vec<Target> {

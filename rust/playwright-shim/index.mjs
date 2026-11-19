@@ -14,9 +14,54 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
+import {
+  handleEvaluation,
+  hasJSHandles,
+  ensureHandleSession,
+  createJSHandle,
+} from "./js-handles.mjs";
+import { animationPolicy } from "./animation-policy.mjs";
+import { consoleMessage } from "./console-message.mjs";
+import { dialogMessage, dialogReplyUnits } from "./dialog.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { basename } from "node:path";
+import { closeScreenshotScene, paintScreenshotScene } from "./screenshot-scene.mjs";
+import { historyUrl, syncHistory, traverseLive } from "./history-navigation.mjs";
+import {
+  emitNativeFrameNavigation,
+  hasNativeHistory,
+  notifyNativeHistory,
+  retiredNativeHistoryTarget,
+  syncNativeHistory,
+} from "./history-snapshot.mjs";
+import { validateArtifactOptions } from "./artifact-options.mjs";
+import { encodeStorageOrigins, decodeStorageOrigins } from "./storage-state.mjs";
+import { equalValues } from "./equality.mjs";
+import { queryVisibleSelector } from "./visible-selector.mjs";
+import {
+  decodeEvaluationError,
+  decodeEvaluationValue,
+  encodeEvaluationError,
+  encodeEvaluationValue,
+  evaluationArgument,
+} from "./evaluation-codec.mjs";
+import { makeKeyboard } from "./keyboard.mjs";
+import { scheduleBindingDrain, throwBindingDrainError } from "./binding-drain.mjs";
+import { captureAssets } from "./screenshot-resources.mjs";
+import { configureActorGeolocation } from "./context-emulation-forwarding.mjs";
+import { invokeHostRoute, routeResponse } from "./host-routes.mjs";
+import { LiveActorHub, ownsBindingDeadline } from "./actor-hub.mjs";
+import { NativeLoadState } from "./native-load-state.mjs";
+import { waitForTargetNetworkIdle } from "./target-network-idle.mjs";
+import { waitForEmitterEvent } from "./event-waiter.mjs";
+import {
+  contextGeolocation,
+  contextPermissionGrant,
+  mergePermissionGrant,
+} from "./geolocation-options.mjs";
 
 const require = createRequire(import.meta.url);
 const native = require("../crates/turbo-surf-napi/index.js");
@@ -29,11 +74,134 @@ const UNSUPPORTED = (api, why) => async () => {
 const PIXEL = "no-browser engine (no rendering surface)";
 const INPUT = "no synthetic input devices (static DOM, no pointer/keyboard hardware)";
 const NETIO = "no in-process network interception";
+const nativeResponseIds = new WeakMap();
+
+function cookieMatchesUrl(cookie, url) {
+  const domain = String(cookie.domain ?? "")
+    .toLowerCase()
+    .replace(/^\./, "");
+  const hostOnly = cookie.host_only ?? !String(cookie.domain).startsWith(".");
+  const host = url.hostname.toLowerCase();
+  if (host !== domain && (hostOnly || !host.endsWith(`.${domain}`))) return false;
+  if (cookie.secure && url.protocol !== "https:") return false;
+  const path = cookie.path || "/";
+  return (
+    url.pathname === path ||
+    (url.pathname.startsWith(path) && (path.endsWith("/") || url.pathname[path.length] === "/"))
+  );
+}
+
+function isXPathSelector(selector) {
+  return (
+    typeof selector === "string" && /^(?:xpath=|\/|\.\.?\/|\.\.?$|\()/.test(selector.trimStart())
+  );
+}
+
+function hasSelectorEngine(selector) {
+  return isXPathSelector(selector) || (selector?.trimStart() ?? "").startsWith("css=");
+}
+
+function cookieMatchesFilter(cookie, filters) {
+  return ["name", "domain", "path"].every((field) => {
+    const expected = filters[field];
+    if (expected === undefined) return true;
+    if (expected instanceof RegExp) {
+      expected.lastIndex = 0;
+      return expected.test(cookie[field]);
+    }
+    return cookie[field] === expected;
+  });
+}
+
+function nativeCookieRecord(cookie) {
+  let domain = cookie.domain;
+  let path = cookie.path;
+  let secure = cookie.secure ?? false;
+  if (cookie.url !== undefined) {
+    if (domain !== undefined || path !== undefined)
+      throw new Error("Cookie must use either url or domain/path");
+    const url = new URL(cookie.url);
+    if (!["http:", "https:"].includes(url.protocol))
+      throw new Error("Cookie URL must use HTTP or HTTPS");
+    domain = url.hostname;
+    path = url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1);
+    secure = url.protocol === "https:";
+  }
+  if (!domain || !path) throw new Error("Cookie requires a url or domain/path pair");
+  return {
+    name: cookie.name,
+    value: cookie.value,
+    domain: domain.toLowerCase().replace(/^\./, ""),
+    path,
+    host_only: cookie.host_only ?? !domain.startsWith("."),
+    secure,
+    ...nativeCookieAttributes(cookie),
+  };
+}
+
+function nativeCookieAttributes(cookie) {
+  return {
+    http_only: cookie.http_only ?? cookie.httpOnly ?? false,
+    same_site: String(cookie.same_site ?? cookie.sameSite ?? "lax").toLowerCase(),
+    expires_at:
+      cookie.expires_at ??
+      (cookie.expires == null || cookie.expires === -1 ? null : cookie.expires * 1000),
+  };
+}
+
+class DownloadNavigationError extends Error {
+  constructor() {
+    super("page.goto: net::ERR_ABORTED: Download is starting");
+  }
+}
+
+function attachmentRecord(response) {
+  const disposition = (response.headers ?? []).find(
+    ([name]) => name.toLowerCase() === "content-disposition",
+  )?.[1];
+  if (!disposition || !/^attachment(?:;|$)/i.test(disposition.trim())) return null;
+  return {
+    filename: attachmentFilename(disposition, response.finalUrl),
+    url: response.finalUrl,
+    bodyBytes: response.bodyBytes ?? Buffer.from(response.html ?? ""),
+  };
+}
+
+function attachmentFilename(disposition, url) {
+  const encoded = /(?:^|;)\s*filename\*\s*=\s*UTF-8'[^']*'([^;]*)/i.exec(disposition);
+  const plain = /(?:^|;)\s*filename\s*=\s*(?:"((?:\\.|[^"])*)"|([^;]*))/i.exec(disposition);
+  let filename = plain ? (plain[1] ?? plain[2]).trim().replace(/\\(.)/g, "$1") : "";
+  if (encoded) {
+    try {
+      filename = decodeURIComponent(encoded[1].trim());
+    } catch {
+      /* use the plain filename */
+    }
+  }
+  return filename || new URL(url).pathname.split("/").at(-1) || "download";
+}
 
 // Build an executable source string from page.evaluate's (fn|string, arg) form.
 function evalSource(script, arg) {
-  if (typeof script === "function") return `(${script.toString()})(${JSON.stringify(arg ?? null)})`;
+  if (typeof script === "function") return `(${script.toString()})(${evaluationArgument(arg)})`;
   return String(script);
+}
+
+// Run `fn` over `items` with at most `limit` in flight, preserving input order
+// in the results. Backs screenshot asset preparation, whose fetches are
+// independent but must not stampede the network.
+async function mapBounded(items, limit, fn) {
+  const results = Array.from({ length: items.length });
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        results[i] = await fn(items[i], i);
+      }
+    }),
+  );
+  return results;
 }
 
 // Quote a value for a CSS attribute selector (backs getByPlaceholder/AltText/Title).
@@ -41,9 +209,27 @@ function cssAttrValue(text) {
   return `"${String(text).replace(/"/g, '\\"')}"`;
 }
 
-// --- page.route helpers (shim-side, fulfill-only) --------------------------
+function validateResourceTagOptions(kind, opts) {
+  const supplied = [opts.content != null, opts.url != null, opts.path != null].filter(
+    Boolean,
+  ).length;
+  if (supplied !== 1)
+    throw new Error(
+      `add${kind === "style" ? "Style" : "Script"}Tag requires exactly one of content, url or path`,
+    );
+}
+
+// --- page.route helpers ---------------------------------------------------
+function harResponseHeaders(response) {
+  const headers = {};
+  for (const h of response.headers || []) {
+    if (h && h.name) headers[String(h.name).toLowerCase()] = h.value == null ? "" : String(h.value);
+  }
+  return headers;
+}
+
 // Normalize a route pattern + fulfill payload into a JSON-serializable record.
-// `patternKey` is the original user pattern as a string so `unroute` can match.
+// `patternKey` preserves predicate identity, or the string/RegExp source for unroute.
 // Convert one HAR entry (Playwright / Chrome DevTools format) into the same
 // route record normalizeRoute produces. Matches the entry's URL exactly: the
 // init-script's globToRegex anchors non-wildcard patterns, so the request URL
@@ -53,59 +239,79 @@ function harEntryToRoute(entry) {
   const url = entry?.request?.url;
   if (!url) return null;
   const resp = entry.response ?? {};
-  const headers = {};
-  for (const h of resp.headers || []) {
-    if (h && h.name) headers[String(h.name).toLowerCase()] = h.value == null ? "" : String(h.value);
-  }
+  const headers = harResponseHeaders(resp);
   const content = resp.content ?? {};
   const payload = {
     status: resp.status ?? 200,
     headers,
     contentType: content.mimeType ?? null,
-    body: content.text == null ? "" : String(content.text),
+    body:
+      content.encoding === "base64"
+        ? Buffer.from(content.text ?? "", "base64")
+        : content.text == null
+          ? ""
+          : String(content.text),
   };
-  // Replay a HAR entry as a fulfill-only handler so the init script can treat
-  // every route uniformly (handlerSource eval'd in the isolate, see #281).
-  const handlerSource = `(async (route) => { await route.fulfill(${JSON.stringify(payload)}); })`;
-  return { kind: "glob", pattern: url, flags: "", patternKey: url, handlerSource };
+  // HAR replay uses the same host dispatch and response encoding as normal routes.
+  return {
+    id: randomUUID(),
+    kind: "glob",
+    pattern: url,
+    flags: "",
+    patternKey: url,
+    handler: (route) => route.fulfill(payload),
+  };
 }
 
 function normalizeRoute(pattern, handler) {
   const isRegex = pattern instanceof RegExp;
-  // Serialize the handler so the init script can re-create it inside the live
-  // isolate and invoke it PER request with a live Request wrapper (#281). We
-  // wrap in parens so a `function` / `async function` declaration-form source
-  // evaluates to the function expression rather than a statement.
+  const isPredicate = typeof pattern === "function";
+  if (!isRegex && !isPredicate && typeof pattern !== "string")
+    throw new TypeError("Route pattern must be a string, RegExp, or URL predicate");
+  if (typeof handler !== "function") throw new TypeError("Route handler must be a function");
   return {
-    kind: isRegex ? "regex" : "glob",
-    pattern: isRegex ? pattern.source : String(pattern),
+    kind: isPredicate ? "predicate" : isRegex ? "regex" : "glob",
+    pattern: isPredicate ? null : isRegex ? pattern.source : String(pattern),
     flags: isRegex ? pattern.flags : "",
-    patternKey: isRegex ? pattern.source : String(pattern),
-    handlerSource: `(${String(handler)})`,
+    patternKey: isPredicate ? pattern : isRegex ? pattern.source : String(pattern),
+    id: randomUUID(),
+    handler,
   };
+}
+
+function matchesHostRoutePredicate({ kind, patternKey }, url) {
+  return kind !== "predicate" || patternKey(new URL(url));
 }
 
 // Build an init script that monkey-patches `fetch` (and XMLHttpRequest for the
 // common open+send path) inside the live isolate. Routes are matched in the
-// order they were registered; a RegExp source uses `new RegExp(...)`, a glob
+// reverse registration order; a RegExp source uses `new RegExp(...)`, a glob
 // supports `**` (any chars) and `*` (any non-slash chars), with substring as a
 // final fallback.
-function buildRouteInitScript(routes) {
-  if (!routes || !routes.length) return "";
+function buildRouteInitScript(routes, bindingName) {
   const table = JSON.stringify(
-    routes.map((r) => ({
+    (routes ?? []).map((r) => ({
       kind: r.kind,
       pattern: r.pattern,
       flags: r.flags,
-      handlerSource: r.handlerSource,
+      id: r.id,
     })),
   );
   return `(() => {
-    const routes = (${table}).map((r) => {
-      let fn = null;
-      try { fn = (0, eval)(r.handlerSource); } catch (_e) { /* malformed handler — route is a no-op */ }
-      return { kind: r.kind, pattern: r.pattern, flags: r.flags, fn };
-    });
+    const invokeHost = __tsNs.shimBindings?.functions[${JSON.stringify(bindingName)}];
+    const previous = __tsNs.shimRouteState;
+    const state = previous || {routes: [], fetch: globalThis.fetch, xhr: globalThis.XMLHttpRequest};
+    __tsNs.shimRouteState = state;
+    const routes = state.routes;
+    state.requests ??= new Map();
+    const next = ${table};
+    routes.splice(0, routes.length, ...next);
+    if (!routes.length) {
+      if (previous) { globalThis.fetch = state.fetch; globalThis.XMLHttpRequest = state.xhr; state.active=false; }
+      return;
+    }
+    if (state.active) return;
+    state.active=true;
     const globToRegex = (p) => {
       // Escape * and ? too, so the two translation passes below can locate
       // every star — a bare * in the source would otherwise skip the escape
@@ -128,13 +334,15 @@ function buildRouteInitScript(routes) {
       } catch (_e) { /* non-URL input — raw-only matching */ }
       return out;
     };
-    const find = (url) => {
+    const find = (url, start = routes.length - 1, table = routes) => {
       const urls = candidates(url);
       // Playwright runs the LATEST handler first (reverse registration order) so
       // a per-test override can shadow a globally registered mock. Iterate the
       // route table from the end.
-      for (let i = routes.length - 1; i >= 0; i--) {
-        const r = routes[i];
+      for (let i = start; i >= 0; i--) {
+        const r = table[i];
+        // Predicate callbacks remain in the host; this is only a candidate.
+        if (r.kind === "predicate") return r;
         for (const u of urls) {
           try {
             if (r.kind === "regex") {
@@ -153,55 +361,84 @@ function buildRouteInitScript(routes) {
       const h = Object.assign({}, o.headers || {});
       if (o.contentType && !Object.keys(h).some((k) => k.toLowerCase() === "content-type"))
         h["content-type"] = o.contentType;
-      return new Response(o.body == null ? "" : String(o.body), { status: o.status == null ? 200 : o.status, headers: h });
+      return new Response(o.status === 204 || o.status === 205 || o.status === 304 ? null : new Uint8Array(o.bodyBytes || []), { status: o.status == null ? 200 : o.status, headers: h });
     };
-    // Invoke a route handler per request (#281): build a Request wrapper
-    // carrying the LIVE url/method/headers, run handler(route, req), and
-    // return a {fulfill?, action?} decision the caller turns into a Response.
-    const runHandler = async (r, url, method, init, headers) => {
-      let fulfilled = null;
-      let action = null;
-      const body = init && init.body != null ? init.body : null;
-      const req = {
-        url: () => url,
-        method: () => String(method || "GET").toUpperCase(),
-        postData: () => (typeof body === "string" ? body : null),
-        postDataJSON: () => { try { return typeof body === "string" ? JSON.parse(body) : null; } catch (_e) { return null; } },
-        headers: () => headers || {},
-        resourceType: () => "xhr",
-      };
-      const route = {
-        request: () => req,
-        fulfill: async (opts) => { fulfilled = opts == null ? {} : opts; },
-        continue: async () => { action = "continue"; },
-        abort: async () => { action = "abort"; },
-        fallback: async () => { action = "fallback"; },
-      };
-      try { if (typeof r.fn === "function") await r.fn(route, req); } catch (_e) { /* handler threw — leave inert */ }
-      return { fulfilled, action };
+    // Only request records and decisions cross the isolate boundary; callbacks stay in Node.
+    const requestRecord = async (input, init, resourceType) => {
+      const request = new Request(input, init);
+      const headers = {}; request.headers.forEach((v,k)=>{headers[k]=v;});
+      const bodyBytes=request.body === null ? null : Array.from(new Uint8Array(await request.arrayBuffer()));
+      const requestId = state.nextRequest = (state.nextRequest || 0) + 1;
+      state.requests.set(requestId, request);
+      const record = {requestId, url:request.url, method:request.method, headers,
+        bodyBytes,
+        credentials:request.credentials, mode:request.mode, cache:request.cache,
+        redirect:request.redirect, referrer:request.referrer, referrerPolicy:request.referrerPolicy,
+        resourceType};
+      Object.defineProperty(record, 'signal', {value:request.signal});
+      return record;
     };
-    const collectHeaders = (init) => {
-      const h = init && init.headers;
-      if (!h) return {};
-      if (typeof h.forEach === "function") { const out = {}; h.forEach((v, k) => { out[k] = v; }); return out; }
-      if (typeof h === "object") return Object.assign({}, h);
-      return {};
+    const routeDecision = async (pending, signal, requestId) => {
+      let abort;
+      const canceled = new Promise((_,reject)=>{
+        abort=()=>{invokeHost({cancel:requestId}).catch(()=>{});reject(signal.reason);};
+        if(signal.aborted) abort(); else signal.addEventListener('abort',abort,{once:true});
+      });
+      try { return await Promise.race([pending,canceled]); }
+      finally {signal.removeEventListener('abort',abort);}
     };
+    const runRouteChain = async (first, request, chain) => {
+      let route = first;
+      const signal = request.signal;
+      const originalUrl = request.url;
+      while (route) {
+        const decision = await routeDecision(invokeHost({id:route.id, request, matchUrl:originalUrl}), signal, request.requestId);
+        if (decision.request) request = decision.request;
+        if (decision.action !== "fallback") return {...decision, request};
+        route = find(originalUrl, chain.indexOf(route) - 1, chain);
+      }
+      return {fulfilled: null, action: "continue", request};
+    };
+    const finishRequest = request => {
+      state.requests.delete(request.requestId);
+      invokeHost({complete:request.requestId}).catch(()=>{});
+    };
+    const original = (request, signal) => state.fetch(request.url, {
+      ...request, signal, body:request.bodyBytes === null ? undefined : new Uint8Array(request.bodyBytes),
+    });
     if (typeof globalThis.fetch === "function") {
       const origFetch = globalThis.fetch;
       globalThis.fetch = async function (input, init) {
         const url = typeof input === "string" ? input : (input && input.url) || "";
-        const method = (init && init.method) || (typeof input === "object" && input && input.method) || "GET";
-        const r = find(url);
+        const chain = routes.slice();
+        const r = find(url, chain.length - 1, chain);
         if (!r) return origFetch(input, init);
-        const { fulfilled, action } = await runHandler(r, url, method, init || {}, collectHeaders(init));
-        if (fulfilled) return synth(fulfilled);
-        if (action === "abort") throw new TypeError("net::ERR_ABORTED");
-        return origFetch(input, init);
+        const request = await requestRecord(input, init, "fetch");
+        try {
+          const decision = await runRouteChain(r, request, chain);
+          if (decision.fulfilled) return synth(decision.fulfilled);
+          if (decision.action === "abort") throw new TypeError("net::ERR_" + (decision.errorCode || "ABORTED").toUpperCase());
+          return await original(decision.request, request.signal);
+        } finally {finishRequest(request);}
       };
     }
     if (typeof globalThis.XMLHttpRequest === "function") {
       const OrigXHR = globalThis.XMLHttpRequest;
+      const bodyBrands = [
+        Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get,
+        Object.getOwnPropertyDescriptor(Blob.prototype,"size").get,
+        FormData.prototype.entries,
+        Object.getOwnPropertyDescriptor(URLSearchParams.prototype,"size")?.get || URLSearchParams.prototype.toString,
+        Object.getOwnPropertyDescriptor(Document.prototype,"URL").get,
+      ];
+      const xhrBody = value => {
+        if(value==null || typeof value==="string" || ArrayBuffer.isView(value)) return value;
+        for(const brand of bodyBrands) {
+          try { Reflect.apply(brand,value,[]); return value; } catch {}
+        }
+        if(typeof value==="symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+        return String(value);
+      };
       function MockXHR() {
         this._mocked = null;
         this._real = null;
@@ -222,67 +459,90 @@ function buildRouteInitScript(routes) {
         this._reqHeaders[name] = value;
         if (this._real) this._real.setRequestHeader(name, value);
       };
-      MockXHR.prototype.send = function (body) {
-        if (this._mocked) {
-          const self = this;
-          runHandler(this._mocked, this._url, this._method, { body }, Object.assign({}, this._reqHeaders)).then(({ fulfilled }) => {
-            const o = fulfilled || { status: 200, body: "" };
-            self.readyState = 4;
-            self.status = o.status == null ? 200 : o.status;
-            const b = o.body == null ? "" : String(o.body);
-            self.responseText = b;
-            self.response = b;
-            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
-            try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
-          });
-        } else if (this._real) {
-          const self = this;
-          this._real.onreadystatechange = function () {
+      MockXHR.prototype._emit = function (name, event) {
+        const callback = this["on" + name];
+        if (typeof callback === "function") callback.call(this, event || new Event(name));
+      };
+      MockXHR.prototype._sendReal = function (body) {
+        if (!this._real) {
+          this._real = new OrigXHR();
+          this._real.open(this._method, this._url);
+          for (const name of Object.keys(this._reqHeaders)) this._real.setRequestHeader(name, this._reqHeaders[name]);
+        }
+        const self = this;
+        for (const name of ["readystatechange", "load", "error", "loadend", "timeout", "abort"]) {
+          this._real.addEventListener(name, (event) => {
             self.readyState = self._real.readyState;
             self.status = self._real.status;
             self.responseText = self._real.responseText;
             self.response = self._real.response;
-            try { if (typeof self.onreadystatechange === "function") self.onreadystatechange(); } catch (_e) {}
-            if (self.readyState === 4) {
-              try { if (typeof self.onload === "function") self.onload(); } catch (_e) {}
-            }
-          };
-          this._real.send(body);
+            self._emit(name, event);
+          });
         }
+        this._real.send(body);
+      };
+      MockXHR.prototype.send = function (body) {
+        const chain = routes.slice();
+        this._mocked = find(this._url, chain.length - 1, chain);
+        if (this._mocked) {
+          const self = this;
+          // XHR converts its BodyInit before discarding GET/HEAD payload bytes.
+          const converted = xhrBody(body), method = String(this._method), normalized = method.toUpperCase();
+          const payload = normalized === "GET" || normalized === "HEAD" ? null : converted;
+          requestRecord(new URL(this._url, location.href).href, {method,body:payload,headers:this._reqHeaders}, "xhr").then(request => runRouteChain(this._mocked, request, chain).finally(()=>finishRequest(request))).then(({ fulfilled, action, request }) => {
+            if (action === "abort") {
+              self.readyState = 4;
+              self.status = 0;
+              self.responseText = self.response = "";
+              self._emit("readystatechange");
+              self._emit("error");
+              self._emit("loadend");
+              return;
+            }
+            if (!fulfilled) { self._url=request.url; self._method=request.method; self._reqHeaders=request.headers; self._real=null; self._sendReal(request.bodyBytes === null ? null : new Uint8Array(request.bodyBytes)); return; }
+            const o = fulfilled;
+            self.readyState = 4;
+            self.status = o.status == null ? 200 : o.status;
+            const b = new TextDecoder().decode(new Uint8Array(o.bodyBytes || []));
+            self.responseText = b;
+            self.response = b;
+            self._emit("readystatechange");
+            self._emit("load");
+            self._emit("loadend");
+          });
+        } else this._sendReal(body);
       };
       MockXHR.prototype.addEventListener = function (name, fn) {
-        if (name === "load") this.onload = fn;
-        else if (name === "readystatechange") this.onreadystatechange = fn;
+        this["on" + name] = fn;
       };
       globalThis.XMLHttpRequest = MockXHR;
     }
   })();`;
 }
 
-// --- page.exposeFunction / exposeBinding (fire-and-forget) ------------------
-// Install a persistent JS→host binding that survives navigation. Since the
-// deno_core isolate runs page JS synchronously inside one `liveEvalEngine`
-// call (no mid-eval callback into Node), the injected stub records each call
-// in a page-global queue and returns `Promise.resolve()`. The shim drains the
-// queue after every live interaction (`_sessionEval` / `evaluate` return,
-// session open) and invokes the Node host handlers then. This covers the
-// common instrumentation case (`captured.push(payload)` from a stubbed
-// telemetry sink, a progress counter, a test-only RPC). Host return values
-// are NOT surfaced back to in-page JS in this release — the page sees
-// `undefined` — because resolving an in-flight promise mid-eval would need a
-// napi hook into Node, tracked in the turbo-dom-browser-env roadmap.
-function buildExposeInitScript(names) {
+// Persistent exposed functions queue serialized calls; Node settles the matching
+// guest promise after invoking the host handler between isolate evaluations.
+function buildExposeInitScript(names, internalName) {
   if (!names || !names.length) return "";
   const list = JSON.stringify(names);
-  return `(() => {
-    const bag = (globalThis.__tsExpose = globalThis.__tsExpose || { q: [], n: 0 });
+  return `"use strict"; (() => {
+    const bag = __tsNs.shimBindings ||= {__proto__:null,q:{__proto__:null,length:0},n:0,nonce:__tsNs.shimBindingId(),error:__tsNs.shimBindingError,pending:{__proto__:null},evaluations:{__proto__:null}};
+    bag.functions ||= {__proto__:null};
     const define = (name) => {
+      if (bag.functions[name]) return;
       if (typeof globalThis[name] === "function" && globalThis[name].__ts) return;
       const fn = function (...args) {
         const id = ++bag.n;
-        try { bag.q.push({ id, name, args }); } catch (_e) { /* queue full */ }
-        return Promise.resolve(undefined);
+        __tsNs.shimBindingPending(true);
+        return __tsNs.shimBindingPromise((resolve, reject) => {
+          let settled=false;
+          const finish=()=>{if(!settled){settled=true;__tsNs.shimBindingPending(false);}};
+          bag.pending[id] = {__proto__:null, resolve:value=>{finish();resolve(value);}, reject:error=>{finish();reject(error);} };
+          bag.q[bag.q.length++] = {__proto__:null, id, name, args };
+        });
       };
+      bag.functions[name] = fn;
+      if (name === ${JSON.stringify(internalName)}) return;
       try { Object.defineProperty(fn, "__ts", { value: true }); } catch (_e) {}
       try {
         Object.defineProperty(globalThis, name, { value: fn, configurable: true, writable: true });
@@ -290,7 +550,6 @@ function buildExposeInitScript(names) {
         try { globalThis[name] = fn; } catch (_e2) {}
       }
     };
-    globalThis.__tsExposeDefine = define;
     for (const n of ${list}) define(n);
   })();`;
 }
@@ -300,16 +559,54 @@ function buildExposeInitScript(names) {
 // the match array (each `{ node, text, html }`) in ONE napi call; composition
 // (first/last/nth/filter) and counts stay in JS over that array.
 // ---------------------------------------------------------------------------
+function responseBudget(value) {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 1 || value > 0xffffffff) {
+    throw new Error("maxResponseBytes must be a positive 32-bit byte count");
+  }
+  return value;
+}
+
+function renderedVisibility(element) {
+  for (let ancestor = element; ancestor; ancestor = __tsNs.tcLocatorParent(ancestor)) {
+    if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
+      return false;
+  }
+  const style = getComputedStyle(element);
+  if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+  if (style.display === "contents") {
+    for (const child of element.childNodes) {
+      if (child.nodeType === 1 && renderedVisibility(child)) return true;
+      if (child.nodeType === 3) {
+        const range = document.createRange();
+        range.selectNode(child);
+        const rect = range.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) return true;
+      }
+    }
+    return false;
+  }
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
 class Locator {
   constructor(page, resolve, opts = {}) {
     this._page = page;
     this._resolve = resolve;
+    this._count = opts.count ?? null;
     this._index = opts.index ?? null;
     this._filter = opts.filter ?? null; // (match) => boolean, applied in JS
     // getByRole/getByText/getByLabel carry {kind,value,name} so a LIVE dispatch can
     // re-resolve the match IN the running isolate (live `*` indices) instead of trusting
     // a re-serialized snapshot's index, which diverges for portal'd content (MUI options).
     this._getBy = opts.getBy ?? null;
+    this._testId = opts.testId ?? null;
+    this._parent = opts.parent ?? null;
+    this._composite = opts.composite ?? null;
+    // Each wrapper preserves the preceding selection stage (including nth) before filtering.
+    this._querySource = opts.querySource ?? null;
+    this._queryFilter = opts.queryFilter ?? null;
     // nth-aware scope chain ([{sel, idx, filter}, …]) for nested locators where a parent had
     // `.nth(i)` or `.filter(...)` — a CSS-concat selector can't express "the i-th (or
     // text-filtered) match's subtree", so the live drive walks this chain via
@@ -326,25 +623,131 @@ class Locator {
     this._filterSpec = opts.filterSpec ?? null;
   }
 
+  page() {
+    return this._page instanceof Frame ? this._page.page() : this._page;
+  }
+
   // The scope chain a CHILD of this locator inherits: our chain plus this locator's own
   // base selector, index, and (serializable) filter.
   _childScope() {
     return [
       ...this._scope,
-      { sel: this._scopeSel ?? this._selector, idx: this._index ?? null, filter: this._filterSpec },
+      {
+        sel: this._scopeSel ?? this._selector,
+        getBy: this._getBy,
+        idx: this._index ?? null,
+        filter: this._filterSpec,
+      },
     ];
   }
 
+  _needsQuery() {
+    return (
+      (this._page._live && this._page._locatorHasShadow) ||
+      !!this._querySource ||
+      !!this._selector?.includes(":visible") ||
+      !!this._parent?._needsQuery() ||
+      (!!this._composite &&
+        (this._composite.left._needsQuery() || this._composite.right._needsQuery()))
+    );
+  }
+  async _prepareQuery() {
+    if (this._needsQuery()) {
+      await this._page._ensureLive();
+      if (!this._page._live) throw new Error("Extended locator queries require a live document");
+    }
+    if (this._page._live)
+      this._page._locatorHasShadow = await this._page._readEngineAsync(
+        "return __tsNs.tcLocatorHasShadow();",
+      );
+  }
+  _queryRecords() {
+    return this._page._locatorHasShadow ? this._shadowQueryRecords() : this._lightQueryRecords();
+  }
+  _lightQueryRecords() {
+    const marker = `data-turbo-surf-query-${randomUUID()}`;
+    const result = this._page._readEngine(`
+      const matches = ${this._liveElementsExpression()};
+      const all = Array.from(document.querySelectorAll('*'));
+      const positions = new Map(all.map((element, index) => [element, index]));
+      // Mark a detached copy: reparsing may repair invalid live HTML and reorder nodes.
+      const copy = document.documentElement.cloneNode(true);
+      const copies = [copy, ...copy.querySelectorAll('*')];
+      const indices = matches.map(element => positions.get(element));
+      indices.forEach((index, order) => copies[index].setAttribute(${JSON.stringify(marker)}, String(order)));
+      return {html: copy.outerHTML, indices, text: matches.map(element => element.textContent)};
+    `);
+    this._queryHtml = result.html;
+    const records = JSON.parse(native.query(result.html, `[${marker}]`, "css"));
+    const ordered = Array.from({ length: result.indices.length });
+    for (const record of records) {
+      const order = Number(native.attrOf(result.html, record.node, marker));
+      ordered[order] = { ...record, idx: result.indices[order], liveText: result.text[order] };
+    }
+    return ordered;
+  }
+  _shadowQueryRecords() {
+    const marker = `data-turbo-surf-query-${randomUUID()}`;
+    const result = this._page._readEngine(`
+      const matches = ${this._liveElementsExpression()};
+      const all = __tsNs.tcLocatorAll();
+      const positions = new Map(all.map((element, index) => [element, index]));
+      const snapshots = __tsNs.tcLocatorSnapshots(matches, ${JSON.stringify(marker)});
+      return {...snapshots, indices: matches.map(element => positions.get(element)), text: matches.map(element => element.textContent)};
+    `);
+    this._queryHtml = result.html[result.membership[0]] ?? "";
+    this._queryBaseURL = result.baseURL;
+    return result.indices.map((index, order) => {
+      const html = result.html[result.membership[order]];
+      const record = JSON.parse(native.query(html, `[${marker}="${order}"]`, "css"))[0];
+      if (!record) throw new Error("Locator metadata cannot represent this element");
+      return { ...record, idx: index, liveText: result.text[order] };
+    });
+  }
+
   _all() {
-    let m = this._resolve(this._page._html);
+    if (this._needsQuery()) return this._queryRecords();
+    let m;
+    if (this._parent && this._selector) {
+      const seen = new Set();
+      m = [];
+      for (const parent of this._parent._all()) {
+        for (const match of JSON.parse(
+          native.query(this._html, this._selector, "auto", parent.node),
+        )) {
+          if (!seen.has(match.node)) {
+            seen.add(match.node);
+            m.push(match);
+          }
+        }
+      }
+    } else {
+      m = this._resolve(this._page._html);
+      if (this._parent) {
+        const descendants = new Set();
+        for (const parent of this._parent._all()) {
+          for (const match of JSON.parse(native.query(this._html, "*", "css", parent.node))) {
+            descendants.add(match.node);
+          }
+        }
+        m = m.filter((match) => descendants.has(match.node));
+      }
+    }
     if (this._filter) m = m.filter(this._filter);
     if (this._index == null) return m;
     const i = this._index < 0 ? m.length + this._index : this._index;
     return m[i] ? [m[i]] : [];
   }
+  _singleMatch() {
+    const matches = this._all();
+    if (matches.length > 1) throw strictLocatorError(matches.length);
+    return matches[0] ?? null;
+  }
+  _checkLiveCardinality(matches) {
+    if (this._index == null && matches.length > 1) throw strictLocatorError(matches.length);
+  }
   _node() {
-    const m = this._all();
-    return m.length ? m[0].node : null;
+    return this._singleMatch()?.node ?? null;
   }
   _requireNode() {
     const n = this._node();
@@ -352,7 +755,7 @@ class Locator {
     return n;
   }
   get _html() {
-    return this._page._html;
+    return this._needsQuery() && this._queryHtml != null ? this._queryHtml : this._page._html;
   }
 
   // --- composition (pure JS, no napi) ---
@@ -362,7 +765,11 @@ class Locator {
   _derive(opts) {
     const loc = new Locator(this._page, this._resolve, {
       ...opts,
+      count: this._count,
       getBy: this._getBy,
+      testId: this._testId,
+      parent: this._parent,
+      composite: this._composite,
       scope: this._scope,
       // The base selector survives composition (incl. `.filter()`); the serializable filter
       // spec carries unless this derivation sets its own (a `.filter()` call passes one).
@@ -373,52 +780,143 @@ class Locator {
     return loc;
   }
   first() {
-    return this._derive({ index: 0, filter: this._filter });
+    return this.nth(0);
   }
   last() {
-    return this._derive({ index: -1, filter: this._filter });
+    return this.nth(-1);
   }
   nth(i) {
-    return this._derive({ index: i, filter: this._filter });
+    if (this._needsQuery()) return new Locator(this._page, null, { querySource: this, index: i });
+    // An earlier index has already reduced the set to at most one element.
+    const index =
+      this._index == null ? i : i === 0 || i === -1 ? this._index : Number.MAX_SAFE_INTEGER;
+    return this._derive({ index, filter: this._filter });
   }
   filter(opts = {}) {
-    const pred = buildFilter(this._page, opts);
-    return this._derive({
-      index: this._index,
-      filter: pred,
-      filterSpec: serializableFilterSpec(opts),
-    });
+    for (const key of ["has", "hasNot"]) {
+      if (opts[key] != null && (!(opts[key] instanceof Locator) || opts[key]._page !== this._page))
+        throw new Error("Filter locators must belong to the same frame");
+    }
+    return new Locator(this._page, null, { querySource: this, queryFilter: { ...opts } });
+  }
+  _combine(other, operation) {
+    if (!(other instanceof Locator) || other._page !== this._page)
+      throw new Error("Locator operands must belong to the same frame");
+    return new Locator(
+      this._page,
+      () => {
+        const left = this._all();
+        const right = other._all();
+        const keep = new Set(right.map((match) => match.node));
+        const matches =
+          operation === "and" ? left.filter((match) => keep.has(match.node)) : [...left, ...right];
+        const records = new Map(matches.map((match) => [match.node, match]));
+        const ordered = [];
+        for (const match of JSON.parse(native.query(this._html, "*", "css")))
+          if (records.has(match.node)) ordered.push(records.get(match.node));
+        return ordered;
+      },
+      { composite: { left: this, right: other, operation } },
+    );
   }
   and(other) {
-    const keep = new Set();
-    return new Locator(this._page, (h) => {
-      for (const x of other._resolve(h)) keep.add(x.node);
-      return this._resolve(h).filter((x) => keep.has(x.node));
-    });
+    return this._combine(other, "and");
   }
   or(other) {
-    return new Locator(this._page, (h) => [...this._resolve(h), ...other._resolve(h)]);
+    return this._combine(other, "or");
+  }
+  _hasComposite() {
+    return this._needsQuery() || this._composite != null || !!this._parent?._hasComposite();
+  }
+  _liveBaseExpression(context = "document") {
+    if (this._querySource) return this._querySource._liveElementsExpression(context);
+    if (this._composite) {
+      const { left, right, operation } = this._composite;
+      return `(() => { const left = ${left._liveElementsExpression(context)}; const right = ${right._liveElementsExpression(context)}; const keep = new Set(right); return (${orderedLocatorElements.toString()})(${operation === "and" ? "left.filter(element => keep.has(element))" : "[...left, ...right]"}); })()`;
+    }
+    if (this._selector) {
+      const roots = this._parent ? this._parent._liveElementsExpression(context) : `[${context}]`;
+      return `(${orderedLocatorElements.toString()})(${roots}.flatMap(root => Array.from(${!isXPathSelector(this._selector) ? `(${queryVisibleSelector.toString()})(root, ${JSON.stringify(this._selector.replace(/^css=/, ""))}, ${renderedVisibility.toString()}, __tsNs.tcLocatorHasShadow() ? __tsNs.tcLocatorDom : undefined)` : `__tsNs.tcQuerySelector(root, ${JSON.stringify(this._selector)})`})))`;
+    }
+    if (this._testId) {
+      const { attribute, source, flags, root } = this._testId;
+      return `(() => { const re = new RegExp(${JSON.stringify(source)}, ${JSON.stringify(flags)}); const roots = ${root ? `__tsNs.tcLocatorQuery(${context}, ${JSON.stringify(root)})` : `[${context}]`}; const matches = []; for (const root of roots) for (const element of __tsNs.tcLocatorQuery(root, ${JSON.stringify(`[${attribute}]`)})) { re.lastIndex = 0; if (re.test(element.getAttribute(${JSON.stringify(attribute)}))) matches.push(element); } return (${orderedLocatorElements.toString()})(matches); })()`;
+    }
+    if (this._getBy) {
+      const g = this._getBy;
+      return `(() => { __tsNs.tcGetBy(${JSON.stringify(g.kind)}, ${JSON.stringify(g.value)}, ${JSON.stringify(g.name)}, null, ${JSON.stringify(g.options ?? {})}); const all = Array.from(__tsNs.tcLocatorAll()); const roots = ${g.root ? `__tsNs.tcLocatorQuery(${context}, ${JSON.stringify(g.root)})` : `[${context}]`}; return JSON.parse(globalThis.__RESULT).map(match => all[match.idx]).filter(element => roots.some(root => root !== element && __tsNs.tcLocatorContains(root, element))); })()`;
+    }
+    throw new Error("Custom locator expressions cannot be composed in a live DOM");
+  }
+  _liveElementsExpression(context = "document") {
+    let source = this._liveBaseExpression(context);
+    if (this._parent && !this._selector)
+      source = `(() => { const roots = ${this._parent._liveElementsExpression(context)}; return ${source}.filter(element => roots.some(root => root !== element && __tsNs.tcLocatorContains(root, element))); })()`;
+    if (this._queryFilter) {
+      const checks = this._liveQueryChecks();
+      source = `${source}.filter(element => ${checks.length ? checks.join(" && ") : "true"})`;
+    }
+    if (this._filter) {
+      if (!this._filterSpec)
+        throw new Error("This locator filter cannot be composed in a live DOM");
+      const spec = this._filterSpec;
+      source = `${source}.filter(element => ${spec.hasText != null ? `(element.textContent || '').includes(${JSON.stringify(spec.hasText)})` : "true"} && ${spec.hasNotText != null ? `!(element.textContent || '').includes(${JSON.stringify(spec.hasNotText)})` : "true"})`;
+    }
+    if (this._index != null)
+      source = `(() => { const matches = ${source}; const index = ${this._index}; const found = matches[index < 0 ? matches.length + index : index]; return found ? [found] : []; })()`;
+    return source;
+  }
+  _liveQueryChecks() {
+    const opts = this._queryFilter;
+    const checks = [];
+    for (const key of ["hasText", "hasNotText"]) {
+      const value = opts[key];
+      if (value == null) continue;
+      const check =
+        value instanceof RegExp
+          ? `new RegExp(${JSON.stringify(value.source)}, ${JSON.stringify(value.flags)}).test(element.textContent || '')`
+          : `String(element.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(${JSON.stringify(String(value).replace(/\s+/g, " ").trim().toLowerCase())})`;
+      checks.push(key === "hasNotText" ? `!(${check})` : check);
+    }
+    for (const key of ["has", "hasNot"])
+      if (opts[key]) {
+        const check = `(${opts[key]._liveElementsExpression("element")}).length > 0`;
+        checks.push(key === "hasNot" ? `!(${check})` : check);
+      }
+    if (opts.visible != null)
+      checks.push(`(${renderedVisibility.toString()})(element) === ${!!opts.visible}`);
+    return checks;
   }
   // When this locator (or an ancestor) was indexed via `.nth(i)`, a CSS-concat selector can't
   // express "the i-th match's subtree" — return the scope CHAIN so the child drives via
   // __tcResolveScoped. Null for the common non-indexed case (keep the simple CSS-concat path).
   _indexedScope() {
     const sc = this._childScope();
-    return sc.some((s) => s.idx != null || s.filter != null) ? sc : null;
+    return sc.some(
+      (s) => s.idx != null || s.filter != null || s.getBy != null || isXPathSelector(s.sel),
+    )
+      ? sc
+      : null;
   }
   // A selector-backed child carrying the nth-aware scope chain (live-driven via the chain).
-  _scopedSelectorChild(selector, scope) {
+  _scopedSelectorChild(selector, scope, parent = this) {
     const loc = this._page._locFromSelector(selector);
     loc._scope = scope;
+    loc._parent = parent;
     return loc;
   }
   // Nested locators: CSS-concat when this locator is selector-backed (the common
   // `.card`→`button` case); a scope chain when an ancestor was `.nth(i)`. getBy-rooted nesting
-  // is document-scoped — see LIMITATIONS.
+  // carries its matcher through the same scope chain.
   locator(selector) {
+    if (this._hasComposite()) return this._scopedSelectorChild(selector, this._childScope(), this);
     // A `.nth()`/`.filter()` ancestor → walk the scope chain (it carries the index/filter a
     // CSS-concat can't express), even if `.filter()` dropped our own `_selector`.
     const scope = this._indexedScope();
+    if (hasSelectorEngine(selector))
+      return this._scopedSelectorChild(selector, scope ?? this._childScope(), this);
+    if (selector.includes(":scope"))
+      return this._scopedSelectorChild(selector, scope ?? this._childScope(), this);
     if (scope) return this._scopedSelectorChild(selector, scope);
     if (!this._selector) return this._page.locator(selector);
     return this._page.locator(`${this._selector} ${selector}`);
@@ -426,130 +924,247 @@ class Locator {
   // Scope getBy* to this locator's subtree when it is selector-backed (descendant matching via
   // the `root` selector, or the nth-aware scope chain when an ancestor was `.nth(i)`). A
   // getBy-rooted parent isn't CSS-expressible → document-scoped.
-  _scopedGetBy(kind, value, name) {
+  _scopedGetBy(kind, value, name, options = null) {
+    if (this._hasComposite())
+      return new Locator(
+        this._page,
+        (html) => JSON.parse(native.getBy(html, kind, value, name, null, JSON.stringify(options))),
+        { getBy: { kind, value, name, options }, parent: this },
+      );
     const scope = this._indexedScope();
     if (scope) {
-      return new Locator(this._page, (h) => JSON.parse(native.getBy(h, kind, value, name)), {
-        getBy: { kind, value, name },
-        scope,
-      });
+      return new Locator(
+        this._page,
+        (h) => JSON.parse(native.getBy(h, kind, value, name, null, JSON.stringify(options))),
+        {
+          getBy: { kind, value, name, options },
+          scope,
+          parent: this,
+        },
+      );
     }
     const root = this._selector;
-    return new Locator(this._page, (h) => JSON.parse(native.getBy(h, kind, value, name, root)), {
-      getBy: { kind, value, name, root },
-    });
+    return new Locator(
+      this._page,
+      (h) => JSON.parse(native.getBy(h, kind, value, name, root, JSON.stringify(options))),
+      {
+        getBy: { kind, value, name, root, options },
+      },
+    );
   }
   getByRole(role, o) {
-    if (!this._selector && !this._indexedScope()) return this._page.getByRole(role, o);
-    return this._scopedGetBy("role", role, o?.name != null ? String(o.name) : null);
+    if (!this._selector && !this._indexedScope() && !this._hasComposite())
+      return this._page.getByRole(role, o);
+    return this._scopedGetBy("role", role, o?.name != null ? String(o.name) : null, o);
   }
   getByText(t, o) {
-    if (!this._selector && !this._indexedScope()) return this._page.getByText(t, o);
-    return this._scopedGetBy("text", String(t), null);
+    if (!this._selector && !this._indexedScope() && !this._hasComposite())
+      return this._page.getByText(t, o);
+    return this._scopedGetBy("text", String(t), null, o);
   }
   getByLabel(t, o) {
-    if (!this._selector && !this._indexedScope()) return this._page.getByLabel(t, o);
-    return this._scopedGetBy("label", String(t), null);
+    if (!this._selector && !this._indexedScope() && !this._hasComposite())
+      return this._page.getByLabel(t, o);
+    return this._scopedGetBy("label", String(t), null, o);
   }
   getByTestId(t) {
+    if (t instanceof RegExp) {
+      const child = this._page._regexTestId(t, this._selector);
+      if (this._hasComposite()) child._parent = this;
+      return child;
+    }
     // Scope to this locator's subtree when it is selector-backed (like `locator()` does) —
     // `card.getByTestId('x')` must match only descendants of the card, not the whole document.
     // A `.filter()`/`.nth()` ancestor walks the scope chain (it carries the filter/index our
     // own `_selector` can't), so check that BEFORE falling back to a document-wide getByTestId.
     const childSel = `[${this._page._context._testIdAttribute}="${t}"]`;
+    if (this._hasComposite()) return this._scopedSelectorChild(childSel, this._childScope(), this);
     const scope = this._indexedScope();
     if (scope) return this._scopedSelectorChild(childSel, scope);
     if (!this._selector) return this._page.getByTestId(t);
     return this._page.locator(`${this._selector} ${childSel}`);
   }
   getByPlaceholder(t, o) {
-    return this._page.getByPlaceholder(t, o);
+    return this.locator(`[placeholder*=${cssAttrValue(t)}]`);
   }
   getByAltText(t, o) {
-    return this._page.getByAltText(t, o);
+    return this.locator(`[alt*=${cssAttrValue(t)}]`);
   }
   getByTitle(t, o) {
-    return this._page.getByTitle(t, o);
+    return this.locator(`[title*=${cssAttrValue(t)}]`);
   }
 
   // --- counts / text (from the single resolve payload) ---
   async count() {
+    await this._prepareQuery();
+    if (this._page._live || this._needsQuery())
+      return this._page._readEngineAsync(`return (${this._liveElementsExpression()}).length;`);
+    if (!this._needsQuery() && this._count && !this._filter && this._scope.length === 0) {
+      const count = this._count(this._page._html);
+      if (this._index == null) return count;
+      const index = this._index < 0 ? count + this._index : this._index;
+      return Number.isInteger(index) && index >= 0 && index < count ? 1 : 0;
+    }
     return this._all().length;
   }
   async all() {
-    return this._all().map((_, i) => this.nth(i));
+    return Array.from({ length: await this.count() }, (_, i) => this.nth(i));
   }
   async textContent() {
-    const m = this._all();
-    return m.length ? (m[0].text ?? null) : null;
+    await this._prepareQuery();
+    const match = this._singleMatch();
+    return match ? this._textContent(match) : null;
+  }
+  _textContent(match) {
+    if (match.liveText !== undefined) return match.liveText;
+    return match.node == null ? (match.text ?? "") : native.textContentOf(this._html, match.node);
   }
   async innerText() {
-    const m = this._all();
-    return m.length ? (m[0].text ?? "").trim() : "";
+    await this._prepareQuery();
+    return (await this._readElement((element) => element.innerText)) ?? "";
   }
   async innerHTML() {
-    const m = this._all();
-    return m.length ? (m[0].html ?? null) : null;
+    return this._readElement((element) => element.innerHTML);
   }
   async allTextContents() {
-    return this._all().map((x) => x.text ?? "");
+    await this._prepareQuery();
+    return this._all().map((match) => this._textContent(match));
   }
   async allInnerTexts() {
-    return this._all().map((x) => (x.text ?? "").trim());
+    await this._prepareQuery();
+    const matches = this._all();
+    const out = [];
+    for (let i = 0; i < matches.length; i++) out.push(await this.nth(i).innerText());
+    return out;
   }
 
   // --- accessors (node-handle backed; cross to Rust) ---
   async getAttribute(name) {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? null : (native.attrOf(this._html, n, name) ?? null);
   }
+  async _liveRead(fn, arg) {
+    await this._prepareQuery();
+    const index = await this._resolveLiveIdx();
+    if (index == null) return null;
+    // Pure DOM reads must not await unrelated exposed host callbacks.
+    const result = await this._page._readEngineAsync(`
+      try { return {value: (${encodeEvaluationValue.toString()})(
+        (${fn.toString()})(__tsNs.tcLocatorAll()[${index}],${JSON.stringify(arg ?? null)}))}; }
+      catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
+    `);
+    if (result.error) throw decodeEvaluationError(result.error);
+    return decodeEvaluationValue(result.value);
+  }
   async inputValue() {
+    await this._prepareQuery();
+    if (this._page._live) return (await this._liveRead((el) => el.value)) ?? "";
     const n = this._node();
     return n == null ? "" : native.inputValueOf(this._html, n);
   }
   async isVisible() {
-    const n = this._node();
-    return n != null && native.isVisible(this._html, n);
+    await this._prepareQuery();
+    if (!this._page._live && this._node() == null) return false;
+    await this._page._ensureLive();
+    return !!(await this._liveRead(renderedVisibility));
   }
   async isHidden() {
+    await this._prepareQuery();
     return !(await this.isVisible());
   }
   async isChecked() {
-    const n = this._node();
-    return n != null && native.isChecked(this._html, n);
+    await this._prepareQuery();
+    return this._readElement((element) => {
+      if (element.tagName === "INPUT" && /^(checkbox|radio)$/.test(element.type))
+        return element.checked;
+      const roles = ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"];
+      if ((element.getAttribute("role") ?? "").split(/\s+/).some((role) => roles.includes(role))) {
+        return element.getAttribute("aria-checked") === "true";
+      }
+      throw new Error("Not a checkbox or radio button");
+    });
   }
   async isEnabled() {
+    await this._prepareQuery();
     const n = this._node();
     return n != null && native.isEnabled(this._html, n);
   }
   async isDisabled() {
+    await this._prepareQuery();
     return !(await this.isEnabled());
   }
   async isEditable() {
+    await this._prepareQuery();
     const n = this._node();
     return n != null && native.isEditable(this._html, n);
   }
+  async _readElement(fn) {
+    await this._prepareQuery();
+    const live = this._page._session != null;
+    const match = live ? null : this._singleMatch();
+    const index = live
+      ? await this._resolveLiveIdx()
+      : match == null
+        ? null
+        : JSON.parse(native.query(this._html, "*", "css")).findIndex(
+            (node) => node.node === match.node,
+          );
+    if (index == null) return null;
+    const script = `globalThis.__RESULT = (() => {
+      try { const element = ${live ? "__tsNs.tcLocatorAll()" : "document.querySelectorAll('*')"}[${index}];
+        return JSON.stringify({value: element ? (${fn.toString()})(element) : null});
+      } catch (error) { return JSON.stringify({error: String(error.message)}); }
+    })()`;
+    const raw = live ? await this._page._evalEngine(script) : native.evaluate(this._html, script);
+    const result = JSON.parse(raw);
+    if (result.error) throw new Error(result.error);
+    return result.value;
+  }
   async isEmpty() {
-    const n = this._node();
-    return n != null && native.isEmpty(this._html, n);
+    await this._prepareQuery();
+    return this._readElement((element) => {
+      const text = /^(INPUT|TEXTAREA)$/.test(element.tagName) ? element.value : element.textContent;
+      return String(text ?? "").trim().length === 0;
+    });
   }
   async ariaRole() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? null : native.ariaRoleOf(this._html, n);
   }
   async accessibleName() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? "" : native.accessibleNameOf(this._html, n);
   }
   async accessibleDescription() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? "" : native.accessibleDescriptionOf(this._html, n);
   }
   async selectedValues() {
+    await this._prepareQuery();
+    if (this._page._live)
+      return (
+        (await this._readElement((element) =>
+          Array.from(element.options)
+            .filter((option) => option.selected)
+            .map((option) => option.value),
+        )) ?? []
+      );
     const n = this._node();
     return n == null ? [] : native.selectedValuesOf(this._html, n);
   }
   async cssValue(name) {
+    await this._prepareQuery();
+    if (this._page._live)
+      return (
+        (await this._liveRead(
+          (el, property) => getComputedStyle(el).getPropertyValue(property),
+          name,
+        )) ?? ""
+      );
     const n = this._node();
     return n == null ? "" : native.cssValueOf(this._html, n, name);
   }
@@ -559,18 +1174,31 @@ class Locator {
     const n = this._node();
     return n == null ? null : JSON.parse(native.nodeSnapshot(this._html, n));
   }
-  // locator.evaluate runs page JS with the element selected by CSS (the element
-  // is the callback's first arg). Needs a selector-backed locator — see LIMITATIONS.
   async evaluate(fn, arg) {
-    if (!this._selector)
-      throw new Error("turbo-surf: locator.evaluate needs a CSS-selector-backed locator");
-    const src = `(${fn.toString()})(document.querySelector(${JSON.stringify(this._selector)}), ${JSON.stringify(arg ?? null)})`;
-    return native.evaluate(this._html, src);
+    const handle = await this.elementHandle();
+    if (!handle) throw new Error("turbo-surf: locator matched no elements");
+    try {
+      return await handle.evaluate(fn, arg);
+    } finally {
+      await handle.dispose();
+    }
   }
   async evaluateAll(fn, arg) {
-    return native.evaluate(this._html, evalSource(fn, arg));
+    await this._prepareQuery();
+    await this._page._ensureLive();
+    const descriptor = await this._page._readEngineAsync(`
+      const elements = ${this._liveElementsExpression()};
+      return {id: __tsNs.remoteHandleRetain(globalThis, elements), kind: 'value'};
+    `);
+    const handle = createJSHandle(this._page, descriptor);
+    try {
+      return await handle.evaluate(fn, arg);
+    } finally {
+      await handle.dispose();
+    }
   }
   async ariaSnapshot() {
+    await this._prepareQuery();
     const n = this._node();
     return n == null ? "" : native.ariaSnapshot(this._html, n);
   }
@@ -588,113 +1216,156 @@ class Locator {
   // is what lets getByRole/getByLabel/getByText drive the running app (fill/click), not
   // just mutate the static HTML snapshot.
   async _driveLive(kind, value) {
-    // nth-aware scope chain: a CSS selector can't target "the i-th match's subtree", so walk
-    // the chain in the live isolate and dispatch on the matched element's global index.
+    await this._prepareQuery();
     if (
-      this._scope &&
-      this._scope.some((s) => s.idx != null || s.filter != null) &&
-      this._page._session != null
-    ) {
-      const leaf = this._selector
-        ? { selector: this._selector }
-        : this._getBy
-          ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
-          : null;
-      if (leaf) {
-        const raw = await native.liveEvalEngine(
-          this._page._session,
-          `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
-        );
-        let matches = [];
-        try {
-          matches = JSON.parse(raw);
-        } catch {
-          matches = [];
-        }
-        const i =
-          this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-        const target = matches[i];
-        if (!target || target.idx == null)
-          throw new Error("turbo-surf: locator matched no elements");
-        return this._page._sessionDispatch("*", target.idx, kind, value);
-      }
-    }
-    if (this._selector)
-      return this._page._sessionDispatch(this._selector, this._index ?? 0, kind, value);
-    // getByRole/getByText/getByLabel: resolve the match IN the live isolate so the index is
-    // a LIVE `querySelectorAll('*')` position (the same context we dispatch into). Resolving
-    // over a re-serialized snapshot can reorder portal'd nodes → wrong element clicked.
-    if (this._getBy && this._page._session != null) {
-      const g = this._getBy;
-      const raw = await native.liveEvalEngine(
-        this._page._session,
-        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
+      this._selector &&
+      !this._hasComposite() &&
+      !this._parent &&
+      this._scope.length === 0 &&
+      !hasSelectorEngine(this._selector)
+    )
+      return this._page._sessionDispatch(
+        this._selector,
+        this._index ?? 0,
+        kind,
+        value,
+        this._index == null,
       );
-      let matches = [];
-      try {
-        matches = JSON.parse(raw);
-      } catch {
-        matches = [];
+    const index = await this._resolveLiveIdx();
+    if (index == null) throw new Error("turbo-surf: locator matched no elements");
+    return this._page._sessionDispatch("*", index, kind, value);
+  }
+  async _waitActionable(kind, options = {}) {
+    await this._prepareQuery();
+    await this._page._ensureLive();
+    if (options.force) return;
+    const deadline = Date.now() + (options.timeout ?? 30000);
+    do {
+      const live = this._page._live;
+      const state = live
+        ? await this._liveRead((element) => ({
+            enabled:
+              !element.matches(":disabled") && element.getAttribute("aria-disabled") !== "true",
+            editable: !element.readOnly,
+          }))
+        : this._snapshot();
+      const visible = live ? await this.isVisible() : state?.visible;
+      if (state?.enabled && (kind !== "fill" || state.editable) && visible) return;
+      if (Date.now() >= deadline) break;
+      await this._page._redrain();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } while (Date.now() < deadline);
+    throw Object.assign(new Error(`Timeout waiting for locator to be actionable for ${kind}`), {
+      name: "TimeoutError",
+    });
+  }
+  async fill(value, options = {}) {
+    await this._prepareQuery();
+    await this._waitActionable("fill", options);
+    const text = String(value);
+    const match = this._singleMatch();
+    if (
+      /^<input[\s>]/i.test(match?.html ?? "") &&
+      native.attrOf(this._html, match.node, "type")?.toLowerCase() === "number" &&
+      text !== "" &&
+      Number.isNaN(Number(text))
+    )
+      throw new Error("Cannot type text into input[type=number]");
+    if (!this._canDriveLive && match) {
+      const editable = native.attrOf(this._html, match.node, "contenteditable");
+      if (["", "true", "plaintext-only"].includes(editable?.toLowerCase())) {
+        await this._page._ensureLive();
       }
-      if (!matches.length) throw new Error("turbo-surf: locator matched no elements");
-      const i =
-        this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-      const target = matches[i];
-      if (!target || target.idx == null) throw new Error("turbo-surf: locator matched no elements");
-      return this._page._sessionDispatch("*", target.idx, kind, value);
     }
-    const m = this._all();
-    if (!m.length || m[0].idx == null) throw new Error("turbo-surf: locator matched no elements");
-    return this._page._sessionDispatch("*", m[0].idx, kind, value);
+    if (this._canDriveLive) return void (await this._driveLive("fill", text));
+    this._page._html = native.fillNode(this._html, this._requireNode(), text);
   }
-  async fill(value) {
-    if (this._canDriveLive) return void (await this._driveLive("fill", String(value)));
-    this._page._html = native.fillNode(this._html, this._requireNode(), String(value));
-  }
-  async clear() {
-    return this.fill("");
+  async clear(options) {
+    await this._prepareQuery();
+    return this.fill("", options);
   }
   async type(value) {
-    return this.fill(value);
+    await this._prepareQuery();
+    await this._page._ensureLive();
+    return void (await this._driveLive("type", String(value)));
   }
   async pressSequentially(value) {
-    return this.fill(value);
+    await this._prepareQuery();
+    return this.type(value);
   }
   async check() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("check"));
     this._page._html = native.setCheckedNode(this._html, this._requireNode(), true);
   }
   async uncheck() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("uncheck"));
     this._page._html = native.setCheckedNode(this._html, this._requireNode(), false);
   }
   async setChecked(on) {
+    await this._prepareQuery();
     return on ? this.check() : this.uncheck();
   }
-  async selectOption(value) {
-    const v = Array.isArray(value) ? value[0] : value;
-    const sval = String(v?.value ?? v);
-    if (this._canDriveLive) {
-      await this._driveLive("select", sval);
-      return [sval];
-    }
-    this._page._html = native.selectOptionNode(this._html, this._requireNode(), sval);
-    return [sval];
+  async selectOption(value, options = {}) {
+    await this._prepareQuery();
+    const choices = normalizeSelectChoices(value);
+    const deadline = Date.now() + (options.timeout ?? 30000);
+    do {
+      try {
+        if (this._canDriveLive) return JSON.parse(await this._driveLive("select", choices));
+        const node = this._requireNode();
+        const index = JSON.parse(native.query(this._html, "*", "css")).findIndex(
+          (match) => match.node === node,
+        );
+        const result = JSON.parse(
+          native.evaluateEngine(
+            this._html,
+            `
+          const values = (${selectOptionOperation.toString()})(__tsNs.tcLocatorAll()[${index}], ${JSON.stringify(choices)}, true);
+          return JSON.stringify({ values, html: (${serializeDocumentType.toString()})(document) + document.documentElement.outerHTML });`,
+          ),
+        );
+        this._page._html = result.html;
+        return result.values;
+      } catch (error) {
+        if (!error.message.includes("Options did not match") || Date.now() >= deadline) throw error;
+        await this._page._redrain();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    } while (true);
   }
-  async click() {
+  async click(opts = {}) {
+    await this._prepareQuery();
+    await this._waitActionable("click", opts);
+    const modifiers = opts.modifiers?.map((modifier) =>
+      modifier === "ControlOrMeta"
+        ? process.platform === "darwin"
+          ? "Meta"
+          : "Control"
+        : modifier,
+    );
+    opts = { ...opts, modifiers };
     if (this._canDriveLive) {
       const urlBefore = this._page._url;
-      const r = await this._driveLive("click");
+      let r;
+      for (let count = 1; count <= (opts.clickCount ?? 1); count++)
+        r = await this._driveLive("click", { ...opts, clickCount: count });
+      if (opts.button && opts.button !== "left") return;
       // A JS handler that navigated changed the URL (SPA router / form POST + redirect).
       // If the URL is unchanged AND the app didn't preventDefault, the click hit a plain
-      // <a>/<form> whose browser default action our event dispatch doesn't perform —
-      // follow the static intent (anchor navigate / form POST). For a JS button (Inert
+      // anchor whose navigation still needs the static intent fallback —
+      // follow that anchor intent. Native form activation already owns submit
+      // events, validation and cancellation. For a JS button (Inert
       // intent) or a handled click (PREVENTED) the dispatch already did the work.
-      if (this._page._url === urlBefore && r !== "PREVENTED") {
+      if (this._page._url === urlBefore && r !== "PREVENTED" && r !== "NATIVE_DEFAULT") {
         const n = this._node();
         if (n != null) {
-          const intent = JSON.parse(native.clickNode(this._page._html, n, this._page._url));
-          if (intent.action !== "inert") return this._page._followIntent(intent);
+          const baseURL = this._needsQuery()
+            ? (this._queryBaseURL ?? this._page._url)
+            : this._page._url;
+          const intent = JSON.parse(native.clickNode(this._html, n, baseURL));
+          if (intent.action === "navigate") return this._page._followIntent(intent);
         }
       }
       return;
@@ -702,30 +1373,58 @@ class Locator {
     const intent = JSON.parse(native.clickNode(this._html, this._requireNode(), this._page._url));
     return this._page._followIntent(intent);
   }
-  async dblclick() {
-    return this.click();
+  async dblclick(opts = {}) {
+    await this._prepareQuery();
+    return this.click({ ...opts, clickCount: 2, noWaitAfter: true });
   }
   async tap() {
-    return this.click();
+    await this._prepareQuery();
+    return this.click({ noWaitAfter: true });
   }
   async press(key) {
-    // Enter on a control submits its owning form (the only no-JS key effect).
-    if (key === "Enter") return this.click();
-    return undefined;
+    await this._prepareQuery();
+    await this._page._ensureLive();
+    const owner = this._page._parentPage ?? this._page;
+    const state = owner._auxiliaryActor
+      ? JSON.parse(native.liveTargetNetworkState(owner._session))
+      : null;
+    if (state && (state.error || typeof state.navigationRevision !== "string"))
+      throw new Error(state.error ?? "Native navigation baseline is unavailable");
+    const keyboard = this._page.keyboard ?? makeKeyboard(this._page);
+    await this.focus();
+    const result = await keyboard.press(key);
+    if (state) {
+      const outcome = JSON.parse(
+        await native.liveDispatchEngine(owner._session, "", state.navigationRevision),
+      );
+      if (outcome.status !== "released" && outcome.status !== "navigation-failed")
+        throw new Error("Native action completion returned an invalid outcome");
+      const completed = JSON.parse(native.liveTargetNetworkState(owner._session));
+      if (completed.error || typeof completed.navigationRevision !== "string")
+        throw new Error(completed.error ?? "Native navigation baseline is unavailable");
+      if (completed.navigationRevision !== state.navigationRevision)
+        await owner._refreshFromSession();
+      else await owner._drainNetworkEvents();
+    }
+    return result;
   }
   async focus() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("focus"));
   }
   async blur() {
+    await this._prepareQuery();
     if (this._canDriveLive) return void (await this._driveLive("blur"));
   }
   async scrollIntoViewIfNeeded() {
-    // No viewport, but a real page scrolls the element into view and also fires
-    // focus for a programmatic scroll on a focusable control — keep it a no-op
-    // today since the live engine has no viewport geometry.
+    await this._prepareQuery();
+    await this.evaluate((element) =>
+      element.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }),
+    );
   }
   async highlight() {}
   async _isFocused() {
+    await this._prepareQuery();
     if (!this._canDriveLive) return false;
     try {
       const r = await this._driveLive("isfocused");
@@ -735,6 +1434,7 @@ class Locator {
     }
   }
   async waitFor(opts = {}) {
+    await this._prepareQuery();
     // "Wait for this element" — for an SPA the element only exists after the app runs, so
     // ensure the page is hydrated (a live session). This covers the bare `goto(/login)` +
     // `emailField.waitFor()` login flow (no `waitUntil:'networkidle'`).
@@ -742,6 +1442,7 @@ class Locator {
     // Then actually poll for the requested state (Playwright defaults to 'visible'),
     // re-pumping the live app between tries — so the wait reflects reality instead of
     // resolving immediately (which masked "the element/modal never appeared").
+    await this._prepareQuery();
     const state = opts.state ?? "visible";
     const timeout = opts.timeout ?? 5000;
     const ok = () => {
@@ -753,49 +1454,71 @@ class Locator {
     };
     if (!this._page._live) return undefined; // static page: best-effort, no polling surface
     const start = Date.now();
-    while (!ok() && Date.now() - start < timeout) await this._page._redrain();
+    while (!ok() && Date.now() - start < timeout) {
+      await this._page._redrain();
+      await this._prepareQuery();
+    }
     if (!ok()) throw new Error(`turbo-surf: waitFor(state=${state}) timed out`);
     return undefined;
   }
 
-  // No layout engine → no geometry. Playwright returns `null` for an element
-  // with no bounding box, so we return null too (honest: there genuinely is no
-  // box) rather than throwing — geometry-conditional helpers (smooth-scroll,
-  // visibility-by-rect) then no-op cleanly instead of crashing the test.
   async boundingBox() {
-    return null;
+    await this._prepareQuery();
+    await this._page._ensureLive();
+    return this._readElement((element) => {
+      for (let ancestor = element; ancestor; ancestor = __tsNs.tcLocatorParent(ancestor)) {
+        if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
+          return null;
+      }
+      const style = getComputedStyle(element);
+      if (
+        style.visibility === "hidden" ||
+        style.visibility === "collapse" ||
+        !element.getClientRects().length
+      )
+        return null;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
   }
 
   // An ElementHandle stand-in: carries enough to re-resolve the element in the live
   // isolate (selector / getBy + index), so `page.waitForFunction(fn, handle)` can run
   // `fn(element)` against the live node (e.g. wait for a submit button's !disabled).
   async elementHandle() {
-    return {
-      __turboHandle: true,
-      selector: this._selector ?? null,
-      getBy: this._getBy ?? null,
-      index: this._index ?? 0,
-    };
+    await ensureHandleSession(this._page);
+    await this._prepareQuery();
+    const index = await this._resolveLiveIdx();
+    if (index == null) return null;
+    const descriptor = await this._page._readEngineAsync(`
+      const element = __tsNs.tcLocatorAll()[${index}];
+      return {id: __tsNs.remoteHandleRetain(globalThis, element), kind: 'element'};
+    `);
+    return createJSHandle(this._page, descriptor);
   }
 
   // Hover has no rendering effect here, but JS hover handlers (menu-open) are real.
   // Drive the live app with mouseenter/over events; otherwise best-effort no-op.
   async hover() {
+    await this._prepareQuery();
     await this._page._ensureLive();
     if (this._page._live) return void (await this._driveLive("hover"));
   }
 
   // dispatchEvent(type) — fire a named DOM event into the live app (e.g. a row
   // checkbox's 'click'). Static snapshot has no JS handlers, so it needs the isolate.
-  async dispatchEvent(type) {
+  async dispatchEvent(type, eventInit = {}) {
+    await this._prepareQuery();
     await this._page._ensureLive();
-    if (this._page._live) return void (await this._driveLive("dispatch", String(type)));
+    if (this._page._live)
+      return void (await this._driveLive("dispatch", { type: String(type), eventInit }));
   }
 
   // setInputFiles: read the file bytes in Node, build File objects in the isolate, and
   // assign them to the <input type=file> so the app's change handler / upload runs. No
   // OS file picker, but the upload PIPELINE is real.
   async setInputFiles(files) {
+    await this._prepareQuery();
     const payload = normalizeInputFiles(files);
     await this._page._ensureLive();
     if (this._page._live) return void (await this._driveLive("setfiles", payload));
@@ -806,6 +1529,7 @@ class Locator {
   // so there's no native drag image, but JS handlers (onDragStart/Over/Drop/End and
   // pointer/mouse listeners) fire exactly as in a real browser (turbo-surf#227).
   async dragTo(target, _opts) {
+    await this._prepareQuery();
     await this._page._ensureLive();
     if (!this._page._live) return;
     const src = await this._resolveLiveIdx();
@@ -814,57 +1538,18 @@ class Locator {
     await this._page._sessionEval(dragScript(src, dst));
   }
 
-  // Resolve this locator to the live `querySelectorAll('*')` index of its first match.
+  // Resolve against the same trusted open-shadow index used by input dispatch.
   // Returns null when the locator matches nothing. Used by dragTo and page.dragAndDrop.
   async _resolveLiveIdx() {
+    await this._prepareQuery();
     if (this._page._session == null) return null;
-    if (this._scope && this._scope.some((s) => s.idx != null || s.filter != null)) {
-      const leaf = this._selector
-        ? { selector: this._selector }
-        : this._getBy
-          ? { getBy: { kind: this._getBy.kind, value: this._getBy.value, name: this._getBy.name } }
-          : null;
-      if (leaf) {
-        const raw = await native.liveEvalEngine(
-          this._page._session,
-          `__tsNs.tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
-        );
-        let matches = [];
-        try {
-          matches = JSON.parse(raw);
-        } catch {
-          matches = [];
-        }
-        const i =
-          this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-        return matches[i]?.idx ?? null;
-      }
-    }
-    if (this._selector) {
-      const raw = await native.liveEvalEngine(
-        this._page._session,
-        `(() => { const els = document.querySelectorAll(${JSON.stringify(this._selector)}); const n = ${this._index ?? 0}; const i = n < 0 ? els.length + n : n; const list = []; const all = document.querySelectorAll('*'); for (let k = 0; k < all.length; k++) if (all[k] === els[i]) { globalThis.__RESULT = String(k); return; } globalThis.__RESULT = ''; })();`,
-      );
-      const n = raw ? Number(raw) : NaN;
-      return Number.isFinite(n) ? n : null;
-    }
-    if (this._getBy) {
-      const g = this._getBy;
-      const raw = await native.liveEvalEngine(
-        this._page._session,
-        `__tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
-      );
-      let matches = [];
-      try {
-        matches = JSON.parse(raw);
-      } catch {
-        matches = [];
-      }
-      const i =
-        this._index == null ? 0 : this._index < 0 ? matches.length + this._index : this._index;
-      return matches[i]?.idx ?? null;
-    }
-    return null;
+    const indices = await this._page._readEngineAsync(`
+      const matches = ${this._liveElementsExpression()};
+      const positions = new Map(__tsNs.tcLocatorAll().map((element, index) => [element, index]));
+      return matches.map(element => positions.get(element));
+    `);
+    this._checkLiveCardinality(indices);
+    return indices[0] ?? null;
   }
 
   // --- unsupported (no rendering surface / no input hardware) → honest throws ---
@@ -873,30 +1558,13 @@ class Locator {
 }
 
 // filter({ hasText, has, hasNot, hasNotText }) → JS predicate over a match.
-function buildFilter(_page, opts) {
-  const checks = [];
-  if (opts.hasText != null) {
-    const re = opts.hasText instanceof RegExp ? opts.hasText : null;
-    checks.push((m) => (re ? re.test(m.text ?? "") : (m.text ?? "").includes(opts.hasText)));
-  }
-  if (opts.hasNotText != null) {
-    checks.push((m) => !(m.text ?? "").includes(opts.hasNotText));
-  }
-  return (m) => checks.every((c) => c(m));
+function orderedLocatorElements(elements) {
+  const selected = new Set(elements);
+  return __tsNs.tcLocatorAll().filter((element) => selected.has(element));
 }
 
-// Serializable subset of a `.filter()` for the live scope chain — __tcResolveScoped re-applies
-// it in the isolate so children of a filtered parent scope to the RIGHT element. Only plain
-// string hasText/hasNotText survive; regex / has / hasNot return null (those keep the
-// JS-predicate-only path: correct for reads, no live child scoping).
-function serializableFilterSpec(opts) {
-  if (opts.has != null || opts.hasNot != null) return null;
-  if (opts.hasText != null && typeof opts.hasText !== "string") return null;
-  if (opts.hasNotText != null && typeof opts.hasNotText !== "string") return null;
-  const spec = {};
-  if (typeof opts.hasText === "string") spec.hasText = opts.hasText;
-  if (typeof opts.hasNotText === "string") spec.hasNotText = opts.hasNotText;
-  return spec.hasText != null || spec.hasNotText != null ? spec : null;
+function strictLocatorError(count) {
+  return new Error(`strict mode violation: locator resolved to ${count} elements`);
 }
 
 // Build the JS run in a live session to drive an interaction by dispatching REAL DOM
@@ -906,6 +1574,72 @@ function serializableFilterSpec(opts) {
 // Normalize Playwright setInputFiles args (path string | {name,mimeType,buffer} |
 // arrays thereof) into [{ name, type, data }] with data as a latin1 binary string
 // (so the isolate's File/Blob → FileReader.readAsDataURL → btoa round-trips bytes).
+function normalizeSelectChoices(value) {
+  const values = value == null ? [] : Array.isArray(value) ? value : [value];
+  return values.map((choice) => {
+    if (typeof choice === "string") return { value: choice };
+    if (
+      !choice ||
+      typeof choice !== "object" ||
+      !["value", "label", "index"].some((key) => choice[key] !== undefined)
+    )
+      throw new TypeError("selectOption requires a value, label or index");
+    if (choice.index !== undefined && (!Number.isInteger(choice.index) || choice.index < 0))
+      throw new TypeError("selectOption index must be a nonnegative integer");
+    for (const key of ["value", "label"])
+      if (choice[key] !== undefined && typeof choice[key] !== "string")
+        throw new TypeError(`selectOption ${key} must be a string`);
+    return { value: choice.value, label: choice.label, index: choice.index };
+  });
+}
+
+function serializeDocumentType(document) {
+  const type = document.doctype;
+  if (!type) return "";
+  const quoted = (value) => (value.includes('"') ? "'" + value + "'" : '"' + value + '"');
+  const publicId = type.publicId || "";
+  const systemId = type.systemId || "";
+  return (
+    "<!DOCTYPE " +
+    type.name +
+    (publicId ? " PUBLIC " + quoted(publicId) : "") +
+    (systemId ? (publicId ? " " : " SYSTEM ") + quoted(systemId) : "") +
+    ">"
+  );
+}
+
+function selectOptionOperation(element, choices, snapshot) {
+  if (element.tagName !== "SELECT") throw new Error("Element is not a select");
+  const options = Array.from(element.options);
+  let remaining = choices.slice();
+  const selected = [];
+  for (let index = 0; index < options.length && remaining.length; index++) {
+    const option = options[index];
+    const matches = (choice) =>
+      (choice.value === undefined || choice.value === option.value) &&
+      (choice.label === undefined || choice.label === option.label) &&
+      (choice.index === undefined || choice.index === index);
+    if (!remaining.some(matches)) continue;
+    selected.push(option);
+    remaining = element.multiple ? remaining.filter((choice) => !matches(choice)) : [];
+  }
+  if (remaining.length) throw new Error("Options did not match the requested selection");
+  const selectedSet = new Set(selected);
+  element.selectedIndex = -1;
+  for (const option of options) {
+    option.selected = selectedSet.has(option);
+    if (snapshot) {
+      if (option.selected) option.setAttribute("selected", "");
+      else option.removeAttribute("selected");
+    }
+  }
+  if (!snapshot) {
+    element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  return selected.map((option) => option.value);
+}
+
 function normalizeInputFiles(files) {
   const fs = require("node:fs");
   const path = require("node:path");
@@ -913,7 +1647,12 @@ function normalizeInputFiles(files) {
   return list.map((f) => {
     if (typeof f === "string") {
       const data = fs.readFileSync(f).toString("latin1");
-      return { name: path.basename(f), type: "", lastModified: fs.statSync(f).mtimeMs, data };
+      return {
+        name: path.basename(f),
+        type: native.fileMimeType(f),
+        lastModified: fs.statSync(f).mtimeMs,
+        data,
+      };
     }
     let data = "";
     if (f.buffer != null) data = Buffer.from(f.buffer).toString("latin1");
@@ -922,48 +1661,110 @@ function normalizeInputFiles(files) {
   });
 }
 
-function interactionScript(selector, index, kind, value) {
+function fillInteractionScript(pick, value) {
+  return `(() => { ${pick} else {
+    el.focus();
+    const value = ${value};
+    const edit = { bubbles: true, composed: true, data: value === '' ? null : value,
+      inputType: value === '' ? 'deleteContentForward' : 'insertText' };
+    if (!el.dispatchEvent(new InputEvent('beforeinput', { ...edit, cancelable: true }))) {
+      globalThis.__RESULT = 'OK'; return;
+    }
+    if (el.isContentEditable) {
+      const range = el.ownerDocument.createRange();
+      range.selectNodeContents(el);
+      range.deleteContents();
+      if (value !== '') {
+        const text = el.ownerDocument.createTextNode(value);
+        range.insertNode(text);
+        range.setStart(text, value.length);
+      }
+      range.collapse(true);
+      const selection = el.ownerDocument.defaultView.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else {
+      const pending = __tsNs.playwrightEditingCommits ??= new WeakMap();
+      if (!pending.has(el)) {
+        const before = el.value;
+        pending.set(el, before);
+        el.addEventListener('blur', () => {
+          pending.delete(el);
+          if (el.value !== before) el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, { once: true });
+      }
+      // The prototype setter bypasses React's instance value tracker before the input event.
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement
+        : el.tagName === 'SELECT' ? HTMLSelectElement : HTMLInputElement;
+      const desc = Object.getOwnPropertyDescriptor(proto.prototype, 'value');
+      if (desc?.set) desc.set.call(el, value); else el.value = value;
+    }
+    el.dispatchEvent(new InputEvent('input', edit));
+    globalThis.__RESULT = 'OK';
+  } })();`;
+}
+
+function typingInteractionScript(pick, value, replaceSelection = "__tsNs.replaceControlSelection") {
+  return `(() => { ${pick} else {
+    el.focus();
+    for (const char of ${value}) {
+      const code = /^[a-z]$/i.test(char) ? 'Key' + char.toUpperCase() : '';
+      const key = { key: char, code, bubbles: true, cancelable: true, composed: true };
+      if (el.dispatchEvent(new KeyboardEvent('keydown', key)) &&
+          el.dispatchEvent(new KeyboardEvent('keypress', key))) {
+        const edit = { data: char, inputType: 'insertText', bubbles: true, composed: true };
+        if (el.dispatchEvent(new InputEvent('beforeinput', { ...edit, cancelable: true }))) {
+          if (!${replaceSelection}(el, char)) {
+            const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement : HTMLInputElement;
+            const setter = Object.getOwnPropertyDescriptor(proto.prototype, 'value').set;
+            setter.call(el, el.value + char);
+          }
+          el.dispatchEvent(new InputEvent('input', edit));
+        }
+      }
+      el.dispatchEvent(new KeyboardEvent('keyup', key));
+    }
+    globalThis.__RESULT = 'OK';
+  } })();`;
+}
+
+function interactionTarget(selector, index, strict) {
   const sel = JSON.stringify(selector);
   const idx = JSON.stringify(index);
-  const val = JSON.stringify(value ?? "");
-  const pick = `const els = document.querySelectorAll(${sel});
+  const remoteHandle = selector && typeof selector === "object" ? selector.__remoteHandle : null;
+  const selection = Number.isInteger(remoteHandle)
+    ? `[__tsNs.remoteHandleGet(${remoteHandle},globalThis)]`
+    : `__tsNs.tcQuerySelector(document, ${sel})`;
+  return `const els = ${selection};
+    if (${strict} && els.length > 1) throw new Error('strict mode violation: locator resolved to ' + els.length + ' elements');
     let __i = ${idx}; if (__i < 0) __i = els.length + __i;
     const el = els[__i];
+    if (${Number.isInteger(remoteHandle)} && el && !el.isConnected) throw new Error('Element is not attached to the DOM');
     if (!el) { globalThis.__RESULT = "NO_MATCH"; }`;
-  if (kind === "fill") {
-    return `(() => { ${pick} else {
-      if (typeof el.focus === "function") el.focus();
-      // Set the value through the PROTOTYPE setter, bypassing React's instance-level
-      // _valueTracker. If we used el.value=, React's tracker would record the new value
-      // and then see "no change" on the input event → onChange never fires → a
-      // controlled input stays empty in React state (and resets on the next render).
-      const proto = el.tagName === "TEXTAREA" ? globalThis.HTMLTextAreaElement
-        : el.tagName === "SELECT" ? globalThis.HTMLSelectElement : globalThis.HTMLInputElement;
-      const desc = proto && Object.getOwnPropertyDescriptor(proto.prototype, "value");
-      if (desc && desc.set) desc.set.call(el, ${val}); else el.value = ${val};
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, data: ${val} }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      globalThis.__RESULT = "OK";
-    } })();`;
-  }
+}
+
+function typingDriver(frameTyping) {
+  return frameTyping ? "__tsNs.replaceFrameControlSelection" : undefined;
+}
+
+function interactionScript(selector, index, kind, value, strict = false, frameTyping = false) {
+  const val = JSON.stringify(value ?? "");
+  const pick = interactionTarget(selector, index, strict);
+  if (kind === "type") return typingInteractionScript(pick, val, typingDriver(frameTyping));
+  if (kind === "fill") return fillInteractionScript(pick, val);
   if (kind === "check" || kind === "uncheck") {
     const on = kind === "check";
     return `(() => { ${pick} else {
       if (el.checked !== ${on}) {
-        el.checked = ${on};
         el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        if (el.checked !== ${on}) throw new Error("Click did not change checked state");
       }
       globalThis.__RESULT = "OK";
     } })();`;
   }
   if (kind === "select") {
     return `(() => { ${pick} else {
-      el.value = ${val};
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      globalThis.__RESULT = "OK";
+      globalThis.__RESULT = JSON.stringify((${selectOptionOperation.toString()})(el, ${val}, false));
     } })();`;
   }
   if (kind === "setfiles") {
@@ -971,8 +1772,11 @@ function interactionScript(selector, index, kind, value) {
     // the exact bytes, select them through the input's own FileList (the prototype files
     // setter, as Chrome's DOM.setFileInputFiles does), then fire input/change.
     return `(() => { ${pick} else {
+      const files = ${val};
+      if (el.tagName !== 'INPUT' || el.type !== 'file') throw new Error('Node is not an input[type=file]');
+      if (!el.multiple && files.length > 1) throw new Error('Non-multiple file input can only accept single file');
       const data = new globalThis.DataTransfer();
-      for (const f of ${val}) {
+      for (const f of files) {
         const bytes = new Uint8Array(f.data.length);
         for (let i = 0; i < bytes.length; i++) bytes[i] = f.data.charCodeAt(i) & 255;
         const options = { type: f.type };
@@ -986,17 +1790,23 @@ function interactionScript(selector, index, kind, value) {
     } })();`;
   }
   if (kind === "dispatch") {
-    // Fire a named event (value = type) on the deepest descendant. A click on a
+    // Synthetic dispatch targets the locator itself, without pointer hit testing. A click on a
     // checkbox/radio also performs the browser default (toggle + change).
     return `(() => { ${pick} else {
-      let t = el; while (t.firstElementChild) t = t.firstElementChild;
-      const type = ${val};
-      const mouse = /^(click|dblclick|mouse|pointer|contextmenu|auxclick)/.test(type);
+      const t = el;
+      const { type, eventInit } = ${val};
+      const constructors = [
+        [/^pointer/, "PointerEvent"], [/^wheel$/, "WheelEvent"],
+        [/^(click|dblclick|mouse|contextmenu|auxclick)/, "MouseEvent"],
+        [/^key/, "KeyboardEvent"], [/^(focus|blur)/, "FocusEvent"],
+        [/^(beforeinput|input)$/, "InputEvent"], [/^composition/, "CompositionEvent"],
+        [/^(drag|drop)/, "DragEvent"], [/^touch/, "TouchEvent"],
+      ];
+      const className = constructors.find(([pattern]) => pattern.test(type))?.[1] || "Event";
+      const EventClass = globalThis[className];
       const box = el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio");
       if (type === "click" && box) el.checked = el.type === "radio" ? true : !el.checked;
-      const ev = mouse
-        ? new MouseEvent(type, { bubbles: true, cancelable: true, view: globalThis })
-        : new Event(type, { bubbles: true, cancelable: true });
+      const ev = new EventClass(type, { bubbles: true, cancelable: true, composed: true, view: globalThis, ...eventInit });
       t.dispatchEvent(ev);
       if (type === "click" && box) {
         el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1019,7 +1829,7 @@ function interactionScript(selector, index, kind, value) {
   }
   if (kind === "isfocused") {
     return `(() => { ${pick} else {
-      globalThis.__RESULT = document.activeElement === el ? "true" : "false";
+      globalThis.__RESULT = el.getRootNode().activeElement === el ? "true" : "false";
     } })();`;
   }
   if (kind === "hover") {
@@ -1029,13 +1839,24 @@ function interactionScript(selector, index, kind, value) {
     // bound to inner nodes (and React's delegation) see a target inside them.
     return `(() => { ${pick} else {
       let t = el; while (t.firstElementChild) t = t.firstElementChild;
-      const o = { bubbles: true, cancelable: true, view: globalThis };
-      const oe = { bubbles: false, cancelable: true, view: globalThis };
-      t.dispatchEvent(new MouseEvent("pointerover", o));
-      t.dispatchEvent(new MouseEvent("mouseover", o));
-      t.dispatchEvent(new MouseEvent("pointerenter", oe));
-      t.dispatchEvent(new MouseEvent("mouseenter", oe));
-      t.dispatchEvent(new MouseEvent("mousemove", o));
+      const previous = __tsNs.shimHoverTarget ?? null;
+      const ancestry = node => { const path = []; while (node) { path.push(node); node = node.parentElement; } return path; };
+      const oldPath = ancestry(previous), newPath = ancestry(t);
+      const boundary = (prefix, Constructor) => {
+        const emit = (node, type, relatedTarget, bubbles) => node.dispatchEvent(new Constructor(type, {
+          bubbles, cancelable: bubbles, view: globalThis, relatedTarget,
+          pointerId: 1, pointerType: "mouse", isPrimary: true,
+        }));
+        if (previous === t) return;
+        if (previous) emit(previous, prefix + "out", t, true);
+        for (const node of oldPath) if (!newPath.includes(node)) emit(node, prefix + "leave", t, false);
+        emit(t, prefix + "over", previous, true);
+        for (const node of newPath.slice().reverse()) if (!oldPath.includes(node)) emit(node, prefix + "enter", previous, false);
+      };
+      boundary("pointer", PointerEvent);
+      boundary("mouse", MouseEvent);
+      __tsNs.shimHoverTarget = t;
+      t.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: globalThis }));
       // Also apply CSS :hover styles — a menu revealed purely by a hover descendant rule has
       // no JS handler; without this it stays display:none (no pointer state in the cascade).
       if (typeof __tsNs.tcApplyHover === "function") __tsNs.tcApplyHover(el);
@@ -1049,16 +1870,26 @@ function interactionScript(selector, index, kind, value) {
     // role="combobox", which opens on its own mousedown) actually fire. Focus and
     // the default-action (form submit) logic stay on the matched control \`el\`.
     let tgt = el; while (tgt.firstElementChild) tgt = tgt.firstElementChild;
-    const o = { bubbles: true, cancelable: true, view: globalThis, button: 0 };
+    const options = ${val} || {};
+    const rect = el.getBoundingClientRect();
+    const position = options.position || { x: rect.width / 2, y: rect.height / 2 };
+    const button = options.button === "right" ? 2 : options.button === "middle" ? 1 : 0;
+    const modifiers = options.modifiers || [];
+    const o = { bubbles: true, cancelable: true, composed: true, view: globalThis, button,
+      clientX: rect.left + position.x, clientY: rect.top + position.y,
+      detail: options.clickCount || 1, shiftKey: modifiers.includes("Shift"),
+      ctrlKey: modifiers.includes("Control"),
+      altKey: modifiers.includes("Alt"), metaKey: modifiers.includes("Meta") };
     // Full pointer+mouse sequence like a real browser: pointer events FIRST (MUI v5+ /
     // Radix / many libs gate selection on pointerdown/up, and MUI Autocomplete/Select
     // options preventDefault mousedown to keep input focus — without the pointer pair the
     // option click never commits the value). PointerEvent if available, else MouseEvent.
     const PE = globalThis.PointerEvent || globalThis.MouseEvent;
-    const pe = (t) => new PE(t, { bubbles: true, cancelable: true, view: globalThis, button: 0, pointerId: 1, isPrimary: true });
+    const pe = (t) => new PE(t, { ...o, detail: 0, buttons: t === "pointerup" ? 0 : [1, 4, 2][button], pointerId: 1, isPrimary: true });
     tgt.dispatchEvent(pe("pointerdown"));
     const md = new MouseEvent("mousedown", o);
     tgt.dispatchEvent(md);
+    if (button === 2) tgt.dispatchEvent(new MouseEvent("contextmenu", o));
     // Focus follows the browser rules: a click moves focus to a FOCUSABLE target, BUT a
     // mousedown handler that calls preventDefault() suppresses the focus shift. MUI's
     // Autocomplete/Select listbox preventDefaults mousedown precisely to keep the input
@@ -1068,23 +1899,15 @@ function interactionScript(selector, index, kind, value) {
     if (focusable && !md.defaultPrevented && typeof el.focus === "function") el.focus();
     tgt.dispatchEvent(pe("pointerup"));
     tgt.dispatchEvent(new MouseEvent("mouseup", o));
-    const clickEv = new MouseEvent("click", o);
+    const clickEv = new MouseEvent(button === 0 ? "click" : "auxclick", o);
     tgt.dispatchEvent(clickEv);
-    // Browser default action of clicking a submit control: fire the form's submit
-    // event (React's onSubmit is delegated). Our dispatch has no default action, so do
-    // it explicitly — unless the click was preventDefault'd.
-    if (!clickEv.defaultPrevented) {
-      let f = null;
-      for (let p = el; p; p = p.parentElement) { if (p.tagName === "FORM") { f = p; break; } }
-      const ty = (el.getAttribute && (el.getAttribute("type") || "")).toLowerCase();
-      const submits = el.tagName === "BUTTON" ? ty !== "button" && ty !== "reset"
-        : el.tagName === "INPUT" && (ty === "submit" || ty === "image");
-      if (f && submits) f.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    }
+    if (button === 0 && o.detail === 2) tgt.dispatchEvent(new MouseEvent("dblclick", o));
     // Report whether the app handled the click (preventDefault). If it did, the shim
     // must NOT also perform the browser default action (e.g. navigate an <a href="#">
     // whose React onClick toggles state) — that would reload and wipe the new state.
-    globalThis.__RESULT = clickEv.defaultPrevented ? "PREVENTED" : "OK";
+    const nativeDefault = button === 0 && !clickEv.defaultPrevented &&
+      typeof __tsNs.dispatchAnchorDefault === "function" && __tsNs.dispatchAnchorDefault(el, clickEv);
+    globalThis.__RESULT = clickEv.defaultPrevented ? "PREVENTED" : nativeDefault ? "NATIVE_DEFAULT" : "OK";
   } })();`;
 }
 
@@ -1107,7 +1930,39 @@ function pathOf(url) {
 // hydration populates them in the engine, but this snapshot-oriented shim does
 // not fetch iframe src here — call `page.content()` after hydration if needed).
 // ---------------------------------------------------------------------------
+function iframeMatchMetadata(parent, html, m) {
+  if (m == null || m.node == null) return null;
+  // The selector may be broader than "iframe" (e.g. a user passed "main") — restrict
+  // to iframe elements by sniffing the serialized outer-HTML opening tag. Match
+  // records don't carry a tag field, so this is the cheapest fidelity check.
+  const outer = String(m.html ?? "")
+    .trimStart()
+    .toLowerCase();
+  if (!outer.startsWith("<iframe")) return null;
+  const name = native.attrOf(html, m.node, "name") ?? "";
+  const id = native.attrOf(html, m.node, "id") ?? "";
+  const src = native.attrOf(html, m.node, "src") ?? "";
+  const srcdoc = native.attrOf(html, m.node, "srcdoc");
+  let url = srcdoc != null ? "about:srcdoc" : "about:blank";
+  if (srcdoc == null && src) {
+    try {
+      url = new URL(src, parent._url).href;
+    } catch {
+      url = src;
+    }
+  }
+  return {
+    node: m.node,
+    name,
+    id,
+    src,
+    html: srcdoc ?? "",
+    url,
+  };
+}
+
 function _collectIframes(parent, selector = "iframe") {
+  if (selector === "iframe" && parent._frameEntries) return parent._frameEntries;
   const html = parent._html ?? "";
   if (!html) return [];
   let matches;
@@ -1118,28 +1973,48 @@ function _collectIframes(parent, selector = "iframe") {
   }
   const out = [];
   for (const m of matches) {
-    if (m == null || m.node == null) continue;
-    // The selector may be broader than "iframe" (e.g. a user passed "main") — restrict
-    // to iframe elements by sniffing the serialized outer-HTML opening tag. Match
-    // records don't carry a tag field, so this is the cheapest fidelity check.
-    const outer = String(m.html ?? "")
-      .trimStart()
-      .toLowerCase();
-    if (!outer.startsWith("<iframe")) continue;
-    const name = native.attrOf(html, m.node, "name") ?? "";
-    const id = native.attrOf(html, m.node, "id") ?? "";
-    const src = native.attrOf(html, m.node, "src") ?? "";
-    const srcdoc = native.attrOf(html, m.node, "srcdoc");
-    out.push({
-      node: m.node,
-      name,
-      id,
-      src,
-      html: srcdoc ?? "",
-      url: src || (srcdoc ? "about:srcdoc" : "about:blank"),
-    });
+    const meta = iframeMatchMetadata(parent, html, m);
+    if (meta) out.push(meta);
+  }
+  if (parent._frameEntries) {
+    const all = JSON.parse(native.query(html, "iframe", "css"));
+    return out
+      .map((meta) => parent._frameEntries[all.findIndex((match) => match.node === meta.node)])
+      .filter(Boolean);
   }
   return out;
+}
+
+function networkWaitMatcher(matcher, baseURL) {
+  if (matcher == null) return async () => true;
+  if (typeof matcher === "function") return async (item) => !!(await matcher(item));
+  let pattern = matcher;
+  if (!(pattern instanceof RegExp)) {
+    let glob = String(pattern);
+    if (baseURL && !glob.startsWith("*")) {
+      try {
+        glob = new URL(glob, baseURL).href;
+      } catch {
+        /* retain invalid pattern */
+      }
+    }
+    let source = "";
+    for (let i = 0; i < glob.length; i++) {
+      const char = glob[i];
+      if (char === "*") {
+        const deep = glob[i + 1] === "*";
+        source += deep ? ".*" : "[^/]*";
+        if (deep) i++;
+      } else {
+        source += /[\\^$+?.()|[\]{}]/.test(char) ? `\\${char}` : char;
+      }
+    }
+    pattern = new RegExp(`^${source}$`);
+  }
+  return async (item) => {
+    pattern.lastIndex = 0;
+    return pattern.test(item.url());
+  };
 }
 
 function _matchUrl(url, spec) {
@@ -1162,6 +2037,27 @@ function _matchUrl(url, spec) {
   return url.includes(stripped);
 }
 
+function frameRealmExpression(path, source, helpers, hostIdentity = null) {
+  return `(() => {
+      let child = globalThis;
+      const indices = ${JSON.stringify(path)};
+      for (let depth = 0; depth < indices.length; depth++) {
+        const host = child.document.querySelectorAll('iframe')[indices[depth]];
+        if (!host) throw new Error('turbo-surf: frame is detached');
+        ${hostIdentity == null ? "" : `if (depth === indices.length - 1 && __tsNs.shimFrameId(host) !== ${JSON.stringify(hostIdentity)}) throw new Error('turbo-surf: frame is detached');`}
+        child = host.contentWindow;
+      }
+      let code = ${JSON.stringify(`return (${source});`)};
+      let helperState;
+      if (${helpers}) {
+        helperState = __tsNs.shimBindingNamespace(child);
+        if (!helperState) throw new Error('turbo-surf: frame is detached');
+        code = '"use strict"; const __G = arguments[0]; const __tsNs = __G;' + code;
+      }
+      return (${helpers} ? __tsNs.remoteHandleCompile(child, code) : child.Function(code))(helperState);
+    })()`;
+}
+
 class Frame {
   constructor(parentPage, parentFrame, meta) {
     this._parentPage = parentPage;
@@ -1170,6 +2066,11 @@ class Frame {
     this._src = meta.src ?? "";
     this._url = meta.url ?? "about:blank";
     this._html = meta.html ?? "";
+    this._node = meta.node;
+    this._path = meta.path;
+    this._frameEntries = meta.children;
+    this._nativeIdentity = false;
+    this._detached = false;
   }
   get _context() {
     return this._parentPage._context;
@@ -1187,14 +2088,75 @@ class Frame {
     return this._parentFrame;
   }
   childFrames() {
-    return _collectIframes(this).map((meta) => new Frame(this._parentPage, this, meta));
+    return this._parentPage.frames().filter((frame) => frame._parentFrame === this);
+  }
+  _assertAttached() {
+    if (this._detached) throw new Error("turbo-surf: frame is detached");
+  }
+  _realmExpression(source, helpers = false) {
+    this._assertAttached();
+    return frameRealmExpression(
+      this._path,
+      source,
+      helpers,
+      helpers && this._nativeIdentity ? this._node : null,
+    );
+  }
+  // Select the current document and dispatch in one actor job; a host snapshot
+  // between keys can already be stale when the next event reaches the isolate.
+  async _keyboardSessionEval(script, parentDocument, continuing) {
+    const expression = frameRealmExpression(
+      this._path,
+      `(() => { ${script}; return globalThis.__RESULT; })()`,
+      true,
+      this._nativeIdentity ? this._node : null,
+    );
+    return this._parentPage._sessionEval(
+      `(() => {
+      const current = __tsNs.shimBindingId();
+      if (typeof current !== 'number' || current <= 0) throw new Error('Native keyboard parent identity is unavailable');
+      if (current !== ${JSON.stringify(parentDocument)}) {
+        if (!${Boolean(continuing)}) throw new Error('turbo-surf: frame is detached');
+        ${script}
+      } else {
+        if (${Boolean(this._detached)}) throw new Error('turbo-surf: frame is detached');
+        globalThis.__RESULT = ${expression};
+      }
+    })()`,
+      { waitForBindings: false },
+    );
+  }
+  async evaluateHandle(script, arg) {
+    return handleEvaluation(this, script, arg, true);
+  }
+  async evaluate(script, arg) {
+    if (hasJSHandles(arg)) return handleEvaluation(this, script, arg);
+    await this._ensureLive();
+    const expression = this._realmExpression(evalSource(script, arg));
+    if (this._parentPage._mergedBindings().size)
+      return this._parentPage._evaluateWithBindings(expression);
+    const raw = await native.liveEvalExpression(
+      this._session,
+      `(async () => {
+      try {
+        const value = await (${expression});
+        return JSON.stringify({ok:true, value: (${encodeEvaluationValue.toString()})(value)});
+      } catch(error) { return JSON.stringify({ok:false, error: (${encodeEvaluationError.toString()})(error)}); }
+    })()`,
+    );
+    await this._parentPage._refreshFromSession();
+    await this._parentPage._drainBindings();
+    const result = JSON.parse(raw);
+    if (!result.ok) throw decodeEvaluationError(result.error);
+    return decodeEvaluationValue(result.value);
   }
   async content() {
+    this._assertAttached();
     return this._html;
   }
   async title() {
-    const m = JSON.parse(native.query(this._html, "title", "css"));
-    return m.length ? (m[0].text ?? "") : "";
+    this._assertAttached();
+    return native.title(this._html);
   }
   async innerText(selector) {
     return this.locator(selector).innerText();
@@ -1206,7 +2168,8 @@ class Frame {
     return this.locator(selector).textContent();
   }
   isDetached() {
-    return false;
+    this._parentPage._syncFrames();
+    return this._detached;
   }
   // Live-interaction surface a Locator bound to this Frame expects on `_page` —
   // iframes share the parent Page's V8 isolate (one session per Page), so forward
@@ -1220,23 +2183,82 @@ class Frame {
     return this._parentPage._live;
   }
   _ensureLive() {
+    this._assertAttached();
     return this._parentPage._ensureLive();
   }
-  _followIntent(intent) {
-    return this._parentPage._followIntent(intent);
+  async _followIntent(intent) {
+    if (intent.action !== "navigate") return this._parentPage._followIntent(intent);
+    await this._ensureLive();
+    await this._sessionEval(`location.href = ${JSON.stringify(intent.url)}; return "OK";`);
   }
-  _sessionDispatch(selector, index, kind, value) {
-    return this._parentPage._sessionDispatch(selector, index, kind, value);
+  _readEngine(script) {
+    const expression = this._realmExpression(`(() => { ${script} })()`, true);
+    return JSON.parse(native.liveReadEngine(this._session, `return ${expression};`));
   }
-  _sessionEval(script) {
-    return this._parentPage._sessionEval(script);
+  async _readEngineAsync(script) {
+    const expression = this._realmExpression(`(() => { ${script} })()`, true);
+    return JSON.parse(await native.liveReadEngineAsync(this._session, `return ${expression};`));
+  }
+  _evalEngine(script, waitForNavigation = false) {
+    const expression = this._realmExpression(
+      `(() => { ${script}; return globalThis.__RESULT; })()`,
+      true,
+    );
+    const evaluate = waitForNavigation ? native.liveDispatchEngine : native.liveEvalEngine;
+    return evaluate(this._session, `globalThis.__RESULT = ${expression};`);
+  }
+  async _sessionDispatch(selector, index, kind, value, strict = false) {
+    if (kind !== "isfocused") this._parentPage._actionSeq++;
+    const script = interactionScript(selector, index ?? 0, kind, value, strict, true);
+    const result =
+      kind === "type"
+        ? await this._typeWithCanonicalSelection(script)
+        : await this._sessionEval(script, {
+            waitForNavigation: kind === "click" && !value?.noWaitAfter,
+          });
+    if (result === "NO_MATCH") throw new Error("turbo-surf: locator matched no elements");
+    return result;
+  }
+  async _typeWithCanonicalSelection(script) {
+    this._assertAttached();
+    const result = await native.liveEvalEngine(
+      this._session,
+      `(() => {
+      'use strict';
+      let child = globalThis;
+      for (const index of ${JSON.stringify(this._path)}) {
+        const host = child.document.querySelectorAll('iframe')[index];
+        if (!host) throw new Error('turbo-surf: frame is detached');
+        child = host.contentWindow;
+      }
+      const childHelpers = __tsNs.shimBindingNamespace(child);
+      if (!childHelpers) throw new Error('turbo-surf: frame is detached');
+      const result = ((globalThis, document, KeyboardEvent, InputEvent, HTMLInputElement, HTMLTextAreaElement, __tsNs) => {
+        ${script};
+        return globalThis.__RESULT;
+      })(child, child.document, child.KeyboardEvent, child.InputEvent, child.HTMLInputElement, child.HTMLTextAreaElement, childHelpers);
+      globalThis.__RESULT = result;
+    })();`,
+    );
+    await this._parentPage._refreshFromSession();
+    await this._parentPage._drainBindings();
+    return result;
+  }
+  async _sessionEval(script, { waitForBindings = true, waitForNavigation = false } = {}) {
+    const result = await this._evalEngine(script, waitForNavigation);
+    await this._parentPage._refreshFromSession();
+    if (waitForBindings) await this._parentPage._drainBindings();
+    else scheduleBindingDrain(this._parentPage);
+    return result;
   }
   _redrain() {
     return this._parentPage._redrain();
   }
   // The locator surface mirrors Page's — the Locator reads from THIS frame's `_html`.
   _locFromSelector(selector, mode = "auto") {
-    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)));
+    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)), {
+      count: (h) => native.queryCount(h, selector, mode),
+    });
     loc._selector = selector;
     return loc;
   }
@@ -1245,19 +2267,31 @@ class Frame {
   }
   getByRole(role, opts = {}) {
     const name = opts.name != null ? String(opts.name) : null;
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "role", role, name)), {
-      getBy: { kind: "role", value: role, name },
-    });
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "role", role, name, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "role", value: role, name, options: opts },
+      },
+    );
   }
-  getByText(text) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
-      getBy: { kind: "text", value: String(text), name: null },
-    });
+  getByText(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "text", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "text", value: String(text), name: null, options: opts },
+      },
+    );
   }
-  getByLabel(text) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "label", String(text))), {
-      getBy: { kind: "label", value: String(text), name: null },
-    });
+  getByLabel(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "label", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "label", value: String(text), name: null, options: opts },
+      },
+    );
   }
   getByPlaceholder(text) {
     return this._locFromSelector(`[placeholder*=${cssAttrValue(text)}]`);
@@ -1285,30 +2319,18 @@ class FrameLocator {
     this._index = 0;
   }
   _resolveFrame() {
-    // Cache the Frame on the parent so writes through fl.locator().fill() survive:
-    // the Frame carries the mutated _html, and a later read via a fresh FrameLocator
-    // over the same parent HTML reuses it. Invalidates when parent._html changes
-    // (e.g. page.setContent) — the key includes the parent-HTML identity.
     const parent = this._parent;
-    const parentHtml = parent._html ?? "";
-    const cacheKey = `${this._selector}\x00${this._index}`;
-    let cache = parent._frameLocatorCache;
-    if (!cache || cache.html !== parentHtml) {
-      cache = { html: parentHtml, frames: new Map() };
-      parent._frameLocatorCache = cache;
-    }
-    const hit = cache.frames.get(cacheKey);
-    if (hit) return hit;
-    const list = _collectIframes(parent, this._selector);
-    const i = this._index < 0 ? list.length + this._index : this._index;
-    const entry = list[i];
+    const page = parent instanceof Frame ? parent._parentPage : parent;
+    const matches = _collectIframes(parent, this._selector);
+    const index = this._index < 0 ? matches.length + this._index : this._index;
+    const entry = matches[index];
     if (!entry) throw new Error(`turbo-surf: frameLocator(${this._selector}) matched no iframe`);
-    const topPage = parent instanceof Frame ? parent._parentPage : parent;
-    const parentFrame = parent instanceof Frame ? parent : null;
-    const frame = new Frame(topPage, parentFrame, entry);
-    cache.frames.set(cacheKey, frame);
-    return frame;
+    page._syncFrames();
+    return page._frames.find(
+      (frame) => frame._parentFrame === parent && frame._node === entry.node,
+    );
   }
+
   _withIndex(i) {
     const fl = new FrameLocator(this._parent, this._selector);
     fl._index = i;
@@ -1329,11 +2351,11 @@ class FrameLocator {
   getByRole(role, opts) {
     return this._resolveFrame().getByRole(role, opts);
   }
-  getByText(t) {
-    return this._resolveFrame().getByText(t);
+  getByText(t, opts) {
+    return this._resolveFrame().getByText(t, opts);
   }
-  getByLabel(t) {
-    return this._resolveFrame().getByLabel(t);
+  getByLabel(t, opts) {
+    return this._resolveFrame().getByLabel(t, opts);
   }
   getByPlaceholder(t) {
     return this._resolveFrame().getByPlaceholder(t);
@@ -1351,13 +2373,22 @@ class FrameLocator {
     return new FrameLocator(this._resolveFrame(), selector);
   }
   owner() {
-    return this._resolveFrame();
+    return this._parent.locator(this._selector).nth(this._index);
   }
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+const NETWORK_EVENTS = [
+  "response",
+  "request",
+  "requestfinished",
+  "requestfailed",
+  "pageerror",
+  "console",
+  "dialog",
+];
 class Page {
   constructor(context) {
     this._html = "";
@@ -1365,15 +2396,17 @@ class Page {
     this._documentResponse = { status: 0, referrer: "", headers: [] };
     this._ownsContext = context == null;
     this._context = context ?? new BrowserContext();
+    this._viewport = { ...this._context._viewport };
     this._requestState = native.requestStateNew?.(this._context._requestState);
     this._history = [];
     this._fwd = [];
+    this._historyCurrent = null;
     this._listeners = new Map();
     this._closed = false;
     this._session = null; // live JS session id (networkidle navigations), else null
     this._loadedPath = null; // path the live DOM was loaded at (to detect in-app nav)
     this._navHops = 0; // auto-followed redirects since the last user navigation
-    this._autoHydrate = true; // hydrate-on-demand unless a goto opted out (commit)
+    this._autoHydrate = true; // execution permission is independent of navigation waiting
     this._actionSeq = 0; // bumps per real user interaction; tags drained responses so
     // waitForResponse can tell a fresh response from one that drained in an earlier step
   }
@@ -1382,10 +2415,15 @@ class Page {
     return this._session != null;
   }
 
-  // Hydrate-on-demand: open a live session if one isn't up (and the last navigation
-  // didn't opt out via waitUntil:'commit'). Idempotent — at most one hydration per doc.
+  get _auxiliaryActor() {
+    return this._actorHub?.capability === "supported";
+  }
+
+  // Hydrate on demand independently of the navigation wait milestone.
+  // Idempotent — at most one execution session per document.
   async _ensureLive() {
     if (this._closed) throw new Error("page is closed");
+    if (this._actorHub?.opening) await this._actorHub.ready;
     if (!this._live && this._autoHydrate !== false) await this._openLiveSession();
   }
 
@@ -1393,11 +2431,50 @@ class Page {
   // inserting a script tag would change parser locations and subject it to CSP.
   _initScriptSource() {
     const all = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
-    if (this._routeInitScript) all.unshift(this._routeInitScript);
-    const exposeNames = [...this._mergedBindings().keys()];
-    const exposeScript = buildExposeInitScript(exposeNames);
-    if (exposeScript) all.unshift(exposeScript);
     return all.map((source) => `try{ ${source} }catch(e){}`).join("\n");
+  }
+
+  _pageInitScriptSource() {
+    return (this._initScripts ?? []).map((source) => `try{ ${source} }catch(e){}`).join("\n");
+  }
+
+  _pageEngineInitScriptSource() {
+    const names = [...(this._bindings?.keys() ?? [])];
+    if (this._routeHandlers?.size) names.push(this._routeBindingName);
+    return (
+      buildExposeInitScript(names, this._routeBindingName) + "\n" + (this._routeInitScript ?? "")
+    );
+  }
+
+  async _configureTargetBootstrap() {
+    if (!this._actorHub) return;
+    await this._actorHub.ready;
+    if (this._actorHub.capability === "unsupported") return;
+    if (!this._auxiliaryActor) throw new Error("Native auxiliary capability is pending");
+    if (this._closed || this._session == null) throw new Error("Page is closed");
+    await native.liveTargetConfigure(
+      this._session,
+      this._pageInitScriptSource(),
+      this._pageEngineInitScriptSource(),
+    );
+  }
+
+  _engineInitScriptSource() {
+    return (
+      buildExposeInitScript([...this._mergedBindings().keys()], this._routeBindingName) +
+      "\n" +
+      (this._routeInitScript ?? "")
+    );
+  }
+  async _installNativeBindings() {
+    if (!this._live) return;
+    await this._configureTargetBootstrap();
+    const engine = this._engineInitScriptSource();
+    await native.liveEvalEngine(
+      this._session,
+      `"use strict"; __tsNs.shimBindingScripts(${JSON.stringify(engine)}, ${JSON.stringify(this._initScriptSource())}, "");
+${engine}`,
+    );
   }
 
   // Merge context-level and page-level exposed bindings; page wins on name clash.
@@ -1405,33 +2482,159 @@ class Page {
     const out = new Map();
     for (const [k, v] of this._context._bindings ?? []) out.set(k, v);
     for (const [k, v] of this._bindings ?? []) out.set(k, v);
+    if (this._routeHandlers?.size)
+      out.set(this._routeBindingName, {
+        fn: (source, data) => this._invokeHostRoute(source, data),
+        isBinding: true,
+      });
     return out;
   }
 
-  // Drain queued binding calls from the isolate and dispatch to Node handlers.
-  // Called after every live interaction. Fire-and-forget: a host-side throw
-  // is swallowed with a warning so one bad handler can't break the page.
-  async _drainBindings() {
-    if (this._session == null || this._draining) return;
-    const handlers = this._mergedBindings();
-    if (handlers.size === 0) return;
-    this._draining = true;
-    try {
-      // Init scripts run per-frame, so each iframe realm keeps its own
-      // __tsExpose.q. Walk the frame tree and splice every realm's queue so
-      // iframe-scoped binding calls aren't lost (turbo-surf#285).
-      const raw = await native.liveEvalEngine(
-        this._session,
-        `(() => {
+  _collectSession(id, script, collect = false) {
+    if (!this._contentCollecting) return native.liveEvalEngine(id, script, collect);
+    return native.liveEvalEngineExpression(
+      id,
+      `(async () => { ${script}
+return String(globalThis.__RESULT ?? ""); })()`,
+    );
+  }
+  _routeRequestController(frame, id) {
+    this._routeRequests ??= new WeakMap();
+    let requests = this._routeRequests.get(frame);
+    if (!requests) this._routeRequests.set(frame, (requests = new Map()));
+    if (!requests.has(id)) requests.set(id, new AbortController());
+    return { requests, controller: requests.get(id) };
+  }
+  async _invokeHostRoute(source, data) {
+    const { requests, controller } = this._routeRequestController(
+      source.frame,
+      data.request?.requestId ?? data.cancel ?? data.complete,
+    );
+    if (data.cancel !== undefined) {
+      controller.abort(new Error("Route's request has been aborted"));
+      return {};
+    }
+    if (data.complete !== undefined) {
+      requests.delete(data.complete);
+      return {};
+    }
+    this._routeLifetime ??= new AbortController();
+    const signal = AbortSignal.any([this._routeLifetime.signal, controller.signal]);
+    if (signal.aborted) throw signal.reason;
+    const entry = this._routeHandlers.get(data.id);
+    if (!entry) throw new Error("Route registration is no longer available");
+    const document = source.frame === this ? "document" : source.frame._realmExpression("document");
+    const allowed = await native.liveEvalEngineExpression(
+      this._session,
+      `String(__tsNs.shimAuthorizeRoute(${document}, ${JSON.stringify(data.request.url)}))`,
+    );
+    if (allowed !== "true") throw new TypeError("Failed to fetch");
+    if (!matchesHostRoutePredicate(entry, data.matchUrl ?? data.request.url))
+      return { action: "fallback" };
+    data = this._hostRouteHeaders(data);
+    const session = this._session;
+    const createRequest = (request) =>
+      makeCapturedRequest(
+        {
+          url: request.url,
+          method: request.method,
+          request,
+          context: { resourceType: request.resourceType },
+        },
+        source.frame,
+      );
+    const fetchResponse = async (request, options) => {
+      if (signal.aborted) throw signal.reason;
+      if (this._closed || session !== this._session)
+        throw new Error("Route's page has been closed or navigated");
+      const expression = `(async () => {
+        const request = ${JSON.stringify(request)};
+        const window = ${source.frame === this ? "globalThis" : source.frame._realmExpression("globalThis")};
+        const realm = __tsNs.shimBindingNamespace(window);
+        const state = realm.shimRouteState;
+        const response = await realm.shimRouteFetch(request.url, {
+          ...request, signal:state.requests.get(request.requestId)?.signal, body:request.bodyBytes === null ? undefined : new Uint8Array(request.bodyBytes),
+        });
+        return JSON.stringify({url:response.url,status:response.status,statusText:response.statusText,
+          headers:Array.from(response.headers),bodyBytes:Array.from(new Uint8Array(await response.arrayBuffer()))});
+      })()`;
+      if (
+        Object.keys(options).some((key) => !["url", "method", "postData", "headers"].includes(key))
+      )
+        throw new Error("Unsupported route.fetch option");
+      const raw = await this._evaluateWithBindings(expression);
+      if (this._closed || session !== this._session)
+        throw new Error("Route's page has been closed or navigated");
+      return routeResponse(JSON.parse(raw));
+    };
+    const decision = await invokeHostRoute(
+      entry.handler,
+      data,
+      createRequest,
+      fetchResponse,
+      signal,
+    );
+    this._publishHostRouteFulfillment(source, data, decision, signal, session);
+    return decision;
+  }
+
+  _hostRouteHeaders(data) {
+    if (!data.request.overriddenHeaders)
+      data = {
+        ...data,
+        request: {
+          ...data.request,
+          headers: {
+            ...Object.fromEntries(
+              Object.entries(this._context._headers).map(([k, v]) => [k.toLowerCase(), v]),
+            ),
+            ...data.request.headers,
+          },
+        },
+      };
+    return data;
+  }
+  _publishHostRouteFulfillment(source, data, decision, signal, session) {
+    if (decision.fulfilled && !signal.aborted && session === this._session && !this._closed) {
+      const value = decision.fulfilled;
+      const status = value.status ?? 200;
+      const body = [204, 205, 304].includes(status)
+        ? Buffer.alloc(0)
+        : Buffer.from(value.bodyBytes ?? []);
+      native.liveNetworkLogPublishIntercepted(
+        session,
+        JSON.stringify({
+          url: data.request.url,
+          method: data.request.method,
+          status,
+          statusText: "",
+          ok: status >= 200 && status < 300,
+          headers: Object.entries(value.headers ?? {}),
+          request: data.request,
+          context: {
+            resourceType: data.request.resourceType,
+            frame: { path: source.frame === this ? [] : source.frame._path },
+          },
+        }),
+        body,
+      );
+    }
+  }
+
+  async _takeBindingCalls() {
+    const raw = await this._collectSession(
+      this._session,
+      `"use strict"; (() => {
           const out = [];
           const seen = new Set();
-          const walk = (w) => {
+          const walk = (w, framePath = []) => {
             if (!w || seen.has(w)) return;
             seen.add(w);
             try {
-              const bag = w.__tsExpose;
+              const bag = __tsNs.shimBindingBag(w);
               if (bag && bag.q && bag.q.length) {
-                for (const c of bag.q.splice(0)) out.push(c);
+                const queue=bag.q; bag.q={__proto__:null,length:0};
+                for(let i=0;i<queue.length;i++) out.push({...queue[i], framePath, nonce:bag.nonce});
               }
             } catch (_e) {}
             let n = 0;
@@ -1439,108 +2642,445 @@ class Page {
             for (let i = 0; i < n; i++) {
               let child = null;
               try { child = w.frames[i]; } catch (_e) { child = null; }
-              if (child) walk(child);
+              if (child) walk(child, [...framePath, i]);
             }
           };
           walk(globalThis);
           globalThis.__RESULT = JSON.stringify(out);
         })();`,
-      );
-      if (!raw) return;
-      let calls;
-      try {
-        calls = JSON.parse(raw);
-      } catch {
-        return;
-      }
-      for (const call of calls) {
-        const entry = handlers.get(call.name);
-        if (!entry) continue;
-        const args = Array.isArray(call.args) ? call.args : [];
-        try {
-          if (entry.isBinding) {
-            await entry.fn({ page: this, context: this._context, frame: null }, ...args);
-          } else {
-            await entry.fn(...args);
-          }
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn(`turbo-surf: exposed binding "${call.name}" threw —`, err?.message ?? err);
-        }
-      }
+      true,
+    );
+    if (!raw) return [];
+    let calls;
+    try {
+      calls = JSON.parse(raw);
     } catch {
-      /* isolate gone / eval failed — nothing to drain */
+      return [];
+    }
+    return calls;
+  }
+  async _invokeBindingCall(call, entry) {
+    const args = Array.isArray(call.args) ? call.args : [];
+    if (!entry.isBinding) return entry.fn(...args);
+    const path = call.framePath ?? [];
+    if (path.length && !this._requestFrames?.has(call.nonce)) await this._refreshFromSession(true);
+    this._syncFrames();
+    const frame = path.length === 0 ? this.mainFrame() : this._requestFrames?.get(call.nonce);
+    if (!frame || frame._detached || (path.length && frame._requestContextId !== call.nonce))
+      throw new Error("Exposed binding caller frame is detached");
+    call.originFrame = frame;
+    return entry.fn({ page: this, context: this._context, frame }, ...args);
+  }
+  async _settleBindingCall(call, entry) {
+    const session = this._session;
+    let payload;
+    try {
+      const value = await this._invokeBindingCall(call, entry);
+      payload = JSON.stringify({ value });
+    } catch (error) {
+      payload = JSON.stringify({
+        error: { name: String(error?.name ?? "Error"), message: String(error?.message ?? error) },
+      });
+    }
+    if (session !== this._session || this._closed) return;
+    const path = call.originFrame?._path ?? call.framePath ?? [];
+    if (call.originFrame?._detached) return;
+    await this._collectSession(
+      session,
+      `"use strict"; (() => {
+      let realm = globalThis;
+      for (const index of ${JSON.stringify(path)}) realm = realm.frames[index];
+      const bag = __tsNs.shimBindingBag(realm), pending = bag?.pending?.[${call.id}];
+      if (!pending || bag.nonce !== ${JSON.stringify(call.nonce)}) return;
+      delete bag.pending[${call.id}];
+      const result = ${payload};
+      if (result.error) {
+        pending.reject(bag.error(result.error.message,result.error.name));
+      } else pending.resolve(result.value);
+    })()`,
+      true,
+    );
+  }
+  async _drainBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
+    throwBindingDrainError(this);
+    if (this._auxiliaryActor)
+      return this._actorHub.drainBindings(deadline, cancelOnTimeout, collect, this);
+    return this._drainOwnBindings(deadline, cancelOnTimeout, collect);
+  }
+  _checkBindingDeadline(deadline, cancelOnTimeout) {
+    if (!(Date.now() >= deadline)) return;
+    const error = new Error("Timeout exceeded while waiting for host bindings");
+    error.name = "TimeoutError";
+    if (cancelOnTimeout) {
+      this._routeLifetime?.abort(error);
+      this._routeLifetime = undefined;
+    }
+    throw error;
+  }
+  _enqueueBindingCalls(calls, handlers, pending, state) {
+    for (const call of calls) {
+      const entry = handlers.get(call.name);
+      if (!entry) continue;
+      state.changed = true;
+      const task = this._settleBindingCall(call, entry)
+        .catch((error) => {
+          state.failure ??= error;
+        })
+        .finally(() => pending.delete(task));
+      pending.add(task);
+    }
+  }
+  async _drainBindingRounds(handlers, state, deadline, cancelOnTimeout, collect) {
+    const pending = new Set();
+    let rounds = 0;
+    let advanced = false;
+    while (this._session != null) {
+      this._checkBindingDeadline(deadline, cancelOnTimeout);
+      const calls = await this._takeBindingCalls();
+      if (this._session == null || this._closed) break;
+      if (calls.length && ++rounds > 100) throw new Error("Exposed binding call budget exhausted");
+      this._enqueueBindingCalls(calls, handlers, pending, state);
+      if (calls.length) advanced = false;
+      if (!pending.size && !calls.length) {
+        if (state.changed && !advanced && !this._contentCollecting) {
+          advanced = true;
+          // Observers advance one turn; actions retain full settlement.
+          await this._collectSession(this._session, "globalThis.__RESULT = '';", collect);
+          continue;
+        }
+        break;
+      }
+      // Keep servicing calls while an async host callback awaits another page operation.
+      if (pending.size)
+        await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 1))]);
+      if (state.failure) throw state.failure;
+    }
+  }
+  async _drainOwnBindings(deadline = Infinity, cancelOnTimeout = true, collect = false) {
+    if (this._session == null || this._draining) return;
+    const handlers = this._mergedBindings();
+    if (handlers.size === 0) return;
+    this._draining = true;
+    const state = { changed: false, failure: undefined };
+    try {
+      await this._drainBindingRounds(handlers, state, deadline, cancelOnTimeout, collect);
+      if (state.changed) await this._refreshFromSession(true);
     } finally {
       this._draining = false;
     }
   }
-
-  async _openLiveSession() {
-    this._closeSession();
-    this._session = await native.liveOpen(
-      this._html,
-      this._url,
-      this._cookies,
-      this._context._userAgent ?? undefined,
-      this._requestState,
-      JSON.stringify(this._documentResponse),
-      this._initScriptSource(),
+  async _evaluateWithBindings(body) {
+    const id = (this._bindingEvalId = (this._bindingEvalId ?? 0) + 1);
+    await native.liveEvalEngine(
+      this._session,
+      `(() => {
+      const bag = __tsNs.shimBindings;
+      bag.evaluations[${id}] = null;
+      Promise.resolve().then(() => (${body})).then(
+        value => {
+          try { bag.evaluations[${id}] = JSON.stringify({value: (${encodeEvaluationValue.toString()})(value)}); }
+          catch (error) { bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); }
+        },
+        error => {bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)});});
+    })()`,
     );
-    this._hydrated = true;
-    this._loadedPath = pathOf(this._url);
-    await this._refreshFromSession();
-    await this._drainBindings();
+    const deadline = Date.now() + 5000;
+    try {
+      while (Date.now() < deadline) {
+        if (this._session == null || this._closed)
+          throw new Error("Page has been closed or navigated");
+        await this._drainBindings(deadline);
+        if (this._session == null || this._closed)
+          throw new Error("Page has been closed or navigated");
+        const raw = await native.liveEvalEngine(
+          this._session,
+          `globalThis.__RESULT = __tsNs.shimBindings.evaluations[${id}] ?? '';`,
+        );
+        if (raw) {
+          const result = JSON.parse(raw);
+          if (result.error) throw decodeEvaluationError(result.error);
+          await this._refreshFromSession(true);
+          return decodeEvaluationValue(result.value);
+        }
+        await this._redrain();
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      throw new Error("Evaluation waiting for exposed binding timed out");
+    } finally {
+      if (this._session != null)
+        await native.liveEvalEngine(
+          this._session,
+          `delete __tsNs.shimBindings?.evaluations?.[${id}];`,
+        );
+    }
+  }
+
+  _openLiveSession(timeoutMs) {
+    if (this._closed) throw new Error("Page session closed");
+    if (this._openingSession) return this._openingSession.promise;
+    if (this._auxiliaryActor && this._session != null) return Promise.resolve();
+    if (this._session != null) this._closeSession();
+    const opening = { id: native.liveNetworkLogCreate() };
+    this._openingSession = opening;
+    this._openingNetworkId = opening.id;
+    this._updateNetworkPump();
+    opening.promise = this._startLiveSession(timeoutMs, opening);
+    return opening.promise;
+  }
+  _driverHistorySnapshot() {
+    if (!this._history.length && !this._fwd.length) return undefined;
+    if (
+      [this._history, this._fwd].some((entries) =>
+        entries.some((entry) => typeof entry !== "string"),
+      )
+    )
+      throw new Error("Native history promotion cannot restore retired same-document state");
+    return {
+      entries: [...this._history, this._url, ...this._fwd.toReversed()],
+      index: this._history.length,
+    };
+  }
+
+  _liveDocumentMetadata(opening) {
+    return JSON.stringify({
+      ...this._documentResponse,
+      hostNetworkLog: opening.id,
+      rootHistory: this._driverHistorySnapshot(),
+      retainInitialHydrationTimeout: Boolean(native.liveInitialHydrationStatus),
+      auxiliaryPolicy: this._context._auxiliaryPolicy,
+      viewport: [this._viewport.width, this._viewport.height],
+      auxiliaryInitScript: this._context._initScripts
+        .map((source) => `try{ ${source} }catch(e){}`)
+        .join("\n"),
+      auxiliaryEngineInitScript: buildExposeInitScript([...this._context._bindings.keys()]),
+      pageInitScript: this._pageInitScriptSource(),
+      pageEngineInitScript: this._pageEngineInitScriptSource(),
+    });
+  }
+
+  async _observeActorOpen(opened, opening) {
+    opened.catch(() => {});
+    if (native.liveAuxiliaryState) await this._context._attachActor(this, opening.id, true);
+  }
+
+  async _completeActorOpen(session) {
+    if (!native.liveAuxiliaryState) return;
+    this._actorHub.opening = false;
+    await this._context._attachActor(this, session);
+  }
+
+  async _failedActorOpen(opening) {
+    const actor = this._actorHub;
+    if (actor) {
+      try {
+        await actor.drain();
+      } catch {}
+      if (actor.capability === "supported") {
+        if (this._targetId != null) await actor.closeTarget(this._targetId);
+        return;
+      }
+      actor.releaseRoot(new Error("Root initialization failed"));
+      this._actorHub = null;
+    }
+    if (native.liveActorClose) native.liveActorClose(opening.id);
+    else native.liveClose(opening.id);
+  }
+
+  _initialHydrationTimeout(session) {
+    if (!native.liveInitialHydrationStatus || !this._auxiliaryActor) return null;
+    const status = JSON.parse(native.liveInitialHydrationStatus(session));
+    if (typeof status.timedOut !== "boolean")
+      throw new Error("Native initial hydration status omitted its outcome");
+    if (!status.timedOut) return null;
+    if (!Number.isSafeInteger(status.timeoutMs) || status.timeoutMs < 0)
+      throw new Error("Native initial hydration status omitted its timeout");
+    return status.timeoutMs;
+  }
+
+  _canRetainTimedOutActor(error) {
+    return (
+      error.name === "TimeoutError" &&
+      !this._closed &&
+      !this._openingClosePromise &&
+      this._session != null &&
+      this._auxiliaryActor &&
+      this._actorHub.pages.get(this._targetId) === this &&
+      this._actorHub.info.has(this._targetId) &&
+      this._actorHub.canReadTarget(this._targetId)
+    );
+  }
+
+  async _settleFailedLiveOpen(error, opening) {
+    if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
+    if (this._openingClosePromise) await this._openingClosePromise;
+    else if (!this._canRetainTimedOutActor(error)) {
+      await this._failedActorOpen(opening);
+      if (this._openingSession === opening) this._failPendingNetworkResponses(error.message);
+    }
+  }
+
+  _throwIfOpeningClosed() {
+    if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
+  }
+
+  async _startLiveSession(timeoutMs, opening) {
+    const started = Date.now();
+    try {
+      const opened = native.liveOpen(
+        this._html,
+        this._url,
+        this._cookies,
+        this._context._userAgent ?? undefined,
+        this._requestState,
+        this._liveDocumentMetadata(opening),
+        this._initScriptSource(),
+        timeoutMs,
+        this._context._maxResponseBytes,
+        this._engineInitScriptSource(),
+        // Browser editing must not expire future timers between consecutive keys.
+        true,
+        this._imageCache?.documentToken,
+      );
+      await this._observeActorOpen(opened, opening);
+      const session = await opened;
+      if (this._closed || this._openingSession !== opening) {
+        native.liveClose(session);
+        throw new Error("Page session closed");
+      }
+      this._session = session;
+      await this._completeActorOpen(session);
+      this._throwIfOpeningClosed();
+      this._hydrated = true;
+      this._loadedPath = pathOf(this._url);
+      const initialTimeout = this._initialHydrationTimeout(session);
+      if (initialTimeout != null) throw new Error(`navigation timeout after ${initialTimeout}ms`);
+      await this._refreshFromSession(true);
+      await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
+      this._throwIfOpeningClosed();
+      if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
+        if (!this._auxiliaryActor) this._closeSession();
+        throw new Error(`navigation timeout after ${timeoutMs}ms`);
+      }
+    } catch (error) {
+      await this._settleFailedLiveOpen(error, opening);
+      throw error;
+    } finally {
+      if (this._openingSession === opening) {
+        this._openingSession = null;
+        this._openingNetworkId = null;
+      }
+      this._updateNetworkPump();
+    }
   }
 
   // Pull the current live DOM + URL + cookies back into the Page so reads (which run
   // over `this._html`) and a subsequent navigation see the post-interaction state.
-  async _refreshFromSession() {
-    if (this._session == null) return;
-    this._html = native.liveSerialize(this._session);
+  async _refreshHistory(collectScript) {
+    if (syncNativeHistory(this, native)) return { url: this._url };
     try {
-      const href = await native.liveEvalEngine(
+      const encoded = await collectScript(
         this._session,
-        "globalThis.__RESULT = location.href;",
+        "globalThis.__RESULT = __tsNs.takeHistoryNavigation();",
       );
-      if (href) this._url = href;
+      const navigation = JSON.parse(encoded);
+      if (navigation) syncHistory(this, navigation);
+      return navigation;
     } catch {
-      /* keep prior url */
+      /* A terminated legacy session retains its last driver state. */
+      return null;
     }
-    // Next App Router client navigation (router.push) doesn't change location.href in our
-    // engine — it fetches the target's RSC flight, which the runtime records on __rscNav.
-    // Treat that as the navigation target (the post-login redirect chain rides this).
+  }
+
+  async _refreshRequestContext(collectScript, historyNavigation) {
     try {
-      const nav = await native.liveEvalEngine(
+      const href = await collectScript(
+        this._session,
+        "globalThis.__RESULT = __tsNs.requestFrameSnapshot?.() || '';",
+      );
+      if (!href) return;
+      const current = JSON.parse(href);
+      if (!hasNativeHistory(this)) this._url = historyNavigation?.url ?? current.url;
+      this._requestContextId = current.id;
+      this._requestFrames ??= new Map();
+      if (current.id) this._requestFrames.set(current.id, this.mainFrame());
+    } catch {
+      /* keep prior URL */
+    }
+  }
+
+  async _refreshRscNavigation(collectScript, historyNavigation) {
+    try {
+      const nav = await collectScript(
         this._session,
         "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
-      if (nav && pathOf(nav) !== this._loadedPath) {
-        this._url = this._resolveUrl(nav);
-      }
+      if (!nav || pathOf(nav) === this._loadedPath) return false;
+      const target = this._resolveUrl(nav);
+      if (target === historyNavigation?.url) return false;
+      this._url = target;
+      return true;
     } catch {
-      /* no pending rsc nav */
+      return false;
     }
+  }
+
+  async _followDocumentNavigation(historyNavigation, rscNavigation, previousUrl) {
+    const admitted = historyNavigation?.crossDocument;
+    const needsDocument = (!this._auxiliaryActor && admitted) || rscNavigation;
+    if (!this._live || !/^https?:/.test(this._url) || !needsDocument || !(this._navHops < 10))
+      return;
+    this._navHops++;
+    if (admitted && !admitted.replace) {
+      this._history.push(this._historyCurrent ?? previousUrl);
+      this._fwd = [];
+    }
+    await this._reopen(admitted?.url ?? this._url);
+  }
+
+  async _refreshFromSession(collect = false) {
+    if (this._session == null) return;
+    const collectScript = (id, script) => this._collectSession(id, script, collect);
+    const previousUrl = this._url;
+    const historyNavigation = await this._refreshHistory(collectScript);
+    this._html = native.liveSerialize(this._session);
+    await this._refreshRequestContext(collectScript, historyNavigation);
+    const rscNavigation = await this._refreshRscNavigation(collectScript, historyNavigation);
     try {
       this._cookies = native.liveCookies(this._session);
     } catch {
       /* keep prior cookies */
     }
-    await this._drainNetworkEvents();
-    // The app navigated to a different route within the live session (a post-login
-    // redirect, router.push/replace). Our engine doesn't do Next's in-place RSC
-    // soft-nav, so re-LOAD that route as a fresh page (carrying cookies) — its own
-    // component tree mounts and its effects run. This follows a redirect CHAIN
-    // (login → /post-login → /entity/…) hop by hop, like a browser, bounded to avoid a
-    // misconfigured redirect loop.
-    if (
-      this._live &&
-      /^https?:/.test(this._url) &&
-      pathOf(this._url) !== this._loadedPath &&
-      this._navHops < 10
-    ) {
-      this._navHops++;
-      await this._reopen(this._url);
-    }
+    if (!historyNavigation && previousUrl !== this._url) this._emit("framenavigated", this);
+    if (this._html.includes("<iframe")) await this._refreshRequestFrames(collect);
+    else this._frameEntries = undefined;
+    this._syncFrames();
+    await this._drainNetworkEvents(true);
+    // Metadata reads can reenter authored DOM methods after the initial frame-discovery snapshot.
+    if (!this._closed && this._session != null) this._html = native.liveSerialize(this._session);
+    await this._followDocumentNavigation(historyNavigation, rscNavigation, previousUrl);
+  }
+
+  async _refreshRequestFrames(collect = false) {
+    const session = this._session;
+    const frames = await this._collectSession(
+      session,
+      `(() => {
+        const walk = (doc, path) => Array.from(doc.querySelectorAll('iframe'), (el, index) => {
+          const window = el.contentWindow;
+          const entry = { node: __tsNs.shimFrameId(el), contextId: window ? __tsNs.requestContextId?.(window) : undefined, name: el.getAttribute('name') || '', id: el.id || '', src: el.getAttribute('src') || '', html: el.getAttribute('srcdoc') || '', url: el.src || 'about:blank', path: [...path,index], children: [] };
+          try { entry.url = el.contentWindow.location.href; if (el.contentDocument) { entry.html = el.contentDocument.documentElement?.outerHTML || ""; entry.live = true; entry.children = walk(el.contentDocument, entry.path); } } catch (_) {}
+          return entry;
+        });
+        globalThis.__RESULT = JSON.stringify({contextId:__tsNs.requestContextId?.(globalThis),frames:walk(document, [])});
+      })();`,
+      collect,
+    );
+    if (this._session !== session) throw new Error("Frame execution context was destroyed");
+    const metadata = JSON.parse(frames);
+    this._frameEntries = metadata.frames;
+    this._requestContextId = metadata.contextId;
+    if (metadata.contextId)
+      (this._requestFrames ??= new Map()).set(metadata.contextId, this.mainFrame());
   }
 
   // Re-pump the live app and pull its DOM forward. Backs web-first assertion retry:
@@ -1549,58 +3089,343 @@ class Page {
   async _redrain() {
     if (this._session == null) return;
     try {
-      await native.liveEvalEngine(this._session, "globalThis.__RESULT = '';");
+      await this._collectSession(this._session, "globalThis.__RESULT = '';");
     } catch {
       /* terminated mid-drain — refresh reads best-effort state */
     }
     await this._refreshFromSession();
+    await this._drainBindings();
   }
 
   // Drain the live app's network log and emit Playwright `response` events. Tests
   // subscribe with `page.on('response', …)` to capture API payloads (the payroll
   // period, employments lists). Each entry → a minimal Response (url/status/json/text).
-  async _drainNetworkEvents() {
-    if (this._session == null) return;
-    if (
-      !this._listeners.has("response") &&
-      !this._listeners.has("requestfinished") &&
-      !this._listeners.has("request")
-    )
-      return;
+  _useActorPump() {
+    if (this._actorHub && this._actorHub.capability !== "unsupported") {
+      this._stopNetworkPump();
+      this._actorHub.start();
+      return true;
+    }
+    return Boolean(native.liveAuxiliaryState && this._openingSession && !this._actorHub);
+  }
+  _updateNetworkPump() {
+    this._updateDialogPolicy();
+    if (this._useActorPump()) return;
+    const session = this._session ?? this._openingNetworkId;
+    const needed =
+      session != null &&
+      (this._openingSession ||
+        this._responseBodies?.size ||
+        NETWORK_EVENTS.some((event) => this._listeners.get(event)?.length));
+    if (needed && this._networkPump?.session === session && this._networkPump.active) return;
+    if (this._networkPump) {
+      this._networkPump.active = false;
+      try {
+        native.liveNetworkLogWake(this._networkPump.session);
+      } catch {}
+      this._networkPump = null;
+    }
+    if (!needed) return;
+    const pump = { session, active: true, wake: "0" };
+    this._networkPump = pump;
+    this._pumpNetworkEvents(pump).catch(() => {});
+  }
+  _stopNetworkPump() {
+    if (!this._networkPump) return;
+    this._networkPump.active = false;
+    try {
+      native.liveNetworkLogWake(this._networkPump.session);
+    } catch {}
+    this._networkPump = null;
+  }
+  async _pumpNetworkEvents(pump) {
+    try {
+      while (pump.active) {
+        const signal = JSON.parse(await native.liveNetworkLogWait(pump.session, pump.wake));
+        if (!pump.active) break;
+        if (signal.closed) {
+          this._closeSession();
+          break;
+        }
+        pump.wake = signal.wake;
+        await this._drainNetworkEvents();
+      }
+    } catch (error) {
+      if (pump.active) this._failPendingNetworkResponses(error.message);
+    } finally {
+      if (this._networkPump === pump) this._networkPump = null;
+    }
+  }
+  async _drainNetworkEvents(afterCurrent = false) {
+    if (this._actorHub && this._actorHub.capability !== "unsupported")
+      return this._actorHub.drain(afterCurrent);
+    if (native.liveAuxiliaryState && this._openingSession && !this._actorHub) return;
+    if (this._networkDrain) return this._networkDrain;
+    this._networkDrain = this._readNetworkEvents();
+    try {
+      await this._networkDrain;
+    } finally {
+      this._networkDrain = null;
+    }
+  }
+  async _readNetworkEvents() {
+    const session = this._session ?? this._openingNetworkId;
+    if (session == null) return;
     let raw;
     try {
-      raw = await native.liveNetworkLog(this._session);
+      raw = await native.liveNetworkLog(session);
     } catch {
       return;
     }
-    if (!raw) return;
-    let entries;
+    if (!raw || (this._session ?? this._openingNetworkId) !== session) return;
+    let entries, revision;
     try {
-      entries = JSON.parse(raw);
+      const batch = JSON.parse(raw);
+      entries = Array.isArray(batch) ? batch : batch.entries;
+      revision = batch.revision;
     } catch {
       return;
     }
-    this._recentResponses = this._recentResponses ?? [];
-    for (const e of entries) {
-      const resp = makeNetResponse(e);
-      resp._seq = this._actionSeq; // which interaction produced it (see waitForResponse)
-      this._recentResponses.push(resp);
-      this._emit("request", resp.request());
-      this._emit("response", resp);
-      this._emit("requestfinished", resp.request());
+    this._consumeNetworkEvents(entries, session);
+    if (revision != null && (this._session ?? this._openingNetworkId) === session)
+      native.liveNetworkLogAcknowledge(session, revision);
+  }
+
+  _consumeNetworkControl(entry, discardedConsoleHandles) {
+    switch (entry.event) {
+      case "dialog":
+        this._receiveDialog(entry);
+        return true;
+      case "console":
+        if (this._listeners.get("console")?.length)
+          this._emit("console", consoleMessage(this, entry));
+        else discardedConsoleHandles.push(...entry.args.map((argument) => argument.id));
+        return true;
+      case "networkoverflow":
+        this._failPendingNetworkResponses(entry.message);
+        this._emit("pageerror", new Error(entry.message));
+        return true;
+      case "responsebody":
+        this._finishNetworkResponse(entry);
+        return true;
+      case "pageerror": {
+        const error = new Error(entry.message);
+        error.name = entry.name;
+        if (entry.stack) error.stack = entry.stack;
+        this._emit("pageerror", error);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  _updateDialogPolicy() {
+    const session = this._session ?? this._openingNetworkId;
+    if (this._closed || session == null || !native.liveDialogConfigure) return;
+    const pageEnabled = Boolean(this._listeners.get("dialog")?.length);
+    const contextEnabled = Boolean(this._context._listeners.get("dialog")?.length);
+    // A new broker already auto-dismisses dialogs. Unrelated event subscriptions
+    // must not configure native UI policy or require a live dialog channel.
+    if (!pageEnabled && !contextEnabled && this._nativeDialogPolicy == null) return;
+    const policy = JSON.stringify([session, pageEnabled, contextEnabled]);
+    if (policy === this._nativeDialogPolicy) return;
+    native.liveDialogConfigure(session, pageEnabled);
+    native.liveDialogConfigure(session, contextEnabled, true);
+    this._nativeDialogPolicy = policy;
+  }
+
+  _receiveDialog(entry) {
+    const session = this._session ?? this._openingNetworkId;
+    const respond = ({ id, accepted, promptText }) =>
+      native.liveDialogRespond(session, id, accepted, dialogReplyUnits(promptText));
+    const dialog = dialogMessage(this, entry, respond);
+    if (!this._listeners.get("dialog")?.length) {
+      dialog.dismiss().catch((error) => this._emit("pageerror", error));
+      return;
+    }
+    try {
+      this._emit("dialog", dialog);
+    } catch (error) {
+      dialog.dismiss().catch(() => {});
+      throw error;
+    }
+  }
+
+  _emitNetworkResponse(entry, previousHop) {
+    const { response, lifecycle } = this._captureNetworkResponse(entry);
+    if (
+      entry.redirectHop > 0 &&
+      previousHop &&
+      previousHop.status() >= 300 &&
+      previousHop.status() < 400
+    ) {
+      requestRedirects.get(response.request()).from = previousHop.request();
+      requestRedirects.get(previousHop.request()).to = response.request();
+    }
+    response._seq = this._actionSeq;
+    this._emit("request", response.request());
+    if (entry.status === 0) this._emit("requestfailed", response.request());
+    else {
+      this._recentResponses.push(response);
+      this._emit("response", response);
+      if (!lifecycle) this._emit("requestfinished", response.request());
+    }
+    return response;
+  }
+
+  _discardConsoleHandles(session, handles) {
+    if (!handles.length || (this._session ?? this._openingNetworkId) !== session) return;
+    if (this._actorHub?.opening) (this._openingConsoleDiscards ??= []).push(...handles);
+    else native.liveNetworkLogDiscardHandles(session, JSON.stringify(handles));
+  }
+
+  _consumeNetworkEvents(entries, session, previousHop = null) {
+    this._recentResponses ??= [];
+    const discardedConsoleHandles = [];
+    for (const entry of entries) {
+      if ((this._session ?? this._openingNetworkId) !== session) break;
+      if (!this._consumeNetworkControl(entry, discardedConsoleHandles))
+        previousHop = this._emitNetworkResponse(entry, previousHop);
     }
     if (this._recentResponses.length > 100)
       this._recentResponses.splice(0, this._recentResponses.length - 100);
+    this._discardConsoleHandles(session, discardedConsoleHandles);
+    return previousHop;
+  }
+
+  _failPendingNetworkResponses(message) {
+    for (const pending of this._responseBodies?.values() ?? []) {
+      pending.entry.error = message;
+      pending.reject(new Error(message));
+      this._emit("requestfailed", pending.response.request());
+    }
+    this._responseBodies?.clear();
+    this._networkResponses?.clear();
+    this._updateNetworkPump();
+  }
+  _finishNetworkResponse(entry) {
+    const pending = this._responseBodies?.get(entry.id);
+    if (!pending) return;
+    for (const name of ["body", "bodyBytes", "bodyUnavailable", "bodyIncomplete", "error"])
+      if (Object.hasOwn(entry, name)) pending.entry[name] = entry[name];
+    if (entry.error || entry.bodyIncomplete) {
+      pending.reject(new Error(entry.error || "Response body incomplete"));
+      this._emit("requestfailed", pending.response.request());
+    } else {
+      pending.resolve();
+      this._emit("requestfinished", pending.response.request());
+    }
+    this._responseBodies.delete(entry.id);
+    this._networkResponses?.delete(entry.id);
+    this._updateNetworkPump();
+    this._recordResponseDownload(pending.entry, pending.response);
+  }
+  _recordResponseDownload(entry, response) {
+    if (
+      !entry.context?.navigation ||
+      response.request().redirectedTo() ||
+      [204, 205].includes(entry.status) ||
+      entry.error ||
+      entry.bodyIncomplete
+    )
+      return;
+    const attachment = attachmentRecord({
+      headers: entry.headers,
+      finalUrl: entry.url,
+      bodyBytes: entry.bodyBytes,
+    });
+    if (!attachment) return;
+    if (entry.bodyUnavailable || entry.bodyBytes == null)
+      throw new Error("Native navigation download body bytes are unavailable");
+    if (entry.id == null)
+      throw new Error("Native navigation download omitted its request identity");
+    this._recordDownload(attachment, entry.id);
+  }
+  _captureNetworkResponse(entry) {
+    let lifecycle;
+    if (entry.bodyPending) {
+      lifecycle = { entry };
+      lifecycle.promise = new Promise((resolve, reject) =>
+        Object.assign(lifecycle, { resolve, reject }),
+      );
+      lifecycle.promise.catch(() => {});
+    }
+    const response = makeNetResponse(entry, this._requestFrame(entry), lifecycle);
+    nativeResponseIds.set(response, entry.id);
+    if (!lifecycle) {
+      this._recordResponseDownload(entry, response);
+      return { response };
+    }
+    lifecycle.response = response;
+    (this._responseBodies ??= new Map()).set(entry.id, lifecycle);
+    (this._networkResponses ??= new Map()).set(entry.id, response);
+    const previous = this._networkResponses.get(entry.redirectFrom);
+    if (previous) {
+      requestRedirects.get(response.request()).from = previous.request();
+      requestRedirects.get(previous.request()).to = response.request();
+      this._networkResponses.delete(entry.redirectFrom);
+    }
+    this._updateNetworkPump();
+    return { response, lifecycle };
+  }
+
+  _requestFrame(entry) {
+    const context = entry.context;
+    if (!context) return this.mainFrame();
+    const metadata = context.frame;
+    const path = metadata?.path;
+    if (path?.length === 0) return this.mainFrame();
+    if (!context.navigation && metadata?.contextId) {
+      const known = this._requestFrames?.get(metadata.contextId);
+      if (known) return known;
+    }
+    if (context.navigation && !path) return null;
+    if (path) return this._requestFrameFromPath(path);
+    return this._requestFrameFromContext(metadata);
+  }
+  _requestFrameFromPath(path) {
+    return (
+      this._frames?.find((frame) => JSON.stringify(frame._path) === JSON.stringify(path)) ?? null
+    );
+  }
+  _requestFrameFromContext(metadata) {
+    return this._requestFrames?.get(metadata?.contextId) ?? null;
   }
 
   // Follow an in-app navigation: load `url` fresh (fetch + hydrate) WITHOUT resetting the
   // redirect-hop budget or pushing history (it's the app navigating, not the user).
   async _reopen(url) {
     await this._navigate(this._resolveUrl(url));
-    await this._openLiveSession();
+    if (!this._actorHub) await this._openLiveSession();
   }
 
   _closeSession() {
+    if (this._auxiliaryActor) {
+      this._actorHub.closeTarget(this._targetId).catch((error) => this._emit("pageerror", error));
+      return;
+    }
+    if (this._actorHub) {
+      this._actorHub.releaseRoot();
+      this._actorHub = null;
+    }
+    this._routeLifetime?.abort(new Error("Route's page has been closed or navigated"));
+    this._routeLifetime = undefined;
+    this._routeRequests = undefined;
+    if (this._routeHandlers)
+      this._routeHandlers = new Map((this._routes ?? []).map((route) => [route.id, route]));
+    if (this._openingNetworkId != null) native.liveClose(this._openingNetworkId);
+    this._openingNetworkId = null;
+    this._openingSession = null;
+    this._failPendingNetworkResponses("Page session closed");
+    for (const frame of (this._frames ?? []).toReversed()) {
+      frame._detached = true;
+      this._emit("framedetached", frame);
+    }
+    this._frames = [];
+    this._frameEntries = undefined;
+    this._requestFrames = undefined;
+    this._requestContextId = undefined;
     if (this._session != null) {
       try {
         native.liveClose(this._session);
@@ -1609,18 +3434,30 @@ class Page {
       }
       this._session = null;
     }
+    this._updateNetworkPump();
   }
 
   // Drive an interaction in the live isolate (real DOM events → running app handlers →
   // re-render), then refresh the Page snapshot. `kind` is "click" | "fill".
-  async _sessionDispatch(selector, index, kind, value) {
+  _readEngine(script) {
+    return JSON.parse(native.liveReadEngine(this._session, script));
+  }
+  async _readEngineAsync(script) {
+    return JSON.parse(await native.liveReadEngineAsync(this._session, script));
+  }
+  _evalEngine(script) {
+    return native.liveEvalEngine(this._session, script);
+  }
+  async _sessionDispatch(selector, index, kind, value, strict = false) {
     // A new user interaction: responses produced by THIS action (and after) are "fresh"
     // for any waitForResponse paired with it; responses from before are stale. The
     // "isfocused" probe is a read, not an interaction — don't tag responses off it.
     if (kind !== "isfocused") this._actionSeq++;
-    const r = await native.liveEvalEngine(
+    const dispatch =
+      kind === "click" && !value?.noWaitAfter ? native.liveDispatchEngine : native.liveEvalEngine;
+    const r = await dispatch(
       this._session,
-      interactionScript(selector, index ?? 0, kind, value),
+      interactionScript(selector, index ?? 0, kind, value, strict),
     );
     await this._refreshFromSession();
     // Surface the NO_MATCH signal before draining so a binding-handler
@@ -1640,11 +3477,12 @@ class Page {
   }
   // Run arbitrary JS in the live isolate, then refresh the Page snapshot. Backs the
   // keyboard (key-event dispatch) and other live-only side effects.
-  async _sessionEval(script) {
+  async _sessionEval(script, { waitForBindings = true } = {}) {
     if (this._session == null) return undefined;
     const r = await native.liveEvalEngine(this._session, script);
     await this._refreshFromSession();
-    await this._drainBindings();
+    if (waitForBindings) await this._drainBindings();
+    else scheduleBindingDrain(this);
     return r;
   }
   get _cookies() {
@@ -1657,6 +3495,228 @@ class Page {
   _resolveUrl(url) {
     const base = this._context._baseURL;
     return base ? new URL(url, base).href : url;
+  }
+
+  async opener() {
+    if (!this._auxiliaryActor) return null;
+    if (this._actorHub.active) await this._actorHub.drain();
+    const target = this._creationSource ?? this._actorHub.info.get(this._targetId)?.sourcePage;
+    const opener = this._actorHub.page(target);
+    return opener && !opener.isClosed() ? opener : null;
+  }
+
+  _nativeLoad() {
+    return (this._nativeLoadState ??= new NativeLoadState(this));
+  }
+
+  _retireNativeDocumentAssets() {
+    this._clearImageCache();
+    closeScreenshotScene(this);
+  }
+
+  _didNativeNavigate(event) {
+    if (retiredNativeHistoryTarget(this)) return;
+    this._retireNativeDocumentAssets();
+    this._nativeLoad().reset();
+    if (!syncNativeHistory(this, native))
+      throw new Error("Native navigation has no owned history target");
+    this._loadedPath = pathOf(this._url);
+    if (this._actorHub.canReadTarget(this._targetId)) {
+      if (!this._actorHub.opening) this._html = native.liveSerialize(this._session);
+      this._syncFrames();
+    }
+    emitNativeFrameNavigation(this, event.url);
+  }
+
+  _didNativeHistoryChanged(event) {
+    notifyNativeHistory(this, native, event);
+  }
+
+  _navigationTimeoutFor(options) {
+    return options.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000;
+  }
+
+  _remainingTargetIdleTimeout(options, started) {
+    const timeout = this._navigationTimeoutFor(options);
+    return timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started));
+  }
+
+  _navigationMilestone(opts) {
+    const controller = new AbortController();
+    const timeout = this._navigationTimeoutFor(opts);
+    const event = opts.waitUntil === "domcontentloaded" ? "domcontentloaded" : "load";
+    const milestone =
+      opts.waitUntil === "commit"
+        ? null
+        : waitForEmitterEvent(this, event, { timeout, signal: controller.signal }).catch(
+            (error) => {
+              throw this._navigationMilestoneError(error, event, timeout);
+            },
+          );
+    milestone?.catch(() => {});
+    return { controller, milestone };
+  }
+
+  _navigationMilestoneError(error, event, timeout) {
+    if (
+      !(error instanceof Error) ||
+      error.name !== "TimeoutError" ||
+      error.message !== `Timeout ${timeout}ms exceeded while waiting for event ${event}`
+    )
+      return error;
+    return Object.assign(
+      new Error(`Target navigation timeout after ${timeout}ms`, { cause: error }),
+      {
+        name: "TimeoutError",
+      },
+    );
+  }
+
+  _navigationBindingError(error, deadline, timeout) {
+    if (!ownsBindingDeadline(error, this, deadline)) return error;
+    return Object.assign(
+      new Error(`Target navigation timeout after ${timeout}ms`, { cause: error }),
+      { name: "TimeoutError" },
+    );
+  }
+
+  _navigationBindingDeadline(options) {
+    const timeout = this._navigationTimeoutFor(options);
+    return timeout === 0 ? Infinity : Date.now() + timeout;
+  }
+
+  _rejectNoContentNavigation(receipt, url) {
+    if ([204, 205].includes(receipt.status))
+      throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
+  }
+
+  _nativeNavigationOptions(method, body, opts) {
+    return {
+      method: method ?? "GET",
+      body,
+      contentType: opts._contentType,
+      referer: Object.hasOwn(opts, "referer") ? opts.referer : this._url,
+      timeoutMs: this._navigationTimeoutFor(opts),
+      waitUntil: opts.waitUntil ?? "load",
+      reload: opts.reload === true,
+    };
+  }
+
+  _navigationDownload(receipt, session) {
+    if (!receipt.attachment) return;
+    const attachment = attachmentRecord(receipt);
+    if (!attachment) throw new Error("Native attachment navigation omitted its disposition");
+    this._recordDownload(attachment, receipt.requestId, session);
+    throw new DownloadNavigationError();
+  }
+
+  _targetNavigationError(error) {
+    if (
+      error instanceof Error &&
+      error.code === "GenericFailure" &&
+      /^(?:Target navigation timeout after \d+ms|Native target navigation exceeded session budget)$/.test(
+        error.message,
+      )
+    )
+      error.name = "TimeoutError";
+    return error;
+  }
+
+  async _navigateActorTarget(url, method, body, opts = {}) {
+    const navigationStarted = performance.now();
+    const session = this._session;
+    const bindingDeadline = this._navigationBindingDeadline(opts);
+    const { controller, milestone } = this._navigationMilestone(opts);
+    this._driverNavigation = true;
+    try {
+      const receipt = JSON.parse(
+        await native.liveNavigateTarget(
+          session,
+          url,
+          opts._historyMode ?? "push",
+          JSON.stringify(this._nativeNavigationOptions(method, body, opts)),
+        ),
+      );
+      this._navigationDownload(receipt, session);
+      this._rejectNoContentNavigation(receipt, url);
+      await this._actorHub.drain();
+      await this._refreshFromSession(true);
+      await this._drainBindings(bindingDeadline, true, true).catch((error) => {
+        throw this._navigationBindingError(
+          error,
+          bindingDeadline,
+          this._navigationTimeoutFor(opts),
+        );
+      });
+      if (milestone && receipt.sameDocument !== true) await milestone;
+      if (opts.waitUntil === "networkidle")
+        await this._waitForTargetNetworkIdle(
+          this._remainingTargetIdleTimeout(opts, navigationStarted),
+        );
+      if (opts.waitUntil !== "commit") this._html = native.liveSerialize(session);
+      syncNativeHistory(this, native);
+      if (receipt.sameDocument === true) return null;
+      if (receipt.requestId == null && /^about:/i.test(receipt.finalUrl)) return null;
+      const response = this._recentResponses?.findLast(
+        (value) => String(nativeResponseIds.get(value)) === String(receipt.requestId),
+      );
+      if (!response)
+        throw new Error("Native navigation completed without an owned navigation response");
+      return response;
+    } catch (error) {
+      throw this._targetNavigationError(error);
+    } finally {
+      controller.abort(new Error("Navigation event wait ended"));
+      this._driverNavigation = false;
+    }
+  }
+
+  async _waitForTargetNetworkIdle(timeout) {
+    await waitForTargetNetworkIdle(
+      () => {
+        if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
+        return JSON.parse(native.liveTargetNetworkState(this._session));
+      },
+      { timeout },
+    );
+  }
+
+  _didNativeClose() {
+    if (this._nativeClosePublished) return null;
+    const session = this._session ?? this._openingNetworkId;
+    if (this._closed && session == null && !this._auxiliaryActor) return null;
+    // The opening task owns alias retirement even if readiness races this event.
+    const ownedClose = this._openingClosePromise != null;
+    const deferred = Boolean(this._actorHub?.opening && session != null);
+    const finalState = session == null || deferred || ownedClose ? null : native.liveClose(session);
+    if (deferred && !ownedClose) (this._actorHub.retiringAliases ??= new Set()).add(session);
+    this._nativeClosePublished = true;
+    this._session = null;
+    this._openingSession = null;
+    this._openingNetworkId = null;
+    this._closed = true;
+    this._releaseNativePageResources();
+    return finalState;
+  }
+
+  _releaseNativePageResources() {
+    this._routeLifetime?.abort(new Error("Route's page has been closed"));
+    this._routeLifetime = undefined;
+    this._failPendingNetworkResponses("Page closed");
+    if (this._requestState != null) native.requestStateClose(this._requestState);
+    this._requestState = undefined;
+    this._clearImageCache();
+    closeScreenshotScene(this);
+    for (const frame of this._frames ?? []) {
+      frame._detached = true;
+      this._emit("framedetached", frame);
+    }
+    this._frames = [];
+    const position = this._context._pages.indexOf(this);
+    if (position >= 0) this._context._pages.splice(position, 1);
+    this._routeHandlers?.clear();
+    this._routes = [];
+    this._emit("close", this);
   }
 
   _navigationReferrerPolicy() {
@@ -1678,37 +3738,62 @@ class Page {
     return policy;
   }
 
-  async _navigate(url, method, body) {
-    if (this._closed) throw new Error("page is closed");
-    this._closeSession(); // a fresh document — discard the prior live app
-    // `about:blank` (and other about: URLs) are not network resources — a browser shows an
-    // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
-    // blank page instead of a "builder error for url (about:blank)" from the net layer.
-    if (/^about:/i.test(url)) {
-      this._html = "<html><head></head><body></body></html>";
-      this._url = url;
-      this._documentResponse = { status: 0, referrer: "", headers: [] };
-      this._hydrated = false;
-      this._emit("load");
-      this._emit("domcontentloaded");
-      return makeResponse({ status: 200, finalUrl: url, html: this._html });
-    }
-    const r = JSON.parse(
-      await native.fetchWithCookies(
-        url,
-        this._cookies,
-        method ?? null,
-        body ?? null,
-        this._context._headersJson(),
-        false,
-        this._requestState,
-        JSON.stringify({
-          source: /^https?:/.test(this._url) ? this._url : null,
-          destination: "document",
-          referrerPolicy: this._navigationReferrerPolicy(),
-        }),
-      ),
+  _navigateAbout(url) {
+    this._clearImageCache();
+    closeScreenshotScene(this);
+    this._closeSession();
+    this._html = "<html><head></head><body></body></html>";
+    this._url = url;
+    this._documentResponse = { status: 0, referrer: "", headers: [] };
+    this._hydrated = false;
+    this._syncFrames();
+    this._emit("framenavigated", this);
+    this._emit("load");
+    this._emit("domcontentloaded");
+    return makeResponse({ status: 200, finalUrl: url, html: this._html });
+  }
+  _fetchNavigationDocument(url, method, body, opts) {
+    return native.fetchWithCookies(
+      url,
+      this._cookies,
+      method ?? null,
+      body ?? null,
+      this._context._headersJson(),
+      false,
+      this._requestState,
+      JSON.stringify({
+        source: Object.hasOwn(opts ?? {}, "referer")
+          ? opts.referer
+          : /^https?:/.test(this._url)
+            ? this._url
+            : null,
+        destination: "document",
+        referrerPolicy: this._navigationReferrerPolicy(),
+      }),
+      null,
+      null,
+      null,
+      opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000,
+      this._context._maxResponseBytes,
     );
+  }
+  _publishNavigationRequests(r, response) {
+    for (const hop of r.requests ?? []) {
+      const entry = {
+        ...hop,
+        context: { navigation: true, resourceType: "document", frame: { path: [] } },
+      };
+      const request = makeCapturedRequest(entry, this.mainFrame(), () =>
+        hop.url === r.finalUrl ? response : null,
+      );
+      if (hop.url === r.finalUrl) response.request = () => request;
+      this._emit("request", request);
+    }
+  }
+  _commitNavigationDocument(r, response) {
+    this._clearImageCache();
+    closeScreenshotScene(this);
+    this._closeSession(); // only a committed response replaces the active document
     this._html = r.html;
     this._documentResponse = {
       status: r.status,
@@ -1718,60 +3803,173 @@ class Page {
     this._url = r.finalUrl;
     this._cookies = r.cookies;
     this._hydrated = false; // fresh document — not yet run its own JS
+    this._syncFrames();
+    this._emit("framenavigated", this);
     this._emit("load");
     this._emit("domcontentloaded");
-    return makeResponse(r);
+    return response;
   }
+  async _navigate(url, method, body, opts) {
+    if (this._closed) throw new Error("page is closed");
+    if (this._actorHub?.opening) {
+      try {
+        await this._actorHub.ready;
+      } catch {}
+      if (this._closed) throw new Error("Page is closed");
+    }
+    if (this._auxiliaryActor && this._session != null)
+      return this._navigateActorTarget(url, method, body, opts);
+    // `about:blank` (and other about: URLs) are not network resources — a browser shows an
+    // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
+    // blank page instead of a "builder error for url (about:blank)" from the net layer.
+    if (/^about:/i.test(url)) return this._navigateAbout(url);
+    let raw;
+    try {
+      raw = await this._fetchNavigationDocument(url, method, body, opts);
+    } catch (error) {
+      if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
+      throw error;
+    }
+    const r = JSON.parse(raw);
+    const response = makeResponse(r);
+    this._publishNavigationRequests(r, response);
+    const attachment = attachmentRecord(r);
+    if (attachment) {
+      if (r.cookies !== this._cookies) this._context._setCookies(r.cookies);
+      this._recordDownload(attachment);
+      throw new DownloadNavigationError();
+    }
+    if (r.status === 204 || r.status === 205) {
+      this._cookies = r.cookies;
+      throw new Error(`page.goto: net::ERR_ABORTED at ${url}`);
+    }
+    return this._commitNavigationDocument(r, response);
+  }
+
+  _remainingNavigationTimeout(opts, started) {
+    const timeout =
+      opts?.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 30000;
+    if (timeout === 0) return undefined;
+    const remaining = timeout - (Date.now() - started);
+    if (remaining > 0) return remaining;
+    const error = new Error(`navigation timeout after ${timeout}ms`);
+    error.name = "TimeoutError";
+    throw error;
+  }
+  _needsObservedHydration(opts) {
+    return (
+      !this._live &&
+      this._autoHydrate !== false &&
+      opts?.waitUntil !== "commit" &&
+      ["pageerror", "console", "response", "request", "requestfinished", "requestfailed"].some(
+        (event) => this._listeners.has(event),
+      )
+    );
+  }
+
   async goto(url, opts) {
-    if (this._url !== "about:blank") this._history.push(this._url);
-    this._fwd = []; // a fresh navigation invalidates the forward stack
+    const started = Date.now();
+    const previous = this._url;
+    const previousEntry = this._historyCurrent ?? previous;
     this._navHops = 0; // user navigation — reset the redirect-follow budget
-    this._autoHydrate = opts?.waitUntil !== "commit"; // 'commit' = inspect raw shell
-    const resp = await this._navigate(this._resolveUrl(url));
+    const resp = await this._navigate(this._resolveUrl(url), undefined, undefined, {
+      ...opts,
+      referer: opts?.referer ?? null,
+    });
+    if (!hasNativeHistory(this)) {
+      if (previous !== "about:blank") this._history.push(previousEntry);
+      this._historyCurrent = null;
+      this._fwd = [];
+    }
     // `waitUntil:'networkidle'` (or a later waitForLoadState('networkidle')) opens a LIVE
     // session: hydrate the app to quiescence so an SPA's client-rendered content (forms,
     // dashboards) appears, and keep it mounted so clicks/fills dispatch real events into
     // the running app. Default/'load'/'commit' stay raw (cheap fetch) — hydrating EVERY
     // goto is both slow and unnecessary for static pages.
-    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    if (opts?.waitUntil === "networkidle") {
+      const initialActor = !this._auxiliaryActor;
+      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
+      // Existing native target navigation already waits for its own networkidle.
+      if (initialActor && this._auxiliaryActor) {
+        try {
+          await this._waitForTargetNetworkIdle(
+            this._remainingNavigationTimeout(opts, started) ?? 0,
+          );
+        } catch (error) {
+          if (this._closed) throw new Error("Page session closed");
+          throw error;
+        }
+        if (this._closed) throw new Error("Page session closed");
+      }
+    }
     // If a `waitForResponse` / `waitForRequest` is already subscribed when the
     // caller does `Promise.all([waitForResponse(...), goto(url)])` without
     // `waitUntil:'networkidle'`, the inline-script fetches that the predicate
     // wants to observe only run inside a live session. Auto-hydrate so the
     // wait short-circuits on a real response instead of timing out with
     // the synthetic 200 fallback. Harmless when nothing is waiting.
-    else if (
-      !this._live &&
-      this._autoHydrate !== false &&
-      (this._listeners.has("response") ||
-        this._listeners.has("request") ||
-        this._listeners.has("requestfinished"))
-    ) {
-      await this._openLiveSession();
+    else if (this._needsObservedHydration(opts)) {
+      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     }
     return resp;
   }
   async reload(opts) {
+    const started = Date.now();
     // Re-fetch in place — no history entry. Like goto, a `waitUntil:'networkidle'` reload
     // re-opens a LIVE session so a client-rendered SPA re-hydrates (its forms/dashboards
     // re-appear); without this the reloaded doc stays the raw un-hydrated shell and reads
     // (e.g. a settings select's value) see an empty DOM.
-    this._autoHydrate = opts?.waitUntil !== "commit";
-    const resp = await this._navigate(this._url);
-    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    const resp = await this._navigate(this._url, undefined, undefined, {
+      ...opts,
+      referer: opts?.referer ?? this._documentResponse?.referrer ?? null,
+      _historyMode: "replace",
+      reload: true,
+    });
+    if (opts?.waitUntil === "networkidle")
+      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
     return resp;
   }
-  async goBack() {
-    const prev = this._history.pop();
-    if (prev == null) return null;
-    this._fwd.push(this._url);
-    return this._navigate(prev);
+  async _traverseNativeHistory(direction, opts) {
+    syncNativeHistory(this, native);
+    const entry = direction === "back" ? this._history.at(-1) : this._fwd.at(-1);
+    if (entry == null) return null;
+    return this._navigateActorTarget(historyUrl(entry), undefined, undefined, {
+      ...opts,
+      _historyMode: direction,
+    });
   }
-  async goForward() {
-    const next = this._fwd.pop();
+
+  async goBack(opts) {
+    if (hasNativeHistory(this)) return this._traverseNativeHistory("back", opts);
+    const prev = this._history.at(-1);
+    if (prev == null) return null;
+    if (await traverseLive(this, prev, native)) return null;
+    const current = this._historyCurrent ?? this._url;
+    const response = await this._navigate(historyUrl(prev), undefined, undefined, {
+      ...opts,
+      _historyMode: "back",
+    });
+    this._historyCurrent = null;
+    this._history.pop();
+    this._fwd.push(current);
+    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    return response;
+  }
+  async goForward(opts) {
+    if (hasNativeHistory(this)) return this._traverseNativeHistory("forward", opts);
+    const next = this._fwd.at(-1);
     if (next == null) return null;
-    this._history.push(this._url);
-    return this._navigate(next);
+    if (await traverseLive(this, next, native)) return null;
+    const current = this._historyCurrent ?? this._url;
+    const response = await this._navigate(historyUrl(next), undefined, undefined, {
+      ...opts,
+      _historyMode: "forward",
+    });
+    this._historyCurrent = null;
+    this._fwd.pop();
+    this._history.push(current);
+    if (opts?.waitUntil === "networkidle") await this._openLiveSession();
+    return response;
   }
 
   url() {
@@ -1827,49 +4025,30 @@ class Page {
     return native.ariaSnapshot(this._html, 0);
   }
 
-  // Evaluate JS against the page DOM. Supports (fn, arg) and string forms. When a live
-  // session is up, run in the LIVE isolate (sees the running app's state + can mutate
-  // it) and refresh the snapshot; otherwise run statelessly over the cached HTML.
+  // Evaluate in the retained isolate. Native revisions identify actual changes to
+  // the driver's snapshots; exposed bindings keep their cooperative settlement pump.
   async evaluate(script, arg) {
     if (this._closed) throw new Error("page is closed");
-    if (this._live) {
-      const body = evalSource(script, arg);
-      // The native bridge returns a UTF-8 string, so round-trip structured values
-      // through JSON with a sentinel prefix: primitives / arrays / plain objects
-      // ride the JSON path; non-serializable results fall back to String(result).
-      const out = await native.liveEvalExpression(
-        this._session,
-        `(async () => { try { const result = await (${body}); if (result === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(result); } catch { return String(result); } } catch { return ""; } })()`,
-      );
-      await this._refreshFromSession();
-      await this._drainBindings();
-      if (typeof out === "string" && out.startsWith("__ts_json__:")) {
-        try {
-          return JSON.parse(out.slice("__ts_json__:".length));
-        } catch {
-          /* malformed payload — fall through to raw string */
-        }
-      }
-      return out;
-    }
-    // Static path: `native.evaluate` returns the trailing expression as a
-    // string, so an `{a:1}` return comes back as "[object Object]". Mirror the
-    // live path — wrap so the trailing expression is a JSON-prefixed string,
-    // then parse back on the shim side.
+    if (hasJSHandles(arg)) return handleEvaluation(this, script, arg);
+    await this._ensureLive();
     const body = evalSource(script, arg);
-    const wrapped = `(() => { try { var __r = (${body}); if (__r === undefined) return ""; try { return "__ts_json__:" + JSON.stringify(__r); } catch { return String(__r); } } catch { return ""; } })()`;
-    const out = native.evaluate(this._html, wrapped);
-    if (typeof out === "string" && out.startsWith("__ts_json__:")) {
-      try {
-        return JSON.parse(out.slice("__ts_json__:".length));
-      } catch {
-        /* malformed payload — fall through to raw string */
-      }
-    }
-    return out;
+    if (this._mergedBindings().size) return this._evaluateWithBindings(body);
+    const tracked = JSON.parse(
+      await native.liveEvalExpressionTracked(
+        this._session,
+        `(async () => { try {
+        return JSON.stringify({value: (${encodeEvaluationValue.toString()})(await (${body}))});
+      } catch(error) { return JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); } })()`,
+      ),
+    );
+    if (tracked.needsSync) await this._refreshFromSession();
+    else if (tracked.events || this._auxiliaryActor) await this._drainNetworkEvents(true);
+    const result = JSON.parse(tracked.value);
+    if (result.error) throw decodeEvaluationError(result.error);
+    return decodeEvaluationValue(result.value);
   }
   async evaluateHandle(script, arg) {
-    return this.evaluate(script, arg);
+    return handleEvaluation(this, script, arg, true);
   }
   // Run the page's own script (promises/timers/fetch/cookies) and replace the
   // cached HTML with the hydrated result — subsequent reads see the new DOM.
@@ -1896,35 +4075,84 @@ class Page {
     return this._html;
   }
   async addInitScript(script, arg) {
-    // No reload pipeline to inject before; run it now over the current DOM.
-    this._context._initScripts.push(evalSource(script, arg));
-    if (this._html) await this.render(evalSource(script, arg));
+    if (this._closed) throw new Error("Page is closed");
+    (this._initScripts ??= []).push(evalSource(script, arg));
+    if (this._live) await this._installNativeBindings();
   }
 
-  async setContent(html) {
-    this._html = html;
-    this._emit("load");
+  async setContent(html, opts = {}) {
+    if (this._closed) throw new Error("page is closed");
+    this._routeLifetime?.abort(new Error("Route's document has been replaced"));
+    this._routeLifetime = undefined;
+    this._routeRequests = undefined;
+    const waitUntil = opts.waitUntil ?? "load";
+    if (!["load", "domcontentloaded", "networkidle"].includes(waitUntil))
+      throw new Error(`Unsupported setContent waitUntil: ${waitUntil}`);
+    if (!this._live) {
+      const previous = this._html;
+      this._html = "";
+      this._initializingForSetContent = true;
+      try {
+        await this._openLiveSession(opts.timeout);
+      } catch (error) {
+        this._html = previous;
+        throw error;
+      } finally {
+        this._initializingForSetContent = false;
+      }
+    }
+    this._clearImageCache();
+    closeScreenshotScene(this);
+    if (this._auxiliaryActor) this._nativeLoad().reset();
+    let failure;
+    try {
+      this._html = await native.liveSetContent(
+        this._session,
+        String(html),
+        waitUntil,
+        opts.timeout,
+      );
+    } catch (error) {
+      failure = error;
+    }
+    const collecting = this._contentCollecting;
+    this._contentCollecting = true;
+    try {
+      await this._refreshFromSession();
+      await this._drainBindings();
+    } finally {
+      this._contentCollecting = collecting;
+    }
+    if (failure) {
+      if (/setContent timeout/.test(failure.message)) failure.name = "TimeoutError";
+      throw failure;
+    }
+    this._contentLoadPending = waitUntil === "domcontentloaded";
+    if (this._auxiliaryActor) await this._actorHub.drain();
+    else {
+      this._emit("domcontentloaded");
+      if (!this._contentLoadPending) this._emit("load");
+    }
   }
 
   // --- page-level actions (selector shortcuts) ---
-  async fill(selector, value) {
-    this._html = native.fill(this._html, selector, value);
+  async fill(selector, value, options) {
+    return this.locator(selector).fill(value, options);
   }
   async type(selector, value) {
-    return this.fill(selector, value);
+    return this.locator(selector).type(value);
   }
   async check(selector) {
-    this._html = native.setChecked(this._html, selector, true);
+    return this.locator(selector).check();
   }
   async uncheck(selector) {
-    this._html = native.setChecked(this._html, selector, false);
+    return this.locator(selector).uncheck();
   }
   async setChecked(selector, on) {
-    this._html = native.setChecked(this._html, selector, !!on);
+    return this.locator(selector).setChecked(on);
   }
-  async selectOption(selector, value) {
-    const v = Array.isArray(value) ? value[0] : value;
-    this._html = native.selectOption(this._html, selector, String(v?.value ?? v));
+  async selectOption(selector, value, options) {
+    return this.locator(selector).selectOption(value, options);
   }
   async setInputFiles(selector, files) {
     return this.locator(selector).setInputFiles(files);
@@ -1932,15 +4160,14 @@ class Page {
   async hover(selector) {
     return this.locator(selector).hover();
   }
-  async click(selector) {
-    const intent = JSON.parse(native.click(this._html, selector, this._url));
-    return this._followIntent(intent);
+  async click(selector, options) {
+    return this.locator(selector).click(options);
   }
-  async dblclick(selector) {
-    return this.click(selector);
+  async dblclick(selector, options) {
+    return this.locator(selector).dblclick(options);
   }
   async tap(selector) {
-    return this.click(selector);
+    return this.locator(selector).tap();
   }
   async press(selector, key) {
     return this.locator(selector).press(key);
@@ -1948,14 +4175,25 @@ class Page {
   async focus(selector) {
     return this.locator(selector).focus();
   }
-  async dispatchEvent() {}
+  async dispatchEvent(selector, type, eventInit, options) {
+    return this.locator(selector).dispatchEvent(type, eventInit, options);
+  }
 
   async _followIntent(intent) {
-    if (intent.action === "navigate") return this.goto(intent.url);
-    if (intent.action === "submit") return this._submit(intent);
-    return null; // inert (a JS-only handler — nothing to fire without JS)
+    try {
+      if (intent.action === "navigate") return await this.goto(intent.url);
+      if (intent.action === "submit") return await this._submit(intent);
+      return null; // inert (a JS-only handler — nothing to fire without JS)
+    } catch (error) {
+      if (error instanceof DownloadNavigationError) return null;
+      throw error;
+    }
   }
   async _submit(intent) {
+    if (this._auxiliaryActor)
+      return this._navigateActorTarget(intent.url, intent.method, intent.body, {
+        _contentType: intent.contentType,
+      });
     const method = intent.method === "GET" ? null : intent.method;
     const r = JSON.parse(
       await native.fetchWithCookies(
@@ -1970,8 +4208,14 @@ class Page {
           source: /^https?:/.test(this._url) ? this._url : null,
           destination: "document",
         }),
+        null,
+        null,
+        false,
+        null,
+        this._context._maxResponseBytes,
       ),
     );
+    this._clearImageCache();
     this._html = r.html;
     this._url = r.finalUrl;
     this._cookies = r.cookies;
@@ -1980,7 +4224,9 @@ class Page {
 
   // --- locators ---
   _locFromSelector(selector, mode = "auto") {
-    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)));
+    const loc = new Locator(this, (h) => JSON.parse(native.query(h, selector, mode)), {
+      count: (h) => native.queryCount(h, selector, mode),
+    });
     loc._selector = selector; // enables CSS-concat nesting
     return loc;
   }
@@ -1989,19 +4235,31 @@ class Page {
   }
   getByRole(role, opts = {}) {
     const name = opts.name != null ? String(opts.name) : null;
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "role", role, name)), {
-      getBy: { kind: "role", value: role, name },
-    });
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "role", role, name, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "role", value: role, name, options: opts },
+      },
+    );
   }
-  getByText(text, _o) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "text", String(text))), {
-      getBy: { kind: "text", value: String(text), name: null },
-    });
+  getByText(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "text", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "text", value: String(text), name: null, options: opts },
+      },
+    );
   }
-  getByLabel(text, _o) {
-    return new Locator(this, (h) => JSON.parse(native.getBy(h, "label", String(text))), {
-      getBy: { kind: "label", value: String(text), name: null },
-    });
+  getByLabel(text, opts = {}) {
+    return new Locator(
+      this,
+      (h) => JSON.parse(native.getBy(h, "label", String(text), null, null, JSON.stringify(opts))),
+      {
+        getBy: { kind: "label", value: String(text), name: null, options: opts },
+      },
+    );
   }
   // The native get_by handles role/text/label; placeholder/alt/title map cleanly
   // to attribute selectors (substring, like Playwright's default exact:false).
@@ -2014,8 +4272,23 @@ class Page {
   getByTitle(text, _o) {
     return this._locFromSelector(`[title*=${cssAttrValue(text)}]`);
   }
+  _regexTestId(pattern, root = null) {
+    const attribute = this._context._testIdAttribute;
+    const re = new RegExp(pattern.source, pattern.flags);
+    const selector = `${root ? `${root} ` : ""}[${attribute}]`;
+    return new Locator(
+      this,
+      (html) =>
+        JSON.parse(native.query(html, selector)).filter((match) => {
+          re.lastIndex = 0;
+          return re.test(native.attrOf(html, match.node, attribute));
+        }),
+      { testId: { attribute, source: pattern.source, flags: pattern.flags, root } },
+    );
+  }
   getByTestId(id) {
-    return this._locFromSelector(`[${this._context._testIdAttribute}="${id}"]`);
+    if (id instanceof RegExp) return this._regexTestId(id);
+    return this._locFromSelector(`[${this._context._testIdAttribute}=${cssAttrValue(id)}]`);
   }
 
   // --- frames ---
@@ -2029,19 +4302,81 @@ class Page {
   mainFrame() {
     return this;
   }
+  page() {
+    return this;
+  }
+  name() {
+    return "";
+  }
+  parentFrame() {
+    return null;
+  }
+  childFrames() {
+    return this.frames().filter((frame) => frame._parentFrame === this);
+  }
+  isDetached() {
+    return false;
+  }
+  _syncFrames() {
+    const previous = this._frames ?? [];
+    const next = [];
+    const visit = (parent) => {
+      const nativeIdentity = parent._frameEntries != null;
+      for (const [index, meta] of _collectIframes(parent).entries()) {
+        let frame = previous.find(
+          (candidate) =>
+            candidate._parentFrame === parent &&
+            (candidate._nativeIdentity === nativeIdentity
+              ? candidate._node === meta.node
+              : !candidate._nativeIdentity && nativeIdentity && candidate._path?.at(-1) === index),
+        );
+        if (!frame) {
+          frame = new Frame(this, parent, meta);
+          this._emit("frameattached", frame);
+          this._emit("framenavigated", frame);
+        } else if (frame._url !== meta.url) {
+          frame._url = meta.url;
+          this._emit("framenavigated", frame);
+        }
+        frame._node = meta.node;
+        frame._nativeIdentity = nativeIdentity;
+        if (meta.live) frame._html = meta.html;
+        frame._name = meta.name;
+        frame._path = meta.path ?? [...(parent._path ?? []), index];
+        frame._frameEntries = meta.children;
+        frame._requestContextId = meta.contextId;
+        if (meta.contextId) {
+          this._requestFrames ??= new Map();
+          this._requestFrames.set(meta.contextId, frame);
+        }
+        next.push(frame);
+        visit(frame);
+      }
+    };
+    visit(this);
+    for (const frame of previous.toReversed()) {
+      if (!next.includes(frame)) {
+        frame._detached = true;
+        this._emit("framedetached", frame);
+      }
+    }
+    this._frames = next;
+  }
   frames() {
-    return [this, ..._collectIframes(this).map((meta) => new Frame(this, null, meta))];
+    this._syncFrames();
+    return [this, ...this._frames];
   }
   frame(opts) {
     if (opts == null) return this;
     const name = typeof opts === "string" ? opts : opts?.name;
     const urlSpec = typeof opts === "object" && opts ? opts.url : null;
-    const match = _collectIframes(this).find(
-      (f) =>
-        (name == null || f.name === name) &&
-        (urlSpec == null || _matchUrl(f.src || f.url, urlSpec)),
+    return (
+      this.frames().find(
+        (frame) =>
+          (name == null || frame.name() === name) &&
+          (urlSpec == null || _matchUrl(frame.url(), urlSpec)),
+      ) ?? null
     );
-    return match ? new Frame(this, null, match) : null;
   }
   frameLocator(selector) {
     return new FrameLocator(this, selector);
@@ -2053,12 +4388,57 @@ class Page {
   // SPA's own scripts having run; the shim has one "settled" tier (a live
   // session with the authored scripts drained), so treat them the same and
   // hydrate if we aren't live yet.
-  async waitForLoadState(_state) {
+  async waitForLoadState(state = "load", options = {}) {
+    if (this._auxiliaryActor) {
+      if (!["load", "domcontentloaded", "networkidle"].includes(state))
+        throw new Error(`Unsupported load state: ${state}`);
+      const started = performance.now();
+      await this._actorHub.drain();
+      await this._nativeLoad().wait(state === "networkidle" ? "load" : state, {
+        timeout: this._navigationTimeoutFor(options),
+      });
+      if (state === "networkidle")
+        await this._waitForTargetNetworkIdle(this._remainingTargetIdleTimeout(options, started));
+      return;
+    }
+    if (this._contentLoadPending && state !== "domcontentloaded") {
+      const collecting = this._contentCollecting;
+      this._contentCollecting = true;
+      try {
+        if (state === "networkidle") await native.liveEvalEngine(this._session, "");
+        else
+          await native.liveEvalEngineExpression(
+            this._session,
+            "__tsNs.waitForDocumentResources().then(() => '')",
+          );
+        await this._refreshFromSession();
+        this._contentLoadPending = false;
+        this._emit("load");
+      } finally {
+        this._contentCollecting = collecting;
+      }
+    }
     if (!this._live) await this._openLiveSession();
   }
   async waitForTimeout(ms) {
     await new Promise((r) => setTimeout(r, Math.min(ms ?? 0, 50)));
   }
+  async _advanceUrlWait(deadline, timedOut) {
+    try {
+      // Observing a URL must not cancel requests owned by a concurrent action.
+      await this._drainBindings(deadline, false, true);
+      if (this._session != null) {
+        await this._collectSession(this._session, "globalThis.__RESULT = '';", true);
+        await this._refreshFromSession(true);
+      }
+      await this._drainBindings(deadline, false, true);
+    } catch (error) {
+      if (this._closed) throw new Error("Page closed while waiting for URL", { cause: error });
+      if (error.name === "TimeoutError" && Date.now() >= deadline) throw timedOut();
+      throw error;
+    }
+  }
+
   async waitForURL(url, opts = {}) {
     // Playwright accepts a string (glob), RegExp, or a predicate fn(URL)=>bool.
     const match = (u) => {
@@ -2072,85 +4452,51 @@ class Page {
       if (url instanceof RegExp) return url.test(u);
       return u.includes(String(url).replace(/\*\*/g, "").replace(/\*/g, ""));
     };
-    if (match(this._url)) return undefined;
-    // In a live session a navigation can be a MULTI-STEP client redirect (login →
-    // /post-login → /entity-select|/entity/{id}), each step a render that runs on the
-    // next drain. Pump the session — each refresh drains it — until the URL matches or
-    // we give up. (No session: the nav already ran synchronously, so just assert.)
-    if (this._live) {
-      const rounds = Math.max(1, Math.ceil((opts.timeout ?? 15000) / 1000));
-      for (let i = 0; i < rounds && !match(this._url); i++) {
-        await native.liveEvalEngine(this._session, "globalThis.__RESULT = location.href;");
-        await this._refreshFromSession();
+    const timeout =
+      opts.timeout ?? this._navigationTimeout ?? this._context._navigationTimeout ?? 15000;
+    const deadline = timeout === 0 ? Infinity : Date.now() + timeout;
+    const timedOut = () =>
+      Object.assign(new Error(`turbo-surf: waitForURL(${url}) — current url is ${this._url}`), {
+        name: "TimeoutError",
+      });
+    for (;;) {
+      if (match(this._url)) return undefined;
+      if (this._closed) throw new Error("Page closed while waiting for URL");
+      if (Date.now() >= deadline) throw timedOut();
+      if (this._live && this._session != null) {
+        await this._advanceUrlWait(deadline, timedOut);
       }
       if (match(this._url)) return undefined;
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, Math.min(20, deadline - Date.now()))),
+      );
     }
-    throw new Error(`turbo-surf: waitForURL(${url}) — current url is ${this._url}`);
   }
   async waitForSelector(selector, opts = {}) {
-    const present = (await this.locator(selector).count()) > 0;
-    if (!present && opts.state !== "hidden" && opts.state !== "detached")
-      throw new Error(`turbo-surf: waitForSelector(${selector}) found no element`);
-    return present ? this.locator(selector) : null;
+    const state = opts.state ?? "visible";
+    if (!["attached", "detached", "hidden", "visible"].includes(state)) {
+      throw new Error(`Unsupported selector wait state: ${state}`);
+    }
+    const locator = this.locator(selector);
+    await locator.waitFor(opts);
+    return state === "hidden" || state === "detached" ? null : locator.elementHandle();
   }
   // Poll `fn(arg)` in the live isolate until truthy. `arg` may be an ElementHandle
   // (from locator.elementHandle()) — resolved to the live element so e.g.
   // `waitForFunction((btn) => !btn.disabled, await uploadButton.elementHandle())` works.
   async waitForFunction(fn, arg, opts) {
-    const timeout = (opts && typeof opts === "object" && opts.timeout) || 30000;
-    await this._ensureLive();
-    const fnStr = typeof fn === "function" ? fn.toString() : String(fn);
-    let argExpr;
-    if (arg && arg.__turboHandle) {
-      if (arg.selector) {
-        argExpr = `document.querySelectorAll(${JSON.stringify(arg.selector)})[${arg.index}]`;
-      } else if (arg.getBy) {
-        const g = arg.getBy;
-        argExpr =
-          `(function(){ __tsNs.tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
-          `var h=JSON.parse(globalThis.__RESULT||"[]"); var all=document.querySelectorAll("*"); return h[${arg.index}]?all[h[${arg.index}].idx]:undefined; })()`;
-      } else {
-        argExpr = "undefined";
-      }
-    } else {
-      argExpr = JSON.stringify(arg ?? null);
-    }
-    // Capture BOTH truthiness and the VALUE — Playwright's waitForFunction resolves to the
-    // function's return value, not a boolean. Works live (poll the running app) and static
-    // (one eval over the snapshot; a static DOM won't change so don't spin).
-    const probe = `(() => { try { var __a = ${argExpr}; var __r = (${fnStr})(__a); return JSON.stringify({ ok: !!__r, v: __r === undefined ? null : __r }); } catch (_e) { return JSON.stringify({ ok: false, v: null }); } })()`;
-    const evalOnce = async () => {
-      let raw;
-      if (this._session != null) {
-        try {
-          raw = await native.liveEvalEngine(this._session, `globalThis.__RESULT = ${probe};`);
-        } catch {
-          raw = null;
-        }
-        await this._refreshFromSession();
-      } else {
-        try {
-          raw = native.evaluateEngine(this._html, `return ${probe};`);
-        } catch {
-          raw = null;
-        }
-      }
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return { ok: false, v: null };
-      }
-    };
+    const timeout = opts?.timeout ?? 30000;
     const start = Date.now();
     for (;;) {
-      const res = await evalOnce();
-      if (res && res.ok) return res.v;
-      if (this._session == null) break; // static snapshot won't change
-      if (Date.now() - start >= timeout) break;
-      await new Promise((res2) => setTimeout(res2, 40));
+      const handle = await this.evaluateHandle(fn, arg);
+      if (await handle.evaluate((value) => !!value)) return handle;
+      await handle.dispose();
+      if (timeout && Date.now() - start >= timeout)
+        throw new Error("turbo-surf: waitForFunction timed out");
+      await new Promise((resolve) => setTimeout(resolve, 40));
     }
-    throw new Error("turbo-surf: waitForFunction timed out");
   }
+
   // `waitForNavigation` resolves when the URL changes from the one at call time.
   // In a live session the change comes from a client redirect pumped by the next
   // drain; outside one it's the paired `goto`/click's synchronous nav. Poll url.
@@ -2172,52 +4518,74 @@ class Page {
     }
     return makeResponse({ status: 200, finalUrl: this._url });
   }
-  // waitForEvent dispatches on name: 'download' drains the live isolate's
-  // __downloads buffer; 'response' / 'request' / 'requestfinished' resolve from
-  // the same listener bus the native-log drain feeds (#218/#222). Unknown names
-  // resolve to undefined — matches the pre-fix no-op for off-spec names.
-  async waitForEvent(event, opts) {
-    const timeout = (opts && typeof opts === "object" && opts.timeout) || 30000;
-    if (event === "response" || event === "request" || event === "requestfinished") {
-      const predicate =
-        opts && typeof opts === "object" && typeof opts.predicate === "function"
-          ? opts.predicate
-          : () => true;
-      return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          this.off(event, onEvt);
-          if (poll) clearInterval(poll);
-          resolve(undefined);
-        }, timeout);
-        const onEvt = (payload) => {
-          try {
-            if (!predicate(payload)) return;
-          } catch {
-            return;
-          }
-          clearTimeout(timer);
-          if (poll) clearInterval(poll);
-          this.off(event, onEvt);
-          resolve(payload);
-        };
-        this.on(event, onEvt);
-        // Same as waitForResponse / waitForRequest: poll unconditionally.
-        const poll = setInterval(() => {
-          this._drainNetworkEvents().catch(() => {});
-        }, 50);
-      });
-    }
-    if (event !== "download") return undefined;
-    await this._ensureLive();
-    if (this._session == null) return undefined;
+  _waitForPopup(opts) {
+    if (!native.liveAuxiliaryState)
+      throw new Error("Native auxiliary Page transport is unavailable");
+    if (this._actorHub?.capability === "unsupported")
+      throw new Error(
+        `Native popup contexts are unavailable: ${this._actorHub.capabilityReason ?? "unsupported root profile"}`,
+      );
+    const controller = new AbortController();
+    const unsupported = () =>
+      controller.abort(new Error("Native popup contexts are unavailable for this root profile"));
+    this.on("__auxiliaryUnsupported", unsupported);
+    const options = typeof opts === "function" ? { predicate: opts } : opts;
+    return waitForEmitterEvent(
+      this,
+      "popup",
+      { ...options, signal: controller.signal },
+      this._defaultTimeout ?? this._context._defaultTimeout ?? 30000,
+    ).finally(() => this.off("__auxiliaryUnsupported", unsupported));
+  }
+
+  async waitForEvent(event, opts = {}) {
+    if (this._closed) throw new Error("Page is closed");
+    if (event === "download") return this._waitForDownload(opts);
+    if (event === "popup") return this._waitForPopup(opts);
+    const supported = [
+      ...NETWORK_EVENTS,
+      "popup",
+      "load",
+      "domcontentloaded",
+      "framenavigated",
+      "close",
+    ];
+    if (!supported.includes(event)) throw new Error(`Unsupported Page event: ${event}`);
+    return waitForEmitterEvent(
+      this,
+      event,
+      opts,
+      this._defaultTimeout ?? this._context._defaultTimeout ?? 30000,
+    );
+  }
+  _downloadRequestKey(requestId, session = this._session ?? this._openingNetworkId) {
+    if (requestId == null) return undefined;
+    if (session == null) throw new Error("Native download has no owned Page session");
+    return `${session}:${requestId}`;
+  }
+  _recordDownload(entry, requestId, session) {
+    const key = this._downloadRequestKey(requestId, session);
+    if (key !== undefined && this._downloadRequestIds?.has(key)) return;
+    const download = makeDownload(entry);
+    if (key !== undefined) (this._downloadRequestIds ??= new Set()).add(key);
+    (this._downloads ??= []).push(download);
+    this._emit("download", download);
+  }
+  async _waitForDownload(opts = {}) {
+    const timeout = opts.timeout ?? 30000;
     const start = Date.now();
-    while (Date.now() - start < timeout) {
+    while (timeout === 0 || Date.now() - start < timeout) {
+      if (this._closed) throw new Error("page is closed");
+      if (this._downloads?.length) return this._downloads.shift();
       let raw;
       try {
-        raw = await native.liveEvalEngine(
-          this._session,
-          "globalThis.__RESULT = JSON.stringify((__tsNs.downloads || []).splice(0));",
-        );
+        raw =
+          this._session == null
+            ? null
+            : await native.liveEvalEngine(
+                this._session,
+                "globalThis.__RESULT = JSON.stringify((__tsNs.downloads || []).splice(0));",
+              );
       } catch {
         raw = null;
       }
@@ -2227,44 +4595,38 @@ class Page {
       } catch {
         entries = [];
       }
-      if (entries.length) return makeDownload(entries[0]);
+      for (const entry of entries) this._recordDownload(entry);
+      if (this._downloads?.length) return this._downloads.shift();
       await new Promise((r) => setTimeout(r, 30)); // let the concurrent click drive + push
     }
-    return undefined;
+    const error = new Error(`Timeout ${timeout}ms exceeded while waiting for event download`);
+    error.name = "TimeoutError";
+    throw error;
   }
   async waitForResponse(matcher, opts = {}) {
-    const test = (resp) => {
-      try {
-        if (typeof matcher === "function") return !!matcher(resp);
-        if (matcher instanceof RegExp) return matcher.test(resp.url());
-        return resp.url().includes(String(matcher));
-      } catch {
-        return false;
-      }
-    };
-    // Real Playwright only matches responses received AFTER this call. Our live engine
-    // drains network in batches, so a matching response may already sit in the buffer —
-    // but ONLY accept one produced by the current interaction (or later). A response that
-    // drained in an EARLIER step is stale and must not match, else a loose predicate like
-    // url.includes('/bulk-upload') grabs the template GET from a prior step instead of
-    // waiting for this step's POST. (_seq is the action that produced the response.)
-    const callSeq = this._actionSeq;
-    // Drain once before the buffered check — the matching entry may already be
-    // sitting in the native log from the action that produced it.
-    if (this._live) await this._drainNetworkEvents();
-    const buffered = (this._recentResponses ?? []).find((r) => (r._seq ?? 0) >= callSeq && test(r));
-    if (buffered) return buffered;
-    return new Promise((resolve) => {
-      // On timeout resolve a synthetic response rather than rejecting: many callers
-      // use `Promise.all([waitForResponse(...), action()])` and only need the action
-      // to run — a hard reject there would fail otherwise-passing flows.
-      const timer = setTimeout(() => {
-        this.off("response", onResp);
-        if (poll) clearInterval(poll);
-        resolve(makeResponse({ status: 200, finalUrl: this._url }));
-      }, opts.timeout ?? 15000);
-      const onResp = (resp) => {
-        if (!test(resp)) return;
+    const test = networkWaitMatcher(matcher, this._context._baseURL);
+    const timeout = opts.timeout ?? this._defaultTimeout ?? this._context._defaultTimeout ?? 30000;
+    return new Promise((resolve, reject) => {
+      const timer =
+        timeout === 0
+          ? null
+          : setTimeout(() => {
+              this.off("response", onResp);
+              if (poll) clearInterval(poll);
+              reject(
+                Object.assign(new Error("Timeout waiting for response"), { name: "TimeoutError" }),
+              );
+            }, timeout);
+      const onResp = async (resp) => {
+        try {
+          if (!(await test(resp))) return;
+        } catch (error) {
+          clearTimeout(timer);
+          clearInterval(poll);
+          this.off("response", onResp);
+          reject(error);
+          return;
+        }
         clearTimeout(timer);
         if (poll) clearInterval(poll);
         this.off("response", onResp);
@@ -2280,37 +4642,33 @@ class Page {
       // session and starts firing emits as soon as goto establishes one.
       const poll = setInterval(() => {
         this._drainNetworkEvents().catch(() => {});
-      }, 50);
+      }, 10);
     });
   }
   async waitForRequest(matcher, opts = {}) {
-    const test = (req) => {
-      try {
-        if (matcher == null) return true;
-        if (typeof matcher === "function") return !!matcher(req);
-        if (matcher instanceof RegExp) return matcher.test(req.url());
-        return req.url().includes(String(matcher));
-      } catch {
-        return false;
-      }
-    };
-    const callSeq = this._actionSeq;
-    // Drain once up front — the matching entry may already be in the native log.
-    if (this._live) await this._drainNetworkEvents();
-    const bufferedResp = (this._recentResponses ?? []).find(
-      (r) => (r._seq ?? 0) >= callSeq && test(r.request()),
-    );
-    if (bufferedResp) return bufferedResp.request();
-    return new Promise((resolve) => {
-      // Timeout returns the historical synthetic stub — some callers chain
-      // Promise.all([waitForRequest(...), action()]) and only need the action.
-      const timer = setTimeout(() => {
-        this.off("request", onReq);
-        if (poll) clearInterval(poll);
-        resolve({ url: () => this._url, method: () => "GET" });
-      }, opts.timeout ?? 15000);
-      const onReq = (req) => {
-        if (!test(req)) return;
+    const test = networkWaitMatcher(matcher, this._context._baseURL);
+    const timeout = opts.timeout ?? this._defaultTimeout ?? this._context._defaultTimeout ?? 30000;
+    return new Promise((resolve, reject) => {
+      const timer =
+        timeout === 0
+          ? null
+          : setTimeout(() => {
+              this.off("request", onReq);
+              if (poll) clearInterval(poll);
+              reject(
+                Object.assign(new Error("Timeout waiting for request"), { name: "TimeoutError" }),
+              );
+            }, timeout);
+      const onReq = async (req) => {
+        try {
+          if (!(await test(req))) return;
+        } catch (error) {
+          clearTimeout(timer);
+          clearInterval(poll);
+          this.off("request", onReq);
+          reject(error);
+          return;
+        }
         clearTimeout(timer);
         if (poll) clearInterval(poll);
         this.off("request", onReq);
@@ -2330,27 +4688,40 @@ class Page {
     const arr = this._listeners.get(event) ?? [];
     arr.push(fn);
     this._listeners.set(event, arr);
+    this._updateNetworkPump();
     return this;
   }
   once(event, fn) {
-    return this.on(event, fn);
+    const once = (payload) => {
+      this.off(event, once);
+      fn.call(this, payload);
+    };
+    once.listener = fn;
+    return this.on(event, once);
   }
   addListener(event, fn) {
     return this.on(event, fn);
   }
   off(event, fn) {
     const arr = this._listeners.get(event);
-    if (arr)
-      this._listeners.set(
-        event,
-        arr.filter((f) => f !== fn),
-      );
+    const index =
+      arr?.findLastIndex((listener) => listener === fn || listener.listener === fn) ?? -1;
+    if (index >= 0) this._listeners.set(event, [...arr.slice(0, index), ...arr.slice(index + 1)]);
+    this._updateNetworkPump();
     return this;
   }
   removeListener(event, fn) {
     return this.off(event, fn);
   }
   _emit(event, payload) {
+    if (payload === undefined && ["load", "domcontentloaded", "close"].includes(event))
+      payload = this;
+    if (event === "framedetached") {
+      const requests = this._routeRequests?.get(payload);
+      for (const controller of requests?.values() ?? [])
+        controller.abort(new Error("Route's frame has been detached"));
+      this._routeRequests?.delete(payload);
+    }
     for (const fn of this._listeners.get(event) ?? []) fn(payload);
   }
 
@@ -2358,25 +4729,89 @@ class Page {
   context() {
     return this._context;
   }
-  request() {
-    return this._context.request();
+  get request() {
+    return this._context.request;
   }
   viewportSize() {
-    return this._context._viewport;
+    return { ...this._viewport };
   }
   async setViewportSize(size) {
-    this._context._viewport = size;
+    if (![size.width, size.height].every((value) => Number.isInteger(value) && value > 0))
+      throw new Error("viewport width and height must be positive integers");
+    if (this._live) {
+      await native.liveResize(this._session, size.width, size.height);
+      await this._refreshFromSession();
+      await this._drainBindings();
+    }
+    this._viewport = { ...size };
   }
-  setDefaultTimeout() {}
-  setDefaultNavigationTimeout() {}
+  setDefaultTimeout(timeout) {
+    this._defaultTimeout = timeout;
+  }
+  setDefaultNavigationTimeout(timeout) {
+    this._navigationTimeout = timeout;
+  }
   async setExtraHTTPHeaders(headers) {
-    this._context._headers = { ...this._context._headers, ...headers };
+    this._context._headers = { ...headers };
+    this._context._configureNative();
   }
-  async emulateMedia() {}
+  _configureNative() {
+    native.requestStateConfigure(
+      this._requestState,
+      JSON.stringify({
+        colorScheme: this._media?.colorScheme ?? this._context._colorScheme,
+        animations: this._context._animations,
+        reducedMotion: this._media?.reducedMotion ?? this._context._reducedMotion,
+        locale: this._context._locale,
+        extraHTTPHeaders: this._context._headers,
+        httpCredentials: this._context._httpCredentials,
+        geolocation: this._context._geolocation,
+        permissions: this._context._permissionGrants,
+      }),
+    );
+  }
+  async emulateMedia(options = {}) {
+    this._media = { ...this._media, ...options };
+    this._configureNative();
+    if (this._live) await this._redrain();
+  }
   async bringToFront() {}
-  async addStyleTag() {}
-  async addScriptTag(opts = {}) {
-    if (opts.content) await this.render(opts.content);
+  addStyleTag(opts = {}) {
+    return this._addResourceTag("style", opts);
+  }
+  addScriptTag(opts = {}) {
+    return this._addResourceTag("script", opts);
+  }
+  async _addResourceTag(kind, opts) {
+    validateResourceTagOptions(kind, opts);
+    const content = opts.path != null ? await readFile(opts.path, "utf8") : opts.content;
+    if (kind === "script" && opts.type === "module") {
+      throw new Error("addScriptTag module injection load completion is not supported");
+    }
+    const external = opts.url != null;
+    const tagName = kind === "script" ? "script" : external ? "link" : "style";
+    const waitForLoad = external;
+    if (!this._live) await this._openLiveSession();
+    const token = `${kind}-${(this._injectedTagSeq = (this._injectedTagSeq ?? 0) + 1)}`;
+    const result = await native.liveEvalExpression(
+      this._session,
+      `(async () => {
+      try {
+        const tag = document.createElement(${JSON.stringify(tagName)});
+        tag.setAttribute('data-ts-injected', ${JSON.stringify(token)});
+        ${kind === "script" && opts.type != null ? `tag.type = ${JSON.stringify(String(opts.type))};` : ""}
+        ${external ? (kind === "style" ? `tag.rel = 'stylesheet'; tag.href = ${JSON.stringify(String(opts.url))};` : `tag.src = ${JSON.stringify(String(opts.url))};`) : `tag.textContent = ${JSON.stringify(String(content))};`}
+        ${waitForLoad ? `const loaded = new Promise((resolve, reject) => { tag.onload = resolve; tag.onerror = () => reject(new Error('Unable to load ${kind}')); });` : ""}
+        document.head.appendChild(tag);
+        ${waitForLoad ? "await loaded;" : ""}
+        return JSON.stringify({ ok: true });
+      } catch (error) { return JSON.stringify({ error: String(error.message || error) }); }
+    })()`,
+    );
+    const outcome = JSON.parse(result);
+    await this._refreshFromSession();
+    if (outcome.error) throw new Error(outcome.error);
+    return this.locator(`[data-ts-injected="${token}"]`).elementHandle();
   }
   storageState() {
     return this._context.storageState();
@@ -2387,14 +4822,68 @@ class Page {
   isClosed() {
     return this._closed;
   }
-  async close() {
-    if (this._closed) return;
+  async _closeOpeningTarget() {
+    if (this._openingClosePromise) return this._openingClosePromise;
+    if (this._closed) return false;
+    const actor = this._actorHub;
+    if (
+      !actor?.opening ||
+      actor.capability !== "supported" ||
+      actor.root == null ||
+      this._targetId !== actor.root
+    )
+      return false;
+    if (!native.liveCloseOpeningTarget)
+      throw new Error("Native opening-target cancellation is unavailable");
+    return (this._openingClosePromise ??= this._closeOwnedOpeningTarget(actor));
+  }
+
+  async _closeOwnedOpeningTarget(actor) {
+    const finalState = await native.liveCloseOpeningTarget(actor.actor, this._targetId);
+    await actor.applyState(JSON.parse(finalState));
+    return true;
+  }
+
+  async _prepareClose() {
+    const dialogSession = this._session ?? this._openingNetworkId;
+    if (!this._closed && dialogSession != null && native.liveDialogCancel)
+      native.liveDialogCancel(dialogSession);
+    if (native.liveAuxiliaryState) {
+      try {
+        await (this._actorHub?.ready ?? this._openingSession?.promise);
+      } catch {}
+    }
+  }
+
+  _closeLegacyPage() {
     this._closeSession();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
+    this._clearImageCache();
+    closeScreenshotScene(this);
     this._closed = true;
+    this._routeHandlers?.clear();
+    this._routes = [];
+    const position = this._context._pages.indexOf(this);
+    if (position >= 0) this._context._pages.splice(position, 1);
     this._emit("close");
+  }
+
+  async _closeOwnedContext() {
     if (this._ownsContext) await this._context.close();
+  }
+
+  async close() {
+    if (await this._closeOpeningTarget()) {
+      await this._closeOwnedContext();
+      return;
+    }
+    if (this._closed) return;
+    await this._prepareClose();
+    if (this._closed) return;
+    if (this._auxiliaryActor) await this._actorHub.closeTarget(this._targetId);
+    else this._closeLegacyPage();
+    await this._closeOwnedContext();
   }
   video() {
     return null;
@@ -2407,79 +4896,165 @@ class Page {
   // browser. Real pixels, but a *representative* render (honors CSS
   // position/z-index stacking; paints PNG/JPEG `<img>`/background images it can
   // fetch, others fall back to a placeholder). `type: "svg"` (or a `.svg` path)
-  // returns a vector document; otherwise PNG. `fullPage: true` grows the image to
-  // the full content height; `clip` is ignored (width/height or the context
-  // viewport drive layout). Returns a Buffer; writes `path` if given.
+  // returns a vector document; PNG and JPEG preserve the requested encoding.
+  // `fullPage: true` grows the image to
+  // the full content height; `clip` crops the rendered pixels while the context
+  // viewport drives layout. Returns a Buffer; writes `path` if given.
   async screenshot(opts = {}) {
-    const vp = this._context._viewport ?? { width: 1280, height: 800 };
+    const vp = this._viewport;
     const width = opts.width ?? vp.width;
     const height = opts.height ?? vp.height;
-    const asSvg =
-      opts.type === "svg" || (typeof opts.path === "string" && opts.path.endsWith(".svg"));
-    // Fetch the page's external <link> stylesheets so the render is styled, not
-    // just inline-CSS. `{ externalCss: false }` skips it (offline/inline-only).
-    const css = opts.externalCss === false ? "" : await this._fetchLinkedCss();
-    // Fetch the page's <img>/background-image bytes so images paint (PNG/JPEG);
-    // `{ images: false }` skips it.
-    const images = opts.images === false ? {} : await this._fetchImages();
-    // Playwright's `fullPage` grows the image to the full content height.
-    const fullPage = opts.fullPage === true;
-    const out = asSvg
-      ? Buffer.from(
-          native.screenshotSvgWithAssets(this._html, css, images, width, height, fullPage),
-          "utf8",
-        )
-      : native.screenshotWithAssets(this._html, css, images, width, height, fullPage);
+    const html = this._html;
+    const maskIndices = screenshotMaskIndices(this, opts.mask);
+    const deviceScale = screenshotDeviceScale(opts, this._context._deviceScaleFactor);
+    const type = screenshotEncoding(opts);
+    const asSvg = type === "svg";
+    const optionsJson = JSON.stringify({
+      fullPage: opts.fullPage === true,
+      deviceScale,
+      maskIndices,
+      maskColor: opts.maskColor ?? "#ff00ff",
+      omitBackground: type !== "jpeg" && opts.omitBackground === true,
+      systemFonts: opts.systemFonts === true,
+    });
+    const { css, images, metadataJson } = await captureAssets(
+      this,
+      native,
+      opts,
+      width,
+      height,
+      optionsJson,
+      html,
+    );
+    let out = paintScreenshotScene(this, native, {
+      html,
+      css,
+      images,
+      width,
+      height,
+      optionsJson,
+      metadataJson,
+      asSvg,
+    });
+    if (opts.clip) out = cropScreenshot(out, opts.clip, asSvg, deviceScale, opts.fullPage === true);
+    if (type === "jpeg") out = native.screenshotJpeg(out, opts.quality);
     if (opts.path) await writeFile(opts.path, out);
     return out;
+  }
+
+  _clearImageCache() {
+    const token = this._imageCache?.documentToken;
+    if (token != null && this._requestState != null)
+      native.requestStateDiscardImageDocument(this._requestState, token);
+    this._imageCache = undefined;
   }
 
   // Fetch the page's `<img>` + `background-image` bytes, keyed by their raw ref
   // (the resolver key the raster expects), resolved against the page URL and
   // fetched as raw bytes over the engine's client. Best-effort: non-http pages
   // and failed/unresolvable refs are skipped; count capped to match the engine.
-  async _fetchImages() {
+  async _fetchImages(refs = native.imageUrls(this._html)) {
     if (!/^https?:/.test(this._url ?? "")) return {};
-    const images = {};
-    for (const ref of native.imageUrls(this._html).slice(0, 60)) {
-      try {
-        const abs = new URL(ref, this._url).href;
-        const buf = await native.fetchBytes(abs, this._requestState, this._url, this._cookies);
-        if (buf && buf.length) images[ref] = buf;
-      } catch {
-        /* skip an image that won't resolve/fetch */
-      }
+    const url = this._url,
+      html = this._html;
+    const requestState = this._requestState,
+      cookies = this._cookies;
+    const key = `${url}\u0000${html}`;
+    if (this._imageCache?.key !== key) {
+      this._clearImageCache();
+      this._imageCache = {
+        key,
+        images: Object.create(null),
+        documentToken:
+          this._session == null
+            ? native.requestStateImageDocument(this._requestState, url)
+            : undefined,
+      };
     }
-    return images;
+    const cache = this._imageCache;
+    const selected = [...new Set(refs.slice(0, 60))];
+    await this._seedResidentImages(cache, selected);
+    const images = cache.images;
+    const entries = await mapBounded(selected, 8, async (ref) => {
+      // Share pending work without restoring an invalidated document's cache.
+      if (Object.hasOwn(images, ref)) return images[ref];
+      images[ref] = (async () => {
+        try {
+          const abs = new URL(ref, url).href;
+          const buf = await native.fetchBytes(abs, requestState, url, cookies, cache.documentToken);
+          return buf && buf.length ? [ref, buf] : null;
+        } catch {
+          return null;
+        }
+      })();
+      return images[ref];
+    });
+    return Object.fromEntries(entries.filter(Boolean));
+  }
+
+  async _seedResidentImages(cache, refs) {
+    if (this._session == null || typeof native.liveImageAssets !== "function") return;
+    const session = this._session;
+    // Keep generation reads and cache updates ordered even for different capture plans.
+    const pending = (cache.resident ?? Promise.resolve()).then(async () => {
+      const query = JSON.stringify({
+        refs,
+        generation: cache.generation,
+        cachedRefs: refs.filter((ref) => Object.hasOwn(cache.images, ref)),
+      });
+      const snapshot = JSON.parse(await native.liveImageAssets(session, query));
+      if (snapshot.generation == null || cache.generation !== snapshot.generation)
+        cache.images = Object.create(null);
+      cache.generation = snapshot.generation;
+      for (const [ref, bytes] of Object.entries(snapshot.images))
+        if (!Object.hasOwn(cache.images, ref))
+          cache.images[ref] = Promise.resolve([ref, Buffer.from(bytes, "base64")]);
+    });
+    cache.resident = pending;
+    try {
+      await pending;
+    } finally {
+      if (cache.resident === pending) cache.resident = undefined;
+    }
   }
 
   // Concatenate the page's `<link rel="stylesheet">` bodies, resolved against the
   // page URL and fetched over the engine's client (cookies apply). Best-effort:
-  // non-http pages and failed/relative-unresolvable sheets are skipped.
+  // non-http pages and failed/relative-unresolvable sheets are skipped. The
+  // fetches are independent and run concurrently; document order of the
+  // concatenation is preserved (cascade order matters).
   async _fetchLinkedCss() {
     if (!/^https?:/.test(this._url ?? "")) return "";
-    let css = "";
-    for (const href of native.stylesheetHrefs(this._html).slice(0, 40)) {
-      try {
-        const abs = new URL(href, this._url).href;
-        const r = JSON.parse(
-          await native.fetchWithCookies(
-            abs,
-            this._cookies,
-            null,
-            null,
-            this._context._headersJson(),
-            false,
-            this._requestState,
-            JSON.stringify({ source: this._url, destination: "style", mode: "no-cors" }),
-          ),
-        );
-        if (r.status >= 200 && r.status < 300 && r.html) css += `${r.html}\n`;
-      } catch {
-        /* skip a sheet that won't resolve/fetch */
-      }
-    }
-    return css;
+    const sheets = await mapBounded(
+      native.stylesheetHrefs(this._html).slice(0, 40),
+      8,
+      async (href) => {
+        try {
+          const abs = new URL(href, this._url).href;
+          const r = JSON.parse(
+            await native.fetchWithCookies(
+              abs,
+              this._cookies,
+              null,
+              null,
+              this._context._headersJson(),
+              false,
+              this._requestState,
+              JSON.stringify({ source: this._url, destination: "style", mode: "no-cors" }),
+              null,
+              null,
+              false,
+              null,
+              this._context._maxResponseBytes,
+            ),
+          );
+          return r.status >= 200 && r.status < 300 && r.html ? `${r.html}\n` : "";
+        } catch {
+          return ""; /* skip a sheet that won't resolve/fetch */
+        }
+      },
+    );
+    return sheets.join("");
   }
 
   // Drag an element matched by `source` to one matched by `target`. Thin wrapper
@@ -2490,37 +5065,40 @@ class Page {
 
   // --- unsupported → honest throws ---
   pdf = UNSUPPORTED("page.pdf", PIXEL);
-  // page.route(url, handler) — shim-side only, by monkey-patching `fetch` inside
-  // the live isolate via an init script. The handler is serialized and re-run
-  // PER request inside the isolate against a real Request wrapper (live
-  // url/method/headers), so handlers that branch on `req.url()` work (#281).
-  // Caveat: the serialized handler loses outer-scope closures — captured host
-  // identifiers and host-side `await` on Node helpers don't cross into V8.
-  // Pattern: string (substring OR glob with `*`/`**`) or RegExp. `continue` and
-  // `fallback` let the real network through; `abort` rejects the fetch.
-  // XHR goes through this same wrapper for the common xhr.open+send path.
+  // Route callbacks run in Node through the existing asynchronous binding pump.
+  // Guest fetch/XHR await serialized decisions; route.fetch bypasses the wrapper
+  // while retaining the initiating realm's native network services.
+  async _installRoutes() {
+    this._routeBindingName ??= "__turboHostRoute_" + randomUUID().replaceAll("-", "");
+    this._routeHandlers ??= new Map();
+    for (const route of this._routes) this._routeHandlers.set(route.id, route);
+    this._routeInitScript = buildRouteInitScript(this._routes, this._routeBindingName);
+    // Retired callbacks stay until navigation so already-queued requests can settle.
+    if (this._live) {
+      await this._installNativeBindings();
+    }
+  }
   async route(urlPattern, handler) {
     this._routes = this._routes ?? [];
     this._routes.push(normalizeRoute(urlPattern, handler));
-    this._routeInitScript = buildRouteInitScript(this._routes);
+    await this._installRoutes();
     // Inject into the CURRENT live isolate too, so a route registered after
     // goto intercepts subsequent fetches without requiring a re-navigation
-    // (turbo-surf#282). The wrapper falls through to the previously-wrapped
-    // fetch for non-matches, so stacking is safe.
-    if (this._live && this._routeInitScript) {
-      await native.liveEvalEngine(this._session, this._routeInitScript);
-    }
+    // (turbo-surf#282). Updating the existing table avoids stale wrapper chains.
   }
-  // Drop a previously-registered route by its original pattern (handler ignored
-  // here because the shim collapses each route to its fulfilled payload).
-  async unroute(urlPattern) {
+  // An optional handler removes only that registration, preserving older matches.
+  async unroute(urlPattern, handler) {
     if (!this._routes) return;
-    const key = urlPattern instanceof RegExp ? urlPattern.source : String(urlPattern);
-    this._routes = this._routes.filter((r) => r.patternKey !== key);
-    this._routeInitScript = buildRouteInitScript(this._routes);
-    if (this._live && this._routeInitScript) {
-      await native.liveEvalEngine(this._session, this._routeInitScript);
-    }
+    const key =
+      typeof urlPattern === "function"
+        ? urlPattern
+        : urlPattern instanceof RegExp
+          ? urlPattern.source
+          : String(urlPattern);
+    this._routes = this._routes.filter(
+      (r) => r.patternKey !== key || (handler && r.handler !== handler),
+    );
+    await this._installRoutes();
   }
   // page.routeFromHAR(har, options?) — read a Playwright/Chrome HAR file and
   // register each `log.entries[].request.url` as a route returning that entry's
@@ -2546,30 +5124,38 @@ class Page {
       if (!matches(route.pattern)) continue;
       this._routes.push(route);
     }
-    this._routeInitScript = buildRouteInitScript(this._routes);
-    if (this._live && this._routeInitScript) {
-      await native.liveEvalEngine(this._session, this._routeInitScript);
-    }
+    await this._installRoutes();
   }
   pause = UNSUPPORTED("page.pause", "no inspector UI");
   // Persistent JS→host binding. The init-script path re-defines
   // `globalThis[name]` on every live session open (so it survives page
   // reloads + in-page navigations); when a session is already up we also
   // define it now so the test can call it before the next navigation.
-  // Host return values are not surfaced to in-page JS — see
-  // buildExposeInitScript for the trade-off.
+  async _assertBindingAvailable(name) {
+    if (this._mergedBindings().has(String(name)))
+      throw new Error(`Function "${name}" has been already registered`);
+    if (this._live) {
+      const exists = await native.liveEvalEngine(
+        this._session,
+        `globalThis.__RESULT = String(${JSON.stringify(String(name))} in globalThis);`,
+      );
+      if (exists === "true") throw new Error(`Function "${name}" has been already registered`);
+    }
+  }
   async exposeBinding(name, fn, _options) {
+    await this._assertBindingAvailable(name);
     this._bindings = this._bindings ?? new Map();
     this._bindings.set(String(name), { fn, isBinding: true });
     if (this._live) {
-      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+      await this._installNativeBindings();
     }
   }
   async exposeFunction(name, fn) {
+    await this._assertBindingAvailable(name);
     this._bindings = this._bindings ?? new Map();
     this._bindings.set(String(name), { fn, isBinding: false });
     if (this._live) {
-      await native.liveEvalEngine(this._session, `${buildExposeInitScript([String(name)])}`);
+      await this._installNativeBindings();
     }
   }
 
@@ -2580,7 +5166,7 @@ class Page {
     return (this._mouse ??= makeMouse(this));
   }
   get keyboard() {
-    return makeKeyboard(this);
+    return (this._keyboard ??= makeKeyboard(this));
   }
   get touchscreen() {
     return (this._touch ??= makeTouchscreen(this));
@@ -2593,13 +5179,13 @@ class Page {
 // adds a second click and a `dblclick`. `wheel(dx, dy)` fires a `wheel` event at
 // the current cursor target.
 function makeMouse(page) {
-  const state = { x: 0, y: 0, button: 0, buttons: 0 };
+  const state = { x: 0, y: 0, button: 0, buttons: 0, detail: 1 };
   const run = async (script) => {
     if (!page._live) return;
     await page._sessionEval(script);
   };
   const base = (extra = "") =>
-    `{ bubbles: true, cancelable: true, view: globalThis, clientX: ${state.x}, clientY: ${state.y}, screenX: ${state.x}, screenY: ${state.y}, button: ${state.button}, buttons: ${state.buttons}${extra} }`;
+    `{ bubbles: true, cancelable: true, view: globalThis, clientX: ${state.x}, clientY: ${state.y}, screenX: ${state.x}, screenY: ${state.y}, button: ${state.button}, buttons: ${state.buttons}, detail: ${state.detail}${extra} }`;
   // Re-read state.x/state.y on every dispatch — baking them at definition time
   // sent every click/down/up/wheel to document.elementFromPoint(0,0) regardless
   // of the preceding move(x, y).
@@ -2617,37 +5203,56 @@ function makeMouse(page) {
     state.y = Math.round(y);
     await run(dispatch("pointermove", "mousemove"));
   }
+  const buttonValue = (opts) => (opts?.button === "right" ? 2 : opts?.button === "middle" ? 1 : 0);
+  const buttonMask = (button) => [1, 4, 2][button];
   async function down(opts) {
-    state.button = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
-    state.buttons = 1 << state.button;
-    await run(dispatch("pointerdown", "mousedown"));
+    state.detail = opts?.clickCount ?? 1;
+    state.button = buttonValue(opts);
+    const wasPressed = state.buttons !== 0;
+    state.buttons |= buttonMask(state.button);
+    await run(dispatch(wasPressed ? "pointermove" : "pointerdown", "mousedown"));
+    if (state.button === 2) {
+      await run(`(() => {
+        const t = ${targetExpr()};
+        if (t) t.dispatchEvent(new MouseEvent("contextmenu", ${base()}));
+      })();`);
+    }
   }
   async function up(opts) {
-    const btn = opts && opts.button === "right" ? 2 : opts && opts.button === "middle" ? 1 : 0;
-    state.button = btn;
-    state.buttons = 0;
-    await run(`(() => {
-      const t = ${targetExpr()};
-      if (!t) return;
-      const PE = globalThis.PointerEvent || globalThis.MouseEvent;
-      t.dispatchEvent(new PE("pointerup", ${base(", pointerId: 1, isPrimary: true, pointerType: 'mouse'")}));
-      t.dispatchEvent(new MouseEvent("mouseup", ${base()}));
-      t.dispatchEvent(new MouseEvent("click", ${base()}));
-    })();`);
+    state.detail = opts?.clickCount ?? 1;
+    state.button = buttonValue(opts);
+    const mask = buttonMask(state.button);
+    const wasPressed = (state.buttons & mask) !== 0;
+    state.buttons &= ~mask;
+    await run(dispatch(state.buttons ? "pointermove" : "pointerup", "mouseup"));
+    if (wasPressed) {
+      await run(`(() => {
+        const t = ${targetExpr()};
+        if (!t) return;
+        const clickEvent = new MouseEvent(${JSON.stringify(state.button === 0 ? "click" : "auxclick")}, ${base()});
+        const accepted = t.dispatchEvent(clickEvent);
+        if (accepted && ${state.button === 0} && typeof __tsNs.dispatchAnchorDefault === "function")
+          __tsNs.dispatchAnchorDefault(t, clickEvent);
+      })();`);
+    }
   }
   async function click(x, y, opts) {
     await move(x, y);
-    await down(opts);
-    await up(opts);
+    for (let count = 1; count <= (opts?.clickCount ?? 1); count++) {
+      const step = { ...opts, clickCount: count };
+      await down(step);
+      if (opts?.delay) await new Promise((resolve) => setTimeout(resolve, opts.delay));
+      await up(step);
+      if (count === 2 && state.button === 0) {
+        await run(`(() => {
+          const t = ${targetExpr()};
+          if (t) t.dispatchEvent(new MouseEvent("dblclick", ${base()}));
+        })();`);
+      }
+    }
   }
   async function dblclick(x, y, opts) {
-    await click(x, y, opts);
-    await click(x, y, opts);
-    await run(`(() => {
-      const t = ${targetExpr()};
-      if (!t) return;
-      t.dispatchEvent(new MouseEvent("dblclick", ${base(", detail: 2")}));
-    })();`);
+    await click(x, y, { ...opts, clickCount: 2 });
   }
   async function wheel(dx, dy) {
     if (!page._live) return;
@@ -2668,43 +5273,113 @@ function makeTouchscreen(page) {
       if (!page._live) return;
       const xi = Math.round(x);
       const yi = Math.round(y);
-      await page._sessionEval(`(() => {
+      const result = await page._sessionEval(`(() => {
         const t = (document.elementFromPoint(${xi}, ${yi}) || document.documentElement || document.body);
         if (!t) return;
-        const PE = globalThis.PointerEvent || globalThis.MouseEvent;
         const common = { bubbles: true, cancelable: true, view: globalThis, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi} };
-        t.dispatchEvent(new PE("pointerdown", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        let touch, start, end;
         try {
-          const touchInit = { identifier: 1, target: t, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi}, pageX: ${xi}, pageY: ${yi} };
-          const Touch = globalThis.Touch;
-          const TouchEvent = globalThis.TouchEvent;
-          if (Touch && TouchEvent) {
-            const touch = new Touch(touchInit);
-            t.dispatchEvent(new TouchEvent("touchstart", { ...common, touches: [touch], targetTouches: [touch], changedTouches: [touch] }));
-            t.dispatchEvent(new TouchEvent("touchend", { ...common, touches: [], targetTouches: [], changedTouches: [touch] }));
-          } else {
-            t.dispatchEvent(new Event("touchstart", common));
-            t.dispatchEvent(new Event("touchend", common));
-          }
-        } catch (_) {
-          t.dispatchEvent(new Event("touchstart", common));
-          t.dispatchEvent(new Event("touchend", common));
+          touch = new Touch({ identifier: 1, target: t, clientX: ${xi}, clientY: ${yi}, screenX: ${xi}, screenY: ${yi}, pageX: ${xi}, pageY: ${yi} });
+          start = new TouchEvent("touchstart", { ...common, touches: [touch], targetTouches: [touch], changedTouches: [touch] });
+          end = new TouchEvent("touchend", { ...common, touches: [], targetTouches: [], changedTouches: [touch] });
+          if (start.touches?.length !== 1 || start.changedTouches?.length !== 1 || end.touches?.length !== 0 || end.changedTouches?.length !== 1) throw new Error("missing touch lists");
+        } catch {
+          globalThis.__RESULT = "TOUCH_UNAVAILABLE";
+          return;
         }
+        const PE = globalThis.PointerEvent || globalThis.MouseEvent;
+        t.dispatchEvent(new PE("pointerdown", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
+        const accepted = t.dispatchEvent(start);
         t.dispatchEvent(new PE("pointerup", { ...common, pointerId: 1, isPrimary: true, pointerType: 'touch' }));
-        t.dispatchEvent(new MouseEvent("click", common));
+        const ended = t.dispatchEvent(end);
+        if (accepted && ended) {
+          for (const type of ["mousedown", "mouseup", "click"])
+            t.dispatchEvent(new MouseEvent(type, { ...common, button: 0, detail: 1 }));
+        }
+        globalThis.__RESULT = "OK";
       })();`);
+      if (result === "TOUCH_UNAVAILABLE")
+        throw new Error(
+          "turbo-surf: touchscreen.tap unavailable — native Touch/TouchEvent payloads unsupported",
+        );
     },
   };
 }
 
-// Drag `srcIdx` to `dstIdx` (live `querySelectorAll('*')` positions). Fires the
+function screenshotMaskIndices(page, masks) {
+  if (masks == null) return [];
+  if (!Array.isArray(masks)) throw new Error("Screenshot mask must be an array of locators");
+  if (!masks.length) return [];
+  const all = JSON.parse(native.query(page._html, "*", "css"));
+  const indices = new Map(all.map((match, index) => [match.node, index]));
+  const selected = new Set();
+  for (const locator of masks) {
+    if (!(locator instanceof Locator) || locator._page !== page) {
+      throw new Error("Screenshot mask locators must belong to this page; frame masks unavailable");
+    }
+    for (const match of locator._all()) {
+      const index = indices.get(match.node);
+      if (index != null) selected.add(index);
+    }
+  }
+  return [...selected];
+}
+
+function screenshotDeviceScale(options, deviceScale = 1) {
+  if (options.scale != null && !["css", "device"].includes(options.scale)) {
+    throw new Error("Screenshot scale must be css or device");
+  }
+  return options.scale === "css" ? 1 : deviceScale;
+}
+
+function screenshotEncoding(opts) {
+  const extension = typeof opts.path === "string" ? opts.path.split(".").pop().toLowerCase() : "";
+  const type =
+    opts.type ?? ({ svg: "svg", jpg: "jpeg", jpeg: "jpeg", png: "png" }[extension] || "png");
+  if (!["png", "jpeg", "svg"].includes(type)) throw new Error("Unsupported screenshot type");
+  if (
+    opts.quality != null &&
+    (type !== "jpeg" || !Number.isInteger(opts.quality) || opts.quality < 0 || opts.quality > 100)
+  ) {
+    throw new Error(
+      "Screenshot quality is only supported for JPEG and must be an integer from 0 to 100",
+    );
+  }
+  return type;
+}
+
+function cropScreenshot(png, clip, asSvg, deviceScale = 1, fullPage = false) {
+  if (asSvg) throw new Error("Screenshot clip is unavailable for SVG output");
+  const { x, y, width, height } = clip;
+  if (
+    ![x, y, width, height].every(Number.isFinite) ||
+    x < 0 ||
+    y < 0 ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    throw new Error(
+      "Screenshot clip requires nonnegative coordinates and positive finite dimensions",
+    );
+  }
+  // Playwright truncates viewport clip dimensions in CSS pixels before device scaling.
+  return native.screenshotCrop(
+    png,
+    Math.round(x * deviceScale),
+    Math.round(y * deviceScale),
+    Math.round((fullPage ? width : Math.floor(width + 1e-3)) * deviceScale),
+    Math.round((fullPage ? height : Math.floor(height + 1e-3)) * deviceScale),
+  );
+}
+
+// Drag `srcIdx` to `dstIdx` (trusted locator-index positions). Fires the
 // full pointer+mouse sequence on source then target, plus the HTML5 drag/drop
 // lifecycle (dragstart on source → dragenter/dragover on target → drop on target
 // → dragend on source), all sharing one DataTransfer so a real app's handlers
 // can set/read types and data. No compositor, so no OS drag image (#227).
 function dragScript(srcIdx, dstIdx) {
   return `(() => {
-    const all = document.querySelectorAll('*');
+    const all = __tsNs.tcLocatorAll();
     const src = all[${srcIdx}];
     const dst = all[${dstIdx}];
     if (!src || !dst) { globalThis.__RESULT = "NO_MATCH"; return; }
@@ -2720,57 +5395,50 @@ function dragScript(srcIdx, dstIdx) {
     src.dispatchEvent(new PE("pointerdown", pointerOpts("pointerdown")));
     src.dispatchEvent(new MouseEvent("mousedown", mouseOpts(1)));
     const DE = globalThis.DragEvent || globalThis.MouseEvent;
-    src.dispatchEvent(new DE("dragstart", dragOpts()));
+    if (!src.dispatchEvent(new DE("dragstart", dragOpts()))) {
+      src.dispatchEvent(new PE("pointerup", pointerOpts("pointerup")));
+      src.dispatchEvent(new MouseEvent("mouseup", mouseOpts(0)));
+      globalThis.__RESULT = "OK";
+      return;
+    }
     dst.dispatchEvent(new PE("pointermove", pointerOpts("pointermove")));
     dst.dispatchEvent(new MouseEvent("mousemove", mouseOpts(1)));
     dst.dispatchEvent(new DE("dragenter", dragOpts()));
-    dst.dispatchEvent(new DE("dragover", dragOpts()));
-    dst.dispatchEvent(new DE("drop", dragOpts()));
+    if (!dst.dispatchEvent(new DE("dragover", dragOpts()))) {
+      dst.dispatchEvent(new DE("drop", dragOpts()));
+    }
     src.dispatchEvent(new DE("dragend", dragOpts()));
     dst.dispatchEvent(new PE("pointerup", pointerOpts("pointerup")));
     dst.dispatchEvent(new MouseEvent("mouseup", mouseOpts(0)));
     globalThis.__RESULT = "OK";
   })();`;
 }
-// Keyboard: no hardware, but key events are real JS. Dispatch keydown/keyup (with a
-// keypress for printable keys) on the focused element (or document) in the live app —
-// covers Escape-to-close-popover, Enter-to-submit, etc. No-op without a live session.
-function makeKeyboard(page) {
-  const dispatch = async (key) => {
-    if (!page._live) return;
-    const k = JSON.stringify(String(key));
-    await page._sessionEval(`(() => {
-      const key = ${k};
-      const el = document.activeElement || document.body || document.documentElement;
-      if (!el) return;
-      const opt = { bubbles: true, cancelable: true, key, code: key, view: globalThis };
-      el.dispatchEvent(new KeyboardEvent("keydown", opt));
-      if (key.length === 1) el.dispatchEvent(new KeyboardEvent("keypress", opt));
-      el.dispatchEvent(new KeyboardEvent("keyup", opt));
-    })();`);
-  };
-  return {
-    press: (key) => dispatch(key),
-    down: (key) => dispatch(key),
-    up: async () => {},
-    type: async (text) => {
-      for (const ch of String(text)) await dispatch(ch);
-    },
-    insertText: async (text) => dispatch(String(text)),
-  };
-}
-
-function makeResponse(r) {
+function makeResponse(r, ensureOpen = () => {}) {
+  const headers = {};
+  const entries = Array.isArray(r.headers) ? r.headers : Object.entries(r.headers ?? {});
+  for (const [key, value] of entries) {
+    const name = key.toLowerCase();
+    headers[name] =
+      headers[name] === undefined
+        ? value
+        : `${headers[name]}${name === "set-cookie" ? "\n" : ", "}${value}`;
+  }
   return {
     status: () => r.status,
     ok: () => r.status >= 200 && r.status < 300,
     url: () => r.finalUrl,
-    statusText: () => "",
-    headers: () => r.headers ?? {},
+    statusText: () => r.statusText ?? "",
+    headers: () => ({ ...headers }),
+    async body() {
+      ensureOpen();
+      return Buffer.from(r.bodyBytes ?? r.html ?? "");
+    },
     async text() {
+      ensureOpen();
       return r.html ?? "";
     },
     async json() {
+      ensureOpen();
       return JSON.parse(r.html ?? "null");
     },
   };
@@ -2778,31 +5446,94 @@ function makeResponse(r) {
 
 // A Playwright-like Response built from a captured live-app fetch (net-log entry),
 // for `page.on('response')` subscribers.
-function makeNetResponse(e) {
-  const req = {
+const requestRedirects = new WeakMap();
+function makeCapturedRequest(e, frame, response = () => null) {
+  const requestHeaders = Object.fromEntries(
+    Object.entries(e.request?.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  const postData = e.request?.bodyBytes == null ? null : Buffer.from(e.request.bodyBytes);
+  const redirects = { from: null, to: null };
+  const request = {
     url: () => e.url,
     method: () => e.method || "GET",
-    headers: () => (e.contentType ? { "content-type": e.contentType } : {}),
-    postData: () => null,
-    resourceType: () => "fetch",
+    headers: () => ({ ...requestHeaders }),
+    async allHeaders() {
+      return { ...requestHeaders };
+    },
+    postData: () => postData?.toString("utf8") ?? null,
+    postDataBuffer: () => (postData == null ? null : Buffer.from(postData)),
+    postDataJSON: () => (postData == null ? null : JSON.parse(postData.toString("utf8"))),
+    redirectedFrom: () => redirects.from,
+    redirectedTo: () => redirects.to,
+    resourceType: () => e.context?.resourceType ?? "fetch",
+    isNavigationRequest: () => !!e.context?.navigation,
+    frame() {
+      if (!frame) throw new Error("Request frame is unavailable");
+      return frame;
+    },
+    async response() {
+      return e.status === 0 ? null : response();
+    },
+    failure: () => (e.status === 0 || e.error ? { errorText: e.error || "net::ERR_FAILED" } : null),
   };
-  return {
+  requestRedirects.set(request, redirects);
+  return request;
+}
+
+function makeNetResponse(e, frame, lifecycle) {
+  const entries = e.headers ?? (e.contentType ? [["content-type", e.contentType]] : []);
+  const all = Object.create(null);
+  for (const [key, value] of entries) {
+    const name = key.toLowerCase();
+    all[name] =
+      all[name] === undefined
+        ? value
+        : `${all[name]}${name === "set-cookie" ? "\n" : ", "}${value}`;
+  }
+  let response;
+  const req = makeCapturedRequest(e, frame, () => response);
+  response = {
     url: () => e.url,
     status: () => e.status,
-    statusText: () => "",
+    statusText: () => e.statusText ?? "",
     ok: () => !!e.ok,
-    headers: () => (e.contentType ? { "content-type": e.contentType } : {}),
+    headers: () =>
+      Object.fromEntries(
+        Object.entries(all).filter(([name]) => !["set-cookie", "set-cookie2"].includes(name)),
+      ),
+    async allHeaders() {
+      return { ...all };
+    },
+    async headerValue(name) {
+      return all[name.toLowerCase()] ?? null;
+    },
+    async headersArray() {
+      return entries.map(([name, value]) => ({ name, value }));
+    },
+    async body() {
+      await lifecycle?.promise;
+      if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
+      if (e.bodyIncomplete) throw new Error("Response body is incomplete");
+      return Buffer.from(e.bodyBytes ?? e.body ?? "");
+    },
     async text() {
+      await lifecycle?.promise;
+      if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       return e.body ?? "";
     },
     async json() {
+      await lifecycle?.promise;
+      if (e.bodyUnavailable) throw new Error("Redirect response body is unavailable");
       return JSON.parse(e.body ?? "null");
     },
     request: () => req,
+    frame: () => req.frame(),
     async finished() {
+      await lifecycle?.promise;
       return null;
     },
   };
+  return response;
 }
 
 // A Playwright-like Download built from a captured client-side export (a `<a download>`
@@ -2812,24 +5543,28 @@ function makeDownload(entry) {
   const fs = require("node:fs");
   const os = require("node:os");
   const path = require("node:path");
+  const filename =
+    path.basename((entry.filename || "download").replaceAll("\\", "/")) || "download";
+  const content =
+    entry.bodyBytes == null ? Buffer.from(entry.content ?? "") : Buffer.from(entry.bodyBytes);
   let cached = null;
   const writeTemp = () => {
     if (cached) return cached;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-surf-dl-"));
-    const p = path.join(dir, entry.filename || "download");
-    fs.writeFileSync(p, entry.content ?? "");
+    const p = path.join(dir, filename);
+    fs.writeFileSync(p, content);
     cached = p;
     return p;
   };
   return {
-    suggestedFilename: () => entry.filename || "download",
+    suggestedFilename: () => filename,
     url: () => entry.url || "",
     async path() {
       return writeTemp();
     },
     async saveAs(dest) {
       const fs2 = require("node:fs");
-      fs2.writeFileSync(dest, entry.content ?? "");
+      fs2.writeFileSync(dest, content);
     },
     async failure() {
       return null;
@@ -2845,73 +5580,132 @@ function makeDownload(entry) {
 // ---------------------------------------------------------------------------
 // BrowserContext
 // ---------------------------------------------------------------------------
-class BrowserContext {
-  constructor(opts = {}) {
-    this._closed = false;
-    // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
-    // so every supported key can reach fixture-constructed contexts without
-    // the test code having to pass it explicitly. In-suite `opts` still wins
-    // over the project block.
-    let projectUse = {};
+function hasContextPreferences(context) {
+  return (
+    context._animations === "disabled" ||
+    context._colorScheme ||
+    context._reducedMotion ||
+    context._locale ||
+    Object.keys(context._headers).length ||
+    context._httpCredentials ||
+    context._geolocation ||
+    context._permissionGrants.length
+  );
+}
+
+function initializeContextRendering(context, merged) {
+  validateArtifactOptions(merged);
+  context._animations = animationPolicy(merged.animations);
+  context._deviceScaleFactor = merged.deviceScaleFactor ?? 1;
+  if (!Number.isFinite(context._deviceScaleFactor) || context._deviceScaleFactor <= 0)
+    throw new Error("deviceScaleFactor must be finite and positive");
+  context.tracing = Object.fromEntries(
+    ["start", "startChunk", "stopChunk", "stop", "group", "groupEnd"].map((method) => [
+      method,
+      UNSUPPORTED(`tracing.${method}`, "no-browser engine has no Playwright trace recorder"),
+    ]),
+  );
+  if (merged.offline !== undefined && typeof merged.offline !== "boolean")
+    throw new Error("offline must be a boolean");
+  context._maxResponseBytes = responseBudget(merged.maxResponseBytes);
+}
+function initializeContextDefaults(context, merged, cookies) {
+  // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
+  // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
+  context._defaultTimeout = merged.actionTimeout;
+  context._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
+  context._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
+  context._cookies = JSON.stringify(cookies);
+}
+function initializeContextStorage(context, merged) {
+  context._requestState = native.requestStateNew?.();
+  const origins = merged.storageState?.origins ?? [];
+  if (origins.length) {
     try {
-      projectUse = process.env.TURBO_PW_USE ? JSON.parse(process.env.TURBO_PW_USE) : {};
-    } catch {
-      /* ignore malformed env — a project without a use block is the common case */
+      native.requestStateImportStorage(context._requestState, encodeStorageOrigins(origins));
+    } catch (error) {
+      native.requestStateClose(context._requestState);
+      throw error;
     }
-    const merged = { ...projectUse, ...opts };
+  }
+}
+function initializeContextIdentity(context, merged) {
+  // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
+  context._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
+  context._headers = merged.extraHTTPHeaders ?? {};
+  context._auxiliaryPolicy = merged.auxiliaryPolicy;
+  context._viewport = merged.viewport ?? { width: 1280, height: 720 };
+  context._testIdAttribute =
+    merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
+}
+function initializeContextPreferences(context, merged, permissionGrant, geolocation) {
+  // Capture-only remaining per-project `use` keys so a suite that reads them
+  // from the context (via a getter or in-suite introspection) sees the real
+  // project value. Timezone and HTTPS settings retain their current capability
+  // limits; permission and location options are applied through native context state.
+  context._httpCredentials = merged.httpCredentials ?? null;
+  context._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
+  context._colorScheme = merged.colorScheme ?? null;
+  context._reducedMotion = merged.reducedMotion ?? null;
+  context._permissions = merged.permissions ?? [];
+  context._geolocation = geolocation;
+  context._permissionGrants = permissionGrant.permissions.length ? [permissionGrant] : [];
+  context._timezoneId = merged.timezoneId ?? null;
+  context._offline = merged.offline ?? false;
+  if (context._offline) native.requestStateSetOffline(context._requestState, true);
+  context._screen = merged.screen ?? null;
+}
+
+function mergedContextOptions(opts) {
+  // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
+  // so every supported key can reach fixture-constructed contexts without
+  // the test code having to pass it explicitly. In-suite `opts` still wins
+  // over the project block.
+  let projectUse = {};
+  try {
+    projectUse = process.env.TURBO_PW_USE ? JSON.parse(process.env.TURBO_PW_USE) : {};
+  } catch {
+    /* ignore malformed env — a project without a use block is the common case */
+  }
+  return { ...projectUse, ...opts };
+}
+
+class BrowserContext {
+  constructor(opts = {}, browser = null) {
+    this._closed = false;
+    this._browser = browser;
+    const merged = mergedContextOptions(opts);
+    initializeContextRendering(this, merged);
     const cookies = merged.storageState?.cookies ?? opts.storageState?.cookies ?? [];
-    // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
-    // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
-    this._baseURL = merged.baseURL ?? process.env.TURBO_SHIM_BASE_URL ?? null;
-    // Locale: real Playwright runs `devices['Desktop Chrome']` (locale en-US), and the
-    // app picks UI language from the `NEXT_LOCALE` cookie (next-intl) — with none it
-    // defaults to es-MX, so English text/role-name assertions miss. Seed NEXT_LOCALE to
-    // match the browser locale (default en-US) unless the caller already provided one.
-    // NOTE: the settings suite expects the es-MX default (Chrome shows es-MX there) — a known
-    // parity gap; the post-login NEXT_LOCALE=en-US source is not yet pinned. See memory.
-    this._locale = merged.locale ?? process.env.TURBO_SHIM_LOCALE ?? null;
-    if (this._locale && !cookies.some((c) => c.name === "NEXT_LOCALE")) {
-      let host = "localhost";
-      try {
-        host = new URL(this._baseURL || "http://localhost").hostname;
-      } catch {
-        /* keep */
-      }
-      cookies.push({
-        name: "NEXT_LOCALE",
-        value: this._locale,
-        domain: host,
-        path: "/",
-        secure: false,
-        http_only: false,
-        same_site: "lax",
-        expires_at: 1900000000000,
-      });
-    }
-    this._cookies = JSON.stringify(cookies);
-    this._requestState = native.requestStateNew?.();
-    // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
-    this._userAgent = merged.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
-    this._headers = merged.extraHTTPHeaders ?? {};
-    this._viewport = merged.viewport ?? { width: 1280, height: 720 };
-    this._testIdAttribute =
-      merged.testIdAttribute ?? process.env.TURBO_SHIM_TESTID_ATTR ?? "data-testid";
-    // Capture-only remaining per-project `use` keys so a suite that reads them
-    // from the context (via a getter or in-suite introspection) sees the real
-    // project value. The engine doesn't act on HTTPS/permissions/geolocation
-    // today — these are present so a project's config doesn't silently vanish.
-    this._httpCredentials = merged.httpCredentials ?? null;
-    this._ignoreHTTPSErrors = merged.ignoreHTTPSErrors ?? false;
-    this._colorScheme = merged.colorScheme ?? null;
-    this._permissions = merged.permissions ?? [];
-    this._geolocation = merged.geolocation ?? null;
-    this._timezoneId = merged.timezoneId ?? null;
-    this._offline = merged.offline ?? false;
-    this._screen = merged.screen ?? null;
+    initializeContextDefaults(this, merged, cookies);
+    const permissionGrant = contextPermissionGrant(merged.permissions ?? []);
+    const geolocation = contextGeolocation(merged.geolocation);
+    initializeContextStorage(this, merged);
+    initializeContextIdentity(this, merged);
+    initializeContextPreferences(this, merged, permissionGrant, geolocation);
     this._initScripts = [];
     this._bindings = new Map();
     this._pages = [];
+    this._actors = new Map();
     this._listeners = new Map();
+    this._pageEventListeners = new WeakMap();
+    if (hasContextPreferences(this)) this._configureNative();
+  }
+  _configureNative() {
+    native.requestStateConfigure(
+      this._requestState,
+      JSON.stringify({
+        colorScheme: this._colorScheme,
+        animations: this._animations,
+        reducedMotion: this._reducedMotion,
+        locale: this._locale,
+        extraHTTPHeaders: this._headers,
+        httpCredentials: this._httpCredentials,
+        geolocation: this._geolocation,
+        permissions: this._permissionGrants,
+      }),
+    );
+    for (const page of this._pages) if (!page._closed) page._configureNative();
   }
   _headersJson() {
     // Merge the context User-Agent into the request headers (so goto/request fetches
@@ -2923,65 +5717,321 @@ class BrowserContext {
     if (this._closed) throw new Error("browser context is closed");
     const p = new Page(this);
     this._pages.push(p);
+    for (const event of NETWORK_EVENTS) this._syncPageEvent(event);
+    this._emit("page", p);
     return p;
   }
+  _createActorHub(page, state) {
+    const actor = new LiveActorHub(native, state, page, {
+      actorClosed: (actor) => this._actors.delete(actor),
+      unsupported: () => {
+        page._updateNetworkPump();
+        page._emit("__auxiliaryUnsupported");
+      },
+      root: (target) => {
+        page._targetId = target;
+      },
+      create: (info, alias) => this._adoptNativePage(actor, info, alias),
+      initialDocumentComplete: (target) => target._nativeLoad().observe("load", { emit: false }),
+      created: (child, event) => {
+        this._emit("page", child);
+        const source = actor.page(event.sourcePage);
+        if (source) source._emit("popup", child);
+      },
+      navigated: (target, event) => target._didNativeNavigate(event),
+      historyChanged: (target, event) => target._didNativeHistoryChanged(event),
+      lifecycle: (target, event) =>
+        target._nativeLoad().observe(event.kind, { emit: !target._initializingForSetContent }),
+      closed: (target) => target._didNativeClose(),
+      network: (target, entry, previous) =>
+        target._consumeNetworkEvents(
+          [entry],
+          target._session ?? target._openingNetworkId,
+          previous,
+        ),
+      failure: (error) => {
+        for (const target of actor.pages.values())
+          if (!target._closed) {
+            target._failPendingNetworkResponses(error.message);
+            target._emit("pageerror", error);
+          }
+      },
+    });
+    return actor;
+  }
+
+  async _attachActor(page, session, opening = false) {
+    let actor = page._actorHub;
+    let initial;
+    if (!actor) {
+      initial = JSON.parse(native.liveAuxiliaryState(session));
+      actor = this._createActorHub(page, initial);
+      this._actors.set(initial.actor, actor);
+    }
+    actor.opening = opening;
+    page._actorHub = actor;
+    page._targetId = actor.root;
+    page._stopNetworkPump();
+    if (initial) await actor.initialize(initial);
+    else await actor.drain(!opening);
+    if (!opening) {
+      for (const alias of actor.retiringAliases ?? []) native.liveClose(alias);
+      actor.retiringAliases?.clear();
+      for (const target of new Set([page, ...actor.pages.values()])) {
+        if (target._closed || target._session == null) continue;
+        target._html = native.liveSerialize(target._session);
+        if (target._openingConsoleDiscards?.length)
+          native.liveNetworkLogDiscardHandles(
+            target._session,
+            JSON.stringify(target._openingConsoleDiscards.splice(0)),
+          );
+      }
+    }
+    actor.start();
+  }
+
+  _adoptNativePage(actor, info, alias) {
+    if (this._closed && !info.closed) throw new Error("Browser context is closed");
+    const page = new Page(this);
+    page._actorHub = actor;
+    page._targetId = info.target;
+    page._creationSource = info.sourcePage;
+    page._session = alias;
+    page._url = info.url;
+    page._closed = info.closed;
+    page._hydrated = alias != null;
+    if (alias != null && !actor.opening) page._html = native.liveSerialize(alias);
+    this._pages.push(page);
+    for (const event of NETWORK_EVENTS) this._syncPageEvent(event);
+    return page;
+  }
+
   pages() {
-    return this._pages;
+    return [...this._pages];
   }
   storageState() {
-    return { cookies: JSON.parse(this._cookies), origins: [] };
+    return {
+      cookies: JSON.parse(this._cookies),
+      origins: decodeStorageOrigins(native.requestStateStorage(this._requestState)),
+    };
   }
   addCookies(cookies) {
-    const existing = JSON.parse(this._cookies);
-    this._cookies = JSON.stringify([...existing, ...cookies]);
+    const merged = new Map();
+    for (const cookie of [...JSON.parse(this._cookies), ...cookies.map(nativeCookieRecord)]) {
+      const domain = String(cookie.domain ?? "")
+        .toLowerCase()
+        .replace(/^\./, "");
+      merged.set(JSON.stringify([cookie.name, domain, cookie.path || "/"]), cookie);
+    }
+    this._setCookies(JSON.stringify([...merged.values()]));
   }
-  async cookies() {
-    return JSON.parse(this._cookies);
+  async cookies(urls) {
+    const cookies = JSON.parse(this._cookies);
+    if (urls == null || (Array.isArray(urls) && urls.length === 0)) return cookies;
+    const targets = (Array.isArray(urls) ? urls : [urls]).map((url) => new URL(url));
+    return cookies.filter((cookie) => targets.some((url) => cookieMatchesUrl(cookie, url)));
   }
-  async clearCookies() {
-    this._cookies = "[]";
+  _setCookies(cookies) {
+    this._cookies = cookies;
+    for (const page of this._pages) {
+      if (page._session != null) native.liveSetCookies(page._session, cookies);
+    }
+  }
+  async clearCookies(filters = {}) {
+    this._setCookies(
+      JSON.stringify(
+        JSON.parse(this._cookies).filter((cookie) => !cookieMatchesFilter(cookie, filters)),
+      ),
+    );
+  }
+  async _syncAuxiliaryBootstrap() {
+    const guest = this._initScripts.map((source) => `try{ ${source} }catch(e){}`).join("\n");
+    const engine = buildExposeInitScript([...this._bindings.keys()]);
+    for (const actor of this._actors.values()) {
+      if (!actor.active) continue;
+      await actor.ready;
+      if (actor.capability === "unsupported") continue;
+      if (actor.capability !== "supported")
+        throw new Error("Native auxiliary capability is pending");
+      if (this._closed) throw new Error("Browser context is closed");
+      await native.liveAuxiliaryConfigure(actor.actor, guest, engine);
+    }
   }
   async addInitScript(script, arg) {
+    if (this._closed) throw new Error("Browser context is closed");
     this._initScripts.push(evalSource(script, arg));
+    await this._syncAuxiliaryBootstrap();
+    for (const page of this._pages) if (page._live) await page._installNativeBindings();
   }
   async setExtraHTTPHeaders(headers) {
-    this._headers = { ...this._headers, ...headers };
+    this._headers = { ...headers };
+    this._configureNative();
   }
-  async setDefaultTimeout() {}
-  async setDefaultNavigationTimeout() {}
-  async grantPermissions() {}
-  async clearPermissions() {}
-  async setGeolocation() {}
-  async setOffline() {}
+  setDefaultTimeout(timeout) {
+    this._defaultTimeout = timeout;
+  }
+  async setDefaultNavigationTimeout(timeout) {
+    this._navigationTimeout = timeout;
+  }
+  async _syncEmulation() {
+    this._configureNative();
+    configureActorGeolocation(native, this._actors, this._geolocation, this._permissionGrants);
+    for (const page of this._pages) {
+      if (!page._closed && page._session != null)
+        await native.liveEvalEngine(page._session, "__tsNs.syncNetworkState();", true);
+    }
+  }
+  async grantPermissions(permissions, options = {}) {
+    if (this._closed) throw new Error("browser context is closed");
+    const grant = contextPermissionGrant(permissions, options);
+    this._permissionGrants = mergePermissionGrant(this._permissionGrants, grant);
+    await this._syncEmulation();
+  }
+  async clearPermissions() {
+    if (this._closed) throw new Error("browser context is closed");
+    this._permissionGrants = [];
+    await this._syncEmulation();
+  }
+  async setGeolocation(geolocation) {
+    if (this._closed) throw new Error("browser context is closed");
+    this._geolocation = contextGeolocation(geolocation);
+    await this._syncEmulation();
+  }
+  async setOffline(offline) {
+    if (typeof offline !== "boolean") throw new Error("offline must be a boolean");
+    const update = async () => {
+      if (this._closed) throw new Error("browser context is closed");
+      if (this._offline === offline) return;
+      native.requestStateSetOffline(this._requestState, offline);
+      this._offline = offline;
+      for (const page of this._pages) {
+        if (!page._closed && page._session != null)
+          await native.liveEvalEngine(page._session, "__tsNs.syncNetworkState();", true);
+      }
+    };
+    const pending = (this._offlineUpdate ?? Promise.resolve()).then(update);
+    this._offlineUpdate = pending.catch(() => {});
+    await pending;
+  }
   on(event, fn) {
+    if (typeof fn !== "function") throw new TypeError("Event listener must be a function");
     const arr = this._listeners.get(event) ?? [];
     arr.push(fn);
     this._listeners.set(event, arr);
+    this._syncPageEvent(event);
     return this;
   }
-  off() {
+  off(event, fn) {
+    const arr = this._listeners.get(event);
+    const index =
+      arr?.findLastIndex((listener) => listener === fn || listener.listener === fn) ?? -1;
+    if (index >= 0) this._listeners.set(event, [...arr.slice(0, index), ...arr.slice(index + 1)]);
+    this._syncPageEvent(event);
     return this;
   }
   once(event, fn) {
-    return this.on(event, fn);
+    const once = (payload) => {
+      this.off(event, once);
+      fn.call(this, payload);
+    };
+    once.listener = fn;
+    return this.on(event, once);
   }
-  request() {
+  _emit(event, payload) {
+    for (const fn of this._listeners.get(event) ?? []) fn.call(this, payload);
+  }
+  _syncPageEvent(event) {
+    if (!NETWORK_EVENTS.includes(event)) return;
+    for (const page of this._pages) {
+      let listeners = this._pageEventListeners.get(page);
+      if (!listeners) {
+        listeners = new Map();
+        this._pageEventListeners.set(page, listeners);
+      }
+      const previous = listeners.get(event);
+      const needed = this._listeners.get(event)?.length > 0;
+      if (needed && !previous) {
+        const listener = (payload) => this._emit(event, payload);
+        listeners.set(event, listener);
+        page.on(event, listener);
+      } else if (!needed && previous) {
+        page.off(event, previous);
+        listeners.delete(event);
+      }
+    }
+  }
+  waitForEvent(event, options = {}) {
+    if (this._closed) return Promise.reject(new Error("Browser context is closed"));
+    const predicate = typeof options === "function" ? options : (options.predicate ?? (() => true));
+    const timeout = typeof options === "function" ? 30000 : (options.timeout ?? 30000);
+    return new Promise((resolve, reject) => {
+      let timer;
+      let settled = false;
+      const finish = (error, payload, failed = error != null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.off(event, onEvent);
+        this.off("close", onClose);
+        if (failed) reject(error);
+        else resolve(payload);
+      };
+      const onEvent = async (payload) => {
+        try {
+          if (await predicate(payload)) finish(null, payload);
+        } catch (error) {
+          finish(error, undefined, true);
+        }
+      };
+      const onClose = () => {
+        if (event !== "close") finish(new Error("Browser context closed while waiting for event"));
+      };
+      this.on(event, onEvent);
+      this.on("close", onClose);
+      if (timeout !== 0)
+        timer = setTimeout(
+          () =>
+            finish(
+              Object.assign(new Error(`Timeout waiting for context event: ${event}`), {
+                name: "TimeoutError",
+              }),
+            ),
+          timeout,
+        );
+    });
+  }
+  get request() {
     // Lazy: build one APIRequestContext per BrowserContext, bound to its
     // cookie jar (reads + Set-Cookie writeback).
     if (!this._requestCtx) {
-      this._requestCtx = request.newContext({ _browserContext: this });
+      this._requestCtx = request.newContext({
+        _browserContext: this,
+        baseURL: this._baseURL,
+        userAgent: this._userAgent,
+      });
     }
     return this._requestCtx;
   }
   browser() {
-    return browserStub;
+    return this._browser ?? browserStub;
   }
   async close() {
     if (this._closed) return;
     this._closed = true;
-    for (const page of this._pages) await page.close();
+    const outcomes = await Promise.allSettled(
+      [...this._actors.values()].map((actor) => actor.close()),
+    );
+    this._actors.clear();
+    outcomes.push(...(await Promise.allSettled(this.pages().map((page) => page.close()))));
+    await this._requestCtx?.dispose();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
+    this._browser?._forgetContext(this);
+    this._emit("close", this);
+    const errors = outcomes
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason);
+    if (errors.length) throw new AggregateError(errors, "Browser context cleanup failed");
   }
   route = UNSUPPORTED("context.route", NETIO);
   routeFromHAR = UNSUPPORTED("context.routeFromHAR", NETIO);
@@ -2989,51 +6039,77 @@ class BrowserContext {
   // Context-level expose: every Page in this context (and future ones) sees
   // the binding; live pages pick it up on the next navigation. On an open
   // session we also define it now so the current Page can use it immediately.
+  async _assertBindingAvailable(name) {
+    if (this._bindings.has(String(name)))
+      throw new Error(`Function "${name}" has been already registered`);
+    for (const page of this._pages) await page._assertBindingAvailable(name);
+  }
   async exposeBinding(name, fn, _options) {
+    await this._assertBindingAvailable(name);
     this._bindings.set(String(name), { fn, isBinding: true });
+    await this._syncAuxiliaryBootstrap();
     for (const page of this._pages) {
       if (page._live) {
-        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+        await page._installNativeBindings();
       }
     }
   }
   async exposeFunction(name, fn) {
+    await this._assertBindingAvailable(name);
     this._bindings.set(String(name), { fn, isBinding: false });
+    await this._syncAuxiliaryBootstrap();
     for (const page of this._pages) {
       if (page._live) {
-        await native.liveEvalEngine(page._session, `${buildExposeInitScript([String(name)])}`);
+        await page._installNativeBindings();
       }
     }
   }
 }
 
-const browserStub = {
-  version: () => "turbo-surf",
-  browserType: () => ({ name: () => "chromium" }),
-  async newContext(opts) {
-    return new BrowserContext(opts);
-  },
-  async newPage(opts) {
-    const page = await new BrowserContext(opts).newPage();
-    page._ownsContext = true;
-    return page;
-  },
-  contexts: () => [],
-  isConnected: () => true,
-  async close() {},
-};
+function makeBrowser() {
+  const contexts = new Set();
+  let connected = true;
+  const ensureConnected = () => {
+    if (!connected) throw new Error("Target page, context or browser has been closed");
+  };
+  return {
+    version: () => "turbo-surf",
+    browserType: () => ({ name: () => "chromium" }),
+    async newContext(opts) {
+      ensureConnected();
+      const context = new BrowserContext(opts, this);
+      contexts.add(context);
+      return context;
+    },
+    async newPage(opts) {
+      const page = await (await this.newContext(opts)).newPage();
+      page._ownsContext = true;
+      return page;
+    },
+    _forgetContext: (context) => contexts.delete(context),
+    contexts: () => [...contexts],
+    isConnected: () => connected,
+    async close() {
+      if (!connected) return;
+      connected = false;
+      await Promise.all(Array.from(contexts, (context) => context.close()));
+    },
+  };
+}
+
+const browserStub = makeBrowser();
 
 // Minimal browser entry for drop-in feel: chromium.launch() → newPage().
 export const chromium = {
   name: () => "chromium",
   async launch() {
-    return browserStub;
+    return makeBrowser();
   },
   async launchPersistentContext(_dir, opts) {
-    return new BrowserContext(opts);
+    return makeBrowser().newContext(opts);
   },
   async connect() {
-    return browserStub;
+    return makeBrowser();
   },
 };
 export const firefox = chromium;
@@ -3058,7 +6134,13 @@ class BaseExpect {
     this._neg = !!negated;
   }
   _ok(pass, message) {
-    if (pass === this._neg) throw new Error(message);
+    if (pass !== this._neg) return;
+    if (this._retryError) {
+      throw new Error(`${message}: ${this._retryError.message ?? this._retryError}`, {
+        cause: this._retryError,
+      });
+    }
+    throw new Error(message);
   }
   // Web-first assertion retry: re-evaluate `thunk` (re-pumping the live app between
   // tries) until it satisfies the (possibly negated) expectation or `timeout`
@@ -3070,17 +6152,34 @@ class BaseExpect {
     const page =
       this._v && (this._v._page ?? (typeof this._v._redrain === "function" ? this._v : null));
     const start = Date.now();
+    this._retryError = undefined;
     const run = async () => {
       try {
-        return !!(await thunk());
-      } catch {
+        const pass = !!(await thunk());
+        // A later valid observation supersedes any transient read failure.
+        this._retryError = undefined;
+        return pass;
+      } catch (error) {
+        if (/strict mode violation/i.test(error.message)) throw error;
+        this._retryError = error;
         return false;
       }
     };
+    const prepare = () => this._v?._prepareQuery?.();
+    await prepare();
     let pass = await run();
     while ((this._neg ? pass : !pass) && Date.now() - start < timeout) {
-      if (!page || !page._live) break;
+      if (!page) break;
+      if (!page._live) {
+        if (page._autoHydrate === false) break;
+        await page._ensureLive();
+        if (!page._live) break;
+        await prepare();
+        pass = await run();
+        continue;
+      }
       await page._redrain();
+      await prepare();
       pass = await run();
     }
     return pass;
@@ -3095,22 +6194,34 @@ class LocatorExpect extends BaseExpect {
     return this._v._snapshot() ?? {};
   }
   async toBeVisible(opts) {
-    this._ok(await this._retry(() => this._snap().visible, opts), "expected element to be visible");
+    this._ok(
+      await this._retry(async () => (await this._v.isVisible()) === (opts?.visible ?? true), opts),
+      "expected element to be visible",
+    );
   }
   async toBeHidden(opts) {
-    this._ok(await this._retry(() => !this._snap().visible, opts), "expected element to be hidden");
+    this._ok(
+      await this._retry(async () => !(await this._v.isVisible()), opts),
+      "expected element to be hidden",
+    );
   }
   async toBeAttached(opts) {
     this._ok(
-      await this._retry(async () => (await this._v.count()) > 0, opts),
+      await this._retry(() => (this._v._node() != null) === (opts?.attached ?? true), opts),
       "expected element to be attached",
     );
   }
   async toBeChecked(opts) {
-    this._ok(await this._retry(() => this._snap().checked, opts), "expected element to be checked");
+    this._ok(
+      await this._retry(async () => (await this._v.isChecked()) === (opts?.checked ?? true), opts),
+      "expected element to be checked",
+    );
   }
   async toBeEnabled(opts) {
-    this._ok(await this._retry(() => this._snap().enabled, opts), "expected element to be enabled");
+    this._ok(
+      await this._retry(() => this._snap().enabled === (opts?.enabled ?? true), opts),
+      "expected element to be enabled",
+    );
   }
   async toBeDisabled(opts) {
     this._ok(
@@ -3120,12 +6231,12 @@ class LocatorExpect extends BaseExpect {
   }
   async toBeEditable(opts) {
     this._ok(
-      await this._retry(() => this._snap().editable, opts),
+      await this._retry(() => this._snap().editable === (opts?.editable ?? true), opts),
       "expected element to be editable",
     );
   }
   async toBeEmpty(opts) {
-    this._ok(await this._retry(() => this._snap().empty, opts), "expected element to be empty");
+    this._ok(await this._retry(() => this._v.isEmpty(), opts), "expected element to be empty");
   }
   async toBeFocused(opts) {
     // Static DOMs have no focus — the pre-fix behavior kept `.not.toBeFocused`
@@ -3138,38 +6249,70 @@ class LocatorExpect extends BaseExpect {
     this._ok(await this._retry(() => this._v._isFocused(), opts), "expected element to be focused");
   }
   async toBeInViewport(opts) {
-    this._ok(
-      await this._retry(() => this._snap().visible, opts),
-      "expected element to be in viewport",
-    );
+    const ratio = opts?.ratio ?? 0;
+    if (ratio < 0 || ratio > 1) throw new Error("ratio must be between 0 and 1");
+    const pass = await this._retry(async () => {
+      const locator = this._v;
+      await locator._page._ensureLive();
+      const index = await locator._resolveLiveIdx();
+      if (index == null) return false;
+      return locator.evaluate(
+        (element, { viewport, ratio }) => {
+          const rect = element.getBoundingClientRect();
+          const width = Math.max(0, Math.min(rect.right, viewport.width) - Math.max(rect.left, 0));
+          const height = Math.max(
+            0,
+            Math.min(rect.bottom, viewport.height) - Math.max(rect.top, 0),
+          );
+          const area = rect.width * rect.height;
+          return area > 0 && width * height > 0 && (width * height) / area >= ratio;
+        },
+        { viewport: locator._page.viewportSize(), ratio },
+      );
+    }, opts);
+    this._ok(pass, "expected element to be in viewport");
   }
   async toHaveCount(n, opts) {
-    const pass = await this._retry(async () => (await this._v.count()) === n, opts);
-    this._ok(pass, `expected count ${n}, got ${await this._v.count()}`);
+    let got;
+    const pass = await this._retry(async () => {
+      got = await this._v.count();
+      return got === n;
+    }, opts);
+    this._ok(pass, `expected count ${n}, got ${got}`);
+  }
+  async _textArrayAssertion(expected, options, contains) {
+    let got;
+    const pass = await this._retry(async () => {
+      got = options?.useInnerText ? await this._v.allInnerTexts() : await this._v.allTextContents();
+      return textCollectionMatches(expected, got, contains);
+    }, options);
+    this._ok(pass, `expected texts ${json(expected)}, got ${json(got)}`);
   }
   async toHaveText(s, opts) {
+    if (Array.isArray(s)) return this._textArrayAssertion(s, opts, false);
+    let got;
     const test = () => {
-      const t = normWs(this._snap().text ?? "");
+      const t = (got = normWs(this._snap().text ?? ""));
       return s instanceof RegExp ? s.test(t) : t === normWs(s);
     };
-    this._ok(
-      await this._retry(test, opts),
-      `expected text ${s}, got "${normWs(this._snap().text ?? "")}"`,
-    );
+    this._ok(await this._retry(test, opts), `expected text ${s}, got "${got}"`);
   }
   async toContainText(s, opts) {
+    if (Array.isArray(s)) return this._textArrayAssertion(s, opts, true);
+    let got;
     const test = () => {
-      const t = normWs(this._snap().text ?? "");
+      const t = (got = normWs(this._snap().text ?? ""));
       return s instanceof RegExp ? s.test(t) : t.includes(normWs(s));
     };
-    this._ok(
-      await this._retry(test, opts),
-      `expected text to contain "${s}", got "${normWs(this._snap().text ?? "")}"`,
-    );
+    this._ok(await this._retry(test, opts), `expected text to contain "${s}", got "${got}"`);
   }
   async toHaveValue(value, opts) {
-    const pass = await this._retry(() => matchText(value, this._snap().value ?? ""), opts);
-    this._ok(pass, `expected value ${value}, got "${this._snap().value ?? ""}"`);
+    let got;
+    const pass = await this._retry(async () => {
+      got = await this._v.inputValue();
+      return matchText(value, got);
+    }, opts);
+    this._ok(pass, `expected value ${value}, got "${got}"`);
   }
   async toHaveValues(values) {
     const got = await this._v.selectedValues();
@@ -3191,35 +6334,71 @@ class LocatorExpect extends BaseExpect {
     this._ok(matchText(d, got), `expected accessible description ${d}, got "${got}"`);
   }
   async toHaveAttribute(name, value, opts) {
+    if (value && typeof value === "object" && !(value instanceof RegExp)) {
+      opts = value;
+      value = undefined;
+    }
+    let got;
     const test = async () => {
-      const got = await this._v.getAttribute(name);
+      got = await this._v.getAttribute(name);
       if (value === undefined) return got !== null;
-      return value instanceof RegExp ? value.test(got ?? "") : got === value;
+      return got !== null && matchText(value, got);
     };
-    this._ok(
-      await this._retry(test, opts),
-      `expected attribute ${name}=${value}, got ${await this._v.getAttribute(name)}`,
-    );
+    this._ok(await this._retry(test, opts), `expected attribute ${name}=${value}, got ${got}`);
   }
-  async toHaveClass(cls) {
-    const got = (await this._v.getAttribute("class")) ?? "";
-    const pass = cls instanceof RegExp ? cls.test(got) : got.split(/\s+/).includes(cls);
-    this._ok(pass, `expected class "${cls}" in "${got}"`);
+  async _classAssertion(expected, options, contains) {
+    let got;
+    const pass = await this._retry(async () => {
+      if (Array.isArray(expected)) {
+        got = this._v
+          ._all()
+          .map((match) => native.attrOf(this._v._html, match.node, "class") ?? "");
+        return (
+          got.length === expected.length &&
+          got.every((value, index) => classMatches(expected[index], value, contains))
+        );
+      }
+      got = (await this._v.getAttribute("class")) ?? "";
+      return classMatches(expected, got, contains);
+    }, options);
+    this._ok(pass, `expected classes ${json(expected)}, got ${json(got)}`);
   }
-  async toContainClass(cls) {
-    return this.toHaveClass(cls);
+  async toHaveClass(classes, options) {
+    return this._classAssertion(classes, options, false);
   }
-  async toHaveId(id) {
-    const got = await this._v.getAttribute("id");
-    this._ok(got === id, `expected id ${id}, got ${got}`);
+  async toContainClass(classes, options) {
+    return this._classAssertion(classes, options, true);
   }
-  async toHaveCSS(name, value) {
-    const got = await this._v.cssValue(name);
-    this._ok(got === value, `expected css ${name}:${value}, got "${got}"`);
+  async toHaveId(id, opts) {
+    let got;
+    const pass = await this._retry(async () => {
+      got = await this._v.getAttribute("id");
+      return got !== null && matchText(id, got);
+    }, opts);
+    this._ok(pass, `expected id ${id}, got ${got}`);
   }
-  async toHaveJSProperty(name, value) {
-    const got = await this._v.getAttribute(name);
-    this._ok(String(got) === String(value), `expected ${name}=${value}, got ${got}`);
+  async toHaveCSS(name, value, opts) {
+    let got;
+    const pass = await this._retry(async () => {
+      got = await this._v.cssValue(name);
+      return matchText(value, got);
+    }, opts);
+    this._ok(pass, `expected css ${name}:${value}, got "${got}"`);
+  }
+  async toHaveJSProperty(name, value, opts) {
+    let got;
+    const pass = await this._retry(async () => {
+      const locator = this._v;
+      await locator._page._ensureLive();
+      const index = await locator._resolveLiveIdx();
+      if (index == null) return false;
+      got = await locator.evaluate((element, name) => {
+        const value = element[name];
+        return { type: typeof value, value };
+      }, name);
+      return got?.type === typeof value && (value === undefined || deepEqual(got.value, value));
+    }, opts);
+    this._ok(pass, `expected property ${name} to equal ${json(value)}, got ${json(got)}`);
   }
   async toMatchAriaSnapshot(expected) {
     const node = this._v._node();
@@ -3250,25 +6429,59 @@ function asyncMatchers(awaiter, neg) {
   return new Proxy(
     {},
     {
-      get:
-        (_t, name) =>
-        async (...args) => {
+      get: (_target, name) => {
+        if (name === "not") return asyncMatchers(awaiter, !neg);
+        return async (...args) => {
           const { value, threw } = await awaiter();
-          if (threw && (name === "toThrow" || name === "toThrowError")) {
-            const m = args[0];
-            const ok =
-              m == null ||
-              (m instanceof RegExp ? m.test(value.message) : String(value.message).includes(m));
-            if (!ok) throw new Error(`expected rejection to match ${m}, got "${value.message}"`);
-            return undefined;
-          }
-          return new ValueExpect(value, neg)[name](...args);
-        },
+          const received =
+            threw && (name === "toThrow" || name === "toThrowError")
+              ? () => {
+                  throw value;
+                }
+              : value;
+          return new ValueExpect(received, neg)[name](...args);
+        };
+      },
     },
   );
 }
 
 // jest-shaped generic-value matchers — pure JS, never cross the napi boundary.
+async function retryAssertion(callback, options = {}, defaultTimeout = 5000) {
+  const timeout = options.timeout ?? defaultTimeout;
+  const intervals = options.intervals ?? [100, 250, 500, 1000];
+  if (timeout < 0 || !Number.isFinite(timeout))
+    throw new Error("timeout must be finite and non-negative");
+  if (!intervals.length || intervals.some((value) => value < 0 || !Number.isFinite(value)))
+    throw new Error("intervals must contain non-negative finite values");
+  const deadline = timeout === 0 ? Infinity : Date.now() + timeout;
+  let attempt = 0;
+  for (;;) {
+    let timer;
+    try {
+      const pending = Promise.resolve().then(callback);
+      if (deadline === Infinity) return await pending;
+      return await Promise.race([
+        pending,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Assertion callback timed out")),
+            Math.max(0, deadline - Date.now()),
+          );
+        }),
+      ]);
+    } catch (error) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw error;
+      const interval = intervals[Math.min(attempt++, intervals.length - 1)];
+      await new Promise((resolve) => setTimeout(resolve, Math.min(interval, remaining)));
+      if (Date.now() >= deadline) throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 class ValueExpect extends BaseExpect {
   get not() {
     return new ValueExpect(this._v, !this._neg);
@@ -3291,6 +6504,10 @@ class ValueExpect extends BaseExpect {
   _await() {
     return this._v;
   }
+  async toPass(options) {
+    if (typeof this._v !== "function") throw new Error("toPass requires a callback");
+    await retryAssertion(this._v, options, 0);
+  }
   toBe(x) {
     this._ok(Object.is(this._v, x), `expected ${this._v} to be ${x}`);
   }
@@ -3298,7 +6515,7 @@ class ValueExpect extends BaseExpect {
     this._ok(deepEqual(this._v, x), `expected ${json(this._v)} to equal ${json(x)}`);
   }
   toStrictEqual(x) {
-    return this.toEqual(x);
+    this._ok(deepEqual(this._v, x, true), `expected ${json(this._v)} to strictly equal ${json(x)}`);
   }
   toContain(x) {
     const pass =
@@ -3338,20 +6555,37 @@ class ValueExpect extends BaseExpect {
   toBeNaN() {
     this._ok(Number.isNaN(this._v), `expected ${this._v} to be NaN`);
   }
+  _numeric(expected, allowBigInt = true) {
+    const valid = (value) =>
+      typeof value === "number" || (allowBigInt && typeof value === "bigint");
+    if (!valid(this._v) || !valid(expected))
+      throw new Error(
+        "Numeric matcher requires number" + (allowBigInt ? " or bigint" : "") + " arguments",
+      );
+  }
   toBeGreaterThan(n) {
+    this._numeric(n);
     this._ok(this._v > n, `expected ${this._v} > ${n}`);
   }
   toBeGreaterThanOrEqual(n) {
+    this._numeric(n);
     this._ok(this._v >= n, `expected ${this._v} >= ${n}`);
   }
   toBeLessThan(n) {
+    this._numeric(n);
     this._ok(this._v < n, `expected ${this._v} < ${n}`);
   }
   toBeLessThanOrEqual(n) {
+    this._numeric(n);
     this._ok(this._v <= n, `expected ${this._v} <= ${n}`);
   }
   toBeCloseTo(n, digits = 2) {
-    this._ok(Math.abs(this._v - n) < 10 ** -digits / 2, `expected ${this._v} close to ${n}`);
+    this._numeric(n, false);
+    if (typeof digits !== "number") throw new Error("Precision must be a number");
+    this._ok(
+      (this._v === n && !Number.isFinite(n)) || Math.abs(this._v - n) < 10 ** -digits / 2,
+      `expected ${this._v} close to ${n}`,
+    );
   }
   toBeInstanceOf(c) {
     this._ok(this._v instanceof c, `expected instance of ${c?.name}`);
@@ -3360,21 +6594,32 @@ class ValueExpect extends BaseExpect {
     this._ok(this._v?.length === n, `expected length ${n}, got ${this._v?.length}`);
   }
   toHaveProperty(key, value) {
-    const got = key.split(".").reduce((o, k) => o?.[k], this._v);
-    this._ok(
-      value === undefined ? got !== undefined : deepEqual(got, value),
-      `expected property ${key}`,
-    );
+    if (typeof key !== "string" && !Array.isArray(key))
+      throw new TypeError("property path must be a string or array");
+    const path = Array.isArray(key) ? key : key.replace(/\[(\d+)\]/g, ".$1").split(".");
+    if (path.length === 0) throw new TypeError("property path must not be empty");
+    let got = this._v;
+    let exists = true;
+    for (const segment of path) {
+      if (got == null || !(segment in Object(got))) {
+        exists = false;
+        break;
+      }
+      got = got[segment];
+    }
+    this._ok(exists && (arguments.length < 2 || deepEqual(got, value)), `expected property ${key}`);
   }
   toThrow(expected) {
-    let threw = null;
+    if (typeof this._v !== "function") throw new TypeError("toThrow requires a function");
+    let threw = false;
+    let error;
     try {
       this._v();
-    } catch (e) {
-      threw = e;
+    } catch (caught) {
+      threw = true;
+      error = caught;
     }
-    const pass = threw != null && (expected == null || String(threw.message).includes(expected));
-    this._ok(pass, "expected function to throw");
+    this._ok(threw && matchesThrownError(error, expected), "expected function to throw");
   }
   toThrowError(expected) {
     return this.toThrow(expected);
@@ -3394,8 +6639,44 @@ class ValueExpect extends BaseExpect {
   toMatchSnapshot = UNSUPPORTED("toMatchSnapshot", PIXEL);
 }
 
+function textCollectionMatches(expected, actual, contains) {
+  const matches = (want, got) => {
+    if (want instanceof RegExp) {
+      want.lastIndex = 0;
+      return want.test(got);
+    }
+    const text = normWs(got);
+    const target = normWs(want);
+    return contains ? text.includes(target) : text === target;
+  };
+  if (!contains)
+    return (
+      actual.length === expected.length &&
+      expected.every((want, index) => matches(want, actual[index]))
+    );
+  let index = 0;
+  for (const got of actual) if (index < expected.length && matches(expected[index], got)) index++;
+  return index === expected.length;
+}
+
+function classMatches(expected, actual, contains) {
+  if (expected instanceof RegExp) {
+    expected.lastIndex = 0;
+    return expected.test(actual);
+  }
+  const tokens = (value) => String(value).split(/\s+/).filter(Boolean).sort();
+  const wanted = tokens(expected);
+  const got = tokens(actual);
+  return contains
+    ? wanted.every((token) => got.includes(token))
+    : wanted.length === got.length && wanted.every((token, index) => token === got[index]);
+}
+
 function matchText(expected, got) {
-  if (expected instanceof RegExp) return expected.test(got);
+  if (expected instanceof RegExp) {
+    expected.lastIndex = 0;
+    return expected.test(got);
+  }
   if (Array.isArray(expected)) return expected.some((e) => matchText(e, got));
   return got === expected;
 }
@@ -3408,16 +6689,31 @@ const json = (x) => {
     return String(x);
   }
 };
-function deepEqual(a, b) {
-  if (Object.is(a, b)) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a == null || b == null) return false;
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  return ka.length === kb.length && ka.every((k) => deepEqual(a[k], b[k]));
+function matchesThrownError(error, expected) {
+  if (expected === undefined) return true;
+  const message = String(error?.message ?? error);
+  if (typeof expected === "string") return message.includes(expected);
+  if (expected instanceof RegExp) return expected.test(message);
+  if (expected instanceof Error) return error?.message === expected.message;
+  if (typeof expected === "function") return error instanceof expected;
+  throw new TypeError("toThrow expects a string, RegExp, Error or error constructor");
+}
+
+function deepEqual(a, b, strict = false) {
+  return equalValues(a, b, strict);
 }
 function subset(want, got) {
+  if (typeof want?.asymmetricMatch === "function") return want.asymmetricMatch(got);
   if (typeof want !== "object" || want == null) return deepEqual(want, got);
-  return Object.keys(want).every((k) => subset(want[k], got?.[k]));
+  if (got == null || typeof got !== "object") return false;
+  if (Array.isArray(want)) {
+    if (!Array.isArray(got) || want.length !== got.length) return false;
+  } else if (Object.prototype.toString.call(want) !== "[object Object]") {
+    return deepEqual(want, got);
+  }
+  return Reflect.ownKeys(want)
+    .filter((key) => Object.prototype.propertyIsEnumerable.call(want, key))
+    .every((key) => key in got && subset(want[key], got[key]));
 }
 
 export function expect(value) {
@@ -3425,31 +6721,142 @@ export function expect(value) {
   if (value instanceof Page) return new PageExpect(value, false);
   return new ValueExpect(value, false);
 }
-expect.soft = expect; // soft assertions behave as hard ones here
-expect.poll = (fn, _o) => new ValueExpect(fn(), false);
+function softAssertion(assertion) {
+  const failed = (error) => {
+    const info = activeInfoStore.getStore();
+    if (!info) throw error;
+    info.errors.push(error);
+    info.status = "failed";
+  };
+  return new Proxy(assertion, {
+    get(target, property) {
+      const value = Reflect.get(target, property);
+      if (typeof value !== "function")
+        return value && typeof value === "object" ? softAssertion(value) : value;
+      return (...args) => {
+        try {
+          const result = value.apply(target, args);
+          return result?.then ? result.catch(failed) : result;
+        } catch (error) {
+          return failed(error);
+        }
+      };
+    },
+  });
+}
+expect.soft = (value) => softAssertion(expect(value));
+function pollAssertion(callback, options, negative = false) {
+  if (typeof callback !== "function") throw new Error("expect.poll requires a callback");
+  return new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (property === "not") return pollAssertion(callback, options, !negative);
+        const matcher = new ValueExpect(undefined, negative)[property];
+        if (typeof matcher !== "function") return undefined;
+        return (...args) =>
+          retryAssertion(async () => {
+            const assertion = new ValueExpect(await callback(), negative);
+            await assertion[property](...args);
+          }, options);
+      },
+    },
+  );
+}
+expect.poll = pollAssertion;
 expect.configure = () => expect;
 expect.extend = () => {};
+
+function asymmetricFactory(match, inverse = false) {
+  return { asymmetricMatch: (value) => Boolean(match(value)) !== inverse };
+}
+function asymmetricContaining(inverse) {
+  return {
+    objectContaining(sample) {
+      if (sample == null || typeof sample !== "object")
+        throw new TypeError("objectContaining requires an object");
+      return asymmetricFactory(
+        (value) =>
+          value != null &&
+          Reflect.ownKeys(sample).every(
+            (key) => key in Object(value) && deepEqual(value[key], sample[key]),
+          ),
+        inverse,
+      );
+    },
+    arrayContaining(sample) {
+      if (!Array.isArray(sample)) throw new TypeError("arrayContaining requires an array");
+      return asymmetricFactory(
+        (value) =>
+          Array.isArray(value) && sample.every((want) => value.some((got) => deepEqual(got, want))),
+        inverse,
+      );
+    },
+    stringContaining(sample) {
+      if (typeof sample !== "string") throw new TypeError("stringContaining requires a string");
+      return asymmetricFactory(
+        (value) => typeof value === "string" && value.includes(sample),
+        inverse,
+      );
+    },
+    stringMatching(sample) {
+      if (typeof sample !== "string" && !(sample instanceof RegExp))
+        throw new TypeError("stringMatching requires a string or RegExp");
+      const pattern = new RegExp(sample);
+      return asymmetricFactory((value) => {
+        pattern.lastIndex = 0;
+        return typeof value === "string" && pattern.test(value);
+      }, inverse);
+    },
+  };
+}
+Object.assign(expect, asymmetricContaining(false));
+expect.not = asymmetricContaining(true);
+expect.anything = () => asymmetricFactory((value) => value != null);
+expect.any = (constructor) => {
+  if (typeof constructor !== "function") throw new TypeError("any requires a constructor");
+  const primitive = new Map([
+    [String, "string"],
+    [Number, "number"],
+    [Boolean, "boolean"],
+    [BigInt, "bigint"],
+    [Symbol, "symbol"],
+    [Function, "function"],
+    [Object, "object"],
+  ]).get(constructor);
+  return asymmetricFactory(
+    (value) =>
+      (primitive && typeof value === primitive) ||
+      (constructor.prototype && value instanceof constructor),
+  );
+};
 
 // ---------------------------------------------------------------------------
 // @playwright/test surface (drop-in over node:test) — fixtures, hooks, steps.
 // ---------------------------------------------------------------------------
+import { after, describe as nodeDescribe, test as nodeTest } from "node:test";
+import { fixtureNames, openFixtures, teardownWorkerFixtures } from "./fixtures.mjs";
 import {
-  after,
-  afterEach,
-  before,
-  beforeEach,
-  describe as nodeDescribe,
-  test as nodeTest,
-} from "node:test";
+  isolatedAttempt,
+  executionOptions,
+  executeIsolated,
+  closeAttemptProcesses,
+  validateTimeout,
+} from "./attempt-process.mjs";
+const attemptPlans = new Map();
+const attemptOccurrences = new Map();
+let workerAttempt = null;
+const initializedWorkerScopes = new Set();
+let activeWorkerScopes = [];
 
 // A fixture set: each value is either a plain default or [fn, opts] / async fn
 // of ({ ...fixtures }, use). We resolve them lazily and tear down after `use`.
 function makeBaseFixtures() {
   return {
-    browser: async (_f, use) => use(browserStub),
+    browser: [async (_f, use) => use(browserStub), { scope: "worker" }],
     context: async (_f, use) => use(new BrowserContext()),
-    page: async (f, use) => {
-      const ctx = f.context ?? new BrowserContext();
+    page: async ({ context }, use) => {
+      const ctx = context;
       const page = await ctx.newPage();
       try {
         await use(page);
@@ -3460,36 +6867,16 @@ function makeBaseFixtures() {
         await page.close();
       }
     },
-    request: async (_f, use) => use(request),
+    request: async ({ baseURL }, use) => {
+      const api = request.newContext({ baseURL });
+      try {
+        await use(api);
+      } finally {
+        await api.dispose();
+      }
+    },
     baseURL: async (_f, use) => use(process.env.TURBO_SHIM_BASE_URL ?? undefined),
   };
-}
-
-// Playwright shares one fixture set (the same `page`/`context`) across a test's
-// beforeEach → body → afterEach. node:test runs those as separate callbacks, so
-// we stash the active set in `_current` (suite runs serially — workers:1) and
-// reuse it everywhere. Teardown is deferred to the *next* test's beforeEach (and
-// a final afterAll) so an afterEach hook still sees a live, logged-in page —
-// without this, cleanup hooks like `revokeActiveGrantIfAny({page})` get an
-// undefined page, crash, and leak server-side state into later tests.
-let _current = null;
-let _fixtureHooksWired = false;
-function wireFixtureHooks(open) {
-  if (_fixtureHooksWired) return;
-  _fixtureHooksWired = true;
-  const teardownCurrent = async () => {
-    if (!_current) return;
-    const c = _current;
-    _current = null;
-    await c.teardown();
-  };
-  // Registered before any user beforeEach (this fires on the first test/hook
-  // registration), so the set is open by the time user hooks and the body run.
-  beforeEach(async () => {
-    await teardownCurrent();
-    _current = await open(makeTestInfo("test"));
-  });
-  after(teardownCurrent);
 }
 
 // Playwright's `test.skip` is overloaded: `skip(title, body)` declares a skipped
@@ -3506,16 +6893,28 @@ const SKIP_SIGNAL = Symbol("turbo-shim-skip");
 // store binds the node:test context to just the body of the running test.
 const skipStackStore = new AsyncLocalStorage();
 const activeTStore = new AsyncLocalStorage();
+const activeAttemptStore = new AsyncLocalStorage();
+const activeWorkerHookStore = new AsyncLocalStorage();
+const rootSkipScope = { skip: false };
+const rootTestHooks = new Map();
+const activeInfoStore = new AsyncLocalStorage();
 const getSkipStack = () => skipStackStore.getStore() ?? [];
 const getActiveT = () => activeTStore.getStore() ?? null;
-const describeSkipped = () => getSkipStack().some((f) => f.skip);
+// Direct context access keeps regression tests out of node:test's registrar.
+export const __internals = Object.freeze({
+  skipStackStore,
+  activeTStore,
+  getSkipStack,
+  getActiveT,
+});
+const describeSkipped = () => rootSkipScope.skip || getSkipStack().some((f) => f.skip);
 const isDeclareForm = (args) => typeof args[0] === "string" && typeof args[1] === "function";
-function skipConditionMet(args) {
+function skipConditionMet(args, fixtures = {}) {
   if (args.length === 0) return true; // bare test.skip() → always skip
   const c = args[0];
   if (typeof c === "function") {
     try {
-      return !!c({});
+      return !!c(fixtures);
     } catch {
       return false;
     }
@@ -3523,36 +6922,244 @@ function skipConditionMet(args) {
   return !!c;
 }
 
-function makeTestFn(baseDefs, extDefs = {}) {
-  const open = (testInfo) => openFixtures(baseDefs, extDefs, testInfo);
-  const run = (name, fn) => {
-    wireFixtureHooks(open);
+function skipActiveAttempt(attempt, reason) {
+  attempt.info.status = "skipped";
+  attempt.info.expectedStatus = "skipped";
+  attempt.info.annotations.push({ type: "skip", description: reason });
+  getActiveT()?.skip(reason);
+  throw SKIP_SIGNAL;
+}
+
+function applySkip(args) {
+  const attempt = activeAttemptStore.getStore();
+  const workerHook = activeWorkerHookStore.getStore();
+  const current = attempt ?? workerHook;
+  const scope = getSkipStack().at(-1) ?? rootSkipScope;
+  if (!current && typeof args[0] === "function") {
+    (scope.guards ??= []).push(args);
+    return;
+  }
+  if (!skipConditionMet(args, current?.fixtures.arg)) return;
+  const reason = typeof args.at(-1) === "string" ? args.at(-1) : undefined;
+  if (attempt) {
+    skipActiveAttempt(attempt, reason);
+  }
+  if (!workerHook && getActiveT()) {
+    getActiveT().skip(reason);
+    throw SKIP_SIGNAL;
+  }
+  const target = workerHook?.scope ?? scope;
+  target.skip = true;
+  target.skipReason = reason;
+  if (workerHook) throw SKIP_SIGNAL;
+}
+
+async function applyPlanGuards(plan, fixtures) {
+  for (const scope of [rootSkipScope, ...plan.frames]) {
+    for (const args of scope.guards ?? []) {
+      await fixtures.resolve(fixtureNames(args[0]));
+      applySkip(args);
+    }
+  }
+}
+
+let hasFocusedTests = false;
+function markFocused() {
+  hasFocusedTests = true;
+  for (const frame of getSkipStack()) frame.containsFocus = true;
+}
+function focusedScopeAllowed(scope) {
+  return !hasFocusedTests || !scope || scope.only || scope.containsFocus;
+}
+
+function cleanupErrors(error) {
+  return error instanceof AggregateError ? error.errors.flatMap(cleanupErrors) : [error];
+}
+
+const rootCleanupHooks = new Map();
+after(async () => {
+  await closeAttemptProcesses();
+  const errors = [];
+  try {
+    await runCleanupHooks(rootCleanupHooks.get("afterAll") ?? [], { browser: browserStub });
+  } catch (error) {
+    errors.push(...cleanupErrors(error));
+  }
+  try {
+    await teardownWorkerFixtures();
+  } catch (error) {
+    errors.push(...cleanupErrors(error));
+  }
+  if (errors.length) throw new AggregateError(errors, "Worker cleanup failed");
+});
+async function runCleanupHooks(hooks, args) {
+  const errors = [];
+  for (const hook of hooks) {
+    try {
+      await hook(args);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length) throw new AggregateError(errors, "Cleanup hooks failed");
+}
+
+function registerTestHook(kind, fn) {
+  const scope = getSkipStack().at(-1);
+  const store = scope ? (scope.testHooks ??= new Map()) : rootTestHooks;
+  if (!store.has(kind)) store.set(kind, []);
+  store.get(kind).push(fn);
+}
+
+const rootFixtureUses = new Map();
+function fixtureUses(keys, frames = getSkipStack()) {
+  const result = {};
+  for (const scope of [rootFixtureUses, ...frames.map((frame) => frame.fixtureUses)]) {
+    for (const key of keys) Object.assign(result, scope?.get(key));
+  }
+  return result;
+}
+
+function recordTestError(info, error) {
+  if (error instanceof AggregateError) {
+    for (const nested of error.errors) recordTestError(info, nested);
+    return;
+  }
+  if (error === SKIP_SIGNAL || info.errors.includes(error)) return;
+  info.status = "failed";
+  info.errors.push(error);
+  info.error ??= error;
+}
+
+async function invokeTestBody(fn, arg, info, expectedFailure) {
+  try {
+    await activeInfoStore.run(info, () => fn(arg, info));
+    if (info.errors.length) throw new AggregateError(info.errors, "Soft assertions failed");
+  } catch (error) {
+    if (error !== SKIP_SIGNAL) recordTestError(info, error);
+    if (error === SKIP_SIGNAL || !expectedFailure) throw error;
+    return;
+  }
+  if (expectedFailure) throw new Error("Expected test to fail, but it passed");
+}
+
+function planHooks(plan, kind, reverse = false) {
+  const scopes = [rootTestHooks, ...plan.frames.map((frame) => frame.testHooks)];
+  if (reverse) scopes.reverse();
+  return scopes.flatMap((scope) => scope?.get(kind) ?? []);
+}
+
+async function invokeFixtureFunction(fn, fixtures, info) {
+  await fixtures.resolve(fixtureNames(fn));
+  return fn(fixtures.arg, info);
+}
+
+async function finishAttempt(plan, fixtures, info, errors) {
+  for (const hook of planHooks(plan, "afterEach", true)) {
+    try {
+      await invokeFixtureFunction(hook, fixtures, info);
+    } catch (error) {
+      recordTestError(info, error);
+      errors.push(error);
+    }
+  }
+  try {
+    await fixtures.teardown();
+  } catch (error) {
+    errors.push(error);
+  }
+}
+
+function startAttemptPhase(info) {
+  if (workerAttempt)
+    process.send?.({ kind: "phase", startedAt: Date.now(), timeout: info.timeout });
+}
+
+async function executeAttempt(plan, t) {
+  const info = makeTestInfo(plan.name);
+  startAttemptPhase(info);
+  if (plan.expectedFailure) info.expectedStatus = "failed";
+  const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
+  const fixtures = await openFixtures(plan.baseDefs, defs, info, (error) =>
+    recordTestError(info, error),
+  );
+  return activeAttemptStore.run({ info, fixtures, plan }, async () => {
+    const errors = [];
+    try {
+      await applyPlanGuards(plan, fixtures);
+      await fixtures.resolveAutomatic();
+      for (const hook of planHooks(plan, "beforeEach"))
+        await invokeFixtureFunction(hook, fixtures, info);
+      await fixtures.resolve(fixtureNames(plan.fn));
+      await invokeTestBody(plan.fn, fixtures.arg, info, plan.expectedFailure);
+    } catch (error) {
+      if (error !== SKIP_SIGNAL) {
+        recordTestError(info, error);
+        errors.push(error);
+      } else info.status = "skipped";
+    } finally {
+      await finishAttempt(plan, fixtures, info, errors);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length) throw new AggregateError(errors, "Test and cleanup failed");
+  });
+}
+
+async function invokeWorkerHook(fn, plan) {
+  const info = makeTestInfo("worker hook");
+  startAttemptPhase(info);
+  const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
+  const fixtures = await openFixtures(plan.baseDefs, defs, info, undefined, true);
+  const scope = plan.frames.at(-1) ?? rootSkipScope;
+  await activeWorkerHookStore.run({ scope, info, fixtures }, async () => {
+    try {
+      await fixtures.resolveAutomatic();
+      await invokeFixtureFunction(fn, fixtures, info);
+    } catch (error) {
+      if (error !== SKIP_SIGNAL) throw error;
+    }
+  });
+}
+
+function makeTestFn(baseDefs, extDefs = {}, parentUseKeys = []) {
+  const useKey = Symbol("fixture use");
+  const useKeys = [...parentUseKeys, useKey];
+  const run = (name, fn, only = false, expectedFailure = false) => {
+    const focused = only || getSkipStack().some((frame) => frame.only);
+    if (only) markFocused();
+    const frames = [...getSkipStack()];
     if (describeSkipped()) {
       nodeTest.skip(name, () => {});
       return;
     }
-    nodeTest(name, async (t) =>
+    const titleKey = JSON.stringify([...frames.map((frame) => frame.title), name]);
+    const occurrence = attemptOccurrences.get(titleKey) ?? 0;
+    attemptOccurrences.set(titleKey, occurrence + 1);
+    const plan = {
+      name,
+      fn,
+      baseDefs,
+      extDefs,
+      useKeys,
+      frames,
+      expectedFailure,
+      id: `${titleKey}:${occurrence}`,
+    };
+    attemptPlans.set(plan.id, plan);
+    if (isolatedAttempt) return;
+    const register = only && process.execArgv.includes("--test-only") ? nodeTest.only : nodeTest;
+    register(name, async (t) =>
       activeTStore.run(t, async () => {
-        const testInfo = makeTestInfo(name);
-        try {
-          // The shared `_current` set is opened once (by the wired beforeEach) with the BASE
-          // fixtures, so it only covers plain `test(...)`. A `test.extend(...)` fn has its own
-          // extDefs (custom fixtures / a `page` override) that `_current` doesn't carry — it must
-          // open its OWN fixtures, else custom fixtures resolve to undefined.
-          if (_current && Object.keys(extDefs).length === 0) {
-            await fn(_current.arg, testInfo);
-            return;
-          }
-          const { arg, teardown } = await open(testInfo);
-          try {
-            await fn(arg, testInfo);
-          } finally {
-            await teardown();
-          }
-        } catch (e) {
-          if (e === SKIP_SIGNAL) return; // runtime test.skip() — already marked on `t`
-          throw e;
+        if (hasFocusedTests && !focused) {
+          t.skip("excluded by focused tests");
+          return;
         }
+        const skippedScope = [rootSkipScope, ...frames].find((scope) => scope.skip);
+        if (skippedScope) {
+          t.skip(skippedScope.skipReason);
+          return;
+        }
+        await executeIsolated(plan, t, executionOptions([rootSkipScope, ...frames]));
       }),
     );
   };
@@ -3563,48 +7170,67 @@ function makeTestFn(baseDefs, extDefs = {}) {
       nodeTest.skip(args[0], () => {});
       return;
     }
-    // Conditional / runtime form `skip(condition?, description?)`.
-    if (!skipConditionMet(args)) return; // condition false → no-op
-    const reason = typeof args[args.length - 1] === "string" ? args[args.length - 1] : undefined;
-    const t = getActiveT();
-    if (t) {
-      t.skip(reason); // inside a running test body → skip at runtime
-      throw SKIP_SIGNAL;
-    }
-    const stack = getSkipStack();
-    if (stack.length) stack[stack.length - 1].skip = true; // describe scope
+    applySkip(args);
   };
-  run.only = (name, fn) => nodeTest.only(name, async () => runWith(open, name, fn));
+  run.only = (name, fn) => run(name, fn, true);
   run.fixme = run.skip;
-  run.fail = run;
-  run.slow = () => {};
-  run.setTimeout = () => {};
-  run.use = () => {};
-  run.step = async (_name, body) => body();
-  run.info = () => makeTestInfo("");
-  run.beforeEach = (fn) => {
-    wireFixtureHooks(open);
-    beforeEach(async () => fn(_current?.arg ?? {}));
+  run.fail = (name, fn) => run(name, fn, false, true);
+  run.slow = () => {
+    const current = activeAttemptStore.getStore() ?? activeWorkerHookStore.getStore();
+    const timeout =
+      current?.info.timeout ?? executionOptions([rootSkipScope, ...getSkipStack()]).timeout;
+    run.setTimeout(timeout * 3);
   };
-  run.afterEach = (fn) => {
-    wireFixtureHooks(open);
-    afterEach(async () => fn(_current?.arg ?? {}));
+  run.setTimeout = (timeout) => {
+    validateTimeout(timeout);
+    const current = activeAttemptStore.getStore() ?? activeWorkerHookStore.getStore();
+    if (current) current.info.setTimeout(timeout);
+    else ((getSkipStack().at(-1) ?? rootSkipScope).execution ??= {}).timeout = timeout;
   };
-  run.beforeAll = (fn) => before(async () => fn({}));
-  run.afterAll = (fn) => after(async () => fn({}));
+  run.use = (overrides) => {
+    const frame = getSkipStack().at(-1);
+    const scope = frame ? (frame.fixtureUses ??= new Map()) : rootFixtureUses;
+    scope.set(useKey, { ...scope.get(useKey), ...overrides });
+  };
+  run.step = async (_name, body) => {
+    const skipped = Symbol("step skipped");
+    const info = {
+      skip(condition = true, _description) {
+        if (condition) throw skipped;
+      },
+    };
+    try {
+      return await body(info);
+    } catch (error) {
+      if (error !== skipped) throw error;
+    }
+  };
+  run.step.skip = async () => {};
+  run.info = () =>
+    activeAttemptStore.getStore()?.info ??
+    activeWorkerHookStore.getStore()?.info ??
+    makeTestInfo("");
+  run.beforeEach = (fn) => registerTestHook("beforeEach", fn);
+  run.afterEach = (fn) => registerTestHook("afterEach", fn);
+  run.beforeAll = (fn) => {
+    const frames = [...getSkipStack()];
+    const scope = frames.at(-1);
+    const target = scope ?? rootSkipScope;
+    (target.workerBefore ??= []).push(() =>
+      invokeWorkerHook(fn, { baseDefs, extDefs, useKeys, frames }),
+    );
+  };
+  run.afterAll = (fn) => {
+    const frames = [...getSkipStack()];
+    const target = frames.at(-1) ?? rootSkipScope;
+    (target.workerAfter ??= []).push(() =>
+      invokeWorkerHook(fn, { baseDefs, extDefs, useKeys, frames }),
+    );
+  };
   // A new fixture name extends; reusing a base/ext name OVERRIDES it but the
   // override still sees the prior value (Playwright's `page: ({page}) => …`).
-  run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more });
+  run.extend = (more) => makeTestFn(baseDefs, { ...extDefs, ...more }, useKeys);
   return run;
-}
-
-async function runWith(open, name, fn) {
-  const { arg, teardown } = await open(makeTestInfo(name));
-  try {
-    await fn(arg, makeTestInfo(name));
-  } finally {
-    await teardown();
-  }
 }
 
 function makeDescribe() {
@@ -3618,77 +7244,128 @@ function makeDescribe() {
   // ("test did not finish before its parent and was cancelled") — and the dangling
   // async test (holding a live-session V8 isolate) was torn down at process exit,
   // which faulted (SIGBUS) on Linux. The Playwright describe body takes no args.
-  const d = (name, fn) =>
-    nodeDescribe(name, async () =>
+  const d = (name, fn, only = false) => {
+    const focused = only || getSkipStack().some((frame) => frame.only);
+    if (only) markFocused();
+    if (isolatedAttempt)
+      return skipStackStore.run(
+        [...getSkipStack(), { title: name, skip: false, only: focused }],
+        fn,
+      );
+    const register =
+      only && process.execArgv.includes("--test-only") ? nodeDescribe.only : nodeDescribe;
+    return register(name, async () =>
       // Each describe runs in its own stack store — nested describes layer on
       // top via a fresh array, and sibling describes never see each other's
       // frames even when node:test interleaves their bodies.
-      skipStackStore.run([...getSkipStack(), { skip: false }], async () => fn()),
+      skipStackStore.run(
+        [...getSkipStack(), { title: name, skip: false, only: focused }],
+        async () => fn(),
+      ),
     );
+  };
   d.skip = (name, fn) => nodeDescribe.skip(name, fn ?? (() => {}));
-  d.only = (name, fn) => d(name, fn);
+  d.only = (name, fn) => d(name, fn, true);
   d.serial = d;
   d.parallel = d;
-  d.configure = () => {};
+  d.configure = (options) => {
+    const scope = getSkipStack().at(-1) ?? rootSkipScope;
+    if (options.timeout !== undefined) validateTimeout(options.timeout);
+    if (
+      options.retries !== undefined &&
+      (!Number.isInteger(options.retries) || options.retries < 0)
+    )
+      throw new Error("Retries must be a non-negative integer");
+    scope.execution = { ...scope.execution, ...options };
+  };
   return d;
 }
 
 function makeTestInfo(title) {
-  return {
+  const info = {
     title,
     titlePath: [title],
     outputDir: "/tmp",
     outputPath: (...p) => ["/tmp", ...p].join("/"),
     snapshotPath: (...p) => ["/tmp", ...p].join("/"),
-    attach: async () => {},
+    attach: async (name, options) => {
+      const attachment = { name, contentType: options.contentType ?? "application/octet-stream" };
+      if (options.path !== undefined) {
+        attachment.path = options.path;
+        await readFile(options.path);
+      } else
+        attachment.body = Buffer.isBuffer(options.body)
+          ? Buffer.from(options.body)
+          : Buffer.from(String(options.body ?? ""));
+      info.attachments.push(attachment);
+    },
     attachments: [],
-    skip: () => {},
-    fixme: () => {},
+    skip: (...args) => applySkip(args),
+    fixme: (...args) => applySkip(args),
     fail: () => {},
-    slow: () => {},
-    setTimeout: () => {},
+    slow: () => info.setTimeout(info.timeout * 3),
+    timeout: workerAttempt?.timeout ?? 30000,
+    setTimeout: (timeout) => {
+      info.timeout = validateTimeout(timeout);
+      if (workerAttempt) process.send?.({ kind: "timeout", timeout });
+    },
     annotations: [],
     errors: [],
     status: "passed",
     expectedStatus: "passed",
-    retry: 0,
-    project: { name: "turbo-surf" },
+    retry: workerAttempt?.retry ?? 0,
+    project: { name: process.env.TURBO_PW_PROJECT_NAME ?? "turbo-surf" },
   };
+  return info;
 }
 
-// Resolve the fixture argument object. Base fixtures (browser → context → page →
-// request → baseURL) resolve first, then extensions in insertion order — so an
-// extension overriding a base name (e.g. `page`) already sees the base value in
-// `arg` when it runs, and replaces it via `use(val)`. Returns { arg, teardown }.
-async function openFixtures(baseDefs, extDefs, testInfo) {
-  const arg = {};
-  const teardowns = [];
-  const resolve = async (name, def) => {
-    if (def === undefined) return;
-    if (typeof def !== "function") {
-      arg[name] = def;
-      return;
+export const __attemptWorker = {
+  async run(message) {
+    workerAttempt = message;
+    const plan = attemptPlans.get(message.id);
+    if (!plan) throw new Error(`Unknown test attempt ${message.id}`);
+    const scopes = [rootSkipScope, ...plan.frames];
+    for (const scope of activeWorkerScopes.slice().reverse()) {
+      if (!scopes.includes(scope)) {
+        await runCleanupHooks(scope.workerAfter ?? [], {});
+        initializedWorkerScopes.delete(scope);
+      }
     }
-    await new Promise((settle, reject) => {
-      const used = (val) =>
-        new Promise((release) => {
-          arg[name] = val;
-          teardowns.push(release);
-          settle();
-        });
-      Promise.resolve(def(arg, used, testInfo)).then(() => settle(), reject);
-    });
-  };
-  // oxlint-disable no-await-in-loop
-  for (const name of ["browser", "context", "page", "request", "baseURL"])
-    await resolve(name, baseDefs[name]);
-  for (const name of Object.keys(extDefs)) await resolve(name, extDefs[name]);
-  // oxlint-enable no-await-in-loop
-  const teardown = async () => {
-    for (const release of teardowns.toReversed()) release();
-  };
-  return { arg, teardown };
-}
+    activeWorkerScopes = scopes;
+    for (const scope of scopes) {
+      if (!initializedWorkerScopes.has(scope)) {
+        initializedWorkerScopes.add(scope);
+        for (const hook of scope.workerBefore ?? []) await hook();
+      }
+    }
+    const skipped = scopes.find((scope) => scope.skip);
+    if (skipped) return { skipped: true, reason: skipped.skipReason };
+    let reason;
+    const t = {
+      skip(value) {
+        reason = value ?? "skipped";
+      },
+    };
+    await activeTStore.run(t, () => executeAttempt(plan, t));
+    return { skipped: reason !== undefined, reason };
+  },
+  async close() {
+    const errors = [];
+    for (const scope of [...initializedWorkerScopes].reverse()) {
+      try {
+        await runCleanupHooks(scope.workerAfter ?? [], {});
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    try {
+      await teardownWorkerFixtures();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length) throw new AggregateError(errors, "Worker cleanup failed");
+  },
+};
 
 export const test = makeTestFn(makeBaseFixtures());
 
@@ -3704,6 +7381,89 @@ export const devices = new Proxy({}, { get: () => ({}) });
  * share the context's cookie jar: outbound requests carry the current cookies,
  * `Set-Cookie` writes merge back in, so a login via `page.goto` is reflected
  * in a later `ctx.request.get('/api/...')`. */
+async function encodeMultipart(fields) {
+  const boundary = `----turbo-surf-${randomUUID()}`;
+  const chunks = [];
+  const escape = (value) =>
+    String(value).replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/"/g, "%22");
+  const entries = fields instanceof FormData ? fields.entries() : Object.entries(fields);
+  for (const [name, value] of entries) {
+    let content = value;
+    let filename;
+    let type;
+    if (value && typeof value === "object") {
+      if (Buffer.isBuffer(value.buffer)) {
+        content = value.buffer;
+        filename = value.name;
+        type = value.mimeType;
+      } else if (typeof value.arrayBuffer === "function") {
+        content = Buffer.from(await value.arrayBuffer());
+        filename = value.name ?? "blob";
+        type = value.type;
+      } else if (value.path) {
+        content = await readFile(value.path);
+        filename = basename(String(value.path));
+      } else {
+        throw new Error("Unsupported multipart file value");
+      }
+    }
+    let header = `--${boundary}\r\nContent-Disposition: form-data; name="${escape(name)}"`;
+    if (filename !== undefined) {
+      header += `; filename="${escape(filename)}"\r\nContent-Type: ${type || "application/octet-stream"}`;
+    }
+    chunks.push(
+      Buffer.from(`${header}\r\n\r\n`),
+      Buffer.isBuffer(content) ? content : Buffer.from(String(content)),
+      Buffer.from("\r\n"),
+    );
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  return { body: Buffer.concat(chunks), type: `multipart/form-data; boundary=${boundary}` };
+}
+
+function setAPIContentType(headers, value) {
+  if (!Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
+    headers["Content-Type"] = value;
+  }
+}
+function encodeAPIRequestData(options, headers) {
+  if (typeof options.data === "string" || Buffer.isBuffer?.(options.data)) {
+    const body = Buffer.isBuffer(options.data) ? options.data : String(options.data);
+    setAPIContentType(headers, "application/octet-stream");
+    return body;
+  }
+  const body = JSON.stringify(options.data);
+  setAPIContentType(headers, "application/json");
+  return body;
+}
+function appendAPIRequestParams(target, options) {
+  if (options.params === undefined) return target;
+  const parsed = new URL(target);
+  for (const [name, value] of new URLSearchParams(options.params))
+    parsed.searchParams.append(name, value);
+  return parsed.href;
+}
+function validateAPIMaxRedirects(maxRedirects) {
+  if (maxRedirects !== undefined && (!Number.isInteger(maxRedirects) || maxRedirects < 0)) {
+    throw new Error("maxRedirects must be a non-negative integer");
+  }
+}
+function needsAPIBasicChallenge(parsed, target, credentialAllowed, credentials) {
+  return (
+    parsed.status === 401 &&
+    credentialAllowed(parsed.finalUrl ?? target) &&
+    credentials.send !== "always" &&
+    parsed.headers?.some(
+      ([name, value]) => name.toLowerCase() === "www-authenticate" && /^Basic(?:\s|$)/i.test(value),
+    )
+  );
+}
+function validateAPIStatus(parsed, failOnStatusCode) {
+  if (failOnStatusCode && (parsed.status < 200 || parsed.status >= 400)) {
+    throw new Error(`API request failed with status ${parsed.status}`);
+  }
+}
+
 export const request = {
   // Synchronous (no await needed) — tests chain `request.newContext({...}).fetch(...)`.
   // Real Playwright returns a Promise here; the synchronous form also works at
@@ -3725,7 +7485,31 @@ export const request = {
     };
     // oxlint-disable no-underscore-dangle
     const bc = opts._browserContext ?? null;
-    const optHeaders = opts.extraHTTPHeaders ?? {};
+    const maxBytes = responseBudget(opts.maxResponseBytes ?? bc?._maxResponseBytes);
+    let cookies = JSON.stringify(opts.storageState?.cookies ?? []);
+    const initialState =
+      typeof opts.storageState === "string"
+        ? readFile(opts.storageState, "utf8").then((text) => {
+            cookies = JSON.stringify(JSON.parse(text).cookies ?? []);
+          })
+        : Promise.resolve();
+    const requestState = native.requestStateNewApi(bc?._requestState);
+    let disposed = false;
+    const responses = new Set();
+    const ensureOpen = () => {
+      if (disposed) throw new Error("APIRequestContext has been disposed");
+    };
+    const optHeaders = {
+      ...(opts.userAgent ? { "User-Agent": opts.userAgent } : {}),
+      ...opts.extraHTTPHeaders,
+    };
+    const credentials = opts.httpCredentials;
+    const authorization = credentials
+      ? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64")}`
+      : null;
+    const credentialAllowed = (url) =>
+      credentials &&
+      (!credentials.origin || new URL(url).origin === new URL(credentials.origin).origin);
     // Resolve the context's `extraHTTPHeaders` live from the parent
     // BrowserContext (if bound) so a `context.setExtraHTTPHeaders(...)` call
     // after `request()` is cached takes effect on the next request — without
@@ -3739,36 +7523,103 @@ export const request = {
     // Note: the explicit `request.newContext({_browserContext: bc,
     // extraHTTPHeaders: X})` double-opt case lets bc win for overlapping keys,
     // which is a shim-private surface; direct callers don't hit it.
-    const ctxHeaders = () => (bc ? { ...optHeaders, ...bc._headers } : optHeaders);
+    const mergeHeaders = (...sources) =>
+      Object.fromEntries(
+        sources.flatMap((source) =>
+          Object.entries(source ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+        ),
+      );
+    const ctxHeaders = () => mergeHeaders(optHeaders, bc?._headers);
     // Encode a request `data`/body like Playwright: an object → JSON body with
     // `Content-Type: application/json` (unless the caller set one), a string → sent
     // as-is. Per-request `headers` merge over the context's `extraHTTPHeaders`.
-    const encode = (o = {}) => {
-      const h = { ...ctxHeaders(), ...o.headers };
+    const encode = async (o = {}) => {
+      const h = mergeHeaders(ctxHeaders(), o.headers);
       let body = null;
+      if ([o.data, o.form, o.multipart].filter((value) => value !== undefined).length > 1) {
+        throw new Error("data, form and multipart are mutually exclusive");
+      }
+      if (o.form !== undefined) {
+        const entries = o.form instanceof FormData ? o.form.entries() : o.form;
+        body = new URLSearchParams(entries).toString();
+        setAPIContentType(h, "application/x-www-form-urlencoded");
+      }
+      if (o.multipart !== undefined) {
+        const multipart = await encodeMultipart(o.multipart);
+        body = multipart.body;
+        setAPIContentType(h, multipart.type);
+      }
       if (o.data !== null && o.data !== undefined) {
-        if (typeof o.data === "string" || Buffer.isBuffer?.(o.data)) {
-          body = String(o.data);
-        } else {
-          body = JSON.stringify(o.data);
-          if (!Object.keys(h).some((k) => k.toLowerCase() === "content-type")) {
-            h["Content-Type"] = "application/json";
-          }
-        }
+        body = encodeAPIRequestData(o, h);
       }
       const hdr = Object.keys(h).length ? JSON.stringify(h) : headers;
       return { body, hdr };
     };
+    const fetchResponse = (
+      target,
+      inCookies,
+      method,
+      body,
+      hdr,
+      maxRedirects,
+      o,
+      encodeHeaders = false,
+    ) =>
+      native.fetchWithCookies(
+        target,
+        inCookies,
+        method ?? null,
+        Buffer.isBuffer(body) ? null : body,
+        encodeHeaders ? JSON.stringify(hdr) : hdr,
+        false,
+        requestState,
+        null,
+        Buffer.isBuffer(body) ? body : null,
+        maxRedirects,
+        true,
+        o.timeout ?? opts.timeout ?? null,
+        maxBytes,
+      );
     const call = async (url, method, o = {}) => {
-      const { body, hdr } = encode(o);
-      const inCookies = bc && bc._cookies ? bc._cookies : "[]";
-      const raw = await native.fetchWithCookies(resolve(url), inCookies, method ?? null, body, hdr);
-      const parsed = JSON.parse(raw);
+      ensureOpen();
+      await initialState;
+      const target = appendAPIRequestParams(resolve(url), o);
+      const maxRedirects = o.maxRedirects ?? opts.maxRedirects;
+      validateAPIMaxRedirects(maxRedirects);
+      const credentialHeaders =
+        credentialAllowed(target) && credentials.send === "always"
+          ? { Authorization: authorization, ...o.headers }
+          : o.headers;
+      const { body, hdr } = await encode({ ...o, headers: credentialHeaders });
+      const inCookies = bc ? bc._cookies : cookies;
+      let raw = await fetchResponse(target, inCookies, method, body, hdr, maxRedirects, o);
+      let parsed = JSON.parse(raw);
+      if (needsAPIBasicChallenge(parsed, target, credentialAllowed, credentials)) {
+        const authHeaders = JSON.parse(hdr ?? "{}");
+        authHeaders.Authorization = authorization;
+        raw = await fetchResponse(
+          target,
+          inCookies,
+          method,
+          body,
+          authHeaders,
+          maxRedirects,
+          o,
+          true,
+        );
+        parsed = JSON.parse(raw);
+      }
       // Merge Set-Cookie writes back into the parent BrowserContext's jar so
       // the next page.goto / page.request / context.request sees them.
-      if (bc && parsed && typeof parsed.cookies === "string") bc._cookies = parsed.cookies;
+      if (typeof parsed.cookies === "string") {
+        if (bc) bc._cookies = parsed.cookies;
+        else cookies = parsed.cookies;
+      }
       // oxlint-enable no-underscore-dangle
-      return makeResponse(parsed);
+      ensureOpen();
+      validateAPIStatus(parsed, o.failOnStatusCode ?? opts.failOnStatusCode);
+      responses.add(parsed);
+      return makeResponse(parsed, ensureOpen);
     };
     return {
       get: (url, o = {}) => call(url, null, o),
@@ -3778,10 +7629,24 @@ export const request = {
       delete: (url, o = {}) => call(url, "DELETE", o),
       head: (url, o = {}) => call(url, "HEAD", o),
       fetch: (url, o = {}) => call(url, o.method ?? null, o),
-      async storageState() {
-        return { cookies: [], origins: [] };
+      async storageState(o = {}) {
+        ensureOpen();
+        await initialState;
+        const state = { cookies: JSON.parse(bc ? bc._cookies : cookies), origins: [] };
+        if (o.path) await writeFile(o.path, JSON.stringify(state));
+        return state;
       },
-      async dispose() {},
+      async dispose() {
+        if (disposed) return;
+        disposed = true;
+        for (const response of responses) {
+          response.html = null;
+          response.bodyBytes = null;
+        }
+        responses.clear();
+        cookies = "[]";
+        if (requestState != null) native.requestStateClose(requestState);
+      },
     };
   },
 };

@@ -4,14 +4,35 @@
 //! (driven on napi's tokio runtime). The thin `@playwright/test` shim (task #10)
 //! composes these; `goto` = `fetchHtml` then view calls on the cached HTML.
 
+mod context_emulation;
 mod document_response;
+pub use context_emulation::live_actor_configure_emulation;
+mod document_images;
+mod image_metadata;
+mod parse_cache;
+mod screenshot_options;
+mod screenshot_output;
+pub use screenshot_options::{screenshot_capture, screenshot_capture_svg};
+mod screenshot_resources;
+mod screenshot_scene;
+pub use screenshot_output::{screenshot_crop, screenshot_jpeg};
+pub use screenshot_resources::screenshot_capture_resources;
+pub use screenshot_scene::ScreenshotScene;
 mod session;
+mod upload_mime;
 // Re-export the live-session napi free functions so they're reachable from the crate
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
 pub use session::{
-    live_close, live_cookies, live_eval, live_eval_engine, live_eval_expression, live_network_log,
-    live_open, live_serialize,
+    live_actor_close, live_auxiliary_adopt, live_auxiliary_configure, live_auxiliary_state,
+    live_auxiliary_wait, live_close, live_close_opening_target, live_cookies, live_dialog_cancel,
+    live_dialog_configure, live_dialog_respond, live_dispatch_engine, live_eval, live_eval_engine,
+    live_eval_engine_expression, live_eval_expression, live_eval_expression_tracked,
+    live_image_assets, live_initial_hydration_status, live_navigate_target, live_network_log,
+    live_network_log_acknowledge, live_network_log_create, live_network_log_discard_handles,
+    live_network_log_publish_intercepted, live_network_log_wait, live_network_log_wake, live_open,
+    live_read_engine, live_read_engine_async, live_resize, live_serialize, live_set_content,
+    live_set_cookies, live_target_configure, live_target_history_state, live_target_network_state,
 };
 
 use napi::bindgen_prelude::*;
@@ -56,6 +77,11 @@ pub(crate) fn ensure_render_init() {
 use view::{Field, FieldType, QueryType, TextMode};
 
 #[napi]
+pub fn file_mime_type(path: String) -> String {
+    upload_mime::file_mime_type(&path)
+}
+
+#[napi]
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
@@ -70,26 +96,14 @@ fn to_json_string<T: serde::Serialize>(v: &T) -> String {
 }
 
 thread_local! {
-    /// Memoize the most recent `html -> Tree` parse per thread. Reads are stateless
-    /// (Node passes the HTML each call), so a page that gets several view passes
-    /// (links + markdown + text + extract — the real crawl pattern, and the shim's
-    /// query-then-accessors) re-parsed the 250 KB document every call. Cache the last
-    /// one: a same-HTML follow-up call is a cheap string compare + `Rc` clone instead
-    /// of a ~5 ms re-parse. Mutating actions still own their own `Tree` (need `&mut`).
-    static PARSE_CACHE: std::cell::RefCell<Option<(String, std::rc::Rc<Tree>)>> =
-        const { std::cell::RefCell::new(None) };
+    // Retain immutable snapshots across interleaved pages, bounded by eight
+    // entries and 4 MiB of input HTML per thread. Mutating actions parse separately.
+    static PARSE_CACHE: std::cell::RefCell<parse_cache::ParseCache<Tree>> =
+        const { std::cell::RefCell::new(parse_cache::ParseCache::new()) };
 }
 
-/// Parsed `Tree` for `html`, reusing the thread's last parse when the HTML is
-/// unchanged. Returned as `Rc<Tree>`; `&tree` derefs to `&Tree` at call sites.
 fn parsed(html: &str) -> std::rc::Rc<Tree> {
-    PARSE_CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        if c.as_ref().map(|(k, _)| k.as_str()) != Some(html) {
-            *c = Some((html.to_string(), std::rc::Rc::new(Tree::parse(html))));
-        }
-        c.as_ref().expect("just set").1.clone()
-    })
+    PARSE_CACHE.with(|cache| cache.borrow_mut().get_or_insert_with(html, Tree::parse))
 }
 
 // --- view passes (parse cached per page; the shim caches the HTML) ----------
@@ -304,14 +318,27 @@ pub fn detect(html: String) -> String {
 }
 
 #[napi]
-pub fn query(html: String, selector: String, kind: Option<String>) -> String {
+pub fn query(html: String, selector: String, kind: Option<String>, root: Option<u32>) -> String {
     let tree = parsed(&html);
     let ty = match kind.as_deref() {
         Some("css") => QueryType::Css,
         Some("xpath") => QueryType::Xpath,
         _ => QueryType::Auto,
     };
-    to_json_string(&view::query(&tree, tree.root(), &selector, ty))
+    let root = root.map(Handle::from_raw).unwrap_or_else(|| tree.root());
+    to_json_string(&view::query(&tree, root, &selector, ty))
+}
+
+/// Match count without serialized node HTML or text.
+#[napi]
+pub fn query_count(html: String, selector: String, kind: Option<String>) -> u32 {
+    let tree = parsed(&html);
+    let ty = match kind.as_deref() {
+        Some("css") => QueryType::Css,
+        Some("xpath") => QueryType::Xpath,
+        _ => QueryType::Auto,
+    };
+    view::query::query_count(&tree, tree.root(), &selector, ty) as u32
 }
 
 /// Locate by `kind` ("role" | "text" | "label") → JSON `[{ node, text }]`.
@@ -323,22 +350,37 @@ pub fn get_by(
     value: String,
     name: Option<String>,
     root: Option<String>,
+    options: Option<String>,
 ) -> String {
     let tree = parsed(&html);
+    let options: view::locator::LocatorOptions = options
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_default();
     let mode_for = |s: &str| {
         if view::locator::is_regex_literal(s) {
             TextMode::Regex
+        } else if options.exact {
+            TextMode::Exact
         } else {
             TextMode::Substring
         }
     };
     let nm = name.as_deref().map(|n| (n, mode_for(n)));
     let mut hits = match kind.as_str() {
-        "role" => view::by_role(&tree, &value, nm),
+        "role" => match root.as_deref().filter(|s| !s.is_empty()) {
+            Some(selector) => {
+                view::locator::by_role_in(&tree, &tree.query_selector_all(selector), &value, nm)
+            }
+            None => view::by_role(&tree, &value, nm),
+        },
         "text" => view::by_text(&tree, &value, mode_for(&value)),
         "label" => view::by_label(&tree, &value, mode_for(&value)),
         _ => Vec::new(),
     };
+    if kind == "role" {
+        hits.retain(|&h| view::locator::matches_role_options(&tree, h, &options));
+    }
     // Scope to a parent locator's subtree: keep only hits that are a descendant (or self) of
     // some element matching `root`. Backs `parentLocator.getByRole/getByText/getByLabel(...)`.
     if let Some(root_sel) = root.as_deref().filter(|s| !s.is_empty()) {
@@ -360,11 +402,17 @@ pub fn get_by(
     // `idx` = the element's position in document order (querySelectorAll('*')), so the
     // Playwright shim can drive a getBy* match in the LIVE isolate by index (these
     // locators have no CSS selector to dispatch through).
-    let all: Vec<Handle> = tree.query_selector_all("*").iter().copied().collect();
+    let order: std::collections::HashMap<Handle, usize> = tree
+        .query_selector_all("*")
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, handle)| (handle, index))
+        .collect();
     let out: Vec<Value> = hits
         .iter()
         .map(|&h| {
-            json!({ "node": h.raw(), "text": view::text(&tree, h), "idx": all.iter().position(|&x| x == h) })
+            json!({ "node": h.raw(), "text": view::text(&tree, h), "idx": order.get(&h).copied() })
         })
         .collect();
     Value::Array(out).to_string()
@@ -532,7 +580,7 @@ impl Task for HydrateTask {
             .build()
             .map_err(|e| Error::from_reason(e.to_string()))?;
         rt.block_on(async {
-            let page = turbo_surf_render::PageSession::open_with_document_response(
+            let mut page = turbo_surf_render::PageSession::open_with_document_response(
                 &self.html,
                 &self.base_url,
                 &self.cookies,
@@ -545,7 +593,7 @@ impl Task for HydrateTask {
                 self.response.metadata.clone(),
             )
             .await?;
-            let html = page.serialize();
+            let html = page.serialize_checked()?;
             page.close();
             Ok::<String, String>(html)
         })
@@ -603,6 +651,13 @@ pub fn render_ts(
 // --- per-element accessors (by node handle; back the shim Locator) ----------
 // Handles are stable for a given HTML parse, so the shim resolves matches (which
 // carry `node`) then reads by handle — works for both `query` and `getBy`.
+
+/// Raw DOM descendant text; distinct from the structured agent-facing text view.
+#[napi]
+pub fn text_content_of(html: String, node: u32) -> String {
+    let tree = parsed(&html);
+    tree.text_content(Handle::from_raw(node))
+}
 
 #[napi]
 pub fn attr_of(html: String, node: u32, name: String) -> Option<String> {
@@ -812,6 +867,7 @@ fn shared_client() -> &'static turbo_surf_core::http_backend::Client {
 pub(crate) struct RequestState {
     pub(crate) client_hints: ClientHints,
     pub(crate) storage: turbo_surf_render::BrowserStorage,
+    pub(crate) document_images: document_images::DocumentImages,
 }
 fn request_states() -> &'static std::sync::Mutex<std::collections::HashMap<u32, RequestState>> {
     static STATES: std::sync::OnceLock<
@@ -821,13 +877,57 @@ fn request_states() -> &'static std::sync::Mutex<std::collections::HashMap<u32, 
 }
 
 #[napi]
+pub fn request_state_configure(id: u32, options_json: String) -> Result<()> {
+    request_state(Some(id))?
+        .storage
+        .configure_emulation(&options_json)
+        .map_err(Error::from_reason)
+}
+
+#[napi]
+pub fn request_state_import_storage(id: u32, origins_json: String) -> Result<()> {
+    request_state(Some(id))?
+        .storage
+        .import_local_storage_state(&origins_json)
+        .map_err(Error::from_reason)
+}
+
+#[napi]
+pub fn request_state_storage(id: u32) -> Result<String> {
+    request_state(Some(id))?
+        .storage
+        .local_storage_state()
+        .map_err(Error::from_reason)
+}
+
+#[napi]
+pub fn request_state_set_offline(id: u32, offline: bool) -> Result<()> {
+    request_state(Some(id))?.client_hints.set_offline(offline);
+    Ok(())
+}
+
+#[napi]
+pub fn request_state_new_api(parent_context_id: Option<u32>) -> Result<u32> {
+    new_request_state(parent_context_id, true)
+}
+
+#[napi]
 pub fn request_state_new(parent_context_id: Option<u32>) -> Result<u32> {
+    new_request_state(parent_context_id, false)
+}
+
+fn new_request_state(parent_context_id: Option<u32>, independent_network: bool) -> Result<u32> {
     let state = match parent_context_id {
         Some(parent) => {
             let parent = request_state(Some(parent))?;
             RequestState {
-                client_hints: parent.client_hints,
+                client_hints: if independent_network {
+                    parent.client_hints.with_independent_network_conditions()
+                } else {
+                    parent.client_hints
+                },
                 storage: parent.storage.new_tab().map_err(Error::from_reason)?,
+                document_images: Default::default(),
             }
         }
         None => RequestState::default(),
@@ -849,10 +949,13 @@ pub fn request_state_new(parent_context_id: Option<u32>) -> Result<u32> {
 
 #[napi]
 pub fn request_state_close(id: u32) -> Result<()> {
-    request_states()
+    let removed = request_states()
         .lock()
         .map_err(|_| Error::from_reason("request state registry poisoned"))?
         .remove(&id);
+    if let Some(state) = removed {
+        state.document_images.clear();
+    }
     Ok(())
 }
 
@@ -938,7 +1041,10 @@ async fn do_fetch(
     body: Option<String>,
     cookies: Option<String>,
 ) -> Result<String> {
-    do_fetch_headers(url, method, body, cookies, None, false, None, None).await
+    do_fetch_headers(
+        url, method, body, cookies, None, false, None, None, None, None, None, None,
+    )
+    .await
 }
 
 /// `do_fetch` plus extra request headers (JSON object) — backs the shim's
@@ -953,6 +1059,10 @@ async fn do_fetch_headers(
     bypass_consent: bool,
     request_state_id: Option<u32>,
     context_json: Option<String>,
+    body_bytes: Option<Buffer>,
+    max_redirects: Option<u32>,
+    no_cache: Option<bool>,
+    max_bytes: Option<u32>,
 ) -> Result<String> {
     let mut jar = cookies
         .as_deref()
@@ -964,7 +1074,10 @@ async fn do_fetch_headers(
     let RequestState {
         client_hints,
         storage,
+        ..
     } = request_state(request_state_id)?;
+    let headers = storage.request_headers(headers);
+    let auth_credentials = storage.http_credentials();
     let storage_effects = storage.response_storage_effects();
     let http_cache = storage.http_cache();
     // Network jobs need native backing, not the tab/profile owner.
@@ -980,12 +1093,48 @@ async fn do_fetch_headers(
                 turbo_surf_render::DocumentResponseMetadata::from_request(200, context, target);
             true
         };
+    let request_hops = std::sync::Mutex::new(Vec::<Value>::new());
+    let request_body = body_bytes
+        .as_ref()
+        .map(|bytes| bytes.to_vec())
+        .or_else(|| body.as_ref().map(|body| body.as_bytes().to_vec()));
+    let request_method = method.as_deref().unwrap_or("GET").to_ascii_uppercase();
+    let before_request = |_context: RequestContext,
+                          target: String,
+                          method: String,
+                          headers: BTreeMap<String, String>|
+     -> turbo_surf_core::net::BeforeRequestFuture {
+        let body = (method == request_method)
+            .then(|| request_body.clone())
+            .flatten();
+        request_hops.lock().unwrap().push(
+            json!({"url":target,"method":method,"request":{"headers":headers,"bodyBytes":body}}),
+        );
+        Box::pin(async { Ok(()) })
+    };
     let opts = FetchOptions {
+        http_credentials: auth_credentials.as_ref(),
+        max_bytes: max_bytes.map(|bytes| bytes as usize),
         method,
         body,
+        body_bytes: body_bytes.map(|bytes| bytes.to_vec()),
+        max_redirects: max_redirects.map(|count| count as usize),
+        cache_mode: if no_cache.unwrap_or(false) {
+            turbo_surf_core::http_cache::CacheMode::NoStore
+        } else {
+            Default::default()
+        },
+        redirect: max_redirects.map(|count| {
+            if count == 0 {
+                turbo_surf_core::net::RedirectMode::Manual
+            } else {
+                turbo_surf_core::net::RedirectMode::Follow
+            }
+        }),
         headers,
         context: Some(context),
         response_policy: Some(&response_policy),
+        before_request: Some(&before_request),
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_partition,
@@ -1005,13 +1154,16 @@ async fn do_fetch_headers(
         .unwrap_or_else(|| "[]".to_string());
     Ok(json!({
         "html": res.html,
+        "bodyBytes": res.body_bytes,
         "finalUrl": res.final_url,
         "status": res.status,
+        "statusText": res.status_text,
         "referrer": response_metadata.lock().unwrap().referrer,
         "headers": res.headers,
         "redirected": res.redirected,
         "contentType": res.content_type,
         "cookies": cookie_state,
+        "requests": request_hops.into_inner().unwrap(),
     })
     .to_string())
 }
@@ -1020,6 +1172,22 @@ async fn do_fetch_headers(
 #[napi]
 pub async fn fetch_html(url: String) -> Result<String> {
     do_fetch(&url, None, None, None).await
+}
+
+/// Allocate a document-owned image handoff; replacing it retires pending captures.
+#[napi]
+pub fn request_state_image_document(id: u32, source: String) -> Result<u32> {
+    request_state(Some(id))?
+        .document_images
+        .begin(source)
+        .ok_or_else(|| Error::from_reason("image document handles exhausted"))
+}
+
+/// Release only the addressed static document's retained native response bodies.
+#[napi]
+pub fn request_state_discard_image_document(id: u32, token: u32) -> Result<()> {
+    request_state(Some(id))?.document_images.discard(token);
+    Ok(())
 }
 
 /// Fetch a URL as raw bytes (no charset decode) → a `Buffer`. For binary
@@ -1038,6 +1206,7 @@ pub async fn fetch_bytes(
     request_state_id: Option<u32>,
     source_url: Option<String>,
     cookies: Option<String>,
+    image_document: Option<u32>,
 ) -> Result<Buffer> {
     let mut headers = std::collections::BTreeMap::new();
     if let Some(accept) = turbo_surf_core::request_context::paintable_image_accept(
@@ -1049,7 +1218,10 @@ pub async fn fetch_bytes(
     let RequestState {
         client_hints,
         storage,
+        document_images,
     } = request_state(request_state_id)?;
+    let headers = storage.request_headers(headers);
+    let auth_credentials = storage.http_credentials();
     let storage_effects = storage.response_storage_effects();
     let http_cache = storage.http_cache();
     drop(storage);
@@ -1061,9 +1233,15 @@ pub async fn fetch_bytes(
         Destination::Image,
         RequestMode::NoCors,
     );
-    context.source = source_url;
+    context.source = source_url.clone();
+    let redirected = std::sync::atomic::AtomicBool::new(false);
+    let observe_request = |_: &str, is_redirect: bool| {
+        redirected.fetch_or(is_redirect, std::sync::atomic::Ordering::Relaxed);
+        true
+    };
     let cache_partition = browsing_cache_partition(&context, &url);
     let opts = FetchOptions {
+        http_credentials: auth_credentials.as_ref(),
         allow_non_html: true,
         client: Some(shared_client()),
         headers,
@@ -1072,12 +1250,26 @@ pub async fn fetch_bytes(
         http_cache: Some(&http_cache),
         cache_partition,
         context: Some(context),
+        request_policy: Some(&observe_request),
         jar: jar.as_mut(),
         ..Default::default()
     };
-    let (_final_url, bytes, _status) = turbo_surf_core::net::fetch_bytes(&url, opts)
+    let response = turbo_surf_core::net::fetch_typed_bytes(&url, opts)
         .await
         .map_err(|e| Error::from_reason(e.to_string()))?;
+    let bytes =
+        if image_document.is_some() && !redirected.load(std::sync::atomic::Ordering::Relaxed) {
+            let bytes = response.bytes.clone();
+            document_images.record(
+                image_document,
+                source_url.as_deref().unwrap_or(""),
+                &url,
+                response,
+            );
+            bytes
+        } else {
+            response.bytes
+        };
     Ok(Buffer::from(bytes))
 }
 
@@ -1100,8 +1292,13 @@ pub async fn fetch_with_cookies(
     bypass_consent: Option<bool>,
     request_state_id: Option<u32>,
     context_json: Option<String>,
+    body_bytes: Option<Buffer>,
+    max_redirects: Option<u32>,
+    no_cache: Option<bool>,
+    timeout_ms: Option<u32>,
+    max_bytes: Option<u32>,
 ) -> Result<String> {
-    do_fetch_headers(
+    let fetch = do_fetch_headers(
         &url,
         method,
         body,
@@ -1110,8 +1307,19 @@ pub async fn fetch_with_cookies(
         bypass_consent.unwrap_or(false),
         request_state_id,
         context_json,
-    )
-    .await
+        body_bytes,
+        max_redirects,
+        no_cache,
+        max_bytes,
+    );
+    match timeout_ms.filter(|timeout| *timeout > 0) {
+        Some(timeout) => {
+            tokio::time::timeout(std::time::Duration::from_millis(timeout as u64), fetch)
+                .await
+                .map_err(|_| Error::from_reason(format!("navigation timeout after {timeout}ms")))?
+        }
+        None => fetch.await,
+    }
 }
 
 fn record_json(r: &Record) -> Value {
@@ -1167,4 +1375,13 @@ pub async fn crawl(opts_json: String) -> Result<String> {
     let recs = run_crawl(opts, Arc::new(nav)).await;
     let arr: Vec<Value> = recs.iter().map(record_json).collect();
     Ok(Value::Array(arr).to_string())
+}
+
+#[cfg(test)]
+mod export_tests {
+    #[test]
+    fn image_assets_task_is_available_from_the_crate_root_without_a_live_session() {
+        // Creating an asynchronous asset read must not dispatch before NAPI schedules it.
+        drop(crate::live_image_assets(u32::MAX, "[]".to_owned()));
+    }
 }

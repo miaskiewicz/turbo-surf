@@ -7,8 +7,11 @@ use turbo_surf_core::request_context::{same_origin, ClientHints, RequestContext,
 
 #[derive(Default)]
 pub struct ScriptPolicies<'a> {
+    pub http_credentials: Option<&'a turbo_surf_core::http_auth::Credentials>,
+    pub max_bytes: Option<usize>,
     pub request: Option<ScriptPolicy<'a>>,
     pub response_side_effects: Option<&'a turbo_surf_core::net::ResponseSideEffects<'a>>,
+    pub response_observer: Option<&'a turbo_surf_core::net::ResponseObserver<'a>>,
     pub http_cache: Option<&'a turbo_surf_core::http_cache::HttpCache>,
     pub cache_partition: &'a str,
     pub embedder: crate::resource_policy::EmbedderPolicy,
@@ -150,9 +153,12 @@ async fn fetch_hop(
     fetch_html(
         target,
         FetchOptions {
+            http_credentials: policies.http_credentials,
+            max_bytes: policies.max_bytes,
             http_cache: policies.http_cache,
             response_policy: Some(&response_policy),
             response_side_effects: policies.response_side_effects,
+            response_observer: policies.response_observer,
             cache_partition: policies.cache_partition.into(),
             headers: headers.clone(),
             context: Some(context.clone()),
@@ -365,6 +371,26 @@ mod tests {
             "",
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn script_response_budget_is_configurable_and_preserves_size_diagnostics() {
+        let origin = server().await;
+        let url = format!("{origin}/js");
+        let small = ScriptPolicies {
+            max_bytes: Some(4),
+            ..Default::default()
+        };
+        let diagnostic = error(&url, context(&origin, RequestMode::NoCors), small).await;
+        assert!(diagnostic.contains("BodyTooLarge"), "{diagnostic}");
+        assert!(diagnostic.contains("maxBytes"), "{diagnostic}");
+        let large = ScriptPolicies {
+            max_bytes: Some(1024),
+            ..Default::default()
+        };
+        assert!(run(&url, context(&origin, RequestMode::NoCors), large)
+            .await
+            .is_ok());
     }
 
     async fn error(url: &str, context: RequestContext, policies: ScriptPolicies<'_>) -> String {

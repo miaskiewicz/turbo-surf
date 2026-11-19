@@ -1,5 +1,13 @@
 # Native Chrome 155 engine profile
 
+This is an optional, source-built SDK experiment; the dated receipts below keep
+their original engine/source identities. It is separate from the current
+[GPU/render-hook bridge](../../../docs/GPU-BRIDGE.md). `gpu-metal`/`coretext`
+are off-by-default consumer features and do not require this SDK. Conversely,
+`native-sdk-frame-read` selects the SDK compatibility path, not GPU rendering;
+the build helper adds that forwarding feature for supported Surf members.
+Neither script publishes an SDK or changes default release build features.
+
 The current profile compiles actual V8 **15.5.35.23** from the revision pinned by
 **Chrome155.0.8059.79**. Its macOS arm64 source artifact is verified against the
 actual engine version, archive and generated bindings. The current SDK includes

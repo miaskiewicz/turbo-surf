@@ -23,6 +23,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Test exact artifact routing and publication guards
+        run: |
+          python3 -B scripts/test_prepare_npm_release.py
+          node --test scripts/smoke-napi-release.test.mjs
       - name: Test the offline release smoke supervisor
         run: python3 -B scripts/test_smoke_mcp_release.py
       - name: Check release versions and exact tag
@@ -40,7 +47,6 @@ jobs:
           print('Release source:', os.environ['GITHUB_SHA'], 'version:', version)
           PYCODE
       - name: Release guard (no [patch] table, no git sources, prerequisites on crates.io)
-        if: github.event_name == 'push'
         working-directory: rust
         run: python3 -B release-deps/release_guard.py
 
@@ -61,6 +67,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
       - uses: dtolnay/rust-toolchain@1.98.0
         with: { targets: "${{ matrix.target }}" }
       - name: Install BoringSSL and binding toolchain
@@ -101,6 +109,14 @@ jobs:
             --binary "$PWD/out/$STAGED_BINARY" --expected-version "$version" \
             --source-commit "$GITHUB_SHA" --work "$RUNNER_TEMP/staged-mcp-smoke" \
             --output "$PWD/smoke-proof"
+          cp "$PWD/smoke-proof/initialize.json" "$PWD/out/mcp-smoke.json"
+      - name: Load and exercise the actual staged Node addon
+        shell: bash
+        run: |
+          version=$(python -c "import json; print(json.load(open('package.json'))['version'])")
+          node scripts/smoke-napi-release.mjs \
+            "$PWD/out/turbo-surf.${{ matrix.napi }}.node" "$version" "$GITHUB_SHA" \
+            "$PWD/out/napi-smoke.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -108,195 +124,94 @@ jobs:
           path: smoke-proof/*
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: bin-${{ matrix.node }}
           path: out/*
-          if-no-files-found: error
+          if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # Publish per-platform @miaskiewicz/turbo-surf-<platform> packages.
-  # Each carries one MCP binary + one .node addon (<200 MB each, under npm limit).
-  # ---------------------------------------------------------------------------
-  publish-platform:
+  # Every native runtime and exact npm tarball must pass before any upload.
+  prepare-packages:
     needs: build
-    name: publish ${{ matrix.npm_dir }}
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { node: darwin-arm64, npm_dir: darwin-arm64, ext: '', mcp_name: turbo-surf-mcp, napi_name: 'turbo-surf.darwin-arm64.node' }
-          - { node: linux-x64, npm_dir: linux-x64, ext: '', mcp_name: turbo-surf-mcp, napi_name: 'turbo-surf.linux-x64-gnu.node' }
-          - { node: linux-arm64, npm_dir: linux-arm64, ext: '', mcp_name: turbo-surf-mcp, napi_name: 'turbo-surf.linux-arm64-gnu.node' }
-          - { node: win32-x64, npm_dir: win32-x64, ext: .exe, mcp_name: turbo-surf-mcp.exe, napi_name: 'turbo-surf.win32-x64-msvc.node' }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20, registry-url: "https://registry.npmjs.org" }
-      - uses: actions/download-artifact@v4
-        with:
-          name: bin-${{ matrix.node }}
-          path: artifact
-      - name: Stage platform package
-        shell: bash
-        run: |
-          pkg_dir="npm/${{ matrix.npm_dir }}"
-          cp "artifact/turbo-surf-mcp-${{ matrix.node }}${{ matrix.ext }}" \
-             "$pkg_dir/${{ matrix.mcp_name }}"
-          cp "artifact/${{ matrix.napi_name }}" "$pkg_dir/"
-          cp LICENSE THIRD_PARTY_NOTICES.md "$pkg_dir/"
-          chmod +x "$pkg_dir/${{ matrix.mcp_name }}" || true
-          ls -la "$pkg_dir/"
-      - name: Publish platform package
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        working-directory: npm/${{ matrix.npm_dir }}
-        run: npm publish --provenance --access public 2>&1 || {
-          rc=$?; npm view "$(node -p 'require("./package.json").name')@$(node -p 'require("./package.json").version')" version >/dev/null 2>&1 && echo "Already published — continuing" || exit $rc;
-        }
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  # ---------------------------------------------------------------------------
-  # Publish the thin `turbo-surf` launcher (no native binaries — those come
-  # from the per-platform optionalDependencies above).
-  # ---------------------------------------------------------------------------
-  publish:
-    needs: publish-platform
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, registry-url: "https://registry.npmjs.org" }
+        with: { node-version: 20 }
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+        with: { python-version: '3.12' }
       - uses: actions/download-artifact@v4
         with:
           pattern: bin-*
           path: artifacts
-      - name: Pack and verify the thin launcher tarball
+      - name: Pack and smoke the exact platform and launcher tarballs
         shell: bash
         run: |
-          python - <<'PYCODE'
-          import base64, hashlib, json, os, shutil, subprocess, tarfile
-          from pathlib import Path, PurePosixPath
-          root = Path.cwd().resolve()
-          metadata = json.loads((root / 'package.json').read_text())
-          version = metadata['version']
-          output = Path(os.environ['RUNNER_TEMP']) / 'npm-release-package'
-          output.mkdir()
-          packed = subprocess.run(['npm', 'pack', '--json', '--ignore-scripts', '--pack-destination', str(output)], cwd=root, capture_output=True, text=True)
-          (output / 'npm-pack.json').write_text(packed.stdout)
-          (output / 'npm-pack.stderr.log').write_text(packed.stderr)
-          packed.check_returncode()
-          packages = json.loads(packed.stdout)
-          if len(packages) != 1 or packages[0]['name'] != 'turbo-surf' or packages[0]['version'] != version:
-              raise SystemExit('npm pack did not produce the exact release package')
-          archive = output / packages[0]['filename']
-          archive_bytes = archive.read_bytes()
-          integrity = 'sha512-' + base64.b64encode(hashlib.sha512(archive_bytes).digest()).decode()
-          if integrity != packages[0]['integrity'] or hashlib.sha1(archive_bytes).hexdigest() != packages[0]['shasum']:
-              raise SystemExit('npm pack integrity does not match the actual tarball')
-          # The thin launcher should NOT contain platform binaries or .node addons.
-          napi_meta = {'index.js', 'index.d.ts', 'package.json', 'LICENSE', 'README.md'}
-          required = {'package.json', 'cli.js', 'index.js', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md'} \
-              | {'rust/crates/turbo-surf-napi/' + name for name in napi_meta}
-          hashes = {}
-          with tarfile.open(archive, 'r:gz') as tar:
-              members = tar.getmembers()
-              names = [member.name for member in members]
-              if len(names) != len(set(names)):
-                  raise SystemExit('Duplicate tarball paths')
-              for member in members:
-                  path = PurePosixPath(member.name)
-                  if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'package' or not (member.isfile() or member.isdir()):
-                      raise SystemExit('Unsafe npm tarball entry: ' + member.name)
-              files = {member.name.removeprefix('package/') for member in members if member.isfile()}
-              # Reject any platform binaries or .node files that snuck in.
-              for f in files:
-                  if f.startswith('bin/') and 'turbo-surf-mcp' in f:
-                      raise SystemExit('Thin launcher tarball must not contain platform binaries: ' + f)
-                  if f.endswith('.node') and not f.endswith('.d.ts'):
-                      raise SystemExit('Thin launcher tarball must not contain .node addons: ' + f)
-              if not required <= files:
-                  missing = required - files
-                  raise SystemExit('Thin launcher tarball is missing required files: ' + str(missing))
-              for name in sorted(required):
-                  data = tar.extractfile('package/' + name).read()
-                  if not data or data != (root / name).read_bytes():
-                      raise SystemExit('Packed release file differs from source: ' + name)
-                  hashes[name] = hashlib.sha256(data).hexdigest()
-          actual = json.loads((root / 'package.json').read_text())
-          if actual['name'] != metadata['name'] or actual['version'] != version:
-              raise SystemExit('Package identity mismatch')
-          receipt = {'archive': str(archive), 'sha256': hashlib.sha256(archive_bytes).hexdigest(),
-              'integrity': integrity, 'version': version, 'fileSha256': hashes, 'thinLauncher': True}
-          (output / 'verify.json').write_text(json.dumps(receipt, indent=2) + '\n')
-          with open(os.environ['GITHUB_ENV'], 'a') as github_env:
-              github_env.write('RELEASE_TARBALL=' + str(archive) + '\n')
-          print(json.dumps(receipt, indent=2))
-          PYCODE
-      - name: Smoke the launcher with a staged binary
-        shell: bash
-        run: |
-          python - <<'PYCODE'
-          import json, os, shutil, signal, subprocess
-          from pathlib import Path
-          import importlib.util
-          root = Path.cwd().resolve()
-          version = json.loads((root / 'package.json').read_text())['version']
-          output = Path(os.environ['RUNNER_TEMP']) / 'npm-release-package'
-          # Stage the linux-x64 binary into a mock platform package for the smoke test.
-          # Node resolves @scope/pkg as NODE_PATH/@scope/pkg/, so nest accordingly.
-          mock_root = Path(os.environ['RUNNER_TEMP']) / 'mock-node-modules'
-          mock_pkg = mock_root / '@miaskiewicz' / 'turbo-surf-linux-x64'
-          mock_pkg.mkdir(parents=True)
-          (mock_pkg / 'package.json').write_text(json.dumps({
-              'name': '@miaskiewicz/turbo-surf-linux-x64', 'version': version}))
-          artifacts = root / 'artifacts'
-          for f in artifacts.rglob('turbo-surf-mcp-linux-x64'):
-              shutil.copy2(f, mock_pkg / 'turbo-surf-mcp')
-              (mock_pkg / 'turbo-surf-mcp').chmod(0o755)
-              break
-          # Point Node module resolution at our mock.
-          env = {'NODE_PATH': str(mock_root)}
-          spec = importlib.util.spec_from_file_location('release_smoke', root / 'scripts/smoke-mcp-release.py')
-          smoke = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(smoke)
-          for name in ('SIGINT', 'SIGTERM', 'SIGHUP'):
-              if hasattr(signal, name):
-                  signal.signal(getattr(signal, name), smoke.interrupted)
-          smoke_output = output / 'javascript-smoke'
-          version_env = os.environ.copy()
-          version_env['NODE_PATH'] = str(mock_root)
-          result = subprocess.run([shutil.which('node'), str(root / 'cli.js'), '--version'],
-              capture_output=True, text=True, timeout=30, env=version_env)
-          print('CLI --version:', result.stdout.strip(), '(exit', result.returncode, ')')
-          if result.returncode != 0:
-              print('stderr:', result.stderr)
-          receipt = smoke.smoke([shutil.which('node'), str(root / 'cli.js')], version,
-              os.environ['GITHUB_SHA'], Path(os.environ['RUNNER_TEMP']) / 'npm-javascript-smoke',
-              smoke_output, env=env)
-          for stream in ('stdout', 'stderr'):
-              log = smoke_output / (stream + '.log')
-              if log.is_file():
-                  shutil.copyfile(log, output / ('initialize.' + stream + '.log'))
-          receipt.update(version=version, cli=str(root / 'cli.js'), thinLauncher=True)
-          (output / 'initialize.json').write_text(json.dumps(receipt, indent=2) + '\n')
-          if not receipt['initializeVerified'] or not receipt['javascriptVerified']:
-              raise SystemExit('Thin launcher CLI smoke failed; see retained evidence')
-          print(json.dumps(receipt, indent=2))
-          PYCODE
+          version=$(python -c "import json; print(json.load(open('package.json'))['version'])")
+          python scripts/prepare-npm-release.py --root "$PWD" \
+            --artifacts "$PWD/artifacts" --output "$RUNNER_TEMP/npm-release-package" \
+            --version "$version" --source-commit "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: npm-release-package
-          path: ${{ runner.temp }}/npm-release-package/*
+          path: ${{ runner.temp }}/npm-release-package/**
           if-no-files-found: warn
-      - name: Publish thin launcher
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        run: npm publish "$RELEASE_TARBALL" --provenance --access public 2>&1 || {
-          rc=$?; npm view "turbo-surf@$(node -p 'require("./package.json").version')" version >/dev/null 2>&1 && echo "Already published — continuing" || exit $rc;
-        }
+
+  publish-platform:
+    needs: prepare-packages
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [darwin-arm64, linux-x64, linux-arm64, win32-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, registry-url: 'https://registry.npmjs.org' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-release-package
+          path: verified
+      - name: Verify the exact publishable artifact
+        shell: bash
+        run: |
+          version=$(python -c "import json; print(json.load(open('package.json'))['version'])")
+          python scripts/prepare-npm-release.py \
+            --publication-receipt "$PWD/verified/FINAL.json" --platform '${{ matrix.platform }}' \
+            --version "$version" --source-commit "$GITHUB_SHA" \
+            --event '${{ github.event_name }}' --ref "$GITHUB_REF"
+      - name: Publish verified platform tarball
+        run: npm publish "$RELEASE_TARBALL" --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish:
+    needs: [prepare-packages, publish-platform]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, registry-url: 'https://registry.npmjs.org' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-release-package
+          path: verified
+      - name: Verify the exact publishable artifact
+        shell: bash
+        run: |
+          version=$(python -c "import json; print(json.load(open('package.json'))['version'])")
+          python scripts/prepare-npm-release.py \
+            --publication-receipt "$PWD/verified/FINAL.json" --platform thin \
+            --version "$version" --source-commit "$GITHUB_SHA" \
+            --event '${{ github.event_name }}' --ref "$GITHUB_REF"
+      - name: Publish verified thin launcher tarball
+        run: npm publish "$RELEASE_TARBALL" --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

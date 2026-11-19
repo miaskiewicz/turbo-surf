@@ -99,7 +99,7 @@ pub struct Policy {
     policies: Arc<Vec<BTreeMap<String, Vec<String>>>>,
     originals: Arc<Vec<String>>,
     header_reports: Arc<Vec<bool>>,
-    form_action: Option<Arc<FormActionGate>>,
+    form_action: Option<Arc<Vec<Arc<FormActionGate>>>>,
 }
 /// A form submission's `form-action`, carried by the navigation request it starts in
 /// a child frame so every redirect hop answers to the submitting document (Chrome 156
@@ -174,8 +174,19 @@ impl Policy {
     /// checks (the initial URL and each redirect hop) also pass through `gate`.
     pub fn with_form_action(&self, gate: Arc<FormActionGate>) -> Self {
         Self {
-            form_action: Some(gate),
+            form_action: Some(Arc::new(vec![gate])),
             ..self.clone()
+        }
+    }
+    /// A navigation's form gate narrows an already captured request policy without
+    /// replacing its originating document's policy or losing existing gates.
+    pub fn include_form_actions(&mut self, navigation: &Self) {
+        let Some(gates) = navigation.form_action.as_ref() else {
+            return;
+        };
+        match self.form_action.as_mut() {
+            Some(existing) => Arc::make_mut(existing).extend(gates.iter().cloned()),
+            None => self.form_action = Some(gates.clone()),
         }
     }
     pub fn origin(&self) -> &str {
@@ -268,7 +279,7 @@ impl Policy {
             && self
                 .form_action
                 .as_ref()
-                .is_some_and(|gate| !gate.allows(target, redirected))
+                .is_some_and(|gates| gates.iter().any(|gate| !gate.allows(target, redirected)))
         {
             return false;
         }
@@ -388,6 +399,16 @@ impl Policy {
         }
         restrictions
     }
+    pub fn blocks_auxiliary_open(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-popups"))
+            })
+        })
+    }
+
     pub fn blocks_form_submission(&self) -> bool {
         self.policies.iter().any(|policy| {
             policy.get("sandbox").is_some_and(|tokens| {
@@ -403,6 +424,15 @@ impl Policy {
                 !tokens
                     .iter()
                     .any(|token| token.eq_ignore_ascii_case("allow-pointer-lock"))
+            })
+        })
+    }
+    pub fn blocks_modal_dialogs(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-modals"))
             })
         })
     }
@@ -522,20 +552,31 @@ impl Policy {
     }
 
     pub fn bypasses_trusted_types_eval(&self) -> bool {
-        let mut has_keyword = false;
+        self.requires_trusted_types()
+            && self.allows_eval_with_trusted_types(true)
+            && self.policies.iter().any(|policy| {
+                Self::list(policy, "script-src")
+                    .is_some_and(|list| has(list, "'trusted-types-eval'"))
+            })
+    }
+    pub fn allows_eval_with_trusted_types(&self, enforced: bool) -> bool {
         self.policies.iter().all(|policy| {
             Self::list(policy, "script-src").is_none_or(|list| {
-                let trusted = list.iter().any(|token| token == "'trusted-types-eval'");
-                has_keyword |= trusted;
-                trusted || list.iter().any(|token| token == "'unsafe-eval'")
+                has(list, "'unsafe-eval'") || enforced && has(list, "'trusted-types-eval'")
             })
-        }) && has_keyword
+        })
     }
-    #[cfg(turbo_surf_native_proxy)]
+    pub fn eval_violations_with_trusted_types(&self, enforced: bool) -> Vec<ReportRecord> {
+        self.records(|policy| {
+            let list = Self::list(policy, "script-src")?;
+            (!has(list, "'unsafe-eval'") && !(enforced && has(list, "'trusted-types-eval'")))
+                .then(|| has(list, "'report-sample'"))
+        })
+    }
     pub fn eval_error_message(&self) -> Option<String> {
         self.policies.iter().find_map(|policy| {
             let list = Self::list(policy, "script-src")?;
-            if list.iter().any(|source| source == "'unsafe-eval'") { return None; }
+            if has(list, "'unsafe-eval'") || self.requires_trusted_types() && has(list, "'trusted-types-eval'") { return None; }
             let directive = if policy.contains_key("script-src") { "script-src" } else { "default-src" };
             Some(format!("Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: {directive} {}\".\n",list.join(" ")))
         })
@@ -931,6 +972,39 @@ mod tests {
         assert!(parent.allows_request("frame-src", "http://a.test/", "", false));
     }
     #[test]
+    fn form_navigation_only_adds_its_gate_to_a_captured_parent_policy() {
+        let parent = Policy::new(
+            "http://a.test/",
+            ["frame-src 'self'; img-src 'none'".into()],
+        );
+        let gate = Arc::new(FormActionGate::new(Policy::new(
+            "http://a.test/",
+            ["form-action http://b.test".into()],
+        )));
+        let navigation = Policy::new("http://a.test/", ["frame-src *; img-src *".into()])
+            .with_form_action(gate.clone());
+        let mut captured = parent.clone();
+        captured.include_form_actions(&navigation);
+        assert!(!captured.allows_request("frame-src", "http://b.test/", "", true));
+        assert!(!captured.allows_request("frame-src", "http://a.test/", "", true));
+        assert!(!captured.allows_request("img-src", "http://a.test/image", "", false));
+        assert_eq!(gate.refused().as_deref(), Some("http://a.test/"));
+        assert!(parent.allows_request("frame-src", "http://a.test/", "", false));
+    }
+    #[test]
+    fn adding_an_unrestricted_navigation_gate_cannot_replace_a_captured_gate() {
+        let original = Arc::new(FormActionGate::new(Policy::new(
+            "http://a.test/",
+            ["form-action 'self'".into()],
+        )));
+        let mut captured = Policy::default().with_form_action(original.clone());
+        let navigation = Policy::default().with_form_action(Arc::new(FormActionGate::default()));
+        captured.include_form_actions(&navigation);
+        assert!(captured.allows_request("frame-src", "http://a.test/", "", false));
+        assert!(!captured.allows_request("frame-src", "http://b.test/hop", "", true));
+        assert_eq!(original.refused().as_deref(), Some("http://b.test/hop"));
+    }
+    #[test]
     fn implemented_trusted_types_and_sampling_are_not_reported_as_missing() {
         let policy = Policy::new("https://policy.test/", [
             "trusted-types named; require-trusted-types-for 'script'; script-src 'trusted-types-eval' 'report-sample'; style-src 'report-sample'".into(),
@@ -1161,6 +1235,23 @@ mod tests {
     }
 
     #[test]
+    fn popup_sandbox_tokens_intersect() {
+        let parse = |header: &str| Policy::new("https://example.test", [header.into()]);
+        assert!(!parse("script-src 'self'").blocks_auxiliary_open());
+        assert!(parse("sandbox allow-scripts allow-same-origin").blocks_auxiliary_open());
+        assert!(!parse("sandbox ALLOW-POPUPS").blocks_auxiliary_open());
+        assert!(parse("sandbox allow-popups, sandbox allow-scripts").blocks_auxiliary_open());
+    }
+    #[test]
+    fn modal_sandbox_tokens_intersect() {
+        let parse = |header: &str| Policy::new("https://example.test", [header.into()]);
+        assert!(!parse("script-src 'self'").blocks_modal_dialogs());
+        assert!(parse("sandbox allow-scripts allow-same-origin").blocks_modal_dialogs());
+        assert!(!parse("sandbox ALLOW-MODALS").blocks_modal_dialogs());
+        assert!(parse("sandbox allow-modals, sandbox allow-scripts").blocks_modal_dialogs());
+    }
+
+    #[test]
     fn top_navigation_without_activation_sandbox_tokens_intersect() {
         let parse = |header: &str| Policy::new("https://navigation.test/", [header.to_owned()]);
         assert!(!parse("default-src 'self'").blocks_top_navigation_without_activation());
@@ -1331,6 +1422,47 @@ mod tests {
             "https://x.test:8443/a",
             false
         ));
+    }
+
+    #[test]
+    fn native_trusted_eval_respects_enforced_types_and_policy_intersection() {
+        let split = Policy::new(
+            "https://eval.test/",
+            [
+                "require-trusted-types-for 'script'".into(),
+                "script-src 'trusted-types-eval'".into(),
+            ],
+        );
+        assert!(split.bypasses_trusted_types_eval());
+        assert!(split.allows_eval_with_trusted_types(true));
+        assert!(split.eval_violations_with_trusted_types(true).is_empty());
+        let keyword_only = Policy::new(
+            "https://eval.test/",
+            ["script-src 'trusted-types-eval'".into()],
+        );
+        assert!(!keyword_only.bypasses_trusted_types_eval());
+        assert!(!keyword_only.allows_eval_with_trusted_types(false));
+        assert_eq!(
+            keyword_only.eval_violations_with_trusted_types(false).len(),
+            1
+        );
+        let denied = Policy::new(
+            "https://eval.test/",
+            [
+                "require-trusted-types-for 'script'".into(),
+                "script-src 'trusted-types-eval'".into(),
+                "script-src 'none'".into(),
+            ],
+        );
+        assert!(!denied.bypasses_trusted_types_eval());
+        assert!(!denied.allows_eval_with_trusted_types(true));
+        let violations = denied.eval_violations_with_trusted_types(true);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].original, "script-src 'none'");
+        assert!(denied
+            .eval_error_message()
+            .unwrap()
+            .contains("script-src 'none'"));
     }
 
     #[test]

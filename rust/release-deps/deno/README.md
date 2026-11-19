@@ -13,11 +13,11 @@ ShouldThrowOnError fixes formerly prepared here as `turbo-surf-v8`).
 | — | `turbo-dom-v8` (turbo-dom) | 150.4.x | prerequisite, not prepared here |
 | 1 | `turbo-surf-deno-v8` | 0.4.1 (0.4.0) | `rusty_v8` → registry `turbo-dom-v8 ~150.4` |
 | 2 | `turbo-surf-serde-v8` | 0.321.1 (0.321.0) | `v8` → forked facade |
-| 3 | `turbo-surf-deno-core` | 0.412.1 (0.412.0) | `v8`, `serde_v8` → forks |
-| 4 | `turbo-surf-deno-bench-util` | 0.253.1 (0.253.0) | `deno_core` → fork |
-| 5 | `turbo-surf-deno-crypto` | 0.273.1 (0.273.0) | `deno_core` → fork |
-| 6 | `turbo-surf-deno-webidl` | 0.259.1 (0.259.0) | `deno_core`, benchmark utility → forks |
-| 7 | `turbo-surf-deno-web` | 0.290.1 (0.290.0) | core, WebIDL and benchmark utility → forks |
+| 3 | `turbo-surf-deno-core` | 0.412.5 (0.412.0) | `v8`, `serde_v8` → forks |
+| 4 | `turbo-surf-deno-bench-util` | 0.253.5 (0.253.0) | `deno_core` → fork |
+| 5 | `turbo-surf-deno-crypto` | 0.273.5 (0.273.0) | `deno_core` → fork |
+| 6 | `turbo-surf-deno-webidl` | 0.259.5 (0.259.0) | `deno_core`, benchmark utility → forks |
+| 7 | `turbo-surf-deno-web` | 0.290.5 (0.290.0) | core, WebIDL and benchmark utility → forks |
 
 Keep the original library names and dependency aliases. Rust handles, op macros,
 serde conversions and native CryptoKey snapshots must share one runtime type
@@ -34,10 +34,23 @@ enclosing consumer to select V8. Callers can disable a leaf's defaults rather th
 having V8 forced unconditionally. This is not validation of a QuickJS backend.
 
 The new package names distinguish these distributions from the upstream releases.
-Their versions are upstream + 1 patch; each manifest records the upstream name and
+The facade and serde versions are upstream + 1 patch; the core and its dependent
+leaves include the next reviewed patch. Each manifest records the upstream name and
 version in `[package.metadata.turbo-surf-upstream]`, and preparation verifies the
 downloaded archive at that exact upstream identity. Native engine identity remains
 V8 150 (turbo-dom-v8); these packages do not contain the experimental V8 155 SDK.
+
+Core 0.412.2 adds owner-scoped module contexts with cancellation and explicit
+retirement, plus host-only inspector context registration. The generator patch
+changes only `runtime/jsruntime.rs`, `modules/map.rs`, and `inspector.rs`; published
+infrastructure JS and ops sources remain exact.
+
+Core 0.412.4 adds host-only cancellation of pending work for a live registered
+module context while preserving its compiled map and loader. It rejects
+unregistered, inactive and busy contexts; its dependency leaves advance to .3
+only to keep exact core/type edges coherent. Facade/serde versions and embedded
+extension JS bytes remain unchanged. This paragraph describes the draft API;
+archive publication requires the reviewed proof and approval packet.
 
 The 0.4.1 facade drops upstream's unused optional `v8x` second backend and its
 `quickjs` feature, so no lock file lists a second native engine; serde_v8 and
@@ -155,3 +168,15 @@ replacement; it must resolve exactly one registry `turbo-dom-v8` 150.4.x and no
 `v8`, `v8x` or `turbo-surf-v8`. Stock V8 and
 the experimental native155 overlay require separate integration validation before
 claiming that both engine configurations remain supported.
+
+Core 0.412.4 adds native async-work observation, generation-checked lifecycle events and per-context module work inspection. Crypto 0.273.4 reports empty AES-GCM IVs as OperationError before mutation; other unsupported positive IV lengths retain their existing error. The Web, WebIDL and benchmark distributions advance only to retain the exact core type edge. Embedded upstream extension JavaScript is unchanged.
+
+Core 0.412.5 adds an embedder checkpoint for pending Promise rejection reports
+from one exact creation context. It preserves handled/unhandled ordering, defers
+when nextTick work is pending, and never polls native operations or timers. A
+captured core-JS trampoline marks actual dispatch entry so termination before
+entry preserves queued reports; an entered attempt is not repeated. This is an
+explicit owned-core JavaScript patch, not an unchanged-upstream-source claim.
+The four dependent distributions advance to .5 only to retain exact core/type
+edges; their embedded extension JavaScript, facade/serde and native V8 identities
+remain unchanged. Archive publication requires the reviewed proof packet.

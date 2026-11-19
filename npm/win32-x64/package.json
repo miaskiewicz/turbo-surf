@@ -1,6 +1,6 @@
 {
   "name": "@miaskiewicz/turbo-surf-win32-x64",
-  "version": "0.8.2",
+  "version": "0.8.4",
   "description": "turbo-surf platform binaries for Windows x64",
   "license": "MIT",
   "repository": "github:miaskiewicz/turbo-surf",

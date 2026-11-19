@@ -78,7 +78,15 @@
       "harness/detection/fixtures/document_hooks*_chrome156.json",
       "harness/detection/user-activation-gates-cases.json",
       "harness/detection/fixtures/user_activation_gates_chrome156.json",
-      ".native-builds/**"
+      ".native-builds/**",
+      ".worktrees/**",
+      ".recovery/**",
+      ".scratch/**",
+      ".claude/**",
+      "harness/detection/abort-timeout-reason-lifetime-probe.js",
+      "harness/detection/abort-timeout-reason-probe.js",
+      "harness/detection/csp-native-tt-keyword-probe.js",
+      "harness/detection/csp-native-tt-probe.js"
     ]
   }
 }

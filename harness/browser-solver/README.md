@@ -1,55 +1,72 @@
-# browser-solver harness
+# Browser challenge-solver harness
 
-A **reference hardened-headless sidecar** for turbo-surf's `BrowserSolver`
-(`turbo-surf-core::challenge`). The engine stays browserless; this dev-only
-harness drives a real Chromium to clear a JS-challenge / proof-of-work wall
-(Kasada, active-canvas DataDome, Cloudflare managed) and returns the cleared
-cookies over a tiny JSON contract. Solve once, replay the cookie on the fast
-path for its TTL (~30 min).
+`solve.mjs` is an optional Playwright/Chromium sidecar for the core
+`BrowserSolver`. It visits a URL in headless Chromium, waits for network idle and
+three additional seconds, then returns cookies. It is development tooling, not
+part of the shipped npm launcher, and does not establish that a challenge was
+cleared. It does not automate visual CAPTCHA interaction.
 
-`playwright` is already a **devDependency** of this repo — `solve.mjs` is test /
-recon tooling and is **not** part of the shipped npm launcher (which only bundles
-`cli.js` / `index.js`).
+The native engine remains browserless. See [solver selection, provider keys,
+status and limitations](../../docs/SOLVERS.md) before enabling a solver. This
+command is distinct from the [search browser sidecar](../../scripts/browser-sidecar/README.md).
 
-## Contract
+## Setup and launch
 
-```
-stdin   {"url": "...", "vendor": "kasada|datadome|kasada|cloudflare",
-         "userAgent": "...", "proxy": "http://user:pass@host:port" | null}
-stdout  {"cookies": {name: value, ...}, "headers": {name: value, ...}}
-exit 0  on success; non-zero + stderr on failure
-```
-
-## Run it (opt-in, never on by default)
+From the repository root, install the development dependencies and a matching
+Playwright Chromium binary:
 
 ```bash
-TURBO_SURF_SOLVER=browser \
-TURBO_SURF_BROWSER_CMD="node harness/browser-solver/solve.mjs" \
-TURBO_SURF_PROXY="http://user:pass@residential-host:port" \
-  npx turbo-surf-mcp        # the MCP session now auto-solves detected walls
+npm ci
+npx playwright install chromium
+export TURBO_SURF_SOLVER=browser
+export TURBO_SURF_BROWSER_CMD="node $PWD/harness/browser-solver/solve.mjs"
+node cli.js
 ```
 
-`turbo-surf` writes the request to the sidecar's stdin, reads the token on
-stdout, injects the cookies into the session jar, and re-fetches once.
+`TURBO_SURF_BROWSER_CMD` is executed with `sh -c`; quote paths containing spaces
+inside the command value. A browser command alone is not auto-selected. To try
+an in-house solver before this sidecar, set `TURBO_SURF_SOLVER=cloudflare`,
+`awswaf`, `akamai`, or `recaptcha` while retaining the command. Fallback occurs
+on a primary solve error, not on later server rejection of a returned token.
 
-## Caveats (the real ones)
+## JSON protocol
 
-1. **Vanilla headless is detected.** `solve.mjs` does only the floor of stealth
-   (`navigator.webdriver`, `window.chrome`, permissions). For hard gates swap
-   chromium for a hardened build behind the **same contract** — patchright,
-   rebrowser-playwright, camoufox, or nodriver.
-2. **Headless GPU = SwiftShader** → `RENDERER` is a VM tell. Run headful on a real
-   GPU (Xvfb + GPU), or accept SwiftShader and don't *claim* a discrete GPU
-   (consistency beats faking).
-3. **Datacenter IP = dead.** The cookie is IP-bound — use a residential `proxy`,
-   and the **same** one you replay through.
-4. **JA3 binding.** `cf_clearance`/`datadome` bind to IP **+ TLS fingerprint**.
-   Build turbo-surf with `--features impersonate` so wreq replays with a Chrome
-   149 JA3 that matches the browser that minted the token.
+One JSON request is written to stdin, followed by EOF:
 
-## Local smoke
+```json
+{"url":"https://example.test/","vendor":"cloudflare","userAgent":"...","proxy":null}
+```
 
-A real-browser round-trip (gating server → sidecar → cleared cookie) is exercised
-manually; the Rust e2e (`turbo-surf-mcp` `e2e_solver_clears_wall_and_replays`)
-covers the same pipeline deterministically with a `printf` stub sidecar so it runs
-in CI without a browser.
+Vendor labels emitted by the core include `akamai`, `datadome`, `kasada`,
+`cloudflare`, `awswaf`, and `recaptcha`. The reference script does not dispatch
+by vendor. It uses the requested URL, optional user agent, and optional proxy.
+
+Write only the response JSON to stdout; diagnostics belong on stderr:
+
+```json
+{"cookies":{"cookie_name":"cookie_value"},"headers":{}}
+```
+
+Both maps contain string values. At least one cookie or header is required by
+the Rust adapter. Exit zero on success; nonzero exit plus stderr is a failure.
+A successful response's TTL is represented as 30 minutes internally, not proof
+of the target's cookie lifetime. The MCP replay path sets cookies at the target
+URL with `Path=/` and refetches once; original domain/path/expiry metadata is
+not part of this protocol.
+
+## Limits
+
+The script adds a few automation-surface overrides; it is not a guarantee of
+undetectable browsing. It launches headless Chromium with a fresh context, a
+1920×1080 viewport, and `en-US` locale. It does not select system Chrome, use a
+persistent profile, or expose a headful toggle. Other implementations can use
+the same protocol.
+
+`TURBO_SURF_PROXY` reaches this sidecar as `proxy`, but does not configure native
+replay routing. Do not claim matching egress from that variable alone. Tokens
+may also depend on TLS and browser fingerprints; no fixed Chrome version or
+30-minute clearance guarantee is implied.
+
+Rust's deterministic `e2e_solver_clears_wall_and_replays` test uses a stub
+sidecar to verify the integration without a browser or live service. Running the
+reference script against a real target is a separate, opt-in live check.

@@ -123,3 +123,75 @@ async fn cross_origin_no_cors_errors_are_muted_while_cors_errors_keep_the_except
     server.abort();
     cross_server.abort();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn diagnostics_accept_classic_and_native_error_event_brands_once() {
+    let mut page = PageSession::open(
+        "<script>throw new Error('classic diagnostic')</script>",
+        "https://errors.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval("reportError(new Error('native diagnostic')); dispatchEvent(new ErrorEvent('error',{error:new Error('synthetic diagnostic')}));")
+        .await
+        .unwrap();
+    let records: Value = serde_json::from_str(&page.drain_network_log()).unwrap();
+    let errors: Vec<_> = records
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|record| record["event"] == "pageerror")
+        .map(|record| record["message"].clone())
+        .collect();
+    assert_eq!(
+        errors,
+        vec![json!("classic diagnostic"), json!("native diagnostic")]
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_frame_fetch_capability_requires_the_actual_live_direct_child() {
+    let mut page = PageSession::open(
+        r#"<iframe id="parent" srcdoc="<iframe id='leaf'></iframe>"></iframe><iframe id="victim"></iframe>"#,
+        "http://localhost/page", "", "", 10000,
+    ).await.unwrap();
+    page.eval_expression(r#"(()=>{
+      globalThis.parentWindow=document.querySelector('#parent').contentWindow;
+      globalThis.leafElement=parentWindow.document.querySelector('#leaf');
+      globalThis.leafWindow=leafElement.contentWindow;
+      globalThis.retiredWindow=document.querySelector('#victim').contentWindow;
+      document.querySelector('#victim').remove();
+      globalThis.fakeWindow={};globalThis.nullWindow=null;globalThis.rootWindow=window;
+      globalThis.getterCalls=0;Object.defineProperty(globalThis,"accessorWindow",{get(){getterCalls++;throw Error("must not run");}});
+      globalThis.popupWindow=window.open('about:blank');
+      return true;
+    })()"#).await.unwrap();
+    assert!(page.frame_boundary_admission_for_testing(None, "parentWindow"));
+    assert!(page.frame_boundary_admission_for_testing(Some("parentWindow"), "leafWindow"));
+    for name in [
+        "accessorWindow",
+        "fakeWindow",
+        "nullWindow",
+        "rootWindow",
+        "@infrastructure",
+        "popupWindow",
+        "leafWindow",
+        "retiredWindow",
+    ] {
+        assert!(
+            !page.frame_boundary_admission_for_testing(None, name),
+            "unexpected callback admission for {name}"
+        );
+    }
+    assert!(!page.frame_boundary_admission_for_testing(Some("accessorWindow"), "parentWindow"));
+    assert_eq!(page.eval_expression("getterCalls").await.unwrap(), "0");
+    assert!(!page.frame_boundary_admission_for_testing(Some("retiredWindow"), "parentWindow"));
+    page.eval_expression("document.body.append(leafElement);globalThis.replacementLeaf=leafElement.contentWindow;true").await.unwrap();
+    assert!(!page.frame_boundary_admission_for_testing(Some("parentWindow"), "leafWindow"));
+    assert!(!page.frame_boundary_admission_for_testing(Some("parentWindow"), "replacementLeaf"));
+    assert!(page.frame_boundary_admission_for_testing(None, "replacementLeaf"));
+}

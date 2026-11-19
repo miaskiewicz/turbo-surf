@@ -12,10 +12,12 @@ import sys
 from prepare import verify_engine, verify_engine_patch
 from surf_workspace import prepare_workspace, cargo_arguments
 from release_aliases import sdk_config, frame_read_arguments
+from window_proxy_compat import verify_window_proxy_alias
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('destination',type=Path)
 parser.add_argument('--profile',choices=['154','155'],help='Require this prepared engine profile')
+parser.add_argument('--native-alias-version', choices=['150.4.0', '150.4.2'], default='150.4.0', help='Explicit metadata-only alias; 150.4.2 requires source-verified prepared WindowProxy capability')
 parser.add_argument('--jobs',type=int,default=4)
 parser.add_argument('--archive',type=Path,help='Reuse an already source-built native archive; requires --bindings and --archive-sha256')
 parser.add_argument('--bindings',type=Path)
@@ -37,6 +39,8 @@ if not (root/'provenance.json').is_file():
 record=json.loads((root/'provenance.json').read_text())
 verify_engine(root/'v8-exact/v8',record)
 verify_engine_patch(root/'v8-exact/v8')
+if args.native_alias_version == '150.4.2':
+    verify_window_proxy_alias(root)
 engine_version=record['engineVersion']
 engine_major=str(record.get('chromeMajor', {'15.4':154, '15.5':155}.get('.'.join(engine_version.split('.')[:2]), 0)))
 if engine_major not in ['154', '155']:
@@ -142,7 +146,7 @@ if args.surf:
     source=Path(__file__).resolve().parents[3]
     workspace=prepare_workspace(source,root/'surf-workspace')
     arguments=cargo_arguments(args.surf,source,workspace)
-    config=sdk_config(source,root,workspace)
+    config=sdk_config(source,root,workspace,native_alias_version=args.native_alias_version)
     # Registry-named graphs also need the binding's native-SDK frame read: this
     # SDK lacks turbo-dom-v8's accessor fix (forwarded by render/mcp/napi/py).
     features=[] if config==root/'cargo-config.toml' else frame_read_arguments(arguments[1:],source)

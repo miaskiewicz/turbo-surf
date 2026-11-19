@@ -33,7 +33,7 @@
     anySignal = __web.anySignal;
   const observables = __interfaceMap("Observable"),
     subscribers = __interfaceMap("Subscriber");
-  const report = (error) => ops.op_report_exception(error);
+  const report = (error) => ops.op_report_exception(__document, error);
   const isObject = (value) =>
     value !== null && (typeof value === "object" || typeof value === "function");
 

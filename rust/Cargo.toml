@@ -13,7 +13,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.8.2"
+version = "0.8.4"
 license = "MIT"
 repository = "https://github.com/miaskiewicz/turbo-surf"
 
@@ -24,6 +24,3 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
-
-# turbo-dom 0.8.2 is on crates.io — the member crates depend on `"0.8.2"`
-# (parser alias on `"0.8"`) / `"150.4"` directly, no patch bridge needed.

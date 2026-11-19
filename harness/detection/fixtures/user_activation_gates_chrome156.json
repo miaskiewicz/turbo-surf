@@ -3,6 +3,8 @@
   "v8": "15.6.75.19",
   "casesSha256": "de0d0559f85f87b31ec060f6d6cf743746171f5fa3afa2b7027042cac1673157",
   "collectorSha256": "3d3cfde8111a1fb4500827672e60f9981034e4b440b88f9c1faf991798fd5aa9",
+  "compatibleCollectorSha256": "895e097cb165707fc87c96a59b7bdcf2ce87d27506209a4d74a56efda9cd5c17",
+  "collectorCompatibility": "The current collector additionally forwards explicit Chrome arguments; its default argument list is unchanged. Original result rows are preserved. Five exact Chrome/156.0.8078.47 Linux Escape replays passed in CI run 44398946903. Two full 27-case macOS replays on that exact build matched every value except the existing fullscreen screen-settlement observation matchesScreenLater; that original assertion is retained.",
   "headless": true,
   "flags": [
     "--remote-debugging-port=0",

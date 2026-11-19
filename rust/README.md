@@ -7,8 +7,13 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
-requires `turbo-dom` 0.7 (with turbo-dom-layout / -raster / -browser-env 0.7.1 from
-crates.io). Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
+uses the published crates.io releases of `turbo-dom`, `turbo-dom-layout`,
+`turbo-dom-raster` and `turbo-dom-browser-env` 0.8.4, with their archive checksums
+recorded in `Cargo.lock`; no DOM Git override is required. The single V8 binding is
+the published `turbo-dom-v8` 150.4.2. The four DOM archives' source and original
+manifests were compared byte-for-byte with reviewed producer commit
+`688a1e3f4197c4fdf5ec55f3ab1c98da642e4948`; registry consumer checks remain a
+separate gate from earlier Git-source executions. Normal Cargo resolution also reuses the already-locked `windows-sys` 0.59.0 for five Windows-only dependency edges previously using 0.52.0; package versions and the macOS runtime feature graph are unchanged. Since 0.6 turbo-dom brings the one Chrome-checked selector engine, the
 original-UTF-16 payload/name/parser APIs, native custom states and checkedness, native
 mutation batches and bounded storage collection (the per-release history is in
 [CHANGELOG.md](../CHANGELOG.md)).
@@ -36,18 +41,17 @@ restore the caller before yielding.
 | `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 80-tool surface over a stateful session |
 
 Native layout/paint, canvas rasterization and system text measurement (optional
-Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.7.1 crate, which
+Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.8 family, which
 mcp/napi/py depend on (forwarding its `gpu-metal` / `coretext` features, and its
 `avif` / `jxl` image decoders, which are on by default); the layout engine is
-`turbo-dom-layout` 0.7.1. turbo-surf no longer depends on
+`turbo-dom-layout` from that same dependency graph. turbo-surf no longer depends on
 turbo-html2pdf.
 
 `cargo test --workspace` runs the offline engine suite. Required gates also include
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
 the root npm test command checks versions, the addon/shim and detection harness too.
 
-The render tier consumes `turbo-dom-layout` 0.7.1 (the layout half of
-turbo-html2pdf-core 0.3.9, relocated verbatim into turbo-dom) for native live-tree
+The render tier consumes `turbo-dom-layout` for native live-tree
 box geometry, transforms, element scroll metrics and point-hit regions: its live-DOM
 input (`turbo_dom_layout::live`) styles the page's own composed tree in place from the
 rules surf matched per tree scope, and its `cssom_view` modules (moved from this crate)
@@ -59,11 +63,25 @@ without guest getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in
 [LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 
+## Build profiles and feature flags
+
+[Build features](../docs/BUILD-FEATURES.md) lists every workspace feature,
+its defaults and forwarding, toolchains, platform targets and exact release
+commands. MCP/NAPI default to impersonation plus AVIF/JPEG XL; standalone
+Python defaults to those image decoders with the rustls resource transport.
+Cargo features unify across a build, so whole-workspace results do not prove a
+standalone wheel's feature graph.
+
+`gpu-metal`, `coretext` and `native-sdk-frame-read` are opt-in. The
+[GPU bridge](../docs/GPU-BRIDGE.md) documents which embedders install execution
+callbacks and how software fallback differs from actual GPU execution. A feature
+name alone does not establish hardware use, native-SDK identity or pixel parity.
+
 ## Registry dependency identity
 
 The seven direct Rust dependency aliases retain the existing source/API names.
-The Deno 0.x.1 family and `turbo-dom-v8` resolve from crates.io; the turbo-dom 0.7.1
-crates resolve from crates.io too. The
+The Deno core/extension 0.x.2 family and the unchanged V8/serde adapters resolve from crates.io. The four turbo-dom 0.8-family
+crates and the single V8 binding use the exact integration pins described above. The
 named distribution family is (turbo-surf publishes twelve; the V8 binding comes
 from turbo-dom):
 
@@ -74,14 +92,18 @@ from turbo-dom):
 | `turbo-surf-btls-sys` | 0.5.6 | transport native dependency |
 | `turbo-surf-btls` | 0.5.6 | transport dependency |
 | `turbo-surf-tokio-btls` | 0.5.6 | transport runtime dependency |
-| `turbo-dom-v8` | 150.4.0 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
+| `turbo-dom-v8` | 150.4.2 | the native V8 binding (turbo-dom's rusty_v8 fork; the only V8) |
 | `turbo-surf-deno-v8` | 0.4.1 | `v8` (the shared facade) |
 | `turbo-surf-serde-v8` | 0.321.1 | shared value conversion |
-| `turbo-surf-deno-core` | 0.412.1 | `deno_core` |
-| `turbo-surf-deno-bench-util` | 0.253.1 | upstream test/benchmark identity |
-| `turbo-surf-deno-crypto` | 0.273.1 | `deno_crypto` |
-| `turbo-surf-deno-webidl` | 0.259.1 | `deno_webidl` |
-| `turbo-surf-deno-web` | 0.290.1 | `deno_web` |
+| `turbo-surf-deno-core` | 0.412.4 | `deno_core` |
+| `turbo-surf-deno-bench-util` | 0.253.4 | upstream test/benchmark identity |
+| `turbo-surf-deno-crypto` | 0.273.4 | `deno_crypto` |
+| `turbo-surf-deno-webidl` | 0.259.4 | `deno_webidl` |
+| `turbo-surf-deno-web` | 0.290.4 | `deno_web` |
+
+The core host API cancels only unfinished module work in an authenticated document
+context. Compiled module maps and healthy namespaces remain available for later
+imports; guest JavaScript receives no cancellation capability.
 
 The distribution generators retain upstream versions, native archive URLs,
 licenses and reviewed source pins while mapping every internal dependency to the
@@ -130,6 +152,42 @@ Direct ports of the JS modules, same behavior and edge cases:
   politeness, retry/backoff, depth/page caps, robots gate. Fetch+parse seam is the
   `Navigator` trait (tier-2 `Page` implements it).
 - `cache` / `measure` — `ResponseCache` (304/storageState) and crawl summaries.
+
+### Host origin restrictions
+
+Set `TURBO_SURF_ALLOWED_ORIGINS` before starting the host process to restrict
+Surf's native networking to a JSON array of exact origins, for example
+`["http://localhost:3000","http://localhost:3301","https://auth.example.test"]`.
+The policy is captured on first native use and cannot be changed by page code or
+later environment changes. With the variable absent, ordinary browsing is
+unchanged. A present empty array denies all network origins; malformed JSON,
+non-Unicode values, wildcards, credentials, paths, queries or fragments in entries
+fail closed. Scheme, canonical host and effective port must match; `ws:`/`wss:`
+origins require their own explicit entries.
+
+Admission runs before native cache access, DNS/socket connection and every
+redirect hop, including scripts/modules, frames, images, stylesheets, fonts,
+fetch/XHR/CORS preflights, screenshot asset fetches, native reports and WebSocket
+handshakes. Existing CSP, CORS, mixed-content and TLS checks still apply. Local
+`data:`/`blob:` resources retain their existing scheme/security handling.
+Challenge solvers and browser sidecars are disabled while this restriction is
+configured because their independent clients cannot enforce the same hop policy.
+
+This constrains Surf's native transports, rather than acting as an OS firewall.
+Host-side Node/Python code and separate provider services require their own
+network restrictions. `Page.route()` alone does not cover native resource
+loaders. Native denial errors and blocked script/module console diagnostics omit
+URL queries; explicit network logs/traces retain their documented request
+metadata and should not be printed with secret-bearing URLs.
+
+Browser-context offline conditions are separate from host authorization. Shared
+`ClientHints` state carries connectivity into tabs and frames; API request contexts
+fork connectivity while retaining their transport identity. Offline mode fails
+new native sends after fresh HTTP-cache admission, leaves already-started HTTP
+responses running, and does not queue or replay HTTP writes. The host-origin
+policy still applies before cache admission and every hop. The Playwright shim
+also updates `navigator.onLine` and trusted online/offline events; established
+WebSocket frames wait for reconnection on the same socket.
 
 ## Tier 2 — `turbo-surf-page`
 

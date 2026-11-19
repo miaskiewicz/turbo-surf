@@ -3,6 +3,86 @@
 CI (`.github/workflows/ci.yml`) gates line coverage and cyclomatic complexity on top of the
 `lint + test` job. Run the same commands locally before pushing.
 
+The commands describe required checks, not a completed gate for the v0.8.3
+release candidate. Historical coverage and complexity measurements below apply
+only to their recorded revisions.
+
+## Local release checks
+
+`npm ci` installs the launcher/harness development tools. `npm run check` runs
+JS lint/format and `npm test`: version/single-V8 checks, Python release-helper
+checks, notice/audio-source checks, Rust workspace tests, clippy with
+`-- -D warnings`, `cargo fmt --check`, the addon-backed Playwright shim/e2e suites
+and offline detection tests. `test:playwright` builds the release NAPI addon first
+and bounds each Node suite with `timeout --signal=KILL 600`; macOS needs a
+compatible `timeout` command available. Node 22 supports the detection raw-CDP
+collector's native WebSocket API. Chrome remains optional development tooling.
+
+The build-and-test gate selects an immutable snapshot of the freshly built Cargo
+addon through `TURBO_SURF_NAPI_PATH`, preserving an explicit harness override.
+Snapshot names hash the final signed bytes. This prevents an installed optional
+platform package from shadowing the local build; production package resolution
+and the bare `test:shim` / `test:e2e` missing-addon skip behavior stay unchanged.
+
+Use an isolated `CARGO_TARGET_DIR` for concurrent work and the matching addon
+output when running shim tests; do not reuse a test candidate's build directory.
+Default, feature-specific and native SDK builds are distinct configurations; see
+[build features](./BUILD-FEATURES.md) and the
+[Chrome parity runbook](../harness/detection/CHROME-PARITY-RUNBOOK.md).
+
+## JavaScript host coverage
+
+Run `npm run coverage:js` with **Node 26.11.0** and the normal Rust build toolchain.
+It builds the release addon, then runs the existing complete shim/E2E and detection
+commands once with `NODE_V8_COVERAGE`. Existing test deadlines and addon selection
+remain in `scripts/test-playwright.mjs`. CI runs this command in the Playwright job.
+A nonzero test command always fails the coverage gate, even when percentages pass.
+The supervisor records TAP logs with an explicit reporter argument on each outer
+Node test command, verifies all
+registered Node files loaded, and binds their bytes and package selectors to the
+run. It requires all three Playwright/control summaries, the detection summary
+and both nonempty offline Python helper runs. Failed/cancelled/todo/empty runs and
+unregistered-file fallback results fail. Only the three existing intentional skips
+are accepted by exact name/reason/count: `skipped test does not run` once and
+`ordinary must not run` (`excluded by focused tests`) twice. Missing optional
+inputs must therefore be supplied for this complete gate; they cannot silently
+skip required detection controls. CI installs the already locked Chrome/Patchright
+oracle dependencies and builds the native `detection_trace` example. Relevant
+environment presence and value hashes are retained without logging their values.
+`scripts/run-node-tests.mjs` consumes the coverage reporter opt-in before launching
+the test process. Nested test probes inherit the caller's original `NODE_OPTIONS`
+and reporter behavior; the coverage gate never changes that environment variable.
+
+`scripts/js-coverage-scope.json` records the same 43 product files as the earlier
+host measurements: `cli.js`, `index.js`, the NAPI JS loader and Playwright shim
+runtime/runner utilities. Existing server and fixture utilities in that inventory
+remain measured. Test cases, the popup application fixture, developer harnesses
+and coverage tooling are outside this product scope. Error handling, unsupported
+platforms and fallback paths inside product files remain included. New tracked
+runtime files cause a scope-drift error until the inventory is reviewed and updated.
+
+All three aggregate metrics must independently meet **92.5% lines, 90% branches and
+90% functions**. Floors accept numbers from 0 to 100 with at most two decimal
+places. The checker converts decimal thresholds to exact integer basis points and
+compares integer counts without rounding: 92.49% fails the line floor, 92.5%
+passes, and 89.999% still fails either 90% floor. Zero totals, incomplete inventories, missing/malformed raw reports, changed
+source hashes and failed test commands cannot pass. Unloaded files remain in the
+line denominator with zero hits and also fail inventory completeness: their nested
+function/branch counts cannot be inferred from V8 runtime data. Execute those
+entrypoints rather than excluding them. Loaded files use Node's native V8 coverage
+semantics; this measures host Node JS, not Rust or guest JS in the separate isolate.
+
+Each run requires a new output directory (default `coverage/js`; remove an old
+local output deliberately or pass another path to `node scripts/run-js-coverage.mjs`).
+It retains raw V8 files, source hashes, test command exits, detailed `coverage.json`,
+`lcov.info` and the exact counts/status in `gate.json`, including command log pins and completeness results. To aggregate an existing run
+without repeating tests, use `npm run coverage:js:report -- /absolute/run/directory`
+with `NODE_V8_COVERAGE` unset. Source bytes must still match that run. The merger
+uses Node's version-pinned internal coverage API and needs no extra dependency.
+`npm run test:coverage:js` exercises exact thresholds, invalid inputs, failed tests,
+unloaded-entry rejection and real V8 aggregation over all 43 fixture files.
+These commands define the gate; they do not assert that a current product run is green.
+
 ## Coverage
 
 Line coverage of the Rust workspace is measured by `cargo tarpaulin` with the LLVM engine
@@ -19,9 +99,11 @@ runner): the `coverage-shard` matrix runs `python3 ../scripts/coverage-shard.py 
 settings, and the `coverage` job merges the shard reports (`scripts/merge-coverage-reports.py`:
 each crate keeps its own shard's coverable lines, a line is covered when any shard hits it)
 and applies the workspace `fail-under` and the per-crate floors to the merge. The render
-shard passes `--chunks 4`: every test process writes a profraw of all instrumented code, so
-render's test binaries are run in four chunks over one build, the profraws deleted between
-chunks (one run filled the 145G runner disk), and the chunk reports unioned.
+shard is split into `render-a` and `render-b`, each passing `--chunks 4` and
+`--slice 0/2` or `--slice 1/2`; their reports are unioned before the crate merge.
+Each runner builds once, then deletes profraws between its chunks; every test
+process writes a profraw of all instrumented code (one unsplit run filled the
+145G runner disk). The resulting chunk reports are unioned.
 
 Then every crate must meet its own floor (`rust/coverage-floors.json`, checked by
 `python3 scripts/check-coverage-floors.py rust/target/cov/report/tarpaulin-report.json
@@ -34,7 +116,7 @@ on 2026-10-28 (consol/cov-c4 5895357), rounded down to 0.1; the workspace `fail-
 | turbo-surf-core | 99.44 * | 99.4 |
 | turbo-surf-mcp | 99.67 | 99.6 |
 | turbo-surf-page | 100.00 | 100 |
-| turbo-surf-render | 95.38 † | 95.0 ‡ |
+| turbo-surf-render | 95.38 † | 93.7 ‡ |
 | turbo-surf-transform | 100.00 | 100 |
 | turbo-surf-view | 99.91 | 99.9 |
 
@@ -58,7 +140,7 @@ guards that only the bootstrap JS can reach, and the network report/redirect cor
 reporting; the release target for render is ~97.5%.
 
 ‡ The render floor was set to 95.0 (from 95.3) by user decision on 2026-10-28, when PR CI moved
-to ubuntu runners (macOS runners unavailable) and the Linux measurement moved against the macOS one.
+to ubuntu runners (macOS runners unavailable) and the Linux measurement moved against the macOS one. On 2026-11-18 the user explicitly changed the Render target to 94.0%; this is the authorized exception to the general rule against lowering floors. The workspace floor remains 93.0%, and all other crate floors are unchanged. The latest measured Render result is 26028/27804 (93.61243%), still 108 covered lines short of 94.0%; the target change does not establish a passing result.
 
 Target: >= 99.5 per measured crate. The coverage phase raises each floor to the measured
 value as tests land; never lower one to pass a change.
@@ -69,18 +151,18 @@ value as tests land; never lower one to pass a change.
   `excluded` in `rust/coverage-floors.json`): the Node and Python bindings. Their code runs
   only inside `node` (the Playwright shim and detection suites) and `python` (the wheel
   tests) processes, which tarpaulin does not instrument, and they have no Rust tests.
-- **`turbo-surf-render/src/window_proxy.rs`, `frame_location.rs`, `frame_ancestors.rs`,
-  `code_generation.rs`, `frame_modules.rs`** (`exclude-files`; `stock_engine.rs` holds their
-  stock-SDK stand-ins): compiled only under `cfg(turbo_surf_native_proxy)`, which
-  `turbo-surf-render/build.rs` sets for `TURBO_SURF_ENGINE=154|155`. That engine is a V8
-  compiled from source at a pinned Chromium revision (`harness/detection/engine-154`,
-  `engine-155`: network checkout, the Chromium toolchain, several GB of caches and hours of
-  build on macOS arm64); no prebuilt artifact is published, so CI cannot build it and the
-  default build has no lines to cover in these files. They are gated in that configuration
-  instead: every engine build run by the helper executes the native WindowProxy/security
-  regressions and the frame suites (`tests/frame_modules.rs`, `iframe_default_layout.rs`,
-  `sandbox_forms.rs` and the `cfg(turbo_surf_native_proxy)` cases elsewhere) before it is
-  accepted.
+- **`turbo-surf-render/src/frame_modules.rs`**
+  (`exclude-files`; `stock_engine.rs` holds its stock-SDK stand-in): compiled only
+  under `cfg(turbo_surf_native_proxy)`, which `turbo-surf-render/build.rs` sets for
+  `TURBO_SURF_ENGINE=154|155`. Those source-built SDK profiles require their own
+  frame-module gates before acceptance. Native code-generation admission is now
+  compiled and measured in the default engine.
+
+`window_proxy.rs`, `frame_location.rs` and `frame_ancestors.rs` are compiled by the
+v0.8.4 default popup engine and are included in its line coverage. Their earlier
+SDK-only exclusions no longer apply. Retain the measured source and feature graph
+with each report; historical measurements below do not establish coverage for the
+new shared paths.
 
 ### Native-engine render coverage (manual, not in CI)
 
@@ -102,7 +184,8 @@ consol/cov-c4b bb1896f (LLVM line records, a finer count than tarpaulin's):
 | render, native engine | 18839/20576 | 91.56 | 91.5 |
 | native-only files (window_proxy, frame_location, frame_ancestors, code_generation, frame_modules) | 1277/1736 | 73.56 | 73.5 |
 
-Three render tests fail in that configuration independently of coverage (#71).
+That dated native-engine measurement recorded three render failures independently
+of coverage (#71); it is not the current candidate status.
 
 ## Complexity
 
@@ -142,5 +225,9 @@ collectors are hash-pinned by a Chrome control (for example `chrome-cdp-trace.mj
 `input-state.js`, checked by `resource-scan-order-chrome.test.mjs`): refactoring one
 re-captures its controls in the same change.
 
-The backlog is cleared: `npm run -s complexity:rust` and `npm run -s complexity:js` both exit
-0. See CHANGELOG for the refactor history (the last entry closed #154).
+The refactor history records the original backlog as cleared (the last entry
+closed #154). Run both complexity commands against the revision under review;
+that historical result does not establish the current candidate gate.
+
+
+On 2026-11-18 the user explicitly replaced the Render-only 94% target with **93.7%**. This specific authorization overrides the default against lowering floors; workspace 93% and all other crate floors stay unchanged. The independently sealed Render result 26189/27939 (93.73635%) clears 93.7% without changing any report, source exclusion, eligible-line denominator or count. The earlier 94% result remains historical.

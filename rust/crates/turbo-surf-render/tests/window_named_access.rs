@@ -174,3 +174,47 @@ return result;};
         serde_json::from_str(&page.eval_json_expression("run()").await.unwrap()).unwrap();
     assert_eq!(got, serde_json::json!(["object", 2, true, "undefined"]));
 }
+
+/// Authored descriptors cannot rename a native browsing context or observe the
+/// trusted named-access resolver. The genuine setter still updates its name.
+#[tokio::test(flavor = "current_thread")]
+async fn child_named_access_reads_the_native_name_without_authored_getters() {
+    let html = r#"<!doctype html><body><iframe name=initial></iframe>
+<div id=nativeFirst></div><div id=forged></div><script>
+const frame = document.querySelector('iframe'), child = frame.contentWindow;
+const define = Object.defineProperty, apply = Reflect.apply;
+const childName = Object.getOwnPropertyDescriptor(child, 'name');
+const nativeAccessor = typeof childName.get === 'function' && typeof childName.set === 'function';
+apply(childName.set, child, ['nativeFirst']);
+let hooks = 0;
+define(child, 'name', {configurable:true,get(){hooks++;return 'forged';},set(){hooks++;}});
+define(window, 'name', {configurable:true,get(){hooks++;return 'forged';},set(){hooks++;}});
+Object.getOwnPropertyDescriptor = () => {hooks++;throw new Error('authored descriptor');};
+Reflect.apply = () => {hooks++;throw new Error('authored apply');};
+const first = window.nativeFirst === child;
+const forged = window.forged === document.getElementById('forged');
+apply(childName.set, child, ['nativeSecond']);
+const oldName = window.nativeFirst === document.getElementById('nativeFirst');
+const newName = window.nativeSecond === child;
+frame.remove();
+globalThis.out = {nativeAccessor,first,forged,
+  oldName,newName,removed:window.nativeSecond===undefined,hooks};
+</script></body>"#;
+    let mut page = PageSession::open(html, "https://native-named.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let got: Value =
+        serde_json::from_str(&page.eval_json_expression("out").await.unwrap()).unwrap();
+    assert_eq!(
+        got,
+        serde_json::json!({
+            "nativeAccessor": true,
+            "first": true,
+            "forged": true,
+            "oldName": true,
+            "newName": true,
+            "removed": true,
+            "hooks": 0
+        })
+    );
+}

@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26.11.0
           cache: npm
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: actions/setup-python@v5
@@ -52,6 +52,12 @@ jobs:
         run: python3 harness/detection/verify-audio-sources.py
       - name: Release smoke supervisor tests
         run: python3 -B scripts/test_smoke_mcp_release.py
+      - name: Exact release artifact and addon smoke controls
+        run: |
+          python3 -B scripts/test_prepare_npm_release.py
+          node --test scripts/smoke-napi-release.test.mjs
+      - name: JS coverage checker tests
+        run: npm run test:coverage:js
       - name: Coverage floor tests
         run: python3 -B scripts/test_check_coverage_floors.py
       - name: Coverage shard tests
@@ -158,7 +164,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26.11.0
           cache: npm
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: actions/setup-python@v5
@@ -174,10 +180,46 @@ jobs:
           key: napi
       - name: Install
         run: npm ci
-      - name: Playwright shim + E2E tests
-        run: npm run test:playwright
-      - name: Detection tests
-        run: npm run test:detection
+      - name: Install locked detection oracle tools
+        run: |
+          sudo apt-get install -y xvfb xauth
+          npm ci --prefix scripts/browser-sidecar
+          npx --no-install playwright install-deps chromium
+          curl --fail --location --retry 3 https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/linux64/chrome-linux64.zip --output "$RUNNER_TEMP/chrome-linux64.zip"
+          echo "e6c94490f0b6b337225aeb2d2a5034858516b7017356980ba94f5176d8774a50  $RUNNER_TEMP/chrome-linux64.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/chrome-linux64.zip" -d "$RUNNER_TEMP/chrome-oracle"
+          "$RUNNER_TEMP/chrome-oracle/chrome-linux64/chrome" --version | grep -F '156.0.8078.47'
+          echo "TURBO_SURF_CHROME_PATH=$RUNNER_TEMP/chrome-oracle/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          echo "TURBO_SURF_CHROME_HEADLESS=1" >> "$GITHUB_ENV"
+      - name: Build native detection collector
+        working-directory: rust
+        run: |
+          cargo build --release -p turbo-surf-mcp --example detection_trace
+          echo "TURBO_SURF_DETECTION_BINARY=$PWD/target/release/examples/detection_trace" >> "$GITHUB_ENV"
+      - name: JS tests + host coverage (lines >= 92.5%, branches/functions >= 90%)
+        env:
+          # Hosted Ubuntu blocks the raw oracle's user-namespace sandbox. These
+          # disposable controls serve authored localhost fixtures only.
+          TURBO_SURF_CHROME_ARGS: --no-sandbox
+        # Oracle controls intentionally launch headed Chrome even when other
+        # collectors use headless mode; keep their real display available.
+        run: xvfb-run --auto-servernum npm run coverage:js
+      - name: Retain JS coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-js
+          path: coverage/js
+          if-no-files-found: error
+      - name: Retain failed Chrome oracle launch diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-oracle-launch-diagnostics
+          path: |
+            /tmp/turbo-*/chrome-stderr.log
+            /tmp/detection-navigation-observation-*/*/chrome-stderr.log
+          if-no-files-found: warn
 
   # --------------------------------------------------------------------------
   # Coverage shards (instrumented builds — must compile independently)

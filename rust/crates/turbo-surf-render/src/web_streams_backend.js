@@ -1,5 +1,5 @@
 // The official algorithms and their symbol records never enter a guest object.
-(function (core, make) {
+(function (core, make, boundary) {
   "use strict";
   const ops = core.ops,
     get = ops.op_interface_record_get,
@@ -23,7 +23,8 @@
   // Pending timeout signals belong to their document heap, never a native root.
   const pendingTimeouts = new Set(),
     retainTimeout = Set.prototype.add.bind(pendingTimeouts),
-    releaseTimeout = Set.prototype.delete.bind(pendingTimeouts);
+    releaseTimeout = Set.prototype.delete.bind(pendingTimeouts),
+    timeoutCount = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
   const rawOwner = ops.Crypto;
   let shared = get(rawOwner);
   if (!shared) {
@@ -32,7 +33,10 @@
     set(rawOwner, shared);
   }
   if (!own(shared, "webBackend")) {
-    const streams = core.loadExtScript("ext:deno_web/06_streams.js");
+    const streams = {
+      ...core.loadExtScript("ext:deno_web/06_streams.js"),
+      ...core.loadExtScript("ext:deno_web/14_compression.js"),
+    };
     const abort = core.loadExtScript("ext:deno_web/03_abort_signal.js");
     core.loadExtScript("ext:deno_web/02_event.js");
     const exceptions = core.loadExtScript("ext:deno_web/01_dom_exception.js");
@@ -68,6 +72,29 @@
       return listener;
     };
     backend.cleanup = (raw, listener) => apply(rawRemove, raw, ["abort", listener]);
+    // Keep the timer's retained source and forwarding closure in the main realm.
+    // Guest frontends are reached only through the existing native weak bridge.
+    backend.timeout = (millis, window) => {
+      const owner = new WeakRef(window);
+      const controller = new abort.AbortController();
+      const timer = apply(abort.AbortSignal.timeout, abort.AbortSignal, [millis]);
+      apply(rawAdd, timer, [
+        "abort",
+        () => {
+          const window = apply(deref, owner, []);
+          if (!window || !ops.op_window_active(window)) return;
+          backend.hostAbort = true;
+          try {
+            apply(backend.controller.abort.value, controller, [
+              new exceptions.DOMException("signal timed out", "TimeoutError"),
+            ]);
+          } finally {
+            backend.hostAbort = false;
+          }
+        },
+      ]);
+      return apply(backend.controller.signal.get, controller, []);
+    };
     const frontMap = new WeakMap(),
       frontGet = WeakMap.prototype.get.bind(frontMap),
       frontSet = WeakMap.prototype.set.bind(frontMap),
@@ -77,6 +104,16 @@
       return weak === undefined ? undefined : apply(deref, weak, []);
     };
     backend.frontSet = (raw, front) => frontSet(raw, new WeakRef(front));
+    const reasons = new WeakMap(),
+      reasonGet = WeakMap.prototype.get.bind(reasons),
+      reasonSet = WeakMap.prototype.set.bind(reasons);
+    backend.reasonGet = (raw) => {
+      const reference = reasonGet(raw);
+      return reference === undefined ? undefined : apply(deref, reference, []);
+    };
+    backend.reasonSet = (raw, reason) => reasonSet(raw, new WeakRef(reason));
+    backend.sourceRef = (front) => new WeakRef(front);
+    backend.sourceGet = (reference) => apply(deref, reference, []);
     define(backend, "authoredHas", { value: WeakSet.prototype.has.bind(backend.authoredErrors) });
     define(backend, "authoredAdd", { value: WeakSet.prototype.add.bind(backend.authoredErrors) });
     define(shared, "webBackend", { value: backend });
@@ -89,7 +126,7 @@
     getSize = WeakMap.prototype.get.bind(sizeFunctions),
     setSize = WeakMap.prototype.set.bind(sizeFunctions);
   const isPrototypeOf = Object.prototype.isPrototypeOf;
-  const localError = (error) => {
+  const legacyError = (error) => {
     if (
       error === null ||
       (typeof error !== "object" && typeof error !== "function") ||
@@ -113,6 +150,22 @@
       );
     } catch {
       return error;
+    }
+  };
+  const localError = (error) => {
+    if (!ops.op_infrastructure_active()) return legacyError(error);
+    if (!ops.op_infrastructure_origin(error) || backend.authoredHas(error)) return error;
+    try {
+      return boundary.streamRehome(error);
+    } catch {
+      try {
+        return new Exception(
+          apply(backend.exception.message.get, error, []),
+          apply(backend.exception.name.get, error, []),
+        );
+      } catch {
+        return new TypeErrorType("Unsupported private infrastructure error");
+      }
     }
   };
   const authored = (value) => {
@@ -151,9 +204,17 @@
     if (previous) return previous;
     return save(create(constructors[name].prototype), name, raw);
   };
-  const promise = (value, convert = (value) => value) =>
+  const boundaryValue = (value) =>
+    ops.op_infrastructure_origin(value) ? boundary.streamRehome(value) : value;
+  const observe = (value, fulfilled, rejected) => {
+    if (ops.op_value_is_promise(value) && ops.op_infrastructure_origin(value))
+      return boundary.streamObserve(value, fulfilled, rejected);
+    return apply(then, resolvePromise(value), [fulfilled, rejected]);
+  };
+  const promise = (value, convert = boundaryValue) =>
     new PromiseType((resolve, reject) => {
-      apply(then, resolvePromise(value), [
+      observe(
+        value,
         (value) => {
           try {
             resolve(convert(value));
@@ -162,7 +223,7 @@
           }
         },
         (error) => reject(localError(error)),
-      ]);
+      );
     });
   const result = (name, member, value) => {
     if (member === "size" && typeof value === "function") {
@@ -189,7 +250,7 @@
       return fn;
     }
     if (member === "read" || member === "next" || member === "return")
-      return promise(value, (item) => ({ value: item.value, done: item.done }));
+      return promise(value, (item) => ({ value: boundaryValue(item.value), done: item.done }));
     if (["closed", "ready", "write", "close", "abort", "cancel", "pipeTo"].includes(member))
       return promise(value);
     if (member === "getReader")
@@ -208,7 +269,7 @@
     if (member === "tee")
       return [wrap(value[0], "ReadableStream"), wrap(value[1], "ReadableStream")];
     if (member === "values") return iteratorFront(value);
-    return value;
+    return boundaryValue(value);
   };
   const argumentsFor = (name, member, args) => {
     if (member === "pipeTo") return [unwrap(args[0], "WritableStream"), pipeOptions(args[1])];
@@ -242,10 +303,8 @@
         function (...args) {
           try {
             const state = record(this, "StreamIterator");
-            return state.realm.result(
-              "Iterator",
-              member,
-              apply(state.raw[member], state.raw, args),
+            return state.realm.invoke(() =>
+              state.realm.result("Iterator", member, apply(state.raw[member], state.raw, args)),
             );
           } catch (error) {
             return rejectPromise(localError(error));
@@ -302,31 +361,36 @@
           if (typeof callback !== "function")
             throw new TypeErrorType("Underlying callback must be a function");
           return function (...args) {
-            const index =
-              (kind === "WritableStream" && member === "write") ||
-              (kind === "TransformStream" && member === "transform")
-                ? 1
-                : 0;
-            if (member !== "cancel" && member !== "abort" && member !== "close")
-              args[index] = wrap(
-                args[index],
-                controllerName(
+            return boundary.streamInvoke(() => {
+              const index =
+                (kind === "WritableStream" && member === "write") ||
+                (kind === "TransformStream" && member === "transform")
+                  ? 1
+                  : 0;
+              if (member !== "cancel" && member !== "abort" && member !== "close")
+                args[index] = wrap(
                   args[index],
-                  kind === "WritableStream"
-                    ? "WritableStreamDefaultController"
-                    : kind === "TransformStream"
-                      ? "TransformStreamDefaultController"
-                      : "ReadableStreamDefaultController",
-                ),
-              );
-            try {
-              const outcome = apply(callback, source, args);
-              return new PromiseType((resolve, reject) =>
-                apply(then, resolvePromise(outcome), [resolve, (error) => reject(authored(error))]),
-              );
-            } catch (error) {
-              throw authored(error);
-            }
+                  controllerName(
+                    args[index],
+                    kind === "WritableStream"
+                      ? "WritableStreamDefaultController"
+                      : kind === "TransformStream"
+                        ? "TransformStreamDefaultController"
+                        : "ReadableStreamDefaultController",
+                  ),
+                );
+              try {
+                const outcome = apply(callback, source, args);
+                return new PromiseType((resolve, reject) =>
+                  apply(then, resolvePromise(outcome), [
+                    resolve,
+                    (error) => reject(authored(error)),
+                  ]),
+                );
+              } catch (error) {
+                throw authored(error);
+              }
+            });
           };
         },
         enumerable: true,
@@ -364,7 +428,13 @@
     return adapter;
   }
   const realmWindow = globalThis;
-  const realm = { result, localError, wrap, active: () => ops.op_window_active(realmWindow) };
+  const realm = {
+    result,
+    localError,
+    wrap,
+    invoke: boundary.streamInvoke,
+    active: () => ops.op_window_active(realmWindow),
+  };
   const names = [
     "ReadableStream",
     "ReadableStreamDefaultReader",
@@ -379,6 +449,8 @@
     "TransformStreamDefaultController",
     "ByteLengthQueuingStrategy",
     "CountQueuingStrategy",
+    "CompressionStream",
+    "DecompressionStream",
   ];
   for (const name of names) {
     const Raw = backend.streams[name],
@@ -391,22 +463,26 @@
         "WritableStreamDefaultWriter",
         "ByteLengthQueuingStrategy",
         "CountQueuingStrategy",
+        "CompressionStream",
+        "DecompressionStream",
       ].includes(name);
     const ctor = make(
       function (...args) {
         if (!publicConstructor) throw new TypeErrorType("Illegal constructor");
         try {
-          if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
-            args[0] = sourceAdapter(args[0], name);
-          if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
-            args[1] = strategyAdapter(args[1]);
-          if (name === "TransformStream") args[2] = strategyAdapter(args[2]);
-          if (name === "ByteLengthQueuingStrategy" || name === "CountQueuingStrategy")
-            args[0] = strategyAdapter(args[0]);
-          if (name === "ReadableStreamDefaultReader" || name === "ReadableStreamBYOBReader")
-            args[0] = unwrap(args[0], "ReadableStream");
-          if (name === "WritableStreamDefaultWriter") args[0] = unwrap(args[0], "WritableStream");
-          save(this, name, construct(Raw, args));
+          return boundary.streamInvoke(() => {
+            if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
+              args[0] = sourceAdapter(args[0], name);
+            if (["ReadableStream", "WritableStream", "TransformStream"].includes(name))
+              args[1] = strategyAdapter(args[1]);
+            if (name === "TransformStream") args[2] = strategyAdapter(args[2]);
+            if (name === "ByteLengthQueuingStrategy" || name === "CountQueuingStrategy")
+              args[0] = strategyAdapter(args[0]);
+            if (name === "ReadableStreamDefaultReader" || name === "ReadableStreamBYOBReader")
+              args[0] = unwrap(args[0], "ReadableStream");
+            if (name === "WritableStreamDefaultWriter") args[0] = unwrap(args[0], "WritableStream");
+            save(this, name, construct(Raw, args));
+          });
         } catch (error) {
           throw localError(error);
         }
@@ -444,10 +520,12 @@
                 if (member === "cancel")
                   state.realm.cancelPrefix = "Failed to execute 'cancel' on '" + name + "': ";
                 try {
-                  return state.realm.result(
-                    name,
-                    member,
-                    apply(native, state.raw, argumentsFor(name, member, args)),
+                  return state.realm.invoke(() =>
+                    state.realm.result(
+                      name,
+                      member,
+                      apply(native, state.raw, argumentsFor(name, member, args)),
+                    ),
                   );
                 } finally {
                   state.realm.cancelPrefix = previous;
@@ -484,7 +562,7 @@
   Object.setPrototypeOf(Signal.prototype, EventTarget.prototype);
   Object.setPrototypeOf(Signal, EventTarget);
   constructors.AbortSignal = Signal;
-  function signalFront(raw) {
+  function signalFront(raw, reasonSources) {
     const previous = getFront(raw);
     if (previous) return previous;
     const controller = new ControllerBefore(),
@@ -492,6 +570,7 @@
     Object.setPrototypeOf(front, Signal.prototype);
     save(front, "AbortSignal", raw);
     const state = record(front, "AbortSignal");
+    state.reasonSources = reasonSources;
     state.dispatch = () => {
       releaseTimeout(front);
       return apply(oldAbort, controller, [signalReason(front)]);
@@ -534,16 +613,39 @@
       }
     define(Signal.prototype, name, copy);
   }
+  function sourceReason(sources, rawReason) {
+    for (let index = 0; index < sources.count; index++) {
+      const source = backend.sourceGet(sources.values[index]);
+      if (!source) continue;
+      const state = record(source, "AbortSignal");
+      if (!apply(backend.signal.aborted.get, state.raw, [])) continue;
+      if (apply(backend.signal.reason.get, state.raw, []) === rawReason)
+        return { __proto__: null, value: signalReason(source) };
+    }
+  }
+  function translatedSignalReason(state, rawReason) {
+    const infrastructure = ops.op_infrastructure_origin(rawReason);
+    if (infrastructure) {
+      const existing = backend.reasonGet(rawReason);
+      if (existing !== undefined) return existing;
+    }
+    const source = state.reasonSources && sourceReason(state.reasonSources, rawReason);
+    if (state.reasonSources && infrastructure && !source)
+      throw new TypeErrorType("Abort reason source is no longer available");
+    const reason = state.realm.localError(source ? source.value : rawReason);
+    if (infrastructure) backend.reasonSet(rawReason, reason);
+    return reason;
+  }
   function signalReason(front) {
     const state = record(front, "AbortSignal");
     if (!apply(backend.signal.aborted.get, state.raw, [])) return undefined;
-    // All dependent raw reasons are assigned before the parent's abort event.
-    // Translate once so reason identity survives the later frontend dispatch.
-    if (!own(state, "translatedReason"))
+    if (!own(state, "translatedReason")) {
       define(state, "translatedReason", {
         __proto__: null,
-        value: state.realm.localError(apply(backend.signal.reason.get, state.raw, [])),
+        value: translatedSignalReason(state, apply(backend.signal.reason.get, state.raw, [])),
       });
+      state.reasonSources = undefined;
+    }
     return state.translatedReason;
   }
   define(Signal.prototype, "reason", {
@@ -580,6 +682,7 @@
       value: make(
         function (...args) {
           try {
+            let reasonSources;
             if (name === "any") {
               const fail = (message) =>
                 new TypeErrorType("Failed to execute 'any' on 'AbortSignal': " + message);
@@ -587,7 +690,8 @@
               const input = args[0];
               if (input === null || (typeof input !== "object" && typeof input !== "function"))
                 throw fail("The provided value cannot be converted to a sequence.");
-              const values = create(null);
+              const values = create(null),
+                sourceFronts = create(null);
               let count = 0;
               const convert = (value) => {
                 let raw;
@@ -597,6 +701,7 @@
                   throw fail("Failed to convert value to 'AbortSignal'.");
                 }
                 // Sequence conversion does not IteratorClose on a brand error.
+                define(sourceFronts, count, { __proto__: null, value: backend.sourceRef(value) });
                 define(values, count++, { __proto__: null, value: raw });
               };
               if (isArray(input) && !core.isProxy(input)) {
@@ -641,6 +746,7 @@
                 },
               });
               args[0] = iterable;
+              reasonSources = { __proto__: null, values: sourceFronts, count };
             }
             if (name === "timeout") {
               const fail = (message) =>
@@ -659,27 +765,7 @@
               millis = trunc(millis);
               if (millis < 0 || millis > 9007199254740991)
                 throw fail("Value is outside the 'unsigned long long' value range.");
-              // The official unrefed timer drives a signal that carries Blink's reason.
-              const controller = new backend.abort.AbortController();
-              const timer = apply(backend.abort.AbortSignal.timeout, backend.abort.AbortSignal, [
-                millis,
-              ]);
-              apply(backend.signal.addEventListener.value, timer, [
-                "abort",
-                () => {
-                  // Blink signals the timeout from a task: each signal (the
-                  // source, then each dependent) dispatches from the host.
-                  backend.hostAbort = true;
-                  try {
-                    apply(backend.controller.abort.value, controller, [
-                      new Exception("signal timed out", "TimeoutError"),
-                    ]);
-                  } finally {
-                    backend.hostAbort = false;
-                  }
-                },
-              ]);
-              const front = signalFront(apply(backend.controller.signal.get, controller, []));
+              const front = signalFront(backend.timeout(millis, realmWindow));
               retainTimeout(front);
               return front;
             }
@@ -688,6 +774,7 @@
               args[0] = new Exception("signal is aborted without reason", "AbortError");
             const front = signalFront(
               apply(backend.abort.AbortSignal[name], backend.abort.AbortSignal, args),
+              reasonSources,
             );
             return front;
           } catch (error) {
@@ -755,6 +842,9 @@
   define(globalThis, "AbortSignal", { value: Signal, writable: true, configurable: true });
   define(globalThis, "AbortController", { value: Controller, writable: true, configurable: true });
   return {
+    hasPendingTimeouts() {
+      return apply(timeoutCount, pendingTimeouts, []) > 0;
+    },
     transferBackend() {
       const streams = backend.streams;
       const transformDescriptors = descriptors(streams.TransformStream.prototype);
@@ -765,6 +855,7 @@
         ReadableController: streams.ReadableStreamDefaultController,
         WritableController: streams.WritableStreamDefaultController,
         wrap,
+        observe,
         cancelFailure(error) {
           if (!realm.cancelPrefix) return error;
           return new Exception(

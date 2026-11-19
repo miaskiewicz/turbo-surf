@@ -13,27 +13,85 @@
 //! Isolate-owned cleanup disposes native handles before V8 invalidation, including
 //! cached runtimes and independent sessions; an entry point never resets its peer.
 
-#[cfg(turbo_surf_native_proxy)]
+#[path = "indexeddb_store.rs"]
+mod indexeddb_store;
+#[path = "native_history.rs"]
+mod native_history;
+#[path = "session_history.rs"]
+mod session_history;
 #[path = "window_proxy.rs"]
 mod window_proxy;
+use native_history::{
+    op_history_ack, op_history_clone, op_history_initialize, op_history_notify,
+    op_history_precommit, op_history_queue_task, op_history_scroll_restoration, op_history_select,
+    op_history_status, op_history_traverse,
+};
 
-#[cfg(turbo_surf_native_proxy)]
+#[path = "private_boundary.rs"]
+pub(crate) mod private_boundary;
+use private_boundary::{
+    op_infrastructure_active, op_infrastructure_adopt_crypto_key, op_infrastructure_origin,
+};
+
+#[cfg(not(turbo_surf_native_proxy))]
+#[path = "registered_module_scripts.rs"]
+mod registered_module_scripts;
+
+#[path = "async_owner.rs"]
+mod async_owner;
+#[path = "selected_document_tasks.rs"]
+mod selected_document_tasks;
+
+#[path = "private_infrastructure.rs"]
+mod private_infrastructure;
+
+#[path = "auxiliary_host.rs"]
+mod auxiliary_host;
+#[path = "auxiliary_navigation.rs"]
+mod auxiliary_navigation;
+#[path = "auxiliary_policy.rs"]
+mod auxiliary_policy;
+#[path = "auxiliary_storage.rs"]
+mod auxiliary_storage;
+pub use auxiliary_policy::AuxiliaryResourcePolicy;
+#[path = "auxiliary_pages.rs"]
+mod auxiliary_pages;
+#[path = "background_work.rs"]
+mod background_work;
 #[path = "code_generation.rs"]
 mod code_generation;
+#[path = "dialog_ops.rs"]
+mod dialog_ops;
+#[path = "driver_sync.rs"]
+mod driver_sync;
+#[path = "initial_document_images.rs"]
+mod initial_document_images;
+pub use initial_document_images::InitialDocumentImages;
+#[path = "resident_image_assets.rs"]
+pub(crate) mod resident_image_assets;
+#[path = "target_action_completion.rs"]
+mod target_action_completion;
+pub use auxiliary_pages::{
+    AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryDriverHistory, AuxiliaryHostServices,
+    AuxiliaryPageEvent, AuxiliaryPageEventLog, AuxiliaryPageInfo,
+};
 
 #[cfg(turbo_surf_native_proxy)]
 #[path = "frame_modules.rs"]
 mod frame_modules;
 
-// The stock SDK has no native WindowProxy, per-frame module loader or code-generation
-// callback: same-named stand-ins keep every call site unconditional.
+// Per-frame module loading remains a profile capability.
+// WindowProxy/Location host services use the producer native ABI in every profile.
 #[cfg(not(turbo_surf_native_proxy))]
 #[path = "stock_engine.rs"]
 mod stock_engine;
 #[cfg(not(turbo_surf_native_proxy))]
-use stock_engine::{code_generation, frame_modules, window_proxy};
+use stock_engine::frame_modules;
 
 use frame_modules::op_frame_module;
+
+#[path = "context_geolocation.rs"]
+mod context_geolocation;
 
 #[path = "microtask_queue.rs"]
 mod microtask_queue;
@@ -88,9 +146,13 @@ mod blob_urls;
 mod form_navigation;
 #[path = "privacy_sandbox.rs"]
 mod privacy_sandbox;
+#[path = "storage_state.rs"]
+mod storage_state;
 #[path = "sync_xhr.rs"]
 mod sync_xhr;
 use privacy_sandbox::{op_private_token_issuer, op_private_token_query};
+#[path = "document_content.rs"]
+mod document_content;
 #[path = "form_submission.rs"]
 mod form_submission;
 #[path = "script_navigation.rs"]
@@ -104,9 +166,9 @@ mod user_activation;
 mod window_interfaces;
 pub use user_activation::NavigationActivationSnapshot;
 use user_activation::{
-    host_user_activation, op_host_close_request, op_host_light_dismiss, op_host_modal_backdrop,
-    op_host_user_activation, op_user_activation_install, op_user_activation_navigator,
-    op_user_activation_read, op_user_activation_snapshot,
+    host_user_activation, op_host_close_request, op_host_input_dispatch, op_host_light_dismiss,
+    op_host_modal_backdrop, op_host_user_activation, op_user_activation_install,
+    op_user_activation_navigator, op_user_activation_read, op_user_activation_snapshot,
 };
 use window_interfaces::{op_location_ancestor_origins, op_location_object, op_location_seed};
 
@@ -147,6 +209,7 @@ impl Drop for OwnedRuntime {
             unsafe { self.0.v8_isolate().enter() };
         }
         let _native = crate::browser_env::activate_isolate(self.0.v8_isolate());
+        async_owner::uninstall(&mut self.0);
         crate::storage_gc::uninstall(self.0.v8_isolate());
         {
             deno_core::scope!(scope, self.0);
@@ -166,6 +229,7 @@ impl Drop for OwnedRuntime {
                 }
             }
         }
+        resident_image_assets::clear_runtime(&self.0.op_state().borrow());
         crate::browser_env::reset_isolate(self.0.v8_isolate());
         crate::browser_env::clear_interface_records(self.0.v8_isolate());
         crate::message_ports::clear(&mut self.0);
@@ -177,6 +241,8 @@ impl Drop for OwnedRuntime {
 /// ES modules) hydrates. Carries the page base + shared cookie jar so module fetches
 /// are same-origin + session-authenticated like page fetches.
 struct NetModuleLoader {
+    network: ModuleNetworkLog,
+    max_resource_bytes: Option<usize>,
     base: String,
     source: String,
     top_level_source: String,
@@ -186,6 +252,7 @@ struct NetModuleLoader {
     client_hints: ClientHints,
     http_cache: turbo_surf_core::http_cache::HttpCache,
     storage_effects: std::sync::Arc<turbo_surf_core::net::ResponseSideEffects<'static>>,
+    emulation: std::sync::Arc<std::sync::RwLock<crate::browser_emulation::BrowserEmulation>>,
     inline_sources: InlineModules,
     credentials: ModuleCredentials,
     csp: CspHandle,
@@ -211,6 +278,7 @@ impl ModuleOrigins {
 #[derive(Clone, Default)]
 struct InlineModules(Rc<RefCell<std::collections::HashMap<String, InlineModule>>>);
 struct InlineModule {
+    owner: u32,
     code: String,
     #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
     code_units: std::sync::Arc<[u16]>,
@@ -222,6 +290,7 @@ struct InlineModule {
 #[derive(Clone)]
 struct CspHandle {
     id: u32,
+    image_assets: resident_image_assets::Assets,
     partition: Option<Rc<CredentiallessPartition>>,
     policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
     response_metadata: Rc<RefCell<crate::DocumentResponseMetadata>>,
@@ -239,6 +308,7 @@ impl CspHandle {
         static NEXT: AtomicU32 = AtomicU32::new(1);
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
+            image_assets: Default::default(),
             partition: None,
             dictionaries: Rc::new(RefCell::new(compression_dictionary::Discovery::new(
                 base, headers,
@@ -395,6 +465,27 @@ fn op_document_feature_enabled(
     #[string] feature: &str,
 ) -> bool {
     document_feature_enabled(scope, document, feature)
+}
+
+/// Authenticate the installed native Document without consulting guest properties.
+pub(crate) fn active_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Context>> {
+    use turbo_dom_browser_env::host_internals::{
+        current_document_context, enter_document_of, is_browsing_context,
+    };
+    let _document = enter_document_of(scope, document);
+    let context = current_document_context(scope)?;
+    if document.get_creation_context(scope) != Some(context) {
+        return None;
+    }
+    let active = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|active| active.0.to_local(scope))
+        .is_some_and(|active| active.strict_equals(document.into()));
+    (active && is_browsing_context() && context.get_slot::<FrameRetired>().is_none())
+        .then_some(context)
 }
 
 pub(crate) fn document_feature_enabled(
@@ -559,23 +650,10 @@ fn op_csp_finish_parser(scope: &mut v8::PinScope, document: v8::Local<v8::Object
     configure_csp_code_generation(scope, context, policy.current());
 }
 
-/// turbo-surf#121: whether the guest-side eval/Function shim should be
-/// installed for this document's current effective CSP. The shim lives only
-/// in the published (non-proxy) SDK; the exact-engine path uses V8's native
-/// source-conversion callback instead.
+/// Native compilation admission preserves direct-eval and constructor identity.
 #[op2(fast)]
-fn op_tt_eval_shim_required(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
-    if cfg!(turbo_surf_native_proxy) {
-        return false;
-    }
-    let Some(context) = document.get_creation_context(scope) else {
-        return false;
-    };
-    let Some(handle) = context.get_slot::<CspHandle>() else {
-        return false;
-    };
-    let required = handle.policy.borrow().current().requires_trusted_types();
-    required
+fn op_tt_eval_shim_required(_scope: &mut v8::PinScope, _document: v8::Local<v8::Object>) -> bool {
+    false
 }
 
 #[op2(fast)]
@@ -796,7 +874,10 @@ fn queue_csp_report<'s>(
         return;
     }
     let url = csp_document_url(scope, context);
-    let (source, line, column) = csp_callsite(scope, parser, kind, &url);
+    let (source, line, column) = {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        csp_callsite(scope, parser, kind, &url)
+    };
     let response_metadata = csp_response_metadata(context);
     let ctx = CspEmitContext {
         kind,
@@ -1406,35 +1487,18 @@ fn authorize_css(
 }
 
 fn configure_csp_code_generation(
-    scope: &mut v8::PinScope,
+    _scope: &mut v8::PinScope,
     context: v8::Local<v8::Context>,
     policy: &crate::csp::Policy,
 ) {
-    let allowed = policy.allows_eval();
-    #[cfg(turbo_surf_native_proxy)]
-    let allowed = {
-        let key = v8::String::new(scope, "turbo-surf.code-generation-callback").unwrap();
-        let key = v8::Private::for_api(scope, Some(key));
-        let global = context.global(scope);
-        allowed
-            && !global
-                .get_private(scope, key)
-                .is_some_and(|callback| callback.is_function())
-    };
-    // Published SDKs lack the private native source-conversion callback, so an
-    // eval-visible Trusted Types gate (turbo-surf#121) is approximated in guest JS:
-    // when the effective CSP requires Trusted Types, a bootstrap-installed shim
-    // patches globalThis.eval / globalThis.Function to route the source through
-    // the realm's TT converter (applying the `default` policy when one exists)
-    // and compile+run the admitted source on the host. Direct-eval semantics are
-    // lost, but the common cases match Chrome and the EvalError message matches
-    // too. V8's own eval gate is left open under TT enforcement so the shim's
-    // host compile and any late direct eval route through the shim.
-    #[cfg(not(turbo_surf_native_proxy))]
-    let allowed =
-        allowed || policy.requires_trusted_types() || policy.bypasses_trusted_types_eval();
-    #[cfg(not(turbo_surf_native_proxy))]
-    let _ = scope;
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_some()
+    {
+        context.set_allow_generation_from_strings(true);
+        return;
+    }
+    let allowed = policy.allows_eval() && !code_generation::installed(context);
     context.set_allow_generation_from_strings(allowed);
 }
 
@@ -1565,21 +1629,41 @@ fn csp_eval_sample(units: &[u16]) -> &[u16] {
     &prefix[start..end]
 }
 
+fn timer_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Context>> {
+    let context = document.get_creation_context(scope)?;
+    if context.get_slot::<FrameRetired>().is_some()
+        || context
+            .get_slot::<private_boundary::Infrastructure>()
+            .is_some()
+    {
+        return None;
+    }
+    context
+        .get_slot::<ActiveDocument>()?
+        .0
+        .to_local(scope)
+        .is_some_and(|active| active.strict_equals(document.into()))
+        .then_some(context)
+}
+
 #[op2(fast, reentrant)]
 fn op_timer_code_allowed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
     source: v8::Local<'s, v8::String>,
 ) -> bool {
-    let context = scope.get_current_context();
+    let Some(context) = timer_document_context(scope, document) else {
+        return false;
+    };
     let Some(handle) = context.get_slot::<CspHandle>() else {
         return false;
     };
-    if context.get_slot::<FrameRetired>().is_some() {
-        return false;
-    }
     let policy = handle.policy.borrow().current().clone();
     let report_only = handle.policy.borrow().report_only.clone();
+    let scope = &mut v8::ContextScope::new(scope, context);
     let units = crate::browser_env::string_code_units(scope, source);
     let sample = csp_eval_sample(&units);
     for (disposition, records) in [
@@ -1618,12 +1702,13 @@ fn op_engine_task_scope<'s>(
 #[op2(reentrant)]
 fn op_run_timer_code<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
     source: v8::Local<'s, v8::String>,
 ) -> v8::Local<'s, v8::Value> {
-    let context = scope.get_current_context();
-    if context.get_slot::<FrameRetired>().is_some() {
+    let Some(context) = timer_document_context(scope, document) else {
         return v8::undefined(scope).into();
-    }
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     let url = context.get_slot::<FrameDocumentLocation>().map_or_else(
         || {
             JsRuntime::op_state_from(scope)
@@ -1735,13 +1820,32 @@ struct ModuleRequest {
     policy: crate::csp::Policy,
 }
 
+fn module_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    owner: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    use turbo_dom_browser_env::host_internals as host;
+    host::handle_of(scope, owner)
+        .ok_or_else(|| JsErrorBox::generic("Native module document required"))?;
+    let _document = host::enter_document_of(scope, owner);
+    if !host::is_browsing_context() {
+        return Err(JsErrorBox::generic("Module document is not active"));
+    }
+    let context = host::current_document_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native module document context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Err(JsErrorBox::generic("Module document has been retired"));
+    }
+    Ok(context)
+}
+
 #[op2(fast)]
-fn op_module_credentials(
-    scope: &mut v8::PinScope,
-    element: v8::Local<v8::Object>,
+fn op_module_credentials<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    element: v8::Local<'s, v8::Object>,
     #[string] specifier: String,
 ) -> Result<(), JsErrorBox> {
-    let context = scope.get_current_context();
+    let context = module_document_context(scope, element)?;
     let options = context
         .get_slot::<ModuleCredentials>()
         .ok_or_else(|| JsErrorBox::generic("Module context unavailable"))?;
@@ -1757,8 +1861,11 @@ fn op_module_credentials(
         crate::browser_env::node_attribute(scope, element, "integrity").unwrap_or_default();
     let policy = context
         .get_slot::<CspHandle>()
-        .map(|handle| handle.policy.borrow().active.clone())
-        .unwrap_or_default();
+        .ok_or_else(|| JsErrorBox::generic("Native module document policy unavailable"))?
+        .policy
+        .borrow()
+        .active
+        .clone();
     options
         .0
         .borrow_mut()
@@ -1789,13 +1896,18 @@ fn op_module_staging_enabled() -> bool {
 
 #[op2]
 #[string]
-fn op_inline_module(
-    scope: &mut v8::PinScope,
+fn op_inline_module<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
-    code: v8::Local<v8::String>,
+    element: v8::Local<'s, v8::Object>,
+    code: v8::Local<'s, v8::String>,
     #[string] base: &str,
     #[string] source: String,
-) -> String {
+) -> Result<String, JsErrorBox> {
+    let owner = module_document_context(scope, element)?
+        .get_slot::<CspHandle>()
+        .ok_or_else(|| JsErrorBox::generic("Native module document owner unavailable"))?
+        .id;
     let code_units = crate::browser_env::string_code_units(scope, code);
     let code = String::from_utf16_lossy(&code_units);
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1808,13 +1920,34 @@ fn op_inline_module(
     state.borrow::<InlineModules>().0.borrow_mut().insert(
         specifier.clone(),
         InlineModule {
+            owner,
             code,
             code_units: code_units.into(),
             base: base.to_string(),
             source,
         },
     );
-    specifier
+    Ok(specifier)
+}
+
+impl NetModuleLoader {
+    fn inline_module_source(&self, url: &ModuleSpecifier) -> Option<ModuleLoadResponse> {
+        let sources = self.inline_sources.0.borrow();
+        let source = sources.get(url.as_str())?;
+        let result = if source.owner == self.csp.id {
+            Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::String(source.code.clone().into()),
+                url,
+                None,
+            ))
+        } else {
+            Err(JsErrorBox::type_error(
+                "Inline module belongs to another document",
+            ))
+        };
+        Some(ModuleLoadResponse::Sync(result))
+    }
 }
 
 impl ModuleLoader for NetModuleLoader {
@@ -1824,6 +1957,7 @@ impl ModuleLoader for NetModuleLoader {
             .0
             .borrow()
             .get(specifier)
+            .filter(|source| source.owner == self.csp.id)
             .map(|source| source.source.clone())
             .unwrap_or_else(|| specifier.to_string())
     }
@@ -1834,6 +1968,7 @@ impl ModuleLoader for NetModuleLoader {
             .0
             .borrow()
             .get(specifier)
+            .filter(|source| source.owner == self.csp.id)
             .map(|source| source.code_units.clone())
     }
 
@@ -1880,9 +2015,16 @@ impl ModuleLoader for NetModuleLoader {
         let sources = self.inline_sources.0.borrow();
         let referrer = sources
             .get(referrer)
+            .filter(|source| source.owner == self.csp.id)
             .map(|source| source.base.as_str())
             .unwrap_or(referrer);
-        resolve_import(specifier, referrer).map_err(|e| JsErrorBox::generic(e.to_string()))
+        let resolved =
+            resolve_import(specifier, referrer).map_err(|e| JsErrorBox::generic(e.to_string()))?;
+        if matches!(resolved.scheme(), "http" | "https") {
+            turbo_surf_core::network_policy::check(resolved.as_str())
+                .map_err(JsErrorBox::generic)?;
+        }
+        Ok(resolved)
     }
 
     fn load(
@@ -1892,19 +2034,8 @@ impl ModuleLoader for NetModuleLoader {
         _options: ModuleLoadOptions,
     ) -> ModuleLoadResponse {
         let url = module_specifier.clone();
-        if let Some(code) = self
-            .inline_sources
-            .0
-            .borrow()
-            .get(url.as_str())
-            .map(|source| source.code.clone())
-        {
-            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
-                ModuleType::JavaScript,
-                ModuleSourceCode::String(code.into()),
-                &url,
-                None,
-            )));
+        if let Some(inline) = self.inline_module_source(&url) {
+            return inline;
         }
         let credentials = {
             let mut options = self.credentials.0.borrow_mut();
@@ -1921,6 +2052,7 @@ impl ModuleLoader for NetModuleLoader {
             inherited.integrity.clear();
             options.entry(url.to_string()).or_insert(inherited).clone()
         };
+        let max_resource_bytes = self.max_resource_bytes;
         let module_credentials = self.credentials.clone();
         let jar = self.jar.clone();
         let ua = self.ua.clone();
@@ -1931,6 +2063,16 @@ impl ModuleLoader for NetModuleLoader {
         let client_hints = self.client_hints.clone();
         let http_cache = self.http_cache.clone();
         let storage_effects = self.storage_effects.clone();
+        let auth_credentials = self
+            .emulation
+            .read()
+            .ok()
+            .and_then(|options| options.http_credentials.clone());
+        let context_headers = self
+            .emulation
+            .read()
+            .map(|options| options.request_headers(Default::default()))
+            .unwrap_or_default();
         let cache_partition = http_cache_partition(
             &self.top_level_source,
             &self.source,
@@ -1942,9 +2084,11 @@ impl ModuleLoader for NetModuleLoader {
         );
         let blob_store = self.blob_store.clone();
         let blob_key = blob_urls::module_key(&self.source, opaque_origin, &self.csp);
+        let activity = self.network.0.borrow().begin_context_request(self.csp.id);
         ModuleLoadResponse::Async(Box::pin(async move {
+            let _activity = activity;
             let mut local = jar.borrow().fork_for_request();
-            let mut headers = std::collections::BTreeMap::new();
+            let mut headers = context_headers;
             if !ua.is_empty() {
                 headers.insert("user-agent".to_string(), ua);
             }
@@ -1969,6 +2113,8 @@ impl ModuleLoader for NetModuleLoader {
                 &client_hints,
                 &mut local,
                 crate::script_fetch::ScriptPolicies {
+                    http_credentials: auth_credentials.as_ref(),
+                    max_bytes: max_resource_bytes,
                     http_cache: Some(&http_cache),
                     response_side_effects: Some(storage_effects.as_ref()),
                     cache_partition: &cache_partition,
@@ -2054,6 +2200,8 @@ struct Ua(String);
 /// `fetch` result marshaled back to JS as a `Response`-like object.
 #[derive(Default, serde::Serialize)]
 struct FetchOut {
+    #[serde(skip_serializing)]
+    raw_headers: Vec<(String, String)>,
     status_text: String,
     stream_id: u32,
     aborted: bool,
@@ -2062,6 +2210,7 @@ struct FetchOut {
     script_errors_muted: bool,
     response_received: bool,
     policy_blocked: bool,
+    host_policy_blocked: bool,
     cross_origin: bool,
     body_bytes: Vec<u8>,
     headers: Vec<(String, String)>,
@@ -2075,8 +2224,58 @@ struct FetchOut {
     final_url: String,
 }
 
-#[derive(Default)]
-struct NetworkLog(std::collections::VecDeque<serde_json::Value>);
+type NetworkLog = crate::NetworkEventLog;
+#[derive(Clone)]
+struct ModuleNetworkLog(Rc<RefCell<NetworkLog>>);
+
+#[op2(reentrant)]
+fn op_page_diagnostic(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    owner: v8::Local<v8::Object>,
+    #[serde] mut entry: serde_json::Value,
+) {
+    let Some(context) = owner.get_creation_context(scope) else {
+        return;
+    };
+    if context.get_slot::<FrameRetired>().is_some() {
+        return;
+    }
+    entry["context"] = serde_json::json!({"frame":request_frame_metadata(scope, context, None)});
+    state.borrow::<NetworkLog>().push(entry);
+}
+
+#[op2(reentrant)]
+fn op_console_message(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    owner: v8::Local<v8::Object>,
+    #[serde] mut entry: serde_json::Value,
+) {
+    let Some(context) = owner.get_creation_context(scope) else {
+        return;
+    };
+    if context.get_slot::<FrameRetired>().is_some() {
+        return;
+    }
+    entry["context"] = serde_json::json!({"frame":request_frame_metadata(scope, context, None)});
+    let log = state.borrow::<NetworkLog>().clone();
+    log.push(entry);
+    for id in log.take_disposals() {
+        crate::remote_handles::dispose(scope, id);
+    }
+}
+
+#[op2(fast, reentrant)]
+fn op_page_lifecycle(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    #[string] phase: &str,
+) {
+    if let Some(context) = document.get_creation_context(scope) {
+        auxiliary_pages::lifecycle(scope, context, phase);
+    }
+}
 
 // Classic scripts are scheduled onto the host pump. Executing inside a JS eval
 // or a synchronous op retains the dispatcher's frames in page Error stacks.
@@ -2133,12 +2332,14 @@ fn op_queue_classic_script<'s>(
     {
         return Err(JsErrorBox::generic("script context is not same-origin"));
     }
+    let caller = v8::Global::new(scope, caller);
+    let caller_context = v8::Local::new(scope, &caller);
+    let scope = &mut v8::ContextScope::new(scope, caller_context);
     let resolver = v8::PromiseResolver::new(scope)
         .ok_or_else(|| JsErrorBox::generic("script completion allocation failed"))?;
     let promise = resolver.get_promise(scope);
     let element = (!in_shadow_tree).then(|| v8::Global::new(scope, element));
     let context = v8::Global::new(scope, context);
-    let caller = v8::Global::new(scope, caller);
     let queue = state.borrow_mut::<ClassicScripts>();
     let located = if inline && !code.is_empty() {
         if let Some((start, _)) = queue
@@ -2223,7 +2424,7 @@ pub fn set_fingerprint(overrides_json: &str) {
 // The fingerprint-override JSON (or "{}" when unset) — ENV_BOOTSTRAP merges it.
 #[op2]
 #[string]
-fn op_fingerprint() -> String {
+fn op_fingerprint(state: &mut OpState) -> String {
     let profile = turbo_surf_core::fingerprint::default_profile();
     let mut defaults = serde_json::json!({
         "fullVersion": profile.full_version,
@@ -2238,6 +2439,10 @@ fn op_fingerprint() -> String {
         .and_then(|g| serde_json::from_str::<serde_json::Value>(&g).ok())
     {
         defaults.as_object_mut().unwrap().extend(overrides);
+    }
+    if let Some(locale) = state.borrow::<BrowserStorage>().emulation().locale {
+        defaults["languages"] = serde_json::json!([locale]);
+        defaults["locale"] = serde_json::json!(locale);
     }
     defaults.to_string()
 }
@@ -2784,6 +2989,265 @@ struct ParsedFetchBody {
     headers: std::collections::BTreeMap<String, String>,
 }
 
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RequestFrameMetadata {
+    context_id: u32,
+    path: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    page_id: Option<String>,
+}
+
+pub(super) fn request_frame_metadata<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    host: Option<v8::Local<'s, v8::Object>>,
+) -> RequestFrameMetadata {
+    let mut path = request_context_path(scope, context);
+    if let Some(host) = host {
+        path = path.and_then(|mut path| {
+            path.push(request_frame_index(scope, host)?);
+            Some(path)
+        });
+    }
+    RequestFrameMetadata {
+        page_id: auxiliary_pages::top_level_identity(scope, context).map(|id| id.0.to_string()),
+        context_id: context
+            .get_slot::<CspHandle>()
+            .map_or(0, |handle| handle.id),
+        path,
+    }
+}
+
+fn request_context_path<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+) -> Option<Vec<u32>> {
+    let mut path = Vec::new();
+    for _ in 0..64 {
+        let Some(parent) = context.get_slot::<FrameParent>() else {
+            path.reverse();
+            return Some(path);
+        };
+        let parent = parent.0.to_local(scope)?;
+        let host = context.get_slot::<FrameHost>()?.0.to_local(scope)?;
+        path.push(request_frame_index(scope, host)?);
+        context = parent;
+    }
+    None
+}
+
+fn request_frame_index<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    host: v8::Local<'s, v8::Object>,
+) -> Option<u32> {
+    use turbo_dom_browser_env::host_internals::{enter_document_of, handle_of, with_tree};
+    let _document = enter_document_of(scope, host);
+    let handle = handle_of(scope, host)?;
+    with_tree(|tree| {
+        tree.query_selector_all("iframe")
+            .iter()
+            .position(|candidate| *candidate == handle)
+    })?
+    .and_then(|index| u32::try_from(index).ok())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchEventContext {
+    frame: RequestFrameMetadata,
+    navigation: bool,
+    resource_type: String,
+}
+
+impl FetchEventContext {
+    fn capture(
+        job: Option<&std::sync::Arc<fetch_streams::Job>>,
+        init: &serde_json::Value,
+        destination: Destination,
+    ) -> Self {
+        let frame = job
+            .map(|job| job.frame.clone())
+            .unwrap_or_else(|| RequestFrameMetadata {
+                context_id: init
+                    .get("csp")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or_default() as u32,
+                path: None,
+                page_id: None,
+            });
+        Self {
+            frame,
+            navigation: destination == Destination::Iframe,
+            resource_type: match destination {
+                Destination::Empty
+                    if init.get("initiator").and_then(serde_json::Value::as_str)
+                        == Some("xmlhttprequest") =>
+                {
+                    "xhr"
+                }
+                Destination::Empty => "fetch",
+                Destination::Iframe => "document",
+                _ => destination.as_str(),
+            }
+            .to_owned(),
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchRequestMetadata {
+    headers: std::collections::BTreeMap<String, String>,
+    body_bytes: Option<Vec<u8>>,
+}
+
+impl FetchRequestMetadata {
+    fn from_options(options: &FetchOptions<'_>) -> Self {
+        Self {
+            headers: options.headers.clone(),
+            body_bytes: options
+                .body_bytes
+                .clone()
+                .or_else(|| options.body.as_ref().map(|body| body.as_bytes().to_vec())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod fetch_request_metadata_tests {
+    use super::{FetchOptions, FetchRequestMetadata};
+
+    #[test]
+    fn captured_request_metadata_keeps_headers_and_binary_body_precedence() {
+        let options = FetchOptions {
+            headers: [("x-probe".to_owned(), "request".to_owned())].into(),
+            body: Some("text fallback".to_owned()),
+            body_bytes: Some(vec![0, 255, 128, 10]),
+            ..Default::default()
+        };
+        let metadata = FetchRequestMetadata::from_options(&options);
+        assert_eq!(metadata.headers["x-probe"], "request");
+        assert_eq!(metadata.body_bytes, Some(vec![0, 255, 128, 10]));
+        assert!(FetchRequestMetadata::from_options(&FetchOptions::default())
+            .body_bytes
+            .is_none());
+    }
+}
+
+#[derive(Default)]
+struct FetchResponseTrace {
+    last: std::sync::Mutex<Option<(u64, u16)>>,
+    suppressed: bool,
+}
+
+impl FetchResponseTrace {
+    fn observe(
+        &self,
+        log: &NetworkLog,
+        context: &FetchEventContext,
+        hop: turbo_surf_core::net::ResponseObservation,
+    ) {
+        if self.suppressed {
+            return;
+        }
+        let mut hops = self.last.lock().unwrap();
+        let id = log.next_id();
+        let prior = hops
+            .as_ref()
+            .filter(|(_, status)| (300..400).contains(status))
+            .map(|(id, _)| *id);
+        log.push(serde_json::json!({"event":"response", "id":id,"redirectFrom":prior,
+            "url":hop.url,"method":hop.method,"status":hop.status,"ok":(200..300).contains(&hop.status),
+            "statusText":hop.status_text,"headers":hop.headers,"context":context,
+            "request":{"headers":hop.request_headers,"bodyBytes":hop.request_body},"bodyPending":true,"bodyIncomplete":true,"body":"","bodyBytes":[]}));
+        if let Some((previous, _)) = hops.as_ref() {
+            log.push(
+                serde_json::json!({"event":"responsebody","id":previous,"bodyUnavailable":true,"bodyIncomplete":false}),
+            );
+        }
+        *hops = Some((id, hop.status));
+    }
+    fn last_id(&self) -> Option<u64> {
+        self.last.lock().unwrap().as_ref().map(|(id, _)| *id)
+    }
+}
+fn append_response_trace(
+    log: &mut NetworkLog,
+    mut entry: serde_json::Value,
+    trace: &FetchResponseTrace,
+) {
+    if trace.suppressed {
+        return;
+    }
+    if let Some(id) = trace.last_id() {
+        if entry["streamed"] == true && entry["status"] != 0 {
+            return;
+        }
+        entry["bodyIncomplete"] = false.into();
+        entry["event"] = "responsebody".into();
+        entry["id"] = id.into();
+        if entry["status"] == 0 {
+            entry["error"] = entry["error"]
+                .as_str()
+                .unwrap_or("Response body failed")
+                .into();
+        }
+    }
+    log.push(entry);
+}
+
+fn append_cancelled_response_trace(log: &NetworkLog, trace: &FetchResponseTrace) {
+    if trace.suppressed {
+        return;
+    }
+    if let Some(id) = trace.last_id() {
+        log.push(serde_json::json!({"event":"responsebody", "id":id,
+            "bodyIncomplete":true,"error":"Fetch cancelled"}));
+    }
+}
+
+#[cfg(test)]
+mod cancelled_response_trace_tests {
+    use super::{append_cancelled_response_trace, FetchResponseTrace, NetworkLog};
+    use std::sync::Mutex;
+
+    #[test]
+    fn cancellation_terminates_only_an_already_observed_response_without_inventing_body() {
+        let log = NetworkLog::default();
+        log.push(serde_json::json!({"event":"response", "id":7, "status":200}));
+        let trace = FetchResponseTrace {
+            last: Mutex::new(Some((7, 200))),
+            suppressed: false,
+        };
+        append_cancelled_response_trace(&log, &trace);
+        let events: serde_json::Value = serde_json::from_str(&log.drain()).unwrap();
+        assert_eq!(events[0]["status"], 200);
+        assert_eq!(events[1]["event"], "responsebody");
+        assert_eq!(events[1]["id"], 7);
+        assert_eq!(events[1]["bodyIncomplete"], true);
+        assert_eq!(events[1]["error"], "Fetch cancelled");
+        assert!(events[1].get("bodyBytes").is_none());
+        assert!(events[1].get("body").is_none());
+        assert_eq!(events.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn unobserved_or_suppressed_fetches_never_fabricate_a_terminal_response() {
+        for trace in [
+            FetchResponseTrace::default(),
+            FetchResponseTrace {
+                last: Mutex::new(Some((7, 200))),
+                suppressed: true,
+            },
+        ] {
+            let log = NetworkLog::default();
+            append_cancelled_response_trace(&log, &trace);
+            assert_eq!(log.drain(), "[]");
+        }
+    }
+}
+
 /// Parse the method / body / headers trio from the fetch init bag, stripping
 /// the browser-controlled headers the guest never gets to override (sec-*,
 /// cookie / origin / referer / host / user-agent / upgrade-insecure-requests).
@@ -2876,7 +3340,13 @@ fn build_fetch_policy_snapshot(
     csp: Option<&CspHandle>,
 ) -> FetchPolicySnapshot {
     if let Some(job) = cancel_job {
-        return job.policy.clone();
+        let mut snapshot = job.policy.clone();
+        if let Some(handle) = csp {
+            snapshot
+                .active
+                .include_form_actions(&handle.policy.borrow().active);
+        }
+        return snapshot;
     }
     let Some(handle) = csp else {
         return FetchPolicySnapshot::default();
@@ -2907,7 +3377,10 @@ async fn run_stream_fetch_branch(
     response_received: &std::sync::atomic::AtomicBool,
     policy_blocked: &std::sync::atomic::AtomicBool,
     crossed_origin: &std::sync::atomic::AtomicBool,
+    event_context: &FetchEventContext,
+    response_trace: &FetchResponseTrace,
 ) -> FetchOut {
+    let request_metadata = FetchRequestMetadata::from_options(&opts);
     let response = {
         opts.jar = Some(local);
         let request = turbo_surf_core::net::fetch_stream(target, opts);
@@ -2917,6 +3390,13 @@ async fn run_stream_fetch_branch(
             Some(request.await)
         }
     };
+    let failure_error = response
+        .as_ref()
+        .and_then(|result| result.as_ref().err())
+        .map(ToString::to_string);
+    if let (Some(job), Some(id)) = (cancel_job, response_trace.last_id()) {
+        fetch_streams::attach_log(job, state.borrow().borrow::<NetworkLog>().clone(), id);
+    }
     let out = stream_response_to_out(
         response,
         target,
@@ -2943,18 +3423,20 @@ async fn run_stream_fetch_branch(
         "status": out.status,
         "ok": out.ok,
         "method": method.unwrap_or("GET"),
+        "request": request_metadata,
+        "context": event_context,
         "contentType": out.content_type,
+        "headers": out.raw_headers,
+        "statusText": out.status_text,
         "streamed": true,
         "streamId": cancel_id,
         "body": "",
         "bodyIncomplete": true,
+        "error": failure_error,
     });
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
-    if log.0.len() == 1000 {
-        log.0.pop_front();
-    }
-    log.0.push_back(entry);
+    append_response_trace(log, entry, response_trace);
     out
 }
 
@@ -3013,7 +3495,9 @@ async fn stream_response_to_out(
         },
         Some(Err(error)) => FetchOut {
             response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
-            policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+            policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed)
+                || turbo_surf_core::network_policy::is_denial(&error.to_string()),
+            host_policy_blocked: turbo_surf_core::network_policy::is_denial(&error.to_string()),
             cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
             final_url: target.to_string(),
             body: error.to_string(),
@@ -3049,6 +3533,7 @@ async fn install_stream_fetch_out(
     let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
         || !turbo_surf_core::request_context::same_origin(source, &response.final_url);
     let out = FetchOut {
+        raw_headers: response.headers.clone(),
         status_text: response.status_text,
         stream_id: cancel_id,
         response_received: true,
@@ -3304,6 +3789,7 @@ fn fetch_response_to_out(args: FetchResponseOut<'_>) -> FetchOut {
     let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
         || !turbo_surf_core::request_context::same_origin(source, &r.final_url);
     FetchOut {
+        raw_headers: r.headers.clone(),
         status_text: r.status_text,
         stream_id: 0,
         aborted: false,
@@ -3315,6 +3801,7 @@ fn fetch_response_to_out(args: FetchResponseOut<'_>) -> FetchOut {
         }),
         response_received: true,
         policy_blocked: false,
+        host_policy_blocked: false,
         cross_origin: cross,
         body_bytes: r.body_bytes,
         headers: crate::fetch_cors::exposed_headers(context, r.headers, cross),
@@ -3349,7 +3836,11 @@ fn fetch_error_to_out(args: FetchErrorOut<'_>) -> FetchOut {
         policy_blocked,
         crossed_origin,
     } = args;
+    if error.contains("BodyTooLarge") {
+        eprintln!("resource fetch {target}: {error}");
+    }
     FetchOut {
+        raw_headers: Vec::new(),
         status_text: String::new(),
         stream_id: 0,
         aborted: false,
@@ -3358,7 +3849,9 @@ fn fetch_error_to_out(args: FetchErrorOut<'_>) -> FetchOut {
         integrity_blocked: error == "Response failed integrity validation"
             || error == "Script response failed integrity validation",
         response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
-        policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+        policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed)
+            || turbo_surf_core::network_policy::is_denial(&error),
+        host_policy_blocked: turbo_surf_core::network_policy::is_denial(&error),
         cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
         body_bytes: Vec::new(),
         headers: Vec::new(),
@@ -3408,8 +3901,13 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         body_bytes,
         mut headers,
     } = parse_fetch_body(&init);
+    headers = state
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .request_headers(headers);
     let source = init.get("source").and_then(|s| s.as_str()).unwrap_or(&base);
     let destination = parse_fetch_destination(&init);
+    let event_context = FetchEventContext::capture(cancel_job.as_ref(), &init, destination);
     let csp = init.get("csp").and_then(|id| id.as_u64()).and_then(|id| {
         state
             .borrow()
@@ -3561,7 +4059,17 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         context.opaque_origin,
         opaque_cache_nonce,
     );
+    let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
+    let response_trace = FetchResponseTrace {
+        suppressed: init["host_route_fetch"] == true,
+        ..Default::default()
+    };
+    let event_log = state.borrow().borrow::<NetworkLog>().clone();
+    let observer = |hop| response_trace.observe(&event_log, &event_context, hop);
     let mut opts = FetchOptions {
+        response_observer: Some(&observer),
+        http_credentials: auth_credentials.as_ref(),
+        max_bytes: state.borrow().borrow::<ResourceBudget>().0,
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_mode,
@@ -3603,10 +4111,13 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
             &response_received,
             &policy_blocked,
             &crossed_origin,
+            &event_context,
+            &response_trace,
         )
         .await;
     }
     let mut script_errors_muted = false;
+    let request_metadata = FetchRequestMetadata::from_options(&opts);
     let response = {
         let request = async {
             if destination == Destination::Script {
@@ -3617,8 +4128,11 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
                     &client_hints,
                     &mut local,
                     crate::script_fetch::ScriptPolicies {
+                        http_credentials: auth_credentials.as_ref(),
+                        max_bytes: opts.max_bytes,
                         http_cache: Some(&http_cache),
                         response_side_effects: Some(storage_effects.as_ref()),
+                        response_observer: Some(&observer),
                         cache_partition: &cache_partition,
                         request: Some(&|target, redirected| {
                             policy.allows_request(directive, target, nonce, redirected)
@@ -3656,12 +4170,14 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let Some(response) = response else {
         jar_rc.borrow_mut().merge_request_changes(local);
         fetch_streams::release(&mut state.borrow_mut(), cancel_id);
+        append_cancelled_response_trace(&event_log, &response_trace);
         return FetchOut {
             aborted: true,
             final_url: target,
             ..Default::default()
         };
     };
+    let failure_error = response.as_ref().err().cloned();
     let out = match response {
         Ok(r) => fetch_response_to_out(FetchResponseOut {
             state: &state,
@@ -3687,13 +4203,10 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     };
     jar_rc.borrow_mut().merge_request_changes(local);
     fetch_streams::release(&mut state.borrow_mut(), cancel_id);
-    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body});
+    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"request":request_metadata,"context":event_context,"contentType":out.content_type,"body":out.body,"bodyBytes":out.body_bytes,"headers":out.raw_headers,"statusText":out.status_text,"error":failure_error});
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
-    if log.0.len() == 1000 {
-        log.0.pop_front();
-    }
-    log.0.push_back(entry);
+    append_response_trace(log, entry, &response_trace);
     out
 }
 
@@ -3728,7 +4241,12 @@ async fn op_load_image(
     #[string] source: String,
     csp: u32,
     #[string] context_json: String,
+    asset_token: u32,
 ) -> ImageOut {
+    let _activity = state
+        .borrow()
+        .borrow::<NetworkLog>()
+        .begin_context_request(csp);
     let (base, jar, ua, hints) = {
         let state = state.borrow();
         (
@@ -3751,6 +4269,7 @@ async fn op_load_image(
         source
     };
     let target = resolve(&source, &url).unwrap_or(url);
+    let mut asset = resident_image_assets::Request::new(&state.borrow(), csp, asset_token, &target);
     let (policy, embedder_policy) = state
         .borrow()
         .borrow::<CspContexts>()
@@ -3768,7 +4287,10 @@ async fn op_load_image(
         };
     }
     let mut local = jar.borrow().fork_for_request();
-    let mut headers = std::collections::BTreeMap::new();
+    let mut headers = state
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .request_headers(Default::default());
     if !ua.is_empty() {
         headers.insert("user-agent".to_string(), ua);
     }
@@ -3808,7 +4330,22 @@ async fn op_load_image(
         .borrow()
         .borrow::<BrowserStorage>()
         .partition_response_effects(anonymous);
+    let auth_credentials = state.borrow().borrow::<BrowserStorage>().http_credentials();
+    let promoted_image = state
+        .borrow()
+        .try_borrow::<initial_document_images::PromotionImages>()
+        .and_then(|images| {
+            images.get(
+                csp,
+                &source,
+                &target,
+                &context,
+                state.borrow().borrow::<ResourceBudget>().0,
+            )
+        });
     let opts = FetchOptions {
+        http_credentials: auth_credentials.as_ref(),
+        max_bytes: state.borrow().borrow::<ResourceBudget>().0,
         response_side_effects: Some(storage_effects.as_ref()),
         http_cache: Some(&http_cache),
         cache_partition,
@@ -3824,7 +4361,9 @@ async fn op_load_image(
     };
     // data: URLs go through the Fetch data: URL processor (base64, percent-encoded and
     // raw payloads) and keep their MIME type, like a network response's Content-Type.
-    let response = if target
+    let response = if let Some(image) = promoted_image {
+        Some(image)
+    } else if target
         .get(..5)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
     {
@@ -3844,14 +4383,17 @@ async fn op_load_image(
         return ImageOut::default();
     };
     match natural_image_size(&response.bytes, &response.content_type) {
-        Some((width, height, ratio)) => ImageOut {
-            url: response.final_url,
-            status: response.status,
-            width,
-            height,
-            ratio,
-            ok: true,
-        },
+        Some((width, height, ratio)) => {
+            asset.finish(response.final_url.clone(), response.bytes);
+            ImageOut {
+                url: response.final_url,
+                status: response.status,
+                width,
+                height,
+                ratio,
+                ok: true,
+            }
+        }
         None => ImageOut {
             url: response.final_url,
             status: response.status,
@@ -3909,7 +4451,27 @@ fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32, Opt
 // The host retains contexts only until page reset/runtime destruction.
 #[derive(Default)]
 struct FrameContextMarker;
+struct NativePageModuleContext;
+
+fn retire_module_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) {
+    JsRuntime::detach_module_context(scope, context);
+    context.remove_slot::<NativePageModuleContext>();
+    if let Some(owner) = context.get_slot::<CspHandle>() {
+        let state = JsRuntime::op_state_from(scope);
+        state
+            .borrow()
+            .borrow::<InlineModules>()
+            .0
+            .borrow_mut()
+            .retain(|_, source| source.owner != owner.id);
+    }
+}
+
 struct FrameDocumentUrl(String);
+struct AuxiliaryFallbackBase(String);
 struct FrameDocumentLocation(String);
 struct FrameDocumentSourceUrl(String);
 struct FrameDepth(u32);
@@ -3929,6 +4491,8 @@ struct FrameSandbox {
     storage_access_blocked: bool,
     top_navigation_without_activation_blocked: bool,
     forms_blocked: bool,
+    popups_blocked: bool,
+    modals_blocked: bool,
     /// The sandboxed pointer lock browsing context flag (no `allow-pointer-lock`).
     pointer_lock_blocked: bool,
     top_navigation_without_activation_permitted: bool,
@@ -3945,6 +4509,8 @@ impl FrameSandbox {
             self.origin_restricted |= origin;
             self.storage_access_blocked |= policy.blocks_storage_access();
             self.forms_blocked |= policy.blocks_form_submission();
+            self.popups_blocked |= policy.blocks_auxiliary_open();
+            self.modals_blocked |= policy.blocks_modal_dialogs();
             self.pointer_lock_blocked |= policy.blocks_pointer_lock();
             self.top_navigation_without_activation_blocked |=
                 policy.blocks_top_navigation_without_activation();
@@ -3966,6 +4532,8 @@ impl FrameSandbox {
             scripts_blocked: inherited.scripts_blocked,
             storage_access_blocked: inherited.storage_access_blocked,
             forms_blocked: inherited.forms_blocked,
+            popups_blocked: inherited.popups_blocked,
+            modals_blocked: inherited.modals_blocked,
             pointer_lock_blocked: inherited.pointer_lock_blocked,
             top_navigation_without_activation_blocked: inherited
                 .top_navigation_without_activation_blocked,
@@ -3977,6 +4545,8 @@ impl FrameSandbox {
             flags.document_domain_blocked = true;
             let tokens = attribute.to_ascii_lowercase();
             let tokens = tokens.split_ascii_whitespace().collect::<Vec<_>>();
+            flags.popups_blocked |= !tokens.contains(&"allow-popups");
+            flags.modals_blocked |= !tokens.contains(&"allow-modals");
             flags.opaque |= !tokens.contains(&"allow-same-origin");
             flags.origin_restricted |= !tokens.contains(&"allow-same-origin");
             flags.scripts_blocked |= !tokens.contains(&"allow-scripts");
@@ -4159,11 +4729,20 @@ pub enum WindowTimerMode {
 /// Host-owned policy installed before any document or frame script executes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PageSessionOptions {
+    /// Explicit per-runtime override; otherwise inherit the browsing profile's
+    /// animation presentation policy. Installed before every Window's scripts.
+    pub animation_policy: Option<crate::AnimationPolicy>,
+    /// Initial host-owned layout viewport, installed before page scripts.
+    pub viewport: Option<[u32; 2]>,
+    /// Optional response-body byte cap for page resources and module graphs.
+    pub max_resource_bytes: Option<usize>,
     pub window_timer_mode: WindowTimerMode,
     /// Cap this initial hydration without shortening later operation budgets.
-    /// Consumed on open; automatic form destinations inherit only the timer mode.
+    /// Consumed on open; later document navigations retain the other session options.
     pub initial_hydration_budget_ms: Option<u64>,
 }
+
+struct ResourceBudget(Option<usize>);
 
 #[derive(Default)]
 struct WindowTimerNesting {
@@ -4218,12 +4797,10 @@ fn op_timer_publish_task_base(
 /// The publisher's task must still be running (its base is cleared when it ends).
 #[op2(fast)]
 fn op_timer_agent_task_base(state: &mut OpState) -> f64 {
-    match &*state.borrow::<TimerClock>().task_base.borrow() {
-        Some(published) if published.nesting.task.get() => {
-            published.nesting.published.get().unwrap_or(f64::NAN)
-        }
-        _ => f64::NAN,
-    }
+    state
+        .borrow::<TimerClock>()
+        .active_task_base()
+        .unwrap_or(f64::NAN)
 }
 
 #[op2(fast)]
@@ -4237,17 +4814,19 @@ fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object
 // A native guard also clears it on watchdog errors without executing more JS or
 // retaining the owning frame context after the checkpoint.
 struct WindowTimerTask {
+    context: v8::Global<v8::Context>,
     nesting: Rc<WindowTimerNesting>,
     previous: u32,
     previous_task: bool,
 }
 impl WindowTimerTask {
-    fn new(context: v8::Local<v8::Context>) -> Self {
+    fn new(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) -> Self {
         let nesting = window_timer_nesting(context);
         let previous = nesting.level.get();
         let previous_task = nesting.task.replace(true);
 
         Self {
+            context: v8::Global::new(scope, context),
             nesting,
             previous,
             previous_task,
@@ -4294,6 +4873,30 @@ struct PublishedTaskBase {
 impl TimerClock {
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64() * 1000.0 + self.advance.get()
+    }
+    fn active_task_base(&self) -> Option<f64> {
+        self.task_base
+            .borrow()
+            .as_ref()
+            .filter(|published| published.nesting.task.get())
+            .and_then(|published| published.nesting.published.get())
+    }
+    fn posted_message_due(&self, source: v8::Local<v8::Context>) -> f64 {
+        if self.mode == WindowTimerMode::Virtual {
+            // Match the private Window timer clock: the current realm's task,
+            // then its agent's active task, then elapsed time outside a task.
+            let local = source
+                .get_slot::<WindowTimerNesting>()
+                .filter(|nesting| nesting.task.get())
+                .and_then(|nesting| nesting.published.get());
+            if let Some(base) = local
+                .filter(|base| base.is_finite())
+                .or_else(|| self.active_task_base().filter(|base| base.is_finite()))
+            {
+                return base;
+            }
+        }
+        self.now()
     }
     fn next_sequence(&self) -> f64 {
         let next = self.sequence.get() + 1.0;
@@ -4370,25 +4973,89 @@ fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::In
         .map(tokio::time::Instant::from_std)
 }
 
-fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimerTurn {
+fn window_timer_contexts(rt: &JsRuntime) -> Vec<v8::Global<v8::Context>> {
     let mut contexts = vec![rt.main_context()];
-    contexts.extend(
-        rt.op_state()
-            .borrow()
-            .borrow::<FrameContexts>()
-            .contexts
-            .iter()
-            .cloned(),
-    );
+    contexts.extend(secondary_window_contexts(&rt.op_state().borrow()));
+    contexts
+}
+
+fn auxiliary_task_contexts(
+    rt: &mut JsRuntime,
+    owner: Option<u64>,
+) -> Result<Vec<v8::Global<v8::Context>>, String> {
+    let contexts = window_timer_contexts(rt);
+    let Some(owner) = owner else {
+        return Ok(contexts);
+    };
+    deno_core::scope!(scope, rt);
+    let root = auxiliary_pages::context(
+        scope,
+        turbo_dom_browser_env::host_internals::AuxiliaryContextId(owner),
+    )?;
+    Ok(contexts
+        .into_iter()
+        .filter(|context| {
+            let context = v8::Local::new(scope, context);
+            context.get_slot::<FrameRetired>().is_none()
+                && auxiliary_pages::in_target_tree(scope, context, root)
+        })
+        .collect())
+}
+
+fn poll_auxiliary_document_tasks(
+    rt: &mut JsRuntime,
+    owner: Option<u64>,
+    cx: &mut std::task::Context<'_>,
+    timer_wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
+) -> Result<bool, String> {
+    if indexeddb_store::run_task_for(rt, owner)? {
+        return Ok(true);
+    }
+    let contexts = auxiliary_task_contexts(rt, owner)?;
+    // Auxiliary navigation must service real document tasks while its resource
+    // promise is pending, without advancing clocks or admitting another Page.
+    let real_timers =
+        rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
+    let turn = if real_timers {
+        run_next_window_timer_in(rt, false, contexts.clone())
+    } else {
+        WindowTimerTurn::default()
+    };
+    if turn.fired > 0 {
+        checkpoint_window_timer_turn(rt, &turn)?;
+        return Ok(true);
+    }
+    if run_background_resource_task_in(rt, contexts) > 0 {
+        checkpoint_window_timer(rt)?;
+        return Ok(true);
+    }
+    Ok(park_on_window_timer_deadline(cx, timer_wake, turn.deadline).is_some())
+}
+
+fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimerTurn {
+    let contexts = window_timer_contexts(rt);
+    run_next_window_timer_in(rt, allow_advance, contexts)
+}
+
+fn run_next_window_timer_in(
+    rt: &mut JsRuntime,
+    allow_advance: bool,
+    contexts: Vec<v8::Global<v8::Context>>,
+) -> WindowTimerTurn {
     deno_core::scope!(scope, rt);
     // Earliest deadline first; equal deadlines in agent-wide queueing order.
     let mut next: Option<((f64, f64), v8::Local<v8::Context>)> = None;
     for context in contexts {
         let context = v8::Local::new(scope, context);
-        if context.get_slot::<FrameRetired>().is_some() {
+        if context.get_slot::<FrameRetired>().is_some()
+            || context
+                .get_slot::<private_boundary::Infrastructure>()
+                .is_some()
+        {
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
+        let _ = call_frame_helper(active, "deliverEmulationState", &[]);
         let Some(key) = call_frame_helper(active, "timerNextDue", &[])
             .and_then(|value| timer_order_key(active, value))
         else {
@@ -4413,11 +5080,30 @@ fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimer
             };
         }
     }
-    let task = WindowTimerTask::new(context);
+    #[cfg(all(test, not(turbo_surf_native_proxy)))]
+    admission_cancellation_tests::timer_admission_fence(scope, due);
+    admit_window_timer(scope, context)
+}
+
+fn admit_window_timer<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> WindowTimerTurn {
+    let task = WindowTimerTask::new(scope, context);
     let active = &mut v8::ContextScope::new(scope, context);
-    let fired = call_frame_helper(active, "runNextTimer", &[])
-        .and_then(|value| value.uint32_value(active))
-        .unwrap_or(0);
+    let fired = async_owner::with_document_admission(active, context, |active| {
+        call_frame_helper(active, "runNextTimer", &[])
+            .and_then(|value| value.uint32_value(active))
+            .unwrap_or(0)
+    })
+    .unwrap_or_else(|error| {
+        #[cfg(all(test, not(turbo_surf_native_proxy)))]
+        admission_cancellation_tests::observe_timer_caller_error(active);
+        if let async_owner::AdmissionError::Authority(error) = error {
+            async_owner::task_failure(active, format!("Timer owner admission: {error}"));
+        }
+        0
+    });
     WindowTimerTurn {
         fired,
         deadline: None,
@@ -4434,32 +5120,84 @@ fn checkpoint_window_timer(rt: &mut JsRuntime) -> Result<(), String> {
     Ok(())
 }
 
+fn checkpoint_window_timer_turn(rt: &mut JsRuntime, turn: &WindowTimerTurn) -> Result<(), String> {
+    checkpoint_window_timer(rt)?;
+    if let Some(task) = &turn._task {
+        rt.scoped_rejection_checkpoint(&task.context)
+            .map_err(|error| error.to_string())?;
+    }
+    if rt.v8_isolate().is_execution_terminating() {
+        return Err("Timer task microtasks were interrupted".into());
+    }
+    Ok(())
+}
+
 fn run_window_timers(rt: &mut JsRuntime, max: u32) -> Result<u32, String> {
+    Ok(run_window_timer_tasks(rt, max, false)?.fired)
+}
+
+fn run_window_timer_tasks(
+    rt: &mut JsRuntime,
+    max: u32,
+    interleave: bool,
+) -> Result<async_owner::QuiescenceTurn, String> {
     checkpoint_window_timer(rt)?;
     let allow_advance =
         rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::Virtual;
     let mut total = 0;
     while total < max {
-        let turn = run_next_window_timer(rt, allow_advance);
+        let turn = if async_owner::enabled(rt) {
+            let root = auxiliary_pages::event_log(&rt.op_state().borrow())
+                .root()
+                .ok_or("Native timer root is unavailable")?
+                .parse::<u64>()
+                .map_err(|_| "Native timer root is invalid")?;
+            let selection = async_owner::selection(rt, root)?;
+            if interleave {
+                if crate::shim_bindings::pending_in(rt, &selection.contexts) {
+                    return Ok(async_owner::QuiescenceTurn {
+                        fired: total,
+                        busy: true,
+                        host_reply: true,
+                    });
+                }
+                if selected_document_tasks::run_selected_tasks(rt, &selection.targets)? {
+                    checkpoint_window_timer(rt)?;
+                    continue;
+                }
+            }
+            run_next_window_timer_in(
+                rt,
+                allow_advance && selection.pending_ops == 0,
+                selection.contexts,
+            )
+        } else {
+            run_next_window_timer(rt, allow_advance)
+        };
         if turn.fired == 0 {
             break;
         }
         total += turn.fired;
-        checkpoint_window_timer(rt)?;
+        checkpoint_window_timer_turn(rt, &turn)?;
     }
-    Ok(total)
+    Ok(async_owner::QuiescenceTurn {
+        fired: total,
+        ..Default::default()
+    })
 }
 
 fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
-    let mut contexts = vec![rt.main_context()];
-    contexts.extend(
-        rt.op_state()
-            .borrow()
-            .borrow::<FrameContexts>()
-            .contexts
-            .iter()
-            .cloned(),
-    );
+    let contexts = window_timer_contexts(rt);
+    run_background_resource_task_in(rt, contexts)
+}
+
+fn run_background_resource_task_in(
+    rt: &mut JsRuntime,
+    contexts: Vec<v8::Global<v8::Context>>,
+) -> u32 {
+    if contexts.is_empty() {
+        return 0;
+    }
     let start = rt
         .op_state()
         .borrow()
@@ -4472,15 +5210,27 @@ fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
         let index = (start + offset) % contexts.len();
         let context = &contexts[index];
         let context = v8::Local::new(scope, context);
-        if context.get_slot::<FrameRetired>().is_some() {
+        if context.get_slot::<FrameRetired>().is_some()
+            || context
+                .get_slot::<private_boundary::Infrastructure>()
+                .is_some()
+        {
             continue;
         }
         let active = &mut v8::ContextScope::new(scope, context);
         let caught = std::pin::pin!(v8::TryCatch::new(active));
         let active = &mut caught.init();
-        let fired = call_frame_helper(active, "runNextBackgroundResourceTask", &[])
-            .and_then(|value| value.uint32_value(active))
-            .unwrap_or(0);
+        let fired = async_owner::with_document_admission(active, context, |active| {
+            call_frame_helper(active, "runNextBackgroundResourceTask", &[])
+                .and_then(|value| value.uint32_value(active))
+                .unwrap_or(0)
+        })
+        .unwrap_or_else(|error| {
+            if let async_owner::AdmissionError::Authority(error) = error {
+                async_owner::task_failure(active, format!("Resource owner admission: {error}"));
+            }
+            0
+        });
         if fired > 0 || active.has_caught() {
             JsRuntime::op_state_from(active)
                 .borrow()
@@ -4523,6 +5273,7 @@ impl Default for WindowMessageLimits {
 #[derive(Default)]
 struct FrameContexts {
     init_script: String,
+    engine_init_script: String,
     contexts: Vec<v8::Global<v8::Context>>,
     core: Option<v8::Global<v8::Value>>,
     messages: std::collections::VecDeque<WindowMessage>,
@@ -4874,12 +5625,73 @@ impl MessageTargetOrigin {
     }
 }
 
+#[op2(fast, reentrant)]
+fn op_shim_binding_scripts(
+    scope: &mut v8::PinScope,
+    #[string] engine: String,
+    #[string] guest: String,
+    #[string] install: String,
+) -> Result<(), JsErrorBox> {
+    auxiliary_pages::update_legacy_frame_bootstrap(scope, &engine, &guest);
+    let contexts = {
+        let state = JsRuntime::op_state_from(scope);
+        let mut state = state.borrow_mut();
+        let frames = state.borrow_mut::<FrameContexts>();
+        frames.engine_init_script = engine.clone();
+        frames.init_script = guest;
+        frames.contexts.clone()
+    };
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if native_frame_is_retired(context) {
+            continue;
+        }
+        let scope = &mut v8::ContextScope::new(scope, context);
+        for source in [&engine, &install] {
+            if !source.is_empty() {
+                crate::browser_env::run_engine_script(scope, &format!("\"use strict\";{source}"))
+                    .ok_or_else(|| JsErrorBox::generic("frame driver script installation failed"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn initialize_frame_scripts<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<(), JsErrorBox> {
+    let has_native_identity =
+        turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some();
+    if auxiliary_navigation::defer_navigation_frame_init(scope, has_native_identity)? {
+        return Ok(());
+    }
+    if has_native_identity {
+        turbo_dom_browser_env::host_internals::run_auxiliary_init_scripts(scope, context);
+    }
+    let result = run_frame_init_script(scope);
+    auxiliary_navigation::finish_navigation_frame_init(scope);
+    result
+}
+
 fn run_frame_init_script(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
-    let source = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .init_script
-        .clone();
+    if auxiliary_navigation::defer_navigation_frame_init(scope, false)? {
+        return Ok(());
+    }
+    let result = run_frame_init_script_active(scope);
+    auxiliary_navigation::finish_navigation_frame_init(scope);
+    result
+}
+
+fn run_frame_init_script_active(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
+    let context = scope.get_current_context();
+    let bootstrap = auxiliary_pages::bootstrap_for_context(scope, context);
+    let engine_source = bootstrap.engine_init_script;
+    if !engine_source.is_empty() {
+        crate::browser_env::run_engine_script(scope, &engine_source)
+            .ok_or_else(|| JsErrorBox::generic("frame driver init script failed"))?;
+    }
+    let source = bootstrap.init_script;
     if source.is_empty() {
         return Ok(());
     }
@@ -4912,6 +5724,31 @@ fn frame_namespace<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s,
     }
     crate::browser_env::engine_namespace(scope)
 }
+#[op2]
+fn op_shim_binding_bag<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let context = window.get_creation_context(scope)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let namespace = frame_namespace(scope)?;
+    let key = v8::String::new(scope, "shimBindings")?;
+    namespace.get(scope, key.into())
+}
+
+#[op2]
+fn op_shim_binding_namespace<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let context = window.get_creation_context(scope)?;
+    if native_frame_is_retired(context) {
+        return None;
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    frame_namespace(scope)
+}
+
 /// A function the realm's own bootstrap registered through `op_set_host_capabilities`
 /// (never a page-reachable namespace lookup).
 #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
@@ -4995,6 +5832,7 @@ fn op_frame_host_helper<'s>(
             | "prepareFrameAdoption"
             | "syncFrameConnections"
             | "frameSourceChanged"
+            | "replaceControlSelection"
     ) || arguments.length() > 2
     {
         return Err(JsErrorBox::type_error("Unknown private frame operation"));
@@ -5431,7 +6269,7 @@ fn queue_window_message<'s>(
         let state = JsRuntime::op_state_from(scope);
         let state = state.borrow();
         let clock = state.borrow::<TimerClock>();
-        (clock.now(), clock.next_sequence())
+        (clock.posted_message_due(source), clock.next_sequence())
     };
     // Structured serialization/transfer precedes the inactive-target check.
     // A payload getter can retire the destination while serialization runs.
@@ -5499,7 +6337,9 @@ fn queue_window_message<'s>(
 /// The locals [`finish_frame_document_install`] borrows from its caller. Using
 /// a struct beats a 9-arg function for readability.
 struct FrameDocumentInstall<'s, 'a> {
+    attempt: v8::Local<'s, v8::Object>,
     context: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
     parent: v8::Local<'s, v8::Context>,
     parent_window: v8::Local<'s, v8::Object>,
     host: v8::Local<'s, v8::Object>,
@@ -5561,7 +6401,9 @@ fn finish_frame_document_install<'s>(
     args: FrameDocumentInstall<'s, '_>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     let FrameDocumentInstall {
+        attempt,
         context,
+        previous,
         parent,
         parent_window,
         host,
@@ -5588,36 +6430,26 @@ fn finish_frame_document_install<'s>(
     };
     install_document_facts(scope, facts);
     window_proxy::install_document(scope);
+    auxiliary_navigation::bind_frame_execution(scope, context, parent, host, attempt)?;
     let global = context.global(scope);
     let core = v8::Local::new(scope, core);
 
     install_frame_document_location(scope, global, url, metadata);
-    let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
-    context.set_slot(Rc::new(BootstrapDepth(depth)));
-    install_frame_environment_marker(scope, context)?;
-    install_environment(scope, core).map_err(JsErrorBox::generic)?;
-    let secure = secure_context(scope);
-    let crypto_core = core
-        .to_object(scope)
-        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
-    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
-    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    if parent
-        .remove_slot::<FailFrameInitializationForTesting>()
-        .is_some()
-    {
-        parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
-        return Err(JsErrorBox::generic("injected frame initialization failure"));
-    }
-    window_proxy::capture_exception(scope);
-    install_frame_environment_marker(scope, context)?;
-    metadata["base"] = serde_json::Value::String(document_base);
     let metadata_location = metadata
         .get("location")
         .and_then(|value| value.as_str())
         .unwrap_or("about:blank")
         .to_string();
+    window_proxy::install_location(scope, &metadata_location);
+    let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
+    context.set_slot(Rc::new(BootstrapDepth(depth)));
+    install_frame_environment_marker(scope, context)?;
+    install_environment(scope, core).map_err(JsErrorBox::generic)?;
+    install_frame_native_backends(scope, core)?;
+    check_frame_initialization_failure(parent)?;
+    window_proxy::capture_exception(scope);
+    install_frame_environment_marker(scope, context)?;
+    metadata["base"] = serde_json::Value::String(document_base);
     let json = v8::String::new(scope, &metadata.to_string()).unwrap();
     let metadata = v8::json::parse(scope, json).unwrap();
     call_frame_helper(
@@ -5626,10 +6458,42 @@ fn finish_frame_document_install<'s>(
         &[metadata, parent_window.into(), host.into()],
     )
     .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
-    window_proxy::install_location(scope, &metadata_location);
     crate::browser_env::finish_key_order(scope);
+    auxiliary_host::finish_nested_navigation(
+        scope,
+        context,
+        previous,
+        parent,
+        host,
+        &metadata_location,
+    )?;
     run_frame_init_script(scope)?;
     Ok(global)
+}
+
+fn install_frame_native_backends<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    core: v8::Local<'s, v8::Value>,
+) -> Result<(), JsErrorBox> {
+    let secure = secure_context(scope);
+    let crypto_core = core
+        .to_object(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    Ok(())
+}
+
+fn check_frame_initialization_failure(parent: v8::Local<v8::Context>) -> Result<(), JsErrorBox> {
+    if parent
+        .remove_slot::<FailFrameInitializationForTesting>()
+        .is_some()
+    {
+        parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
+        return Err(JsErrorBox::generic("injected frame initialization failure"));
+    }
+    Ok(())
 }
 
 /// Pick the right HTML installer for this frame: srcdoc uses the srcdoc path,
@@ -5919,7 +6783,96 @@ fn op_frame_set_document<'s>(
     html: v8::Local<'s, v8::String>,
     #[string] metadata: &str,
     response_id: u32,
+    attempt: v8::Local<'s, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    let guard = auxiliary_navigation::start_frame_execution_deadline(scope, parent, host, attempt)
+        .map_err(frame_start_error)?;
+    let mut ownership = FrameInstallOwnership::default();
+    let result = set_frame_document_active(
+        scope,
+        FrameDocumentRequest {
+            window,
+            parent_window,
+            host,
+            html,
+            metadata,
+            response_id,
+            attempt,
+        },
+        &mut ownership,
+    );
+    finish_frame_document_transaction(scope, result, guard, ownership)
+}
+
+fn frame_start_error(error: auxiliary_navigation::FrameStartError) -> JsErrorBox {
+    match error {
+        auxiliary_navigation::FrameStartError::Cancelled => {
+            JsErrorBox::generic("Frame load attempt is cancelled")
+        }
+        auxiliary_navigation::FrameStartError::Authority(error) => JsErrorBox::generic(error),
+    }
+}
+
+fn finish_frame_document_transaction<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    result: Result<v8::Local<'s, v8::Object>, JsErrorBox>,
+    guard: Option<auxiliary_navigation::FrameExecutionDeadline>,
+    ownership: FrameInstallOwnership<'s>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let outcome = guard
+        .map(|guard| guard.finish(scope))
+        .unwrap_or(auxiliary_navigation::FrameExecutionOutcome::Completed);
+    if outcome == auxiliary_navigation::FrameExecutionOutcome::Interrupted
+        || scope.is_execution_terminating()
+    {
+        if let Some(context) = ownership.current {
+            auxiliary_navigation::queue_interrupted_frame(scope, context, ownership.previous);
+        }
+        return Err(JsErrorBox::generic("Frame execution was interrupted"));
+    }
+    let expired = outcome == auxiliary_navigation::FrameExecutionOutcome::Cancelled;
+    if result.is_err() || expired {
+        if let Some(context) = ownership.current {
+            retire_failed_frame_navigation(scope, context, ownership.previous);
+        }
+    }
+    if expired {
+        Err(JsErrorBox::generic("Frame load attempt is cancelled"))
+    } else {
+        result
+    }
+}
+
+struct FrameDocumentRequest<'s, 'a> {
+    window: v8::Local<'s, v8::Object>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    html: v8::Local<'s, v8::String>,
+    metadata: &'a str,
+    response_id: u32,
+    attempt: v8::Local<'s, v8::Object>,
+}
+#[derive(Default)]
+struct FrameInstallOwnership<'s> {
+    current: Option<v8::Local<'s, v8::Context>>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+}
+
+fn set_frame_document_active<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    request: FrameDocumentRequest<'s, '_>,
+    ownership: &mut FrameInstallOwnership<'s>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let FrameDocumentRequest {
+        window,
+        parent_window,
+        host,
+        html,
+        metadata,
+        response_id,
+        attempt,
+    } = request;
     let supplied_units = crate::browser_env::string_code_units(scope, html);
     let mut context = window
         .get_creation_context(scope)
@@ -5939,18 +6892,13 @@ fn op_frame_set_document<'s>(
         .get_slot::<FrameParent>()
         .ok_or_else(|| JsErrorBox::generic("target is not a child frame"))?;
     let parent = crate::context_ownership::local(scope, &parent.0);
-    let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
-    let caller = v8::Local::new(scope, caller);
     let native_parent = parent.global(scope);
-    if !parent_window.strict_equals(native_parent.into())
-        || !caller
-            .get_security_token(scope)
-            .strict_equals(parent.get_security_token(scope))
-    {
+    if !is_frame_attempt_owner(scope, parent, parent_window) {
         return Err(JsErrorBox::generic(
             "frame document can only be replaced by its owning context",
         ));
     }
+    auxiliary_navigation::check_frame_load_attempt(scope, parent, host, attempt)?;
     // The recorded owner and V8 token authorize borrowed same-origin callbacks;
     // a guest __ownerWin facade cannot substitute for the owner's actual global.
     let parent_window = native_parent;
@@ -5979,11 +6927,12 @@ fn op_frame_set_document<'s>(
         // realm/tree. A token change on the same context would turn those old
         // Function/document handles into access to the replacement origin.
         let previous = context;
-        retire_frame_tree(scope, previous);
-        let window = allocate_frame(scope, parent, Some(previous), false)?;
+        let window = replace_frame_context(scope, parent, previous)?;
         context = window.get_creation_context(scope).unwrap();
         replaced = Some(previous);
     }
+    ownership.current = Some(context);
+    ownership.previous = replaced;
     let configure = || {
         let mut sandbox = FrameSandbox::from_host(scope, parent, host);
         if let Some(document) = &document {
@@ -6127,7 +7076,9 @@ fn op_frame_set_document<'s>(
         finish_frame_document_install(
             scope,
             FrameDocumentInstall {
+                attempt,
                 context,
+                previous: replaced,
                 parent,
                 parent_window,
                 host,
@@ -6139,11 +7090,7 @@ fn op_frame_set_document<'s>(
             },
         )
     };
-    let result = configure();
-    if result.is_err() {
-        retire_failed_frame_tree(scope, context);
-    }
-    result
+    configure()
 }
 
 #[op2(nofast, reentrant)]
@@ -6337,21 +7284,22 @@ fn op_location_navigation_sandboxed(
 }
 
 #[op2(fast)]
-fn op_native_location_installed(scope: &mut v8::PinScope) -> bool {
-    #[cfg(turbo_surf_native_proxy)]
-    {
-        window_proxy::location_installed(scope)
-    }
-    #[cfg(not(turbo_surf_native_proxy))]
-    {
-        let _ = scope;
-        false
-    }
+fn op_native_location_installed(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(window_proxy::location_installed)
 }
 
 #[op2(fast)]
 fn op_native_window_proxy() -> bool {
-    cfg!(turbo_surf_native_proxy)
+    true
+}
+
+#[op2(fast)]
+fn op_producer_window_proxy(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document.get_creation_context(scope).is_some_and(|context| {
+        turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some()
+    })
 }
 
 #[op2(fast)]
@@ -6423,11 +7371,23 @@ fn op_frame_resources<'s>(
         .ok_or_else(|| JsErrorBox::generic("frame resource loading unavailable"))
 }
 
-#[op2(reentrant)]
-fn op_create_frame<'s>(
+fn is_frame_attempt_owner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    window: v8::Local<'s, v8::Object>,
+) -> bool {
+    let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let caller = v8::Local::new(scope, caller);
+    window.strict_equals(parent.global(scope).into())
+        && caller
+            .get_security_token(scope)
+            .strict_equals(parent.get_security_token(scope))
+}
+
+fn frame_attempt_owner<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     parent_window: v8::Local<'s, v8::Object>,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
     let parent = parent_window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("frame owner context unavailable"))?;
@@ -6439,11 +7399,163 @@ fn op_create_frame<'s>(
     {
         return Err(JsErrorBox::generic("frame owner is not same-origin"));
     }
-    create_frame(scope, parent)
+    Ok(parent)
+}
+
+#[op2(reentrant)]
+fn op_frame_load_attempt<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::new_frame_load_attempt(scope, parent, host)
+}
+
+#[op2(nofast, reentrant)]
+fn op_frame_load_complete<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<(), JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::complete_frame_load_attempt(scope, parent, host, attempt)
+}
+
+#[op2(fast, reentrant)]
+fn op_frame_load_active<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<bool, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::frame_load_attempt_active(scope, parent, host, attempt)
+}
+
+fn frame_window_document_current<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    document: v8::Local<'s, v8::Object>,
+) -> bool {
+    use turbo_dom_browser_env::host_internals as host;
+    let Some(_document) = host::enter_context_document(context) else {
+        return false;
+    };
+    let Some(root) = host::with_tree(|tree| tree.root()) else {
+        return false;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let actual = host::wrap(scope, root);
+    actual.strict_equals(document.into()) && actual.get_creation_context(scope) == Some(context)
+}
+
+#[op2(nofast, reentrant)]
+fn op_frame_load_window_valid<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    window: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<bool, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    auxiliary_navigation::frame_load_attempt_active(scope, parent, host, attempt)?;
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("Frame window context unavailable"))?;
+    if native_frame_is_retired(context) {
+        return Ok(false);
+    }
+    if let Some(identity) =
+        turbo_dom_browser_env::host_internals::auxiliary_context_identity(context)
+    {
+        if identity.closed {
+            return Ok(false);
+        }
+    }
+    let document = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|document| document.0.to_local(scope))
+        .ok_or_else(|| JsErrorBox::generic("Frame window document unavailable"))?;
+    let actual_parent = context
+        .get_slot::<FrameParent>()
+        .and_then(|parent| parent.0.to_local(scope));
+    let actual_host = context
+        .get_slot::<FrameHost>()
+        .and_then(|host| host.0.to_local(scope));
+    if !window.strict_equals(context.global(scope).into())
+        || actual_parent != Some(parent)
+        || !actual_host.is_some_and(|saved| saved.strict_equals(host.into()))
+        || !frame_window_document_current(scope, context, document)
+    {
+        return Err(JsErrorBox::generic("Frame window ownership changed"));
+    }
+    Ok(true)
+}
+
+#[op2(reentrant)]
+fn op_create_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    attempt: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let parent = frame_attempt_owner(scope, parent_window)?;
+    let guard = auxiliary_navigation::start_frame_execution_deadline(scope, parent, host, attempt)
+        .map_err(frame_start_error)?;
+    let mut current = None;
+    let result = (|| {
+        let window = allocate_frame(scope, parent, None)?;
+        let context = window
+            .get_creation_context(scope)
+            .ok_or_else(|| JsErrorBox::generic("Frame context unavailable"))?;
+        current = Some(context);
+        if cfg!(turbo_surf_native_proxy) {
+            initialize_created_frame(scope, context, parent)?;
+            auxiliary_navigation::bind_frame_execution(scope, context, parent, host, attempt)?;
+        }
+        Ok(window)
+    })();
+    finish_frame_document_transaction(
+        scope,
+        result,
+        guard,
+        FrameInstallOwnership {
+            current,
+            previous: None,
+        },
+    )
 }
 
 fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'s, v8::Context>) {
-    retire_frame_tree_impl(scope, previous, true);
+    retire_frame_tree_impl(scope, previous, true, false);
+}
+
+// Frame allocation and document installation are separate synchronous native ops.
+// If their caller was interrupted between them, no legitimate provisional frame
+// can resume after the fully-unwound command boundary.
+fn retire_uninstalled_frame_allocations(rt: &mut JsRuntime) {
+    let contexts = rt
+        .op_state()
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    deno_core::scope!(scope, rt);
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameContextMarker>().is_some()
+            && context.get_slot::<FrameParent>().is_some()
+            && context.get_slot::<FrameRetired>().is_none()
+            && context.get_slot::<FrameConfigured>().is_none()
+            && context.get_slot::<CspHandle>().is_none()
+            && context.get_slot::<ActiveDocument>().is_none()
+            && turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_none()
+        {
+            retire_failed_frame_tree(scope, context);
+        }
+    }
 }
 
 // Failed initialization has no published document or runnable guest task. Stop
@@ -6452,14 +7564,50 @@ fn retire_failed_frame_tree<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
 ) {
-    retire_frame_tree_impl(scope, previous, false);
+    retire_frame_tree_impl(scope, previous, false, false);
+}
+
+// Navigation retires the old document and its descendants, but transfers the
+// navigating root's browsing-context identity to its replacement WindowProxy.
+fn replace_frame_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    previous: v8::Local<'s, v8::Context>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    retire_frame_tree_impl(scope, previous, true, true);
+    allocate_frame(scope, parent, Some(previous)).inspect_err(|_| {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, previous);
+    })
+}
+
+fn retire_failed_frame_navigation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    current: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+) {
+    retire_failed_frame_tree(scope, current);
+    if let Some(previous) = previous {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, previous);
+    }
+}
+
+fn retire_frame_identity<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    preserved: Option<v8::Local<'s, v8::Context>>,
+) {
+    if preserved != Some(context) {
+        turbo_dom_browser_env::host_internals::retire_auxiliary_context(scope, context);
+    }
 }
 
 fn retire_frame_tree_impl<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     previous: v8::Local<'s, v8::Context>,
     call_helpers: bool,
+    preserve_identity: bool,
 ) {
+    let preserved = preserve_identity.then_some(previous);
     previous.set_slot(Rc::new(FrameDirectRetirement));
     let contexts = JsRuntime::op_state_from(scope)
         .borrow()
@@ -6475,20 +7623,27 @@ fn retire_frame_tree_impl<'s>(
                     let old_scope = &mut v8::ContextScope::new(scope, context);
                     let _ = call_frame_helper(old_scope, "cancelModuleGraphs", &[]);
                     let _ = call_frame_helper(old_scope, "cancelDocumentTasks", &[]);
+                    let _ = call_frame_helper(old_scope, "shimCancelBindings", &[]);
                     let _ = call_frame_helper(old_scope, "retireResourceDocument", &[]);
                 }
                 if context.get_slot::<FrameRetired>().is_none() {
                     crate::script_inventory::retire_frame(scope, context);
                 }
+                crate::shim_bindings::retire(context);
+                crate::remote_handles::retire_context(scope, context);
                 fetch_streams::retire_context(scope, context);
+                network_transports::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
                 blob_urls::retire_context(scope, context);
                 storage_events::retire(context);
+                retire_frame_identity(scope, context, preserved);
                 turbo_dom_browser_env::host_internals::retire_context(context);
+                indexeddb_store::retire_context(scope, context);
+                resident_image_assets::retire(context);
+                initial_document_images::retire(scope, context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
-                #[cfg(turbo_surf_native_proxy)]
-                JsRuntime::detach_module_context(scope, context);
+                retire_module_context(scope, context);
                 break;
             }
             let Some(parent) = ancestor.get_slot::<FrameParent>() else {
@@ -6522,18 +7677,26 @@ fn retire_frame_tree_impl<'s>(
     drop(discarded);
 }
 
-fn create_frame<'s>(
+fn initialize_created_frame<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
     parent: v8::Local<'s, v8::Context>,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
-    allocate_frame(scope, parent, None, true)
+) -> Result<(), JsErrorBox> {
+    let core = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .core
+        .clone()
+        .ok_or_else(|| JsErrorBox::generic("Frame host core unavailable"))?;
+    let core = v8::Local::new(scope, core);
+    let depth = context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0);
+    initialize_new_frame(scope, context, parent, core, depth)
 }
 
 fn allocate_frame<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     parent: v8::Local<'s, v8::Context>,
     previous: Option<v8::Local<'s, v8::Context>>,
-    initialize: bool,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     if parent.get_slot::<FrameRetired>().is_some() {
         return Err(JsErrorBox::generic(
@@ -6554,7 +7717,7 @@ fn allocate_frame<'s>(
         .core
         .clone()
         .ok_or_else(|| JsErrorBox::generic("frame host core unavailable"))?;
-    let core = v8::Local::new(scope, saved_core);
+    let _core = v8::Local::new(scope, saved_core);
     let context = window_proxy::context(scope, previous);
     crate::script_inventory::register_frame(scope, context);
     context.set_slot(Rc::new(FrameContextMarker));
@@ -6580,9 +7743,6 @@ fn allocate_frame<'s>(
         }
     }
     let global = context.global(scope);
-    if initialize {
-        initialize_new_frame(scope, context, parent, core, depth)?;
-    }
     let retained = v8::Global::new(scope, context);
     JsRuntime::op_state_from(scope)
         .borrow_mut()
@@ -6606,10 +7766,21 @@ fn initialize_new_frame<'s>(
     let scope = &mut v8::ContextScope::new(outer, context);
     inherit_parent_csp(scope, context, parent);
     crate::browser_env::defer_key_order(scope);
-    crate::browser_env::install_independent_html(
-        scope,
-        "<!DOCTYPE html><html><head></head><body></body></html>",
-    );
+    if JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<auxiliary_pages::Pages>()
+        .enabled
+    {
+        turbo_dom_browser_env::host_internals::initialize_auxiliary_document(
+            scope,
+            "<!DOCTYPE html><html><head></head><body></body></html>",
+        );
+    } else {
+        crate::browser_env::install_independent_html(
+            scope,
+            "<!DOCTYPE html><html><head></head><body></body></html>",
+        );
+    }
     install_css_authorization(scope)?;
     let facts = DocumentFacts::inherited(scope, context, parent);
     install_document_facts(scope, facts);
@@ -6617,6 +7788,9 @@ fn initialize_new_frame<'s>(
 
     let namespace = crate::browser_env::engine_namespace(scope).ok_or_else(|| {
         storage_events::retire(context);
+        indexeddb_store::retire_context(scope, context);
+        resident_image_assets::retire(context);
+        initial_document_images::retire(scope, context);
         context.set_slot(Rc::new(FrameRetired));
         crate::context_ownership::release_parent(scope, context);
         JsErrorBox::generic("frame initialization was interrupted")
@@ -6639,7 +7813,11 @@ fn initialize_new_frame<'s>(
     crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
     window_proxy::capture_exception(scope);
     crate::browser_env::finish_key_order(scope);
-    run_frame_init_script(scope)?;
+    if turbo_dom_browser_env::host_internals::auxiliary_context_identity(parent).is_some() {
+        auxiliary_host::install_nested(scope, context, parent, "about:blank", "")
+            .map_err(JsErrorBox::generic)?;
+    }
+    initialize_frame_scripts(scope, context)?;
     // Host capabilities are passed privately and never installed on the global.
     Ok(())
 }
@@ -6685,11 +7863,70 @@ fn op_run_local_timers<'s>(
     let Some(context) = document.get_creation_context(scope) else {
         return 0;
     };
-    let _task = WindowTimerTask::new(context);
+    if context.get_slot::<FrameRetired>().is_some()
+        || !context
+            .get_slot::<ActiveDocument>()
+            .and_then(|active| active.0.to_local(scope))
+            .is_some_and(|active| active.strict_equals(document.into()))
+    {
+        return 0;
+    }
+    let max = max.number_value(scope).unwrap_or(0.0);
+    if max.is_nan() || max <= 0.0 || context.get_microtask_queue().is_running_microtasks() {
+        return 0;
+    }
+    // Hydration may call this private drain from a Promise continuation. Such
+    // turns cannot nest a full checkpoint, so the outer host pump owns their tasks.
     let active = &mut v8::ContextScope::new(scope, context);
-    call_frame_helper(active, "runLocalTimers", &[max])
-        .and_then(|value| value.uint32_value(active))
-        .unwrap_or(0)
+    active.perform_microtask_checkpoint();
+    let mut fired = 0;
+    while f64::from(fired) < max
+        && !active.is_execution_terminating()
+        && context.get_slot::<FrameRetired>().is_none()
+    {
+        let _task = WindowTimerTask::new(active, context);
+        let next = call_frame_helper(active, "runNextTimer", &[])
+            .and_then(|value| value.uint32_value(active))
+            .unwrap_or(0);
+        if next == 0 {
+            break;
+        }
+        fired += next;
+        // Promise reactions and observers from this task finish before the next
+        // timer, including a fullscreenchange task queued by requestFullscreen.
+        active.perform_microtask_checkpoint();
+    }
+    fired
+}
+
+#[op2(fast)]
+fn op_network_online(state: &mut OpState) -> bool {
+    !state.borrow::<ClientHints>().is_offline()
+}
+
+#[op2(nofast, reentrant)]
+fn op_sync_network_state(scope: &mut v8::PinScope) -> u32 {
+    let frames = secondary_window_contexts(&JsRuntime::op_state_from(scope).borrow());
+    let current = scope.get_current_context();
+    let mut contexts = vec![v8::Global::new(scope, current)];
+    contexts.extend(frames);
+    let mut fired = 0;
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameRetired>().is_some() {
+            continue;
+        }
+        let active = &mut v8::ContextScope::new(scope, context);
+        for name in ["deliverNetworkState", "deliverEmulationState"] {
+            if let Some(callback) = host_capability(active, context, name) {
+                let receiver = v8::undefined(active);
+                if let Some(value) = callback.call(active, receiver.into(), &[]) {
+                    fired += value.uint32_value(active).unwrap_or(0);
+                }
+            }
+        }
+    }
+    fired
 }
 
 #[op2(fast, reentrant)]
@@ -6697,12 +7934,14 @@ fn op_run_frame_timers(scope: &mut v8::PinScope) -> u32 {
     run_frame_timers(scope, 5000)
 }
 
+fn secondary_window_contexts(state: &OpState) -> Vec<v8::Global<v8::Context>> {
+    let mut contexts = state.borrow::<FrameContexts>().contexts.clone();
+    contexts.extend(auxiliary_pages::contexts(state));
+    contexts
+}
+
 fn run_frame_timers(scope: &mut v8::PinScope, max: u32) -> u32 {
-    let frames = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .contexts
-        .clone();
+    let frames = secondary_window_contexts(&JsRuntime::op_state_from(scope).borrow());
     let mut fired = 0;
     for context in frames {
         let context = v8::Local::new(scope, context);
@@ -6721,6 +7960,7 @@ fn run_frame_timers(scope: &mut v8::PinScope, max: u32) -> u32 {
 
 #[op2(fast, reentrant)]
 fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
+    let root = scope.get_current_context();
     let frames = JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<FrameContexts>()
@@ -6729,7 +7969,9 @@ fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
     let mut pending = 0;
     for context in frames {
         let context = v8::Local::new(scope, context);
-        if context.get_slot::<FrameRetired>().is_some() {
+        if context.get_slot::<FrameRetired>().is_some()
+            || !auxiliary_pages::in_target_tree(scope, context, root)
+        {
             continue;
         }
         let scope = &mut v8::ContextScope::new(scope, context);
@@ -6830,6 +8072,7 @@ fn op_queue_frame_script<'s>(
             .ok_or_else(|| JsErrorBox::generic("frame script document unavailable"))?;
         v8::Global::new(scope, document)
     };
+    let scope = &mut v8::ContextScope::new(scope, caller_local);
     let resolver = v8::PromiseResolver::new(scope)
         .ok_or_else(|| JsErrorBox::generic("frame script completion allocation failed"))?;
     let promise = resolver.get_promise(scope);
@@ -7106,6 +8349,15 @@ fn op_frame_owner_metadata(
 
 #[op2]
 #[string]
+fn op_auxiliary_fallback_base(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> String {
+    document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<AuxiliaryFallbackBase>())
+        .map_or_else(String::new, |base| base.0.clone())
+}
+
+#[op2]
+#[string]
 fn op_document_request_source(
     scope: &mut v8::PinScope,
     state: &mut OpState,
@@ -7284,6 +8536,7 @@ pub struct BrowserStorage(
     turbo_surf_core::http_cache::HttpCache,
     std::sync::Arc<StorageTab>,
     crate::csp_reporting::Reporter,
+    std::sync::Arc<std::sync::RwLock<crate::browser_emulation::BrowserEmulation>>,
 );
 impl Default for BrowserStorage {
     fn default() -> Self {
@@ -7293,10 +8546,68 @@ impl Default for BrowserStorage {
             turbo_surf_core::http_cache::HttpCache::default(),
             std::sync::Arc::new(StorageTab { areas, id: 0 }),
             crate::csp_reporting::Reporter::default(),
+            Default::default(),
         )
     }
 }
 impl BrowserStorage {
+    /// Select presentation for future sessions without replacing other preferences.
+    pub fn set_animation_policy(&self, policy: crate::AnimationPolicy) -> Result<(), String> {
+        self.4
+            .write()
+            .map_err(|_| "Context preferences unavailable")?
+            .animations = policy;
+        Ok(())
+    }
+
+    pub fn animation_policy(&self) -> crate::AnimationPolicy {
+        self.with_emulation(|options| options.animations)
+    }
+
+    pub fn context_emulation_handle(&self) -> crate::ContextEmulationHandle {
+        crate::ContextEmulationHandle::new(self.4.clone())
+    }
+    pub fn configure_emulation(&self, json: &str) -> Result<(), String> {
+        let mut options: crate::browser_emulation::BrowserEmulation =
+            serde_json::from_str(json).map_err(|e| e.to_string())?;
+        options.validate()?;
+        let changed = {
+            let mut current = self
+                .4
+                .write()
+                .map_err(|_| "Context preferences unavailable")?;
+            options.changed = current.changed.clone();
+            let changed = options.changed.clone();
+            *current = options;
+            changed
+        };
+        changed.notify_waiters();
+        Ok(())
+    }
+    pub fn http_credentials(&self) -> Option<turbo_surf_core::http_auth::Credentials> {
+        self.with_emulation(|options| options.http_credentials.clone())
+    }
+    pub fn request_headers(
+        &self,
+        authored: std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        self.with_emulation(|options| options.request_headers(authored))
+    }
+    pub(crate) fn with_emulation<R>(
+        &self,
+        read: impl FnOnce(&crate::browser_emulation::BrowserEmulation) -> R,
+    ) -> R {
+        match self.4.read() {
+            Ok(options) => read(&options),
+            Err(_) => read(&Default::default()),
+        }
+    }
+    pub(crate) fn emulation(&self) -> crate::browser_emulation::BrowserEmulation {
+        self.4
+            .read()
+            .map(|options| options.clone())
+            .unwrap_or_default()
+    }
     /// Share the profile's native HTTP cache with host navigation/resource callers.
     pub fn http_cache(&self) -> turbo_surf_core::http_cache::HttpCache {
         self.1.clone()
@@ -7320,6 +8631,7 @@ impl BrowserStorage {
                 id,
             }),
             self.3.clone(),
+            std::sync::Arc::new(std::sync::RwLock::new(self.emulation())),
         ))
     }
     /// Storage side effects for actual native HTTP response headers. This
@@ -7550,12 +8862,11 @@ fn storage_area(
     }
     let origin = window_origin(scope, context);
     let source = if unpartitioned {
-        &origin
+        origin.clone()
     } else {
-        &state.borrow::<Base>().0
+        auxiliary_storage::site_source(scope, state, context)?
     };
-    let site =
-        turbo_surf_core::request_context::schemeful_site(source).unwrap_or_else(|| source.clone());
+    let site = turbo_surf_core::request_context::schemeful_site(&source).unwrap_or(source);
     let partition = context
         .get_slot::<CspHandle>()
         .and_then(|handle| handle.partition.clone())
@@ -7563,7 +8874,7 @@ fn storage_area(
     if !state.has::<BrowserStorage>() {
         state.put(BrowserStorage::default());
     }
-    let backing = state.borrow::<BrowserStorage>().clone();
+    let backing = auxiliary_storage::backing(scope, state, context)?;
     let key = StorageKey {
         partition,
         site,
@@ -7589,29 +8900,15 @@ fn storage_area(
     Ok(id)
 }
 
-/// IndexedDB backing stores (indexeddb.js), one per storage key: the same
-/// partitioning as DOM storage, so every same-partition realm shares the databases.
-#[derive(Default)]
-struct IdbRegistries(std::collections::HashMap<u32, v8::Global<v8::Object>>);
-#[op2(reentrant)]
-fn op_idb_registry<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
+/// Validate a factory's actual storage partition without retaining its realm.
+#[op2(nofast, reentrant)]
+fn op_idb_registry(
+    scope: &mut v8::PinScope,
     state: &mut OpState,
-    window: v8::Local<'s, v8::Object>,
+    window: v8::Local<v8::Object>,
     unpartitioned: bool,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
-    let id = storage_area(scope, state, window, false, unpartitioned)?;
-    if !state.has::<IdbRegistries>() {
-        state.put(IdbRegistries::default());
-    }
-    let registries = state.borrow_mut::<IdbRegistries>();
-    if let Some(registry) = registries.0.get(&id) {
-        return Ok(v8::Local::new(scope, registry));
-    }
-    let null = v8::null(scope).into();
-    let registry = v8::Object::with_prototype_and_properties(scope, null, &[], &[]);
-    registries.0.insert(id, v8::Global::new(scope, registry));
-    Ok(registry)
+) -> Result<u32, JsErrorBox> {
+    storage_area(scope, state, window, false, unpartitioned)
 }
 struct StorageFactory(v8::Weak<v8::Function>);
 #[op2(fast)]
@@ -7715,6 +9012,7 @@ fn storage_string<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Lo
 mod storage_events;
 
 enum StorageReply {
+    QuotaExceeded,
     Null,
     Value(Vec<u16>),
     Keys(Vec<Vec<u16>>),
@@ -7826,7 +9124,7 @@ fn storage_set(
         .map(|(name, value)| name.len() + value.len())
         .sum();
     if other_units + key.len() + value.len() > quota_units {
-        return Err(JsErrorBox::range_error("Storage quota exceeded"));
+        return Ok((StorageReply::QuotaExceeded, None));
     }
     let index = values.iter().position(|(name, _)| *name == key);
     let edit = if index.is_none_or(|index| values[index].1 != value) {
@@ -7916,7 +9214,7 @@ fn op_storage_call<'s>(
         })
         .unwrap_or_else(|| state.borrow::<Base>().0.clone());
     if command == "set" && key.length() + value.length() > QUOTA_UNITS {
-        return Err(JsErrorBox::range_error("Storage quota exceeded"));
+        return Ok(storage_reply_to_js(scope, StorageReply::QuotaExceeded));
     }
     // An oversized key cannot have been stored. Avoid materializing a guest rope
     // that cannot possibly match an entry or pass the write quota.
@@ -7967,6 +9265,7 @@ fn storage_reply_to_js<'s>(
     reply: StorageReply,
 ) -> v8::Local<'s, v8::Value> {
     match reply {
+        StorageReply::QuotaExceeded => v8::Integer::new(scope, -1).into(),
         StorageReply::Null => v8::null(scope).into(),
         StorageReply::Value(units) => storage_string(scope, &units),
         StorageReply::Keys(keys) => {
@@ -8007,11 +9306,11 @@ fn op_interface_record_set<'s>(
 }
 
 #[op2(fast)]
-fn op_storage_id(
-    scope: &mut v8::PinScope,
-    object: v8::Local<v8::Object>,
-) -> Result<u32, JsErrorBox> {
-    storage_id(scope, object)
+fn op_storage_id(scope: &mut v8::PinScope, receiver: v8::Local<v8::Value>) -> u32 {
+    let Ok(object) = v8::Local::<v8::Object>::try_from(receiver) else {
+        return 0;
+    };
+    storage_id(scope, object).unwrap_or(0)
 }
 fn storage_id(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> Result<u32, JsErrorBox> {
     let name = v8::String::new(scope, "turbo-surf.Storage.area").unwrap();
@@ -8025,6 +9324,39 @@ fn storage_id(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> Result
 }
 
 struct RuntimeCore(v8::Weak<v8::Object>);
+
+/// Native platform factories receive captured bootstrap prototypes, never page arguments.
+pub(crate) fn platform_object_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    prototype: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Context>, JsErrorBox> {
+    let owner = prototype
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Native platform owner unavailable"))?;
+    let owner = v8::Global::new(scope, owner);
+    let owner = v8::Local::new(scope, &owner);
+    if owner.get_slot::<FrameRetired>().is_some() || owner.get_slot::<CspHandle>().is_none() {
+        return Err(JsErrorBox::type_error(
+            "Native platform owner is closed or invalid",
+        ));
+    }
+    let caller = scope.get_current_context();
+    let caller_core = caller
+        .get_slot::<RuntimeCore>()
+        .and_then(|core| core.0.to_local(scope));
+    let owner_core = owner
+        .get_slot::<RuntimeCore>()
+        .and_then(|core| core.0.to_local(scope));
+    if !caller_core
+        .zip(owner_core)
+        .is_some_and(|(caller, owner)| caller.strict_equals(owner.into()))
+    {
+        return Err(JsErrorBox::type_error(
+            "Native platform owner belongs to another actor",
+        ));
+    }
+    Ok(owner)
+}
 
 #[op2(fast)]
 fn op_capture_runtime_core(scope: &mut v8::PinScope, core: v8::Local<v8::Object>) {
@@ -8079,6 +9411,14 @@ fn op_route_promise_rejection(
     ) else {
         return false;
     };
+    // E is not a Window. Preserve core's default reporting for an unknown
+    // infrastructure rejection instead of queuing a task on its blank document.
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_some()
+    {
+        return false;
+    }
     // A page realm the report cannot reach (not yet tracked, or retired) is logged and
     // handled: a routing miss must never abort the session.
     let miss = || {
@@ -8109,10 +9449,40 @@ fn op_route_promise_rejection(
         || miss()
 }
 
+fn register_network_activity_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) {
+    let target = auxiliary_pages::top_level_identity(scope, context);
+    let shared = JsRuntime::op_state_from(scope);
+    let state = shared.borrow();
+    let log = state.borrow::<NetworkLog>();
+    if let Some(loader) = state.try_borrow::<ModuleNetworkLog>() {
+        *loader.0.borrow_mut() = log.clone();
+    }
+    if let (Some(target), Some(csp)) = (target, context.get_slot::<CspHandle>()) {
+        log.register_network_context(csp.id, &target.0.to_string());
+    }
+}
+
 fn install_environment<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Value>,
 ) -> Result<(), String> {
+    let context = scope.get_current_context();
+    // Every Window starts with the same font policy that web-font detach restores.
+    // Discovery already ran before the isolate's first guest turn.
+    if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {
+        crate::browser_env::set_canvas_fonts(context, fonts.clone());
+    }
+    register_network_activity_context(scope, context);
+    let core_object = core
+        .to_object(scope)
+        .ok_or("Native runtime core unavailable")?;
+    let core_handle = crate::context_ownership::object(scope, core_object)
+        .ok_or("Native runtime core ownership interrupted")?;
+    context.set_slot(Rc::new(RuntimeCore(core_handle)));
+    crate::animation_policy::install(scope)?;
     // A navigation can be interrupted while trusted bootstrap is compiling. The
     // retained WindowProxy must never expose bootstrap-only host capabilities.
     v8::tc_scope!(let scope, scope);
@@ -8123,6 +9493,7 @@ fn install_environment<'s>(
         .ok_or("Native stream initialization failed")?;
     let namespace = crate::browser_env::engine_namespace(scope)
         .ok_or("Native environment namespace unavailable")?;
+    let boundary = private_boundary::capabilities(scope)?;
     let code = v8::String::new(scope, ENV_BOOTSTRAP).unwrap();
     let function = v8::Script::compile(scope, code, None)
         .and_then(|script| script.run(scope))
@@ -8133,7 +9504,7 @@ fn install_environment<'s>(
             .call(
                 scope,
                 receiver.into(),
-                &[core, web_factory.into(), namespace.into()],
+                &[core, web_factory.into(), namespace.into(), boundary.into()],
             )
             .is_some()
         {
@@ -8195,8 +9566,23 @@ fn op_window_media_state(scope: &mut v8::PinScope, window: v8::Local<v8::Object>
     }
 }
 
+#[op2(fast)]
+fn op_driver_sync_changed(state: &mut OpState) {
+    driver_sync::changed(state);
+}
+
+#[op2(reentrant)]
+#[string]
+fn op_history_document_id<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Result<String, JsErrorBox> {
+    native_history::document_id_for_script(scope, document)
+}
+
 #[op2(nofast)]
 fn op_script_navigation_admitted(scope: &mut v8::PinScope, #[string] target: String) {
+    driver_sync::changed(&mut JsRuntime::op_state_from(scope).borrow_mut());
     script_navigation::record(
         scope.get_entered_or_microtask_context(),
         scope.get_current_context(),
@@ -8255,6 +9641,10 @@ deno_core::extension!(
     turbo_dom,
     ops = [
         op_create_frame,
+        op_frame_load_attempt,
+        op_frame_load_active,
+        op_frame_load_complete,
+        op_frame_load_window_valid,
         op_frame_host_helper,
         op_windows_same_origin,
         op_window_parent,
@@ -8268,6 +9658,8 @@ deno_core::extension!(
         op_window_media_state,
         op_window_message_pending,
         op_native_window_proxy,
+        op_producer_window_proxy,
+        auxiliary_host::op_auxiliary_anchor_default,
         op_native_location_installed,
         op_location_navigation_sandboxed,
         op_location_object,
@@ -8296,6 +9688,8 @@ deno_core::extension!(
         op_timer_agent_task_base,
         op_run_local_timers,
         op_run_frame_timers,
+        op_network_online,
+        op_sync_network_state,
         op_engine_task_scope,
         op_frame_pending,
         op_queue_frame_script,
@@ -8305,6 +9699,7 @@ deno_core::extension!(
         op_route_promise_rejection,
         op_set_host_input_driver,
         op_host_user_activation,
+        op_host_input_dispatch,
         op_host_close_request,
         op_host_light_dismiss,
         op_host_modal_backdrop,
@@ -8313,6 +9708,18 @@ deno_core::extension!(
         op_user_activation_navigator,
         op_user_activation_read,
         op_script_navigation_admitted,
+        op_history_document_id,
+        op_history_initialize,
+        op_history_precommit,
+        op_history_clone,
+        op_history_select,
+        op_history_ack,
+        op_history_notify,
+        op_history_status,
+        op_history_scroll_restoration,
+        op_history_queue_task,
+        op_history_traverse,
+        op_driver_sync_changed,
         op_capture_runtime_core,
         op_set_host_capabilities,
         op_form_data_entries,
@@ -8321,6 +9728,12 @@ deno_core::extension!(
         op_form_navigation_blocked,
         op_storage_area,
         op_idb_registry,
+        indexeddb_store::op_idb_clone,
+        indexeddb_store::op_idb_load,
+        indexeddb_store::op_idb_save,
+        indexeddb_store::op_idb_delete,
+        indexeddb_store::op_idb_databases,
+        indexeddb_store::op_idb_live,
         crate::indexed_db::op_idb_dispatch,
         op_storage_factory,
         op_storage_object,
@@ -8332,11 +9745,16 @@ deno_core::extension!(
         storage_events::op_storage_events,
         storage_events::op_storage_event_create,
         op_storage_bind,
+        op_infrastructure_adopt_crypto_key,
+        op_infrastructure_active,
+        op_infrastructure_origin,
         op_interface_record_get,
         op_interface_record_set,
         op_storage_id,
         op_dispatch_host_event,
         op_host_pointer,
+        crate::locator_dom::op_locator_revision,
+        crate::locator_dom::op_locator_has_shadow,
         crate::stream_transfers::op_stream_transfer_install,
         crate::web_streams_backend::op_web_abort_bind,
         crate::web_streams_backend::op_web_abort_listener,
@@ -8353,6 +9771,7 @@ deno_core::extension!(
         op_document_referrer,
         op_frame_referrer_policy,
         op_document_request_source,
+        op_auxiliary_fallback_base,
         op_frame_owner_metadata,
         op_frame_owner_window,
         op_document_cookie_site,
@@ -8364,6 +9783,7 @@ deno_core::extension!(
         op_parse_xml_document,
         op_parse_xml_response,
         op_parser_scripts,
+        document_content::op_replace_document_content,
         op_trusted_type_string,
         op_timer_code_allowed,
         op_run_timer_code,
@@ -8380,6 +9800,7 @@ deno_core::extension!(
         op_cookie_get,
         op_cookie_set,
         fetch_streams::op_fetch_prepare,
+        fetch_streams::op_fetch_prepare_frame,
         fetch_streams::op_fetch_upload_start,
         fetch_streams::op_fetch_upload_write,
         fetch_streams::op_fetch_upload_finish,
@@ -8389,6 +9810,14 @@ deno_core::extension!(
         fetch_streams::op_fetch_release,
         fetch_streams::op_fetch_read,
         op_fetch,
+        crate::shim_bindings::op_shim_binding_pending,
+        op_shim_binding_scripts,
+        op_shim_binding_bag,
+        op_shim_binding_namespace,
+        op_page_diagnostic,
+        op_page_lifecycle,
+        op_console_message,
+        dialog_ops::op_dialog,
         network_transports::op_connect_allowed,
         network_transports::op_ws_open,
         network_transports::op_ws_send_text,
@@ -8403,6 +9832,9 @@ deno_core::extension!(
         blob_urls::op_blob_url_read,
         sync_xhr::op_fetch_sync,
         op_load_image,
+        resident_image_assets::op_begin_image_asset,
+        resident_image_assets::op_commit_image_asset,
+        resident_image_assets::op_discard_image_asset,
         op_decode_data_image,
         op_dictionary_active,
         op_dictionary_headers,
@@ -8421,6 +9853,7 @@ deno_core::extension!(
         op_csp_context,
         op_csp_base_url,
         op_permissions_policy,
+        context_geolocation::op_context_emulation,
         op_document_feature_enabled,
         op_private_token_issuer,
         op_private_token_query,
@@ -8469,17 +9902,35 @@ deno_core::extension!(
 // inside the IIFE they're per-invocation. Globals are assigned to `globalThis`
 // (idempotent) and the cookie bridge re-applies to the current `document`.
 const ENV_BOOTSTRAP: &str = concat!(
-    r##"((__core, __webFactory, __tsNs) => {
+    r##"((__core, __webFactory, __tsNs, __boundary) => {
 "use strict";
 // Core is a private embedder argument; no page global temporarily exposes ops.
 const ops = __core.ops;
-const __print = __core.print;
+const __print = (message) => __core.print(message, true);
 let __web;
 ops.op_capture_runtime_core(__core);
 if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
 // The engine namespace (turbo-dom#222): a V8 private on the global, handed to this
 // bootstrap by Rust; page script cannot reach it.
 const __G = __tsNs;
+__G.remoteHandleRetain = (owner, value) => ops.op_remote_handle_retain(owner, value);
+__G.remoteHandleGet = (id, owner) => ops.op_remote_handle_get(id, owner);
+__G.remoteHandleDispose = id => ops.op_remote_handle_dispose(id);
+__G.remoteHandleCount = () => ops.op_remote_handle_count();
+__G.remoteHandleCompile = (owner, source) => ops.op_remote_handle_compile(owner, source);
+const __remoteHandleApply = Reflect.apply;
+const __remoteHandleFunctionSource = Function.prototype.toString;
+const __remoteHandleFrameStates = new WeakMap();
+const __remoteHandleFrameGet = WeakMap.prototype.get, __remoteHandleFrameSet = WeakMap.prototype.set;
+__G.remoteHandleFunctionSource = fn => __remoteHandleApply(__remoteHandleFunctionSource, fn, []);
+__G.remoteHandleFrameState = owner => {
+  let state = __remoteHandleApply(__remoteHandleFrameGet, __remoteHandleFrameStates, [owner]);
+  if (!state) {
+    state = {__proto__:null};
+    __remoteHandleApply(__remoteHandleFrameSet, __remoteHandleFrameStates, [owner, state]);
+  }
+  return state;
+};
 // Blink's message for an interface constructor called without `new` (turbo-surf#86):
 // interfaces without a constructor say "Illegal constructor", the others "Failed to
 // construct 'X': Please use the 'new' operator, ...". Every constructor this bootstrap
@@ -8522,6 +9973,30 @@ let __markDocumentInteractive;
 // Interface records use a native, isolate-owned ephemeron map. Same-origin
 // borrowed methods accept foreign-realm objects without exposing a brand setter.
 const __stringify = JSON.stringify, __String = String;
+__G.requestContextId = window => ops.op_csp_context(window);
+__G.requestFrameSnapshot = () => __stringify({__proto__:null,url:location.href,id:ops.op_csp_context(globalThis)});
+__G.shimAuthorizeRoute = (document, url) => ops.op_csp_request(document, url, "connect-src", "");
+__G.shimBindingPending = active => ops.op_shim_binding_pending(__document, active);
+__G.shimBindingScripts = (engine, guest, install) => ops.op_shim_binding_scripts(engine, guest, install);
+__G.shimBindingBag = window => ops.op_shim_binding_bag(window);
+__G.shimBindingNamespace = window => ops.op_shim_binding_namespace(window);
+__G.shimBindingId = () => ops.op_csp_context(__document);
+__G.shimBindingPromise = executor => new __intrinsicPromise(executor);
+const __shimError = Error;
+__G.shimBindingError = (message, name) => {
+  const error = new __shimError(message);
+  __intrinsicDefine(error,"name",{__proto__:null,value:name,writable:true,configurable:true});
+  return error;
+};
+const __shimOwnKeys = Object.keys;
+__G.shimCancelBindings = () => {
+  const pending=__G.shimBindings?.pending;
+  if (!pending) return;
+  for (const id of __shimOwnKeys(pending)) {
+    const call=pending[id]; delete pending[id];
+    call.reject(__G.shimBindingError("Frame has been detached", "Error"));
+  }
+};
 // Intrinsics captured at install time (turbo-surf#87): engine code on the document
 // load and node insertion paths calls these, never a builtin it looks up at run time
 // (a page can replace any prototype method, accessor or static, and install index
@@ -8639,7 +10114,7 @@ for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:
 // Deno's error builders live for the whole isolate. Register them in the main
 // realm before frame bootstrap can install crypto, so an initial iframe never
 // becomes a permanent constructor/context root in the shared native core.
-if (!__G.isFrame) {
+if (!__G.isFrame && !__G.isAuxiliary) {
   const NativeDOMException = globalThis.DOMException;
   for (const name of [
     "DataCloneError",
@@ -8647,6 +10122,7 @@ if (!__G.isFrame) {
     "InvalidAccessError",
     "NotSupportedError",
     "OperationError",
+    "SecurityError",
     "SyntaxError",
     "QuotaExceededError",
     "TypeMismatchError",
@@ -8672,6 +10148,27 @@ if (!__G.isFrame) {
 // settable per process via `set_fingerprint` (MCP `set_fingerprint` tool).
 const __fp = (() => { try { return JSON.parse(ops.op_fingerprint()); } catch (e) { return {}; } })();
 const __pick = (k, d) => (__fp[k] !== undefined ? __fp[k] : d);
+// Locale is a per-context default; leave ICU's process-global locale untouched.
+// Proxies retain the real Intl constructors, native formatting and receiver brands.
+if (__fp.locale) {
+  const locale = Intl.getCanonicalLocales(__fp.locale)[0];
+  const defaultArgs = (args, index = 0) => { if (args[index] === undefined) args[index] = locale; return args; };
+  for (const name of ["Collator", "DateTimeFormat", "DisplayNames", "ListFormat", "NumberFormat", "PluralRules", "RelativeTimeFormat", "Segmenter"]) {
+    const target = Intl[name];
+    if (typeof target !== "function") continue;
+    Intl[name] = new Proxy(target, {
+      apply(target, receiver, args) { return Reflect.apply(target, receiver, defaultArgs(args)); },
+      construct(target, args, constructor) { return Reflect.construct(target, defaultArgs(args), constructor); },
+    });
+  }
+  for (const [prototype, names, index] of [[Date.prototype,["toLocaleString","toLocaleDateString","toLocaleTimeString"],0],[Number.prototype,["toLocaleString"],0],[BigInt.prototype,["toLocaleString"],0],[String.prototype,["localeCompare"],1]]) {
+    for (const name of names) {
+      const target = prototype[name];
+      prototype[name] = new Proxy(target, { apply(target, receiver, args) { return Reflect.apply(target, receiver, defaultArgs(args,index)); } });
+    }
+  }
+}
+
 const __ua = __pick("userAgent",
   (ops.op_user_agent && ops.op_user_agent()) || __fp.defaultUserAgent || "");
 // Derive the major from the ACTUAL UA string so navigator.userAgentData.brands always
@@ -8919,6 +10416,7 @@ const __navData = {
     const val = has ? __navData[name] : (Object.prototype.hasOwnProperty.call(GET_STUB, name) ? GET_STUB[name] : {});
     const getter = Object.getOwnPropertyDescriptor({get [name]() {
       if (this !== navigator) throw new TypeError("Illegal invocation");
+      if (name === "onLine") return ops.op_network_online();
       return val;
     }}, name).get;
     def(name, { get: getter, enumerable: true, configurable: true });
@@ -8997,19 +10495,22 @@ globalThis.chrome = globalThis.chrome || {
   csi: function () { return {}; },
   app: { isInstalled: false },
 };
-globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
+if (!globalThis.location) globalThis.location = { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
 // Storage areas live in the host and are keyed by the actual Window's origin.
 // Private IDs remain attached to retained Storage objects across navigation.
 const __storageApply=Reflect.apply,__storageCharCode=String.prototype.charCodeAt,__storageGetters=__recordCreate(null);
 const __storageWindows = new WeakMap(),__storageWindowGet=WeakMap.prototype.get.bind(__storageWindows),__storageWindowSet=WeakMap.prototype.set.bind(__storageWindows),__storageNumber=Number;
-const __storageMap = receiver => ops.op_storage_id(receiver);
+const __storageMap = receiver => {
+ const id=ops.op_storage_id(receiver);
+ if(!id)throw new __exceptionTypeError('Illegal invocation');
+ return id;
+};
 const __storageString = value => {if(typeof value==='symbol')throw new __exceptionTypeError('Cannot convert a Symbol to a string');return __String(value);};
-const __storageRangeError=RangeError,__storageException=DOMException;
+const __storageException=DOMException;
 const __storageNativeCall=(id,receiver,command,key='',value='')=>{
- try{return ops.op_storage_call(id,receiver,command,key,value);}catch(error){
-  if(error instanceof __storageRangeError&&error.message==='Storage quota exceeded')throw new __storageException(error.message,'QuotaExceededError');
-  throw error;
- }
+ const result=ops.op_storage_call(id,receiver,command,key,value);
+ if(result===-1)throw new __storageException('Storage quota exceeded','QuotaExceededError');
+ return result;
 };
 const __storageCall = (receiver, command, key='', value='') => __storageNativeCall(__storageMap(receiver),receiver,command,key,value);
 function Storage() {throw new __exceptionTypeError('Illegal constructor');}
@@ -9124,13 +10625,49 @@ ops.op_storage_events_factory((key,oldValue,newValue,url,session)=>{
  ops.op_event_trust(event,-1);ops.op_dispatch_host_event(event,globalThis);
 },()=>new __StorageEventImplementation(''));
 
-const __log = (...a) => __print(a.map(String).join(" ") + "\n");
-globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
-const __timers = [];
-Object.setPrototypeOf(__timers, null);
-const __timerPush = Array.prototype.push.bind(__timers);
-const __timerSplice = Array.prototype.splice.bind(__timers);
-const __timerFindIndex = Array.prototype.findIndex.bind(__timers);
+const __pageErrorApply = Reflect.apply;
+const __pageErrorRead = Object.fromEntries(["error","message"].map(name=>[name,Object.getOwnPropertyDescriptor(ErrorEvent.prototype,name).get]));
+const __consoleDocument = globalThis.document, __consoleWindow = globalThis;
+const __consoleError = Error;
+const __consoleApply = Reflect.apply;
+const __consoleDescriptors = Object.getOwnPropertyDescriptors;
+const __consoleKeys = Object.keys;
+const __consoleString = String;
+const __consoleJson = JSON.stringify;
+const __consoleElement = Element;
+const __consolePreview = value => {
+ if(typeof value==='string')return value;
+ if(value===null||typeof value!=='object')return __consoleString(value);
+ try {
+  const descriptors=__consoleDescriptors(value);
+  return '{'+__consoleKeys(descriptors).slice(0,5).map(key=>{
+   const descriptor=descriptors[key];const item=descriptor.value;
+   return key+': '+(!Object.hasOwn(descriptor,'value')?'[Getter]':item===null||typeof item!=='object'?typeof item==='string'?__consoleJson(item):__consoleString(item):'Object');
+  }).join(', ')+'}';
+ }catch(_error){return 'Object';}
+};
+const __consoleLocation = () => {
+ const stack=__consoleString(new __consoleError().stack||'');
+ for(const line of stack.split('\n').slice(1)){
+  const match=line.match(/(?:\(|at )([^()]+):(\d+):(\d+)\)?$/);
+  if(match&&!match[1].includes('<')&&!match[1].includes('ext:'))return {url:match[1].trim(),lineNumber:Number(match[2])-1,columnNumber:Number(match[3])-1};
+ }
+ return {url:__consoleString(location.href),lineNumber:0,columnNumber:0};
+};
+const __consoleLog = type => (...args) => {
+ const descriptors=[];
+ try {
+  const text=args.map(__consolePreview).join(' ');
+  __print(text+'\n');
+  for(const value of args) descriptors.push({id:__G.remoteHandleRetain(__consoleWindow,value),kind:value instanceof __consoleElement?'element':'value'});
+  ops.op_console_message(__consoleDocument,{event:'console',type,text,args:descriptors,location:__consoleLocation(),contextId:ops.op_csp_context(__consoleWindow)});
+ }catch(error){for(const descriptor of descriptors)__G.remoteHandleDispose(descriptor.id);}
+};
+globalThis.console = {log:__consoleLog('log'),info:__consoleLog('info'),warn:__consoleLog('warning'),error:__consoleLog('error'),debug:__consoleLog('debug'),dir:__consoleLog('dir'),trace:__consoleLog('trace'),clear:__consoleLog('clear')};
+
+"##,
+    include_str!("timer_queue.js"),
+    r##"
 const __timerApply = Reflect.apply;
 const __timerMax = Math.max;
 let __tid = 1;
@@ -9147,10 +10684,10 @@ let __taskEpoch = 0;
 // work (microtasks / the React scheduler) still drains promptly (it never advances the
 // clock); only delayed polls are time-gated.
 const __timerNow = () => ops.op_timer_clock();
-// The clock an unclamped timer queued by a timer task (or its microtasks) counts its
+// The clock a timer queued by a timer task (or its microtasks) counts its
 // delay from: that task's own due time, not the host's elapsed real time, so a loaded host cannot reorder a task queued by a
-// task behind a rendering frame queued earlier (turbo-surf#101). The nesting clamp, timers
-// outside timer tasks and real-time window timers use the live clock.
+// task behind a rendering frame queued earlier (turbo-surf#101). This also applies to
+// the nesting clamp; timers outside tasks and real-time timers use the live clock.
 let __taskBase = null, __taskBaseEpoch = -1;
 // Only while the host runs a timer task (and its microtask checkpoint) in this realm; a
 // rendering frame's own tasks keep the live clock.
@@ -9180,7 +10717,7 @@ const __timerGet = Map.prototype.get.bind(__activeTimers), __timerSet = Map.prot
 // overtakes a zero-delay task queued before it.
 let __lastTaskDue = -Infinity;
 const __timerDue = (nesting, delay, rendering) => {
-  if (nesting > 6) return __timerNow() + __timerMax(4, delay);
+  if (nesting > 6) return __taskClock() + __timerMax(4, delay);
   const due = __taskClock() + delay;
   if (delay !== 0 || rendering) return due;
   return __lastTaskDue = __timerMax(due, __lastTaskDue);
@@ -9196,13 +10733,26 @@ const __createTimer = (name, repeat, handler, delay, args, rendering = false) =>
   const level=rendering?-1:ops.op_timer_nesting(__timerDocument);
   const nesting=level<7?level+1:7;
   const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerDue(nesting,delay,rendering),delay,nesting,repeat,args,sequence:ops.op_task_sequence(),rendering};
+  ops.op_driver_sync_changed();
   __timerSet(id,timer);__timerPush(timer);return id;
 };
 // A non-timer task (id 0: never cancellable, no timer id consumed) in the same
 // deadline/sequence order as this agent's timers.
 const __queueTimerTask = (fn, due, sequence) => {
+  ops.op_driver_sync_changed();
   __timerPush({__proto__:null,id:0,fn,source:null,due,delay:0,nesting:0,repeat:false,args:[],sequence});
 };
+let __observedNetworkOnline=ops.op_network_online();
+const __deliverNetworkState=()=>{
+  const online=ops.op_network_online();
+  if(online===__observedNetworkOnline)return 0;
+  __observedNetworkOnline=online;
+  const event=new __hostEvent(online?'online':'offline',{__proto__:null});
+  ops.op_event_trust(event,-1);ops.op_dispatch_host_event(event,globalThis);
+  return 1;
+};
+ops.op_set_host_capabilities({deliverNetworkState:__deliverNetworkState});
+__G.syncNetworkState=()=>ops.op_sync_network_state();
 globalThis.setTimeout=(handler,delay=0,...args)=>__createTimer("setTimeout",false,handler,delay,args);
 globalThis.setInterval=(handler,delay=0,...args)=>__createTimer("setInterval",true,handler,delay,args);
 globalThis.clearTimeout=(id)=>{
@@ -9210,7 +10760,7 @@ globalThis.clearTimeout=(id)=>{
   id=(+id)|0;if(id===0)return;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
 };
 globalThis.clearInterval=globalThis.clearTimeout;
-ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;__timerClear();ops.op_timer_set_nesting(__timerDocument,0);}});
+ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timerClearQueue();__timerClear();ops.op_timer_set_nesting(__timerDocument,0);}});
 // The origin-relative clock combines elapsed native monotonic time with the virtual
 // timer scheduler. Timers advance their scheduled delay; synchronous work consumes
 // real elapsed time. Date/rAF/Event timestamps share this navigation origin.
@@ -9283,6 +10833,7 @@ const __frameStage = (ts) => { __frameNow = ts; __clockEpoch = __taskEpoch; __cl
 // A task that runs before any other due task, so a frame's stages stay contiguous while
 // each still ends with its own microtask checkpoint.
 const __frameTask = (fn) => {
+  ops.op_driver_sync_changed();
   const id = __tid++;
   // Sequence 0 sorts before every queued task (agent sequences start at 1).
   const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[],sequence:0};
@@ -9353,6 +10904,7 @@ if (typeof __G.installAnimationHost === "function") __G.installAnimationHost({
   task(callback) { __frameTimer(callback, 0); },
 });
 globalThis.requestAnimationFrame = (fn) => {
+  ops.op_driver_sync_changed();
   const id = ++__rafId;
   __rafQueue[__rafQueue.length] = { id, fn };
   __scheduleFrame();
@@ -9374,24 +10926,9 @@ globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) =
 ops.op_install_microtask_queue(globalThis);
 const __nextLocalTimer = () => {
   if (!__timers.length || ops.op_window_message_pending()) return -1;
-  let index=0;
-  for(let i=1;i<__timers.length;i++){
-    const timer=__timers[i], best=__timers[index];
-    if(timer.due<best.due||(timer.due===best.due&&timer.sequence<best.sequence))index=i;
-  }
+  const index=__nextTimerIndex();
   const due=__timers[index].due;
   return !__realWindowTimers && due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
-};
-// A timer task's nested timers count from the latest due time among the timers already
-// due with it (within the same millisecond of its own due time): in Chrome the parent
-// runs no earlier than those siblings were due, so a nested zero-delay timer queues
-// behind an equal-delay sibling set slightly later by the live clock (turbo-surf#118).
-// Rendering frames are not siblings (turbo-surf#101); only queued dues are read, never
-// the live clock, so the order stays deterministic.
-const __taskBaseFor = (due) => {
-  let base=due;
-  for(let i=0;i<__timers.length;i++){const t=__timers[i];if(!t.rendering&&t.due>base&&t.due<due+1)base=t.due;}
-  return base;
 };
 const __runLocalTimers = (max=100000,keepTask=false) => {
   let fired=0;
@@ -9405,7 +10942,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);
     try{
-      try{ops.op_engine_task_scope(()=>{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);});}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+      try{ops.op_engine_task_scope(()=>{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(__timerDocument,timer.source);});}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
       if(timer.repeat&&__timerGet(timer.id)===timer){
         if(timer.nesting<7)timer.nesting++;
         timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);timer.sequence=ops.op_task_sequence();__timerPush(timer);
@@ -9415,10 +10952,11 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
   return fired;
 };
 __G.runTimers = (max=100000) => {
-  let fired=ops.op_storage_events();
+  let fired=__G.isFrame||__G.isAuxiliary?0:ops.op_sync_network_state();
+  fired+=ops.op_storage_events();
   if(fired)return fired;
   fired=ops.op_run_local_timers(__timerDocument,max);
-  if(!__G.isFrame)fired+=ops.op_run_frame_timers();
+  if(!__G.isFrame&&!__G.isAuxiliary)fired+=ops.op_run_frame_timers();
   return fired;
 };
 ops.op_set_host_capabilities({
@@ -9553,8 +11091,8 @@ if(ops.op_is_secure_context()) {
   Object.defineProperty(Document.prototype,name,{value:__documentFunction(method,name,length),writable:true,enumerable:true,configurable:true});
 }
 const __cookieAccess = () => {if (!ops.op_document_cookie_allowed(__document)) throw new DOMException("An opaque document cannot access cookies", "SecurityError");};
-__documentRuntimeState.readCookie = () => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_get(__document) : ops.op_cookie_get();};
-__documentRuntimeState.writeCookie = value => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_set(__document, value) : ops.op_cookie_set(value);};
+__documentRuntimeState.readCookie = () => {__cookieAccess();return ops.op_frame_cookie_get(__document);};
+__documentRuntimeState.writeCookie = value => {__cookieAccess();return ops.op_frame_cookie_set(__document, value);};
 __defineDocumentAccessor("cookie", state => state.readCookie(),
   (state, _receiver, value) => state.writeCookie(String(value)));
 __G.readDocumentCookie = __documentRuntimeState.readCookie;
@@ -9565,8 +11103,10 @@ ops.op_set_host_capabilities({setCurrentScript:__G.setCurrentScript});
 __defineDocumentAccessor("fonts", state => state.fonts);
 __defineDocumentAccessor("currentScript", state => state.currentScript);
 "##,
+    include_str!("dialogs.js"),
     include_str!("permissions_policy.js"),
     include_str!("permission_status.js"),
+    include_str!("geolocation.js"),
     include_str!("privacy_sandbox.js"),
     r##"
 
@@ -9727,6 +11267,10 @@ const __bodyByteTag=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8A
 const __bodyByteChunk=value=>__baseApply(__bodyByteTag,value,[])==="Uint8Array";
 const __fetchFailures=__interfaceMap("Fetch.failure");
 const __resourceFailure=error=>__fetchFailures.get(error);
+const __hostPolicyFailure=error=>__resourceFailure(error)?.hostPolicyBlocked||["Network origin blocked by host policy","Invalid host network origin policy"].some(message=>__String(error).includes(message));
+const __resourceDiagnosticSource=(source,error)=>__hostPolicyFailure(error)?"blocked origin":source;
+const __resourceDiagnosticError=error=>__hostPolicyFailure(error)?"Network origin blocked by host policy":error;
+
 // Private body and interface state. Public members are receiver-checked Web-IDL
 // accessors; body reads consume once and retain the identity of their stream.
 {
@@ -9847,7 +11391,8 @@ const __resourceFailure=error=>__fetchFailures.get(error);
   __resourceResponse=response=>{const item=state(responses,response);if(!item.resource)throw new TypeError("Not a network response");return item.resource;};
   __requestInit = value => {const item=requests.get(value);return item?{...item,body:item.body.raw,bodyIsStream:item.body.sourceStream}:value;};
 }
-__web = __webFactory(__core, __G.makeNativeFunction);
+__web = __webFactory(__core, __G.makeNativeFunction, __boundary);
+__G.pendingNativeTimeouts = () => __web.hasPendingTimeouts() ? "1" : "0";
 const __FetchReadable=ReadableStream;
 const __FetchPromise=Promise,__FetchPromiseRace=Promise.race.bind(Promise),__FetchThen=Function.prototype.call.bind(Promise.prototype.then);
 const __ReadableGetReader=ReadableStream.prototype.getReader,__ReadableTee=ReadableStream.prototype.tee;
@@ -9929,10 +11474,11 @@ const __fetchFromSource = async (url, init, referrerSource) => {
         // reload carrying `_rsc` returns a flight payload, not HTML.
         u.searchParams.delete("_rsc");
         __G.rscNav = u.pathname + u.search + u.hash;
+        ops.op_driver_sync_changed();
       }
     }
   } catch (_e) {}
-  const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body, body_bytes:bodyBytes, upload:!!uploadPump, cancel_id:cancelId, stream:!o.destination, cache:o.cache,
+  const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body, body_bytes:bodyBytes, upload:!!uploadPump, cancel_id:cancelId, stream:!o.destination, cache:o.cache, host_route_fetch:__intrinsicHasOwn(o,"hostRouteFetch")&&o.hostRouteFetch===true,
     referrer:o.referrer,referrerPolicy:o.referrerPolicy,
     mode: o.mode, credentials: o.credentials, redirect:o.redirect, integrity:o.integrity, destination: o.destination, source, referrer_source:referrerSource,
     opaque_origin: ops.op_window_opaque(__document), ...cookieSite, initiator:o.initiator,
@@ -9957,7 +11503,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
     if(uploadError&&!isAborted()){ops.op_fetch_cancel(cancelId);finish();throw new __exceptionTypeError("Failed to fetch");}
   }
   if(r.aborted||isAborted()){ops.op_fetch_cancel(cancelId);finish();throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");}
-  if (!r.status) {ops.op_fetch_cancel(cancelId);finish();const error=new __exceptionTypeError("Failed to fetch");__fetchFailures.set(error,{policyBlocked:r.policy_blocked,integrityBlocked:r.integrity_blocked,started:!r.policy_blocked,crossOrigin:r.cross_origin,responseReceived:r.response_received});throw error;}
+  if (!r.status) {ops.op_fetch_cancel(cancelId);finish();const error=new __exceptionTypeError("Failed to fetch");__fetchFailures.set(error,{policyBlocked:r.policy_blocked,hostPolicyBlocked:r.host_policy_blocked,integrityBlocked:r.integrity_blocked,started:!r.policy_blocked,crossOrigin:r.cross_origin,responseReceived:r.response_received});throw error;}
   const crossOrigin = r.cross_origin;
   const responseType = o.redirect==="manual"&&[301,302,303,307,308].includes(r.status)?"opaqueredirect":crossOrigin && (o.mode || "cors") === "no-cors" && !o.destination ? "opaque" : crossOrigin && (o.mode || "cors") === "cors" ? "cors" : "basic";
   const headers = (r.headers || []).filter(([name]) => !["set-cookie", "set-cookie2"].includes(name.toLowerCase()));
@@ -9985,9 +11531,13 @@ const __FetchRequest=Request;
 const __AbortSignalAborted=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"aborted").get;
 const __AbortSignalReason=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"reason").get;
 const __AbortAdd=EventTarget.prototype.addEventListener,__AbortRemove=EventTarget.prototype.removeEventListener;
+__G.shimRouteFetch = (input, init) => {
+  const request = new __FetchRequest(input, init);
+  return __fetchFromSource(request, {...__requestInit(request), destination:"", hostRouteFetch:true}, ops.op_document_request_url());
+};
 globalThis.fetch = async (input, init = undefined) => {
   const request = new __FetchRequest(input, init);
-  return __fetchFromSource(request, {...__requestInit(request), destination:""}, ops.op_document_request_url());
+  return __fetchFromSource(request, {...__requestInit(request), destination:"", hostRouteFetch:false}, ops.op_document_request_url());
 };
 // V8 clones preserve cycles and built-in types. Supported native keys use a
 // private host serializer; no page hook receives their material.
@@ -10057,7 +11607,7 @@ globalThis.fetch = async (input, init = undefined) => {
       let event;
       try { event = new MediaQueryListEvent("change", { media: list.mql.media, matches: now }); }
       catch { event = new __MediaEvent("change"); Object.defineProperties(event, { media: { value: list.mql.media }, matches: { value: now } }); }
-      for (const fn of list.listeners.slice()) { try { apply(fn, list.mql, [event]); } catch (e) { ops.op_report_exception(e); } }
+      for (const fn of list.listeners.slice()) { try { apply(fn, list.mql, [event]); } catch (e) { ops.op_report_exception(__document, e); } }
     }
   });
   const __mqLen = (tok, basis) => {
@@ -10562,6 +12112,15 @@ for (const name of ["message", "filename", "lineno", "colno", "error"]) {
   Object.defineProperty(ErrorEvent.prototype, name, {...descriptor, enumerable:true});
 }
 Object.defineProperty(ErrorEvent.prototype, Symbol.toStringTag, {value:"ErrorEvent", configurable:true});
+globalThis.addEventListener("error", event => {
+  if (!event.isTrusted) return;
+  // Classic reporters use this runtime's event; native listener exceptions keep
+  // the producer's captured event brand and require its original accessors.
+  const record = __errorEventState.get(event);
+  const error = record ? record.error : __pageErrorApply(__pageErrorRead.error,event,[]);
+  const message = record ? record.message : __pageErrorApply(__pageErrorRead.message,event,[]);
+  ops.op_page_diagnostic(__document,{event:"pageerror",name:String(error?.name || "Error"),message:String(error?.message || message),stack:String(error?.stack || "")});
+});
 // PromiseRejectionEvent and the Window promise-rejection tracker (turbo-surf#103).
 // deno_core's V8 reject callback hands over unhandled rejections after the microtask
 // checkpoint; like Chrome, each report is a task queued behind the timers already
@@ -10648,7 +12207,7 @@ Object.defineProperty(PromiseRejectionEvent.prototype, Symbol.toStringTag, {valu
   // Only the main realm installs the shared handlers: a frame-realm closure held by
   // the core would keep a retired frame alive.
   ops.op_register_rejection_realm(realm);
-  if (!__G.isFrame) {
+  if (!__G.isFrame && !__G.isAuxiliary) {
     // Routed reports are handled here (the event, never a fatal event-loop error);
     // one no realm takes keeps deno_core's default reporting.
     __core.setUnhandledPromiseRejectionHandler((promise, reason) => ops.op_route_promise_rejection(promise, reason, false));
@@ -11166,14 +12725,9 @@ if (typeof globalThis.ReadableStream === "undefined") {
     }
   };
 }
-// requestIdleCallback must invoke the callback with an IdleDeadline ({didTimeout, timeRemaining()});
-// the bare shim passed nothing, so `deadline.timeRemaining()` threw — a correctness bug + tell.
-globalThis.requestIdleCallback = (fn) => globalThis.setTimeout(() => {
-  const start = __perfNow();
-  fn({ didTimeout: false, timeRemaining: () => Math.max(0, 50 - (__perfNow() - start)) });
-}, 1);
-globalThis.cancelIdleCallback = (id) => globalThis.clearTimeout(id);
-
+"##,
+    include_str!("idle_callback.js"),
+    r##"
 // WHATWG URL + URLSearchParams — deno_core ships neither, but app bundles (Next.js,
 // the PropelAuth SDK, …) use `new URL(...)` while hydrating, so without these the
 // page crashes with "URL is not defined" before rendering. Native parsing handles
@@ -11188,17 +12742,17 @@ if (typeof globalThis.URLSearchParams === "undefined") {
       let pairs=[];
       if(init instanceof URLSearchParams)pairs=__urlPairs(init).map(pair=>pair.slice());
       else if(init != null && typeof init === "object") {
-        if(typeof init[Symbol.iterator] === "function") for(const pair of init){const values=Array.from(pair);if(values.length!==2)throw new TypeError("Search parameter pairs require two values");pairs.push(values.map(String));}
-        else pairs=Object.entries(init).map(([key,value])=>[key,String(value)]);
-      } else pairs=ops.op_url_params_parse(String(init).replace(/^\?/,""));
+        if(typeof init[Symbol.iterator] === "function") for(const pair of init){const values=Array.from(pair);if(values.length!==2)throw new TypeError("Search parameter pairs require two values");pairs.push(values.map(__String));}
+        else pairs=Object.entries(init).map(([key,value])=>[key,__String(value)]);
+      } else pairs=ops.op_url_params_parse(__String(init).replace(/^\?/,""));
       __urlParamStates.set(this,pairs);
     }
-    append(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");__urlPairs(this).push([String(key),String(value)]);__urlParamsChanged(this);}
-    delete(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");key=String(key);__urlParamStates.set(this,__urlPairs(this).filter(pair=>pair[0]!==key||(value!==undefined&&pair[1]!==String(value))));__urlParamsChanged(this);}
-    get(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).find(pair=>pair[0]===String(key))?.[1]??null;}
-    getAll(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).filter(pair=>pair[0]===String(key)).map(pair=>pair[1]);}
-    has(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).some(pair=>pair[0]===String(key)&&(value===undefined||pair[1]===String(value)));}
-    set(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");key=String(key);value=String(value);let found=false;const pairs=[];for(const pair of __urlPairs(this)){if(pair[0]!==key)pairs.push(pair);else if(!found){pairs.push([key,value]);found=true;}}if(!found)pairs.push([key,value]);__urlParamStates.set(this,pairs);__urlParamsChanged(this);}
+    append(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");__urlPairs(this).push([__String(key),__String(value)]);__urlParamsChanged(this);}
+    delete(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");key=__String(key);__urlParamStates.set(this,__urlPairs(this).filter(pair=>pair[0]!==key||(value!==undefined&&pair[1]!==__String(value))));__urlParamsChanged(this);}
+    get(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).find(pair=>pair[0]===__String(key))?.[1]??null;}
+    getAll(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).filter(pair=>pair[0]===__String(key)).map(pair=>pair[1]);}
+    has(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).some(pair=>pair[0]===__String(key)&&(value===undefined||pair[1]===__String(value)));}
+    set(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");key=__String(key);value=__String(value);let found=false;const pairs=[];for(const pair of __urlPairs(this)){if(pair[0]!==key)pairs.push(pair);else if(!found){pairs.push([key,value]);found=true;}}if(!found)pairs.push([key,value]);__urlParamStates.set(this,pairs);__urlParamsChanged(this);}
     sort() {__urlPairs(this).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);__urlParamsChanged(this);}
     forEach(callback,thisArg = undefined) {if(typeof callback!=="function")throw new TypeError("A callback required");for(let index=0;index<__urlPairs(this).length;index++){const pair=__urlPairs(this)[index];callback.call(thisArg,pair[1],pair[0],this);}}
     keys() {return __urlIterate(this,"key");}
@@ -11211,26 +12765,27 @@ if (typeof globalThis.URLSearchParams === "undefined") {
   Object.defineProperty(URLSearchParams.prototype,Symbol.toStringTag,{value:"URLSearchParams",configurable:true});
 }
 if (typeof globalThis.URL === "undefined") {
+  const NativeURLSearchParams = globalThis.URLSearchParams;
   const states = __interfaceMap("URL");
   const state = (receiver) => { const value = states.get(receiver); if (!value) throw new TypeError("Illegal invocation"); return value; };
-  const parse = (input, base = "") => ops.op_surf_url_parse(String(input), base);
+  const parse = (input, base = "") => ops.op_surf_url_parse(__String(input), base);
   const update = (receiver, key, value) => {
     const current = state(receiver);
-    current.parts = parse(ops.op_url_update(receiver.href, key, String(value)));
+    current.parts = parse(ops.op_url_update(receiver.href, key, __String(value)));
     // URL.searchParams keeps its identity across URL mutations.
-    const replacement = new URLSearchParams(current.parts.search);
+    const replacement = new NativeURLSearchParams(current.parts.search);
     __urlParamStates.set(current.params,__urlPairs(replacement));
   };
   globalThis.URL = class URL {
     constructor(url, base = undefined) {
       if (!arguments.length) throw new TypeError("URL requires an input");
-      const parts = parse(url, base === undefined ? "" : String(base));
-      const params=new URLSearchParams(parts.search),current={parts,params};
+      const parts = parse(url, base === undefined ? "" : __String(base));
+      const params=new NativeURLSearchParams(parts.search),current={parts,params};
       states.set(this,current);
       __urlParamOwners.set(params,()=>{current.parts=parse(ops.op_url_update(current.parts.href,"search",params.toString()));});
     }
     get href() {return state(this).parts.href;}
-    set href(value) { const current = state(this), parts = parse(value); current.parts = parts; __urlParamStates.set(current.params,__urlPairs(new URLSearchParams(parts.search))); }
+    set href(value) { const current = state(this), parts = parse(value); current.parts = parts; __urlParamStates.set(current.params,__urlPairs(new NativeURLSearchParams(parts.search))); }
     get origin() { return state(this).parts.origin; }
     get searchParams() { return state(this).params; }
     get search() {return state(this).parts.search;}
@@ -11266,7 +12821,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
 // can resolve `page.waitForEvent('download')` + `download.path()`. Runs after browser_env
 // installed the anchor prototype (ENV_BOOTSTRAP runs last).
 (() => {
-  const decodeBlobBytes = TextDecoder.prototype.decode.bind(new TextDecoder());
+  const blobByteArray = Array.from;
   // The native store keys each URL by the creating document's storage key
   // (blob_urls.rs); revocation and reads stay within that key.
   const overload = "Failed to execute 'createObjectURL' on 'URL': Overload resolution failed.";
@@ -11282,7 +12837,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
   }, "revokeObjectURL", 1);
   __G.readBlobUrl = (url) => {
     const bytes = ops.op_blob_url_read(__document, url);
-    return bytes == null ? null : decodeBlobBytes(bytes);
+    return bytes == null ? null : blobByteArray(bytes);
   };
   __G.downloads = __G.downloads || [];
   const record = (el) => {
@@ -11294,8 +12849,8 @@ __BodyParamsString=URLSearchParams.prototype.toString;
           if (dl == null && n.download) dl = n.download;
           if (dl != null) {
             const href = (n.getAttribute("href") || n.href || "");
-            const content = __G.readBlobUrl(String(href));
-            __G.downloads.push({ filename: dl || "download", url: String(href), content: content == null ? "" : content });
+            const bodyBytes = __G.readBlobUrl(String(href));
+            __G.downloads.push({ filename: dl || "download", url: String(href), bodyBytes: bodyBytes || [] });
             return true;
           }
         }
@@ -11362,84 +12917,9 @@ __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : st
   try { if (typeof d.close !== "function") d.close = () => {}; } catch (_) {}
 })();
 
-// document.createTreeWalker + NodeFilter — focus-management code (MUI's DataGrid / focus
-// trap, ARIA widgets) walks the tree with these; deno_core's binding has neither, so a
-// page with a data grid threw "createTreeWalker is not a function" and rendered blank.
-// A document-order DFS honoring whatToShow + the accept filter (REJECT skips the subtree,
-// SKIP skips the node but descends) — enough for focusable-element scans.
-(() => {
-  const d = globalThis.document;
-  if (!d || typeof d.createTreeWalker === "function") return;
-  globalThis.NodeFilter = globalThis.NodeFilter || {
-    SHOW_ALL: 0xffffffff, SHOW_ELEMENT: 1, SHOW_TEXT: 4, SHOW_COMMENT: 128,
-    FILTER_ACCEPT: 1, FILTER_REJECT: 2, FILTER_SKIP: 3,
-  };
-  const ACCEPT = 1, REJECT = 2;
-  // createTreeWalker(root, optional whatToShow, optional filter).length === 1.
-  d.createTreeWalker = function (root) {
-    const whatToShow = arguments[1], filter = arguments[2];
-    const show = whatToShow == null ? 0xffffffff : whatToShow >>> 0;
-    const accept = (n) => {
-      const t = n.nodeType || 1;
-      const bit = t === 1 ? 1 : t === 3 ? 4 : t === 8 ? 128 : 1 << (t - 1);
-      if ((show & bit) === 0) return 3; // SKIP (wrong type)
-      const fn = filter && (typeof filter === "function" ? filter : filter.acceptNode);
-      if (typeof fn === "function") {
-        try { return fn.call(filter, n); } catch (_e) { return 1; }
-      }
-      return 1;
-    };
-    const w = { root, whatToShow: show, filter, currentNode: root };
-    w.nextNode = function () {
-      let node = this.currentNode;
-      for (;;) {
-        let child = node.firstChild;
-        let descend = true;
-        while (descend && child) {
-          node = child;
-          const r = accept(node);
-          if (r === ACCEPT) { this.currentNode = node; return node; }
-          if (r === REJECT) { descend = false; } // don't descend; fall to sibling search
-          else child = node.firstChild; // SKIP → keep descending
-        }
-        let t = node;
-        while (t && t !== this.root) {
-          if (t.nextSibling) { node = t.nextSibling; break; }
-          t = t.parentNode;
-        }
-        if (!t || t === this.root) return null;
-        const r = accept(node);
-        if (r === ACCEPT) { this.currentNode = node; return node; }
-      }
-    };
-    w.firstChild = function () {
-      let c = this.currentNode.firstChild;
-      while (c) { const r = accept(c); if (r === ACCEPT) { this.currentNode = c; return c; } c = c.nextSibling; }
-      return null;
-    };
-    w.nextSibling = function () {
-      let s = this.currentNode.nextSibling;
-      while (s) { const r = accept(s); if (r === ACCEPT) { this.currentNode = s; return s; } s = s.nextSibling; }
-      return null;
-    };
-    w.parentNode = function () {
-      let p = this.currentNode.parentNode;
-      while (p && p !== this.root) { if (accept(p) === ACCEPT) { this.currentNode = p; return p; } p = p.parentNode; }
-      return null;
-    };
-    w.previousNode = function () { return null; }; // rarely used by focus scans
-    return w;
-  };
-  // NodeIterator (same filter model, linear) — some libs use it instead of TreeWalker.
-  if (typeof d.createNodeIterator !== "function") {
-    d.createNodeIterator = function (root) {
-      const whatToShow = arguments[1], filter = arguments[2];
-      const tw = d.createTreeWalker(root, whatToShow, filter);
-      return { nextNode: () => tw.nextNode(), previousNode: () => null, detach() {} };
-    };
-  }
-})();
-
+"##,
+    include_str!("dom_traversal.js"),
+    r##"
 // Viewport / screen globals — no real rendering surface here, but analytics and
 // responsive code read them (PostHog `.split`/`.height` on undefined throws → loops
 // forever). Sensible desktop defaults.
@@ -11590,14 +13070,42 @@ const __resourceJSONParse = JSON.parse;
 const __resourceThen = Function.prototype.call.bind(Promise.prototype.then);
 // Parse order, including parser scripts inside declarative shadow roots.
 const __initialResourceScripts = ops.op_parser_scripts(__document);
-let __orderedDynamicScripts = Promise.resolve();
-const __resources = new WeakMap();
-const __resourcePromises = new Set();
+let __replacingDocumentContent = false;
+let __replacementParserPreparations = new WeakMap();
+const __replacementParserDelete = Function.prototype.call.bind(WeakMap.prototype.delete);
+__G.dispatchAnchorDefault = (_node, event) => ops.op_auxiliary_anchor_default(event);
+ops.op_set_host_capabilities({replaceDocumentContent:html=>{
+  let scripts;
+  __resourceDocumentGeneration++;
+  __resources=new __resourceMapConstructor();
+  __replacementParserPreparations=new __resourceMapConstructor();
+  __resourcePromises=new __resourceSetConstructor();
+  __orderedDynamicScripts=__initialDynamicScriptGate;
+  __replacingDocumentContent=true;
+  try{
+    scripts=ops.op_replace_document_content(__document,html);
+    // Native replacement bypasses the guest insertion delegates.
+    ops.op_frame_host_helper(__document,"syncFrameConnections",[__document]);
+  }
+  finally{__replacingDocumentContent=false;}
+  __initialResourceScripts.length=0;
+  for(let index=0;index<scripts.length;index++)__initialResourceScripts[index]=scripts[index];
+  __resourceMutationEpoch++;
+  __fontStyleUpdated=false;
+}});
+const __initialDynamicScriptGate = Promise.resolve();
+const __resourceMapConstructor = WeakMap, __resourceSetConstructor = Set;
+let __orderedDynamicScripts = __initialDynamicScriptGate;
+let __resources = new __resourceMapConstructor();
+let __resourcePromises = new __resourceSetConstructor();
+let __resourceDocumentGeneration = 0;
 const __resourceSheetConstructor = CSSStyleSheet;
 const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readRules;
 // Image load state is published to the binding's HTMLImageElement.prototype accessors
 // (complete/naturalWidth/naturalHeight/currentSrc); page JS cannot reach this record.
 const __imageHost = ops.op_interface_record_get(document).imageHost;
+__G.screenshotImageMetadata = () => ops.op_screenshot_image_metadata(__document, false);
+__G.clearScreenshotImageMetadata = () => ops.op_screenshot_image_metadata(__document, true);
 // width/height/x/y read the rendered box from surf's native live layout (turbo-dom#26):
 // null while the image is not being rendered; a layout this snapshot cannot supply reads
 // as not rendered (the attribute / natural size) rather than throwing from an IDL getter.
@@ -11636,8 +13144,9 @@ function __fireResourceEvent(el, kind, win = globalThis) {
   try { ops.op_dispatch_host_event(ev, el); } catch (_) {}
 }
 function __trackResource(promise) {
-  __intrinsicApply(__intrinsicSetAdd, __resourcePromises, [promise]);
-  __promiseFinally(promise, () => __intrinsicApply(__intrinsicSetDelete, __resourcePromises, [promise]));
+  const promises=__resourcePromises;
+  __intrinsicApply(__intrinsicSetAdd, promises, [promise]);
+  __promiseFinally(promise, () => __intrinsicApply(__intrinsicSetDelete, promises, [promise]));
   return promise;
 }
 function __resourceNow() { return __perfNow(); }
@@ -11715,14 +13224,20 @@ function __loadImage(el, win = globalThis, parser = false, restart = false) {
   else __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc});
   state.promise = __trackResource((async () => {
     let result = decoded;
+    let assetToken = 0;
     const url = new URL(src, source).href, start = __resourceNow(win);
     try {
       await 0;
-      if (!data && ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(doc):undefined}));
+      if (!data && ops.op_csp_request(doc,url,"img-src","")) {
+        assetToken = ops.op_begin_image_asset(el,choice.key,url);
+        result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(doc):undefined}),assetToken);
+      }
     } catch (_) {}
     __recordResource(win, url, "img", start);
-    if (__resources.get(el) !== state) return;
-    __fireResourceEvent(el, __imageLoaded(el,choice,result,url) ? "load" : "error", win);
+    if (__resources.get(el) !== state) { ops.op_discard_image_asset(doc,assetToken); return; }
+    const loaded = __imageLoaded(el,choice,result,url);
+    ops.op_commit_image_asset(el,assetToken);
+    __fireResourceEvent(el, loaded ? "load" : "error", win);
   })());
   return state.promise;
 }
@@ -11753,9 +13268,10 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     if(tag==="SCRIPT"||__intrinsicApply(__resourceLocalName,el,[])==="script")continue;
     if (tag==="IMG") {__loadImage(el,win,true);continue;}
     if(tag==="STYLE"){
-      const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
       const source=__intrinsicApply(__resourceText,el,[]);let state=__intrinsicApply(__intrinsicWeakGet,__resources,[el]);
-      if(!state||state.src!==source){state={__proto__:null,src:source,promise:null};__intrinsicApply(__intrinsicWeakSet,__resources,[el,state]);__intrinsicApply(__intrinsicWeakSet,__resourceStyleRequests,[sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true}]);state.promise=__trackResource(__loadSheetImports(sheet,__intrinsicApply(__resourceBaseURL,doc,[])||ops.op_document_request_url(),win));}
+      if(state&&state.src===source){__listPush(styles,state.promise);continue;}
+      const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
+      state={__proto__:null,src:source,promise:null};__intrinsicApply(__intrinsicWeakSet,__resources,[el,state]);__intrinsicApply(__intrinsicWeakSet,__resourceStyleRequests,[sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true}]);state.promise=__trackResource(__loadSheetImports(sheet,__intrinsicApply(__resourceBaseURL,doc,[])||ops.op_document_request_url(),win));
       __listPush(styles,state.promise);continue;
     }
     if (!(__resourceAttribute.call(el,"rel")||"").toLowerCase().split(/\s+/).includes("stylesheet") || el.disabled) continue;
@@ -11891,9 +13407,15 @@ function __resourceScriptAttributes(prepared) {
   return attributes;
 }
 function __prepareResourceScript(el) {
+  const prepared=__intrinsicApply(__intrinsicWeakGet,__replacementParserPreparations,[el]);
+  if(prepared){
+    __replacementParserDelete(__replacementParserPreparations,el);
+    return prepared;
+  }
   return ops.op_prepare_resource_script(__document, el);
 }
 __G.execScriptEl = async function (el, preparation = null, executionGate = null) {
+  const generation=__resourceDocumentGeneration;
   if (!el || !ops.op_document_scripts_allowed(__document)) return;
   const prepared = preparation || __prepareResourceScript(el);
   if (!prepared) return;
@@ -11916,6 +13438,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
     const resources=__G.loadDocumentResources(__document,globalThis,deferred?null:el);
     if(!prepared.asynchronous||!(external||module))await resources;
   }
+  if(generation!==__resourceDocumentGeneration)return;
   const absoluteSource=get("src")?new URL(get("src"),__baseApply(__resourceBaseURL,__document,[])).href:"";
   const parserScripts=__intrinsicApply(__resourceDocumentQuery,__document,["script"]);
   let parserIndex=-1;
@@ -11928,7 +13451,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
   if (prepared.kind === "module") {
     const src = get("src");
     const specifier = src ? new URL(src, __baseApply(__resourceBaseURL,__document,[])).href
-      : ops.op_inline_module(prepared.source, __baseApply(__resourceBaseURL,__document,[]), document.URL);
+      : ops.op_inline_module(el, prepared.source, __baseApply(__resourceBaseURL,__document,[]), document.URL);
     ops.op_module_credentials(el,specifier);
     // The SDK loader observes actual graph/evaluation transitions independently
     // of import()'s promise, which waits for top-level await. The published SDK
@@ -11945,7 +13468,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
       waiter.error = error;
       if (!__moduleStaging) __completeModuleWaiter(waiter, false, null);
       else if (waiter.done && waiter.ready) __reportModuleError(waiter, null);
-      __print("module error (" + specifier + "): " + error + "\n");
+      __print("module error (" + __resourceDiagnosticSource(specifier,error) + "): " + __resourceDiagnosticError(error) + "\n");
     });
     return __trackResource(gate);
   }
@@ -11968,6 +13491,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
       code = prepared.source;
     }
     if (executionGate) await executionGate;
+    if(generation!==__resourceDocumentGeneration)return;
     // Legacy classic bundles retain their import.meta compatibility rewrite.
     // Import/export parse failures move the original text to Deno's real graph;
     // explicit module elements use the separate standards path above.
@@ -12000,10 +13524,16 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
     if (src) __fireScriptEvent(el, "load");
   } catch (e) {
     if(src)__fireScriptEvent(el,downloaded?"load":"error");
-    __print("script error (" + (src || "inline") + "): " + e + "\n");
+    __print("script error (" + __resourceDiagnosticSource(src || "inline",e) + "): " + __resourceDiagnosticError(e) + "\n");
   }
 };
 function __startResourceScript(element, prepared) {
+  // Replacement insertion callbacks precede the returned parser-order queue.
+  // Preserve native preparation instead of starting parser work as dynamic IO.
+  if(__replacingDocumentContent && prepared?.parserInserted){
+    __intrinsicApply(__intrinsicWeakSet,__replacementParserPreparations,[element,prepared]);
+    return;
+  }
   if (!prepared || prepared.kind === "importmap" || prepared.kind === "speculationrules") return;
   const attributes = __resourceScriptAttributes(prepared);
   if (prepared.kind !== "module" && __recordOwn(attributes,"nomodule")) return;
@@ -12019,7 +13549,7 @@ function __startResourceScript(element, prepared) {
     __trackResource(next);
   } else __trackResource(__G.execScriptEl(element, prepared));
 }
-ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;__retireCspViolationTasks();__dictionaryRetireTasks();ops.op_retire_resource_document(__document);ops.op_install_resource_consumer(__document,event=>__documentBaseMutation(event,()=>{}),__documentRuntimeState);}});
+ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;__retireCspViolationTasks();__dictionaryRetireTasks();ops.op_retire_resource_document(__document,event=>__documentBaseMutation(event,()=>{}));}});
 const __cspStyleSheetGetter=(()=>{
   for(let prototype=HTMLStyleElement.prototype;prototype;prototype=Object.getPrototypeOf(prototype)){
     const descriptor=Object.getOwnPropertyDescriptor(prototype,"sheet");
@@ -12094,9 +13624,13 @@ function __reselectPicture(picture) {
 function __imageMutation(event) {
   if (event.type === "attributes") {
     if (event.attributeNamespace!==null) return;
-    if (__imageMutationAttributes[event.attributeName] && __ownedImage(event.target))
-      __loadImage(event.target,globalThis,false,true);
-    else if (__sourceMutationAttributes[event.attributeName] && __resourceElementKind(event.target)==="SOURCE")
+    if (__imageMutationAttributes[event.attributeName] && __ownedImage(event.target)) {
+      // Importing replacement markup queues its initial detached src assignment.
+      // An already-admitted parser load owns that same initial request.
+      const initial=__replacingDocumentContent && event.oldValue===null &&
+        !__listIncludes(event.ancestors,__document);
+      __loadImage(event.target,globalThis,false,!initial);
+    } else if (__sourceMutationAttributes[event.attributeName] && __resourceElementKind(event.target)==="SOURCE")
       __reselectPicture(__resourceApply(__resourceParentNode,event.target,[]));
   } else if (event.type === "childList") {
     for (let index=0; index<event.added.length; index++) __startInsertedImages(event.added[index]);
@@ -12165,6 +13699,8 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     const ordered = __list();
     for (let index = 0; index < all.length; index++) if (!isDeferred(all[index])) __listPush(ordered, all[index]);
     for (let index = 0; index < all.length; index++) if (isDeferred(all[index])) __listPush(ordered, all[index]);
+    let deferredExecution = null;
+    let deferredDownloads = 0;
     for (let position = 0; position < ordered.length; position++) {
       const element = ordered[position];
       const prepared = __prepareResourceScript(element);
@@ -12172,8 +13708,20 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
       ranScript = true;
       if (__G.initialLoading && prepared.parserInserted && isDeferred(element)) __markDocumentInteractive();
       if (prepared.asynchronous && (prepared.src || prepared.kind === "module")) __trackResource(__G.execScriptEl(element, prepared));
-      else await __G.execScriptEl(element, prepared);
+      else if (prepared.kind !== "module" && prepared.src && isDeferred(element)) {
+        // Download the next classic while its predecessor executes, retaining the
+        // same preparation, CSP, credentials and integrity path as other scripts.
+        deferredExecution = __G.execScriptEl(element, prepared, deferredExecution);
+        if (++deferredDownloads === 8) {
+          await deferredExecution;
+          deferredDownloads = 0;
+        }
+      } else {
+        if (deferredExecution) await deferredExecution;
+        await __G.execScriptEl(element, prepared);
+      }
     }
+    if (deferredExecution) await deferredExecution;
     __G.loadDocumentResources();
     if (__G.initialLoading) __markDocumentInteractive();
     const fired = fireTimers ? __G.runTimers(__intrinsicMin(timersLeft, 5000)) : 0;
@@ -12205,6 +13753,9 @@ __G.takeModuleScript = function () {
   __G.currentModuleEl = null;
   __G.moduleDescriptor = "";
 };
+"##,
+    include_str!("locator_dom.js"),
+    r##"
 // getByRole/getByText/getByLabel resolved IN the LIVE isolate, returning each match's
 // document-order index (querySelectorAll('*') position) so the Playwright shim can dispatch
 // on `*`[idx] in the SAME context. The shim used to resolve these over a re-serialized
@@ -12213,18 +13764,19 @@ __G.takeModuleScript = function () {
 // options / dialogs), so the idx pointed at the WRONG live node (a wrapper, not the option),
 // and the click never reached the option's onClick. Resolving here over the live DOM keeps
 // the idx and the dispatch in one context. Mirrors the Rust matchers (aria.rs/locator.rs).
-__G.tcGetBy = function (kind, value, name, root) {
+__G.tcGetBy = function (kind, value, name, root, options) {
+  options = options || {};
   // `idx` is always the GLOBAL document-order position (so the shim dispatches on `*`[idx]).
   // `root` scopes matching to within elements matching that selector (descendant-or-self) —
   // backs `parentLocator.getByRole/getByText/getByLabel(...)`.
-  const all = Array.prototype.slice.call(document.querySelectorAll("*"));
+  const all = __G.tcLocatorAll();
   let inScope = null;
   if (root) {
     inScope = new Set();
-    const roots = Array.prototype.slice.call(document.querySelectorAll(root));
+    const roots = __G.tcLocatorQuery(document, root);
     for (let ri = 0; ri < roots.length; ri++) {
       inScope.add(roots[ri]);
-      const sub = roots[ri].querySelectorAll("*");
+      const sub = __G.tcLocatorQuery(roots[ri], "*");
       for (let si = 0; si < sub.length; si++) inScope.add(sub[si]);
     }
   }
@@ -12238,49 +13790,106 @@ __G.tcGetBy = function (kind, value, name, root) {
       return t === "checkbox" ? "checkbox" : t === "radio" ? "radio"
         : (t === "button" || t === "submit" || t === "reset") ? "button" : "textbox";
     }
-    return ({ a: "link", button: "button", select: "combobox", textarea: "textbox" })[tag] || "generic";
+    if (tag === "th" && /^(row|rowgroup)$/.test(attr(el, "scope"))) return "rowheader";
+    return ({ a: "link", button: "button", select: "combobox", textarea: "textbox",
+      h1: "heading", h2: "heading", h3: "heading", h4: "heading", h5: "heading", h6: "heading",
+      img: "img", table: "table", thead: "rowgroup", tbody: "rowgroup", tfoot: "rowgroup",
+      tr: "row", th: "columnheader", td: "cell", ul: "list", ol: "list", li: "listitem",
+      nav: "navigation", main: "main", article: "article", aside: "complementary", fieldset: "group", option: "option"
+    })[tag] || "generic";
+  };
+  const normalizeName = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+  const referenceName = (el) => {
+    const label = normalizeName(attr(el, 'aria-label'));
+    if (label) return label;
+    if ((el.tagName || '').toLowerCase() === 'img' && el.hasAttribute('alt')) return normalizeName(attr(el, 'alt'));
+    return normalizeName(el.textContent);
   };
   const accName = (el) => {
-    const cands = [attr(el, "aria-label").trim(), (el.textContent || "").trim(),
-      attr(el, "placeholder").trim(), attr(el, "value").trim(), attr(el, "title").trim()];
-    for (const c of cands) if (c) return c;
-    return "";
+    const refs = attr(el, 'aria-labelledby').trim().split(/\s+/).filter(Boolean)
+      .map((id) => __G.tcLocatorById(el, id)).filter(Boolean);
+    if (refs.length) return refs.map(referenceName).filter(Boolean).join(' ');
+    const label = normalizeName(attr(el, 'aria-label'));
+    if (label) return label;
+    if (el.labels && el.labels.length) return Array.from(el.labels).map(referenceName).filter(Boolean).join(' ');
+    if ((el.tagName || '').toLowerCase() === 'img' && el.hasAttribute('alt')) return normalizeName(attr(el, 'alt'));
+    const candidates = [el.textContent, attr(el, 'placeholder'), attr(el, 'value'), attr(el, 'title')];
+    for (const candidate of candidates) { const value = normalizeName(candidate); if (value) return value; }
+    return '';
   };
-  // Substring match, or a `/pattern/flags` regex literal (mirrors turbo-surf-view).
-  const tmatch = (v, want) => {
-    if (want == null) return true;
+  const matcher = (want) => {
+    if (want == null) return () => true;
     const m = /^\/(.*)\/([a-z]*)$/.exec(want);
-    if (m) { try { return new RegExp(m[1], m[2]).test(v); } catch (_e) { return false; } }
-    return String(v).indexOf(want) >= 0;
+    if (!m) {
+      const normalize = (text) => String(text).trim().replace(/\s+/g, ' ');
+      if (options.exact) {
+        const expected = normalize(want);
+        return (value) => normalize(value) === expected;
+      }
+      const expected = String(want).toLowerCase();
+      return (value) => String(value).toLowerCase().indexOf(expected) >= 0;
+    }
+    let re;
+    try { re = new RegExp(m[1], m[2]); } catch (_e) { return () => false; }
+    return (v) => { re.lastIndex = 0; return re.test(v); };
   };
-  const idxOf = (el) => all.indexOf(el);
+  const nameMatch = matcher(name);
+  const valueMatch = matcher(value);
+  const indices = new Map(all.map((el, idx) => [el, idx]));
+  const idxOf = (el) => indices.get(el);
   let hits = [];
   if (kind === "role") {
-    for (const el of all) if (roleOf(el) === value && tmatch(accName(el), name)) hits.push(el);
+    for (const el of all) if ((!inScope || inScope.has(el)) && roleOf(el) === value && nameMatch(accName(el))) hits.push(el);
   } else if (kind === "label") {
     const seen = new Set();
     const push = (el) => { if (el && !seen.has(el)) { seen.add(el); hits.push(el); } };
-    for (const lab of document.querySelectorAll("label")) {
-      if (!tmatch((lab.textContent || "").trim(), value)) continue;
-      const forId = attr(lab, "for");
-      if (forId) push(document.getElementById(forId));
+    for (const lab of __G.tcLocatorQuery(document, "label")) {
+      if (!valueMatch((lab.textContent || "").trim())) continue;
+      push(__G.tcLocatorLabelControl(lab));
       const id = attr(lab, "id");
-      if (id) for (const t of document.querySelectorAll('[aria-labelledby~="' + id + '"]')) push(t);
-      push(lab.querySelector("input,select,textarea"));
+      if (id) for (const t of __G.tcLocatorLightQuery(lab, '[aria-labelledby~="' + id + '"]')) push(t);
     }
-    for (const el of document.querySelectorAll("[aria-label]")) if (tmatch(attr(el, "aria-label"), value)) push(el);
+    for (const el of __G.tcLocatorQuery(document, "[aria-label]")) if (valueMatch(attr(el, "aria-label"))) push(el);
   } else if (kind === "text") {
     // Leaf-text match: the element's text matches AND no descendant element also matches
     // (so we target the tightest node, like turbo-surf-view's by_text).
     for (const el of all) {
-      if (!tmatch((el.textContent || "").trim(), value)) continue;
+      if (!valueMatch((el.textContent || "").trim())) continue;
       let childMatch = false;
-      for (const c of el.querySelectorAll("*")) { if (tmatch((c.textContent || "").trim(), value)) { childMatch = true; break; } }
+      for (const c of __G.tcLocatorQuery(el, "*")) { if (valueMatch((c.textContent || "").trim())) { childMatch = true; break; } }
       if (!childMatch) hits.push(el);
     }
   }
+  if (kind === "role") hits = hits.filter((el) => {
+    if (options.level != null && Number(attr(el, 'aria-level') || (el.tagName || '').slice(1)) !== options.level) return false;
+    if (options.pressed != null && attr(el, 'aria-pressed') !== String(options.pressed)) return false;
+    if (options.includeHidden) return true;
+    const visibility = getComputedStyle(el).visibility;
+    if (visibility === 'hidden' || visibility === 'collapse') return false;
+    for (let current = el; current && current.nodeType === 1; current = __G.tcLocatorParent(current)) {
+      if (current.hasAttribute('hidden') || attr(current, 'aria-hidden') === 'true' || getComputedStyle(current).display === 'none') return false;
+    }
+    return true;
+  });
   if (inScope) hits = hits.filter((el) => inScope.has(el));
   globalThis.__RESULT = JSON.stringify(hits.map((el) => ({ idx: idxOf(el) })));
+};
+
+// Keep each locator step's selector engine and context instead of concatenating XPath as CSS.
+__G.tcQuerySelector = function (root, selector) {
+  let expression = String(selector).trimStart();
+  const xpath = /^(?:xpath=|\/|\.\.?\/|\.\.?$|\()/.test(expression);
+  if (!xpath) return __G.tcLocatorQuery(root, expression.replace(/^css=/, ""));
+  expression = expression.replace(/^xpath=/, "");
+  if (root.nodeType !== 9 && expression.startsWith("/")) expression = "." + expression;
+  const doc = root.nodeType === 9 ? root : root.ownerDocument;
+  const result = doc.evaluate(expression, root, null, 7, null);
+  const nodes = [];
+  for (let i = 0; i < result.snapshotLength; i++) {
+    const node = result.snapshotItem(i);
+    if (node.nodeType === 1) nodes.push(node);
+  }
+  return nodes;
 };
 
 // Resolve a locator through an nth-aware scope CHAIN, then match its leaf. `scope` is an
@@ -12294,10 +13903,15 @@ __G.tcResolveScoped = function (scope, leaf) {
   for (let si = 0; si < (scope || []).length; si++) {
     const s = scope[si];
     let next = [];
-    for (let ci = 0; ci < cur.length; ci++) {
+    if (s.getBy) {
+      const all = __G.tcLocatorAll();
+      __G.tcGetBy(s.getBy.kind, s.getBy.value, s.getBy.name, s.getBy.root, s.getBy.options);
+      const matches = JSON.parse(globalThis.__RESULT).map((hit) => all[hit.idx]);
+      next = matches.filter((el) => cur.some((root) => root === document || (root !== el && __G.tcLocatorContains(root, el))));
+    } else for (let ci = 0; ci < cur.length; ci++) {
       let m;
       try {
-        m = cur[ci].querySelectorAll(s.sel);
+        m = __G.tcQuerySelector(cur[ci], s.sel);
       } catch (e) {
         m = [];
       }
@@ -12320,26 +13934,27 @@ __G.tcResolveScoped = function (scope, leaf) {
     }
     cur = next;
   }
-  const all = Array.prototype.slice.call(document.querySelectorAll("*"));
+  const all = __G.tcLocatorAll();
+  const indices = new Map(all.map((el, idx) => [el, idx]));
   if (leaf && leaf.selector) {
     let res = [];
     for (let ci = 0; ci < cur.length; ci++) {
       let m;
       try {
-        m = cur[ci].querySelectorAll(leaf.selector);
+        m = __G.tcQuerySelector(cur[ci], leaf.selector);
       } catch (e) {
         m = [];
       }
       for (let mi = 0; mi < m.length; mi++) res.push(m[mi]);
     }
-    globalThis.__RESULT = JSON.stringify(res.map((el) => ({ idx: all.indexOf(el) })));
+    globalThis.__RESULT = JSON.stringify(res.map((el) => ({ idx: indices.get(el) })));
     return;
   }
   if (leaf && leaf.getBy) {
     // Reuse __G.tcGetBy's role/text/label matcher by marking the resolved roots and scoping to
     // them (descendant-or-self via the [data-tc-scope] root selector).
     for (let ci = 0; ci < cur.length; ci++) if (cur[ci].setAttribute) cur[ci].setAttribute("data-tc-scope", "");
-    __G.tcGetBy(leaf.getBy.kind, leaf.getBy.value, leaf.getBy.name, "[data-tc-scope]");
+    __G.tcGetBy(leaf.getBy.kind, leaf.getBy.value, leaf.getBy.name, "[data-tc-scope]", leaf.getBy.options);
     const out = globalThis.__RESULT;
     for (let ci = 0; ci < cur.length; ci++) if (cur[ci].removeAttribute) cur[ci].removeAttribute("data-tc-scope");
     globalThis.__RESULT = out;
@@ -12477,7 +14092,7 @@ const __pendingWindowTimer = () => {
   return index>=0 && __timers[index].due<=__timerNow();
 };
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __setSize(__resourcePromises) > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
+  (!__G.isFrame && !__G.isAuxiliary && ops.op_frame_pending() > 0) || __pendingFetchCount > 0 || __setSize(__resourcePromises) > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
 __G.pendingFetchCount = () => String(__pendingFetchCount);
@@ -12540,6 +14155,9 @@ __G.domSig = (() => {
     return frameApply(kind === 9 ? frameDocumentQuery : kind === 11 ? frameFragmentQuery : frameElementQuery, root, [selector]);
   };
   const frameDocument = node => frameApply(frameNodeType, node, []) === 9 ? node : frameApply(frameOwnerDocument, node, []);
+  // Keep the owning realm's native edit/range bookkeeping without exposing its namespace.
+  __G.replaceFrameControlSelection = (control, text) => ops.op_frame_host_helper(
+    frameDocument(control), "replaceControlSelection", [control, text]);
   const frameOwner = el => frameApply(frameDefaultView, frameApply(frameOwnerDocument, el, []), []);
   const frameConnected = el => frameApply(frameIsConnected, el, []);
   const visitFrameHosts = callback => frameApply(frameHostEach, frameHosts, [callback]);
@@ -12565,7 +14183,7 @@ __G.domSig = (() => {
     if (owner !== globalThis) return ops.op_frame_host_helper(frameDocument(el), "frameRecordFor", [el]);
     let record = frameRecords.get(el);
     if (!record || record.owner !== owner) {
-      record = {__proto__:null, owner, depth: frameDepth, realm: null, started: false, connected: false, epoch: 0, loaded: false};
+      record = {__proto__:null, owner, depth: frameDepth, realm: null, started: false, connected: false, epoch: 0, loaded: false, attempt: null, attemptEpoch: -1};
       frameRecords.set(el, record);
     }
     if (frameConnected(el)) frameApply(frameHostAdd, frameHosts, [el]);
@@ -12592,9 +14210,11 @@ __G.domSig = (() => {
       ops.op_dispatch_host_event(event, el);
     }, 0);
   };
+  // Native length/frames are read-only; same-origin indices still use the host's child table.
+  const producerFrameProperties = () => ops.op_producer_window_proxy(__document);
   let frameCount = globalThis.length || 0;
   for (let i = 0; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
-  globalThis.length = 0; globalThis.frames = globalThis;
+  if (!producerFrameProperties()) { globalThis.length = 0; globalThis.frames = globalThis; }
   const refreshFrameTree = () => {
     const windows = ops.op_window_child_frames(__document);
     for (let i = windows.length; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
@@ -12604,7 +14224,8 @@ __G.domSig = (() => {
         configurable: true, get() { return frameWindowView(window); }
       });
     }
-    frameCount = windows.length; globalThis.length = frameCount;
+    frameCount = windows.length;
+    if (!producerFrameProperties()) globalThis.length = frameCount;
   };
 
   // Compile in the child's V8 context, preserving its global lexical bindings and
@@ -12622,7 +14243,7 @@ __G.domSig = (() => {
         if(script.module){await ops.op_frame_module(cw,script.index);return;}
         if(!ops.op_frame_script_allowed(cw,script.index)){if(script.src)ops.op_frame_script_event(cw,script.index,false);return;}
         if (script.src) {
-          const response = await ops.op_fetch(script.src, __stringify({ __proto__:null, destination: "script", source: frameUrl, frame_script: true, integrity:script.integrity, ...ops.op_document_cookie_site(cw), csp:ops.op_csp_context(cw), opaque_origin:ops.op_window_opaque(cw), mode:script.crossorigin===null?"no-cors":"cors", credentials:script.crossorigin!==null&&script.crossorigin.toLowerCase()!=="use-credentials"?"same-origin":"include" }));
+          const response = await __boundary.invokeFrame(cw, () => ops.op_fetch(script.src, __stringify({ __proto__:null, destination: "script", source: frameUrl, frame_script: true, integrity:script.integrity, ...ops.op_document_cookie_site(cw), csp:ops.op_csp_context(cw), opaque_origin:ops.op_window_opaque(cw), mode:script.crossorigin===null?"no-cors":"cors", credentials:script.crossorigin!==null&&script.crossorigin.toLowerCase()!=="use-credentials"?"same-origin":"include" })));
           if (response && response.ok) {
             downloaded=true;
             await runVmInRealm(cw, response.body, response.final_url || script.src, response.frame_script || 0, script.index);
@@ -12654,18 +14275,18 @@ __G.domSig = (() => {
   __G.executeFrameModule = index => {const element=__frameScriptElements[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
   // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
   __G.configureFrame = (metadata, parentWin, hostEl) => {
-    for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
+    if (!producerFrameProperties()) for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
       const getter=__documentFunction(function(){if(!ops.op_surf_is_window(this))throw new __exceptionTypeError("Illegal invocation");const value=read(this);return name==="frameElement"?value:frameWindowView(value);},"get "+name,0);
       Object.defineProperty(globalThis,name,{__proto__:null,get:getter,configurable:true,enumerable:true});
     }
     __G.setDocumentReadyState("loading");
     globalThis.origin = metadata.origin;
-    location.href = metadata.location;
+    if (!ops.op_native_location_installed(__document)) location.href = metadata.location;
     __documentRuntimeState.frame = metadata;
     __documentRuntimeState.contentType = metadata.contentType || "text/html";
     __initializeDocumentBase();
     __documentRuntimeState.referrer = ops.op_document_referrer(__document);
-    globalThis.frames = globalThis;
+    if (!producerFrameProperties()) globalThis.frames = globalThis;
     installFrameFactory(globalThis, document, metadata.depth + 1);
   };
   function fireFrameEvent(target, type, bubbles) {
@@ -12714,19 +14335,32 @@ __G.domSig = (() => {
     const location = record.navigationURL || (frameSrcdocOf(el) !== null ? "about:srcdoc" : inherited ? "about:blank" : url);
     return {__proto__:null, url, origin, location, inherited, depth: record.depth, referrer: source[0]};
   };
-  const frameRealm = (el) => {
+  const frameLoadAttempt = (el, record) => {
+    if (record.attemptEpoch !== record.epoch) {
+      record.attempt = ops.op_frame_load_attempt(record.owner, el);
+      record.attemptEpoch = record.epoch;
+    }
+    return record.attempt;
+  };
+  const frameAttemptCancelled = (el, record, epoch, attempt) =>
+    record.epoch !== epoch || !frameConnected(el) || !ops.op_frame_load_active(record.owner, el, attempt);
+  const frameRealm = (el, capturedAttempt = null) => {
     if (!ops.op_window_active(__document)) return null;
     const record = recordFor(el);
     if (!record || !ops.op_window_active(__document) || !frameConnected(el) || record.depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) return null;
-    if (record.realm && ops.op_window_active(record.realm)) return record.realm;
+    const attempt = capturedAttempt || frameLoadAttempt(el, record);
+    const active = ops.op_frame_load_active(record.owner, el, attempt);
+    if (capturedAttempt && capturedAttempt !== record.attempt) return null;
+    if (record.realm && ops.op_frame_load_window_valid(record.owner, el, record.realm, attempt)) return record.realm;
+    if (!active) { record.realm = null; return null; }
     // An unsuccessful native commit retires its unpublished replacement. A
     // later host navigation must allocate a fresh realm rather than reuse it.
     record.realm = null;
-    let window = ops.op_create_frame(globalThis);
+    let window = ops.op_create_frame(globalThis, el, attempt);
     record.metadata = frameMetadata(el);
     window = ops.op_frame_set_document(window, record.owner, el,
       "<!DOCTYPE html><html><head></head><body></body></html>",
-      __stringify({__proto__:null,...record.metadata, inherited: true, initial: true}), 0);
+      __stringify({__proto__:null,...record.metadata, inherited: true, initial: true}), 0, attempt);
     record.realm = window;
     refreshFrameTree();
     return window;
@@ -12735,16 +14369,18 @@ __G.domSig = (() => {
     const record = recordFor(el);
     if (!record || record.owner !== globalThis || record.started || !frameConnected(el) || !ops.op_window_active(__document)) return;
     record.started = true;
-    const epoch = record.epoch;
-    let window = frameRealm(el);
-    if (!window) { fireIframeLoad(el, epoch); return; }
+    const epoch = record.epoch, attempt = frameLoadAttempt(el, record);
+    if (!ops.op_frame_load_active(record.owner, el, attempt)) return;
+    let cancelled = false;
     __pendingFetchCount++;
-    let frameUrl = record.metadata.url;
     try {
-      // Insertion creates the initial empty document synchronously. Navigation
-      // commits on a later microtask, so srcdoc cannot appear during appendChild.
+      // Publish the initial realm synchronously; authored child work still waits
+      // until trusted bootstrap has finished installing the owner's geometry.
+      let window = frameRealm(el, attempt);
       await undefined;
-      if (record.epoch !== epoch || !frameConnected(el)) return;
+      if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
+      if (!window) { fireIframeLoad(el, epoch); return; }
+      let frameUrl = record.metadata.url;
       let html = "", responseId = 0;
       const srcdoc = record.navigationURL ? null : frameSrcdocOf(el);
       const blank = srcdoc === null && (record.navigationURL ? record.navigationURL === "about:blank" : !frameSrcOf(el) || frameSrcOf(el) === "about:blank");
@@ -12752,20 +14388,26 @@ __G.domSig = (() => {
       else {
         const url = record.navigationURL || resolveFrameUrl(el);
         if (url && url !== "about:blank") {
-          const init = __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(__document):undefined});
+          const cancelId = /^https?:/.test(url) ? ops.op_fetch_prepare_frame(__document,el) : 0;
+          const init = __stringify({__proto__:null,cancel_id:cancelId,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document),blob_key:url.startsWith("blob:")?ops.op_blob_url_key(__document):undefined});
           const request = record.navigationRequest; record.navigationRequest = "";
-          const response = await ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init);
+          let response;
+          // The iframe request belongs to this captured parent document, not the
+          // private realm that owns the native op wrapper.
+          try { response = await __boundary.invoke(() => ops.op_fetch(url, request ? init.slice(0, -1) + "," + request.slice(1) : init)); }
+          finally { if (cancelId) ops.op_fetch_release(cancelId); }
           if (request && ops.op_form_navigation_blocked(request) && record.epoch === epoch) { record.loaded = true; return; }
-          if (record.epoch !== epoch || !frameConnected(el)) return;
+          if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;
         }
       }
-      if (record.epoch !== epoch || !frameConnected(el)) return;
+      if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
+      if (frameAttemptCancelled(el, record, epoch, attempt)) { cancelled = true; return; }
       if (!blank || record.navigation) {
         window = ops.op_frame_set_document(window, record.owner, el,
           html || "<!DOCTYPE html><html><head></head><body></body></html>",
-          __stringify({__proto__:null,...record.metadata, url: frameUrl}), responseId);
+          __stringify({__proto__:null,...record.metadata, url: frameUrl}), responseId, attempt);
         record.realm = window; record.navigation = false;
         refreshFrameTree();
       }
@@ -12774,11 +14416,16 @@ __G.domSig = (() => {
       await ops.op_frame_dom_ready(window);
       await __framePromiseAll(work.asynchronous);
       await ops.op_frame_finish(window);
+      ops.op_frame_load_complete(record.owner, el, attempt);
     } catch (error) {
-      if (record.epoch === epoch) __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
+      cancelled = true;
+      if (!frameAttemptCancelled(el, record, epoch, attempt)) {
+        cancelled = false;
+        __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
+      }
     } finally {
       __pendingFetchCount = __pendingFetchCount > 0 ? __pendingFetchCount - 1 : 0;
-      fireIframeLoad(el, epoch);
+      if (!cancelled) fireIframeLoad(el, epoch);
     }
   };
   const loadFrame = el => __trackResource(loadFrameImpl(el));
@@ -12856,6 +14503,28 @@ __G.domSig = (() => {
     if (frameApply(iframeTag, el, []) !== "IFRAME") throw new TypeError("Illegal invocation");
     return frameOwner(el);
   };
+  // Automation identities are document-scoped and never expose their map to authored code.
+  __G.shimFrameId = (() => {
+    const Constructor = WeakMap, get = Constructor.prototype.get, set = Constructor.prototype.set;
+    const identities = new Constructor(), Failure = Error;
+    const documentId = ops.op_csp_context(__document);
+    const ownWindow = frameApply(frameDefaultView, __document, []);
+    const ownTop = ownWindow && ops.op_window_top(ownWindow);
+    const rootId = ownTop ? ops.op_csp_context(ownTop) : 0;
+    let next = 0;
+    return host => {
+      const owner = frameReceiver(host), top = owner && ops.op_window_top(owner);
+      if (!frameConnected(host) || !top || rootId <= 0 || ops.op_csp_context(top) !== rootId)
+        throw new Failure("turbo-surf: frame is detached");
+      let identity = frameApply(get, identities, [host]);
+      if (identity === undefined) {
+        if (next >= 9007199254740991) throw new Failure("Native frame identity limit exceeded");
+        identity = __String(documentId) + ":" + __String(++next);
+        frameApply(set, identities, [host, identity]);
+      }
+      return identity;
+    };
+  })();
   const accessFrame = (el, documentOnly) => {
     const owner = frameReceiver(el);
     if (!owner) return null;
@@ -13258,8 +14927,10 @@ __G.domSig = (() => {
     __G.performancePhase("domContentLoadedEventStart");
     lifecycleEvent(document, "DOMContentLoaded", true);
     __G.performancePhase("domContentLoadedEventEnd");
+    ops.op_page_lifecycle(__document, "domcontentloaded");
   };
   let __documentCompleted = false;
+  let __contentLoadGeneration = 0;
   const dispatchDocumentComplete = () => {
     if (__documentCompleted) return;
     __documentCompleted = true;
@@ -13270,8 +14941,10 @@ __G.domSig = (() => {
     lifecycleEvent(globalThis, "load", false);
     __G.performancePhase("loadEventEnd");
     lifecycleEvent(globalThis, "pageshow");
+    ops.op_page_lifecycle(__document, "load");
   };
-  ops.op_set_host_capabilities({documentLoading:()=>{__G.initialLoading=true;__G.setDocumentReadyState("loading");},markDocumentInteractive:__markDocumentInteractive,dispatchDocumentInteractive,dispatchDocumentComplete});
+  ops.op_set_host_capabilities({scheduleContentLoad:()=>{const generation=__contentLoadGeneration;__resourceThen(__G.waitForDocumentResources(),()=>{if(generation===__contentLoadGeneration)dispatchDocumentComplete();});}});
+  ops.op_set_host_capabilities({documentLoading:()=>{__contentLoadGeneration++;__documentCompleted=false;__G.initialLoading=true;__G.setDocumentReadyState("loading");},markDocumentInteractive:__markDocumentInteractive,dispatchDocumentInteractive,dispatchDocumentComplete});
 
   // NB: navigator is now a full `Navigator` instance built earlier — zero own props, all 84
   // members (incl. userAgent/platform/webdriver) as native-marked getters on `Navigator.prototype`
@@ -14446,6 +16119,15 @@ fn pin_timezone() {
     });
 }
 
+// Deno supplies its template argument, but the producer constructor owns the
+// native Window layout and access checks required by canonical auxiliary roots.
+fn auxiliary_root_template<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    _template: v8::Local<'s, v8::ObjectTemplate>,
+) -> v8::Local<'s, v8::ObjectTemplate> {
+    turbo_dom_browser_env::host_internals::auxiliary_window_template(scope)
+}
+
 fn make_runtime(base: &str, cookies: &str, ua: &str) -> OwnedRuntime {
     make_runtime_with_hints(base, cookies, ua, ClientHints::default())
 }
@@ -14501,6 +16183,7 @@ fn make_runtime_with_storage_and_options(
         turbo_surf_core::request_context::origin(base).is_none(),
     ));
     let csp = CspHandle::new(base, &[], "");
+    let module_network = ModuleNetworkLog(Rc::new(RefCell::new(NetworkLog::default())));
     #[cfg(turbo_surf_native_proxy)]
     let module_stages = ModuleStages::default();
     let mut rt = JsRuntime::new(RuntimeOptions {
@@ -14509,7 +16192,7 @@ fn make_runtime_with_storage_and_options(
             let extension = turbo_dom::init();
             let extension = {
                 let mut extension = extension;
-                extension.global_template_middleware = Some(window_proxy::template);
+                extension.global_template_middleware = Some(auxiliary_root_template);
                 extension
             };
             let mut extensions = crate::crypto_backend::extensions();
@@ -14517,19 +16200,23 @@ fn make_runtime_with_storage_and_options(
             extensions.push(crate::message_ports::extension());
             extensions.push(crate::audio_backend::extension());
             extensions.push(crate::geometry_backend::extension());
+            extensions.push(crate::remote_handles::extension());
             extensions.push(extension);
             extensions
         },
-        // Exact-engine children own native module maps. Published SDK children
-        // fail closed; actual context retirement and sandbox flags gate imports.
+        // Registered native Pages own their maps; no guest context falls back to E.
         validate_import_attributes_cb: Some(Box::new(|scope, _attributes, _context| {
             let current = scope.get_current_context();
-            if current.get_slot::<FrameContextMarker>().is_some()
-                && (!cfg!(turbo_surf_native_proxy)
-                    || current.get_slot::<FrameRetired>().is_some()
+            if current.get_slot::<FrameRetired>().is_some()
+                || current
+                    .get_slot::<FrameSandbox>()
+                    .is_some_and(|policy| policy.scripts_blocked)
+                || ((current.get_slot::<FrameContextMarker>().is_some()
                     || current
-                        .get_slot::<FrameSandbox>()
-                        .is_some_and(|policy| policy.scripts_blocked))
+                        .get_slot::<private_infrastructure::GuestDocument>()
+                        .is_some())
+                    && !cfg!(turbo_surf_native_proxy)
+                    && current.get_slot::<NativePageModuleContext>().is_none())
             {
                 let message = v8::String::new(
                     scope,
@@ -14541,6 +16228,8 @@ fn make_runtime_with_storage_and_options(
             }
         })),
         module_loader: Some(Rc::new(NetModuleLoader {
+            network: module_network.clone(),
+            max_resource_bytes: options.max_resource_bytes,
             base: base.to_string(),
             source: base.to_string(),
             top_level_source: base.to_string(),
@@ -14552,6 +16241,7 @@ fn make_runtime_with_storage_and_options(
             storage_effects: storage.partition_response_effects(
                 csp.partition.as_ref().map_or(0, |partition| partition.id),
             ),
+            emulation: storage.4.clone(),
             inline_sources: inline_sources.clone(),
             credentials: module_credentials.clone(),
             csp: csp.clone(),
@@ -14565,7 +16255,6 @@ fn make_runtime_with_storage_and_options(
     // Date/Intl report the coherent zone rather than a cached host default.
     rt.v8_isolate()
         .date_time_configuration_change_notification(v8::TimeZoneDetection::Redetect);
-    #[cfg(turbo_surf_native_proxy)]
     rt.v8_isolate()
         .set_failed_access_check_callback(window_proxy::failed_access);
     // Install the JS wasm-streaming handler before we delete `Deno` from the
@@ -14604,9 +16293,19 @@ fn make_runtime_with_storage_and_options(
     }
     let state = rt.op_state();
     let mut state = state.borrow_mut();
-    state.put(NetworkLog::default());
+    state.put(ResourceBudget(options.max_resource_bytes));
+    let network = module_network.0.borrow().clone();
+    state.put(module_network);
+    state.put(network.own_world());
+    state.put(network);
+    state.put(driver_sync::Revision::default());
     state.put(blob_store);
     state.put(form_submission::Queue::default());
+    state.put(crate::animation_policy::Selected(
+        options
+            .animation_policy
+            .unwrap_or(storage.animation_policy()),
+    ));
     state.put(storage);
     state.put(ResponseHeaders::default());
     state.put(crate::DocumentResponseMetadata::default());
@@ -14618,7 +16317,12 @@ fn make_runtime_with_storage_and_options(
     state.put(module_stages);
     state.put(ClassicScripts::default());
     state.put(FrameContexts::default());
+    state.put(auxiliary_pages::Pages::default());
+    state.put(auxiliary_navigation::State::default());
     state.put(crate::document_facts::AgentClusters::default());
+    state.put(crate::live_layout_backend::InitialViewport(
+        options.viewport,
+    ));
     state.put(TimerClock {
         mode: options.window_timer_mode,
         ..TimerClock::default()
@@ -14671,6 +16375,7 @@ fn install_dom_csp_handle<'a, 'b>(
     *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
     context.remove_slot::<FrameSandbox>();
     install_csp_sandbox_flags(scope, context, &csp);
+    user_activation::reject_opaque_seed(scope, context);
     if let Some(origins) = context.get_slot::<ModuleOrigins>() {
         origins.opaque.set(window_is_opaque(scope, context));
         origins
@@ -14734,8 +16439,10 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let mut state = state.borrow_mut();
         let frames = state.borrow_mut::<FrameContexts>();
         let init_script = std::mem::take(&mut frames.init_script);
+        let engine_init_script = std::mem::take(&mut frames.engine_init_script);
         *frames = FrameContexts {
             init_script,
+            engine_init_script,
             ..Default::default()
         };
         // A new top-level document starts a new browsing context group.
@@ -14745,7 +16452,22 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         queue.used_inline_offsets.clear();
         queue.jobs.clear();
     }
-    let context = rt.main_context();
+    install_dom_document(rt, html, base)?;
+    let actual_origin = {
+        let selected = private_infrastructure::context(rt)?;
+        deno_core::scope!(scope, rt);
+        let context = v8::Local::new(scope, selected);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        window_origin(scope, context)
+    };
+    private_infrastructure::set_origin(rt, &actual_origin)?;
+    install_dom_environment(rt, base)?;
+    finish_dom_window(rt, base)?;
+    Ok(())
+}
+
+fn install_dom_document(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String> {
+    let context = private_infrastructure::context(rt)?;
     {
         let scope = v8::HandleScope::new(rt.v8_isolate());
         let scope = std::pin::pin!(scope);
@@ -14754,7 +16476,6 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let mut scope = v8::ContextScope::new(&mut scope, context);
         set_origin_token(&mut scope, context, base);
         install_dom_csp_handle(&mut scope, context, base, html);
-        #[cfg(turbo_surf_native_proxy)]
         window_proxy::seed_location(&mut scope, base);
         let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
             let policy = handle.policy.borrow();
@@ -14762,16 +16483,7 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         });
         // Chrome's interface key order is applied once Surf's own interfaces exist too.
         crate::browser_env::defer_key_order(&mut scope);
-        if source_positions {
-            crate::browser_env::install_with_html_source_positions(&mut scope, html);
-        } else {
-            crate::browser_env::install_html(&mut scope, html);
-        }
-        // Canvas `measureText` resolves `ctx.font` against the faces live layout uses
-        // (turbo-dom#237); a page opened before font discovery keeps the bundled faces.
-        if let Some(fonts) = crate::live_layout_backend::loaded_system_fonts() {
-            crate::browser_env::set_canvas_fonts(context, fonts.clone());
-        }
+        auxiliary_host::install_root_document_html(&mut scope, html, source_positions);
         install_css_authorization(&mut scope).map_err(|error| error.to_string())?;
         // Before the environment bootstrap, which already creates the parsed iframes.
         let headers = JsRuntime::op_state_from(&scope)
@@ -14781,20 +16493,38 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
             .clone();
         let facts = DocumentFacts::response(&mut scope, context, base, &headers);
         install_document_facts(&mut scope, facts);
+        auxiliary_navigation::install_opener_policy(context, &headers, base);
+        auxiliary_host::install_root(&mut scope, base)?;
+        window_proxy::install_location(&mut scope, base);
+        private_infrastructure::configure_guest(&mut scope, context, base)?;
     }
-    let origin = ModuleSpecifier::parse(base)
-        .map(|url| url.origin().ascii_serialization())
-        .unwrap_or_else(|_| "null".to_string());
-    let actual_origin = {
-        deno_core::scope!(scope, rt);
-        let context = scope.get_current_context();
-        window_origin(scope, context)
-    };
-    rt.execute_script("<location>", format!("location.href = {base:?}; location.origin = {origin:?}; globalThis.origin = {actual_origin:?}"))
-        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn install_dom_environment(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     {
+        let guest = private_infrastructure::context(rt)?;
         deno_core::scope!(scope, rt);
-        let context = scope.get_current_context();
+        let guest = v8::Local::new(scope, guest);
+        if guest
+            .get_slot::<private_infrastructure::GuestDocument>()
+            .is_some()
+        {
+            if let Some(csp) = guest.get_slot::<CspHandle>() {
+                if let Some(images) = JsRuntime::op_state_from(scope)
+                    .borrow_mut()
+                    .try_borrow_mut::<initial_document_images::PromotionImages>()
+                {
+                    images.bind(csp.id, base);
+                }
+            }
+        }
+    }
+    {
+        let selected = private_infrastructure::context(rt)?;
+        deno_core::scope!(scope, rt);
+        let context = v8::Local::new(scope, selected);
+        let scope = &mut v8::ContextScope::new(scope, context);
         let core = context
             .get_slot::<RuntimeCore>()
             .ok_or("Native crypto core unavailable")?;
@@ -14804,20 +16534,32 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         crate::crypto_backend::install(scope, core, trustworthy_url(base))?;
         crate::audio_backend::install(scope, core)?;
         crate::geometry_backend::install(scope, core)?;
+        native_history::activate(scope, context)?;
+        native_history::materialize(scope, context)?;
     }
-    #[cfg(turbo_surf_native_proxy)]
+    Ok(())
+}
+
+fn finish_dom_window(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     {
-        let context = rt.main_context();
+        let context = private_infrastructure::context(rt)?;
         let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
         let mut scope = scope.init();
         let context = v8::Local::new(&scope, context);
         let scope = &mut v8::ContextScope::new(&mut scope, context);
         window_proxy::capture_exception(scope);
-        window_proxy::install_location(scope, base);
     }
     {
+        let selected = private_infrastructure::context(rt)?;
         deno_core::scope!(scope, rt);
+        let context = v8::Local::new(scope, selected);
+        let scope = &mut v8::ContextScope::new(scope, context);
         crate::browser_env::finish_key_order(scope);
+        auxiliary_host::install_root(scope, base)?;
+        let context = scope.get_current_context();
+        if turbo_dom_browser_env::host_internals::auxiliary_context_identity(context).is_some() {
+            turbo_dom_browser_env::host_internals::run_auxiliary_init_scripts(scope, context);
+        }
     }
     Ok(())
 }
@@ -14838,7 +16580,7 @@ fn namespace_call(
     name: &str,
     args: &[HostArg],
 ) -> Result<v8::Global<v8::Value>, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -14852,13 +16594,16 @@ fn namespace_call(
             HostArg::Value(value) => v8::Local::new(scope, value),
         })
         .collect();
-    if let Some(value) = call_frame_helper(scope, name, &values) {
+    if let Some(value) = async_owner::with_document(scope, context, |scope| {
+        call_frame_helper(scope, name, &values)
+    })? {
         return Ok(v8::Global::new(scope, value));
     }
-    if !scope.is_execution_terminating() {
-        if let Some(error) = scope.exception() {
-            return Err(error.to_rust_string_lossy(scope));
-        }
+    if scope.is_execution_terminating() {
+        return Err(format!("Namespace function {name} execution terminated"));
+    }
+    if let Some(error) = scope.exception() {
+        return Err(error.to_rust_string_lossy(scope));
     }
     Err(format!("Namespace function {name} failed"))
 }
@@ -14869,12 +16614,14 @@ pub(crate) fn execute_engine_script(
     rt: &mut JsRuntime,
     source: &str,
 ) -> Result<v8::Global<v8::Value>, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
     v8::tc_scope!(let scope, scope);
-    if let Some(value) = crate::browser_env::run_engine_script(scope, source) {
+    if let Some(value) = async_owner::with_document(scope, context, |scope| {
+        crate::browser_env::run_engine_script(scope, source)
+    })? {
         return Ok(v8::Global::new(scope, value));
     }
     Err(scope
@@ -14885,8 +16632,8 @@ pub(crate) fn execute_engine_script(
 
 /// Reads a data property of the main realm's bootstrap namespace natively
 /// (turbo-surf#87); `undefined` when the namespace is unavailable.
-fn namespace_value(rt: &mut JsRuntime, name: &str) -> v8::Global<v8::Value> {
-    let context = rt.main_context();
+fn namespace_value(rt: &mut JsRuntime, name: &str) -> Result<v8::Global<v8::Value>, String> {
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -14896,11 +16643,11 @@ fn namespace_value(rt: &mut JsRuntime, name: &str) -> v8::Global<v8::Value> {
         namespace.get(scope, key.into())
     });
     let value = value.unwrap_or_else(|| v8::undefined(scope).into());
-    v8::Global::new(scope, value)
+    Ok(v8::Global::new(scope, value))
 }
 
 fn read_string(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<String, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     let scope = v8::HandleScope::new(rt.v8_isolate());
     let scope = std::pin::pin!(scope);
     let mut scope = scope.init();
@@ -14911,7 +16658,7 @@ fn read_string(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<Stri
 }
 
 fn read_json(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<String, String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     deno_core::scope!(scope, rt);
     let context = v8::Local::new(scope, context);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -15029,6 +16776,8 @@ fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, Stri
 
 struct ClassicScriptFailure {
     interrupted: bool,
+    deadline_cancelled: bool,
+    deferred_interruption: bool,
     error: Option<v8::Global<v8::Value>>,
     message: String,
     line: usize,
@@ -15039,6 +16788,8 @@ impl ClassicScriptFailure {
     fn host(message: &str) -> Self {
         Self {
             interrupted: false,
+            deadline_cancelled: false,
+            deferred_interruption: false,
             error: None,
             message: message.into(),
             line: 0,
@@ -15062,7 +16813,54 @@ fn execute_frame_script(
         ));
     }
     let mut scope = v8::ContextScope::new(&mut scope, context);
-    let scope = std::pin::pin!(v8::TryCatch::new(&mut scope));
+    let guard = match auxiliary_navigation::start_frame_context_deadline(&mut scope, context) {
+        Ok(guard) => guard,
+        Err(auxiliary_navigation::FrameStartError::Cancelled) => {
+            let mut failure =
+                ClassicScriptFailure::host("Frame script navigation deadline expired");
+            failure.deadline_cancelled = true;
+            return Err(failure);
+        }
+        Err(auxiliary_navigation::FrameStartError::Authority(error)) => {
+            return Err(ClassicScriptFailure::host(&error))
+        }
+    };
+    let result = async_owner::with_document(&mut scope, context, |scope| {
+        execute_frame_script_active(scope, source_url, code)
+    })
+    .map_err(|error| ClassicScriptFailure::host(&error))
+    .and_then(|result| result);
+    let outcome = guard
+        .map(|guard| guard.finish(&mut scope))
+        .unwrap_or(auxiliary_navigation::FrameExecutionOutcome::Completed);
+    if outcome == auxiliary_navigation::FrameExecutionOutcome::Interrupted
+        || scope.is_execution_terminating()
+        || result
+            .as_ref()
+            .err()
+            .is_some_and(|failure| failure.interrupted)
+    {
+        auxiliary_navigation::queue_interrupted_frame(&mut scope, context, None);
+        let mut failure = ClassicScriptFailure::host("Frame script execution was interrupted");
+        failure.interrupted = true;
+        failure.deferred_interruption = true;
+        return Err(failure);
+    }
+    if outcome == auxiliary_navigation::FrameExecutionOutcome::Cancelled {
+        retire_failed_frame_tree(&mut scope, context);
+        let mut failure = ClassicScriptFailure::host("Frame script navigation deadline expired");
+        failure.deadline_cancelled = true;
+        return Err(failure);
+    }
+    result
+}
+
+fn execute_frame_script_active(
+    scope: &mut v8::PinScope,
+    source_url: &str,
+    code: &[u16],
+) -> Result<(), ClassicScriptFailure> {
+    let scope = std::pin::pin!(v8::TryCatch::new(scope));
     let scope = &mut scope.init();
     let source = v8::String::new_from_two_byte(scope, code, v8::NewStringType::Normal)
         .ok_or_else(|| ClassicScriptFailure::host("script source allocation failed"))?;
@@ -15099,6 +16897,8 @@ fn execute_frame_script(
     let message = scope.message();
     Err(ClassicScriptFailure {
         interrupted: false,
+        deadline_cancelled: false,
+        deferred_interruption: false,
         error: Some(v8::Global::new(scope, error)),
         message: message
             .map(|message| message.get(scope).to_rust_string_lossy(scope))
@@ -15264,7 +17064,7 @@ fn run_due_window_timers(
     if turn.fired == 0 {
         return WindowTimerStep::Idle(turn.deadline);
     }
-    match checkpoint_window_timer(rt) {
+    match checkpoint_window_timer_turn(rt, &turn) {
         Ok(()) => WindowTimerStep::Fired(std::task::Poll::Ready(None)),
         Err(error) => WindowTimerStep::Fired(std::task::Poll::Ready(Some(Err(error)))),
     }
@@ -15292,7 +17092,7 @@ fn drain_next_background_resource_task(
 /// going, a shared storage inbox wakes the host future, or long-lived unref'd
 /// sockets / event streams keep the awaited operation live.
 fn should_keep_pending(
-    rt: &JsRuntime,
+    rt: &mut JsRuntime,
     storage_waiter: &Option<crate::storage_inbox::Waiter>,
     completion: Option<&v8::Global<v8::Value>>,
     await_window_timer: bool,
@@ -15304,6 +17104,9 @@ fn should_keep_pending(
     }
     let settled = matches!(result, std::task::Poll::Ready(Ok(())));
     if completion.is_some() && storage_waiter.is_some() && settled {
+        return true;
+    }
+    if completion.is_some() && settled && context_geolocation::observing(rt) {
         return true;
     }
     completion.is_some() && settled && network_transports::live(&rt.op_state().borrow())
@@ -15356,7 +17159,29 @@ fn evaluate_completion_condition(
 /// True when the event loop should yield back to the outer loop because a
 /// native-proxy module stage, a window message, or a pending classic-script
 /// job is queued.
-fn has_pending_frame_work(rt: &JsRuntime) -> bool {
+fn drive_pending_document_task(rt: &mut JsRuntime, owner: Option<u64>) -> Result<bool, String> {
+    if indexeddb_store::run_task_for(rt, owner)? {
+        return Ok(true);
+    }
+    let history_task = match owner {
+        Some(owner) => native_history::run_task_for(rt, Some(owner)),
+        None => native_history::run_task(rt),
+    }?;
+    if history_task {
+        return Ok(true);
+    }
+    #[cfg(turbo_surf_native_proxy)]
+    return drive_pending_module_stage(rt);
+    #[cfg(not(turbo_surf_native_proxy))]
+    Ok(false)
+}
+
+fn has_pending_frame_work(rt: &JsRuntime, owner: Option<u64>) -> bool {
+    if indexeddb_store::has_tasks_for(rt, owner)
+        || native_history::has_tasks_for(&rt.op_state().borrow(), owner)
+    {
+        return true;
+    }
     #[cfg(turbo_surf_native_proxy)]
     if !rt
         .op_state()
@@ -15470,6 +17295,43 @@ fn run_pending_classic_script(rt: &mut JsRuntime, job: ClassicScriptJob) -> Resu
     } = job;
     let previous_script = capture_current_script(rt, &script_context, &document, element.as_ref());
     let result = execute_frame_script(rt, script_context.clone(), &source, &code);
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|failure| failure.deferred_interruption)
+    {
+        let shared = rt.op_state();
+        let mut state = shared.borrow_mut();
+        if !state.has::<DeferredClassicInterruptions>() {
+            state.put(DeferredClassicInterruptions::default());
+        }
+        state
+            .borrow_mut::<DeferredClassicInterruptions>()
+            .0
+            .push(DeferredClassicInterruption {
+                script_context,
+                document,
+                previous_script,
+                waiter_context,
+                resolver,
+            });
+        return Err("Classic script execution was interrupted".into());
+    }
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|failure| failure.deadline_cancelled)
+    {
+        reject_classic_script_as_interrupted(
+            rt,
+            &script_context,
+            &document,
+            previous_script,
+            &waiter_context,
+            &resolver,
+        )?;
+        return Ok(());
+    }
     if script_execution_interrupted(rt, result.as_ref()) {
         rt.v8_isolate().cancel_terminate_execution();
         reject_classic_script_as_interrupted(
@@ -15496,6 +17358,35 @@ fn run_pending_classic_script(rt: &mut JsRuntime, job: ClassicScriptJob) -> Resu
     }
     settle_classic_script_waiter(&mut scope, &waiter_context, &resolver, failure);
     Ok(())
+}
+
+struct DeferredClassicInterruption {
+    script_context: v8::Global<v8::Context>,
+    document: v8::Global<v8::Object>,
+    previous_script: Option<v8::Global<v8::Value>>,
+    waiter_context: v8::Global<v8::Context>,
+    resolver: v8::Global<v8::PromiseResolver>,
+}
+#[derive(Default)]
+struct DeferredClassicInterruptions(Vec<DeferredClassicInterruption>);
+
+fn settle_deferred_classic_interruptions(rt: &mut JsRuntime) {
+    let jobs = rt
+        .op_state()
+        .borrow_mut()
+        .try_borrow_mut::<DeferredClassicInterruptions>()
+        .map(|jobs| std::mem::take(&mut jobs.0))
+        .unwrap_or_default();
+    for job in jobs {
+        let _ = reject_classic_script_as_interrupted(
+            rt,
+            &job.script_context,
+            &job.document,
+            job.previous_script,
+            &job.waiter_context,
+            &job.resolver,
+        );
+    }
 }
 
 /// Capture `document.currentScript` before a classic script runs so it can be
@@ -15627,11 +17518,82 @@ fn settle_classic_script_waiter<'s>(
     }
 }
 
+// A collector services one ready turn, never parking on unrelated page IO or
+// running the document's hydration/quiescence loops while its host replies wait.
+async fn poll_driver_turn(rt: &mut JsRuntime) -> Result<(), String> {
+    rt.v8_isolate().perform_microtask_checkpoint();
+    #[cfg(turbo_surf_native_proxy)]
+    drive_pending_module_stage(rt)?;
+    let message = rt
+        .op_state()
+        .borrow_mut()
+        .borrow_mut::<FrameContexts>()
+        .messages
+        .pop_front();
+    if let Some(message) = message {
+        deliver_window_message(rt, message)?;
+    }
+    let job = rt
+        .op_state()
+        .borrow_mut()
+        .borrow_mut::<ClassicScripts>()
+        .jobs
+        .pop_front();
+    if let Some(job) = job {
+        run_pending_classic_script(rt, job)?;
+    }
+    std::future::poll_fn(|cx| {
+        let result = rt.poll_event_loop(cx, deno_core::PollEventLoopOptions::default());
+        if let std::task::Poll::Ready(Err(error)) = result {
+            let text = error.to_string();
+            if !text.contains("Uncaught (in promise)") && !text.contains("Unhandled") {
+                return std::task::Poll::Ready(Err(text));
+            }
+        }
+        if let Some(std::task::Poll::Ready(Some(Err(error)))) = drain_pending_storage_event(rt) {
+            return std::task::Poll::Ready(Err(error));
+        }
+        let mut timer_budget = 1;
+        if let WindowTimerStep::Fired(std::task::Poll::Ready(Some(Err(error)))) =
+            run_due_window_timers(rt, &mut timer_budget, false)
+        {
+            return std::task::Poll::Ready(Err(error));
+        }
+        if let Some(std::task::Poll::Ready(Some(Err(error)))) =
+            drain_next_background_resource_task(rt)
+        {
+            return std::task::Poll::Ready(Err(error));
+        }
+        std::task::Poll::Ready(Ok(()))
+    })
+    .await
+}
+
 async fn drain_event_loop_until_completion(
     rt: &mut JsRuntime,
     condition: Option<&str>,
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
+    let owner = auxiliary_pages::event_log(&rt.op_state().borrow())
+        .root()
+        .map(|root| {
+            root.parse::<u64>()
+                .map_err(|_| "Invalid native actor root identity")
+        })
+        .transpose()?;
+    drain_event_loop_until_completion_for(rt, condition, completion, owner).await
+}
+
+async fn drain_event_loop_until_completion_for(
+    rt: &mut JsRuntime,
+    condition: Option<&str>,
+    completion: Option<&v8::Global<v8::Value>>,
+    owner: Option<u64>,
+) -> Result<(), String> {
+    if async_owner::enabled(rt) {
+        let root = owner.ok_or("Native async root ownership is unavailable")?;
+        return async_owner::drain(rt, root, condition, completion).await;
+    }
     let real_timers =
         rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
     let mut frame_timer_budget = 200000u32;
@@ -15640,6 +17602,12 @@ async fn drain_event_loop_until_completion(
         std::pin::Pin<Box<tokio::time::Sleep>>,
     )> = None;
     let storage_waiter = storage_events::waiter(&rt.op_state().borrow());
+    let emulation_changed = rt
+        .op_state()
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .with_emulation(|options| options.changed.clone());
+    let mut emulation_waiter = Box::pin(emulation_changed.clone().notified_owned());
     // Even a synchronous result ends a script job. Observer and Promise
     // microtasks must run before the operation-completion shortcut can return.
     rt.v8_isolate().perform_microtask_checkpoint();
@@ -15652,8 +17620,7 @@ async fn drain_event_loop_until_completion(
         if completion.is_some_and(|promise| promise_settled(rt, promise)) {
             return Ok(());
         }
-        #[cfg(turbo_surf_native_proxy)]
-        if drive_pending_module_stage(rt)? {
+        if drive_pending_document_task(rt, owner)? {
             continue;
         }
         let message = {
@@ -15676,6 +17643,11 @@ async fn drain_event_loop_until_completion(
             continue;
         }
         let result = std::future::poll_fn(|cx| {
+            context_geolocation::register_change_waiter(
+                &mut emulation_waiter,
+                &emulation_changed,
+                cx,
+            );
             if let Some(waiter) = &storage_waiter {
                 waiter.register(cx);
             }
@@ -15685,7 +17657,7 @@ async fn drain_event_loop_until_completion(
             if completion.is_some_and(|promise| promise_settled(rt, promise)) {
                 return std::task::Poll::Ready(Some(Ok(())));
             }
-            if has_pending_frame_work(rt) {
+            if has_pending_frame_work(rt, owner) {
                 return std::task::Poll::Ready(None);
             }
 
@@ -15703,6 +17675,11 @@ async fn drain_event_loop_until_completion(
             };
             if let Some(outcome) = drain_next_background_resource_task(rt) {
                 return outcome;
+            }
+            if completion.is_none() && crate::shim_bindings::pending(rt) {
+                // Poll real IO and due timers, then free the actor for the
+                // embedder's reply rather than parking on its external work.
+                return std::task::Poll::Ready(Some(Ok(())));
             }
             // Native I/O and official system timers use real monotonic time.
             // Do not leap a Window timer past their earlier wake-up. Keep one
@@ -15939,7 +17916,7 @@ pub async fn render_capture_cookies_with_document_response(
             page.eval(program).await?;
         }
     }
-    let result = (page.serialize(), page.cookies());
+    let result = (page.serialize_checked()?, page.cookies());
     page.close();
     Ok(result)
 }
@@ -16391,12 +18368,12 @@ fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str, base: &str) -> Result<(),
 // receiver-local state; each phase updates it and dispatches the matching trusted
 // events. All fully guarded so a lifecycle hiccup can't break a render.
 fn run_lifecycle(rt: &mut JsRuntime, phase: &str) -> Result<(), String> {
-    let context = rt.main_context();
+    let context = private_infrastructure::context(rt)?;
     let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
     let mut scope = scope.init();
     let context = v8::Local::new(&scope, context);
     let scope = &mut v8::ContextScope::new(&mut scope, context);
-    call_frame_helper(scope, phase, &[])
+    async_owner::with_document(scope, context, |scope| call_frame_helper(scope, phase, &[]))?
         .map(|_| ())
         .ok_or_else(|| format!("Native lifecycle {phase} failed"))
 }
@@ -16440,7 +18417,7 @@ pub async fn render_hydrate_with_budget(
         let _activation = rt.activation_key().enter();
         prepare_hydration(&mut rt, html, base)?;
     }
-    let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
+    let watchdog = Watchdog::start(rt.v8_isolate(), budget_ms);
     rt.park();
     let key = rt.activation_key();
     let result = key
@@ -16578,29 +18555,44 @@ fn hydrate_pass(rt: &mut JsRuntime) -> Result<v8::Global<v8::Value>, String> {
     )
 }
 
-/// The unified post-load pump: a single "run scripts+timers, then drain" pass
-/// isn't enough for a real SPA (React kicks a fetch → yields → the fetch
-/// resolves → React schedules more work via a MessageChannel → …). Loop until
-/// the namespace predicate `pendingWork` goes false or the pump budget runs
-/// out. Split from [`hydrate_installed_document`] to keep it under the
-/// complexity gate.
+/// Continue post-load hydration while selected native work remains. Timer-only
+/// queues hand off to the following full quiescence phase, which also runs any
+/// scripts, modules and native work those timers create.
 async fn run_post_load_hydration_pumps(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     const MAX_PUMPS: usize = 500;
+    // Host callbacks can only settle after this actor yields back to its driver.
     for round in 0..MAX_PUMPS {
+        if crate::shim_bindings::pending(rt) {
+            return Ok(());
+        }
         hydrate_pass(rt)?;
-        drain_event_loop(rt).await?;
+        // A background frame loop must yield to the bounded hydration pump,
+        // not turn its first iteration into an unbounded timer collector.
+        let first = drain_quiescence_turn(rt, true).await?;
+        if post_load_turn_handoff(rt, &first) {
+            return Ok(());
+        }
         drain_module_scripts(rt, base).await?;
-        drain_event_loop(rt).await?;
+        let last = drain_quiescence_turn(rt, true).await?;
+        if post_load_turn_handoff(rt, &last) {
+            return Ok(());
+        }
         rt.op_state()
             .borrow_mut()
             .borrow_mut::<HydrationProgress>()
             .completed_pumps = round + 1;
-        let pending = namespace_call(rt, "pendingWork", &[])?;
-        if read_string(rt, pending)? != "1" {
+        // Raw timer queues need not become empty (for example, a running CSS
+        // animation). Full quiescence still drains them after this native-work phase.
+        if !first.busy && !last.busy {
             break;
         }
+        tokio::task::yield_now().await;
     }
     Ok(())
+}
+
+fn post_load_turn_handoff(rt: &JsRuntime, turn: &async_owner::QuiescenceTurn) -> bool {
+    turn.host_reply || crate::shim_bindings::pending(rt)
 }
 
 async fn hydrate_installed_document(
@@ -16613,36 +18605,64 @@ async fn hydrate_installed_document(
     run_lifecycle(rt, "documentLoading").map_err(|error| error.to_string())?;
     namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
     hydration_phase(rt, HydrationPhase::InitScript);
+    let engine_source = rt
+        .op_state()
+        .borrow()
+        .borrow::<FrameContexts>()
+        .engine_init_script
+        .clone();
+    if !engine_source.is_empty() {
+        execute_engine_script(rt, &engine_source)?;
+    }
     if !init_script.is_empty() {
-        rt.execute_script("<init-script>", init_script.to_string())
-            .map_err(|e| e.to_string())?;
+        private_infrastructure::execute(rt, init_script).map_err(|e| e.to_string())?;
     }
     hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
     namespace_call(rt, "startInitialHydrate", &[])?;
-    drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
-    hydration_phase(rt, HydrationPhase::ModuleScripts);
-    drain_module_scripts(rt, base).await?;
-    hydration_phase(rt, HydrationPhase::DocumentInteractive);
-    run_lifecycle(rt, "dispatchDocumentInteractive").map_err(|error| error.to_string())?;
-    // HTML load waits for script graph completion, images/styles and frames,
-    // independently of unrelated fetches or a module's pending top-level await.
-    hydration_phase(rt, HydrationPhase::LoadResources);
-    drain_event_loop_until(rt, Some("documentLoadReady")).await?;
-    hydration_phase(rt, HydrationPhase::DocumentComplete);
-    run_lifecycle(rt, "dispatchDocumentComplete")?;
-    // Unified event-loop pump. A single "run scripts+timers, then drain" pass isn't
-    // enough for a real SPA: React kicks a fetch, yields, the fetch resolves, React
-    // schedules MORE work (a timer via its MessageChannel), which schedules another
-    // fetch… So loop — run the hydration pump, drain async ops (microtasks + fetches +
-    // injected-script loads), check whether JS still has queued work — until it
-    // quiesces. The watchdog bounds wall time; MAX_PUMPS bounds a pathological spin.
-    hydration_phase(rt, HydrationPhase::PostLoadHydration);
-    run_post_load_hydration_pumps(rt, base).await?;
-    run_lifecycle(rt, "dispatchDocumentComplete").map_err(|error| error.to_string())?;
-    hydration_phase(rt, HydrationPhase::PostLoadQuiescence);
-    drain_to_quiescence(rt).await?;
-    hydration_phase(rt, HydrationPhase::Complete);
+    resume_host_hydration(rt, base).await?;
     Ok(crate::browser_env::document_html())
+}
+
+async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
+    loop {
+        let phase = rt.op_state().borrow().borrow::<HydrationProgress>().phase;
+        let next = match phase {
+            HydrationPhase::ParserAndDeferredScripts => {
+                drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
+                HydrationPhase::ModuleScripts
+            }
+            HydrationPhase::ModuleScripts => {
+                drain_module_scripts(rt, base).await?;
+                HydrationPhase::DocumentInteractive
+            }
+            HydrationPhase::DocumentInteractive => {
+                run_lifecycle(rt, "dispatchDocumentInteractive")?;
+                HydrationPhase::LoadResources
+            }
+            HydrationPhase::LoadResources => {
+                drain_event_loop_until(rt, Some("documentLoadReady")).await?;
+                HydrationPhase::DocumentComplete
+            }
+            HydrationPhase::DocumentComplete => {
+                run_lifecycle(rt, "dispatchDocumentComplete")?;
+                HydrationPhase::PostLoadHydration
+            }
+            HydrationPhase::PostLoadHydration => {
+                run_post_load_hydration_pumps(rt, base).await?;
+                run_lifecycle(rt, "dispatchDocumentComplete")?;
+                HydrationPhase::PostLoadQuiescence
+            }
+            HydrationPhase::PostLoadQuiescence => {
+                drain_to_quiescence(rt).await?;
+                HydrationPhase::Complete
+            }
+            _ => return Ok(()),
+        };
+        if crate::shim_bindings::pending(rt) {
+            return Ok(());
+        }
+        hydration_phase(rt, next);
+    }
 }
 
 // Compatibility only: evaluate module syntax in classic script elements (claimed via the engine namespace's `takeModuleScript`) through
@@ -16651,14 +18671,9 @@ async fn hydrate_installed_document(
 // This is the path a Next dev / turbopack build (served as ES modules) needs to hydrate.
 async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     for n in 0..1000usize {
-        namespace_call(rt, "takeModuleScript", &[])?;
-        let g = namespace_value(rt, "moduleDescriptor");
-        let desc = read_string(rt, g)?;
-        if desc.is_empty() || desc == "undefined" || desc == "null" {
+        let Some(v) = take_module_descriptor(rt)? else {
             break;
-        }
-        let v: deno_core::serde_json::Value =
-            deno_core::serde_json::from_str(&desc).unwrap_or(deno_core::serde_json::Value::Null);
+        };
         let src = v.get("src").and_then(|s| s.as_str()).unwrap_or("");
         let code = v
             .get("code")
@@ -16673,6 +18688,19 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
         let Ok(spec) = ModuleSpecifier::parse(&spec_str) else {
             continue;
         };
+        if private_infrastructure::enabled(rt) {
+            #[cfg(not(turbo_surf_native_proxy))]
+            {
+                let context = private_infrastructure::context(rt)?;
+                registered_module_scripts::load_and_evaluate(rt, &context, &spec, code).await?;
+                if crate::shim_bindings::pending(rt) {
+                    return Ok(());
+                }
+                continue;
+            }
+            #[cfg(turbo_surf_native_proxy)]
+            return Err("Guest-root module dispatch requires the registered default engine".into());
+        }
         // Code in hand (inline module, OR a `<script src>` chunk whose fetched body was
         // ESM — the engine namespace's `execScriptEl` already fetched it and queued it) → evaluate from that
         // code with `spec` as its identity so the import graph still resolves relative to
@@ -16684,17 +18712,8 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
         };
         match loaded {
             Ok(id) => {
-                // Point document.currentScript at the chunk's element for the duration of
-                // evaluation: turbopack chunks self-register via TURBOPACK.push([document
-                // .currentScript, …]) and key the chunk by currentScript.src. Without this
-                // an ESM chunk registers under a stale path and the entry's chunk-load
-                // Promise.all never resolves (→ the app never hydrates, no error).
-                let element = namespace_value(rt, "currentModuleEl");
-                namespace_call(rt, "setCurrentScript", &[HostArg::Value(element)])?;
-                let ev = rt.mod_evaluate(id).await;
-                namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
-                if let Err(e) = ev {
-                    eprintln!("module eval error ({spec_str}): {e}");
+                if !evaluate_loaded_module(rt, id, &spec_str).await? {
+                    return Ok(());
                 }
             }
             Err(e) => eprintln!("module load error ({spec_str}): {e}"),
@@ -16703,21 +18722,82 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
     Ok(())
 }
 
+fn take_module_descriptor(
+    rt: &mut JsRuntime,
+) -> Result<Option<deno_core::serde_json::Value>, String> {
+    namespace_call(rt, "takeModuleScript", &[])?;
+    let value = namespace_value(rt, "moduleDescriptor")?;
+    let descriptor = read_string(rt, value)?;
+    if descriptor.is_empty() || descriptor == "undefined" || descriptor == "null" {
+        return Ok(None);
+    }
+    Ok(Some(
+        deno_core::serde_json::from_str(&descriptor).unwrap_or(deno_core::serde_json::Value::Null),
+    ))
+}
+
+async fn evaluate_loaded_module(
+    rt: &mut JsRuntime,
+    id: deno_core::ModuleId,
+    spec_str: &str,
+) -> Result<bool, String> {
+    // Point document.currentScript at the chunk's element for the duration of
+    // evaluation: turbopack chunks self-register via TURBOPACK.push([document
+    // .currentScript, …]) and key the chunk by currentScript.src. Without this
+    // an ESM chunk registers under a stale path and the entry's chunk-load
+    // Promise.all never resolves (→ the app never hydrates, no error).
+    let element = namespace_value(rt, "currentModuleEl")?;
+    namespace_call(rt, "setCurrentScript", &[HostArg::Value(element)])?;
+    let evaluation = rt.mod_evaluate(id);
+    if crate::shim_bindings::pending(rt) {
+        drop(evaluation);
+        namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
+        return Ok(false);
+    }
+    let ev = evaluation.await;
+    namespace_call(rt, "setCurrentScript", &[HostArg::Null])?;
+    if let Err(e) = ev {
+        eprintln!("module eval error ({spec_str}): {e}");
+    }
+    Ok(true)
+}
+
 // RAII runaway-execution watchdog: terminates the isolate if an op runs past the
 // budget, and is cancelled (thread joined) on drop. Replaces the hand-rolled
 // done-flag + spawn + join that each one-shot entry point repeats.
+#[derive(Default)]
+struct ActiveWatchdogs(Vec<std::sync::Weak<std::sync::atomic::AtomicBool>>);
+
 struct Watchdog {
     exceeded: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(all(test, not(turbo_surf_native_proxy)))]
+    termination_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
     done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Watchdog {
-    fn start(handle: v8::IsolateHandle, budget_ms: u64) -> Self {
+    fn any_active(isolate: &v8::Isolate) -> bool {
+        isolate
+            .get_slot::<ActiveWatchdogs>()
+            .is_some_and(|active| active.0.iter().any(|flag| flag.strong_count() > 0))
+    }
+    fn start(isolate: &mut v8::Isolate, budget_ms: u64) -> Self {
+        let handle = isolate.thread_safe_handle();
         use std::sync::atomic::Ordering;
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let watch = done.clone();
         let exceeded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if isolate.get_slot::<ActiveWatchdogs>().is_none() {
+            isolate.set_slot(ActiveWatchdogs::default());
+        }
+        let active = isolate.get_slot_mut::<ActiveWatchdogs>().unwrap();
+        active.0.retain(|flag| flag.strong_count() > 0);
+        active.0.push(std::sync::Arc::downgrade(&done));
         let timed_out = exceeded.clone();
+        #[cfg(all(test, not(turbo_surf_native_proxy)))]
+        let termination_requested = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        #[cfg(all(test, not(turbo_surf_native_proxy)))]
+        let requested = termination_requested.clone();
         let thread = std::thread::spawn(move || {
             let start = std::time::Instant::now();
             while !watch.load(Ordering::Relaxed) {
@@ -16726,12 +18806,16 @@ impl Watchdog {
                     // Nested native callbacks can clear V8's termination state.
                     // Keep the deadline enforced until the owner joins this guard.
                     handle.terminate_execution();
+                    #[cfg(all(test, not(turbo_surf_native_proxy)))]
+                    requested.store(true, Ordering::Release);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(2));
+                std::thread::park_timeout(std::time::Duration::from_millis(2));
             }
         });
         Watchdog {
             exceeded,
+            #[cfg(all(test, not(turbo_surf_native_proxy)))]
+            termination_requested,
             done,
             thread: Some(thread),
         }
@@ -16741,8 +18825,44 @@ impl Drop for Watchdog {
     fn drop(&mut self) {
         self.done.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Some(t) = self.thread.take() {
+            t.thread().unpark();
             let _ = t.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod watchdog_cancellation_tests {
+    use super::Watchdog;
+    use std::sync::{atomic::AtomicBool, mpsc, Arc};
+    use std::time::Duration;
+
+    #[test]
+    fn dropping_watchdog_wakes_its_waiting_thread() {
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            std::thread::park_timeout(Duration::from_secs(10));
+        });
+        ready_rx.recv().unwrap();
+        let waiting = worker.thread().clone();
+        let watchdog = Watchdog {
+            exceeded: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(turbo_surf_native_proxy))]
+            termination_requested: Arc::new(AtomicBool::new(false)),
+            done: Arc::new(AtomicBool::new(false)),
+            thread: Some(worker),
+        };
+        let (cancel_tx, cancel_rx) = mpsc::channel();
+        let cancel = std::thread::spawn(move || {
+            drop(watchdog);
+            cancel_tx.send(()).unwrap();
+        });
+        let result = cancel_rx.recv_timeout(Duration::from_secs(1));
+        // Release only our worker even when the assertion fails.
+        waiting.unpark();
+        cancel.join().unwrap();
+        result.expect("dropping a completed watchdog must wake its deadline wait");
     }
 }
 
@@ -16778,6 +18898,9 @@ async fn drain_to_quiescence_with_scripts(
     rt: &mut JsRuntime,
     execute_document_scripts: bool,
 ) -> Result<(), String> {
+    if crate::shim_bindings::pending(rt) {
+        return drain_event_loop(rt).await;
+    }
     // Fresh virtual-time window for this interaction so its transitions (e.g. a closing
     // MUI modal's Fade-exit timer) fire + complete even when the clock is already large.
     namespace_call(rt, "resetTimerBudget", &[])?;
@@ -16789,14 +18912,17 @@ async fn drain_to_quiescence_with_scripts(
     let mut stable = 0usize;
     let mut last_sig = String::new();
     for _ in 0..MAX_ROUNDS {
-        let fired = quiescence_pump_scripts(rt, execute_document_scripts).await?;
-        let state = sample_quiescence_state(rt, fired)?;
-        if !state.still && !state.fired_any {
+        let turn = quiescence_pump_scripts(rt, execute_document_scripts).await?;
+        if turn.host_reply {
+            return Ok(());
+        }
+        let state = sample_quiescence_state(rt, turn)?;
+        if !state.still && !state.fired_any && !state.awaiting_async {
             break; // genuinely idle
         }
         // A request is outstanding: keep pumping (don't let the stable-DOM early-out
         // fire) so the response's re-render — a modal close, a redirect — lands.
-        if state.awaiting_fetch {
+        if state.awaiting_async {
             stable = 0;
             continue;
         }
@@ -16816,11 +18942,11 @@ async fn drain_to_quiescence_with_scripts(
 /// One round's forward progress: run newly-injected classic + module scripts
 /// (when `execute_document_scripts` is set — the interaction path's safety
 /// valve), drain the event loop, fire any due Window timers, then drain again.
-/// Returns how many Window timers fired this round.
+/// Returns actual Window timer activity and remaining selected native work.
 async fn quiescence_pump_scripts(
     rt: &mut JsRuntime,
     execute_document_scripts: bool,
-) -> Result<u32, String> {
+) -> Result<async_owner::QuiescenceTurn, String> {
     // RUN any newly-injected <script>s, then drain. An interaction can pull a chunk at
     // runtime — Next's `dynamic(() => import('…'))` (lazy modals: AddVacationTimeModal,
     // etc.) appends a <script src> when the component first renders. Without running it
@@ -16829,14 +18955,55 @@ async fn quiescence_pump_scripts(
     if execute_document_scripts {
         hydrate_pass(rt)?;
     }
-    drain_event_loop(rt).await?;
+    let first = drain_quiescence_turn(rt, true).await?;
+    if first.host_reply {
+        return Ok(first);
+    }
     if execute_document_scripts {
         let base = rt.op_state().borrow().borrow::<Base>().0.clone();
         drain_module_scripts(rt, &base).await?;
     }
-    let fired = run_window_timers(rt, 2000)?;
-    drain_event_loop(rt).await?;
-    Ok(fired)
+    let allowance = 2000u32
+        .checked_sub(first.fired)
+        .ok_or("Quiescence timer turn exceeded its native allowance")?;
+    let mut rest = run_quiescence_timers(rt, allowance).await?;
+    rest.fired += first.fired;
+    Ok(rest)
+}
+
+async fn run_quiescence_timers(
+    rt: &mut JsRuntime,
+    allowance: u32,
+) -> Result<async_owner::QuiescenceTurn, String> {
+    let first = drain_quiescence_turn(rt, false).await?;
+    if first.host_reply {
+        return Ok(first);
+    }
+    // Reuse each timer's authenticated selection for native task interleaving,
+    // rather than polling the complete VM between otherwise empty callbacks.
+    let timers = run_window_timer_tasks(rt, allowance, true)?;
+    if timers.host_reply {
+        return Ok(timers);
+    }
+    let mut last = drain_quiescence_turn(rt, false).await?;
+    last.fired += timers.fired;
+    Ok(last)
+}
+
+async fn drain_quiescence_turn(
+    rt: &mut JsRuntime,
+    timers: bool,
+) -> Result<async_owner::QuiescenceTurn, String> {
+    if !async_owner::enabled(rt) {
+        drain_event_loop(rt).await?;
+        return Ok(async_owner::QuiescenceTurn::default());
+    }
+    let root = auxiliary_pages::event_log(&rt.op_state().borrow())
+        .root()
+        .ok_or("Native quiescence root is unavailable")?
+        .parse::<u64>()
+        .map_err(|_| "Native quiescence root is invalid")?;
+    async_owner::quiescence_turn(rt, root, timers).await
 }
 
 /// Observed state at the end of one quiescence round: whether JS still has
@@ -16845,24 +19012,33 @@ async fn quiescence_pump_scripts(
 struct QuiescenceSample {
     still: bool,
     fired_any: bool,
-    awaiting_fetch: bool,
+    awaiting_async: bool,
     sig: String,
 }
 
 /// Call the namespace predicates `pendingWork` / `domSig` / `pendingFetchCount`
 /// and fold them (together with the pump's fired-timer count) into a
 /// [`QuiescenceSample`].
-fn sample_quiescence_state(rt: &mut JsRuntime, fired: u32) -> Result<QuiescenceSample, String> {
+fn sample_quiescence_state(
+    rt: &mut JsRuntime,
+    turn: async_owner::QuiescenceTurn,
+) -> Result<QuiescenceSample, String> {
     let pending = namespace_call(rt, "pendingWork", &[])?;
-    let sig_v = namespace_call(rt, "domSig", &[])?;
     let fetches = namespace_call(rt, "pendingFetchCount", &[])?;
     let still = read_string(rt, pending)? == "1";
-    let awaiting_fetch = read_string(rt, fetches)? != "0";
-    let sig = read_string(rt, sig_v)?;
+    let awaiting_async = turn.busy || read_string(rt, fetches)? != "0";
+    // Idle rounds stop immediately; selected native work and in-flight fetches
+    // reset stability regardless of DOM state. Neither path uses the potentially expensive control scan.
+    let sig = if (still || turn.fired != 0) && !awaiting_async {
+        let sig_v = namespace_call(rt, "domSig", &[])?;
+        read_string(rt, sig_v)?
+    } else {
+        String::new()
+    };
     Ok(QuiescenceSample {
         still,
-        fired_any: fired != 0,
-        awaiting_fetch,
+        fired_any: turn.fired != 0,
+        awaiting_async,
         sig,
     })
 }
@@ -16918,6 +19094,8 @@ pub struct HydrationDiagnostics {
 /// created and driven from a single owning thread (the napi layer pins one thread per
 /// session). `close()` (or drop) resets the binding while the isolate is still alive.
 pub struct PageSession {
+    driver_snapshot: Option<driver_sync::Snapshot>,
+    driver_cookies: Option<String>,
     script_inventory: Option<crate::script_inventory::ScriptInventory>,
     navigation_count: u64,
     rt: OwnedRuntime,
@@ -17118,6 +19296,118 @@ impl PageSession {
         activation: Option<NavigationActivationSnapshot>,
         options: PageSessionOptions,
     ) -> Result<Self, String> {
+        Self::open_with_document_response_and_host_services(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            "",
+            None,
+        )
+        .await
+    }
+
+    /// Install private driver bindings separately from guest-global init scripts.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_host_script(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        engine_init_script: &str,
+    ) -> Result<Self, String> {
+        Self::open_with_document_response_and_host_services(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            engine_init_script,
+            None,
+        )
+        .await
+    }
+
+    /// Install a stable host event queue before initial document hydration.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_event_log(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        event_log: Option<crate::NetworkEventLog>,
+    ) -> Result<Self, String> {
+        Self::open_with_document_response_and_host_services(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            "",
+            event_log,
+        )
+        .await
+    }
+
+    /// Install private driver services before authored document scripts execute.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_host_services(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        engine_init_script: &str,
+        event_log: Option<crate::NetworkEventLog>,
+    ) -> Result<Self, String> {
+        if let Some(log) = &event_log {
+            log.retain_host_bodies();
+        }
         let mut session = Self::open_with_document_response_unfollowed(
             html,
             base,
@@ -17131,6 +19421,54 @@ impl PageSession {
             response_metadata,
             activation,
             options,
+            engine_init_script,
+            event_log,
+            AuxiliaryHostServices::default(),
+            true,
+        )
+        .await?;
+        session.follow_form_navigation().await?;
+        Ok(session)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_auxiliary_services(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+        engine_init_script: &str,
+        event_log: Option<crate::NetworkEventLog>,
+        auxiliary: AuxiliaryHostServices,
+    ) -> Result<Self, String> {
+        if let Some(log) = &event_log {
+            log.retain_host_bodies();
+        }
+        let mut session = Self::open_with_document_response_unfollowed(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            options,
+            engine_init_script,
+            event_log,
+            auxiliary,
+            false,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -17151,7 +19489,19 @@ impl PageSession {
         response_metadata: crate::DocumentResponseMetadata,
         activation: Option<NavigationActivationSnapshot>,
         options: PageSessionOptions,
+        engine_init_script: &str,
+        event_log: Option<crate::NetworkEventLog>,
+        auxiliary: AuxiliaryHostServices,
+        legacy_frame_bootstrap: bool,
     ) -> Result<Self, String> {
+        let options = PageSessionOptions {
+            animation_policy: Some(
+                options
+                    .animation_policy
+                    .unwrap_or(storage.animation_policy()),
+            ),
+            ..options
+        };
         crate::live_layout_backend::initialize_system_fonts_async().await?;
         let mut rt = make_runtime_with_storage_and_options(
             base,
@@ -17161,6 +19511,61 @@ impl PageSession {
             storage,
             options,
         );
+        if let Some(event_log) = event_log {
+            if event_log.is_closed() {
+                return Err("Page session closed".into());
+            }
+            let state = rt.op_state();
+            let mut state = state.borrow_mut();
+            state.put(event_log.own_world());
+            state.put(event_log);
+        }
+        rt.op_state()
+            .borrow_mut()
+            .put(initial_document_images::PromotionImages::new(
+                auxiliary.initial_images,
+            ));
+        rt.op_state()
+            .borrow_mut()
+            .borrow_mut::<auxiliary_pages::Pages>()
+            .enabled = true;
+        {
+            let state = rt.op_state();
+            let mut state = state.borrow_mut();
+            let pages = state.borrow_mut::<auxiliary_pages::Pages>();
+            pages.bootstrap = auxiliary.bootstrap;
+            pages.legacy_frame_bootstrap = legacy_frame_bootstrap;
+            pages.root_bootstrap = if legacy_frame_bootstrap {
+                auxiliary_pages::AuxiliaryBootstrap {
+                    init_script: init_script.to_owned(),
+                    engine_init_script: engine_init_script.to_owned(),
+                }
+            } else {
+                auxiliary.root_bootstrap
+            };
+            pages.root_history = auxiliary.root_history;
+            pages.history_log = auxiliary.history_log;
+            pages.events = auxiliary.events;
+            pages.policy = auxiliary.policy;
+            pages.events.set_limit(auxiliary.policy.max_event_rows);
+        }
+        {
+            let _activation = rt.activation_key().enter();
+            deno_core::scope!(scope, rt);
+            let context = scope.get_current_context();
+            if !turbo_dom_browser_env::host_internals::is_auxiliary_window_context(scope, context) {
+                let state = JsRuntime::op_state_from(scope);
+                let mut state = state.borrow_mut();
+                let pages = state.borrow_mut::<auxiliary_pages::Pages>();
+                pages.enabled = false;
+                pages
+                    .events
+                    .set_capability(AuxiliaryCapability::Unsupported {
+                        reason: "The active root does not use the producer native Window template"
+                            .into(),
+                    });
+            }
+        }
         user_activation::seed(&mut rt, base, activation);
         let mut script_inventory = std::env::var_os("TURBO_SURF_JS_TRACE")
             .map(|root| {
@@ -17174,11 +19579,15 @@ impl PageSession {
             .borrow_mut()
             .borrow_mut::<FrameContexts>()
             .init_script = init_script.to_owned();
+        rt.op_state()
+            .borrow_mut()
+            .borrow_mut::<FrameContexts>()
+            .engine_init_script = engine_init_script.to_owned();
         rt.op_state().borrow_mut().put(response_metadata);
         rt.op_state().borrow_mut().borrow_mut::<ResponseHeaders>().0 = response_headers.to_vec();
         {
             let _activation = rt.activation_key().enter();
-            prepare_hydration(&mut rt, html, base)?;
+            private_infrastructure::prepare(&mut rt, html, base)?;
         }
         let enforce_initial_deadline = options.window_timer_mode == WindowTimerMode::RealTime
             || options.initial_hydration_budget_ms.is_some();
@@ -17189,7 +19598,7 @@ impl PageSession {
             initial_hydration_budget_ms: None,
             ..options
         };
-        let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), initial_budget_ms);
+        let watchdog = Watchdog::start(rt.v8_isolate(), initial_budget_ms);
         let exceeded = watchdog.exceeded.clone();
         rt.park();
         let key = rt.activation_key();
@@ -17210,7 +19619,7 @@ impl PageSession {
         let progress = rt.op_state().borrow().borrow::<HydrationProgress>().clone();
         let unsupported_csp = {
             let _activation = rt.activation_key().enter();
-            let context = rt.main_context();
+            let context = private_infrastructure::context(&mut rt)?;
             let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
             let scope = &mut scope.init();
             let context = v8::Local::new(scope, context);
@@ -17220,6 +19629,8 @@ impl PageSession {
         };
         match result {
             Ok(_) => Ok(PageSession {
+                driver_snapshot: None,
+                driver_cookies: None,
                 script_inventory,
                 navigation_count: 0,
                 rt,
@@ -17242,7 +19653,10 @@ impl PageSession {
             // non-budget errors (install/parse) still fail the open.
             Err(e) if budget_exceeded || rt.v8_isolate().is_execution_terminating() => {
                 rt.v8_isolate().cancel_terminate_execution();
+                auxiliary_navigation::retire_interrupted_frames(&mut rt);
                 Ok(PageSession {
+                    driver_snapshot: None,
+                    driver_cookies: None,
                     script_inventory,
                     navigation_count: 0,
                     rt,
@@ -17269,6 +19683,54 @@ impl PageSession {
         }
     }
 
+    /// Resize the trusted layout viewport without replacing the active document.
+    pub async fn set_viewport(&mut self, width: u32, height: u32) -> Result<(), String> {
+        if self.closed {
+            return Err("page session is closed".into());
+        }
+        {
+            let _activation = self.rt.activation_key().enter();
+            let selected = private_infrastructure::context(&mut self.rt)?;
+            deno_core::scope!(scope, self.rt);
+            let context = v8::Local::new(scope, selected);
+            let scope = &mut v8::ContextScope::new(scope, context);
+            crate::live_layout_backend::set_viewport(scope, width, height)?;
+        }
+        self.options.viewport = Some([width, height]);
+        self.eval_engine("").await.map(|_| ())
+    }
+
+    /// Read the live realm without advancing timers, network work or navigation.
+    /// Driver-only scripts return a JSON value synchronously under the session budget.
+    pub fn read_engine(&mut self, script: &str) -> Result<String, String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
+        let _activation = self.rt.activation_key().enter();
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
+        let result = execute_engine_script(&mut self.rt, script).and_then(|value| {
+            let promise = {
+                deno_core::scope!(scope, self.rt);
+                v8::Local::new(scope, &value).is_promise()
+            };
+            if promise {
+                Err("Engine read must return a synchronous value".into())
+            } else {
+                read_json(&mut self.rt, value)
+            }
+        });
+        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(watchdog);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        let result = if exceeded {
+            Err("Engine read exceeded the session execution budget".into())
+        } else {
+            result
+        };
+        self.finish_history_command(result)
+    }
+
     /// Run `script` in the LIVE isolate, then drain the event loop to quiescence so any
     /// work the script triggered (event handlers, re-render, fetch) completes. Returns
     /// `String(globalThis.__RESULT || '')` — scripts that need to return a value stash
@@ -17284,19 +19746,87 @@ impl PageSession {
         self.eval_in(script, true).await
     }
 
-    async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
+    /// Collect a driver result without recursively resuming document hydration.
+    /// One bounded event-loop turn keeps native IO and due guest tasks moving.
+    pub async fn collect_engine(&mut self, script: &str) -> Result<String, String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
         let key = self.rt.activation_key();
-        let result = key.during(self.eval_active(script, engine)).await;
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
+        let result = key
+            .during(async {
+                execute_engine_script(&mut self.rt, script)?;
+                // Capture before guest tasks run: a page must not overwrite a collected reply.
+                let value = private_infrastructure::execute(
+                    &mut self.rt,
+                    "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)",
+                )
+                .map_err(|error| error.to_string())?;
+                let result = read_string(&mut self.rt, value)?;
+                poll_driver_turn(&mut self.rt).await?;
+                Ok(result)
+            })
+            .await;
+        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(watchdog);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        let result = if exceeded {
+            Err("Driver collection exceeded the session execution budget".into())
+        } else {
+            result
+        };
+        self.finish_history_command(result)
+    }
+
+    async fn eval_in(&mut self, script: &str, engine: bool) -> Result<String, String> {
+        {
+            let _activation = self.rt.activation_key().enter();
+            let _guest = private_infrastructure::context(&mut self.rt)?;
+        }
+        // The private runtime's initial guest root is auxiliary too. Its native
+        // identity selects the realm, but does not replace the session eval contract.
+        let result = if private_infrastructure::enabled(&self.rt) {
+            let key = self.rt.activation_key();
+            key.during(self.eval_active(script, engine)).await
+        } else if let Some(target) = self.replaced_root_target() {
+            self.eval_replaced_root(target, script, engine).await
+        } else {
+            let key = self.rt.activation_key();
+            key.during(self.eval_active(script, engine)).await
+        };
+        self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
+        self.publish_auxiliary_state();
         result
+    }
+
+    async fn eval_replaced_root(
+        &mut self,
+        target: u64,
+        script: &str,
+        engine: bool,
+    ) -> Result<String, String> {
+        if engine {
+            return self.eval_target_engine(target, script, false).await;
+        }
+        let source =
+            format!("{script}\n;String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)");
+        let result = self
+            .eval_target_expression(target, &source, false, false)
+            .await?;
+        self.eval_target_expression(target, "__tsNs.hydrate(300,200000,true)", true, false)
+            .await?;
+        Ok(result)
     }
 
     async fn eval_active(&mut self, script: &str, engine: bool) -> Result<String, String> {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
-        let drained = {
-            let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
-            with_async_execution_budget(
+        let (drained, exceeded) = {
+            let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
+            let drained = with_async_execution_budget(
                 self.options.window_timer_mode == WindowTimerMode::RealTime,
                 budget,
                 &watchdog.exceeded,
@@ -17304,14 +19834,18 @@ impl PageSession {
                     if engine {
                         execute_engine_script(&mut self.rt, script)?;
                     } else {
-                        self.rt
-                            .execute_script("<session-eval>", script.to_string())
-                            .map_err(|e| e.to_string())?;
+                        private_infrastructure::execute(&mut self.rt, script)?;
                     }
+                    let base = self.rt.op_state().borrow().borrow::<Base>().0.clone();
+                    resume_host_hydration(&mut self.rt, &base).await?;
                     drain_to_quiescence(&mut self.rt).await
                 },
             )
-            .await
+            .await;
+            let exceeded = watchdog.exceeded.clone();
+            drop(watchdog);
+            let exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
+            (drained, exceeded)
         };
         // The watchdog may have terminated mid-drain. Clear that terminate state so the
         // isolate is usable again, then read the result BEST-EFFORT: an interaction's
@@ -17319,14 +19853,23 @@ impl PageSession {
         // drain — the budget is normally hit later on background churn (analytics
         // polling, React's idle scheduler). Returning the reached state beats throwing.
         self.rt.v8_isolate().cancel_terminate_execution();
-        match drained {
-            Err(e) if !(e.contains("terminat") || e.contains("execution")) => Err(e),
-            _ => self
-                .rt
-                .execute_script("<result>", READ)
-                .map_err(|e| budget_msg(&e.to_string(), budget))
-                .and_then(|g| read_string(&mut self.rt, g)),
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        self.hydration_diagnostics.progress = self
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<HydrationProgress>()
+            .clone();
+        if let Err(error) = self.finish_history_command(Ok(())) {
+            return Err(drained.err().unwrap_or(error));
         }
+        let result = match drained {
+            Err(e) if !exceeded && !(e.contains("terminat") || e.contains("execution")) => Err(e),
+            _ => private_infrastructure::execute(&mut self.rt, READ)
+                .map_err(|e| budget_msg(&e, budget))
+                .and_then(|g| read_string(&mut self.rt, g)),
+        };
+        self.finish_history_command(result)
     }
 
     /// Evaluate an expression and await its own result without a page-global result slot.
@@ -17359,11 +19902,21 @@ impl PageSession {
         json: bool,
         engine: bool,
     ) -> Result<String, String> {
-        let key = self.rt.activation_key();
-        let result = key
-            .during(self.eval_expression_active(expression, json, engine))
-            .await;
+        {
+            let _activation = self.rt.activation_key().enter();
+            let _guest = private_infrastructure::context(&mut self.rt)?;
+        }
+        let result = if let Some(target) = self.replaced_root_target() {
+            self.eval_target_expression(target, expression, engine, json)
+                .await
+        } else {
+            let key = self.rt.activation_key();
+            key.during(self.eval_expression_active(expression, json, engine))
+                .await
+        };
+        self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
+        self.publish_auxiliary_state();
         result
     }
 
@@ -17376,7 +19929,7 @@ impl PageSession {
         if self.closed {
             return Err("Page session is closed".into());
         }
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
                 let value = if engine {
@@ -17408,10 +19961,15 @@ impl PageSession {
         let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded {
-            return Err("Expression exceeded the session execution budget".into());
-        }
-        result.map_err(|_| "Expression exceeded the session execution budget".to_owned())?
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        let result = if exceeded {
+            Err("Expression exceeded the session execution budget".into())
+        } else {
+            result.unwrap_or_else(|_| {
+                Err("Expression exceeded the session execution budget".to_owned())
+            })
+        };
+        self.finish_history_command(result)
     }
 
     /// Deliver embedder input through a private native dispatch capability.
@@ -17420,7 +19978,9 @@ impl PageSession {
     pub async fn input(&mut self, steps: &serde_json::Value) -> Result<(), String> {
         let key = self.rt.activation_key();
         let result = key.during(self.input_active(steps)).await;
+        self.publish_auxiliary_state();
         self.follow_form_navigation().await?;
+        self.publish_auxiliary_state();
         result
     }
 
@@ -17428,12 +19988,15 @@ impl PageSession {
         if self.closed {
             return Err("Page session is closed".into());
         }
-        let _watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        // Cancellation belongs to this operation's document, even if navigation replaces it.
+        let selected = private_infrastructure::context(&mut self.rt)?;
+        let _watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
                 let promise = {
                     deno_core::scope!(scope, self.rt);
-                    let context = scope.get_current_context();
+                    let context = v8::Local::new(scope, &selected);
+                    let scope = &mut v8::ContextScope::new(scope, context);
                     let driver = context
                         .get_slot::<HostInputDriver>()
                         .ok_or("Host input driver unavailable")?;
@@ -17467,19 +20030,30 @@ impl PageSession {
             .load(std::sync::atomic::Ordering::Relaxed);
         drop(_watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
-        if exceeded || !matches!(&result, Ok(Ok(()))) {
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        let result = if exceeded {
+            Err("Host input exceeded the session execution budget".into())
+        } else {
+            result.unwrap_or_else(|_| {
+                Err("Host input exceeded the session execution budget".to_string())
+            })
+        };
+        if let Err(error) = self.finish_history_command(Ok(())) {
+            return result.and(Err(error));
+        }
+        if result.is_err() {
             deno_core::scope!(scope, self.rt);
-            let context = scope.get_current_context();
-            if let Some(driver) = context.get_slot::<HostInputDriver>() {
-                let callback = crate::context_ownership::local(scope, &driver.cancel);
-                let receiver = v8::undefined(scope).into();
-                callback.call(scope, receiver, &[]);
+            let context = v8::Local::new(scope, &selected);
+            if context.get_slot::<FrameRetired>().is_none() {
+                let scope = &mut v8::ContextScope::new(scope, context);
+                if let Some(driver) = context.get_slot::<HostInputDriver>() {
+                    let callback = crate::context_ownership::local(scope, &driver.cancel);
+                    let receiver = v8::undefined(scope).into();
+                    callback.call(scope, receiver, &[]);
+                }
             }
         }
-        if exceeded {
-            return Err("Host input exceeded the session execution budget".into());
-        }
-        result.map_err(|_| "Host input exceeded the session execution budget".to_string())?
+        self.finish_history_command(result)
     }
 
     /// Host-only retention diagnostics; never installed on the guest global.
@@ -17535,30 +20109,95 @@ impl PageSession {
         crate::storage_gc::diagnostics(self.rt.v8_isolate())
     }
 
+    /// Host-only remote handle ownership accounting; never installed on guest globals.
+    #[doc(hidden)]
+    pub fn remote_handle_diagnostics_for_testing(&mut self) -> serde_json::Value {
+        let _activation = self.rt.activation_key().enter();
+        crate::remote_handles::diagnostics(self.rt.v8_isolate())
+    }
+
+    /// Native IDB continuation journal; this read never executes a document callback.
+    #[doc(hidden)]
+    pub fn indexeddb_diagnostics_for_testing(&self) -> serde_json::Value {
+        indexeddb_store::diagnostics(&self.rt)
+    }
+
+    /// Host-only private frame-boundary admission probe; never installed on a Window.
+    #[doc(hidden)]
+    pub fn frame_boundary_admission_for_testing(
+        &mut self,
+        parent_name: Option<&str>,
+        window_name: &str,
+    ) -> bool {
+        let _activation = self.rt.activation_key().enter();
+        let root = match private_infrastructure::context(&mut self.rt) {
+            Ok(root) => root,
+            Err(_) => return false,
+        };
+        let infrastructure = self.rt.main_context();
+        deno_core::scope!(scope, self.rt);
+        let root = v8::Local::new(scope, root);
+        let scope = &mut v8::ContextScope::new(scope, root);
+        let global = root.global(scope);
+        let parent = match parent_name {
+            None => root,
+            Some(name) => {
+                let Some(value) = private_boundary::frame_probe::own_value(scope, global, name)
+                else {
+                    return false;
+                };
+                let Ok(window) = v8::Local::<v8::Object>::try_from(value) else {
+                    return false;
+                };
+                let Some(context) = window.get_creation_context(scope) else {
+                    return false;
+                };
+                if !window.strict_equals(context.global(scope).into()) {
+                    return false;
+                }
+                context
+            }
+        };
+        let window = if window_name == "@infrastructure" {
+            v8::Local::new(scope, infrastructure).global(scope).into()
+        } else {
+            let Some(value) = private_boundary::frame_probe::own_value(scope, global, window_name)
+            else {
+                return false;
+            };
+            value
+        };
+        private_boundary::frame_probe::admitted(scope, parent, window)
+    }
+
     /// Host-only context registry accounting; never installed on guest globals.
     #[doc(hidden)]
     pub fn context_registry_diagnostics_for_testing(&mut self) -> serde_json::Value {
         let _activation = self.rt.activation_key().enter();
-        crate::context_ownership::diagnostics(self.rt.v8_isolate())
+        let root = private_infrastructure::context(&mut self.rt).ok();
+        deno_core::scope!(scope, self.rt);
+        let root = root.map(|root| v8::Local::new(scope, root));
+        crate::context_ownership::diagnostics(scope, root)
     }
 
     /// Inject one native replacement-bootstrap failure before guest publication.
     #[doc(hidden)]
     pub fn fail_next_frame_initialization_for_testing(&mut self) {
         let _activation = self.rt.activation_key().enter();
+        let context = private_infrastructure::context(&mut self.rt)
+            .expect("active document for frame fault injection");
         deno_core::scope!(scope, self.rt);
-        scope
-            .get_current_context()
-            .set_slot(Rc::new(FailFrameInitializationForTesting));
+        v8::Local::new(scope, context).set_slot(Rc::new(FailFrameInitializationForTesting));
     }
 
     /// Consume the native test fault receipt without publishing guest state.
     #[doc(hidden)]
     pub fn take_frame_initialization_failure_for_testing(&mut self) -> bool {
         let _activation = self.rt.activation_key().enter();
+        let context = private_infrastructure::context(&mut self.rt)
+            .expect("active document for frame fault receipt");
         deno_core::scope!(scope, self.rt);
-        scope
-            .get_current_context()
+        v8::Local::new(scope, context)
             .remove_slot::<FailedFrameInitializationForTesting>()
             .is_some()
     }
@@ -17612,19 +20251,36 @@ impl PageSession {
         crate::message_ports::diagnostics(scope)
     }
 
+    /// Release only host-discarded handles while the isolate owns execution.
+    pub fn flush_network_disposals(&mut self) {
+        let ids = self.network_event_log().take_disposals();
+        if ids.is_empty() {
+            return;
+        }
+        let _activation = self.rt.activation_key().enter();
+        deno_core::scope!(scope, self.rt);
+        for id in ids {
+            crate::remote_handles::dispose(scope, id);
+        }
+    }
+
+    /// A Send-only host queue; reading it never enters or borrows the isolate.
+    pub fn network_event_log(&self) -> crate::NetworkEventLog {
+        self.rt.op_state().borrow().borrow::<NetworkLog>().clone()
+    }
+
     /// Host-only response records; page JS cannot read raw opaque resource bodies.
     pub fn drain_network_log(&mut self) -> String {
         let state = self.rt.op_state();
         let mut state = state.borrow_mut();
         fetch_streams::refresh_logs(&mut state);
-        let rows: Vec<_> = state.borrow_mut::<NetworkLog>().0.drain(..).collect();
-        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+        state.borrow::<NetworkLog>().drain_snapshot()
     }
 
     /// Snapshot the opt-in interface tracer inside each active native child context.
     pub fn frame_interface_snapshots(&mut self) -> Vec<serde_json::Value> {
         let _activation = self.rt.activation_key().enter();
-        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
         let contexts = self
             .rt
             .op_state()
@@ -17669,6 +20325,7 @@ impl PageSession {
         }
         drop(watchdog);
         self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         rows
     }
 
@@ -17683,25 +20340,41 @@ impl PageSession {
         let state = self.rt.op_state();
         let state = state.borrow();
         (
-            self.navigation_count,
+            self.navigation_count + auxiliary_navigation::root_commits(&state),
             state.borrow::<Base>().0.clone(),
             state.borrow::<crate::DocumentResponseMetadata>().clone(),
         )
     }
 
+    /// Installed native root responses whose actual admitted request was a form submission.
+    pub fn form_navigation_count(&self) -> u64 {
+        let state = self.rt.op_state();
+        let forms = auxiliary_navigation::root_form_commits(&state.borrow());
+        self.navigation_count + forms
+    }
+
     /// Activation is captured when a script navigation is admitted, before timers run.
     pub fn script_nav_activation_snapshot(&mut self) -> Option<(String, bool)> {
         let _activation = self.rt.activation_key().enter();
+        let selected = private_infrastructure::context(&mut self.rt).ok()?;
         deno_core::scope!(scope, self.rt);
-        script_navigation::snapshot(scope.get_current_context())
+        let context = v8::Local::new(scope, selected);
+        script_navigation::snapshot(context)
     }
 
     /// Native sticky activation and source origin for a subsequent document navigation.
     pub fn navigation_activation_snapshot(&mut self) -> NavigationActivationSnapshot {
         let source = self.rt.op_state().borrow().borrow::<Base>().0.clone();
         let _activation = self.rt.activation_key().enter();
+        let Ok(selected) = private_infrastructure::context(&mut self.rt) else {
+            return NavigationActivationSnapshot::inactive(source);
+        };
         deno_core::scope!(scope, self.rt);
-        NavigationActivationSnapshot::capture(source, scope.get_current_context())
+        let context = v8::Local::new(scope, selected);
+        let Some(source) = window_proxy::location_url(context) else {
+            return NavigationActivationSnapshot::inactive(source);
+        };
+        NavigationActivationSnapshot::capture(scope, source, context)
     }
 
     /// Snapshot the host-owned headers of the installed response after navigation.
@@ -17715,9 +20388,27 @@ impl PageSession {
     }
 
     /// Serialize the CURRENT live DOM to HTML (no reset — the page stays alive).
-    pub fn serialize(&self) -> String {
+    pub fn serialize(&mut self) -> String {
+        self.serialize_checked().unwrap_or_default()
+    }
+
+    /// Serialize only an owned live document; private infrastructure is never a fallback.
+    pub fn serialize_checked(&mut self) -> Result<String, String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
+        {
+            let _activation = self.rt.activation_key().enter();
+            let _guest = private_infrastructure::context(&mut self.rt)?;
+        }
+        if let Some(target) = self.replaced_root_target() {
+            return self.serialize_target(target);
+        }
+        if private_infrastructure::enabled(&self.rt) {
+            return Err("Guest root ownership unavailable".into());
+        }
         let _activation = self.rt.activation_key().enter();
-        crate::browser_env::document_html()
+        Ok(crate::browser_env::document_html())
     }
 
     /// The page's cookies as a `storageState` JSON string (includes HttpOnly session
@@ -17731,10 +20422,23 @@ impl PageSession {
         s
     }
 
+    /// Replace context cookies while preserving the shared jar used by live APIs.
+    pub fn set_cookies(&mut self, cookies: &str) {
+        apply_report_cookies(&mut self.rt.op_state().borrow_mut());
+        let op_state = self.rt.op_state();
+        let jar = op_state.borrow().borrow::<Jar>().clone();
+        *jar.borrow_mut() = CookieJar::from_storage_state(cookies);
+    }
+
     /// Tear down: reset the binding while the isolate is still alive, then drop it.
     pub fn close(mut self) {
         let _activation = self.rt.activation_key().enter();
         self.script_inventory.take();
+        {
+            deno_core::scope!(scope, self.rt);
+            auxiliary_pages::close_all(scope);
+        }
+        self.auxiliary_event_log().close();
         self.closed = true;
     }
 }
@@ -17743,6 +20447,11 @@ impl Drop for PageSession {
     fn drop(&mut self) {
         let _activation = self.rt.activation_key().enter();
         self.script_inventory.take();
+        if !self.closed {
+            deno_core::scope!(scope, self.rt);
+            auxiliary_pages::close_all(scope);
+        }
+        self.auxiliary_event_log().close();
     }
 }
 
@@ -17880,13 +20589,26 @@ mod window_timer_task_tests {
         .unwrap()
     }
 
+    fn guest_script(
+        page: &mut PageSession,
+        source: &str,
+        engine: bool,
+    ) -> Result<v8::Global<v8::Value>, String> {
+        let target = page.replaced_root_target().expect("actual guest root");
+        auxiliary_pages::execute_target(
+            &mut page.rt,
+            turbo_dom_browser_env::host_internals::AuxiliaryContextId(target),
+            source,
+            engine,
+        )
+    }
+
     async fn chain(kind: &str) {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        page.rt
-            .execute_script(
-                "<timer-chain>",
-                format!(
+        guest_script(
+            &mut page,
+            &format!(
                     r#"(()=>{{
                       const kind={kind:?},frame=document.querySelector('#frame').contentWindow;
                       const rows=globalThis.timerRows=[];
@@ -17897,6 +20619,7 @@ mod window_timer_task_tests {
                         target.setTimeout(()=>{{
                           rows.push(performance.now()-created);
                           if(rows.length===12)return;
+                          if(kind==='busy'&&rows.length===6){{const started=performance.now();while(performance.now()-started<8){{}}}}
                           if(kind.endsWith('Promise')||kind==='promise')Promise.resolve().then(schedule);
                           else if(kind.endsWith('QueueMicrotask')||kind==='queueMicrotask')queueMicrotask(schedule);
                           else schedule();
@@ -17908,8 +20631,9 @@ mod window_timer_task_tests {
                       }},0);else schedule();
                     }})()"#
                 ),
-            )
-            .unwrap();
+            false,
+        )
+        .unwrap();
         checkpoint_window_timer(&mut page.rt).unwrap();
         for index in 0..12 {
             let turn = run_next_window_timer(&mut page.rt, true);
@@ -17922,32 +20646,42 @@ mod window_timer_task_tests {
             };
             assert_eq!(nesting.level.get(), expected, "{kind} task {index}");
             checkpoint_window_timer(&mut page.rt).unwrap();
+            if !kind.starts_with("crossRealm") && kind != "interval" && (5..11).contains(&index) {
+                let base = nesting.published.get().expect("running timer task base");
+                deno_core::scope!(scope, page.rt);
+                let context = v8::Local::new(scope, &turn._task.as_ref().unwrap().context);
+                let active = &mut v8::ContextScope::new(scope, context);
+                let next = call_frame_helper(active, "timerNextDue", &[])
+                    .and_then(|value| timer_order_key(active, value))
+                    .expect("next real nested timer");
+                assert!(
+                    next.0 >= base + 4.0,
+                    "{kind} task {index}: due={} base={base}",
+                    next.0
+                );
+            }
             assert_eq!(nesting.level.get(), expected, "{kind} checkpoint {index}");
             drop(turn);
             assert_eq!(nesting.level.get(), 0, "{kind} finished task {index}");
         }
-        let value = page
-            .rt
-            .execute_script("<timer-rows>", "JSON.stringify(timerRows)")
-            .unwrap();
+        let value = guest_script(&mut page, "JSON.stringify(timerRows)", false).unwrap();
         let rows: Vec<f64> =
             serde_json::from_str(&read_string(&mut page.rt, value).unwrap()).unwrap();
         assert_eq!(rows.len(), 12);
-        if !kind.starts_with("crossRealm") && kind != "interval" {
-            // The public clock has a 100us grid. No wall-time upper bound is
-            // imposed on the six structurally unclamped tasks or on the host.
-            assert!(
-                rows[6..].iter().all(|delay| *delay >= 3.9 - 1e-6),
-                "{kind}: {rows:?}"
-            );
-        }
+        // Virtual timers are clamped from the running task's published deadline,
+        // not this live-clock sample after host or callback work. The native due
+        // assertions above verify the exact clamp without a wall-time tolerance.
+        assert!(
+            rows.iter().all(|delay| delay.is_finite() && *delay >= 0.0),
+            "{kind}: {rows:?}"
+        );
         assert_eq!(run_next_window_timer(&mut page.rt, true).fired, 0);
     }
 
     async fn retired_task() {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        page.rt.execute_script("<retired-timer>", "const frame=document.querySelector('#frame');frame.contentWindow.setTimeout(()=>{frame.remove();Promise.resolve().then(()=>setTimeout(()=>{},0));},0)").unwrap();
+        guest_script(&mut page, "const frame=document.querySelector('#frame');frame.contentWindow.setTimeout(()=>{frame.remove();Promise.resolve().then(()=>setTimeout(()=>{},0));},0)", false).unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
         assert_eq!(turn.fired, 1);
         let retired = turn._task.as_ref().unwrap().nesting.clone();
@@ -17970,9 +20704,10 @@ mod window_timer_task_tests {
     async fn legacy_reentrancy() {
         let mut page = page(5000).await;
         let _activation = page.rt.activation_key().enter();
-        execute_engine_script(
-            &mut page.rt,
+        guest_script(
+            &mut page,
             "setTimeout(()=>{setTimeout(()=>{},0);__tsNs.runTimers(1);setTimeout(()=>{},0);},0)",
+            true,
         )
         .unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
@@ -18004,9 +20739,7 @@ mod window_timer_task_tests {
             window_timer_nesting(scope.get_current_context())
         };
         assert_eq!(nesting.level.get(), 0);
-        page.rt
-            .execute_script("<after-interruption>", "setTimeout(()=>{},0)")
-            .unwrap();
+        guest_script(&mut page, "setTimeout(()=>{},0)", false).unwrap();
         let turn = run_next_window_timer(&mut page.rt, true);
         assert_eq!(turn.fired, 1);
         assert_eq!(turn._task.as_ref().unwrap().nesting.level.get(), 1);
@@ -18024,6 +20757,7 @@ mod window_timer_task_tests {
                 .block_on(async {
                     for kind in [
                         "direct",
+                        "busy",
                         "promise",
                         "queueMicrotask",
                         "crossRealm",
@@ -18129,3 +20863,51 @@ mod frame_source_tests {
         assert_eq!(&plaintext[bodies[0].0..bodies[0].1], "a");
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_document_contract_tests.rs"]
+mod runtime_document_contract_tests;
+
+#[cfg(test)]
+#[path = "security_error_registration_tests.rs"]
+mod security_error_registration_tests;
+
+#[cfg(test)]
+#[path = "registered_fetch_prepare_tests.rs"]
+mod registered_fetch_prepare_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_document_lifecycle_tests.rs"]
+mod runtime_registered_document_lifecycle_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_navigation_tests.rs"]
+mod runtime_registered_navigation_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_geometry_tests.rs"]
+mod runtime_registered_geometry_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_resource_deadline_tests.rs"]
+mod registered_resource_deadline_tests;
+
+#[cfg(test)]
+#[path = "runtime_queued_classic_interruption_tests.rs"]
+mod runtime_queued_classic_interruption_tests;
+
+#[cfg(test)]
+#[path = "runtime_registered_host_ops_tests.rs"]
+mod runtime_registered_host_ops_tests;
+
+#[cfg(test)]
+#[path = "runtime_source_normalization_tests.rs"]
+mod runtime_source_normalization_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "runtime_provisional_frame_tests.rs"]
+mod runtime_provisional_frame_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "runtime_admission_cancellation_tests.rs"]
+mod admission_cancellation_tests;

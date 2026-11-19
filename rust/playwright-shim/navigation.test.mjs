@@ -1,0 +1,412 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+
+let shim;
+try {
+  shim = await import("./index.mjs");
+} catch (error) {
+  console.log("shim: native addon not built, skipping —", error.message);
+  process.exit(0);
+}
+
+test("Blob downloads preserve every byte in path, saveAs and streams", async () => {
+  const page = shim.newPage();
+  const directory = await mkdtemp(join(tmpdir(), "surf-download-test-"));
+  let downloadPath;
+  try {
+    await page.setContent("<body></body>");
+    await page._ensureLive();
+    await page.evaluate(() => {
+      const url = URL.createObjectURL(new Blob([new Uint8Array([0, 255, 128, 10])]));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "fixture.bin";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    });
+    const download = await page.waitForEvent("download", { timeout: 1000 });
+    downloadPath = await download.path();
+    const expected = Buffer.from([0, 255, 128, 10]);
+    assert.deepEqual(await readFile(downloadPath), expected);
+    await download.saveAs(join(directory, "saved.bin"));
+    assert.deepEqual(await readFile(join(directory, "saved.bin")), expected);
+    const chunks = [];
+    for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+    assert.deepEqual(Buffer.concat(chunks), expected);
+  } finally {
+    await page.close();
+    await rm(directory, { recursive: true, force: true });
+    if (downloadPath) await rm(dirname(downloadPath), { recursive: true, force: true });
+  }
+});
+
+test("HTTP attachments emit binary downloads without replacing the live document", async () => {
+  let attachmentRequests = 0;
+  const bytes = Buffer.from([0, 255, 128, 10]);
+  const server = createServer((request, response) => {
+    if (request.url === "/attachment") {
+      attachmentRequests++;
+      response.setHeader(
+        "content-disposition",
+        "attachment; filename=fallback.bin; filename*=UTF-8''f%C3%ADxture.bin",
+      );
+      response.setHeader("content-type", "application/octet-stream");
+      response.end(bytes);
+    } else
+      response.end(
+        '<body data-keep="yes"><a id="download" href="/attachment">Download</a><a id="hidden" style="display:none" href="/attachment">Hidden</a><button id="disabled" disabled>Disabled</button></body>',
+      );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}/`;
+  const page = shim.newPage();
+  let downloadPath;
+  let staticPage;
+  try {
+    await page.goto(origin, { waitUntil: "networkidle" });
+    const events = [];
+    page.on("download", (download) => events.push(download));
+    const waiting = page.waitForEvent("download", { timeout: 300 });
+    await page.locator("#download").click();
+    const download = await waiting;
+    assert.ok(download, "an attachment must produce a real Download");
+    assert.equal(download.suggestedFilename(), "fíxture.bin");
+    downloadPath = await download.path();
+    assert.deepEqual(await readFile(downloadPath), bytes);
+    assert.equal(events.length, 1);
+    assert.equal(attachmentRequests, 1);
+    assert.equal(page.url(), origin);
+    assert.equal(await page.evaluate(() => document.body.dataset.keep), "yes");
+    await assert.rejects(
+      page.waitForEvent("download", { timeout: 30 }),
+      (error) => error.name === "TimeoutError",
+    );
+    staticPage = await page.context().newPage();
+    staticPage._autoHydrate = false; // Exercise the independent static-only tier.
+    await staticPage.goto(origin, { waitUntil: "commit" });
+    await assert.rejects(
+      staticPage.locator("#hidden").click({ timeout: 30 }),
+      (error) => error.name === "TimeoutError",
+    );
+    await assert.rejects(
+      staticPage.locator("#disabled").click({ timeout: 30 }),
+      (error) => error.name === "TimeoutError",
+    );
+    assert.equal(staticPage._live, false);
+    assert.equal(attachmentRequests, 1);
+    const staticWaiting = staticPage.waitForEvent("download", { timeout: 300 });
+    await staticPage.locator("#download").click();
+    assert.equal((await staticWaiting).suggestedFilename(), "fíxture.bin");
+    assert.equal(staticPage._live, false);
+    assert.equal(attachmentRequests, 2);
+    assert.equal(await page.evaluate(() => document.body.dataset.keep), "yes");
+  } finally {
+    await staticPage?.close();
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+    if (downloadPath) await rm(dirname(downloadPath), { recursive: true, force: true });
+  }
+});
+
+test(
+  "native document downloads wait for body EOF, exclude fetches and deduplicate receipts",
+  { timeout: 5000 },
+  async () => {
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    let heldResponse;
+    const server = createServer((request, response) => {
+      if (request.url === "/redirect") {
+        response.writeHead(302, {
+          location: "/direct",
+          "content-disposition": 'attachment; filename="ignored.bin"',
+        });
+        response.end();
+        return;
+      }
+      if (request.url !== "/") {
+        response.setHeader("content-disposition", 'attachment; filename="actual.bin"');
+        response.setHeader("content-type", "application/octet-stream");
+        if (request.url === "/held") {
+          heldResponse = response;
+          response.write(bytes.subarray(0, 2));
+        } else response.end(bytes);
+        return;
+      }
+      response.end(
+        '<body data-keep="yes"><a id="attachment" href="/held">Download</a><a id="redirect" href="/redirect">Redirect</a></body>',
+      );
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const page = shim.newPage();
+    const downloads = [];
+    const directories = new Set();
+    page.on("download", (download) => downloads.push(download));
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      const header = page.waitForResponse((response) => response.url() === `${origin}/held`, {
+        timeout: 1000,
+      });
+      const waiting = page.waitForEvent("download", { timeout: 2000 });
+      waiting.catch(() => {});
+      const click = page.click("#attachment");
+      click.catch(() => {});
+      assert.equal(
+        (await header).headers()["content-disposition"],
+        'attachment; filename="actual.bin"',
+      );
+      assert.equal(downloads.length, 0, "response headers do not complete a native download");
+      heldResponse.end(bytes.subarray(2));
+      heldResponse = null;
+      const download = await waiting;
+      await click;
+      const file = await download.path();
+      directories.add(dirname(file));
+      assert.deepEqual(await readFile(file), bytes);
+      assert.equal(downloads.length, 1);
+      assert.equal(await page.evaluate(() => document.body.dataset.keep), "yes");
+      assert.deepEqual(
+        await page.evaluate(async () =>
+          Array.from(new Uint8Array(await (await fetch("/fetch")).arrayBuffer())),
+        ),
+        [...bytes],
+      );
+      assert.equal(
+        downloads.length,
+        1,
+        "a fetch with attachment headers is not a document download",
+      );
+      const directWaiting = page.waitForEvent("download", { timeout: 1000 });
+      directWaiting.catch(() => {});
+      await assert.rejects(page.goto(`${origin}/direct`), /Download is starting/);
+      const direct = await directWaiting;
+      const directFile = await direct.path();
+      directories.add(dirname(directFile));
+      assert.deepEqual(await readFile(directFile), bytes);
+      assert.deepEqual(
+        downloads,
+        [download, direct],
+        "a native receipt and its body event share one download",
+      );
+      const redirectedWaiting = page.waitForEvent("download", { timeout: 1000 });
+      redirectedWaiting.catch(() => {});
+      await page.click("#redirect");
+      const redirected = await redirectedWaiting;
+      const redirectedFile = await redirected.path();
+      directories.add(dirname(redirectedFile));
+      assert.equal(redirected.suggestedFilename(), "actual.bin");
+      assert.deepEqual(await readFile(redirectedFile), bytes);
+      assert.deepEqual(downloads, [download, direct, redirected]);
+    } finally {
+      heldResponse?.end();
+      await page.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      for (const directory of directories) await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("waitForURL keeps waiting for a later driver navigation within its timeout", async () => {
+  const page = shim.newPage();
+  let change;
+  try {
+    await page.setContent("<body>protected</body>");
+    const navigated = new Promise((resolve, reject) => {
+      change = setTimeout(() => {
+        page.evaluate(() => history.pushState({}, "", "#login")).then(resolve, reject);
+      }, 300);
+    });
+    await page.waitForURL("**#login", { timeout: 2000 });
+    await navigated;
+    assert.equal(page.url(), "about:blank#login");
+  } finally {
+    clearTimeout(change);
+    await page.close();
+  }
+});
+
+test("waitForURL honors zero timeout and URL predicate/RegExp overloads", async () => {
+  const page = shim.newPage();
+  let change;
+  try {
+    await page.setContent("<body>protected</body>");
+    const navigated = new Promise((resolve, reject) => {
+      change = setTimeout(
+        () => page.evaluate(() => history.pushState({}, "", "#ready")).then(resolve, reject),
+        100,
+      );
+    });
+    await page.waitForURL((url) => url.hash === "#ready", { timeout: 0, waitUntil: "commit" });
+    await navigated;
+    await page.waitForURL(/#ready$/, { timeout: 50 });
+  } finally {
+    clearTimeout(change);
+    await page.close();
+  }
+});
+
+test("waitForURL expires at its deadline and stops when the page closes", async () => {
+  const page = shim.newPage();
+  try {
+    await page.setContent("<body>protected</body>");
+    const start = Date.now();
+    await assert.rejects(page.waitForURL("**#missing", { timeout: 120 }), { name: "TimeoutError" });
+    assert.ok(Date.now() - start >= 100);
+    const wait = page.waitForURL("**#missing", { timeout: 0 });
+    await page.close();
+    await assert.rejects(wait, /Page closed/);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a URL wait timeout leaves a pending host callback and sibling URL wait alive", async () => {
+  const page = shim.newPage();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let timer;
+  try {
+    await page.setContent("<body>protected</body>");
+    await page.exposeFunction("finishLogin", async () => {
+      await gate;
+      return "success";
+    });
+    await page._evalEngine(
+      "finishLogin().then(value => { globalThis.loginResult = value; history.pushState({}, '', '#login'); }); globalThis.__RESULT = ''; ",
+    );
+    const loser = page.waitForURL("**#missing", { timeout: 80 });
+    const winner = page.waitForURL("**#login", { timeout: 2000 });
+    timer = setTimeout(release, 200);
+    await assert.rejects(loser, { name: "TimeoutError" });
+    await winner;
+    assert.equal(await page.evaluate(() => globalThis.loginResult), "success");
+  } finally {
+    clearTimeout(timer);
+    release();
+    await page.close();
+  }
+});
+
+test("a URL timeout does not abort an unrelated routed request", async () => {
+  const server = createServer((request, response) =>
+    response.end(request.url === "/slow" ? "success" : "<body>protected</body>"),
+  );
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = shim.newPage();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let timer;
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    await page._ensureLive();
+    await page.route("**/slow", async (route) => {
+      await gate;
+      await route.continue();
+    });
+    await page._evalEngine(
+      "fetch('/slow').then(r => r.text()).then(value => { globalThis.loginResult = value; history.pushState({}, '', '#login'); }); globalThis.__RESULT = ''; ",
+    );
+    const loser = page.waitForURL("**#missing", { timeout: 80 });
+    const winner = page.waitForURL("**#login", { timeout: 2000 });
+    timer = setTimeout(release, 200);
+    await assert.rejects(loser, { name: "TimeoutError" });
+    await winner;
+    assert.equal(await page.evaluate(() => globalThis.loginResult), "success");
+  } finally {
+    clearTimeout(timer);
+    release();
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("waitForURL can start before a static driver navigation", async () => {
+  const server = createServer((_request, response) => response.end("<body>destination</body>"));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = shim.newPage();
+  let change;
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/destination`;
+    const navigated = new Promise((resolve, reject) => {
+      change = setTimeout(() => page.goto(url, { waitUntil: "commit" }).then(resolve, reject), 100);
+    });
+    await page.waitForURL(url, { timeout: 2000, waitUntil: "commit" });
+    await navigated;
+    assert.equal(page.url(), url);
+    assert.equal(page._live, false);
+  } finally {
+    clearTimeout(change);
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test(
+  "initial root Location navigation loads once without bootstrap self-requests",
+  { timeout: 5000 },
+  async () => {
+    const requests = [];
+    const server = createServer((req, res) => {
+      requests.push(req.url);
+      res.end("<body>real-document</body>");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const page = shim.newPage();
+    let loads = 0;
+    page.on("load", () => loads++);
+    try {
+      await page.goto(`${base}/one`, { waitUntil: "networkidle", timeout: 2000 });
+      const firstLoads = loads;
+      const loaded = page.waitForEvent("load", { timeout: 2000 });
+      loaded.catch(() => {});
+      await page.evaluate(() => location.assign("/two"));
+      await loaded;
+      assert.equal(page.url(), `${base}/two`);
+      assert.deepEqual(requests, ["/one", "/two"]);
+      assert.equal(loads, firstLoads + 1);
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);
+
+test("loaded native navigation mirrors a late external script's document mutation", async () => {
+  let scriptRequests = 0;
+  const server = createServer((request, response) => {
+    response.setHeader("cache-control", "no-store");
+    if (request.url === "/late.js") {
+      scriptRequests++;
+      response.setHeader("content-type", "application/javascript");
+      setTimeout(() => response.end("document.body.dataset.loadedPath=location.pathname;"), 30);
+      return;
+    }
+    response.setHeader("content-type", "text/html");
+    response.end('<body><script src="/late.js"></script></body>');
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const page = shim.newPage();
+  try {
+    for (const path of ["/first", "/next"]) {
+      await page.goto(origin + path, { waitUntil: path === "/first" ? "networkidle" : "load" });
+      assert.equal(await page.locator("body").getAttribute("data-loaded-path"), path);
+    }
+    assert.equal(scriptRequests, 2);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

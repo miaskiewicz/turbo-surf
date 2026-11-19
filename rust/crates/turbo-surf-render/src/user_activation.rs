@@ -26,6 +26,7 @@ pub(super) struct HostUserActivation {
 pub struct NavigationActivationSnapshot {
     source: String,
     sticky: bool,
+    opaque: bool,
 }
 
 struct InheritedSticky(bool);
@@ -120,15 +121,33 @@ fn active_document<'s>(
     context.get_slot::<ActiveDocument>()?.0.to_local(scope)
 }
 
-/// https://html.spec.whatwg.org/#activation-notification for trusted host input.
-#[op2(nofast, reentrant)]
-pub(super) fn op_host_user_activation(scope: &mut v8::PinScope) {
-    let context = scope.get_current_context();
+fn input_document_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Context>> {
+    let context = document.get_creation_context(scope)?;
     if context.get_slot::<HostInputDriver>().is_none()
         || context.get_slot::<FrameRetired>().is_some()
+        || context
+            .get_slot::<private_boundary::Infrastructure>()
+            .is_some()
     {
-        return;
+        return None;
     }
+    let active = active_document(scope, context)?;
+    active.strict_equals(document.into()).then_some(context)
+}
+
+/// https://html.spec.whatwg.org/#activation-notification for trusted host input.
+#[op2(nofast, reentrant)]
+pub(super) fn op_host_user_activation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) {
+    let Some(context) = input_document_context(scope, document) else {
+        return;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     let stamp = NEXT_STAMP.with(|next| {
         let stamp = next.get();
         next.set(stamp + 1);
@@ -206,10 +225,23 @@ fn activation_host(
 }
 
 impl NavigationActivationSnapshot {
-    pub(super) fn capture(source: String, context: v8::Local<v8::Context>) -> Self {
+    pub(super) fn inactive(source: String) -> Self {
+        Self {
+            source,
+            sticky: false,
+            opaque: true,
+        }
+    }
+
+    pub(super) fn capture(
+        scope: &mut v8::PinScope,
+        source: String,
+        context: v8::Local<v8::Context>,
+    ) -> Self {
         Self {
             source,
             sticky: has_been_active(context),
+            opaque: window_is_opaque(scope, context),
         }
     }
 
@@ -220,6 +252,7 @@ impl NavigationActivationSnapshot {
             return false;
         };
         self.sticky
+            && !self.opaque
             && matches!(source.origin(), url::Origin::Tuple(..))
             && source.origin() == destination.origin()
     }
@@ -235,6 +268,32 @@ pub(super) fn seed(
     scope
         .get_current_context()
         .set_slot(Rc::new(InheritedSticky(sticky)));
+}
+
+pub(super) fn reject_opaque_seed(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    if context
+        .get_slot::<private_boundary::Infrastructure>()
+        .is_none()
+        && window_is_opaque(scope, context)
+    {
+        context.set_slot(Rc::new(InheritedSticky(false)));
+    }
+}
+
+pub(super) fn carry_navigation(
+    scope: &mut v8::PinScope,
+    snapshot: NavigationActivationSnapshot,
+    current: v8::Local<v8::Context>,
+    destination: &str,
+) {
+    let sticky = !window_is_opaque(scope, current) && snapshot.carries_to(destination);
+    current.set_slot(Rc::new(InheritedSticky(sticky)));
+}
+
+pub(super) fn inherit_initial(source: v8::Local<v8::Context>, target: v8::Local<v8::Context>) {
+    if let Some(sticky) = source.get_slot::<InheritedSticky>() {
+        target.set_slot(sticky);
+    }
 }
 
 fn key<'s>(scope: &mut v8::PinScope<'s, '_>, name: &str) -> Option<v8::Local<'s, v8::Private>> {
@@ -338,16 +397,41 @@ pub(super) fn snapshot_bits(context: v8::Local<v8::Context>) -> i32 {
     i32::from(host_user_activation(context)) | (i32::from(has_been_active(context)) << 1)
 }
 
-/// A trusted Esc keydown the page did not cancel: process the window's close watchers.
+/// Trusted input defaults inspect the actual input document's native context slots.
 #[op2(nofast, reentrant)]
-pub(super) fn op_host_close_request(scope: &mut v8::PinScope) -> bool {
-    let context = scope.get_current_context();
-    if context.get_slot::<HostInputDriver>().is_none() {
-        return false;
+pub(super) fn op_host_input_dispatch<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    event: v8::Local<'s, v8::Object>,
+    target: v8::Local<'s, v8::Object>,
+) {
+    let Some(context) = input_document_context(scope, document) else {
+        return;
+    };
+    use turbo_dom_browser_env::host_internals::{
+        current_document_context, enter_document_of, handle_of,
+    };
+    if handle_of(scope, target).is_none() {
+        return;
     }
-    let Some(document) = active_document(scope, context) else {
+    let _document = enter_document_of(scope, target);
+    if current_document_context(scope) != Some(context) {
+        return;
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    crate::browser_env::dispatch_host_event(scope, event, target);
+}
+
+/// A trusted uncanceled Esc: process close watchers in the actual input document.
+#[op2(nofast, reentrant)]
+pub(super) fn op_host_close_request<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> bool {
+    let Some(context) = input_document_context(scope, document) else {
         return false;
     };
+    let scope = &mut v8::ContextScope::new(scope, context);
     crate::browser_env::process_close_watchers(scope, document)
 }
 

@@ -45,3 +45,13 @@ fn coherent_runtime_crypto_and_type_graph() {
         delete Object.prototype.keyData;
     "#).unwrap();
 }
+
+#[test]
+fn pending_module_cancel_api_does_not_register_the_infrastructure_context() {
+    let mut runtime = deno_core::JsRuntime::new(Default::default());
+    deno_core::scope!(scope, runtime);
+    let context = scope.get_current_context();
+    assert!(!deno_core::JsRuntime::cancel_module_context_pending_work(
+        scope, context
+    ));
+}

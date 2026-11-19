@@ -1,0 +1,22 @@
+{
+  "lifetime": {
+    "reasonStable": true,
+    "reasonSourceCollected": true,
+    "reasonChildCollected": false,
+    "unusedSourcesCollected": [true, true],
+    "winner": "root wins",
+    "pendingSourcesCollected": [[true, true], [true, true]],
+    "pendingAborted": [false, false]
+  },
+  "lifetimeProbeSha256": "7ccc6b9fef5da7296bc39119c2113631ab2105e6676edca44b61bd859327dbf9",
+  "version": {
+    "protocolVersion": "1.3",
+    "product": "HeadlessChrome/156.0.8078.47",
+    "revision": "@1d17a2e2ee147bb7d6ae2ab6abdb3a2510c17775",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.47 Safari/537.36",
+    "jsVersion": "15.6.75.19"
+  },
+  "probeSha256": "1d3b0d120fb6dc2fdb8d86aaa792b73a960e4e57c028853e116f577561eb56ac",
+  "elapsedMs": 124.24029200000001,
+  "result": "{\"same\":{\"before\":[false,false],\"same\":true,\"stable\":true,\"sourceBrand\":true,\"dependentSourceBrand\":true,\"dependentOwnBrand\":true,\"name\":\"TimeoutError\",\"message\":\"signal timed out\"},\"childSource\":{\"before\":[false,false],\"same\":true,\"stable\":true,\"sourceBrand\":true,\"dependentSourceBrand\":true,\"dependentOwnBrand\":false,\"name\":\"TimeoutError\",\"message\":\"signal timed out\"},\"rootSource\":{\"before\":[false,false],\"same\":true,\"stable\":true,\"sourceBrand\":true,\"dependentSourceBrand\":true,\"dependentOwnBrand\":false,\"name\":\"TimeoutError\",\"message\":\"signal timed out\"},\"retired\":{\"rootSource\":true,\"childSource\":true,\"childBrand\":true},\"dependentOnlyTimeoutReason\":{\"same\":true,\"sourceBrand\":true,\"rootBrand\":false},\"retiredTimeout\":{\"source\":false,\"dependent\":false}}"
+}

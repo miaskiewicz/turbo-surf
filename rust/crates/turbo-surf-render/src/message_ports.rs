@@ -620,6 +620,15 @@ fn op_port_post_message<'s>(
     let Some(peer) = live_peer(&source, &token) else {
         return Ok(());
     };
+    let owner = current_owner(scope, &source.borrow())
+        .filter(|owner| *owner == object)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    let context = owner
+        .get_creation_context(scope)
+        .filter(|context| !crate::runtime::native_frame_is_retired(*context))
+        .ok_or_else(|| JsErrorBox::type_error("MessagePort owner has retired"))?;
+    // Serialization policy and native class adapters belong to the actual port realm.
+    let scope = &mut v8::ContextScope::new(scope, context);
     let registry = registry(scope);
     let destination = peer.and_then(|peer| registry.borrow().endpoints.get(&peer).cloned());
     let doomed = peer.is_some_and(|peer| transfer_contains_endpoint(scope, transfer, peer));

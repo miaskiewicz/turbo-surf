@@ -505,3 +505,107 @@
 @@ -293 +293 @@
 -        obj.set(scope, priv_k.into(), priv_key.into());
 +        obj.create_data_property(scope, priv_k.into(), priv_key.into());
+--- a/shared.rs
++++ b/shared.rs
+@@ -468,3 +468,45 @@
+     }
+   }
+ }
++
++// Empty IVs are invalid WebCrypto input, distinct from a valid length that
++// this backend cannot encrypt/decrypt. Preserve the latter capability error.
++pub(crate) fn validate_aes_gcm_iv_length(
++  length: usize,
++) -> Result<(), deno_error::JsErrorBox> {
++  if length == 0 {
++    return Err(deno_error::JsErrorBox::new(
++      "DOMExceptionOperationError",
++      "Initialization vector must not be empty",
++    ));
++  }
++  if length == 12 || length == 16 {
++    return Ok(());
++  }
++  Err(deno_error::JsErrorBox::new(
++    "DOMExceptionNotSupportedError",
++    "Initialization vector length not supported",
++  ))
++}
++
++#[cfg(test)]
++mod iv_length_tests {
++  use deno_error::JsErrorClass;
++
++  #[test]
++  fn zero_iv_is_invalid_while_positive_unsupported_lengths_keep_their_class() {
++    let invalid = super::validate_aes_gcm_iv_length(0).unwrap_err();
++    assert_eq!(invalid.get_class(), "DOMExceptionOperationError");
++    for length in [1, 8, 9, 15, 17, 31] {
++      let unsupported = super::validate_aes_gcm_iv_length(length).unwrap_err();
++      assert_eq!(unsupported.get_class(), "DOMExceptionNotSupportedError");
++      assert_eq!(
++        unsupported.get_message(),
++        "Initialization vector length not supported"
++      );
++    }
++    for length in [12, 16] {
++      assert!(super::validate_aes_gcm_iv_length(length).is_ok());
++    }
++  }
++}
+--- a/subtle_decrypt.rs
++++ b/subtle_decrypt.rs
+@@ -501,12 +501,8 @@
+       if data.len() < (tag_length / 8) as usize {
+         return Err(op_error("The provided data is too small".to_string()));
+       }
+-      let iv_len = iv.len();
+-      if iv_len != 12 && iv_len != 16 {
+-        return Err(not_supported(
+-          "Initialization vector length not supported".to_string(),
+-        ));
+-      }
++      crate::shared::validate_aes_gcm_iv_length(iv.len())
++        .map_err(CryptoError::Other)?;
+       let key_length = key.algorithm_length.ok_or_else(|| {
+         op_error("AES-GCM key is missing 'length'".to_string())
+       })?;
+@@ -599,10 +595,6 @@
+   CryptoError::Other(JsErrorBox::new("DOMExceptionOperationError", msg))
+ }
+ 
+-fn not_supported(msg: String) -> CryptoError {
+-  CryptoError::Other(JsErrorBox::new("DOMExceptionNotSupportedError", msg))
+-}
+-
+ fn decrypt_error_to_crypto(e: decrypt::DecryptError) -> CryptoError {
+   CryptoError::Other(JsErrorBox::from_err(e))
+ }
+--- a/subtle_encrypt.rs
++++ b/subtle_encrypt.rs
+@@ -563,12 +563,8 @@
+           return Err(op_error(format!("Invalid tag length: {t}")));
+         }
+       };
+-      let iv_len = iv.len();
+-      if iv_len != 12 && iv_len != 16 {
+-        return Err(not_supported(
+-          "Initialization vector length not supported".to_string(),
+-        ));
+-      }
++      crate::shared::validate_aes_gcm_iv_length(iv.len())
++        .map_err(CryptoError::Other)?;
+       let key_length = key.algorithm_length.ok_or_else(|| {
+         op_error("AES-GCM key is missing 'length'".to_string())
+       })?;
+@@ -666,10 +662,6 @@
+   CryptoError::Other(JsErrorBox::new("DOMExceptionOperationError", msg))
+ }
+ 
+-fn not_supported(msg: String) -> CryptoError {
+-  CryptoError::Other(JsErrorBox::new("DOMExceptionNotSupportedError", msg))
+-}
+-
+ fn encrypt_error_to_crypto(e: encrypt::EncryptError) -> CryptoError {
+   CryptoError::Other(JsErrorBox::from_err(e))
+ }

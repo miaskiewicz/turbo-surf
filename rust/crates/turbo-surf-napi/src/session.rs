@@ -210,26 +210,533 @@ fn read_query(t: &Tree, root: Handle, args: &Value) -> std::result::Result<Strin
 // holds only `Send` command channels keyed by id.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use tokio::sync::mpsc::UnboundedSender as MpscSender;
-use turbo_surf_render::{PageSession, DEFAULT_RENDER_BUDGET_MS};
+use turbo_surf_render::{
+    AuxiliaryBootstrap, AuxiliaryCapability, AuxiliaryHostServices, AuxiliaryPageEventLog,
+    PageSession, PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS,
+};
 
 enum LiveJob {
+    Content(
+        String,
+        String,
+        Option<u64>,
+        SyncSender<std::result::Result<String, String>>,
+    ),
+    Resize(u32, u32, SyncSender<std::result::Result<String, String>>),
+    Navigate(
+        String,
+        String,
+        String,
+        SyncSender<std::result::Result<String, String>>,
+    ),
     Eval(String, SyncSender<std::result::Result<String, String>>),
     EngineEval(String, SyncSender<std::result::Result<String, String>>),
-    Expression(String, SyncSender<std::result::Result<String, String>>),
-    Serialize(SyncSender<String>),
-    Cookies(SyncSender<String>),
-    NetworkLog(SyncSender<String>),
-    Close(SyncSender<()>),
+    Interaction(
+        String,
+        Option<String>,
+        SyncSender<std::result::Result<String, String>>,
+    ),
+    EngineCollect(String, SyncSender<std::result::Result<String, String>>),
+    EngineRead(String, SyncSender<std::result::Result<String, String>>),
+    Expression(
+        String,
+        bool,
+        SyncSender<std::result::Result<String, String>>,
+    ),
+    ExpressionTracked(String, SyncSender<std::result::Result<String, String>>),
+    Serialize(SyncSender<std::result::Result<String, String>>),
+    ImageAssets(String, SyncSender<std::result::Result<String, String>>),
+    Cookies(SyncSender<std::result::Result<String, String>>),
+    SetCookies(String, SyncSender<std::result::Result<(), String>>),
+    ConfigureTarget(
+        AuxiliaryBootstrap,
+        SyncSender<std::result::Result<(), String>>,
+    ),
+    CleanupNetwork,
+    Close(SyncSender<std::result::Result<(), String>>),
 }
 
-static LIVE: OnceLock<Mutex<HashMap<u32, MpscSender<LiveJob>>>> = OnceLock::new();
+impl LiveJob {
+    fn requires_live_target(&self) -> bool {
+        !matches!(self, Self::Close(_) | Self::CleanupNetwork)
+    }
+
+    fn reject(self, error: String) {
+        match self {
+            Self::Content(_, _, _, reply)
+            | Self::Resize(_, _, reply)
+            | Self::Navigate(_, _, _, reply)
+            | Self::Eval(_, reply)
+            | Self::EngineEval(_, reply)
+            | Self::Interaction(_, _, reply)
+            | Self::EngineCollect(_, reply)
+            | Self::EngineRead(_, reply)
+            | Self::Expression(_, _, reply)
+            | Self::ExpressionTracked(_, reply)
+            | Self::Serialize(reply)
+            | Self::ImageAssets(_, reply)
+            | Self::Cookies(reply) => {
+                let _ = reply.send(Err(error));
+            }
+            Self::SetCookies(_, reply) | Self::ConfigureTarget(_, reply) | Self::Close(reply) => {
+                let _ = reply.send(Err(error));
+            }
+            Self::CleanupNetwork => {}
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum LiveTarget {
+    LegacyRoot,
+    Auxiliary(u64),
+}
+
+impl LiveTarget {
+    fn with_auxiliary<T>(
+        self,
+        operation: impl FnOnce(u64) -> std::result::Result<T, String>,
+    ) -> std::result::Result<T, String> {
+        match self {
+            Self::Auxiliary(target) => operation(target),
+            Self::LegacyRoot => {
+                Err("Auxiliary contexts are unsupported by this actual root context".into())
+            }
+        }
+    }
+}
+
+fn initialized_root_target(session: &mut PageSession) -> std::result::Result<LiveTarget, String> {
+    match session.auxiliary_event_log().capability() {
+        AuxiliaryCapability::Supported => session.auxiliary_root_id().map(LiveTarget::Auxiliary),
+        AuxiliaryCapability::Unsupported { .. } => Ok(LiveTarget::LegacyRoot),
+        AuxiliaryCapability::Pending => {
+            Err("Actual root auxiliary capability was not resolved before initialization".into())
+        }
+    }
+}
+
+async fn poll_actor_work(
+    session: &mut PageSession,
+    legacy: bool,
+) -> std::result::Result<String, String> {
+    if legacy {
+        session.eval("").await
+    } else {
+        session.poll_background_work().await
+    }
+}
+
+enum LiveMessage {
+    Target {
+        target: LiveTarget,
+        job: LiveJob,
+    },
+    Shutdown(SyncSender<()>),
+    ConfigureContext(
+        AuxiliaryBootstrap,
+        SyncSender<std::result::Result<(), String>>,
+    ),
+}
+
+fn run_target_job<T>(
+    runtime: &tokio::runtime::Runtime,
+    mut cancellation: tokio::sync::watch::Receiver<bool>,
+    future: impl std::future::Future<Output = std::result::Result<T, String>>,
+) -> std::result::Result<T, String> {
+    runtime.block_on(async {
+        let closed = async {
+            loop {
+                if *cancellation.borrow_and_update() {
+                    return;
+                }
+                if cancellation.changed().await.is_err() {
+                    return;
+                }
+            }
+        };
+        tokio::select! {
+            biased;
+            () = closed => Err("Native auxiliary target closed".into()),
+            result = future => result,
+        }
+    })
+}
+
+struct LiveActor {
+    id: u32,
+    tx: MpscSender<LiveMessage>,
+    network: turbo_surf_render::NetworkEventLog,
+    auxiliary: AuxiliaryPageEventLog,
+    history_log: turbo_surf_render::NativeHistoryLog,
+    emulation: turbo_surf_render::ContextEmulationHandle,
+    opening: AtomicBool,
+    initial_hydration_timeout: Mutex<Option<u32>>,
+    started: AtomicBool,
+    closing_calls: AtomicUsize,
+    finished: Arc<(Mutex<bool>, Condvar)>,
+    cancellations: Arc<Mutex<HashMap<LiveTarget, tokio::sync::watch::Sender<bool>>>>,
+}
+
+struct LiveConnection {
+    actor: Arc<LiveActor>,
+    target: LiveTarget,
+}
+
+static ACTORS: OnceLock<Mutex<HashMap<u32, Arc<LiveActor>>>> = OnceLock::new();
+static LIVE: OnceLock<Mutex<HashMap<u32, LiveConnection>>> = OnceLock::new();
 static LIVE_NEXT: AtomicU32 = AtomicU32::new(1);
 
-fn live_registry() -> &'static Mutex<HashMap<u32, MpscSender<LiveJob>>> {
+fn live_registry() -> &'static Mutex<HashMap<u32, LiveConnection>> {
     LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn actor_registry() -> &'static Mutex<HashMap<u32, Arc<LiveActor>>> {
+    ACTORS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn live_actor(id: u32) -> Result<Arc<LiveActor>> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    if let Some(connection) = live.get(&id) {
+        return Ok(connection.actor.clone());
+    }
+    drop(live);
+    actor_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("actor registry poisoned"))?
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| Error::from_reason("no such live actor"))
+}
+
+pub(crate) fn actor_context_emulation(
+    id: u32,
+) -> Result<turbo_surf_render::ContextEmulationHandle> {
+    let actor = live_actor(id)?;
+    if actor.network.is_closed() {
+        return Err(Error::from_reason("live actor is closed"));
+    }
+    Ok(actor.emulation.clone())
+}
+
+struct ActiveActorClose(Arc<LiveActor>);
+
+impl ActiveActorClose {
+    fn new(actor: Arc<LiveActor>) -> Self {
+        actor.closing_calls.fetch_add(1, Ordering::AcqRel);
+        Self(actor)
+    }
+}
+
+impl Drop for ActiveActorClose {
+    fn drop(&mut self) {
+        self.0.closing_calls.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct OpeningActorGuard {
+    actor: Arc<LiveActor>,
+    committed: bool,
+}
+
+impl Drop for OpeningActorGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.actor.network.close();
+            if !self.actor.started.load(Ordering::Acquire) {
+                finish_actor_without_session(&self.actor);
+            } else {
+                let (reply, _) = sync_channel(1);
+                let _ = self.actor.tx.send(LiveMessage::Shutdown(reply));
+            }
+        }
+    }
+}
+
+fn finish_actor_without_session(actor: &LiveActor) {
+    LiveWorkerCleanup {
+        id: actor.id,
+        network: actor.network.clone(),
+        auxiliary: actor.auxiliary.clone(),
+        finished: actor.finished.clone(),
+    }
+    .finish();
+}
+
+fn prepare_live_actor(
+    reserved: Option<u32>,
+    emulation: turbo_surf_render::ContextEmulationHandle,
+) -> Result<(
+    Arc<LiveActor>,
+    tokio::sync::mpsc::UnboundedReceiver<LiveMessage>,
+    OpeningActorGuard,
+)> {
+    let id = reserved.unwrap_or_else(|| LIVE_NEXT.fetch_add(1, Ordering::Relaxed));
+    let network = if reserved.is_some() {
+        opening_networks()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::from_reason("Invalid opening network log"))?
+    } else {
+        turbo_surf_render::NetworkEventLog::default()
+    };
+    if network.is_closed() {
+        return Err(Error::from_reason("Page session closed"));
+    }
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let actor = Arc::new(LiveActor {
+        id,
+        tx,
+        network,
+        auxiliary: AuxiliaryPageEventLog::default(),
+        history_log: turbo_surf_render::NativeHistoryLog::default(),
+        emulation,
+        opening: AtomicBool::new(true),
+        initial_hydration_timeout: Mutex::new(None),
+        started: AtomicBool::new(false),
+        closing_calls: AtomicUsize::new(0),
+        finished: Arc::new((Mutex::new(false), Condvar::new())),
+        cancellations: Arc::new(Mutex::new(HashMap::new())),
+    });
+    let mut actors = actor_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("actor registry poisoned"))?;
+    if actors.contains_key(&id) {
+        return Err(Error::from_reason("opening actor already registered"));
+    }
+    actors.insert(id, actor.clone());
+    let guard = OpeningActorGuard {
+        actor: actor.clone(),
+        committed: false,
+    };
+    Ok((actor, rx, guard))
+}
+
+fn wait_for_actor_cleanup(actor: &LiveActor) -> Result<()> {
+    let (finished, changed) = &*actor.finished;
+    let finished = finished
+        .lock()
+        .map_err(|_| Error::from_reason("actor completion poisoned"))?;
+    let (finished, _) = changed
+        .wait_timeout_while(finished, std::time::Duration::from_secs(5), |done| !*done)
+        .map_err(|_| Error::from_reason("actor completion poisoned"))?;
+    if !*finished {
+        return Err(Error::from_reason(
+            "live actor close exceeded cleanup deadline",
+        ));
+    }
+    Ok(())
+}
+
+struct LiveWorkerCleanup {
+    id: u32,
+    network: turbo_surf_render::NetworkEventLog,
+    auxiliary: AuxiliaryPageEventLog,
+    finished: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl LiveWorkerCleanup {
+    fn finish(&mut self) {
+        self.network.close();
+        self.auxiliary.close();
+        if let Ok(mut live) = live_registry().lock() {
+            live.retain(|_, connection| connection.actor.id != self.id);
+        }
+        if let Ok(mut actors) = actor_registry().lock() {
+            actors.remove(&self.id);
+        }
+        if let Ok(mut opening) = opening_networks().lock() {
+            if let Some(log) = opening.remove(&self.id) {
+                log.close();
+            }
+        }
+        let (finished, changed) = &*self.finished;
+        if let Ok(mut finished) = finished.lock() {
+            *finished = true;
+            changed.notify_all();
+        }
+    }
+}
+
+impl Drop for LiveWorkerCleanup {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+static OPENING_NETWORKS: OnceLock<Mutex<HashMap<u32, turbo_surf_render::NetworkEventLog>>> =
+    OnceLock::new();
+fn opening_networks() -> &'static Mutex<HashMap<u32, turbo_surf_render::NetworkEventLog>> {
+    OPENING_NETWORKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn network_log(id: u32) -> Result<turbo_surf_render::NetworkEventLog> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    if let Some(connection) = live.get(&id) {
+        return Ok(connection.actor.network.clone());
+    }
+    drop(live);
+    if let Ok(actor) = live_actor(id) {
+        return Ok(actor.network.clone());
+    }
+    opening_networks()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| Error::from_reason("no such live session"))
+}
+
+fn dialog_owner(id: u32) -> Result<Option<String>> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    Ok(live.get(&id).map(|connection| match connection.target {
+        LiveTarget::LegacyRoot => "legacy-root".to_owned(),
+        LiveTarget::Auxiliary(target) => target.to_string(),
+    }))
+}
+
+/// Read the completed actor bootstrap outcome without entering the guest isolate.
+#[napi]
+pub fn live_initial_hydration_status(id: u32) -> Result<String> {
+    let actor = live_actor(id)?;
+    if actor.id != id {
+        return Err(Error::from_reason(
+            "initial hydration status requires its actor token",
+        ));
+    }
+    if actor.opening.load(Ordering::Acquire) {
+        return Err(Error::from_reason("initial hydration is still pending"));
+    }
+    if actor.network.is_closed() {
+        return Err(Error::from_reason("initial hydration actor is closed"));
+    }
+    let root = initial_hydration_root(&actor)?;
+    if actor
+        .cancellations
+        .lock()
+        .map_err(|_| Error::from_reason("actor cancellation registry poisoned"))?
+        .get(&root)
+        .is_some_and(|cancel| *cancel.borrow())
+    {
+        return Err(Error::from_reason("initial hydration root is closing"));
+    }
+    let timeout = actor
+        .initial_hydration_timeout
+        .lock()
+        .map_err(|_| Error::from_reason("initial hydration status poisoned"))?;
+    Ok(serde_json::json!({"timedOut": timeout.is_some(), "timeoutMs": *timeout}).to_string())
+}
+
+fn initial_hydration_root(actor: &LiveActor) -> Result<LiveTarget> {
+    let root = actor
+        .auxiliary
+        .root()
+        .ok_or_else(|| Error::from_reason("initial hydration root ownership is unavailable"))?;
+    let info = actor
+        .auxiliary
+        .info(&root)
+        .ok_or_else(|| Error::from_reason("initial hydration root ownership is unavailable"))?;
+    if info.closed {
+        return Err(Error::from_reason("initial hydration root is closed"));
+    }
+    let target = root
+        .parse()
+        .map_err(|_| Error::from_reason("initial hydration root identity is invalid"))?;
+    Ok(LiveTarget::Auxiliary(target))
+}
+
+// A target-only close needs the partial session to retire its root without
+// destroying sibling pages; it does not authorize recovery of the closing Page.
+fn initial_root_close_requested(actor: &LiveActor) -> bool {
+    let Some(root) = actor.auxiliary.root().and_then(|root| root.parse().ok()) else {
+        return false;
+    };
+    actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .get(&LiveTarget::Auxiliary(root))
+        .is_some_and(|cancel| *cancel.borrow())
+}
+
+/// Configure a host listener without entering the owning (possibly paused) isolate.
+#[napi]
+pub fn live_dialog_configure(id: u32, enabled: bool, context_wide: Option<bool>) -> Result<()> {
+    let broker = network_log(id)?.dialogs();
+    let result = if context_wide.unwrap_or(false) {
+        broker.configure_context(enabled)
+    } else if live_actor(id).is_ok_and(|actor| actor.id != id) {
+        broker.configure(
+            &dialog_owner(id)?.ok_or_else(|| Error::from_reason("Dialog target closed"))?,
+            enabled,
+        )
+    } else {
+        broker.configure_primary(enabled)
+    };
+    result.map_err(Error::from_reason)
+}
+
+/// A reply must bypass the ordinary actor queue: guest JavaScript is paused in it.
+#[napi]
+pub fn live_dialog_respond(
+    id: u32,
+    dialog: String,
+    accepted: bool,
+    prompt_text: Option<Vec<u16>>,
+) -> Result<()> {
+    let parsed = dialog
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid dialog ID"))?;
+    if parsed.to_string() != dialog {
+        return Err(Error::from_reason("Invalid dialog ID"));
+    }
+    let broker = network_log(id)?.dialogs();
+    let reply = turbo_surf_render::DialogReply {
+        accepted,
+        prompt_text,
+    };
+    match dialog_owner(id)? {
+        Some(owner) => broker.respond(&owner, parsed, reply),
+        None => broker.respond_primary(parsed, reply),
+    }
+    .map_err(Error::from_reason)
+}
+#[napi]
+pub fn live_dialog_cancel(id: u32) -> Result<()> {
+    let broker = match network_log(id) {
+        Ok(log) => log.dialogs(),
+        Err(error) if error.reason == "no such live session" => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if live_actor(id).is_ok_and(|actor| actor.id != id) {
+        broker.cancel_owner(
+            &dialog_owner(id)?.ok_or_else(|| Error::from_reason("Dialog target closed"))?,
+        );
+    } else {
+        broker.cancel_primary();
+    }
+    Ok(())
+}
+
+/// Reserve a host event queue before initial hydration starts.
+#[napi]
+pub fn live_network_log_create() -> Result<u32> {
+    let id = LIVE_NEXT.fetch_add(1, Ordering::Relaxed);
+    opening_networks()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?
+        .insert(id, turbo_surf_render::NetworkEventLog::default());
+    Ok(id)
 }
 
 fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
@@ -237,16 +744,454 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
         .lock()
         .map_err(|_| "session registry poisoned")?;
     let tx = reg.get(&id).ok_or("no such live session")?;
-    tx.send(job)
+    if tx.actor.opening.load(Ordering::Acquire) {
+        return Err("live actor is opening".into());
+    }
+    if tx.actor.network.is_closed() {
+        return Err("live actor is closed".into());
+    }
+    tx.actor
+        .cancellations
+        .lock()
+        .map_err(|_| "actor cancellation registry poisoned")?
+        .entry(tx.target)
+        .or_insert_with(|| tokio::sync::watch::channel(false).0);
+    tx.actor
+        .tx
+        .send(LiveMessage::Target {
+            target: tx.target,
+            job,
+        })
         .map_err(|_| "live session worker gone".to_string())
+}
+
+struct TargetWorker<'a> {
+    rt: &'a tokio::runtime::Runtime,
+    session: &'a mut PageSession,
+    target: LiveTarget,
+    primary: bool,
+    logical_root: bool,
+    cancellation: tokio::sync::watch::Receiver<bool>,
+    final_close: &'a mut Option<SyncSender<std::result::Result<(), String>>>,
+    storage_work: &'a mut bool,
+}
+
+impl TargetWorker<'_> {
+    fn execute(&mut self, job: LiveJob) -> bool {
+        match job {
+            LiveJob::Content(html, wait_until, timeout, reply) => {
+                let result = if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.set_content(&html, &wait_until, timeout),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.set_target_content(
+                                native_target,
+                                &html,
+                                &wait_until,
+                                timeout,
+                            ),
+                        )
+                    })
+                };
+                *self.storage_work |= wait_until == "domcontentloaded" && result.is_ok();
+                let _ = reply.send(result);
+            }
+            LiveJob::Navigate(url, history, options, reply) => {
+                let _ = reply.send(self.target.with_auxiliary(|native_target| {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.navigate_target_with_options(
+                            native_target,
+                            &url,
+                            &history,
+                            &options,
+                        ),
+                    )
+                }));
+            }
+            LiveJob::ConfigureTarget(bootstrap, reply) => {
+                let _ = reply.send(self.target.with_auxiliary(|native_target| {
+                    self.session
+                        .configure_target_bootstrap(native_target, bootstrap)
+                }));
+            }
+            LiveJob::CleanupNetwork => {}
+            LiveJob::Resize(width, height, reply) => {
+                let result = if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.set_viewport(width, height),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.resize_target(native_target, width, height),
+                        )
+                    })
+                }
+                .map(|_| String::new());
+                let _ = reply.send(result);
+            }
+            LiveJob::Serialize(reply) => {
+                let _ = reply.send(if self.primary {
+                    self.session.serialize_for_driver_checked()
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session.serialize_target_for_driver(native_target)
+                    })
+                });
+            }
+            LiveJob::ImageAssets(query, reply) => {
+                let _ = reply.send(if self.primary {
+                    self.session.screenshot_image_assets(&query)
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session
+                            .screenshot_target_image_assets(native_target, &query)
+                    })
+                });
+            }
+            LiveJob::SetCookies(cookies, reply) => {
+                self.session.set_cookies(&cookies);
+                let _ = reply.send(Ok(()));
+            }
+            LiveJob::Cookies(reply) => {
+                let _ = reply.send(if self.primary {
+                    Ok(self.session.cookies_for_driver())
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session.cookies_target_for_driver(native_target)
+                    })
+                });
+            }
+            LiveJob::Close(reply) => return self.close(reply),
+            job => self.execute_script(job),
+        }
+        true
+    }
+    fn execute_script(&mut self, job: LiveJob) {
+        match job {
+            LiveJob::Eval(script, reply) => {
+                // The logical Page root can live in an auxiliary V8 context.
+                // Legacy liveEval retains the full session drain contract there.
+                let _ = reply.send(if self.logical_root {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.eval_target_script(native_target, &script),
+                        )
+                    })
+                });
+            }
+            LiveJob::Interaction(script, baseline, reply) => {
+                let result = if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_engine(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.dispatch_target_engine_since(
+                                target,
+                                &script,
+                                baseline.as_deref(),
+                            ),
+                        )
+                    })
+                };
+                let _ = reply.send(result);
+            }
+            LiveJob::EngineEval(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_engine(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session
+                                .eval_target_engine(native_target, &script, false),
+                        )
+                    })
+                });
+            }
+            LiveJob::EngineCollect(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.collect_engine(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session
+                                .eval_target_engine(native_target, &script, true),
+                        )
+                    })
+                });
+            }
+            LiveJob::EngineRead(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    self.session.read_engine(&script)
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        self.session.read_target_engine(native_target, &script)
+                    })
+                });
+            }
+            LiveJob::Expression(script, engine, reply) => {
+                let result = if !self.primary {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session.eval_target_expression(
+                                native_target,
+                                &script,
+                                engine,
+                                false,
+                            ),
+                        )
+                    })
+                } else if engine {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_engine_expression(&script),
+                    )
+                } else {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_expression(&script),
+                    )
+                };
+                let _ = reply.send(result);
+            }
+            LiveJob::ExpressionTracked(script, reply) => {
+                let _ = reply.send(if self.primary {
+                    run_target_job(
+                        self.rt,
+                        self.cancellation.clone(),
+                        self.session.eval_expression_tracked(&script),
+                    )
+                } else {
+                    self.target.with_auxiliary(|native_target| {
+                        run_target_job(
+                            self.rt,
+                            self.cancellation.clone(),
+                            self.session
+                                .eval_target_expression_tracked(native_target, &script),
+                        )
+                    })
+                });
+            }
+            _ => unreachable!("control jobs are dispatched before script jobs"),
+        }
+    }
+    fn close(&mut self, reply: SyncSender<std::result::Result<(), String>>) -> bool {
+        if self.target == LiveTarget::LegacyRoot {
+            *self.final_close = Some(reply);
+            return false;
+        }
+        match self
+            .target
+            .with_auxiliary(|native_target| self.session.close_target(native_target))
+        {
+            Ok(alive) => {
+                if !alive {
+                    *self.final_close = Some(reply);
+                    return false;
+                }
+                let _ = reply.send(Ok(()));
+            }
+            Err(error) => {
+                let _ = reply.send(Err(error));
+            }
+        }
+
+        true
+    }
+}
+
+fn finish_actor_target_close(
+    rt: &tokio::runtime::Runtime,
+    session: PageSession,
+    actor: &LiveActor,
+    target: LiveTarget,
+    cleanup: &mut LiveWorkerCleanup,
+    reply: Option<SyncSender<std::result::Result<(), String>>>,
+) {
+    session.close();
+    let completed = match target {
+        LiveTarget::LegacyRoot => true,
+        LiveTarget::Auxiliary(_) => rt.block_on(
+            actor
+                .network
+                .wait_all_response_completion_async(std::time::Duration::from_secs(5)),
+        ),
+    };
+    cleanup.finish();
+    if let Some(reply) = reply {
+        let _ = reply.send(
+            completed
+                .then_some(())
+                .ok_or_else(|| "Native target response cancellation did not complete".to_owned()),
+        );
+    }
+}
+
+fn run_actor_loop(
+    rt: &tokio::runtime::Runtime,
+    mut session: PageSession,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<LiveMessage>,
+    root_target: LiveTarget,
+    actor: &LiveActor,
+    cleanup: &mut LiveWorkerCleanup,
+) {
+    let legacy = root_target == LiveTarget::LegacyRoot;
+    let mut storage_work = session.has_pending_auxiliary_work();
+    loop {
+        enum Ready {
+            Job(Option<LiveMessage>),
+            Storage,
+        }
+        let ready = if !legacy && !session.has_owned_pages() {
+            Ready::Job(rt.block_on(rx.recv()))
+        } else if storage_work || !legacy {
+            rt.block_on(async {
+                tokio::select! {
+                    biased;
+                    job = rx.recv() => Ready::Job(job),
+                    _ = poll_actor_work(&mut session, legacy) => Ready::Storage,
+                }
+            })
+        } else {
+            let signal = session.storage_event_signal();
+            rt.block_on(async {
+                tokio::select! {
+                    biased;
+                    job = rx.recv() => Ready::Job(job),
+                    () = signal => Ready::Storage,
+                }
+            })
+        };
+        let message = match ready {
+            Ready::Job(Some(job)) => job,
+            Ready::Job(None) => break,
+            Ready::Storage => {
+                // Drive continuations while IO is pending, but let host
+                // commands interrupt the drain (Close cancels transport).
+                storage_work = !storage_work;
+                continue;
+            }
+        };
+        // Synchronous guest callbacks may create transports, but a read
+        // must not poll the runtime or advance the page event loop.
+        let _runtime_context = rt.enter();
+        session.flush_network_disposals();
+        let (target, job) = match message {
+            LiveMessage::Target { target, job } => (target, job),
+            LiveMessage::ConfigureContext(bootstrap, reply) => {
+                let result = if actor.network.is_closed() {
+                    Err("live actor is closed".into())
+                } else {
+                    session.configure_auxiliary_bootstrap(bootstrap)
+                };
+                let _ = reply.send(result);
+                continue;
+            }
+            LiveMessage::Shutdown(reply) => {
+                session.close();
+                cleanup.finish();
+                let _ = reply.send(());
+                break;
+            }
+        };
+        let primary_result = match target {
+            LiveTarget::LegacyRoot => Ok(true),
+            LiveTarget::Auxiliary(id) => session.target_is_primary(id),
+        };
+        let primary = match primary_result {
+            Ok(primary) => primary,
+            Err(error) if job.requires_live_target() => {
+                job.reject(error);
+                continue;
+            }
+            Err(_) => false,
+        };
+        let cancellation = actor
+            .cancellations
+            .lock()
+            .unwrap()
+            .entry(target)
+            .or_insert_with(|| tokio::sync::watch::channel(false).0)
+            .subscribe();
+        if *cancellation.borrow() && job.requires_live_target() {
+            job.reject("Native auxiliary target closed".into());
+            continue;
+        }
+        let mut final_close = None;
+        let mut worker = TargetWorker {
+            rt,
+            session: &mut session,
+            target,
+            primary,
+            logical_root: target == root_target,
+            cancellation,
+            final_close: &mut final_close,
+            storage_work: &mut storage_work,
+        };
+        if !worker.execute(job) {
+            finish_actor_target_close(rt, session, actor, target, cleanup, final_close);
+            break;
+        }
+        storage_work |= session.has_pending_auxiliary_work();
+    }
 }
 
 /// Spawn a session thread, hydrate the page on it, and register it. Returns the id.
 /// Async (hydration fetches chunks from a possibly same-process server, so Node's loop
 /// must stay free).
 pub struct LiveOpenTask {
+    initial_images: turbo_surf_render::InitialDocumentImages,
+    receiver: Option<tokio::sync::mpsc::UnboundedReceiver<LiveMessage>>,
+    opening_guard: OpeningActorGuard,
+    max_resource_bytes: Option<u32>,
+    initial_timeout_ms: Option<u32>,
+    window_timer_mode: WindowTimerMode,
     response: crate::document_response::DocumentResponse,
     init_script: String,
+    engine_init_script: String,
     html: String,
     base_url: String,
     cookies: String,
@@ -261,17 +1206,57 @@ impl Task for LiveOpenTask {
     type JsValue = u32;
 
     fn compute(&mut self) -> Result<u32> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LiveJob>();
-        let (open_tx, open_rx) = sync_channel::<std::result::Result<(), String>>(1);
+        let actor = self.opening_guard.actor.clone();
+        let mut rx = self
+            .receiver
+            .take()
+            .ok_or_else(|| Error::from_reason("live actor already started"))?;
+        actor.started.store(true, Ordering::Release);
+        if actor.network.is_closed() {
+            finish_actor_without_session(&actor);
+            return Err(Error::from_reason("Page session closed"));
+        }
+        let tx = actor.tx.clone();
+        let (open_tx, open_rx) =
+            sync_channel::<std::result::Result<(LiveTarget, AuxiliaryPageEventLog), String>>(1);
         let html = std::mem::take(&mut self.html);
         let base = std::mem::take(&mut self.base_url);
         let cookies = std::mem::take(&mut self.cookies);
         let ua = std::mem::take(&mut self.user_agent);
         let client_hints = self.client_hints.clone();
         let storage = self.storage.clone();
+        let initial_images = std::mem::take(&mut self.initial_images);
         let response = self.response.clone();
+        let reserved = response.host_network_log;
+        let id = actor.id;
+        let network = actor.network.clone();
+        let worker_network = network.clone();
         let init_script = std::mem::take(&mut self.init_script);
-        thread::spawn(move || {
+        let engine_init_script = std::mem::take(&mut self.engine_init_script);
+        let initial_timeout_ms = self.initial_timeout_ms;
+        let window_timer_mode = self.window_timer_mode;
+        let viewport = response.viewport;
+        let max_resource_bytes = self.max_resource_bytes;
+        let auxiliary = actor.auxiliary.clone();
+        let history_log = actor.history_log.clone();
+        let worker_actor = actor.clone();
+        let retain_initial_timeout = self.response.retain_initial_hydration_timeout;
+        let auxiliary_policy = self.response.auxiliary_policy.unwrap_or_default();
+        let root_bootstrap = AuxiliaryBootstrap {
+            init_script: self.response.page_init_script.clone(),
+            engine_init_script: self.response.page_engine_init_script.clone(),
+        };
+        let auxiliary_bootstrap = AuxiliaryBootstrap {
+            init_script: self.response.auxiliary_init_script.clone(),
+            engine_init_script: self.response.auxiliary_engine_init_script.clone(),
+        };
+        let spawned = thread::Builder::new().spawn(move || {
+            let mut cleanup = LiveWorkerCleanup {
+                id,
+                network: worker_network.clone(),
+                auxiliary: auxiliary.clone(),
+                finished: worker_actor.finished.clone(),
+            };
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -282,97 +1267,168 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            let mut session = match rt.block_on(PageSession::open_with_document_response(
-                &html,
-                &base,
-                &cookies,
-                &ua,
-                DEFAULT_RENDER_BUDGET_MS,
-                &init_script,
-                client_hints,
-                &response.headers,
-                storage,
-                response.metadata,
-            )) {
-                Ok(s) => {
-                    let _ = open_tx.send(Ok(()));
-                    s
+            let (session, root_target) = match rt.block_on(
+                PageSession::open_with_document_response_and_auxiliary_services(
+                    &html,
+                    &base,
+                    &cookies,
+                    &ua,
+                    DEFAULT_RENDER_BUDGET_MS,
+                    &init_script,
+                    client_hints,
+                    &response.headers,
+                    storage,
+                    response.metadata,
+                    None,
+                    PageSessionOptions {
+                        animation_policy: None,
+                        max_resource_bytes: max_resource_bytes.map(|bytes| bytes as usize),
+                        initial_hydration_budget_ms: initial_timeout_ms.map(u64::from),
+                        viewport,
+                        window_timer_mode,
+                    },
+                    &engine_init_script,
+                    Some(worker_network.clone()),
+                    AuxiliaryHostServices {
+                        initial_images,
+                        bootstrap: auxiliary_bootstrap,
+                        root_bootstrap,
+                        root_history: response.root_history,
+                        history_log,
+                        events: auxiliary,
+                        policy: auxiliary_policy,
+                    },
+                ),
+            ) {
+                Ok(mut s) => {
+                    if worker_network.is_closed() {
+                        s.close();
+                        let _ = open_tx.send(Err("Page session closed".into()));
+                        return;
+                    }
+                    let initial_history_error = s.reconcile_interrupted_history().err();
+                    if let Some(error) = &initial_history_error {
+                        eprintln!("Initial document history reconciliation: {error}");
+                    }
+                    let history_retired_root = initial_history_error.is_some()
+                        && worker_actor
+                            .auxiliary
+                            .root()
+                            .and_then(|target| worker_actor.auxiliary.info(&target))
+                            .is_some_and(|info| info.closed);
+                    if let Some(timeout) =
+                        initial_timeout_ms.filter(|_| s.hydration_diagnostics().budget_exceeded)
+                    {
+                        if !(retain_initial_timeout
+                            || initial_root_close_requested(&worker_actor)
+                            || history_retired_root)
+                            || !matches!(
+                                s.auxiliary_event_log().capability(),
+                                AuxiliaryCapability::Supported
+                            )
+                        {
+                            s.close();
+                            let _ =
+                                open_tx.send(Err(format!("navigation timeout after {timeout}ms")));
+                            return;
+                        }
+                        let Ok(mut status) = worker_actor.initial_hydration_timeout.lock() else {
+                            s.close();
+                            let _ = open_tx.send(Err("initial hydration status poisoned".into()));
+                            return;
+                        };
+                        *status = Some(timeout);
+                    }
+                    let root = match initialized_root_target(&mut s) {
+                        Ok(root) => root,
+                        Err(error) => {
+                            s.close();
+                            let _ = open_tx.send(Err(error));
+                            return;
+                        }
+                    };
+                    let auxiliary = s.auxiliary_event_log();
+                    cleanup.auxiliary = auxiliary.clone();
+                    worker_actor.opening.store(false, Ordering::Release);
+                    let _ = open_tx.send(Ok((root, auxiliary)));
+                    (s, root)
                 }
                 Err(e) => {
                     let _ = open_tx.send(Err(e));
                     return;
                 }
             };
-            let mut storage_work = false;
-            loop {
-                enum Ready {
-                    Job(Option<LiveJob>),
-                    Storage,
-                }
-                let ready = if storage_work {
-                    rt.block_on(async {
-                        tokio::select! {
-                            biased;
-                            job = rx.recv() => Ready::Job(job),
-                            _ = session.eval("") => Ready::Storage,
-                        }
-                    })
-                } else {
-                    let signal = session.storage_event_signal();
-                    rt.block_on(async {
-                        tokio::select! {
-                            biased;
-                            job = rx.recv() => Ready::Job(job),
-                            () = signal => Ready::Storage,
-                        }
-                    })
-                };
-                let job = match ready {
-                    Ready::Job(Some(job)) => job,
-                    Ready::Job(None) => break,
-                    Ready::Storage => {
-                        // Drive continuations while IO is pending, but let host
-                        // commands interrupt the drain (Close cancels transport).
-                        storage_work = !storage_work;
-                        continue;
-                    }
-                };
-                match job {
-                    LiveJob::Eval(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval(&script)));
-                    }
-                    LiveJob::EngineEval(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval_engine(&script)));
-                    }
-                    LiveJob::Expression(script, reply) => {
-                        let _ = reply.send(rt.block_on(session.eval_expression(&script)));
-                    }
-                    LiveJob::Serialize(reply) => {
-                        let _ = reply.send(session.serialize());
-                    }
-                    LiveJob::NetworkLog(reply) => {
-                        let _ = reply.send(session.drain_network_log());
-                    }
-                    LiveJob::Cookies(reply) => {
-                        let _ = reply.send(session.cookies());
-                    }
-                    LiveJob::Close(reply) => {
-                        session.close();
-                        let _ = reply.send(());
-                        break;
-                    }
-                }
-            }
+            run_actor_loop(
+                &rt,
+                session,
+                &mut rx,
+                root_target,
+                &worker_actor,
+                &mut cleanup,
+            );
         });
-        open_rx
+        if let Err(error) = spawned {
+            finish_actor_without_session(&actor);
+            return Err(Error::from_reason(format!(
+                "live actor thread could not start: {error}"
+            )));
+        }
+        let opened = open_rx
             .recv()
-            .map_err(|_| Error::from_reason("live session thread died during open"))?
-            .map_err(Error::from_reason)?;
-        let id = LIVE_NEXT.fetch_add(1, Ordering::Relaxed);
-        live_registry()
+            .map_err(|_| "live session thread died during open".to_owned())
+            .and_then(|value| value);
+        let (root, auxiliary) = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                opening_networks().lock().unwrap().remove(&id);
+                network.close();
+                return Err(Error::from_reason(error));
+            }
+        };
+        let mut live = live_registry()
             .lock()
-            .map_err(|_| Error::from_reason("session registry poisoned"))?
-            .insert(id, tx);
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        let mut opening = opening_networks()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        if network.is_closed() || reserved.is_some() && !opening.contains_key(&id) {
+            let (reply, _) = sync_channel(1);
+            let _ = tx.send(LiveMessage::Shutdown(reply));
+            return Err(Error::from_reason("Page session closed"));
+        }
+        let auxiliary_root = match root {
+            LiveTarget::Auxiliary(id) => Some(id.to_string()),
+            LiveTarget::LegacyRoot => None,
+        };
+        debug_assert_eq!(actor.auxiliary.root(), auxiliary_root);
+        debug_assert_eq!(auxiliary.root(), actor.auxiliary.root());
+        let root_closing = actor
+            .cancellations
+            .lock()
+            .map_err(|_| Error::from_reason("actor cancellation registry poisoned"))?
+            .get(&root)
+            .is_some_and(|cancel| *cancel.borrow());
+        if root_closing
+            || auxiliary_root
+                .as_deref()
+                .and_then(|id| actor.auxiliary.info(id))
+                .is_some_and(|info| info.closed)
+        {
+            opening.remove(&id);
+            self.opening_guard.committed = true;
+            return Err(Error::from_reason(
+                "Page target closed during initialization",
+            ));
+        }
+        live.insert(
+            id,
+            LiveConnection {
+                actor,
+                target: root,
+            },
+        );
+        opening.remove(&id);
+        self.opening_guard.committed = true;
         Ok(id)
     }
 
@@ -383,6 +1439,7 @@ impl Task for LiveOpenTask {
 
 /// Open a live page session (hydrate + keep alive). Returns a session id.
 #[napi]
+#[allow(clippy::too_many_arguments)]
 pub fn live_open(
     html: String,
     base_url: String,
@@ -391,14 +1448,36 @@ pub fn live_open(
     request_state_id: Option<u32>,
     document_response: Option<String>,
     init_script: Option<String>,
+    timeout_ms: Option<u32>,
+    max_resource_bytes: Option<u32>,
+    engine_init_script: Option<String>,
+    real_time_timers: Option<bool>,
+    image_document: Option<u32>,
 ) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
     crate::ensure_render_init();
     let state = crate::request_state(request_state_id)?;
+    let response = crate::document_response::parse(document_response)?;
+    let (_, receiver, opening_guard) = prepare_live_actor(
+        response.host_network_log,
+        state.storage.context_emulation_handle(),
+    )?;
+    let initial_images = state.document_images.take(image_document, &base_url);
     Ok(AsyncTask::new(LiveOpenTask {
-        response: crate::document_response::parse(document_response)?,
+        initial_images,
+        receiver: Some(receiver),
+        opening_guard,
+        max_resource_bytes,
+        initial_timeout_ms: timeout_ms.filter(|timeout| *timeout > 0),
+        window_timer_mode: if real_time_timers.unwrap_or(false) {
+            WindowTimerMode::RealTime
+        } else {
+            WindowTimerMode::Virtual
+        },
+        response,
         init_script: init_script.unwrap_or_default(),
+        engine_init_script: engine_init_script.unwrap_or_default(),
         html,
         base_url,
         cookies: cookies.unwrap_or_default(),
@@ -408,13 +1487,48 @@ pub fn live_open(
     }))
 }
 
+pub struct LiveResizeTask {
+    id: u32,
+    width: u32,
+    height: u32,
+}
+
+#[napi]
+impl Task for LiveResizeTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(self.id, LiveJob::Resize(self.width, self.height, reply))
+            .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live resize worker dropped reply"))?
+            .map_err(Error::from_reason)
+    }
+
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Update a live session's private host viewport and deliver rendering steps.
+#[napi]
+pub fn live_resize(id: u32, width: u32, height: u32) -> AsyncTask<LiveResizeTask> {
+    AsyncTask::new(LiveResizeTask { id, width, height })
+}
+
 /// Run `script` in the live isolate, drain to quiescence, return `String(__RESULT||'')`.
 /// Async — the script may trigger fetches to a same-process server.
 pub struct LiveEvalTask {
     id: u32,
     script: String,
     expression: bool,
+    tracked: bool,
     engine: bool,
+    collect: bool,
+    interaction: bool,
+    navigation_baseline: Option<String>,
 }
 
 #[napi]
@@ -426,8 +1540,18 @@ impl Task for LiveEvalTask {
         let (reply, rx) = sync_channel(1);
         live_send(
             self.id,
-            if self.expression {
-                LiveJob::Expression(std::mem::take(&mut self.script), reply)
+            if self.interaction {
+                LiveJob::Interaction(
+                    std::mem::take(&mut self.script),
+                    self.navigation_baseline.take(),
+                    reply,
+                )
+            } else if self.tracked {
+                LiveJob::ExpressionTracked(std::mem::take(&mut self.script), reply)
+            } else if self.expression {
+                LiveJob::Expression(std::mem::take(&mut self.script), self.engine, reply)
+            } else if self.collect {
+                LiveJob::EngineCollect(std::mem::take(&mut self.script), reply)
             } else if self.engine {
                 LiveJob::EngineEval(std::mem::take(&mut self.script), reply)
             } else {
@@ -452,6 +1576,10 @@ pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
         id,
         script,
         expression: false,
+        interaction: false,
+        navigation_baseline: None,
+        tracked: false,
+        collect: false,
         engine: false,
     })
 }
@@ -459,12 +1587,35 @@ pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
 /// [`live_eval`] for a driver script that needs the engine namespace: the script runs as
 /// a function body whose `__tsNs` parameter is the namespace (turbo-dom#222).
 #[napi]
-pub fn live_eval_engine(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+pub fn live_eval_engine(id: u32, script: String, collect: Option<bool>) -> AsyncTask<LiveEvalTask> {
     AsyncTask::new(LiveEvalTask {
         id,
         script,
         expression: false,
+        interaction: false,
+        navigation_baseline: None,
+        tracked: false,
+        collect: collect.unwrap_or(false),
         engine: true,
+    })
+}
+
+/// Dispatch a trusted interaction and await navigation admitted by its actual target.
+#[napi]
+pub fn live_dispatch_engine(
+    id: u32,
+    script: String,
+    navigation_baseline: Option<String>,
+) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: false,
+        tracked: false,
+        collect: false,
+        engine: true,
+        interaction: true,
+        navigation_baseline,
     })
 }
 
@@ -475,33 +1626,248 @@ pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> 
         id,
         script,
         expression: true,
+        interaction: false,
+        navigation_baseline: None,
+        tracked: false,
+        collect: false,
         engine: false,
     })
 }
 
-pub struct LiveNetworkLogTask {
+/// Evaluate and return a JSON envelope with the result and host-owned sync invalidation.
+#[napi]
+pub fn live_eval_expression_tracked(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: true,
+        interaction: false,
+        navigation_baseline: None,
+        tracked: true,
+        collect: false,
+        engine: false,
+    })
+}
+
+/// Await a trusted driver expression without exposing its namespace to guest functions.
+#[napi]
+pub fn live_eval_engine_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: true,
+        interaction: false,
+        navigation_baseline: None,
+        tracked: false,
+        collect: false,
+        engine: true,
+    })
+}
+
+pub struct LiveContentTask {
     id: u32,
+    html: String,
+    wait_until: String,
+    timeout_ms: Option<u32>,
 }
 
 #[napi]
-impl Task for LiveNetworkLogTask {
+impl Task for LiveContentTask {
     type Output = String;
     type JsValue = String;
     fn compute(&mut self) -> Result<String> {
         let (reply, rx) = sync_channel(1);
-        live_send(self.id, LiveJob::NetworkLog(reply)).map_err(Error::from_reason)?;
+        live_send(
+            self.id,
+            LiveJob::Content(
+                std::mem::take(&mut self.html),
+                self.wait_until.clone(),
+                self.timeout_ms.map(u64::from),
+                reply,
+            ),
+        )
+        .map_err(Error::from_reason)?;
         rx.recv()
-            .map_err(|_| Error::from_reason("live session dropped network log reply"))
+            .map_err(|_| Error::from_reason("live content worker dropped reply"))?
+            .map_err(Error::from_reason)
     }
-    fn resolve(&mut self, _env: Env, out: String) -> Result<String> {
-        Ok(out)
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
     }
 }
 
-/// Drain native response records without exposing raw resource bodies to guest JS.
+/// Replace live document contents through the native parser/resource lifecycle.
 #[napi]
-pub fn live_network_log(id: u32) -> AsyncTask<LiveNetworkLogTask> {
-    AsyncTask::new(LiveNetworkLogTask { id })
+pub fn live_set_content(
+    id: u32,
+    html: String,
+    wait_until: Option<String>,
+    timeout_ms: Option<u32>,
+) -> AsyncTask<LiveContentTask> {
+    AsyncTask::new(LiveContentTask {
+        id,
+        html,
+        wait_until: wait_until.unwrap_or_else(|| "load".into()),
+        timeout_ms,
+    })
+}
+
+/// Drain transport events without queueing behind an isolate awaiting its body.
+#[napi]
+pub async fn live_network_log(id: u32) -> Result<String> {
+    Ok(network_log(id)?.drain_batch())
+}
+
+/// Host decisions share the native transport hub without taking the isolate actor.
+#[napi]
+pub fn live_network_log_publish_intercepted(id: u32, header: String, body: Buffer) -> Result<()> {
+    let mut header: serde_json::Value = serde_json::from_str(&header)
+        .map_err(|_| Error::from_reason("Invalid intercepted response"))?;
+    if !header.is_object() {
+        return Err(Error::from_reason("Invalid intercepted response"));
+    }
+    if let Some(target) = intercepted_page_owner(id)? {
+        stamp_intercepted_owner(&mut header, &target)?;
+    }
+    network_log(id)?.publish_intercepted_response(header, &body);
+    Ok(())
+}
+
+fn intercepted_page_owner(id: u32) -> Result<Option<String>> {
+    let connection = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?
+        .get(&id)
+        .map(|connection| (connection.actor.clone(), connection.target));
+    if let Some((actor, target)) = connection {
+        return match target {
+            LiveTarget::LegacyRoot => Ok(None),
+            LiveTarget::Auxiliary(target) => verified_intercepted_owner(&actor, target.to_string()),
+        };
+    }
+    let actor = live_actor(id)?;
+    if actor.id != id || !actor.opening.load(Ordering::Acquire) {
+        return Err(Error::from_reason("Intercepted response target is closed"));
+    }
+    match actor.auxiliary.capability() {
+        AuxiliaryCapability::Unsupported { .. } => Ok(None),
+        AuxiliaryCapability::Supported => {
+            let root = actor.auxiliary.root().ok_or_else(|| {
+                Error::from_reason("Intercepted response root is not initialized")
+            })?;
+            verified_intercepted_owner(&actor, root)
+        }
+        AuxiliaryCapability::Pending => Err(Error::from_reason(
+            "Intercepted response owner is not initialized",
+        )),
+    }
+}
+
+fn verified_intercepted_owner(actor: &LiveActor, target: String) -> Result<Option<String>> {
+    if actor.auxiliary.is_closed() || actor.auxiliary.info(&target).is_none_or(|info| info.closed) {
+        return Err(Error::from_reason("Intercepted response target is closed"));
+    }
+    Ok(Some(target))
+}
+
+fn stamp_intercepted_owner(header: &mut serde_json::Value, target: &str) -> Result<()> {
+    let context = header
+        .as_object_mut()
+        .ok_or_else(|| Error::from_reason("Invalid intercepted response"))?
+        .entry("context")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| Error::from_reason("Invalid intercepted response context"))?;
+    let frame = context
+        .entry("frame")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| Error::from_reason("Invalid intercepted response frame"))?;
+    frame.insert("pageId".to_owned(), target.into());
+    Ok(())
+}
+
+/// Wait on native transport notifications without occupying the isolate actor.
+#[napi]
+pub async fn live_network_log_wait(id: u32, wake: String) -> Result<String> {
+    let wake = wake
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid network wake token"))?;
+    let log = network_log(id)?;
+    let (wake, closed) = log.wait_for_events(wake).await;
+    Ok(serde_json::json!({"wake":wake.to_string(),"closed":closed}).to_string())
+}
+#[napi]
+pub fn live_network_log_wake(id: u32) -> Result<()> {
+    network_log(id)?.wake();
+    Ok(())
+}
+/// Discard unobserved console argument IDs at the next safe isolate boundary.
+#[napi]
+pub fn live_network_log_discard_handles(id: u32, ids: String) -> Result<()> {
+    let ids = serde_json::from_str::<Vec<u32>>(&ids)
+        .map_err(|_| Error::from_reason("Invalid console argument IDs"))?;
+    network_log(id)?.discard_handles(ids);
+    let _ = live_send(id, LiveJob::CleanupNetwork);
+    Ok(())
+}
+
+/// Acknowledge only the event batch already processed by the host driver.
+#[napi]
+pub fn live_network_log_acknowledge(id: u32, revision: String) -> Result<()> {
+    let revision = revision
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid network revision"))?;
+    if !network_log(id)?.acknowledge(revision) {
+        return Err(Error::from_reason("Invalid network revision"));
+    }
+    Ok(())
+}
+
+/// Return a synchronous driver query without pumping the page event loop.
+#[napi]
+pub fn live_read_engine(id: u32, script: String) -> Result<String> {
+    let (reply, rx) = sync_channel(1);
+    live_send(id, LiveJob::EngineRead(script, reply)).map_err(Error::from_reason)?;
+    // A preceding asynchronous command may await the caller's localhost server.
+    // Bound this wait so a synchronous query cannot deadlock that Node event loop.
+    rx.recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|_| Error::from_reason("live session is busy or engine read timed out"))?
+        .map_err(Error::from_reason)
+}
+
+/// A non-pumping engine read whose actor queue wait leaves Node available for IO.
+pub struct LiveReadTask {
+    id: u32,
+    script: String,
+}
+
+#[napi]
+impl Task for LiveReadTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(
+            self.id,
+            LiveJob::EngineRead(std::mem::take(&mut self.script), reply),
+        )
+        .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live session dropped engine read reply"))?
+            .map_err(Error::from_reason)
+    }
+
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Read the live realm without pumping it, asynchronously waiting for the actor.
+#[napi]
+pub fn live_read_engine_async(id: u32, script: String) -> AsyncTask<LiveReadTask> {
+    AsyncTask::new(LiveReadTask { id, script })
 }
 
 /// Serialize the live DOM to HTML (sync — no network).
@@ -510,7 +1876,8 @@ pub fn live_serialize(id: u32) -> Result<String> {
     let (reply, rx) = sync_channel(1);
     live_send(id, LiveJob::Serialize(reply)).map_err(Error::from_reason)?;
     rx.recv()
-        .map_err(|_| Error::from_reason("live session dropped serialize reply"))
+        .map_err(|_| Error::from_reason("live session dropped serialize reply"))?
+        .map_err(Error::from_reason)
 }
 
 /// The live session's cookies (storageState JSON) — carries the session a later
@@ -520,23 +1887,588 @@ pub fn live_cookies(id: u32) -> Result<String> {
     let (reply, rx) = sync_channel(1);
     live_send(id, LiveJob::Cookies(reply)).map_err(Error::from_reason)?;
     rx.recv()
-        .map_err(|_| Error::from_reason("live session dropped cookies reply"))
+        .map_err(|_| Error::from_reason("live session dropped cookies reply"))?
+        .map_err(Error::from_reason)
 }
 
-/// Close a live session: reset the binding, drop the isolate, unregister (sync).
+/// Replace the live context cookie jar without reopening its document.
 #[napi]
-pub fn live_close(id: u32) -> Result<()> {
-    let tx = {
-        let mut reg = live_registry()
+pub fn live_set_cookies(id: u32, cookies: String) -> Result<()> {
+    let (reply, rx) = sync_channel(1);
+    live_send(id, LiveJob::SetCookies(cookies, reply)).map_err(Error::from_reason)?;
+    rx.recv()
+        .map_err(|_| Error::from_reason("live session dropped cookie update reply"))?
+        .map_err(Error::from_reason)
+}
+
+/// Close one actual target; only its final actor close returns a lifecycle snapshot.
+#[napi]
+pub fn live_close(id: u32) -> Result<Option<String>> {
+    if live_actor(id).is_ok_and(|actor| actor.opening.load(Ordering::Acquire)) {
+        return Err(Error::from_reason(
+            "live actor is opening; use actor close to cancel initialization",
+        ));
+    }
+    let (tx, opening) = {
+        let mut live = live_registry()
             .lock()
             .map_err(|_| Error::from_reason("session registry poisoned"))?;
-        reg.remove(&id)
+        let mut opening = opening_networks()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        (live.remove(&id), opening.remove(&id))
     };
-    if let Some(tx) = tx {
+    if let Some(log) = opening {
+        log.close();
+    }
+    if let Some(connection) = tx {
+        let _closing = ActiveActorClose::new(connection.actor.clone());
+        let owner = match connection.target {
+            LiveTarget::LegacyRoot => "legacy-root".to_owned(),
+            LiveTarget::Auxiliary(target) => target.to_string(),
+        };
+        connection.actor.network.dialogs().cancel_owner(&owner);
+        connection
+            .actor
+            .cancellations
+            .lock()
+            .unwrap()
+            .entry(connection.target)
+            .or_insert_with(|| tokio::sync::watch::channel(false).0)
+            .send_replace(true);
         let (reply, rx) = sync_channel(1);
-        if tx.send(LiveJob::Close(reply)).is_ok() {
-            let _ = rx.recv();
+        if connection
+            .actor
+            .tx
+            .send(LiveMessage::Target {
+                target: connection.target,
+                job: LiveJob::Close(reply),
+            })
+            .is_ok()
+        {
+            rx.recv()
+                .map_err(|_| Error::from_reason("live session dropped close reply"))?
+                .map_err(Error::from_reason)?;
+        }
+        if connection.actor.auxiliary.is_closed() {
+            return Ok(Some(auxiliary_snapshot(&connection.actor).to_string()));
         }
     }
-    Ok(())
+    Ok(None)
+}
+
+pub struct LiveOpeningCloseTask {
+    actor: Arc<LiveActor>,
+    target: u64,
+}
+
+impl LiveOpeningCloseTask {
+    fn closed_snapshot(&self) -> Result<String> {
+        if !self.actor.network.wait_target_response_completion(
+            &self.target.to_string(),
+            std::time::Duration::from_secs(5),
+        ) {
+            return Err(Error::from_reason(
+                "Native target response cancellation did not complete",
+            ));
+        }
+        if !self
+            .actor
+            .auxiliary
+            .info(&self.target.to_string())
+            .is_some_and(|info| info.closed)
+        {
+            return Err(Error::from_reason("Native opening target did not close"));
+        }
+        {
+            // Open checks root liveness and publishes its alias under this same lock.
+            let mut live = live_registry()
+                .lock()
+                .map_err(|_| Error::from_reason("session registry poisoned"))?;
+            live.retain(|_, connection| {
+                connection.actor.id != self.actor.id
+                    || connection.target != LiveTarget::Auxiliary(self.target)
+            });
+        }
+        Ok(auxiliary_snapshot(&self.actor).to_string())
+    }
+}
+
+#[napi]
+impl Task for LiveOpeningCloseTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        if self
+            .actor
+            .auxiliary
+            .info(&self.target.to_string())
+            .is_some_and(|info| info.closed)
+        {
+            return self.closed_snapshot();
+        }
+        let _closing = ActiveActorClose::new(self.actor.clone());
+        let (reply, receiver) = sync_channel(1);
+        self.actor
+            .tx
+            .send(LiveMessage::Target {
+                target: LiveTarget::Auxiliary(self.target),
+                job: LiveJob::Close(reply),
+            })
+            .map_err(|_| Error::from_reason("live actor worker gone"))?;
+        receiver
+            .recv()
+            .map_err(|_| Error::from_reason("live target dropped close reply"))?
+            .map_err(Error::from_reason)?;
+        self.closed_snapshot()
+    }
+
+    fn resolve(&mut self, _env: Env, result: String) -> Result<String> {
+        Ok(result)
+    }
+}
+
+/// Cancel one registered opening target without retiring its surviving auxiliaries.
+#[napi]
+pub fn live_close_opening_target(
+    id: u32,
+    target: String,
+) -> Result<AsyncTask<LiveOpeningCloseTask>> {
+    let actor = live_actor(id)?;
+    if actor.id != id {
+        return Err(Error::from_reason(
+            "Opening close requires the actual actor token",
+        ));
+    }
+    let target_id = parse_auxiliary_target(&target)?;
+    actor
+        .auxiliary
+        .info(&target)
+        .ok_or_else(|| Error::from_reason("Native target ownership is unavailable"))?;
+    if actor.auxiliary.root().as_deref() != Some(target.as_str()) {
+        return Err(Error::from_reason(
+            "Opening root target ownership is unavailable",
+        ));
+    }
+    actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .entry(LiveTarget::Auxiliary(target_id))
+        .or_insert_with(|| tokio::sync::watch::channel(false).0)
+        .send_replace(true);
+    actor.network.dialogs().cancel_owner(&target);
+    actor.network.cancel_target(&target);
+    Ok(AsyncTask::new(LiveOpeningCloseTask {
+        actor,
+        target: target_id,
+    }))
+}
+
+/// Observe one real target without entering the actor or consuming transport events.
+#[napi]
+pub fn live_target_network_state(id: u32) -> Result<String> {
+    let (actor, target) = {
+        let live = live_registry()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        let connection = live
+            .get(&id)
+            .ok_or_else(|| Error::from_reason("no such live session"))?;
+        let target = connection
+            .target
+            .with_auxiliary(Ok)
+            .map_err(Error::from_reason)?;
+        (connection.actor.clone(), target)
+    };
+    let info = actor
+        .auxiliary
+        .info(&target.to_string())
+        .ok_or_else(|| Error::from_reason("Native target ownership is unavailable"))?;
+    let mut state = actor.network.target_network_state(&target.to_string());
+    let cancelling = actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .get(&LiveTarget::Auxiliary(target))
+        .is_some_and(|cancel| *cancel.borrow());
+    state["closed"] = (info.closed || cancelling || actor.auxiliary.is_closed()).into();
+    if actor.opening.load(Ordering::Acquire) {
+        state["pendingNavigation"] = true.into();
+    }
+    Ok(state.to_string())
+}
+
+/// Read one authenticated target's native history metadata without entering V8.
+#[napi]
+pub fn live_target_history_state(id: u32) -> Result<String> {
+    let (actor, target) = {
+        let live = live_registry()
+            .lock()
+            .map_err(|_| Error::from_reason("session registry poisoned"))?;
+        let connection = live
+            .get(&id)
+            .ok_or_else(|| Error::from_reason("no such live session"))?;
+        let target = connection
+            .target
+            .with_auxiliary(Ok)
+            .map_err(Error::from_reason)?;
+        (connection.actor.clone(), target)
+    };
+    let key = target.to_string();
+    let info = actor
+        .auxiliary
+        .info(&key)
+        .ok_or_else(|| Error::from_reason("Native target ownership is unavailable"))?;
+    let cancelling = actor
+        .cancellations
+        .lock()
+        .map_err(|_| Error::from_reason("target cancellation registry poisoned"))?
+        .get(&LiveTarget::Auxiliary(target))
+        .is_some_and(|cancel| *cancel.borrow());
+    if info.closed || cancelling || actor.auxiliary.is_closed() {
+        return Err(Error::from_reason("Native history target is closed"));
+    }
+    actor
+        .history_log
+        .snapshot(&key)
+        .map(|value| value.to_string())
+        .map_err(Error::from_reason)
+}
+
+/// Inspect and drain the one actor-owned lifecycle queue, including pre-open events.
+#[napi]
+pub fn live_auxiliary_state(id: u32) -> Result<String> {
+    Ok(auxiliary_snapshot(live_actor(id)?.as_ref()).to_string())
+}
+
+fn auxiliary_snapshot(actor: &LiveActor) -> serde_json::Value {
+    let revision = actor.auxiliary.revision().to_string();
+    serde_json::json!({
+        "revision": revision,
+        "capability": actor.auxiliary.capability(),
+        "actor": actor.id,
+        "root": actor.auxiliary.root(),
+        "pages": actor.auxiliary.pages(),
+        "events": actor.auxiliary.take(),
+        "closed": actor.auxiliary.is_closed(),
+        "opening": actor.opening.load(Ordering::Acquire),
+    })
+}
+
+fn parse_auxiliary_target(target: &str) -> Result<u64> {
+    let id = target
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("Invalid native auxiliary target"))?;
+    if id.to_string() != target {
+        return Err(Error::from_reason("Invalid native auxiliary target"));
+    }
+    Ok(id)
+}
+
+/// Adopt only an actual live producer target into an idempotent numeric alias.
+#[napi]
+pub fn live_auxiliary_adopt(id: u32, target: String) -> Result<u32> {
+    let actor = live_actor(id)?;
+    let native_target = LiveTarget::Auxiliary(parse_auxiliary_target(&target)?);
+    let mut live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    if actor
+        .cancellations
+        .lock()
+        .unwrap()
+        .get(&native_target)
+        .is_some_and(|cancel| *cancel.borrow())
+    {
+        return Err(Error::from_reason("Native auxiliary target is closing"));
+    }
+    if actor.auxiliary.is_closed() || actor.auxiliary.info(&target).is_none_or(|info| info.closed) {
+        return Err(Error::from_reason(
+            "No live native auxiliary target in this actor",
+        ));
+    }
+    if let Some((&alias, _)) = live.iter().find(|(_, connection)| {
+        connection.actor.id == actor.id && connection.target == native_target
+    }) {
+        return Ok(alias);
+    }
+    let alias = if actor.auxiliary.root().as_deref() == Some(target.as_str()) {
+        actor.id
+    } else {
+        LIVE_NEXT.fetch_add(1, Ordering::Relaxed)
+    };
+    live.insert(
+        alias,
+        LiveConnection {
+            actor,
+            target: native_target,
+        },
+    );
+    Ok(alias)
+}
+
+/// Wait without queueing behind a page that is itself waiting for transport IO.
+#[napi]
+pub fn live_auxiliary_wait(env: Env, id: u32, revision: Option<String>) -> Result<napi::JsObject> {
+    // Capture the trusted log before returning to JS: an immediate close may
+    // unregister the actor before the asynchronous waiter starts polling.
+    let actor = live_actor(id)?;
+    let observed = match revision {
+        Some(revision) => {
+            let parsed = revision
+                .parse::<u64>()
+                .map_err(|_| Error::from_reason("Invalid auxiliary revision"))?;
+            if parsed.to_string() != revision {
+                return Err(Error::from_reason("Invalid auxiliary revision"));
+            }
+            parsed
+        }
+        None => actor.auxiliary.revision(),
+    };
+    env.spawn_future(async move {
+        let closed = actor.auxiliary.wait_for_revision(observed).await;
+        Ok(
+            if closed && actor.closing_calls.load(Ordering::Acquire) == 0 {
+                serde_json::json!({"closed": true, "finalState": auxiliary_snapshot(&actor)})
+            } else {
+                serde_json::json!({"closed": closed})
+            }
+            .to_string(),
+        )
+    })
+}
+
+/// Tear down all actual targets, including auxiliaries not yet adopted by the host.
+#[napi]
+pub fn live_actor_close(id: u32) -> Result<Option<String>> {
+    let actor = match live_actor(id) {
+        Ok(actor) => actor,
+        Err(error) if error.reason == "no such live actor" => {
+            if let Some(log) = opening_networks()
+                .lock()
+                .map_err(|_| Error::from_reason("session registry poisoned"))?
+                .remove(&id)
+            {
+                log.close();
+            }
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
+    let _closing = ActiveActorClose::new(actor.clone());
+    actor.network.close();
+    if !actor.started.load(Ordering::Acquire) {
+        finish_actor_without_session(&actor);
+        return Ok(Some(auxiliary_snapshot(&actor).to_string()));
+    }
+    for cancellation in actor.cancellations.lock().unwrap().values() {
+        cancellation.send_replace(true);
+    }
+    let (reply, _) = sync_channel(1);
+    let _ = actor.tx.send(LiveMessage::Shutdown(reply));
+    wait_for_actor_cleanup(&actor)?;
+    Ok(Some(auxiliary_snapshot(&actor).to_string()))
+}
+
+pub struct LiveNavigateTask {
+    id: u32,
+    url: String,
+    history: String,
+    options: String,
+}
+
+#[napi]
+impl Task for LiveNavigateTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(
+            self.id,
+            LiveJob::Navigate(
+                std::mem::take(&mut self.url),
+                self.history.clone(),
+                std::mem::take(&mut self.options),
+                reply,
+            ),
+        )
+        .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live target dropped navigation reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+
+/// Navigate the same actual target in its owning isolate, retaining WindowProxy identity.
+#[napi]
+pub fn live_navigate_target(
+    id: u32,
+    url: String,
+    history: Option<String>,
+    options: Option<String>,
+) -> Result<AsyncTask<LiveNavigateTask>> {
+    let history = history.unwrap_or_else(|| "push".into());
+    if !matches!(history.as_str(), "push" | "replace" | "back" | "forward") {
+        return Err(Error::from_reason("Invalid auxiliary history operation"));
+    }
+    Ok(AsyncTask::new(LiveNavigateTask {
+        id,
+        url,
+        history,
+        options: options.unwrap_or_else(|| "{}".into()),
+    }))
+}
+
+pub struct LiveConfigureTask {
+    actor: Arc<LiveActor>,
+    target: Option<LiveTarget>,
+    bootstrap: AuxiliaryBootstrap,
+}
+
+#[napi]
+impl Task for LiveConfigureTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> {
+        if self.actor.opening.load(Ordering::Acquire) {
+            return Err(Error::from_reason("live actor is opening"));
+        }
+        if self.actor.network.is_closed() {
+            return Err(Error::from_reason("live actor is closed"));
+        }
+        let (reply, rx) = sync_channel(1);
+        let bootstrap = std::mem::take(&mut self.bootstrap);
+        let message = if let Some(target) = self.target {
+            self.actor
+                .cancellations
+                .lock()
+                .map_err(|_| Error::from_reason("actor cancellation registry poisoned"))?
+                .entry(target)
+                .or_insert_with(|| tokio::sync::watch::channel(false).0);
+            LiveMessage::Target {
+                target,
+                job: LiveJob::ConfigureTarget(bootstrap, reply),
+            }
+        } else {
+            LiveMessage::ConfigureContext(bootstrap, reply)
+        };
+        self.actor
+            .tx
+            .send(message)
+            .map_err(|_| Error::from_reason("live actor worker gone"))?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live actor dropped bootstrap reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Replace context-only initialization for future actual auxiliary documents.
+#[napi]
+pub fn live_auxiliary_configure(
+    id: u32,
+    init_script: String,
+    engine_init_script: String,
+) -> Result<AsyncTask<LiveConfigureTask>> {
+    Ok(AsyncTask::new(LiveConfigureTask {
+        actor: live_actor(id)?,
+        target: None,
+        bootstrap: AuxiliaryBootstrap {
+            init_script,
+            engine_init_script,
+        },
+    }))
+}
+
+/// Retain Page-only initialization for this target's own future navigation.
+#[napi]
+pub fn live_target_configure(
+    id: u32,
+    init_script: String,
+    engine_init_script: String,
+) -> Result<AsyncTask<LiveConfigureTask>> {
+    let live = live_registry()
+        .lock()
+        .map_err(|_| Error::from_reason("session registry poisoned"))?;
+    let connection = live
+        .get(&id)
+        .ok_or_else(|| Error::from_reason("no such live session"))?;
+    Ok(AsyncTask::new(LiveConfigureTask {
+        actor: connection.actor.clone(),
+        target: Some(connection.target),
+        bootstrap: AuxiliaryBootstrap {
+            init_script,
+            engine_init_script,
+        },
+    }))
+}
+
+/// Read screenshot bytes through the actor without executing guest JavaScript.
+pub struct LiveImageAssetsTask {
+    id: u32,
+    query: String,
+}
+#[napi]
+impl Task for LiveImageAssetsTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(
+            self.id,
+            LiveJob::ImageAssets(std::mem::take(&mut self.query), reply),
+        )
+        .map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live session dropped image asset reply"))?
+            .map_err(Error::from_reason)
+    }
+    fn resolve(&mut self, _env: Env, value: String) -> Result<String> {
+        Ok(value)
+    }
+}
+#[napi]
+pub fn live_image_assets(id: u32, query: String) -> AsyncTask<LiveImageAssetsTask> {
+    AsyncTask::new(LiveImageAssetsTask { id, query })
+}
+
+#[cfg(test)]
+mod intercepted_owner_tests {
+    use super::stamp_intercepted_owner;
+
+    #[test]
+    fn authoritative_alias_replaces_supplied_owner_and_preserves_frame_identity() {
+        let mut header = serde_json::json!({"context":{"resourceType":"fetch","frame":{"pageId":"forged","path":[0,1],"contextId":42}}});
+        stamp_intercepted_owner(&mut header, "actual-child").unwrap();
+        assert_eq!(header["context"]["frame"]["pageId"], "actual-child");
+        assert_eq!(
+            header["context"]["frame"]["path"],
+            serde_json::json!([0, 1])
+        );
+        assert_eq!(header["context"]["frame"]["contextId"], 42);
+    }
+
+    #[test]
+    fn missing_context_receives_only_verified_owner() {
+        let mut header = serde_json::json!({"status":200});
+        stamp_intercepted_owner(&mut header, "actual-root").unwrap();
+        assert_eq!(header["context"]["frame"]["pageId"], "actual-root");
+    }
+
+    #[test]
+    fn malformed_frame_metadata_is_rejected_without_panicking() {
+        for mut header in [
+            serde_json::json!({"context":"invalid"}),
+            serde_json::json!({"context":{"frame":[]}}),
+        ] {
+            assert!(stamp_intercepted_owner(&mut header, "actual-root").is_err());
+        }
+    }
 }

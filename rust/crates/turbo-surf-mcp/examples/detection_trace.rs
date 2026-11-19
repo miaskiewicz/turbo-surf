@@ -15,11 +15,42 @@ use turbo_surf_render::{
     NavigationActivationSnapshot, PageSession, PageSessionOptions, WindowTimerMode,
 };
 
-// Host sleeps give delayed HTTP futures a turn without advancing future window timers.
+#[derive(Clone, Copy)]
+struct NavigationCounters {
+    commits: u64,
+    forms: u64,
+}
+impl NavigationCounters {
+    fn read(page: &PageSession) -> Self {
+        Self {
+            commits: page.navigation_snapshot().0,
+            forms: page.form_navigation_count(),
+        }
+    }
+    fn source(self, before: Self, steps_empty: bool) -> Option<&'static str> {
+        let committed = self.commits > before.commits || (steps_empty && self.commits > 0);
+        committed.then_some(
+            if self.forms > before.forms || (steps_empty && self.forms > 0) {
+                "native-form"
+            } else {
+                "script"
+            },
+        )
+    }
+}
+
+// Host progress gives delayed native tasks a turn without advancing future window timers.
 async fn wait_until(page: &mut PageSession, deadline: Instant) -> Result<(), String> {
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-        tokio::time::sleep(remaining.min(Duration::from_millis(25))).await;
-        page.eval("void 0").await?;
+        // A scalar evaluation cannot advance the actor's queued document loads.
+        if let Ok(result) = tokio::time::timeout(
+            remaining.min(Duration::from_millis(25)),
+            page.poll_background_work(),
+        )
+        .await
+        {
+            result?;
+        }
     }
     Ok(())
 }
@@ -528,7 +559,7 @@ fn timed_out(trace: &mut Value) -> Option<PageSession> {
 fn choose_target(
     trace: &Value,
     installed_url: &str,
-    native_form: bool,
+    native_source: Option<&'static str>,
     steps_empty: bool,
     fallback: &Value,
 ) -> (String, &'static str) {
@@ -538,14 +569,12 @@ fn choose_target(
         .and_then(|p| p["nav"].as_str())
         .unwrap_or(installed_url)
         .to_string();
-    let mut nav_source = if native_form {
-        "native-form"
-    } else if target != installed_url {
+    let mut nav_source = native_source.unwrap_or(if target != installed_url {
         "script"
     } else {
         "none"
-    };
-    if !native_form && !steps_empty && target == installed_url {
+    });
+    if native_source.is_none() && !steps_empty && target == installed_url {
         if let Some(u) = fallback.as_str().filter(|u| *u != installed_url) {
             target = u.into();
             nav_source = "form-fallback";
@@ -725,7 +754,7 @@ impl Capture<'_> {
         self.home_readiness(&mut page, trace).await?;
         self.home_dwell(&mut page, trace).await?;
         self.dismiss(&mut page, trace).await?;
-        let native_before_input = page.navigation_snapshot().0;
+        let native_before_input = NavigationCounters::read(&page);
         let steps = self.config["steps"]
             .as_array()
             .ok_or("steps array required")?;
@@ -820,7 +849,7 @@ impl Capture<'_> {
         &self,
         mut page: PageSession,
         window: ObservationWindow,
-        native_before_input: u64,
+        native_before_input: NavigationCounters,
         trace: &mut Value,
     ) -> Result<(), BoxError> {
         let observed = self
@@ -843,15 +872,27 @@ impl Capture<'_> {
         &self,
         page: &mut PageSession,
         window: &ObservationWindow,
-        native_before_input: u64,
+        native_before_input: NavigationCounters,
         trace: &mut Value,
     ) -> Result<(), BoxError> {
-        let native_form = page.navigation_snapshot().0 > native_before_input;
+        let counters = NavigationCounters::read(page);
+        let native_source = counters.source(native_before_input, false);
+        let native_form = native_source == Some("native-form");
+        trace["nativeNavigation"] = json!({"beforeCommits":native_before_input.commits,"beforeForms":native_before_input.forms,"commits":counters.commits,"forms":counters.forms});
         trace["inputSource"] = json!("native-host");
-        trace["navigationSource"] = json!(if native_form { "native-form" } else { "none" });
+        trace["navigationSource"] = json!(native_source.unwrap_or("none"));
         trace["formFallback"] = Value::Null;
         self.follow_observed_hops(page, window, native_form, trace)
             .await?;
+        let completed = NavigationCounters::read(page);
+        let completed_source = completed.source(native_before_input, false);
+        let native_form = native_form || completed_source == Some("native-form");
+        trace["nativeNavigation"] = json!({"beforeCommits":native_before_input.commits,"beforeForms":native_before_input.forms,"commits":completed.commits,"forms":completed.forms});
+        if native_form {
+            trace["navigationSource"] = json!("native-form");
+        } else if let Some(source) = completed_source {
+            trace["navigationSource"] = json!(source);
+        }
         self.observed_final_snapshot(page, trace).await?;
         if require_native_form(self.config) && !native_form {
             return Err(NATIVE_FORM_REQUIRED.into());
@@ -995,24 +1036,33 @@ impl Capture<'_> {
         &self,
         mut page: PageSession,
         steps_empty: bool,
-        native_before_input: u64,
+        native_before_input: NavigationCounters,
         trace: &mut Value,
     ) -> Result<(), BoxError> {
         self.search_dwell(&mut page, steps_empty, trace).await?;
-        let (native_after_input, installed_url, _) = page.navigation_snapshot();
-        let native_form =
-            native_after_input > native_before_input || (steps_empty && native_after_input > 0);
-        if native_form && !self.native_final(&mut page, &installed_url, trace).await? {
-            return self.finish_native(page, trace).await;
-        }
+        let (_, installed_url, _) = page.navigation_snapshot();
+        let counters = NavigationCounters::read(&page);
+        let native_source = counters.source(native_before_input, steps_empty);
+        let native_form = native_source == Some("native-form");
+        trace["nativeNavigation"] = json!({"beforeCommits":native_before_input.commits,"beforeForms":native_before_input.forms,"commits":counters.commits,"forms":counters.forms});
         if !native_form && require_native_form(self.config) {
             return Err(NATIVE_FORM_REQUIRED.into());
         }
+        if let Some(source) = native_source {
+            if !self
+                .native_final(&mut page, &installed_url, source, trace)
+                .await?
+            {
+                return self.finish_native(page, trace).await;
+            }
+        }
         // Follow the actual JS navigation; if the DOM's Enter default is absent, record the
         // serialized GET form fallback separately rather than claiming the JS navigated.
-        let fallback = self.form_fallback(&mut page, native_form).await?;
+        let fallback = self
+            .form_fallback(&mut page, native_source.is_some())
+            .await?;
         let (target, nav_source) =
-            choose_target(trace, &installed_url, native_form, steps_empty, &fallback);
+            choose_target(trace, &installed_url, native_source, steps_empty, &fallback);
         trace["inputSource"] = json!("native-host");
         trace["navigationSource"] = json!(nav_source);
         trace["formFallback"] = fallback;
@@ -1052,16 +1102,17 @@ impl Capture<'_> {
         Ok(())
     }
 
-    /// Snapshot a committed native form navigation; true when a script navigation
+    /// Snapshot a committed native navigation; true when a script navigation
     /// is still pending on it.
     async fn native_final(
         &self,
         page: &mut PageSession,
         installed_url: &str,
+        source: &'static str,
         trace: &mut Value,
     ) -> Result<bool, BoxError> {
         trace["inputSource"] = json!("native-host");
-        trace["navigationSource"] = json!("native-form");
+        trace["navigationSource"] = json!(source);
         trace["formFallback"] = Value::Null;
         let row = snapshot(page, self.out, "native-final", self.config).await?;
         let pending_script_navigation = row["nav"]
@@ -1205,6 +1256,257 @@ mod tests {
         assert_eq!(trace["pages"].as_array().unwrap().len(), 1);
         assert!(!Path::new("unexpected-js-trace").exists());
         assert!(!out.join("native-js").exists());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fixed_observation_deadline_does_not_wait_for_unfinished_native_io() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let (requested, seen) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+            let _ = requested.send(());
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\na")
+                .await;
+            std::future::pending::<()>().await;
+        });
+        let mut page = PageSession::open_with_document_response_and_options(
+            "<body>ready",
+            &base,
+            "",
+            "",
+            60_000,
+            "",
+            Default::default(),
+            &[],
+            Default::default(),
+            Default::default(),
+            None,
+            realtime_options(),
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap().to_string();
+        page.eval_expression("void fetch('/hold')").await.unwrap();
+        let start = Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(2), real_wait(&mut page, 200)).await;
+        let elapsed = start.elapsed();
+        let pending =
+            page.network_event_log().target_network_state(&root)["pendingRequests"].clone();
+        let requested = tokio::time::timeout(Duration::from_secs(1), seen).await;
+        server.abort();
+        result
+            .expect("fixed deadline must not await held HTTP body")
+            .unwrap();
+        assert!(requested.unwrap().is_ok());
+        assert!(elapsed >= Duration::from_millis(200), "{elapsed:?}");
+        assert_eq!(pending, json!(1));
+    }
+
+    async fn gated_navigation_response(
+        listener: tokio::net::TcpListener,
+        entered: tokio::sync::oneshot::Sender<()>,
+        released: tokio::sync::oneshot::Receiver<()>,
+    ) -> (String, Instant) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut header = Vec::new();
+        let mut chunk = [0; 1024];
+        while !header.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            assert!(header.len() < 16384);
+            let count = socket.read(&mut chunk).await.unwrap();
+            assert!(count > 0);
+            header.extend_from_slice(&chunk[..count]);
+        }
+        let request = String::from_utf8(header)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_owned();
+        entered.send(()).unwrap();
+        released.await.unwrap();
+        let body = "<body>late native response<script>globalThis.__browserFixture={lateScriptRan:true}</script></body>";
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        socket.write_all(response.as_bytes()).await.unwrap();
+        (request, Instant::now())
+    }
+
+    async fn late_script_observation(require_form: bool) {
+        turbo_surf_mcp::initialize_render_hooks();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let (entered, seen) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(gated_navigation_response(listener, entered, released));
+        let mut page = PageSession::open_with_document_response_and_options(
+            "<body>source",
+            &base,
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &[],
+            Default::default(),
+            Default::default(),
+            None,
+            realtime_options(),
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        let before = NavigationCounters::read(&page);
+        assert_eq!((before.commits, before.forms), (0, 0));
+        let out = capture_fixture_directory();
+        let config = json!({"requireNativeFormNavigation":require_form});
+        let capture = Capture {
+            config: &config,
+            out: &out,
+            profile: fingerprint::default_profile(),
+            hints: ClientHints::default(),
+            storage: Default::default(),
+            budget: 5000,
+            init: String::new(),
+            wait_ms: 0,
+            cadence_ms: 0,
+        };
+        let mut trace = json!({"pages":[]});
+        let window = ObservationWindow::start(1000, 0, &mut trace);
+        page.eval_expression("location.assign('/late');void 0")
+            .await
+            .unwrap();
+        assert_eq!(NavigationCounters::read(&page).commits, 0);
+        let mut observation = Box::pin(capture.observe(&mut page, &window, before, &mut trace));
+        tokio::select! {
+            result = &mut observation => panic!("observation finished before response release: {result:?}"),
+            requested = tokio::time::timeout(Duration::from_secs(1), seen) => requested.unwrap().unwrap(),
+        }
+        release.send(()).unwrap();
+        let result = observation.await;
+        if require_form {
+            assert_eq!(result.unwrap_err().to_string(), NATIVE_FORM_REQUIRED);
+        } else {
+            result.unwrap();
+        }
+        let (request, finished) = server.await.unwrap();
+        assert_eq!(request, "GET /late HTTP/1.1");
+        assert!(finished < window.started + window.duration);
+        assert!(window.remaining().is_zero());
+        assert_eq!(page.auxiliary_root_id().unwrap(), root);
+        assert_eq!(page.navigation_snapshot().1, format!("{base}late"));
+        assert_eq!(page.form_navigation_count(), 0);
+        assert_eq!(page.navigation_snapshot().0, 1);
+        assert_eq!(trace["nativeNavigation"]["commits"], 1);
+        assert_eq!(trace["nativeNavigation"]["forms"], 0);
+        assert_eq!(trace["navigationSource"], "script");
+        assert_eq!(trace["formFallback"], Value::Null);
+        assert_eq!(trace["observation"]["followedNavigationHops"], Value::Null);
+        let final_page = trace["pages"].as_array().unwrap().last().unwrap();
+        assert_eq!(final_page["browserFixture"]["lateScriptRan"], true);
+        assert_eq!(final_page["readyState"], "complete");
+        page.close();
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn committed_document_may_reach_fixed_deadline_before_parser_turn() {
+        turbo_surf_mcp::initialize_render_hooks();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let (entered, seen) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(gated_navigation_response(listener, entered, released));
+        let init = "if(location.pathname==='/late'){const until=Number(new URL(location.href).searchParams.get('until'));while(Date.now()<until){}}";
+        let mut page = PageSession::open_with_document_response_and_options(
+            "<body>source",
+            &base,
+            "",
+            "",
+            5000,
+            init,
+            Default::default(),
+            &[],
+            Default::default(),
+            Default::default(),
+            None,
+            realtime_options(),
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap();
+        let before = NavigationCounters::read(&page);
+        assert_eq!((before.commits, before.forms), (0, 0));
+        let out = capture_fixture_directory();
+        let config = json!({"requireNativeFormNavigation":false});
+        let capture = Capture {
+            config: &config,
+            out: &out,
+            profile: fingerprint::default_profile(),
+            hints: ClientHints::default(),
+            storage: Default::default(),
+            budget: 5000,
+            init: String::new(),
+            wait_ms: 0,
+            cadence_ms: 0,
+        };
+        let mut trace = json!({"pages":[]});
+        let window = ObservationWindow::start(200, 0, &mut trace);
+        let until = host_milliseconds() + 250;
+        eprintln!(
+            "FRONTIER fixedDeadlineMs={} initUntilMs={until}",
+            until - 50
+        );
+        page.eval_expression(&format!("location.assign('/late?until={until}');void 0"))
+            .await
+            .unwrap();
+        assert_eq!(NavigationCounters::read(&page).commits, 0);
+        let mut observation = Box::pin(capture.observe(&mut page, &window, before, &mut trace));
+        tokio::select! {
+            result = &mut observation => panic!("observation finished before response release: {result:?}"),
+            requested = tokio::time::timeout(Duration::from_secs(1), seen) => requested.unwrap().unwrap(),
+        }
+        release.send(()).unwrap();
+        let result = observation.await;
+        result.unwrap();
+        let (request, finished) = server.await.unwrap();
+        assert_eq!(request, format!("GET /late?until={until} HTTP/1.1"));
+        assert!(finished < window.started + window.duration);
+        assert!(window.remaining().is_zero());
+        assert_eq!(page.auxiliary_root_id().unwrap(), root);
+        assert_eq!(
+            page.navigation_snapshot().1,
+            format!("{base}late?until={until}")
+        );
+        assert_eq!(page.form_navigation_count(), 0);
+        assert_eq!(page.navigation_snapshot().0, 1);
+        assert_eq!(trace["nativeNavigation"]["commits"], 1);
+        assert_eq!(trace["nativeNavigation"]["forms"], 0);
+        assert_eq!(trace["navigationSource"], "script");
+        assert_eq!(trace["formFallback"], Value::Null);
+        assert_eq!(trace["observation"]["followedNavigationHops"], Value::Null);
+        let final_page = trace["pages"].as_array().unwrap().last().unwrap();
+        assert_eq!(final_page["browserFixture"], Value::Null);
+        assert_eq!(final_page["readyState"], "loading");
+        assert!(fs::read_to_string(out.join("native-final.html"))
+            .unwrap()
+            .contains("globalThis.__browserFixture={lateScriptRan:true}"));
+        page.close();
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn observation_attributes_native_script_commit_after_window_entry() {
+        late_script_observation(false).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn late_script_commit_cannot_satisfy_native_form_requirement() {
+        late_script_observation(true).await;
     }
 
     fn capture_fixture_directory() -> std::path::PathBuf {

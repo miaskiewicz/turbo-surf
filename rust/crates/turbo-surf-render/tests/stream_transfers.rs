@@ -259,3 +259,44 @@ async fn source_pull_reentry_preserves_chrome_buffer_stream_port_transfer_phases
     eprintln!("stream phases: {actual}");
     assert_eq!(actual, control["result"]);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn trusted_stream_transfer_observes_completion_without_guest_promise_hooks() {
+    let mut page = PageSession::open(
+        "<!doctype html><body>",
+        "https://stream-promise.test/",
+        "",
+        "",
+        20000,
+    )
+    .await
+    .unwrap();
+    let script = r#"(async () => {
+      const source = new ReadableStream({ start(controller) { controller.enqueue(17); controller.close(); } });
+      const originalThen = Promise.prototype.then;
+      const species = Object.getOwnPropertyDescriptor(Promise, Symbol.species);
+      let hooks = 0, copy;
+      const unexpected = () => { hooks++; throw new Error('guest promise hook reached'); };
+      try {
+        Promise.prototype.then = unexpected;
+        Object.defineProperty(Promise, Symbol.species, { configurable: true, get: unexpected });
+        copy = structuredClone(source, { transfer: [source] });
+      } finally {
+        Promise.prototype.then = originalThen;
+        Object.defineProperty(Promise, Symbol.species, species);
+      }
+      // Match the Chrome transfer probe's lock observation before awaiting EOF.
+      const lockedAtTransfer = source.locked;
+      const reader = copy.getReader();
+      const first = await reader.read(), last = await reader.read();
+      return { hooks, locked: lockedAtTransfer, local: copy instanceof ReadableStream,
+        own: Reflect.ownKeys(copy).length, value: first.value, done: last.done };
+    })()"#;
+    let actual: serde_json::Value =
+        serde_json::from_str(&page.eval_json_expression(script).await.unwrap()).unwrap();
+    page.close();
+    assert_eq!(
+        actual,
+        serde_json::json!({ "hooks": 0, "locked": true, "local": true, "own": 0, "value": 17, "done": true })
+    );
+}

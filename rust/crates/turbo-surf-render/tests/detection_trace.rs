@@ -131,7 +131,7 @@ async fn init_failure_does_not_run_page_code_or_leave_binding_alive() {
     )
     .await
     .is_err());
-    let page = PageSession::open("<body>fresh</body>", "https://example.test/", "", "", 5000)
+    let mut page = PageSession::open("<body>fresh</body>", "https://example.test/", "", "", 5000)
         .await
         .unwrap();
     assert!(page.serialize().contains("fresh"));

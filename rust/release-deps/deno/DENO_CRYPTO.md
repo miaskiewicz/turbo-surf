@@ -58,7 +58,7 @@ To change the patch, edit an unpacked archive, regenerate
 `patchedFiles` (SHA-256 per file) and re-run the command above plus
 `python3 -m unittest discover -s rust/release-deps/deno -p 'test_*.py'`.
 
-The render crate consumes the named package `turbo-surf-deno-crypto` (0.273.1,
+The render crate consumes the named package `turbo-surf-deno-crypto` (0.273.4,
 the reviewed distribution of upstream 0.273.0) through its unchanged
 `deno_crypto` Rust alias. The matching Deno core, WebIDL and web extension
 packages share the named Deno family on turbo-dom's `turbo-dom-v8` fork,

@@ -20,6 +20,7 @@
   const apply = Reflect.apply,
     define = Object.defineProperty,
     describe = Object.getOwnPropertyDescriptor,
+    nativeName = describe(globalThis, "name")?.get,
     NameMap = Map,
     mapGet = Map.prototype.get,
     mapSet = Map.prototype.set,
@@ -55,8 +56,10 @@
     const rows = namedElements(document, name);
     return rows.length ? rows : undefined;
   };
-  // A child's browsing-context name is its window's own `name` data property.
+  // Native Window stores its browsing-context name behind an accessor. Keep
+  // that trusted getter: a child's authored own getter must not participate.
   const frameName = (window) => {
+    if (typeof nativeName === "function") return apply(nativeName, window, []);
     const descriptor = describe(window, "name");
     return descriptor && hasOwn(descriptor, "value") ? descriptor.value : undefined;
   };

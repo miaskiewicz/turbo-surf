@@ -1,5 +1,6 @@
 // Private, native-branded rectangle data; no guest-visible host registry.
-(function (core, make, frameWindow, frameStep, ns) {
+// oxlint-disable-next-line no-unused-expressions -- The host evaluates this expression to obtain the private installer.
+(function (core, make, frameWindow, frameStep, ns, boundary) {
   "use strict";
   const ops = core.ops;
   const getRecord = ops.op_interface_record_get;
@@ -35,7 +36,7 @@
     return value;
   }
 
-  if (frameWindow) {
+  {
     for (const [name, height] of [
       ["innerWidth", false],
       ["innerHeight", true],
@@ -69,6 +70,8 @@
     }
   }
 
+  if (typeof frameStep === "function") frameStep(() => {});
+
   function brand(receiver, kind) {
     if (!ops.op_live_geometry_brand(receiver, kind)) throw new LocalTypeError("Illegal invocation");
   }
@@ -100,12 +103,21 @@
       );
     return result;
   }
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep conversion helpers private to the installer.
   function number(value) {
     // Engine ToNumber rejects even a BigInt returned by valueOf/toPrimitive.
     return +value;
   }
+  function nativeObject(prototype, ownerPrototype) {
+    try {
+      return ops.op_geometry_object(prototype, ownerPrototype);
+    } catch (error) {
+      if (ops.op_infrastructure_origin(error)) throw boundary.rehome(error);
+      throw error;
+    }
+  }
   function object(kind, prototype, x, y, width, height) {
-    const result = ops.op_geometry_object(prototype);
+    const result = nativeObject(prototype, prototypes[kind]);
     const record = { __proto__: null, kind, x, y, width, height };
     if (!setRecord(result, record))
       throw new LocalTypeError("Geometry record installation interrupted");
@@ -253,10 +265,10 @@
             typeof input !== "function"
           )
             throw new LocalTypeError("The provided value is not of type 'DOMRectInit'");
-          const dictionary = input ?? create(null);
+          const rectInit = input ?? create(null);
           // Web IDL dictionaries convert members in lexicographic order.
           const member = (name) => {
-            const value = dictionary[name];
+            const value = rectInit[name];
             return value === undefined ? 0 : number(value);
           };
           const height = member("height"),
@@ -376,7 +388,7 @@
     configurable: true,
   });
   function rectList(rects) {
-    const result = ops.op_geometry_object(rectListPrototype),
+    const result = nativeObject(rectListPrototype, rectListPrototype),
       items = [];
     setPrototype(items, null);
     for (let i = 0; i < rects.length; i++) {
@@ -409,7 +421,7 @@
     value: make(
       function () {
         brand(this, 1);
-        return rectangle(ops.op_live_element_geometry(this).bounds);
+        return rectangle(ops.op_live_element_geometry(this, true).bounds);
       },
       "getBoundingClientRect",
       0,
@@ -423,7 +435,7 @@
     value: make(
       function () {
         brand(this, 1);
-        return rectList(ops.op_live_element_geometry(this).rects);
+        return rectList(ops.op_live_element_geometry(this, true).rects);
       },
       "getClientRects",
       0,
@@ -445,7 +457,11 @@
       get: make(
         function () {
           brand(this, group === "offset" ? 2 : 1);
-          return ops.op_live_element_geometry(this)[group][field];
+          if (name === "clientWidth" || name === "clientHeight") {
+            const viewport = ops.op_live_viewport_client(this);
+            if (viewport !== null) return viewport[name === "clientWidth" ? 0 : 1];
+          }
+          return ops.op_live_element_geometry(this, true)[group][field];
         },
         "get " + name,
         0,
@@ -480,6 +496,7 @@
   function task(callback) {
     apply(hostTimeout, realmWindow, [callback, 0]);
   }
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep result factories private to the installer.
   function scrollResult(interrupted) {
     return { interrupted };
   }
@@ -886,6 +903,9 @@
       get: make(
         function () {
           brand(this, 1);
+          if (field === "width" || field === "height")
+            return ops.op_live_element_scroll_extent(this)[field === "width" ? 0 : 1];
+          if (ops.op_live_element_scroll_offset_is_zero(this)) return 0;
           return ops.op_live_element_scroll(this, 0, 0)[field];
         },
         `get ${name}`,
@@ -900,6 +920,7 @@
           brand(this, 1);
           value = number(value);
           interrupt(this);
+          if (value === 0 && ops.op_live_element_scroll_offset_is_zero(this)) return;
           scrolled(this, ops.op_live_element_scroll(this, name === "scrollLeft" ? 1 : 2, value));
         },
         `set ${name}`,
@@ -924,7 +945,17 @@
             x = coordinate(x, name);
             y = coordinate(y, name);
             const result = ops.op_live_elements_at_point(this, x, y);
-            return name === "elementFromPoint" ? (result[0] ?? null) : result;
+            if (name === "elementFromPoint") return result[0] ?? null;
+            const values = [];
+            for (let index = 0; index < result.length; index++)
+              define(values, index, {
+                __proto__: null,
+                value: result[index],
+                writable: true,
+                enumerable: true,
+                configurable: true,
+              });
+            return values;
           },
           name,
           2,
@@ -1028,9 +1059,13 @@
             name === "caretRangeFromPoint"
               ? number(y === undefined ? 0 : y) | 0
               : floatCoordinate(y, name);
-          if (name === "caretPositionFromPoint" && arguments[2] != null) {
+          if (
+            name === "caretPositionFromPoint" &&
+            arguments[2] !== null &&
+            arguments[2] !== undefined
+          ) {
             const roots = arguments[2].shadowRoots;
-            if (roots != null && Array.from(roots).length !== 0)
+            if (roots !== null && roots !== undefined && Array.from(roots).length !== 0)
               throw new Error("Native shadow-root caret selection is unsupported");
           }
           const endpoint = ops.op_live_caret_at_point(this, x, y);
@@ -1041,7 +1076,7 @@
             apply(rangeCollapse, range, [true]);
             return range;
           }
-          const result = ops.op_geometry_object(caretPrototype);
+          const result = nativeObject(caretPrototype, caretPrototype);
           if (
             !setRecord(result, {
               __proto__: null,
@@ -1097,6 +1132,7 @@
     let index = 0;
     const length = text.length;
     const at = (position) => apply(charCode, text, [position]);
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep parser predicates private to the installer.
     const space = (code) => code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
     while (index < length && space(at(index))) index++;
     let negative = false;

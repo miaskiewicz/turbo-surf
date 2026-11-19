@@ -1,0 +1,1388 @@
+--- a/inspector.rs
++++ b/inspector.rs
+@@ -960,0 +961,16 @@
++  /// Announce an embedder-owned context in this runtime's inspector group.
++  pub fn context_created(
++    &self,
++    context: v8::Local<v8::Context>,
++    name: &str,
++  ) {
++    self.v8_inspector.context_created(
++      context,
++      Self::CONTEXT_GROUP_ID,
++      v8::inspector::StringView::from(name.as_bytes()),
++      v8::inspector::StringView::from(
++        br#"{"isDefault":false,"type":"isolated"}"#.as_slice(),
++      ),
++    );
++  }
++
+--- a/modules/map.rs
++++ b/modules/map.rs
+@@ -179 +179 @@
+-  pub(crate) fn destroy(&self) {
++  pub(crate) fn cancel_pending_work(&self) {
+@@ -185,0 +186,6 @@
++    self.pending_mod_evaluation.set(false);
++    self.dyn_module_evaluate_idle_counter.set(0);
++  }
++
++  pub(crate) fn destroy(&self) {
++    self.cancel_pending_work();
+--- a/runtime/jsruntime.rs
++++ b/runtime/jsruntime.rs
+@@ -257,0 +258,4 @@
++    for entry in self.state.module_contexts.borrow_mut().drain(..) {
++      entry.modules.destroy();
++    }
++
+@@ -508,0 +513,44 @@
++// The embedder's ContextState/op driver stays shared; only module work is owned.
++struct ModuleContext {
++  context: v8::Weak<v8::Context>,
++  modules: Rc<ModuleMap>,
++  active: Cell<bool>,
++  busy: Cell<u32>,
++  cancellation_waker: AtomicWaker,
++}
++
++impl ModuleContext {
++  fn check_active(&self, cx: Option<&Context>) -> Result<(), CoreError> {
++    if let Some(cx) = cx {
++      self.cancellation_waker.register(cx.waker());
++    }
++    if self.active.get() {
++      return Ok(());
++    }
++    Err(
++      CoreErrorKind::JsBox(JsErrorBox::type_error(
++        "Module context was retired while loading",
++      ))
++      .into_box(),
++    )
++  }
++}
++
++struct ModuleContextWork(Rc<ModuleContext>);
++
++impl ModuleContextWork {
++  fn enter(entry: Rc<ModuleContext>) -> Self {
++    entry.busy.set(entry.busy.get() + 1);
++    Self(entry)
++  }
++}
++
++impl Drop for ModuleContextWork {
++  fn drop(&mut self) {
++    self.0.busy.set(self.0.busy.get() - 1);
++    if self.0.busy.get() == 0 && !self.0.active.get() {
++      self.0.modules.destroy();
++    }
++  }
++}
++
+@@ -511,0 +560 @@
++  module_contexts: RefCell<Vec<Rc<ModuleContext>>>,
+@@ -784,0 +834,139 @@
++  /// Attach a module graph to an embedder-created context sharing this runtime's
++  /// ContextState. The embedder must authenticate its loader and reject imports
++  /// after retirement. No JavaScript core/op-driver state is replaced.
++  pub fn register_module_context(
++    scope: &mut v8::PinScope,
++    loader: Rc<dyn ModuleLoader>,
++  ) -> bool {
++    let context = scope.get_current_context();
++    if context
++      .get_aligned_pointer_from_embedder_data(
++        super::jsrealm::CONTEXT_STATE_SLOT_INDEX,
++      )
++      .is_null()
++    {
++      return false;
++    }
++    let state = Self::state_from(scope);
++    let contexts = state.module_contexts.borrow().clone();
++    for entry in contexts {
++      if entry
++        .context
++        .to_local(scope)
++        .is_some_and(|owner| owner == context)
++      {
++        return entry.active.get();
++      }
++    }
++    let context_state = JsRealm::state_from_scope(scope);
++    let modules = Rc::new(ModuleMap::new(
++      loader,
++      state.source_mapper.clone(),
++      context_state.exception_state.clone(),
++      false,
++    ));
++    // SAFETY: the registry retains the map until its weak context is collected.
++    unsafe {
++      context.set_aligned_pointer_in_embedder_data(
++        super::jsrealm::MODULE_MAP_SLOT_INDEX,
++        Rc::as_ptr(&modules) as *mut c_void,
++      );
++    }
++    state
++      .module_contexts
++      .borrow_mut()
++      .push(Rc::new(ModuleContext {
++        context: v8::Weak::new(scope, context),
++        modules,
++        active: Cell::new(true),
++        busy: Cell::new(0),
++        cancellation_waker: Default::default(),
++      }));
++    true
++  }
++
++  /// Cancel this registered context's module work without closing the shared
++  /// ContextState/op driver. Retain its map allocation for future V8 callbacks;
++  /// the embedder must reject new imports from the retired context.
++  pub fn detach_module_context<'s>(
++    scope: &mut v8::PinScope<'s, '_>,
++    context: v8::Local<'s, v8::Context>,
++  ) {
++    let state = Self::state_from(scope);
++    let contexts = state.module_contexts.borrow().clone();
++    for entry in contexts {
++      if entry
++        .context
++        .to_local(scope)
++        .is_some_and(|owner| owner == context)
++        && entry.active.replace(false)
++      {
++        entry.cancellation_waker.wake();
++        state.waker.wake();
++        if entry.busy.get() == 0 {
++          entry.modules.destroy();
++        }
++        return;
++      }
++    }
++  }
++
++  /// Cancel pending module work for this live registered context without
++  /// retiring its loader or compiled module map. Must be called outside an
++  /// in-flight registered module operation.
++  pub fn cancel_module_context_pending_work<'s>(
++    scope: &mut v8::PinScope<'s, '_>,
++    context: v8::Local<'s, v8::Context>,
++  ) -> bool {
++    let state = Self::state_from(scope);
++    let contexts = state.module_contexts.borrow().clone();
++    for entry in contexts {
++      if entry.active.get()
++        && entry.context.to_local(scope) == Some(context)
++        && entry.busy.get() == 0
++      {
++        entry.modules.cancel_pending_work();
++        entry.cancellation_waker.wake();
++        state.waker.wake();
++        return true;
++      }
++    }
++    false
++  }
++
++  fn poll_module_contexts(
++    &self,
++    cx: &mut Context,
++    scope: &mut v8::PinScope,
++    main: &ModuleMap,
++  ) -> Result<(), CoreError> {
++    main.poll_progress(cx, scope)?;
++    self.poll_registered_module_contexts(cx, scope)
++  }
++
++  fn poll_registered_module_contexts(
++    &self,
++    cx: &mut Context,
++    scope: &mut v8::PinScope,
++  ) -> Result<(), CoreError> {
++    self
++      .inner
++      .state
++      .module_contexts
++      .borrow_mut()
++      .retain(|entry| !entry.context.is_empty());
++    let entries = self.inner.state.module_contexts.borrow().clone();
++    for entry in entries {
++      if !entry.active.get() {
++        continue;
++      }
++      let Some(context) = entry.context.to_local(scope) else {
++        continue;
++      };
++      let _work = ModuleContextWork::enter(entry.clone());
++      let child_scope = &mut v8::ContextScope::new(scope, context);
++      entry.modules.poll_progress(cx, child_scope)?;
++    }
++    Ok(())
++  }
++
+@@ -874,0 +1063 @@
++      module_contexts: Default::default(),
+@@ -2476 +2665 @@
+-    modules.poll_progress(cx, scope)?;
++    self.poll_module_contexts(cx, scope, modules)?;
+@@ -2832,0 +3022,17 @@
++  let runtime = JsRuntime::state_from(scope);
++  let contexts = runtime.module_contexts.borrow().clone();
++  for entry in contexts {
++    if !entry.active.get() {
++      continue;
++    }
++    let Some(context) = entry.context.to_local(scope) else {
++      continue;
++    };
++    let scope = &mut v8::ContextScope::new(scope, context);
++    if let Some(message) =
++      entry.modules.find_stalled_top_level_await(scope).first()
++    {
++      let message = v8::Local::new(scope, message);
++      return Some(JsError::from_v8_message(scope, message));
++    }
++  }
+@@ -3086 +3292 @@
+-    EventLoopPendingState {
++    let mut result = EventLoopPendingState {
+@@ -3099 +3305,16 @@
+-    }
++    };
++    let runtime = JsRuntime::state_from(scope);
++    for entry in runtime
++      .module_contexts
++      .borrow()
++      .iter()
++      .filter(|entry| entry.active.get())
++    {
++      result.has_pending_dyn_imports |=
++        entry.modules.has_pending_dynamic_imports();
++      result.has_pending_dyn_module_evaluation |=
++        entry.modules.has_pending_dyn_module_evaluation();
++      result.has_pending_module_evaluation |=
++        entry.modules.has_pending_module_evaluation();
++    }
++    result
+@@ -3277,0 +3499,145 @@
++  }
++
++  /// Load a side module into an active embedder-registered context. The caller
++  /// must evaluate it in that same context; module identifiers are map-local.
++  pub async fn load_side_es_module_in_context(
++    &mut self,
++    context: &v8::Global<v8::Context>,
++    specifier: &ModuleSpecifier,
++  ) -> Result<ModuleId, CoreError> {
++    self
++      .load_registered_side_module(context, specifier, None)
++      .await
++  }
++
++  /// Load code already fetched by the embedder without fetching it again.
++  pub async fn load_side_es_module_from_code_in_context(
++    &mut self,
++    context: &v8::Global<v8::Context>,
++    specifier: &ModuleSpecifier,
++    code: impl IntoModuleCodeString,
++  ) -> Result<ModuleId, CoreError> {
++    self
++      .load_registered_side_module(
++        context,
++        specifier,
++        Some(code.into_module_code()),
++      )
++      .await
++  }
++
++  fn registered_module_realm(
++    &mut self,
++    context: &v8::Global<v8::Context>,
++  ) -> Result<(JsRealm, Rc<ModuleContext>), CoreError> {
++    let runtime = self.inner.state.clone();
++    let entries = runtime.module_contexts.borrow().clone();
++    v8::scope!(scope, self.v8_isolate());
++    let requested = v8::Local::new(scope, context);
++    let entry = entries
++      .into_iter()
++      .find(|entry| {
++        entry.active.get() && entry.context.to_local(scope) == Some(requested)
++      })
++      .ok_or_else(|| {
++        CoreErrorKind::JsBox(JsErrorBox::type_error(
++          "Module context is not registered or has been retired",
++        ))
++        .into_box()
++      })?;
++    let scope = &mut v8::ContextScope::new(scope, requested);
++    let realm = JsRealm::new(JsRealmInner::new(
++      JsRealm::state_from_scope(scope),
++      context.clone(),
++      entry.modules.clone(),
++      runtime.function_templates.clone(),
++    ));
++    Ok((realm, entry))
++  }
++
++  async fn load_registered_side_module(
++    &mut self,
++    context: &v8::Global<v8::Context>,
++    specifier: &ModuleSpecifier,
++    code: Option<ModuleCodeString>,
++  ) -> Result<ModuleId, CoreError> {
++    let (realm, entry) = self.registered_module_realm(context)?;
++    let _work = ModuleContextWork::enter(entry.clone());
++    let result = self
++      .drive_es_module_load_in_realm(
++        realm,
++        false,
++        specifier,
++        code,
++        Some(entry.clone()),
++      )
++      .await;
++    if !entry.active.get() {
++      return Err(
++        CoreErrorKind::JsBox(JsErrorBox::type_error(
++          "Module context was retired while loading",
++        ))
++        .into_box(),
++      );
++    }
++    result
++  }
++
++  fn compile_context_module_code(
++    &mut self,
++    realm: &JsRealm,
++    is_main: bool,
++    specifier: &ModuleSpecifier,
++    code: Option<ModuleCodeString>,
++  ) -> Result<(), CoreError> {
++    let Some(code) = code else { return Ok(()) };
++    let modules = realm.0.module_map();
++    jsrealm::context_scope!(scope, realm, self.v8_isolate());
++    modules
++      .new_es_module(
++        scope,
++        is_main,
++        specifier.to_string().into(),
++        code,
++        false,
++        None,
++      )
++      .map(|_| ())
++      .map_err(|error| error.into_error(scope, false, false))
++  }
++
++  async fn drive_module_context_future<F, T>(
++    &mut self,
++    future: F,
++    registered: Option<&Rc<ModuleContext>>,
++    pump_event_loop: bool,
++  ) -> Result<T, CoreError>
++  where
++    F: Future<Output = Result<T, CoreError>>,
++  {
++    let mut future = std::pin::pin!(future);
++    poll_fn(|cx| {
++      if let Some(entry) = registered
++        && let Err(error) = entry.check_active(Some(cx))
++      {
++        return Poll::Ready(Err(error));
++      }
++      if let Poll::Ready(result) = future.as_mut().poll(cx) {
++        return Poll::Ready(result);
++      }
++      if !pump_event_loop {
++        return Poll::Pending;
++      }
++      if let Poll::Ready(Err(error)) =
++        self.poll_event_loop(cx, Default::default())
++      {
++        return Poll::Ready(Err(error));
++      }
++      if let Some(entry) = registered
++        && let Err(error) = entry.check_active(Some(cx))
++      {
++        return Poll::Ready(Err(error));
++      }
++      future.as_mut().poll(cx)
++    })
++    .await
+@@ -3292,0 +3659,13 @@
++    self
++      .drive_es_module_load_in_realm(realm, is_main, specifier, code, None)
++      .await
++  }
++
++  async fn drive_es_module_load_in_realm(
++    &mut self,
++    realm: JsRealm,
++    is_main: bool,
++    specifier: &ModuleSpecifier,
++    code: Option<ModuleCodeString>,
++    registered: Option<Rc<ModuleContext>>,
++  ) -> Result<ModuleId, CoreError> {
+@@ -3303,9 +3682,14 @@
+-    if let Some(code) = code {
+-      jsrealm::context_scope!(scope, &realm, self.v8_isolate());
+-      module_map_rc
+-        .new_es_module(
+-          scope,
+-          is_main,
+-          specifier.to_string().into(),
+-          code,
+-          false,
++    self.compile_context_module_code(&realm, is_main, specifier, code)?;
++
++    if let Some(entry) = &registered {
++      entry.check_active(None)?;
++    }
++    let preparation = async {
++      if is_main {
++        RecursiveModuleLoad::main(specifier.to_string(), module_map_rc.clone())
++          .await
++      } else {
++        RecursiveModuleLoad::side(
++          specifier.to_string(),
++          module_map_rc.clone(),
++          SideModuleKind::Async,
+@@ -3314,12 +3698,8 @@
+-        .map_err(|e| e.into_error(scope, false, false))?;
+-    }
+-
+-    let mut load = if is_main {
+-      RecursiveModuleLoad::main(specifier.to_string(), module_map_rc.clone())
+-        .await?
+-    } else {
+-      RecursiveModuleLoad::side(
+-        specifier.to_string(),
+-        module_map_rc.clone(),
+-        SideModuleKind::Async,
+-        None,
++        .await
++      }
++    };
++    let mut load = self
++      .drive_module_context_future(
++        preparation,
++        registered.as_ref(),
++        pump_event_loop,
+@@ -3327,2 +3707 @@
+-      .await?
+-    };
++      .await?;
+@@ -3336,19 +3715,7 @@
+-      let next_step = poll_fn(|cx| {
+-        if let Poll::Ready(t) = load.poll_next_unpin(cx) {
+-          return Poll::Ready(Ok::<_, CoreError>(t));
+-        }
+-        if !pump_event_loop {
+-          return Poll::Pending;
+-        }
+-        match self.poll_event_loop(cx, PollEventLoopOptions::default()) {
+-          Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+-          Poll::Ready(Ok(())) | Poll::Pending => {}
+-        }
+-        // After polling the event loop, the recursive load may have new
+-        // results ready (e.g. a hook callback responded). Re-poll.
+-        match load.poll_next_unpin(cx) {
+-          Poll::Ready(t) => Poll::Ready(Ok(t)),
+-          Poll::Pending => Poll::Pending,
+-        }
+-      })
+-      .await?;
++      let next_step = self
++        .drive_module_context_future(
++          async { Ok(load.next().await) },
++          registered.as_ref(),
++          pump_event_loop,
++        )
++        .await?;
+@@ -3357,0 +3725,3 @@
++      if let Some(entry) = &registered {
++        entry.check_active(None)?;
++      }
+@@ -3364,0 +3735,3 @@
++    if let Some(entry) = &registered {
++      entry.check_active(None)?;
++    }
+@@ -3737,0 +4111,4 @@
++
++#[cfg(test)]
++#[path = "tests/module_pending_cancel.rs"]
++mod pending_cancel_tests;
+--- a/uv_compat/tcp.rs
++++ b/uv_compat/tcp.rs
+@@ -818 +818,3 @@
+-      && stream.set_linger(Some(std::time::Duration::ZERO)).is_err()
++      && socket2::SockRef::from(stream)
++        .set_linger(Some(std::time::Duration::ZERO))
++        .is_err()
+--- a/modules/recursive_load.rs
++++ b/modules/recursive_load.rs
+@@ -366 +366 @@
+-          &module_source.module_type
++          module_source.module_type
+--- a/uv_compat.rs
++++ b/uv_compat.rs
+@@ -360 +360 @@
+-    for (_, handle_ptr) in self.timer_handles.borrow().iter() {
++    for handle_ptr in self.timer_handles.borrow().values() {
+--- /dev/null
++++ b/runtime/tests/module_pending_cancel.rs
+@@ -0,0 +1,90 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++
++use super::JsRuntime;
++use super::ModuleContextWork;
++use crate::NoopModuleLoader;
++use crate::RuntimeOptions;
++use std::rc::Rc;
++
++fn native_context(runtime: &mut JsRuntime) -> v8::Global<v8::Context> {
++  crate::scope!(scope, runtime);
++  let initial = scope.get_current_context();
++  let state = initial.get_aligned_pointer_from_embedder_data(
++    crate::runtime::jsrealm::CONTEXT_STATE_SLOT_INDEX,
++  );
++  let modules = initial.get_aligned_pointer_from_embedder_data(
++    crate::runtime::jsrealm::MODULE_MAP_SLOT_INDEX,
++  );
++  let context = v8::Context::new(scope, Default::default());
++  // SAFETY: this runtime owns the borrowed slots until its native contexts drop.
++  unsafe {
++    context.set_aligned_pointer_in_embedder_data(
++      crate::runtime::jsrealm::CONTEXT_STATE_SLOT_INDEX,
++      state,
++    );
++    context.set_aligned_pointer_in_embedder_data(
++      crate::runtime::jsrealm::MODULE_MAP_SLOT_INDEX,
++      modules,
++    );
++  }
++  v8::Global::new(scope, context)
++}
++
++fn register(
++  runtime: &mut JsRuntime,
++  context: &v8::Global<v8::Context>,
++) -> bool {
++  crate::scope!(scope, runtime);
++  let context = v8::Local::new(scope, context);
++  let scope = &mut v8::ContextScope::new(scope, context);
++  JsRuntime::register_module_context(scope, Rc::new(NoopModuleLoader))
++}
++
++fn cancel(runtime: &mut JsRuntime, context: &v8::Global<v8::Context>) -> bool {
++  crate::scope!(scope, runtime);
++  let context = v8::Local::new(scope, context);
++  let scope = &mut v8::ContextScope::new(scope, context);
++  JsRuntime::cancel_module_context_pending_work(scope, context)
++}
++
++#[test]
++fn pending_module_cancel_requires_a_live_registered_native_context() {
++  let mut runtime = JsRuntime::new(RuntimeOptions::default());
++  let unregistered = native_context(&mut runtime);
++  assert!(!cancel(&mut runtime, &unregistered));
++
++  let registered = native_context(&mut runtime);
++  assert!(register(&mut runtime, &registered));
++  assert!(cancel(&mut runtime, &registered));
++  {
++    crate::scope!(scope, &mut runtime);
++    let context = v8::Local::new(scope, &registered);
++    JsRuntime::detach_module_context(scope, context);
++  }
++  assert!(!cancel(&mut runtime, &registered));
++  assert!(!register(&mut runtime, &registered));
++  assert!(!cancel(&mut runtime, &unregistered));
++}
++
++#[test]
++fn pending_module_cancel_rejects_an_in_flight_registered_operation() {
++  let mut runtime = JsRuntime::new(RuntimeOptions::default());
++  let context = native_context(&mut runtime);
++  assert!(register(&mut runtime, &context));
++  let state = JsRuntime::state_from(runtime.v8_isolate());
++  let entry = {
++    let contexts = state.module_contexts.borrow();
++    assert_eq!(contexts.len(), 1);
++    contexts[0].clone()
++  };
++  // Hold the exact RAII guard used by registered load/evaluation operations;
++  // no guest flag or test-only production admission path is introduced.
++  let operation = ModuleContextWork::enter(entry.clone());
++  assert_eq!(entry.busy.get(), 1);
++  assert!(!cancel(&mut runtime, &context));
++  assert!(entry.active.get());
++  drop(operation);
++  assert_eq!(entry.busy.get(), 0);
++  assert!(cancel(&mut runtime, &context));
++  assert!(entry.active.get());
++}
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -192,0 +193,3 @@
++[dependencies.socket2]
++version = "=0.6.4"
++
+--- a/00_infra.js
++++ b/00_infra.js
+@@ -29,6 +29,9 @@
+     URIError,
+   } = window.__bootstrap.primordials;
+ 
++  let op_async_work_registered;
++  let op_async_work_settled;
++
+   // Promise ids must be non-negative and fit in an i32 (Rust's `PromiseId`);
+   // the increment in the async op stubs wraps back to 0 past 2^31 - 1.
+   let nextPromiseId = 0;
+@@ -58,6 +61,8 @@
+ 
+   function __initializeCoreMethods(submitLeakTrace_) {
+     submitLeakTrace = submitLeakTrace_;
++    // Native ops are bound between infra and core initialization.
++    ({ op_async_work_registered, op_async_work_settled } = window.Deno.core.ops);
+   }
+ 
+   const build = {
+@@ -169,6 +174,7 @@
+       },
+     );
+     wrappedPromise[promiseIdSymbol] = promiseId;
++    op_async_work_registered(promiseId, wrappedPromise);
+     return wrappedPromise;
+   }
+ 
+@@ -188,6 +194,7 @@
+       }
+       MapPrototypeDelete(promiseMap, promiseId);
+     }
++    op_async_work_settled(promiseId);
+     if (isOk) {
+       promise[0](res);
+     } else {
+--- a/async_work.rs
++++ b/async_work.rs
+@@ -0,0 +1,122 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++//! Host-only observations of genuine native asynchronous op promises.
++use std::collections::HashMap;
++use std::rc::Rc;
++
++/// Lifecycle of one real op-driver promise. Eagerly completed ops have no
++/// pending promise and do not emit these observations.
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum AsyncOpEvent {
++  Registered,
++  Refed,
++  Unrefed,
++  Settled,
++  TrackingFailed,
++}
++
++/// The Promise is supplied only on registration, before it leaves trusted core.
++/// Embedders must use weak handles and must not execute authored JavaScript from
++/// this callback. Promise IDs are opaque and may be reused after completion.
++pub struct AsyncOpObservation<'s> {
++  pub promise_id: i32,
++  pub generation: u64,
++  pub event: AsyncOpEvent,
++  pub promise: Option<v8::Local<'s, v8::Promise>>,
++}
++
++/// Native observers cannot throw a guest exception into op bookkeeping.
++#[derive(Clone)]
++pub struct AsyncOpObserver(
++  pub Rc<dyn for<'s, 'i> Fn(&mut v8::PinScope<'s, 'i>, AsyncOpObservation<'s>)>,
++);
++
++#[derive(Default)]
++struct ActiveOps {
++  generation: u64,
++  failed: bool,
++  entries: HashMap<i32, u64>,
++}
++
++impl ActiveOps {
++  fn observe(&mut self, id: i32, event: AsyncOpEvent) -> Option<u64> {
++    match event {
++      AsyncOpEvent::Registered => {
++        if self.entries.contains_key(&id) {
++          return None;
++        }
++        let Some(generation) = self.generation.checked_add(1) else {
++          self.failed = true;
++          return None;
++        };
++        self.generation = generation;
++        self.entries.insert(id, self.generation);
++        Some(self.generation)
++      }
++      AsyncOpEvent::Settled => self.entries.remove(&id),
++      AsyncOpEvent::Refed | AsyncOpEvent::Unrefed => self.entries.get(&id).copied(),
++      AsyncOpEvent::TrackingFailed => None,
++    }
++  }
++}
++
++pub(crate) fn notify<'s, 'i>(
++  scope: &mut v8::PinScope<'s, 'i>,
++  promise_id: i32,
++  event: AsyncOpEvent,
++  promise: Option<v8::Local<'s, v8::Promise>>,
++) {
++  let state = crate::JsRuntime::op_state_from(scope);
++  let (generation, event, observer) = {
++    let mut state = state.borrow_mut();
++    if !state.has::<ActiveOps>() {
++      state.put(ActiveOps::default());
++    }
++    let active = state.borrow_mut::<ActiveOps>();
++    let mut generation = active.observe(promise_id, event);
++    let event = if active.failed {
++      generation = Some(0);
++      AsyncOpEvent::TrackingFailed
++    } else {
++      event
++    };
++    let observer = state.try_borrow::<AsyncOpObserver>().cloned();
++    (generation, event, observer)
++  };
++  if let (Some(generation), Some(observer)) = (generation, observer) {
++    let promise = if event == AsyncOpEvent::Registered {
++      promise
++    } else {
++      None
++    };
++    (observer.0)(
++      scope,
++      AsyncOpObservation {
++        promise_id,
++        generation,
++        event,
++        promise,
++      },
++    );
++  }
++}
++
++#[cfg(test)]
++mod tests {
++  use super::{ActiveOps, AsyncOpEvent};
++
++  #[test]
++  fn native_generation_overflow_fails_closed_without_registering() {
++    let mut active = ActiveOps {
++      generation: u64::MAX,
++      ..Default::default()
++    };
++    assert_eq!(active.observe(7, AsyncOpEvent::Registered), None);
++    assert!(active.failed);
++    assert!(active.entries.is_empty());
++    assert_eq!(active.observe(8, AsyncOpEvent::Registered), None);
++    assert!(active.failed);
++    assert!(active.entries.is_empty());
++    assert_eq!(active.observe(-1, AsyncOpEvent::Refed), None);
++    assert!(active.failed);
++  }
++}
+--- a/lib.rs
++++ b/lib.rs
+@@ -22,6 +22,7 @@
+ mod external;
+ mod fast_string;
+ mod flags;
++mod async_work;
+ mod gotham_state;
+ mod inspector;
+ mod io;
+@@ -49,6 +50,7 @@
+ pub mod webidl;
+ 
+ // Re-exports
++pub use async_work::{AsyncOpEvent, AsyncOpObservation, AsyncOpObserver};
+ pub use anyhow;
+ pub use deno_ops::CppgcBase;
+ pub use deno_ops::CppgcInherits;
+@@ -323,3 +325,4 @@
+     );
+   }
+ }
++
+--- a/ops_builtin.rs
++++ b/ops_builtin.rs
+@@ -109,6 +109,8 @@
+   ops_builtin_v8::op_timer_track,
+   ops_builtin_v8::op_timer_untrack,
+   ops_builtin_v8::op_timer_now,
++  ops_builtin_v8::op_async_work_registered,
++  ops_builtin_v8::op_async_work_settled,
+   ops_builtin_v8::op_ref_op,
+   ops_builtin_v8::op_unref_op,
+   ops_builtin_v8::op_lazy_load_esm,
+--- a/ops_builtin_v8.rs
++++ b/ops_builtin_v8.rs
+@@ -51,16 +51,32 @@
+     f.map(|f| v8::Global::new(scope, f));
+ }
+ 
+-#[op2(fast)]
++#[op2(fast, reentrant)]
++pub fn op_async_work_registered<'s>(
++  scope: &mut v8::PinScope<'s, '_>,
++  promise_id: i32,
++  promise: v8::Local<'s, v8::Promise>,
++) {
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Registered, Some(promise));
++}
++
++#[op2(fast, reentrant)]
++pub fn op_async_work_settled(scope: &mut v8::PinScope, promise_id: i32) {
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Settled, None);
++}
++
++#[op2(fast, reentrant)]
+ pub fn op_ref_op(scope: &mut v8::PinScope, promise_id: i32) {
+   let context_state = JsRealm::state_from_scope(scope);
+   context_state.unrefed_ops.borrow_mut().remove(&promise_id);
+-}
+-
+-#[op2(fast)]
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Refed, None);
++}
++
++#[op2(fast, reentrant)]
+ pub fn op_unref_op(scope: &mut v8::PinScope, promise_id: i32) {
+   let context_state = JsRealm::state_from_scope(scope);
+   context_state.unrefed_ops.borrow_mut().insert(promise_id);
++  crate::async_work::notify(scope, promise_id, crate::AsyncOpEvent::Unrefed, None);
+ }
+ 
+ #[op2(fast)]
+--- a/runtime/jsruntime.rs
++++ b/runtime/jsruntime.rs
+@@ -934,6 +934,25 @@
+     false
+   }
+ 
++  /// Inspect only the actual live registered document's module work. This
++  /// does not poll other contexts or borrow their shared op-driver state.
++  /// An absent or retired registration is not reported as an idle document.
++  pub fn module_context_pending_work<'s>(
++    scope: &mut v8::PinScope<'s, '_>,
++    context: v8::Local<'s, v8::Context>,
++  ) -> Option<bool> {
++    let state = Self::state_from(scope);
++    let contexts = state.module_contexts.borrow();
++    contexts.iter().find(|entry| {
++      entry.active.get() && entry.context.to_local(scope) == Some(context)
++    }).map(|entry| {
++      entry.busy.get() != 0
++        || entry.modules.has_pending_dynamic_imports()
++        || entry.modules.has_pending_dyn_module_evaluation()
++        || entry.modules.has_pending_module_evaluation()
++    })
++  }
++
+   fn poll_module_contexts(
+     &self,
+     cx: &mut Context,
+--- a/01_core.js
++++ b/01_core.js
+@@ -18,0 +19 @@
++    ReflectApply,
+@@ -475,0 +477,5 @@
++  function __scopedRejectionCallback(markEntered, callback, args) {
++    markEntered();
++    return ReflectApply(callback, undefined, args);
++  }
++
+@@ -1069,0 +1076 @@
++    __scopedRejectionCallback,
+--- a/async_work.rs
++++ b/async_work.rs
+@@ -26,0 +27,3 @@
++type AsyncOpCallback =
++  dyn for<'s, 'i> Fn(&mut v8::PinScope<'s, 'i>, AsyncOpObservation<'s>);
++
+@@ -29,3 +32 @@
+-pub struct AsyncOpObserver(
+-  pub Rc<dyn for<'s, 'i> Fn(&mut v8::PinScope<'s, 'i>, AsyncOpObservation<'s>)>,
+-);
++pub struct AsyncOpObserver(pub Rc<AsyncOpCallback>);
+--- a/lib.rs
++++ b/lib.rs
+@@ -192,0 +193 @@
++pub use crate::runtime::ScopedRejectionCheckpoint;
+--- a/runtime/exception_state.rs
++++ b/runtime/exception_state.rs
+@@ -11,0 +12 @@
++  pub(crate) scoped_rejection_callback_entered: Cell<bool>,
+--- a/runtime/jsrealm.rs
++++ b/runtime/jsrealm.rs
+@@ -87,0 +88 @@
++  pub(crate) js_scoped_rejection_cb: RefCell<Option<v8::Global<v8::Function>>>,
+@@ -211,0 +213 @@
++      js_scoped_rejection_cb: Default::default(),
+@@ -354,0 +357 @@
++    std::mem::take(&mut *state.js_scoped_rejection_cb.borrow_mut());
+--- a/runtime/jsruntime.rs
++++ b/runtime/jsruntime.rs
+@@ -1898,0 +1899 @@
++      scoped_rejection_cb,
+@@ -1937,0 +1939,3 @@
++      );
++      let scoped_rejection_cb: v8::Local<v8::Function> = bindings::get(
++        scope, core_obj, SCOPED_REJECTION_CALLBACK, "Deno.core.__scopedRejectionCallback",
+@@ -2090,0 +2095 @@
++        v8::Global::new(scope, scoped_rejection_cb),
+@@ -2116,0 +2122 @@
++    state_rc.js_scoped_rejection_cb.borrow_mut().replace(scoped_rejection_cb);
+@@ -4133,0 +4140,4 @@
++
++#[path = "rejection_checkpoint.rs"]
++mod rejection_checkpoint;
++pub use rejection_checkpoint::ScopedRejectionCheckpoint;
+--- a/runtime/mod.rs
++++ b/runtime/mod.rs
+@@ -40,0 +41 @@
++pub use jsruntime::ScopedRejectionCheckpoint;
+--- /dev/null
++++ b/runtime/rejection_checkpoint.rs
+@@ -0,0 +1,424 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++use super::*;
++
++/// Work performed by an embedder's document-task rejection checkpoint.
++#[derive(Debug, Default, PartialEq, Eq)]
++pub struct ScopedRejectionCheckpoint {
++  pub handled: usize,
++  pub unhandled: usize,
++  pub deferred_ticks: bool,
++  pub deferred_termination: bool,
++}
++
++fn take_context_rows<T>(
++  scope: &mut v8::PinScope,
++  queue: &RefCell<VecDeque<T>>,
++  context: v8::Local<v8::Context>,
++  promise: impl Fn(&T) -> &v8::Global<v8::Promise>,
++) -> VecDeque<T> {
++  let rows = std::mem::take(&mut *queue.borrow_mut());
++  let mut selected = VecDeque::new();
++  let mut deferred = VecDeque::new();
++  for row in rows {
++    let value = v8::Local::new(scope, promise(&row));
++    if value.get_creation_context(scope) == Some(context) {
++      selected.push_back(row);
++    } else {
++      deferred.push_back(row);
++    }
++  }
++  queue.borrow_mut().extend(deferred);
++  selected
++}
++
++fn prepend_rows<T>(queue: &RefCell<VecDeque<T>>, mut rows: VecDeque<T>) {
++  rows.append(&mut *queue.borrow_mut());
++  *queue.borrow_mut() = rows;
++}
++
++fn mark_callback_entry(
++  scope: &mut v8::PinScope,
++  _args: v8::FunctionCallbackArguments,
++  _result: v8::ReturnValue,
++) {
++  JsRealm::exception_state_from_scope(scope)
++    .scoped_rejection_callback_entered
++    .set(true);
++}
++
++struct CallbackEntry<'a> {
++  flag: &'a std::cell::Cell<bool>,
++  previous: bool,
++}
++impl Drop for CallbackEntry<'_> {
++  fn drop(&mut self) {
++    self.flag.set(self.previous);
++  }
++}
++
++fn call_scoped_callback<'s>(
++  scope: &mut v8::PinScope<'s, '_>,
++  callback: v8::Local<'s, v8::Function>,
++  trampoline: &v8::Global<v8::Function>,
++  args: &[v8::Local<'s, v8::Value>],
++  entered: &std::cell::Cell<bool>,
++) -> (Option<v8::Local<'s, v8::Value>>, bool) {
++  // Entry means a dispatch attempt began, not that the user handler completed.
++  // A nested checkpoint restores this attempt's marker when it returns.
++  let marker = CallbackEntry {
++    flag: entered,
++    previous: entered.replace(false),
++  };
++  let value = (|| {
++    let mark = v8::Function::new(scope, mark_callback_entry)?;
++    let values = v8::Array::new_with_elements(scope, args);
++    let trampoline = v8::Local::new(scope, trampoline);
++    let undefined = v8::undefined(scope).into();
++    trampoline.call(
++      scope,
++      undefined,
++      &[mark.into(), callback.into(), values.into()],
++    )
++  })();
++  (value, marker.flag.get())
++}
++
++impl JsRuntime {
++  /// Report pending Promise rejection events from one exact context after its
++  /// task's microtask checkpoint, without polling native work or other contexts.
++  ///
++  /// nextTick processing is isolate-wide. If it is pending, leave the reports
++  /// queued for the ordinary event loop so a nextTick handler can still catch a
++  /// rejection before it is reported. The core drain's historically named
++  /// macrotask phase contains only nextTick/microtask work; it does not own a
++  /// separate macrotask callback queue. Foreign-context reports remain queued.
++  pub fn scoped_rejection_checkpoint(
++    &mut self,
++    context: &v8::Global<v8::Context>,
++  ) -> Result<ScopedRejectionCheckpoint, Box<JsError>> {
++    let mut result = ScopedRejectionCheckpoint::default();
++    if self.v8_isolate().is_execution_terminating() {
++      result.deferred_termination = true;
++      return Ok(result);
++    }
++    let state = self.inner.main_realm.0.context_state.clone();
++    if state.has_tick_scheduled() {
++      result.deferred_ticks = true;
++      return Ok(result);
++    }
++    scope!(scope, self);
++    let context = v8::Local::new(scope, context);
++    let exceptions = &state.exception_state;
++    let trampoline = state.js_scoped_rejection_cb.borrow().clone().unwrap();
++    let mut handled = take_context_rows(
++      scope,
++      &exceptions.pending_handled_promise_rejections,
++      context,
++      |row| &row.0,
++    );
++    while let Some((promise, reason)) = handled.pop_front() {
++      let callback = exceptions.js_handled_promise_rejection_cb.borrow().clone();
++      if let Some(callback) = callback {
++        v8::tc_scope!(let caught, scope);
++        let callback = v8::Local::new(caught, callback);
++        let args = [
++          v8::Local::new(caught, &promise).into(),
++          v8::Local::new(caught, &reason),
++        ];
++        let (_, entered) = call_scoped_callback(
++          caught,
++          callback,
++          &trampoline,
++          &args,
++          &exceptions.scoped_rejection_callback_entered,
++        );
++        if caught.has_terminated() || caught.is_execution_terminating() {
++          if !entered {
++            handled.push_front((promise, reason));
++          }
++          prepend_rows(&exceptions.pending_handled_promise_rejections, handled);
++          result.deferred_termination = true;
++          return Ok(result);
++        }
++        if let Some(exception) = caught.exception() {
++          prepend_rows(&exceptions.pending_handled_promise_rejections, handled);
++          return exception_to_err_result(caught, exception, false, true);
++        }
++      }
++      result.handled += 1;
++    }
++    if state.has_tick_scheduled() {
++      result.deferred_ticks = true;
++      return Ok(result);
++    }
++    let mut unhandled = take_context_rows(
++      scope,
++      &exceptions.pending_promise_rejections,
++      context,
++      |row| &row.0,
++    );
++    let callback = state.js_handle_rejections_cb.borrow().clone();
++    while let Some((promise, reason, stack)) = unhandled.pop_front() {
++      v8::tc_scope!(let caught, scope);
++      let callback = v8::Local::new(caught, callback.as_ref().unwrap());
++      let args = [
++        v8::Local::new(caught, &promise).into(),
++        v8::Local::new(caught, &reason),
++        v8::Local::new(caught, &stack),
++      ];
++      let (_, entered) = call_scoped_callback(
++        caught,
++        callback,
++        &trampoline,
++        &args,
++        &exceptions.scoped_rejection_callback_entered,
++      );
++      if caught.has_terminated() || caught.is_execution_terminating() {
++        if !entered {
++          unhandled.push_front((promise, reason, stack));
++        }
++        prepend_rows(&exceptions.pending_promise_rejections, unhandled);
++        result.deferred_termination = true;
++        return Ok(result);
++      }
++      if let Some(exception) = caught.exception() {
++        prepend_rows(&exceptions.pending_promise_rejections, unhandled);
++        return exception_to_err_result(caught, exception, false, true);
++      }
++      result.unhandled += 1;
++    }
++    scope.perform_microtask_checkpoint();
++    Ok(result)
++  }
++}
++
++#[cfg(test)]
++mod tests {
++  use super::*;
++
++  fn install(runtime: &mut JsRuntime) {
++    runtime
++      .execute_script(
++        "checkpoint_test",
++        r#"
++      globalThis.rows=[];
++      Deno.core.setUnhandledPromiseRejectionHandler(()=>{rows.push('unhandled');return true});
++      Deno.core.setHandledPromiseRejectionHandler(()=>rows.push('handled'));
++      globalThis.rejected=Promise.reject(42);
++    "#,
++      )
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++  }
++
++  fn rows(runtime: &mut JsRuntime) -> String {
++    let value = runtime
++      .execute_script("checkpoint_rows", "JSON.stringify(rows)")
++      .unwrap();
++    scope!(scope, runtime);
++    v8::Local::new(scope, value).to_rust_string_lossy(scope)
++  }
++
++  #[test]
++  fn checkpoint_keeps_foreign_reports_queued() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    let foreign = {
++      scope!(scope, &mut runtime);
++      let context = v8::Context::new(scope, Default::default());
++      v8::Global::new(scope, context)
++    };
++    let result = runtime.scoped_rejection_checkpoint(&foreign).unwrap();
++    assert_eq!(result, ScopedRejectionCheckpoint::default());
++    assert_eq!(rows(&mut runtime), "[]");
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++    assert_eq!(rows(&mut runtime), "[\"unhandled\"]");
++  }
++
++  #[test]
++  fn checkpoint_preserves_later_handled_notification() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++    runtime
++      .execute_script("catch_later", "rejected.catch(()=>{})")
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .handled,
++      1
++    );
++    assert_eq!(rows(&mut runtime), "[\"unhandled\",\"handled\"]");
++  }
++
++  #[tokio::test]
++  async fn checkpoint_defers_to_pending_next_tick_handler() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    runtime.execute_script("tick_catch", r#"
++      Deno.core.queueNextTick({callback:()=>rejected.catch(()=>{}),args:undefined,snapshot:undefined});
++    "#).unwrap();
++    let context = runtime.main_context();
++    let result = runtime.scoped_rejection_checkpoint(&context).unwrap();
++    assert!(result.deferred_ticks);
++    assert_eq!(result.unhandled, 0);
++    runtime.run_event_loop(Default::default()).await.unwrap();
++    assert_eq!(rows(&mut runtime), "[]");
++  }
++  #[test]
++  fn checkpoint_retains_unprocessed_handled_rows_after_throw() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    runtime
++      .execute_script("second_rejection", "globalThis.second=Promise.reject(43)")
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      2
++    );
++    runtime
++      .execute_script(
++        "handled_throw",
++        r#"
++      Deno.core.setHandledPromiseRejectionHandler(()=>{throw new Error('handled callback')});
++      rejected.catch(()=>{});second.catch(()=>{});
++    "#,
++      )
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    assert!(runtime.scoped_rejection_checkpoint(&context).is_err());
++    runtime
++      .execute_script(
++        "handled_restore",
++        "Deno.core.setHandledPromiseRejectionHandler(()=>rows.push('handled'))",
++      )
++      .unwrap();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .handled,
++      1
++    );
++    assert_eq!(
++      rows(&mut runtime),
++      "[\"unhandled\",\"unhandled\",\"handled\"]"
++    );
++  }
++
++  #[test]
++  fn checkpoint_preserves_reports_during_termination() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    let context = runtime.main_context();
++    runtime
++      .v8_isolate()
++      .thread_safe_handle()
++      .terminate_execution();
++    assert!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .deferred_termination
++    );
++    runtime.v8_isolate().cancel_terminate_execution();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++  }
++  fn terminate_handler(
++    scope: &mut v8::PinScope,
++    _args: v8::FunctionCallbackArguments,
++    _result: v8::ReturnValue,
++  ) {
++    scope.terminate_execution();
++  }
++
++  #[test]
++  fn checkpoint_does_not_repeat_an_entered_terminating_handler() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    {
++      scope!(scope, &mut runtime);
++      let stop = v8::Function::new(scope, terminate_handler).unwrap();
++      let context = scope.get_current_context();
++      let key = v8::String::new(scope, "stopCheckpoint").unwrap();
++      context.global(scope).set(scope, key.into(), stop.into());
++    }
++    runtime.execute_script("second_and_stop", r#"
++      globalThis.second=Promise.reject(43);
++      Deno.core.setUnhandledPromiseRejectionHandler((_promise,reason)=>{rows.push(reason);stopCheckpoint();return true});
++    "#).unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    let context = runtime.main_context();
++    assert!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .deferred_termination
++    );
++    runtime.v8_isolate().cancel_terminate_execution();
++    runtime.execute_script("restore_reporter", "Deno.core.setUnhandledPromiseRejectionHandler((_promise,reason)=>{rows.push(reason);return true})").unwrap();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      1
++    );
++    assert_eq!(rows(&mut runtime), "[42,43]");
++  }
++
++  #[test]
++  fn checkpoint_keeps_microtasks_after_the_complete_report_batch() {
++    let mut runtime = JsRuntime::new(RuntimeOptions::default());
++    install(&mut runtime);
++    runtime
++      .execute_script(
++        "batch_microtasks",
++        r#"
++      globalThis.second=Promise.reject(43);
++      Deno.core.setUnhandledPromiseRejectionHandler((_promise,reason)=>{
++        rows.push(reason);Promise.resolve().then(()=>rows.push('micro'+reason));return true;
++      });
++    "#,
++      )
++      .unwrap();
++    runtime.v8_isolate().perform_microtask_checkpoint();
++    let context = runtime.main_context();
++    assert_eq!(
++      runtime
++        .scoped_rejection_checkpoint(&context)
++        .unwrap()
++        .unhandled,
++      2
++    );
++    assert_eq!(rows(&mut runtime), "[42,43,\"micro42\",\"micro43\"]");
++  }
++}
+--- a/runtime/v8_static_strings.rs
++++ b/runtime/v8_static_strings.rs
+@@ -32,0 +33 @@
++  SCOPED_REJECTION_CALLBACK = "__scopedRejectionCallback",

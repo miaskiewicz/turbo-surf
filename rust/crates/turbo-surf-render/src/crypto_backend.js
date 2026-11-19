@@ -1,7 +1,7 @@
 // Called privately during realm bootstrap. Algorithms, key material and brands
 // remain in the official deno_crypto cppgc Rust classes. Public interface
 // prototypes belong to this realm; the shared native factories stay private.
-(function (core, make, secure, algorithmFactory, hybridFactory) {
+(function (core, make, secure, algorithmFactory, hybridFactory, boundary) {
   "use strict";
   const ops = core.ops;
   const rawCrypto = ops.Crypto,
@@ -23,10 +23,10 @@
     set = ops.op_interface_record_set;
   // Isolate-owned metadata is captured in the main realm before any iframe.
   const backend = get(rawCrypto).cryptoBackend;
-  const isPrototypeOf = Object.prototype.isPrototypeOf;
   const domName = Object.getOwnPropertyDescriptor(NativeDOMException.prototype, "name").get;
   const domMessage = Object.getOwnPropertyDescriptor(NativeDOMException.prototype, "message").get;
-  function localError(error) {
+  const isPrototypeOf = Object.prototype.isPrototypeOf;
+  function legacyError(error) {
     if (
       apply(isPrototypeOf, backend.typeErrorPrototype, [error]) &&
       !apply(isPrototypeOf, LocalTypeError.prototype, [error])
@@ -38,6 +38,21 @@
       return error instanceof NativeDOMException ? error : new NativeDOMException(message, name);
     } catch {
       return error;
+    }
+  }
+  function localError(error) {
+    if (!ops.op_infrastructure_active()) return legacyError(error);
+    if (!ops.op_infrastructure_origin(error)) return error;
+    try {
+      return boundary.rehome(error);
+    } catch {
+      try {
+        const name = apply(domName, error, []),
+          message = apply(domMessage, error, []);
+        return new NativeDOMException(message, name);
+      } catch {
+        return new LocalTypeError("Unsupported private infrastructure error");
+      }
     }
   }
   const hybrid = hybridFactory(ops.NativeHybridKey, backend, apply, NativeDOMException);
@@ -196,10 +211,12 @@
       // Only freshly-created native result keys are adapted. A caller's input or
       // a foreign key passed to sign/export/derive is never changed.
       setPrototype(key, CryptoKey.prototype);
+      if (ops.op_infrastructure_active()) ops.op_infrastructure_adopt_crypto_key(key);
     }
     return key;
   }
   function ownBuffer(value) {
+    if (ops.op_infrastructure_origin(value)) return boundary.rehome(value);
     setPrototype(value, bufferPrototype);
     return value;
   }
@@ -266,42 +283,51 @@
             promise: LocalPromise,
             error: localError,
             result: resultKey,
+            observe: boundary.observe,
+            invoke: boundary.invoke,
           };
-          return new owner.promise((resolve, reject) => {
-            try {
-              if (!record || !own(record, "cryptoOwner"))
-                throw new LocalTypeError("Illegal invocation");
-              if (args.length < arity)
-                throw new LocalTypeError(name + " requires " + arity + " arguments");
-              const normalized = profile.admit(name, args);
-              const hybridResult = hybrid.handles(name, normalized)
-                ? hybrid.run(name, normalized, receiver)
-                : undefined;
-              const value = hybridResult ? hybridResult.value : apply(native, receiver, normalized);
-              const complete = (value) => {
+          return owner.invoke(
+            () =>
+              new owner.promise((resolve, reject) => {
                 try {
-                  resolve(owner.result(name, value));
+                  if (!record || !own(record, "cryptoOwner"))
+                    throw new LocalTypeError("Illegal invocation");
+                  if (args.length < arity)
+                    throw new LocalTypeError(name + " requires " + arity + " arguments");
+                  const normalized = profile.admit(name, args);
+                  const hybridResult = hybrid.handles(name, normalized)
+                    ? hybrid.run(name, normalized, receiver)
+                    : undefined;
+                  const value = hybridResult
+                    ? hybridResult.value
+                    : apply(native, receiver, normalized);
+                  const complete = (value) => {
+                    try {
+                      resolve(owner.result(name, value));
+                    } catch (error) {
+                      reject(owner.error(error));
+                    }
+                  };
+                  // Borrow the captured native then; guest parent Promise prototypes must
+                  // not substitute a foreign input key as a native operation result.
+                  if (
+                    hybridResult
+                      ? !hybridResult.async
+                      : name === "importKey" ||
+                        name === "getPublicKey" ||
+                        name === "unwrapKey" ||
+                        name === "encapsulateKey" ||
+                        name === "decapsulateKey"
+                  )
+                    complete(value);
+                  else if (ops.op_value_is_promise(value) && ops.op_infrastructure_origin(value))
+                    owner.observe(value, complete, (error) => reject(owner.error(error)));
+                  else apply(then, value, [complete, (error) => reject(owner.error(error))]);
                 } catch (error) {
                   reject(owner.error(error));
                 }
-              };
-              // Borrow the captured native then; guest parent Promise prototypes must
-              // not substitute a foreign input key as a native operation result.
-              if (
-                hybridResult
-                  ? !hybridResult.async
-                  : name === "importKey" ||
-                    name === "getPublicKey" ||
-                    name === "unwrapKey" ||
-                    name === "encapsulateKey" ||
-                    name === "decapsulateKey"
-              )
-                complete(value);
-              else apply(then, value, [complete, (error) => reject(owner.error(error))]);
-            } catch (error) {
-              reject(owner.error(error));
-            }
-          });
+              }),
+          );
         },
         name,
         arity,
@@ -315,7 +341,13 @@
   const crypto = apply(backend.createCrypto, rawCrypto, [subtle]);
   const subtleRecord = get(subtle) || create(null);
   define(subtleRecord, "cryptoOwner", {
-    value: { promise: LocalPromise, error: localError, result: resultKey },
+    value: {
+      promise: LocalPromise,
+      error: localError,
+      result: resultKey,
+      observe: boundary.observe,
+      invoke: boundary.invoke,
+    },
   });
   set(subtle, subtleRecord);
   const windowRecord = get(globalThis) || create(null);

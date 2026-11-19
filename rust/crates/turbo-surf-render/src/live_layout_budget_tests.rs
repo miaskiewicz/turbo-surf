@@ -86,7 +86,7 @@ fn layout(
         &inputs,
         &mut Diagnostics::default(),
     )
-    .map(|(snapshot, _)| snapshot)
+    .map(|resolved| resolved.snapshot)
 }
 
 fn body(tree: &Tree) -> Handle {
@@ -254,7 +254,6 @@ fn attribute_budget_measures_the_original_style_before_the_inline_override() {
 }
 
 #[test]
-#[ignore]
 fn inline_override_replaces_only_an_existing_style_attribute() {
     let mut tree = Tree::parse(
         "<body style='margin:0'><div id=a style='width:10px;height:5px'></div><div id=b></div></body>",

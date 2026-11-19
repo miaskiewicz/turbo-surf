@@ -271,7 +271,6 @@ async fn timeout_abort_listener_survives_collection_until_delivery() {
     );
 }
 
-#[cfg(turbo_surf_native_proxy)]
 #[tokio::test(flavor = "current_thread")]
 async fn pending_timeout_does_not_root_retired_document() {
     let mut page = PageSession::open("<body>", "https://timeout-lifetime.test/", "", "", 5000)
@@ -287,4 +286,54 @@ async fn pending_timeout_does_not_root_retired_document() {
             .unwrap(),
         "[true,true]"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn earlier_native_timeout_precedes_a_later_window_timer() {
+    let mut page = PageSession::open("<body>", "https://timeout-clock.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    let actual = page.eval_expression(r#"(async()=>{const signal=AbortSignal.timeout(1000);let delivered=false;signal.addEventListener('abort',()=>{delivered=signal.aborted&&signal.reason.name==='TimeoutError';});await new Promise(resolve=>setTimeout(resolve,2000));return JSON.stringify({delivered,aborted:signal.aborted,reason:signal.aborted?signal.reason.name:null});})()"#).await.unwrap();
+    let elapsed = started.elapsed();
+    eprintln!("timeout-clock-native elapsed={elapsed:?} actual={actual}");
+    assert_eq!(
+        actual,
+        r#"{"delivered":true,"aborted":true,"reason":"TimeoutError"}"#
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn peer_native_timeout_does_not_postpone_root_http_completion() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let mut bytes = [0; 1024];
+            let count = socket.read(&mut bytes).await.unwrap();
+            assert!(count > 0);
+            request.extend_from_slice(&bytes[..count]);
+        }
+        assert!(String::from_utf8_lossy(&request).starts_with("GET /root "));
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nroot")
+            .await
+            .unwrap();
+    });
+    let mut page = PageSession::open("<body>", &origin, "", "", 5000)
+        .await
+        .unwrap();
+    assert_eq!(page.eval_expression("(()=>{const frame=document.createElement('iframe');document.body.append(frame);globalThis.peerTimeout=frame.contentWindow.AbortSignal.timeout(1000);return String(peerTimeout.aborted);})()").await.unwrap(), "false");
+    assert_eq!(page.eval_expression("(async()=>{const response=await fetch('/root');return JSON.stringify([await response.text(),peerTimeout.aborted]);})()").await.unwrap(), r#"["root",false]"#);
+    server.await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn borrowed_timeout_keeps_its_function_relevant_global() {
+    let mut page = PageSession::open("<body>", "https://borrowed-timeout.test/", "", "", 5000)
+        .await
+        .unwrap();
+    assert_eq!(page.eval_expression("(async()=>{const frame=document.createElement('iframe');document.body.append(frame);const child=frame.contentWindow;const signal=child.AbortSignal.timeout.call(AbortSignal,20);const brands=[signal instanceof child.AbortSignal,signal instanceof AbortSignal];await new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));return JSON.stringify([...brands,signal.aborted,signal.reason.name,signal.reason instanceof child.DOMException,signal.reason instanceof DOMException]);})()").await.unwrap(), r#"[true,false,true,"TimeoutError",true,false]"#);
 }

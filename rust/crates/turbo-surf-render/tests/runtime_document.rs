@@ -243,7 +243,7 @@ async fn retired_iframe_document_has_no_default_view_and_keeps_its_own_metadata(
     let result = page.eval("globalThis.__RESULT=JSON.stringify({retired:oldFrameDocument.defaultView===null,borrowed:Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get.call(oldFrameDocument)===null,url:oldFrameDocument.URL===oldFrameURL,current:document.getElementById('f').contentDocument.defaultView===document.getElementById('f').contentWindow,kept:document.getElementById('f').contentWindow===oldFrameWindow,fresh:document.getElementById('f').contentDocument!==oldFrameDocument})").await.unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&result).unwrap(),
-        serde_json::json!({"retired":true,"borrowed":true,"url":true,"current":true,"kept":cfg!(turbo_surf_native_proxy),"fresh":true})
+        serde_json::json!({"retired":true,"borrowed":true,"url":true,"current":true,"kept":true,"fresh":true})
     );
 }
 

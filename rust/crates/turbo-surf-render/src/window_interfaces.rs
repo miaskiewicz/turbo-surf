@@ -31,17 +31,20 @@ pub(super) fn op_location_object<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Lo
 /// Same-document URL updates (pushState, fragment navigation) move the native-proxy
 /// Location's URL without a navigation. The stock engine keeps that URL in JS.
 #[op2(fast)]
-pub(super) fn op_location_seed(scope: &mut v8::PinScope, #[string] url: String) -> bool {
-    #[cfg(turbo_surf_native_proxy)]
-    {
-        window_proxy::set_location_url(scope, &url);
-        true
+pub(super) fn op_location_seed(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    #[string] url: String,
+) -> bool {
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    if native_frame_is_retired(context) {
+        return false;
     }
-    #[cfg(not(turbo_surf_native_proxy))]
-    {
-        let _ = (scope, url);
-        false
-    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    window_proxy::set_location_url(scope, &url);
+    true
 }
 
 /// This realm's ancestor browsing contexts' origins, nearest parent first, for

@@ -56,6 +56,11 @@ test("keyboard-driven activation controls always launch headless, away from the 
     const source = readFileSync(new URL(collector, import.meta.url), "utf8");
     assert.doesNotMatch(source, /TURBO_SURF_CHROME_HEADLESS/, collector);
     const fixture = JSON.parse(readFileSync(new URL(control, import.meta.url), "utf8"));
+    assert.equal(
+      fixture.sourceSha256 ?? fixture.compatibleCollectorSha256 ?? fixture.collectorSha256,
+      createHash("sha256").update(source).digest("hex"),
+      control,
+    );
     assert.match(fixture.browser, /^Chrome\/156\./, control);
     assert.equal(fixture.headless, true, control);
     assert.equal(fixture.flags.filter((flag) => flag === "--headless=new").length, 1, control);

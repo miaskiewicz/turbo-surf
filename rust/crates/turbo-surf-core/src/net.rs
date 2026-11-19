@@ -50,7 +50,7 @@ pub enum ErrorCode {
     Network,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpError {
     pub message: String,
     pub code: ErrorCode,
@@ -88,6 +88,8 @@ pub struct FetchResult {
 type BodyStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<bytes::Bytes, HttpError>> + Send>>;
 pub type ResponseChunkObserver = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync>;
+/// A transport terminal result, independent of guest stream consumption.
+pub type ResponseCompletionObserver = std::sync::Arc<dyn Fn(Result<(), HttpError>) + Send + Sync>;
 
 /// A live response body, optionally backed by an owner-cancellable native cache fill.
 pub struct ResponseBody {
@@ -106,6 +108,7 @@ pub struct ResponseBody {
     background: Option<std::sync::Arc<BackgroundBody>>,
 }
 struct BackgroundBody {
+    cache_fill: bool,
     state: std::sync::Mutex<BackgroundState>,
     ready: tokio::sync::Notify,
     cancel: tokio::sync::watch::Sender<bool>,
@@ -152,14 +155,33 @@ impl ResponseBody {
     }
     pub fn background_cache_with_observer(
         self,
-        mut owner: tokio::sync::watch::Receiver<bool>,
+        owner: tokio::sync::watch::Receiver<bool>,
         observer: Option<ResponseChunkObserver>,
     ) -> Self {
-        if self.cache_store.is_none() {
+        self.background_observed_impl(owner, observer, None, false)
+    }
+    /// Download and observe transport completion independently of guest body pulls.
+    pub fn background_observed(
+        self,
+        owner: tokio::sync::watch::Receiver<bool>,
+        observer: ResponseChunkObserver,
+        completion: ResponseCompletionObserver,
+    ) -> Self {
+        self.background_observed_impl(owner, Some(observer), Some(completion), true)
+    }
+    fn background_observed_impl(
+        self,
+        mut owner: tokio::sync::watch::Receiver<bool>,
+        observer: Option<ResponseChunkObserver>,
+        completion: Option<ResponseCompletionObserver>,
+        force: bool,
+    ) -> Self {
+        if !force && self.cache_store.is_none() {
             return self;
         }
         let (cancel, mut canceled) = tokio::sync::watch::channel(false);
         let background = std::sync::Arc::new(BackgroundBody {
+            cache_fill: self.cache_store.is_some(),
             state: std::sync::Mutex::new(BackgroundState::default()),
             ready: tokio::sync::Notify::new(),
             cancel,
@@ -224,6 +246,9 @@ impl ResponseBody {
                 }
             };
             let mut state = background.state.lock().unwrap();
+            if let Some(completion) = completion {
+                completion(error.clone().map_or(Ok(()), Err));
+            }
             state.done = true;
             state.failed = error.is_some();
             state.error = error;
@@ -235,6 +260,17 @@ impl ResponseBody {
     /// Collection releases queued guest bytes while the native cache fill keeps
     /// its creation-owner cancellation watch. No JS or IO occurs here.
     pub fn detach_cache_consumer(&mut self) -> bool {
+        let Some(background) = &self.background else {
+            return false;
+        };
+        if !background.cache_fill {
+            return false;
+        }
+        background.detach();
+        true
+    }
+    /// An external response observer owns completion independently of guest GC.
+    pub fn detach_observed_consumer(&mut self) -> bool {
         let Some(background) = &self.background else {
             return false;
         };
@@ -363,6 +399,19 @@ struct NetworkResponseEffects {
     headers: Vec<(String, String)>,
 }
 
+/// Metadata observed from an actual admitted HTTP response before its body is read.
+#[derive(Clone, Debug)]
+pub struct ResponseObservation {
+    pub url: String,
+    pub method: String,
+    pub request_headers: BTreeMap<String, String>,
+    pub request_body: Option<Vec<u8>>,
+    pub status: u16,
+    pub status_text: String,
+    pub headers: Vec<(String, String)>,
+}
+pub type ResponseObserver<'a> = dyn Fn(ResponseObservation) + Send + Sync + 'a;
+
 pub type BeforeRequestFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), HttpError>> + Send>>;
 pub type BeforeRequest<'a> = dyn Fn(RequestContext, String, String, BTreeMap<String, String>) -> BeforeRequestFuture
@@ -379,12 +428,15 @@ pub enum RedirectMode {
 
 #[derive(Default)]
 pub struct FetchOptions<'a> {
+    pub http_credentials: Option<&'a crate::http_auth::Credentials>,
     pub headers: BTreeMap<String, String>,
     /// Browser metadata for this request. Unspecified requests are top-level
     /// navigations; script/fetch/image callers should identify their context.
     pub context: Option<RequestContext>,
     /// A native embedder policy checked before contacting every redirect target.
     pub request_policy: Option<&'a RequestPolicy<'a>>,
+    /// Actual admitted response metadata, including intermediate redirect hops.
+    pub response_observer: Option<&'a ResponseObserver<'a>>,
     /// A native embedder response policy checked before following redirects.
     pub response_policy: Option<&'a ResponsePolicy<'a>>,
     /// Pure native effects after credential admission, before guest response policy.
@@ -403,6 +455,8 @@ pub struct FetchOptions<'a> {
     pub upload_body: Option<crate::upload_body::UploadBody>,
     pub max_bytes: Option<usize>,
     pub allow_non_html: bool,
+    /// Admit download responses without admitting other non-HTML documents.
+    pub allow_attachments: bool,
     pub max_redirects: Option<usize>,
     /// Explicit Fetch redirect semantics; None preserves legacy max_redirects behavior.
     pub redirect: Option<RedirectMode>,
@@ -771,6 +825,7 @@ pub fn client_builder() -> http::ClientBuilder {
 #[derive(Clone)]
 pub struct ReportClient {
     legacy: http::Client,
+    network: Option<crate::network_conditions::NetworkConditions>,
     #[cfg(not(feature = "impersonate"))]
     modern: ModernReportClient,
 }
@@ -807,6 +862,7 @@ fn report_https_client(der: Option<&[u8]>) -> Result<ModernReportClient, HttpErr
 }
 pub fn build_report_client() -> ReportClient {
     ReportClient {
+        network: None,
         legacy: build_browser_client(),
         #[cfg(not(feature = "impersonate"))]
         modern: report_https_client(None).expect("native report TLS roots"),
@@ -837,6 +893,7 @@ fn with_trust(builder: http::ClientBuilder, der: &[u8]) -> Result<http::ClientBu
 /// Report client with an embedder-supplied DER trust anchor; verification remains enabled.
 pub fn report_client_with_trust(der: &[u8]) -> Result<ReportClient, HttpError> {
     Ok(ReportClient {
+        network: None,
         legacy: client_builder_with_trust(der)?
             .build()
             .map_err(|error| err(error, ErrorCode::Network))?,
@@ -848,6 +905,19 @@ pub struct ReportResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
 }
+impl ReportClient {
+    /// Retain the configured transport/trust while binding an owned context.
+    pub fn with_network_conditions(
+        &self,
+        network: crate::network_conditions::NetworkConditions,
+    ) -> Self {
+        Self {
+            network: Some(network),
+            ..self.clone()
+        }
+    }
+}
+
 /// Send raw native bytes and discard the response at header arrival. Modern
 /// reports use controlled Hyper headers because reqwest always supplies Accept.
 pub async fn send_report_request(
@@ -858,6 +928,12 @@ pub async fn send_report_request(
     body: Vec<u8>,
     modern: bool,
 ) -> Result<ReportResponse, HttpError> {
+    check_host_network_policy(url)?;
+    if let Some(network) = &client.network {
+        network
+            .check()
+            .map_err(|message| HttpError::new(message, ErrorCode::Network))?;
+    }
     let trace_id = crate::http_trace::next_id();
     crate::http_trace::record(
         || serde_json::json!({"event":"request","id":trace_id.0,"url":url,"method":method,"explicit_headers":headers,"body_bytes":body,"destination":"report","headerScope":"native report headers; transport-added headers absent"}),
@@ -969,10 +1045,21 @@ struct Outgoing<'a> {
     upload: Option<crate::upload_body::UploadBody>,
     /// A Critical-CH restart, which has its own measured header order.
     restart: bool,
+    network: Option<crate::network_conditions::NetworkConditions>,
 }
 
 // One transport seam for every hop.
+fn check_host_network_policy(url: &str) -> Result<(), HttpError> {
+    crate::network_policy::check(url).map_err(|message| HttpError::new(message, ErrorCode::Network))
+}
+
 async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, HttpError> {
+    check_host_network_policy(hop.url)?;
+    if let Some(network) = &hop.network {
+        network
+            .check()
+            .map_err(|message| HttpError::new(message, ErrorCode::Network))?;
+    }
     let Outgoing {
         method,
         url,
@@ -981,6 +1068,7 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
         body_bytes,
         upload,
         restart,
+        network,
     } = hop;
     let m = http::Method::from_bytes(method.as_bytes()).map_err(|e| err(e, ErrorCode::Network))?;
     // Without impersonation a streaming upload is forced onto HTTP/2 below.
@@ -1023,21 +1111,36 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
             "headerScope": "application headers including context and hints; transport-added headers absent",
         })
     });
-    let mut result = req.send().await;
-    if let Ok(response) = &result {
+    let retry = bodyless_read_retry(
+        &req,
+        method,
+        streaming_upload || body.is_some() || body_bytes.is_some(),
+    );
+    let mut result = send_with_stale_recovery(req, retry, network.as_ref()).await;
+    finish_transport_response(&mut result, url, method, trace_id);
+    result.map_err(|e| transport_error(&e, url))
+}
+
+fn finish_transport_response(
+    result: &mut http::Result<http::Response>,
+    url: &str,
+    method: &str,
+    trace_id: crate::http_trace::RequestId,
+) {
+    if let Ok(response) = &*result {
         remember_protocol(url, response.version());
     }
     if method == "HEAD" {
-        if let Ok(response) = &mut result {
+        if let Ok(response) = &mut *result {
             response.extensions_mut().insert(HeadResponse);
         }
     }
     if trace_id.0 != 0 {
-        if let Ok(res) = &mut result {
+        if let Ok(res) = &mut *result {
             res.extensions_mut().insert(trace_id);
         }
     }
-    crate::http_trace::record(|| match &result {
+    crate::http_trace::record(|| match &*result {
         Ok(res) => serde_json::json!({
             "event": "response", "id":trace_id.0, "url": url, "final_url": final_url(res),
             "status": res.status().as_u16(),
@@ -1049,7 +1152,68 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
             serde_json::json!({ "event": "error", "id":trace_id.0, "url": url, "error": e.to_string() })
         }
     });
-    result.map_err(|e| err(format!("{e} (url: {url})"), ErrorCode::Network))
+}
+
+fn bodyless_read_retry(
+    request: &http::RequestBuilder,
+    method: &str,
+    has_body: bool,
+) -> Option<http::RequestBuilder> {
+    if matches!(method, "GET" | "HEAD") && !has_body {
+        request.try_clone()
+    } else {
+        None
+    }
+}
+
+async fn send_with_stale_recovery(
+    request: http::RequestBuilder,
+    retry: Option<http::RequestBuilder>,
+    network: Option<&crate::network_conditions::NetworkConditions>,
+) -> http::Result<http::Response> {
+    // A peer can expire an idle socket while an embedder parks its runtime.
+    // A reset can follow a consumed request, so only bodyless reads are replayed.
+    match (request.send().await, retry) {
+        (Err(error), Some(retry))
+            if stale_connection_error(&error)
+                && !network
+                    .is_some_and(crate::network_conditions::NetworkConditions::is_offline) =>
+        {
+            retry.send().await
+        }
+        (result, _) => result,
+    }
+}
+
+fn stale_connection_error(error: &http::Error) -> bool {
+    std::iter::successors(Some(error as &(dyn std::error::Error + 'static)), |error| {
+        error.source()
+    })
+    .take(16)
+    .any(|error| {
+        error.downcast_ref::<std::io::Error>().is_some_and(|cause| {
+            matches!(
+                cause.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+            )
+        })
+    })
+}
+
+fn transport_error(error: &(dyn std::error::Error + 'static), url: &str) -> HttpError {
+    let mut message = error.to_string();
+    let mut cause = error.source();
+    // Transport Display implementations may include only their first wrapper.
+    for _ in 0..16 {
+        let Some(current) = cause else { break };
+        let detail = current.to_string();
+        if !message.ends_with(&detail) {
+            message.push_str(": ");
+            message.push_str(&detail);
+        }
+        cause = current.source();
+    }
+    err(format!("{message} (url: {url})"), ErrorCode::Network)
 }
 
 fn apply_headers(
@@ -1311,7 +1475,12 @@ fn ingest_set_cookie(opts: &mut FetchOptions, res: &http::Response, final_url: &
 
 fn gate_html_type(opts: &FetchOptions, res: &http::Response) -> Result<(), HttpError> {
     let ct = header_value(res, "content-type");
-    if !opts.allow_non_html && !is_html_type(&ct) {
+    let attachment = opts.allow_attachments
+        && header_value(res, "content-disposition")
+            .split(';')
+            .next()
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("attachment"));
+    if !opts.allow_non_html && !attachment && !is_html_type(&ct) {
         return Err(HttpError::new(
             format!("non-HTML content-type: {ct}"),
             ErrorCode::NotHtml,
@@ -1642,6 +1811,9 @@ async fn send_and_revalidate<'a, 'b>(
             body_bytes: &hop.body_bytes,
             upload: opts.upload_body.take(),
             restart,
+            network: opts
+                .client_hints
+                .map(crate::request_context::ClientHints::network_conditions),
         },
     )
     .await?;
@@ -2014,6 +2186,65 @@ fn attach_pending_dictionary(
     }
 }
 
+fn challenge_authorization(
+    opts: &FetchOptions<'_>,
+    hop: &Hop,
+    response: &http::Response,
+) -> Option<String> {
+    if response.status().as_u16() != 401
+        || opts
+            .context
+            .as_ref()
+            .is_some_and(|context| !context.sends_credentials(&hop.url))
+    {
+        return None;
+    }
+    let basic = response_headers_pairs(response)
+        .iter()
+        .any(|(name, value)| {
+            name.eq_ignore_ascii_case("www-authenticate")
+                && crate::http_auth::basic_challenge(value)
+        });
+    if !basic {
+        return None;
+    }
+    opts.http_credentials?.authorization(&hop.url)
+}
+
+async fn request_with_auth(
+    opts: &mut FetchOptions<'_>,
+    hop: &Hop,
+    client: &http::Client,
+    streaming: bool,
+) -> Result<http::Response, HttpError> {
+    let response = cached_request(opts, hop, client).await?;
+    notify_response_effects(opts, &response);
+    check_response_policy(opts, hop, &response)?;
+    observe_response(opts, hop, &response);
+    let Some(authorization) = challenge_authorization(opts, hop, &response) else {
+        return Ok(response);
+    };
+    if streaming {
+        return Err(HttpError::new(
+            "Cannot replay streaming body for HTTP authentication",
+            ErrorCode::Network,
+        ));
+    }
+    drop(response);
+    opts.headers
+        .retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
+    opts.headers.insert("authorization".into(), authorization);
+    let previous_mode = opts.cache_mode;
+    opts.cache_mode = CacheMode::Reload;
+    let response = cached_request(opts, hop, client).await;
+    opts.cache_mode = previous_mode;
+    let response = response?;
+    notify_response_effects(opts, &response);
+    check_response_policy(opts, hop, &response)?;
+    observe_response(opts, hop, &response);
+    Ok(response)
+}
+
 async fn follow_manually_response(
     opts: &mut FetchOptions<'_>,
     start: &str,
@@ -2036,10 +2267,8 @@ async fn follow_manually_response(
     for redirects in 0.. {
         check_request_policy(opts, &hop, redirects)?;
         check_same_origin_mode(opts, &hop)?;
-        let mut res = cached_request(opts, &hop, &cl).await?;
+        let mut res = request_with_auth(opts, &hop, &cl, streaming_upload).await?;
         let final_url = final_url(&res);
-        notify_response_effects(opts, &res);
-        check_response_policy(opts, &hop, &res)?;
         if res.status().as_u16() == 204 {
             if let Some(pending) = res.extensions_mut().remove::<PendingStore>() {
                 pending.cache.store(pending.entry);
@@ -2081,6 +2310,7 @@ fn check_request_policy(
     hop: &Hop,
     redirects: usize,
 ) -> Result<(), HttpError> {
+    check_host_network_policy(&hop.url)?;
     if opts
         .request_policy
         .is_some_and(|allowed| !allowed(&hop.url, redirects > 0))
@@ -2125,6 +2355,23 @@ fn notify_response_effects(opts: &FetchOptions<'_>, res: &http::Response) {
         if context.sends_credentials(&effects.url) {
             observer(&context, &effects.url, &effects.headers);
         }
+    }
+}
+
+fn observe_response(opts: &FetchOptions<'_>, hop: &Hop, response: &http::Response) {
+    if let Some(observer) = opts.response_observer {
+        observer(ResponseObservation {
+            url: hop.url.clone(),
+            method: hop.method.clone(),
+            request_headers: opts.headers.clone(),
+            request_body: hop
+                .body_bytes
+                .clone()
+                .or_else(|| hop.body.as_ref().map(|b| b.as_bytes().to_vec())),
+            status: response.status().as_u16(),
+            status_text: status_text(response),
+            headers: response_headers_pairs(response),
+        });
     }
 }
 
@@ -2322,6 +2569,9 @@ async fn follow_auto(
             body_bytes: &opts.body_bytes,
             upload: None,
             restart: false,
+            network: opts
+                .client_hints
+                .map(crate::request_context::ClientHints::network_conditions),
         },
     )
     .await?;
@@ -2336,12 +2586,14 @@ async fn follow_auto(
 /// round-trip, fetch-spec method rewrite); otherwise reqwest auto-follows
 /// (cap 20). Content-type gate, byte cap, and charset decode mirror the JS.
 pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchResult, HttpError> {
+    check_host_network_policy(url)?;
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     match opts.max_redirects {
         Some(n) => follow_manually(&mut opts, url, n, max_bytes).await,
         // Negotiated hints and browser context must be re-derived for every
         // redirect origin; a backend's automatic follow cannot do that.
-        None if opts.upload_body.is_some()
+        None if crate::network_policy::configured()
+            || opts.upload_body.is_some()
             || opts.redirect.is_some()
             || opts.http_cache.is_some()
             || opts.dictionary_store.is_some()
@@ -2349,8 +2601,10 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
             || opts.context.is_some()
             || opts.request_policy.is_some()
             || opts.response_policy.is_some()
+            || opts.response_observer.is_some()
             || opts.response_side_effects.is_some()
-            || opts.before_request.is_some() =>
+            || opts.before_request.is_some()
+            || opts.http_credentials.is_some() =>
         {
             follow_manually(&mut opts, url, 20, max_bytes).await
         }
@@ -2365,6 +2619,7 @@ pub async fn fetch_stream(
     url: &str,
     mut opts: FetchOptions<'_>,
 ) -> Result<StreamingResult, HttpError> {
+    check_host_network_policy(url)?;
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     let redirects = opts.max_redirects.unwrap_or(20);
     let (res, final_url, redirected) = follow_manually_response(&mut opts, url, redirects).await?;
@@ -2489,7 +2744,8 @@ pub struct FetchedBytes {
 /// True when any option on `opts` forces the manual redirect / cache / policy
 /// path instead of letting the reqwest client follow redirects on its own.
 fn needs_manual_redirect_path(opts: &FetchOptions<'_>) -> bool {
-    opts.redirect.is_some()
+    crate::network_policy::configured()
+        || opts.redirect.is_some()
         || opts.max_redirects.is_some()
         || opts.http_cache.is_some()
         || opts.dictionary_store.is_some()
@@ -2497,8 +2753,10 @@ fn needs_manual_redirect_path(opts: &FetchOptions<'_>) -> bool {
         || opts.context.is_some()
         || opts.request_policy.is_some()
         || opts.response_policy.is_some()
+        || opts.response_observer.is_some()
         || opts.response_side_effects.is_some()
         || opts.before_request.is_some()
+        || opts.http_credentials.is_some()
 }
 
 /// Manual redirect / cache / policy branch of [`fetch_typed_bytes`]: drive
@@ -2553,6 +2811,9 @@ async fn fetch_typed_bytes_direct(
             body_bytes: &opts.body_bytes,
             upload: None,
             restart: false,
+            network: opts
+                .client_hints
+                .map(crate::request_context::ClientHints::network_conditions),
         },
     )
     .await?;
@@ -2574,6 +2835,7 @@ pub async fn fetch_typed_bytes(
     url: &str,
     mut opts: FetchOptions<'_>,
 ) -> Result<FetchedBytes, HttpError> {
+    check_host_network_policy(url)?;
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     if needs_manual_redirect_path(&opts) {
         return fetch_typed_bytes_manual(&mut opts, url, max_bytes).await;
@@ -2583,6 +2845,57 @@ pub async fn fetch_typed_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stale_read_recovery_never_clones_mutating_requests_or_uploads() {
+        let client = super::build_client();
+        for method in ["GET", "HEAD"] {
+            let request = client.request(
+                super::http::Method::from_bytes(method.as_bytes()).unwrap(),
+                "http://localhost/read",
+            );
+            assert!(super::bodyless_read_retry(&request, method, false).is_some());
+            assert!(super::bodyless_read_retry(&request, method, true).is_none());
+        }
+        for method in ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"] {
+            let request = client.request(
+                super::http::Method::from_bytes(method.as_bytes()).unwrap(),
+                "http://localhost/write",
+            );
+            assert!(super::bodyless_read_retry(&request, method, false).is_none());
+        }
+        let (_sender, upload) = crate::upload::upload_channel(8);
+        let request = client
+            .get("http://localhost/stream")
+            .body(upload.into_body().unwrap());
+        assert!(super::bodyless_read_retry(&request, "GET", true).is_none());
+    }
+
+    #[test]
+    fn transport_failure_preserves_underlying_cause() {
+        #[derive(Debug)]
+        struct Transport(std::io::Error);
+        impl std::fmt::Display for Transport {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("client error (SendRequest)")
+            }
+        }
+        impl std::error::Error for Transport {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        let failure = Transport(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "fixture peer reset",
+        ));
+        let error = super::transport_error(&failure, "http://localhost/script.js");
+        assert!(error
+            .message
+            .contains("client error (SendRequest): fixture peer reset"));
+        assert!(error.message.ends_with("(url: http://localhost/script.js)"));
+        assert_eq!(error.code, super::ErrorCode::Network);
+    }
+
     #[test]
     fn protocol_memory_drops_priority_only_for_http1_origins() {
         let url = "https://protocol-memory.test/a";
@@ -2694,6 +3007,7 @@ mod tests {
                 body_bytes: &Some(b"hello".to_vec()),
                 upload: None,
                 restart: false,
+                network: None,
             },
         )
         .await
@@ -3022,6 +3336,43 @@ mod io_tests {
     }
 
     #[tokio::test]
+    async fn host_body_observation_completes_without_guest_pulls_or_cache_admission() {
+        let port = spawn().await;
+        let response = fetch_stream(&url(port, "/"), FetchOptions::default())
+            .await
+            .unwrap();
+        let (_owner, receiver) = tokio::sync::watch::channel(false);
+        let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = bytes.clone();
+        let (completed, completion) = tokio::sync::oneshot::channel();
+        let completed = std::sync::Mutex::new(Some(completed));
+        let mut body = response.body.background_observed(
+            receiver,
+            std::sync::Arc::new(move |chunk| captured.lock().unwrap().extend_from_slice(chunk)),
+            std::sync::Arc::new(move |result| {
+                if let Some(sender) = completed.lock().unwrap().take() {
+                    let _ = sender.send(result);
+                }
+            }),
+        );
+        assert!(
+            !body.detach_cache_consumer(),
+            "observation is not cache admission"
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), completion)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&bytes.lock().unwrap()).contains("ok"));
+        let mut consumed = Vec::new();
+        while let Some(chunk) = body.next_chunk().await.unwrap() {
+            consumed.extend(chunk);
+        }
+        assert_eq!(consumed, *bytes.lock().unwrap());
+    }
+
+    #[tokio::test]
     async fn streaming_redirects_keep_cookie_and_native_request_response_policy_guards() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3054,6 +3405,8 @@ mod io_tests {
         let responses = |_: &RequestContext, url: &str, _: &[(String, String)]| {
             url.ends_with("/start") || url.ends_with("/finish")
         };
+        let observed = std::sync::Mutex::new(Vec::new());
+        let observer = |hop: ResponseObservation| observed.lock().unwrap().push(hop);
         let mut jar = CookieJar::new();
         let mut response = fetch_stream(
             &target,
@@ -3062,11 +3415,31 @@ mod io_tests {
                 jar: Some(&mut jar),
                 request_policy: Some(&policy),
                 response_policy: Some(&responses),
+                response_observer: Some(&observer),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
+        assert_eq!(
+            observed
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|hop| hop.status)
+                .collect::<Vec<_>>(),
+            vec![302, 200]
+        );
+        {
+            let hops = observed.lock().unwrap();
+            assert!(hops[0].url.ends_with("/start"));
+            assert!(hops[1].url.ends_with("/finish"));
+            assert_eq!(hops[0].status_text, "Found");
+            assert!(hops[0]
+                .headers
+                .iter()
+                .any(|(name, value)| name.eq_ignore_ascii_case("location") && value == "/finish"));
+        }
         assert!(response.redirected);
         assert!(response.final_url.ends_with("/finish"));
         assert_eq!(
@@ -3167,6 +3540,8 @@ mod io_tests {
     #[tokio::test]
     async fn native_response_policy_denies_a_redirect_before_following_it() {
         let p = spawn().await;
+        let observed = std::sync::Mutex::new(Vec::new());
+        let observer = |hop: ResponseObservation| observed.lock().unwrap().push(hop);
         let seen = std::sync::Mutex::new(Vec::new());
         let request = |target: &str, _| {
             seen.lock().unwrap().push(target.to_string());
@@ -3182,6 +3557,7 @@ mod io_tests {
             FetchOptions {
                 request_policy: Some(&request),
                 response_policy: Some(&response),
+                response_observer: Some(&observer),
                 ..Default::default()
             },
         )
@@ -3190,6 +3566,7 @@ mod io_tests {
             result.unwrap_err().message,
             "Response blocked by native document policy"
         );
+        assert!(observed.lock().unwrap().is_empty());
         assert_eq!(*seen.lock().unwrap(), vec![url(p, "/r")]);
     }
 
@@ -3657,6 +4034,7 @@ mod edge_tests {
                     body_bytes: &None,
                     upload: None,
                     restart: false,
+                    network: None,
                 },
             )
             .await
@@ -3938,5 +4316,112 @@ mod edge_tests {
         .await
         .unwrap();
         assert_eq!(cached.body.next_chunk().await.unwrap().unwrap(), b"hello");
+    }
+}
+
+#[cfg(test)]
+mod http_auth_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn browser_credentials_retry_basic_once_and_respect_scope_and_omission() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let requests = seen.clone();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let mut buffer = [0; 4096];
+                    let len = socket.read(&mut buffer).await.unwrap();
+                    if len == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..len]);
+                }
+                let request = String::from_utf8_lossy(&bytes).to_lowercase();
+                requests.lock().unwrap().push(request.clone());
+                let response = if request.contains("authorization: basic ywxpy2u6c2vjcmv0") {
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"
+                } else {
+                    "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=probe\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nNO"
+                };
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let credentials = crate::http_auth::Credentials {
+            username: "alice".into(),
+            password: "secret".into(),
+            origin: Some(origin.clone()),
+        };
+        let observed = std::sync::Mutex::new(Vec::new());
+        let observer = |hop: ResponseObservation| observed.lock().unwrap().push(hop);
+        let response = fetch_html(
+            &origin,
+            FetchOptions {
+                response_observer: Some(&observer),
+                http_credentials: Some(&credentials),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.html, "OK");
+        assert_eq!(
+            observed
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|hop| hop.status)
+                .collect::<Vec<_>>(),
+            vec![401, 200]
+        );
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        assert!(!seen.lock().unwrap()[0].contains("authorization:"));
+        seen.lock().unwrap().clear();
+        let other = crate::http_auth::Credentials {
+            origin: Some("http://127.0.0.1:1".into()),
+            ..credentials.clone()
+        };
+        assert_eq!(
+            fetch_html(
+                &origin,
+                FetchOptions {
+                    http_credentials: Some(&other),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .status,
+            401
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        seen.lock().unwrap().clear();
+        let context = RequestContext {
+            credentials: crate::request_context::Credentials::Omit,
+            ..Default::default()
+        };
+        assert_eq!(
+            fetch_html(
+                &origin,
+                FetchOptions {
+                    http_credentials: Some(&credentials),
+                    context: Some(context),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .status,
+            401
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        server.abort();
     }
 }

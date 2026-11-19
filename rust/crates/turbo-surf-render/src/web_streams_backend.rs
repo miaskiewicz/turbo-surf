@@ -99,7 +99,13 @@ pub(crate) fn op_web_abort_dispatch(
         return;
     };
     let scope = &mut v8::ContextScope::new(scope, context);
-    callback.call(scope, object.into(), &[reason]);
+    if host {
+        // The retained callback re-enters the canonical DOM dispatch frontend.
+        // Its listeners need the engine-task bracket while they run.
+        crate::browser_env::engine_task_scope(scope, callback);
+    } else {
+        callback.call(scope, object.into(), &[reason]);
+    }
     // A host-run abort ends each signal's dispatch with the microtask
     // checkpoint Blink performs when its native caller's script stack empties.
     if host {

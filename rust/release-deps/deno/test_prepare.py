@@ -193,7 +193,8 @@ version = "=0.321.0"
                          {k: (v["version"], v["candidateName"], v["publishVersion"]) for k, v in pins.items()})
         for package in prepare.PACKAGES:
             major, minor, patch_level = package.version.split(".")
-            self.assertEqual(package.publish, f"{major}.{minor}.{int(patch_level) + 1}")
+            revision = 1 if package.upstream in {"deno_v8", "serde_v8"} else 5
+            self.assertEqual(package.publish, f"{major}.{minor}.{int(patch_level) + revision}")
         self.assertEqual({k for k, v in pins.items() if "embeddedSources" in v}, prepare.EMBEDDED_LEAVES)
         self.assertFalse((ROOT / "v8-teardown-tests.patch").exists())
 
@@ -223,7 +224,7 @@ features = ["reactor-tokio", "v8_use_custom_libcxx"]
                 self.assertFalse(core["default-features"])
                 self.assertEqual(core["features"], ["reactor-tokio", "v8_use_custom_libcxx"])
                 self.assertEqual(core["package"], "turbo-surf-deno-core")
-                self.assertEqual(core["version"], "=0.412.1")
+                self.assertEqual(core["version"], "=0.412.5")
                 self.assertEqual(core["path"], "../turbo-surf-deno-core")
                 self.assertEqual(result["package"]["license"], "MIT")
                 self.assertEqual(result["package"]["version"], package.publish)
@@ -361,14 +362,15 @@ class EmbeddedSourceContracts(unittest.TestCase):
 
 
 class PatchedSourceContracts(unittest.TestCase):
-    """deno_crypto is the upstream archive plus a committed patch, never a vendored tree."""
+    """Reviewed core and crypto edits are patches over pinned upstream archives."""
 
-    def test_only_deno_crypto_is_patched_and_its_patch_and_pins_exist(self):
+    def test_only_reviewed_core_and_crypto_are_patched_and_pinned(self):
         pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
         patched = {p.upstream: p.patch for p in prepare.PACKAGES if p.patch}
-        self.assertEqual(patched, {"deno_crypto": "deno_crypto.patch"})
+        self.assertEqual(patched, {"deno_crypto": "deno_crypto.patch", "deno_core": "deno_core.patch"})
+        self.assertTrue((prepare.PATCHES / "deno_core.patch").is_file())
         self.assertTrue((prepare.PATCHES / "deno_crypto.patch").is_file())
-        self.assertEqual({name for name, pin in pins.items() if "patchedFiles" in pin}, {"deno_crypto"})
+        self.assertEqual({name for name, pin in pins.items() if "patchedFiles" in pin}, {"deno_crypto", "deno_core"})
         files = pins["deno_crypto"]["patchedFiles"]
         # The patch adds the license and the clone helper to the upstream archive.
         self.assertIn("LICENSE.md", files)
@@ -399,7 +401,7 @@ class PatchedSourceContracts(unittest.TestCase):
 class CandidateTreeContracts(unittest.TestCase):
     MANIFEST = '''[package]
 name = "turbo-surf-deno-web"
-version = "0.290.1"
+version = "0.290.3"
 
 [lib]
 name = "deno_web"
@@ -410,13 +412,13 @@ name = "encoding"
 path = "benches/encoding.rs"
 
 [dependencies.deno_core]
-version = "=0.412.1"
+version = "=0.412.5"
 default-features = false
 package = "turbo-surf-deno-core"
 path = "../turbo-surf-deno-core"
 
 [target.'cfg(windows)'.dev-dependencies.deno_webidl]
-version = "=0.259.1"
+version = "=0.259.3"
 package = "turbo-surf-deno-webidl"
 path = "../turbo-surf-deno-webidl"
 '''
@@ -426,7 +428,7 @@ path = "../turbo-surf-deno-webidl"
         self.assertEqual(result["lib"]["path"], "lib.rs")
         self.assertEqual(result["bench"][0]["path"], "benches/encoding.rs")
         self.assertNotIn("path", result["dependencies"]["deno_core"])
-        self.assertEqual(result["dependencies"]["deno_core"]["version"], "=0.412.1")
+        self.assertEqual(result["dependencies"]["deno_core"]["version"], "=0.412.5")
         self.assertNotIn("path", result["target"]["cfg(windows)"]["dev-dependencies"]["deno_webidl"])
         with self.assertRaisesRegex(ValueError, "more than dependency paths"):
             # An inline dependency path would survive line removal; refuse it.

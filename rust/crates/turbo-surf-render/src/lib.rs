@@ -10,22 +10,29 @@
 // (live_layout_dom, compression_dictionary_dom) use its `host_internals`.
 use turbo_dom_browser_env::browser_env;
 
+mod animation_policy;
+pub use animation_policy::AnimationPolicy;
 mod audio_backend;
 mod audio_buffer;
 mod audio_dsp;
 mod audio_effects;
 mod audio_fft;
 mod audio_timeline;
+mod browser_emulation;
 mod compression_dictionary_dom;
+mod context_emulation_handle;
 mod context_ownership;
 mod crypto_backend;
 mod crypto_clone;
 mod crypto_hybrid;
 mod csp;
 mod csp_reporting;
+mod dialog_broker;
 mod document_facts;
 mod document_response;
+pub use dialog_broker::{DialogBroker, DialogKind, DialogReply, DialogRequest};
 mod fetch_cors;
+mod geolocation_config;
 mod geometry_backend;
 mod indexed_db;
 mod integrity;
@@ -44,14 +51,23 @@ mod live_layout_scoped;
 mod live_layout_supports;
 mod live_layout_zoom;
 mod live_stylesheets;
+mod locator_dom;
 mod message_ports;
+mod native_history_log;
+mod network_activity;
+mod network_events;
+pub use native_history_log::NativeHistoryLog;
+pub use network_events::NetworkEventLog;
 mod permissions_policy;
 mod probe;
 mod referrer_meta;
+mod remote_handles;
 mod resource_policy;
 mod runtime;
+mod screenshot_metadata;
 mod script_fetch;
 mod script_inventory;
+mod shim_bindings;
 mod storage_gc;
 mod storage_inbox;
 pub use storage_inbox::StorageEventSignal;
@@ -60,6 +76,7 @@ mod web_fonts;
 mod web_streams_backend;
 mod window_named_properties;
 
+pub use context_emulation_handle::ContextEmulationHandle;
 pub use document_response::DocumentResponseMetadata;
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
 pub use runtime::{
@@ -68,9 +85,12 @@ pub use runtime::{
     render_capture_cookies_with_response_headers, render_html, render_html_async, render_hydrate,
     render_hydrate_with_budget, render_page, render_page_pooled, render_page_with_budget,
     run_engine_with_dom, run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn,
-    set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, BrowserStorage, HydrationDiagnostics,
-    HydrationPhase, HydrationProgress, NavigationActivationSnapshot, PageSession,
-    PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
+    set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, AuxiliaryBootstrap,
+    AuxiliaryCapability, AuxiliaryDriverHistory, AuxiliaryHostServices, AuxiliaryPageEvent,
+    AuxiliaryPageEventLog, AuxiliaryPageInfo, AuxiliaryResourcePolicy, BrowserStorage,
+    HydrationDiagnostics, HydrationPhase, HydrationProgress, InitialDocumentImages,
+    NavigationActivationSnapshot, PageSession, PageSessionOptions, WindowTimerMode,
+    DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
 pub use web_fonts::{font_face_sources, web_font_face, WebFontSource};
 

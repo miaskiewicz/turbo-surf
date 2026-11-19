@@ -6,7 +6,10 @@ use deno_error::JsErrorBox;
 fn op_geometry_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     prototype: v8::Local<'s, v8::Object>,
+    owner_prototype: v8::Local<'s, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let context = crate::runtime::platform_object_context(scope, owner_prototype)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
     let template = v8::ObjectTemplate::new(scope);
     template.set_internal_field_count(1);
     let object = template
@@ -59,6 +62,13 @@ fn op_capture_frame_scheduler<'s>(
 /// updates every document of the event loop together. Retired or foreign values are ignored.
 #[op2(fast, reentrant)]
 fn op_request_frame_rendering<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) {
+    request_rendering(scope, window);
+}
+
+pub(crate) fn request_rendering<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
 ) {
@@ -119,14 +129,18 @@ deno_core::extension!(
         crate::live_layout_supports::op_native_css_supports,
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
+        crate::live_layout_backend::op_live_viewport_client,
         crate::live_layout_backend::op_live_image_box,
         crate::live_layout_backend::op_live_element_used_size,
         crate::live_layout_backend::op_live_image_loaded,
+        crate::screenshot_metadata::op_screenshot_image_metadata,
         crate::web_fonts::op_font_face_parse,
         crate::web_fonts::op_font_face_attach,
         crate::web_fonts::op_font_face_detach,
         crate::web_fonts::op_font_face_rule,
         crate::live_layout_backend::op_live_element_scroll,
+        crate::live_layout_backend::op_live_element_scroll_offset_is_zero,
+        crate::live_layout_backend::op_live_element_scroll_extent,
         crate::live_layout_backend::op_live_element_scroll_to,
         crate::live_layout_backend::op_live_viewport_offset,
         crate::live_layout_backend::op_live_scroll_into_view,
@@ -171,6 +185,7 @@ pub(crate) fn install<'s>(
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
     if let Some(initializer) = initializer {
+        let boundary = crate::runtime::private_boundary::capabilities(scope)?;
         let undefined = v8::undefined(scope);
         let context = scope.get_current_context();
         let frame_window = crate::runtime::native_frame_layout_host(scope, context).is_some();
@@ -189,6 +204,7 @@ pub(crate) fn install<'s>(
                     frame_window.into(),
                     scheduler,
                     namespace.into(),
+                    boundary.into(),
                 ],
             )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())

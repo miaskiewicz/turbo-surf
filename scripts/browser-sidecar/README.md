@@ -1,7 +1,10 @@
 # Browser sidecar for `web_search`
 
 The sidecar runs real Chrome outside the native engine over a JSON stdin/stdout
-contract. The built-in Google strategy currently uses `mode:"enid"`: mint/cache
+contract. It is separate from `TURBO_SURF_BROWSER_CMD`, the challenge-token
+sidecar; see [solver configuration](../../docs/SOLVERS.md). Normal native
+navigation does not require either browser command. The built-in Google strategy
+currently uses `mode:"enid"`: mint/cache
 cookies through this sidecar, then try the native request, with one remint retry.
 `browser:true` fetches the whole SERP through Chrome instead.
 
@@ -14,10 +17,21 @@ the cause remains unresolved. See the
 
 ## Setup
 
+Run from the repository root with Node.js/npm and system Google Chrome installed.
+Headed mode also needs a graphical session. The setup script installs its own
+locked dependencies under `scripts/browser-sidecar/node_modules`:
+
 ```bash
 bash scripts/browser-sidecar/setup.sh
 export TURBO_SURF_BROWSER_FETCH_CMD="node $PWD/scripts/browser-sidecar/fetch-serp.mjs"
 ```
+
+`TURBO_SURF_BROWSER_FETCH_CMD` is split on whitespace, not executed by a shell.
+The example assumes the repository path has no spaces; otherwise point it at a
+wrapper executable in a path without spaces. `setup.sh` attempts to install
+bundled Chromium when system Chrome is absent, but `fetch-serp.mjs` still selects
+`channel:"chrome"`; that fallback does not change the configured browser channel.
+Install system Chrome before relying on the fetch command.
 
 `web_search {query:"…",engine:"google"}` uses the ENID strategy;
 `browser:true` uses browser fetching. `remint:true` or `TURBO_SURF_ENID_REMINT=1`
@@ -31,13 +45,21 @@ omit ENID, which makes the mint fail even when Chrome itself could search.
 
 ## Contract
 
-- FETCH: `{"url","headless"?,"userAgent"?,"proxy"?}` →
-  `{"html","finalUrl","status","blocked"}`. `blocked:true` identifies `/sorry`;
+- FETCH: `{"url","headless"?,"proxy"?}` →
+  `{"html","finalUrl","status","blocked"}`. `blocked:true` identifies a
+  `/sorry/` URL or an unusual-traffic body;
   it does not identify the rejection's cause.
 - MINT: `{"mint":true,"headless"?,"proxy"?}` →
   `{"cookies":[{"name","value","domain","path","expires"}]}`.
   The implementation requires an ENID cookie and returns an error if absent.
   The engine caches returned cookies in `.enid-cache.json`.
+
+The MCP caller sends only `url`/`mint` and optional `headless`. It does not
+forward `TURBO_SURF_PROXY` or a user-agent override to this search sidecar. A
+manual protocol caller can supply `proxy`; `userAgent` is not used by the script.
+The persistent `.chrome-profile` is beside `fetch-serp.mjs`; do not share it
+between concurrent sidecar processes. `TURBO_SURF_SIDECAR_DIR` changes MCP
+setup/cache lookup (including `.enid-cache.json`), not the script's profile path.
 
 Headed is the default; `TURBO_SURF_SIDECAR_HEADLESS=1` or per-call `headless`
 changes it. Headed/headless outcomes must be measured on the deployed version,
@@ -63,6 +85,7 @@ Committed dev dependencies are declared in `package.json` and locked in the comm
 `package-lock.json`: Patchright is pinned to exactly 1.59.4 because
 `harness/detection/chrome-trace.mjs` uses the 3-argument
 `evaluate(fn, arg, isolatedContext)` that 1.62.3 and 1.64.2 reject (turbo-surf#53);
-install with `npm ci`. `node_modules/`, `.chrome-profile/` and `.enid-cache.json` are
+install with `npm ci` in `scripts/browser-sidecar/` (or use `setup.sh`).
+`node_modules/`, `.chrome-profile/` and `.enid-cache.json` are
 local/gitignored.
 Cookie caches and raw diagnostics can contain session secrets; keep them local.

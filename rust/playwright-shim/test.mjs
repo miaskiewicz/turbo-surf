@@ -85,6 +85,43 @@ test("frame locator interactions do not crash (#280)", async () => {
   await child.locator("#ok").click();
 });
 
+test("child fragment navigation clears a hash without replacing its document", async () => {
+  const page = newPage();
+  await page.setContent('<iframe name="pay" srcdoc="<p>child</p>"></iframe>');
+  const child = page.frame({ name: "pay" });
+  assert.ok(child);
+  await child.evaluate(() => {
+    globalThis.originalDocument = document;
+  });
+  const changed = await child.evaluate(async () => {
+    const events = [];
+    const change = (href) =>
+      new Promise((resolve) => {
+        addEventListener(
+          "hashchange",
+          (event) => {
+            events.push([event.oldURL, event.newURL]);
+            resolve();
+          },
+          { once: true },
+        );
+        location.hash = href;
+      });
+    await change("x");
+    await change("");
+    return { events, href: location.href, same: document === originalDocument };
+  });
+  assert.deepEqual(changed, {
+    events: [
+      ["about:srcdoc", "about:srcdoc#x"],
+      ["about:srcdoc#x", "about:srcdoc#"],
+    ],
+    href: "about:srcdoc#",
+    same: true,
+  });
+  assert.equal(page.url(), "about:blank");
+});
+
 test("evaluate + render (JS execution, no browser)", async () => {
   const page = newPage();
   await page.setContent("<body><h1 id='t'>Hi</h1><div id='app'></div></body>");
@@ -107,10 +144,9 @@ test("actions: fill / check / selectOption mutate the DOM", async () => {
   await page.fill("#t", "hello");
   await page.check("#c");
   await page.selectOption("#s", "b");
-  assert.match(await page.content(), /value="hello"/);
-  assert.match(await page.content(), /id="c"[^>]*checked|checked[^>]*id="c"/);
-  // the select now has b selected (serialized)
-  assert.match(await page.content(), /value="b"[^>]*selected|selected[^>]*value="b"/);
+  assert.equal(await page.locator("#t").inputValue(), "hello");
+  assert.equal(await page.locator("#c").isChecked(), true);
+  assert.deepEqual(await page.locator("#s").selectedValues(), ["b"]);
 });
 
 test("click follows a link to a new page", async () => {
@@ -204,9 +240,9 @@ test("honest-throws for pixel APIs (G5)", async () => {
   await page.setContent("<button>x</button>");
   await assert.rejects(() => page.pdf(), /unavailable/);
   await assert.rejects(() => page.locator("button").screenshot(), /unavailable/);
-  // boundingBox returns null (no layout engine → unmeasurable), matching Playwright's
-  // null for a non-laid-out element — not a throw.
-  assert.equal(await page.locator("button").boundingBox(), null);
+  const box = await page.locator("button").boundingBox();
+  assert.ok(box && box.width > 0 && box.height > 0);
+  await page.close();
 });
 
 test("mock SPA hydrates through the shim (G15)", async () => {

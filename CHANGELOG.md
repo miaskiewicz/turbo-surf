@@ -1,5 +1,537 @@
 # Changelog
 
+## [0.8.4] - 2026-11-19
+
+- Refresh actor readiness after native opening completes, reject navigation closed during final metadata refresh, and honor network-idle waits on the initial actor navigation.
+- Check realtime timer-wait interruption against the requested completion marker rather than treating unrelated background-task completion as that timer.
+
+- Validate background watchdog recovery against its actual completion marker across competing tasks, retaining the original execution budget and total recovery deadline.
+
+- Keep realtime background work pending when a ready timer deadline only schedules a repoll, instead of reporting that a callback has already run.
+- Keep healthy page recovery usable after an interrupted timer-owner entry, preserving the actual termination exception and retaining genuine document authority failures.
+
+- Retain reached interaction effects when the operation's own watchdog interrupts selected document work, without hiding the same native predicate error when its deadline has not expired.
+- Keep input recovery usable when an execution interruption blocks resource owner entry, while retaining genuine document authority failures and the original cancellation budgets.
+
+- Refresh dirty page snapshots after iframe metadata reads and network callbacks, so authored DOM reentrancy cannot leave `page.content()` behind the live document.
+
+- Reject navigation as closed when page disposal completes during live-session attachment, preserving successful initialization and unrelated native errors.
+- Make the paused-host collector regression wait for its actual queued timer within the original budget, checking that each collector turn leaves document hydration paused even when older rendering work runs first.
+
+- Avoid repeated full timer-queue scans for ordered task bursts, preserving CSP violation capacity, release-before-reentry, timer ordering and execution budgets.
+
+- Hand timer-only post-load work to the existing full quiescence phase instead of exhausting initial hydration pumps, while preserving fetch completion, dynamic scripts, animation callbacks and finite animations.
+
+- Roll back unpublished frame allocations after interrupted creation, preserving healthy root input, installed frames and peers without admitting incomplete document owners.
+
+- Reap owned web-server processes before checking their groups, and bound transient Darwin group-retirement probes by the existing shutdown deadline while preserving descendant termination and permission errors.
+
+- Preserve posted-message order against later timers in virtual-time pages by using the running task clock across windows; keep real-time scheduling and existing document authority unchanged.
+
+- Preserve ordered nested-frame history notifications after completed page commands, including consecutive changes to the same URL.
+
+- Settle interrupted initial-hydration script waiters before returning a retained partial page, so later healthy evaluations remain usable within their original execution budget.
+
+- Update native DOM, layout and raster together, including canvas background and quirks layout corrections.
+
+- Settle closed navigation waiters after guest checkpoints without waiting for unrelated target work.
+
+- Adopt the native layout correction for quirks-mode root and body viewport sizing, preserving explicit viewport geometry without changing standards-mode content boxes.
+
+- Return actual child markup from Locator and Frame innerHTML reads, preserving missing-element results and live document ownership.
+
+- Deliver Page.dispatchEvent through the existing live Locator dispatch path, preserving event initialization, settlement and missing-target errors.
+
+- Retire interrupted child-script work consistently after watchdog cancellation, preserving healthy roots and peers and settling queued waiters.
+
+- Keep URL construction and updates independent of a page-replaced URLSearchParams constructor.
+
+- Capture URL and URLSearchParams string conversions before authored scripts can replace the global String constructor, while retaining user-defined coercions and mutation errors.
+- Preserve canonical DOMException types and messages for native SecurityError rejections, including cross-origin private frame operations.
+
+- Preserve retained stream operations after source-frame retirement, keep retired document tasks and fetches inadmissible, and release the frontend realm after the actual source sink closes.
+
+- Complete legacy root async evaluation using native document ownership and actual Promise dependencies, without waiting for unrelated popup work. Preserve borrowed crypto/stream error realms, module source URLs, peer IndexedDB continuations and retired-document collection.
+- Expose native CompressionStream and DecompressionStream through the existing private stream backend, and report empty AES-GCM IVs as owning-realm OperationError values.
+
+- Resolve native Location navigation against the trusted live document base, preserve same-document identity for repeated and empty fragments, and retain sandbox navigation checks.
+
+- Enforce dynamic-compilation CSP and Trusted Types through the default native V8 callback, preserving direct-eval lexical scope, Function-family identity and bounded violation delivery. Enable the three source-pinned native code-generation controls in the default gate.
+
+- Keep supported native Page actors recoverable after driver navigation deadlines while retiring only unfinished owned frame/module work; preserve completed child documents, healthy module caches and surviving peer Pages.
+
+- Preserve native document-group history and structured-cloned state across real navigation, replacement and back/forward traversal; authenticate current-document ownership and retire only interrupted, unacknowledged mutations. Navigation API traversal remains limited to its current document group.
+- Complete native click and locator-press navigation at the owning main-document commit, retain accepted background form jobs across interrupted reads, and preserve sibling navigation isolation.
+- Resolve inherited frame form bases through native parent capabilities, keep physical key sequences bound to their original page across document replacement, and capture private frame/font map operations before authored scripts.
+- Hand bounded, owner-scoped static image bytes into the initial guest document without refetching them, and discard retired or reset document seeds.
+
+- Preserve authored getter exceptions from native JSON collectors and reject undefined results consistently across root and child targets.
+
+- Dispatch native host input in its actual guest document realm, retain the operation owner for cancellation, skip retired realms and use captured cleanup primitives.
+
+- Cancel opening root targets without retiring surviving popups, join concurrent closes, and await actual response-body completion before the final actor runtime exits.
+
+- Publish classic-script response headers before body completion and report actual canceled script bodies, preserving redirect, integrity and CSP enforcement.
+
+- Export live screenshot image-asset reads from the NAPI crate root, keeping the async task reachable in strict all-target builds.
+
+- Enumerate `Locator.all()` from the current query count instead of a stale pre-hydration snapshot.
+
+- Read locator counts from the current native document after hydration, preserving static execution policy, indexed/scoped queries and nonblocking reads.
+
+- Retire screenshot image bytes and retained paint scenes when a native document navigates, including same-URL replacements.
+- Reuse bounded Rust-owned current-document image bodies for native screenshots, including no-store images, without exposing opaque bytes to guest JavaScript or accepting retired image completions.
+
+- Strengthen retained-Page commit reload controls with actual document/global
+  replacement, stable native ownership and exact client requests; verify commit
+  returns before a held script completes and genuine load follows its release.
+
+This candidate includes the unshipped v0.8.3 work; there was no v0.8.3 product release.
+The v0.8.4 release requires the published `turbo-dom`, `turbo-dom-browser-env`,
+`turbo-dom-layout`, and `turbo-dom-raster` 0.8.4 distributions and one registry
+`turbo-dom-v8` 150.4.2. Development Git candidate results remain separate from
+validation of that final registry graph. Combined release validation is still in
+progress; the entries below describe changes already integrated into the release
+branch.
+
+### Engine and performance
+
+- Register actual guest Page contexts with the native inspector, keeping eval,
+  function and child-script inventory visible while retiring replaced contexts.
+
+- Execute initial and replacement native Page modules in registered document-owned
+  module maps, isolating inline-source authority and cancelling retired module work.
+  Consume the published core 0.412.5 and matching extension dependency closure.
+
+- Allocate opaque geometry and Web Audio values in their actual frontend realm,
+  preserving borrowed constructors, subclass prototypes and guest stream identity
+  without exposing infrastructure objects.
+
+- Retain native Window hooks when iframe documents change, keeping nested frame
+  counts live and sandbox navigation errors consistent with Chromium.
+
+- Align navigation regression controls with independent execution permission:
+  load and commit permit later on-demand execution, while an explicitly disabled
+  policy remains static without client requests.
+
+- Preserve explicit driver navigation referrers and authentic request metadata.
+  Read root history from the actual native Location, retain prior document
+  entries, and keep the active document/history on 204/205 responses.
+
+- Refresh legacy Window frame counts until the actual canonical read-only surface
+  is registered, preserving iframe adoption, indexed identities and parent links.
+
+- Preserve an empty fragment for `location.hash = ""`, keeping child document
+  identity and genuine hashchange events consistent with Chromium.
+
+- Keep frame locator navigation in its actual child realm and handle fragment
+  history through the native Location without navigating the parent Page.
+
+- Install the initial root Location before page bootstrap, so guest assign/reload
+  uses real native navigation without extra bootstrap network requests.
+
+- Align retained-frame validation with Chromium: a stable WindowProxy denies
+  cross-origin reads, while the old document and retired code remain isolated.
+
+- Restore standalone renderer cross-origin Window messaging, preserving cloned
+  payloads, sender realm identity and authenticated nested-frame completion.
+
+- Keep Deno service algorithms in a private stable realm while persistent Page
+  sessions start in actual native guest Window contexts. Preserve cached-fetch
+  and stream completion across document replacement, guest object identity and
+  BYOB aliasing/detachment; bind private value conversion to the live frontend
+  owner and reject closed guest snapshots instead of reading engine state.
+
+- Report asynchronous host-binding collection failures to foreground callers
+  without making keyboard input wait for unrelated host callback completion.
+
+- Preserve actual Page ownership for intercepted responses, including opening
+  roots and children retained after opener closure; reject retired target tokens.
+- Preserve genuine cross-window message clone exceptions instead of replacing
+  them with unsupported-operation errors.
+- Recheck canonical frame surfaces during bootstrap to avoid writing read-only
+  Window properties after native admission.
+- Service navigation host bindings within the original deadline, publish content
+  lifecycle events once, preserve page-close errors and update native dialog
+  policy only when dialog listeners change. Delegate Page selector waits to the
+  locator's existing query preparation.
+
+- Retain the actual root form response in legacy Rust and MCP callers after
+  native document replacement, including same-URL POST metadata and committed
+  responses followed by a guest exception. Keep child target responses separate.
+
+- Add real native popup Pages, named-window reuse, opener ownership, context
+  bootstrap inheritance and retained child operation after opener closure. Keep
+  actual Window identities, Location/history, caller promise realms and document
+  lifecycle events correct across root and iframe replacement (#326).
+- Observe network idle from each actual Page's native HTTP/navigation activity,
+  including pre-header and streamed-body work, while naturally progressing due
+  real timers and callbacks without advancing virtual clocks or waiting on
+  unrelated sibling requests (#326).
+- Admit explicit attachment responses for native target navigation while keeping
+  other non-HTML document responses rejected and preserving the original page.
+
+- Pierce open shadow roots for CSS and getBy locators, retaining real action
+  targets, tree-scoped accessible names and asynchronous actor reads (#476).
+
+- Finish keyboard events without waiting for unrelated exposed host callbacks.
+  Keep those callbacks running with their real guest values/errors and retain
+  collection failures, frame ownership, key ordering and editing defaults (#518).
+- Apply configured geolocation and origin-scoped permission grants to live
+  documents. Deliver asynchronous position callbacks, watch updates and
+  permission changes; enforce document policy and retire canceled watches (#391).
+- Pause native alert/confirm/prompt execution for a host Dialog accept/dismiss
+  response, with no-listener auto-dismiss, page ownership and close cancellation.
+  Host replies bypass the blocked isolate command queue (#405).
+- Add an explicit enabled/disabled animation presentation policy across Rust,
+  NAPI, Playwright contexts and MCP render mode configuration. Disabled canonical
+  effects use underlying styles while their genuine timing, events and promises,
+  application timers and frame callbacks continue. Fresh producer suppression
+  proof is distinct from enabled-mode finite completion (#500).
+
+- Keep the original native geometry admission/cache path first. Inspect fresh
+  canonical effect state only for actual animation-resource blockers, recapture
+  before the bounded final pass, and never cache lifecycle-waived views. Opt-in
+  layout profiles count these inspections separately (#522).
+
+- Admit underlying native geometry for an element only when fresh canonical CSS
+  effect state proves its matching declared animations completed without fill.
+  Playback changes invalidate reuse; active, paused, infinite, filling, unknown
+  and mismatched effects keep their guards. Scoped shadow stylesheet lifecycle
+  uses the producer's canonical scoped-sheet discovery, while unknown or
+  mismatched effect proofs remain strict (#511; turbo-dom #509).
+
+- Keep on-demand JavaScript available after `waitUntil: "commit"` navigation,
+  reload and history replacement, while preserving the immediate raw-response
+  path and explicit static-only execution permission. Later actions, evaluation
+  and web-first assertions can hydrate client-rendered data (#520).
+
+- Reuse native geometry across query targets only when the actual styled scene
+  passed strict resource admission. Preserve all document, stylesheet, viewport,
+  composition, image and font freshness keys and target-specific animation
+  rejection when strict admission is unavailable (#519).
+- Implement native per-context offline conditions after cache lookup, preserving
+  already-started HTTP responses and independent API request contexts. Owned
+  frames receive trusted connectivity events; established WebSocket frames wait
+  for reconnection (#508).
+- Yield Node while asynchronous locator reads wait for the native actor, without
+  pumping unrelated host callbacks or relaxing read deadlines (#515, #517).
+- Recognize native and supported ARIA disabled states, including inherited state
+  and explicit overrides, in locator actionability and assertions (#514).
+- Honor request/response waiter timeout defaults, explicit overrides and zero;
+  isolate worker-hook deadlines from test bodies while preserving the shared
+  beforeEach/body budget (#513, #516).
+
+- Use wall-clock timer deadlines in Playwright shim sessions so consecutive
+  keystrokes preserve editor character queries instead of expiring future
+  callbacks between digits. Direct native callers retain virtual timers unless
+  they opt in (#512).
+
+- Dispatch React-compatible Enter and printable `keypress` events with legacy
+  character codes, preserving cancellation and keyup ordering so chat inputs
+  using `onKeyPress` can submit. Command chords omit keypress while retaining
+  select-all editing defaults (#506).
+
+- Enforce an optional immutable host-origin allowlist before native cache access,
+  redirects, resource/module loads, reports, and WebSocket connections. Invalid
+  configured policies fail closed; challenge helpers are disabled under the
+  restriction and denied resource diagnostics redact URL queries (#505).
+- Construct asynchronous MCP dispatch state on the heap before polling it,
+  preserving stack headroom for cold V8 initialization without changing thread
+  stack sizes, execution budgets, or synchronous read paths (#501).
+- Preserve the reached interaction state when a watchdog terminates native DOM
+  signature sampling, while retaining errors for genuine namespace exceptions
+  and missing helpers (#498).
+- Let concurrent URL observers advance host callbacks without waiting for
+  unrelated response bodies; losing observers retain their deadline without
+  aborting sibling requests (#498).
+- Recover once from a reset or broken pipe when sending a bodyless `GET` or
+  `HEAD` through a stale pooled connection, preserving the configured transport.
+  Requests with bodies, uploads, other methods, and unrelated errors are not
+  replayed. Preserve nested transport error causes for diagnosis (#498).
+- Scope `offsetTop`, `offsetLeft`, and `offsetParent` resource checks to the
+  queried box dependencies, so unrelated transform animations do not break
+  Popper positioning or Autocomplete option measurements. Animated targets,
+  ancestors, and layout-changing effects retain strict admission checks (#498).
+- Add opt-in, diagnostic-only Page/Locator operation timings for auth profiling;
+  correctness and comparative speed runs remain uninstrumented.
+- Keep native runtime initialization state off nested MCP dispatch frames,
+  preserving stack headroom during official Deno extension loading.
+- Prepare nested CSS rules in their original tree scopes, including conditional
+  groups, while preserving the page's CSSOM.
+- Compile text regular expressions once per query, restrict role/name work to the
+  requested scope, construct global action indices once, and retain a bounded LRU
+  of parsed pages when reads alternate between pages (#492, #493, #494, #495).
+- Download deferred classic scripts concurrently while preserving their required
+  execution order (#491).
+- Count locator matches and read visibility without serializing unnecessary HTML,
+  text, or accessible-name snapshots. Successful assertions reuse their observed
+  value instead of making extra queries to construct unused errors (#461, #486,
+  #487).
+- Skip redundant document/cookie refreshes after acknowledged read-only collectors,
+  while invalidating synchronization for real DOM, cookie, navigation, child-frame,
+  scheduled task and event changes (#297).
+- Avoid repeated idle DOM-signature scans after scalar evaluations, stop completed
+  watchdogs promptly, and skip unchanged stylesheet host reads (#463, #484, #309).
+- Use an ordered, early-terminating title search. Consumer coverage verifies large
+  unrelated bodies, title movement, removal, and writes (#462).
+- Bracket official timeout-signal callbacks with the canonical engine-task scope
+  and re-enable the unchanged Chrome 156 abort-order oracle. Legacy
+  `document.createEvent("Event")` aliases remain usable after full runtime
+  initialization, including the React development callback path (#295, #347).
+- Admit opacity-only animation keyframes and constant longhands equal to the
+  element's computed style for geometry reads, while retaining resource admission
+  checks for geometry-changing animations (#345).
+- Keep unrelated transform-only animations from rejecting independent rectangle
+  reads, and read viewport client dimensions directly under the existing overlay
+  scrollbar policy. Animated targets, ancestors, and uncertain scroll or layout
+  dependencies retain resource admission checks (#498).
+- Classify vendor-prefixed transforms and SVG stroke-dash animation properties
+  by their parsed types when proving independent rectangle reads (#498).
+- Allow definitely clipped animation-only descendant branches in independent
+  rectangle reads, retaining shared-ancestor, scrolling, and uncertain-overflow
+  checks. Evaluate that dependency proof only for effects that need it (#498).
+- Scope box, computed-size, observer, pointer-center, and leaf scroll-extent
+  reads to their actual animation dependencies. Cache receiver and read purpose
+  separately, retaining checks for affected targets, descendants of extent
+  queries, nonzero scrolling, uncertain gutters, and true hit testing (#498).
+- Read a native element's known zero scroll offset without an unrelated layout
+  rejection, allowing modal reflow checks. Preserve owner-document/realm checks
+  and the existing layout/clamping path for retained nonzero offsets (#498).
+- Preserve unchanged zero scroll assignments after numeric conversion and smooth
+  scroll interruption, so modal mounting does not request unrelated layout.
+  Actual movement retains the existing clamping and resource checks (#498).
+- Correct TreeWalker parent/backward/filtered-child traversal, propagate filter
+  exceptions, maintain NodeIterator's root and reference cursor, and honor idle
+  callback timeout and deadline behavior (#449, #450, #451, #452).
+
+### Locators and accessibility
+
+- Pierce actual open shadow roots for live CSS and getBy locators, including
+  nested roots, scoped accessible names and actions targeting the original node.
+  Mutation invalidates the trusted locator index; closed roots remain opaque and
+  XPath keeps physical-tree semantics. Metadata reads avoid application custom
+  element construction, and shadow anchor fallback honors the document base URL
+  (#476).
+
+- Expose `Locator.page()` with stable owning-Page identity for direct, derived,
+  and nested-frame locators (#503).
+- Use one canonical live selector plan for extended `:visible` actions and compose
+  scoped `has`/`hasNot`, text and visibility filters without dropping earlier
+  filters (#349, #328).
+- Preserve chained `first`/`last`/`nth` selections, indexed ancestor scopes, nested
+  `:scope`, and parents created through `getBy*` locators (#472, #473, #474, #475).
+- Match regular-expression test IDs and keep placeholder, alternative-text, and
+  title queries inside their parent scopes (#477, #380).
+- Resolve native heading, table, and image roles; honor heading levels, pressed
+  state, accessibility visibility, and exact matching. Accessible names resolve
+  ordered `aria-labelledby` references and native labels (#375, #376, #377, #379).
+- Read rendered `innerText`, raw DOM `textContent`, and live input values according
+  to their distinct contracts. CSS and visibility reads use the live document and
+  its CSSOM rather than an outdated markup snapshot (#378, #421, #350, #352, #353).
+- Preserve XPath engine prefixes and relative parent/axis traversal. Locator
+  evaluation uses the selected live element or full matched collection, and
+  locator unions/intersections retain indexing, uniqueness, and document order
+  (#365, #364, #363, #330).
+- Enforce strict single-target actions and assertions, wait for actionable controls,
+  return live bounding boxes, and scroll the target into view (#334, #346, #418,
+  #361).
+
+### Input, forms, and events
+
+- Preserve mouse button masks, held-button state, click counts, and locator click
+  position/modifier/button options. Double clicks and ancestor hover boundaries
+  dispatch their corresponding events (#439, #440, #441, #370, #360).
+- Honor touch cancellation before compatibility mouse activation, preserve native
+  touch payloads when available, and reject unavailable payload construction
+  explicitly. Drag/drop stops after canceled starts or unaccepted drop targets
+  (#442, #471).
+- Keep keyboard modifiers and down/up transitions distinct; apply cancellable
+  editing and activation defaults; route locator key presses through the keyboard
+  driver (#356, #358, #323).
+- Fill contenteditable nodes through DOM selections, honor canceled `beforeinput`,
+  defer changes until blur, type at the current selection, and reject invalid
+  numeric text before changing the existing value (#408, #409, #410, #411).
+- Apply checkbox/radio activation once, read live checked state, validate supported
+  checkbox types, and avoid duplicate form submit activation (#351, #419, #348).
+- Resolve select options by value, label, or index with proper multiple selection;
+  infer upload MIME types from file extensions and preserve single-file input
+  cardinality (#337, #339, #340).
+- Dispatch synthetic events on the selected node with their initializer fields;
+  remove once listeners before callbacks and remove only one duplicate listener
+  registration at a time (#371, #372, #373, #374).
+
+### Pages, frames, and evaluation
+
+- Preserve generic Rust host bindings in current and future child realms after
+  native page registration, including late driver updates without rerunning
+  guest initialization or sharing page scripts with sibling popups.
+
+- Wait for URL changes through the configured deadline, including unlimited
+  waits, without canceling requests or sibling URL waits when one wait expires
+  (#497).
+- Honor configured integer and percentage worker limits in the test CLI,
+  preserving project caps and serial suite execution (#499).
+- Await live evaluation after ordinary navigation, preserve tagged JavaScript
+  values such as undefined, non-finite numbers, negative zero and BigInt, and
+  reject with the original page exception details (#362, #359, #357).
+- Hydrate when a web-first assertion misses its initial snapshot, rather than
+  failing against an inert post-navigation document (#310).
+- Replace live document contents without resetting the Window realm or custom
+  element registry, run the replacement parser/resource lifecycle, and retire old
+  pending image/script work before waiting for the new document (#386).
+- Keep handle-returning APIs as realm-bound remote handles, preserving object
+  identity and explicit disposal instead of substituting serialized values (#343).
+- Preserve sparse-array lengths and undefined entries when handle arguments cross
+  the realm boundary.
+- Insert and execute script/style tags in the live document, including external
+  scripts and stylesheet loading (#387, #388).
+- Keep frame identities, parent/child relationships and detach state; use live child
+  documents and realms for reads, evaluation, and actions. Resolve frame URLs
+  against their owners and return the owning Locator from `FrameLocator.owner`
+  (#443, #444, #445, #446, #447, #448).
+- Resize the trusted live viewport independently for each page, updating geometry,
+  CSS media queries and resize events (#369).
+- Preserve same-document SPA state and structured history entries without replacing
+  the DOM; make actual reloads and history document traversals execute the intended
+  navigation/scripts (#319, #425).
+- Honor per-navigation deadlines through fetch and initial hydration, preserve
+  authored referrers, and retain the current document for HTTP 204/205 responses
+  (#427, #426, #428).
+- Track browser contexts and closed pages, close owned contexts on browser shutdown,
+  and wait for the requested selector state (#401, #402, #403).
+- Reject duplicate exposed-function registrations, settle returned values and
+  exceptions correctly, and identify the calling frame in exposed bindings
+  (#415, #416, #417).
+
+### HTTP requests, responses, and downloads
+
+- Match `Page.route` URL predicates in the host, preserving captured closures,
+  fallback ordering, original-URL matching, and unroute identity without exposing
+  host callbacks to page JavaScript (#507).
+- Apply XHR body conversion before discarding GET/HEAD payload bytes in routed
+  requests, preserving synchronous conversion errors, POST bodies and caller
+  headers while keeping Fetch's body restrictions strict (#504).
+- Retain native connection pools across API requests while bypassing browser HTTP
+  cache reuse for those requests (#485).
+- Preserve standalone cookie jars and cached `page.request` / `context.request`
+  properties; encode query parameters, form and multipart fields, string bodies,
+  and raw Buffer bytes correctly (#329, #331, #333, #434, #435, #341).
+- Apply request context user agents and scoped Basic credentials, merge headers
+  without case-sensitive duplicates, enforce disposal, and honor redirect and
+  failure-status policies (#433, #432, #431, #335).
+- Preserve actual captured request headers and POST bytes, link requests to their
+  responses, and report document navigations and redirects with the originating
+  frame identity (#311, #344, #307).
+- Preserve redirect response chains, status text, complete response headers, and
+  binary response bodies. Header helpers expose the expected normalized and raw
+  forms (#399, #398, #400, #338).
+- Preserve literal HTTP header names such as `__proto__` and `constructor` without
+  inheriting object properties or invoking prototype setters.
+- Publish response headers before body completion, including during initial and
+  form navigation. Body reads await their own completion; unread bodies, failures,
+  cancellation, and console handles retain correct lifecycle and ownership (#483).
+- Emit transport failures as `requestfailed`, not fabricated successful responses.
+  Response waits reject on timeout, only observe newly delivered events, use URL
+  glob semantics and await async predicates; native polling uses a lower floor
+  (#407, #308, #354, #355, #296).
+- Execute request routes through actual host callbacks, including fulfilled and
+  fetched responses, while preserving CSP, cancellation, deadlines, and genuine
+  host dependencies in module initialization. Fulfilled and rewritten requests
+  publish the same response lifecycle without duplicate internal-fetch events,
+  preserving ordinary guest and continued-request events (#320).
+- Apply route registration changes to live sessions, traverse fallback handlers,
+  remove obsolete interceptors, and honor XHR abort/continue outcomes (#322, #324).
+- Emit HTTP attachment downloads, reject missed download waits, keep commit-mode
+  attachment actions usable, and preserve Blob bytes through path, save and stream
+  access (#325, #327).
+- Configure finite response and script/module byte budgets through navigation and
+  resource admission instead of silently imposing the old fixed bundle cap (#342).
+
+### Context state
+
+- Observe genuine context page, close, and network events with predicate/deadline
+  waiters and lazy page subscriptions; expose the captured response frame. Popup
+  creation remains deferred rather than returning a fabricated page (#509).
+- Normalize URL-form cookies for native jars; replace cookie identities rather than
+  append duplicates; filter cookie reads and removals by URL and identity; propagate
+  clearing into live pages (#314, #315, #422, #423, #424).
+- Import and export origin-localStorage storage state before authored scripts run,
+  preserving shared tabs and UTF-16 values (#317).
+- Apply locale defaults to native requests and Intl without inserting an
+  application cookie, and isolate color-scheme/reduced-motion preferences by
+  context (#395, #396).
+- Replace extra HTTP header sets, forward context headers to native live requests,
+  and answer origin-scoped browser Basic-auth challenges without leaking credentials
+  across redirects (#393, #392, #394).
+
+### Screenshots
+
+- Retain image bytes for the current document, invalidate them on navigation,
+  coalesce in-flight requests, and fetch independent resources with bounded
+  concurrency (#489, #490).
+- Use trusted intrinsic metadata and native paint-resource planning to avoid
+  fetching images that cannot contribute viewport pixels, while retaining
+  conservative handling for unknown sizes and effects/full-page captures (#496).
+- Retain an owned immutable prepared screenshot scene between unchanged captures;
+  invalidate on changed inputs, reuse its layout/resource plan, and release it on
+  close. Regression controls cover unchanged bytes, mutations, metadata, masks,
+  transparency, and device scale (#488).
+- Encode JPEG output and quality correctly; honor clips, masks, transparent initial
+  backgrounds, device/CSS scale selection and positioned full-page overflow
+  (#467, #466, #469, #464, #470, #468).
+
+### Assertions
+
+- Compare typed values, cycles, strict prototypes, promise rejection overloads,
+  property-path existence, array subset lengths, thrown error expectations,
+  recursive asymmetric matchers, and numeric/infinity cases correctly
+  (#381, #382, #383, #384, #385, #389, #390).
+- Preserve missing-attribute versus empty-value distinctions, match CSS/ID regular
+  expressions, compare actual JavaScript property values, and honor expected-state
+  options and viewport intersection ratios (#436, #437, #438, #429, #430).
+- Match complete class sets, ordered text arrays, and emptiness using current text
+  and control values (#336, #332, #420).
+- Retry awaited `expect.poll` and `toPass` callbacks; accumulate soft failures
+  without stopping the test body (#366, #367, #368).
+
+### Test runner and fixtures
+
+- Bind the build-and-test Playwright gate to an immutable snapshot of its freshly
+  built Cargo addon, so an older optional platform package cannot shadow the
+  current binary. Hash final signed bytes, preserve explicit artifact overrides,
+  and retain production loading and bare-test skip behavior (#502).
+- Execute the CLI through npm bin symlinks, load TypeScript suites, exit completed
+  HTML-report runs, and reject unsupported runtime capability combinations
+  (#305, #300).
+- Respect grep/inverse-grep, regular-expression test-file selectors, project setup
+  dependencies, and no-tests failure semantics. Step callbacks receive step info
+  and support explicit step skipping (#454, #458, #457, #456, #459).
+- Resolve fixture dependencies lazily, share each attempt's fixture graph, honor
+  tuple/auto/worker lifetimes and plain scoped overrides, and retain setup across
+  sibling suites. All-suite hooks receive their supported browser fixture
+  (#453, #313, #321, #460, #479, #478).
+- Enforce per-test deadlines with isolated timed-out attempts and restart retry
+  workers so attempts do not share a stale test execution (#318).
+- Retain TestInfo outcomes and attachments, honor file/hook/TestInfo skip guards,
+  expected-failure and exclusive selection semantics, and run all cleanup hooks
+  before reporting errors (#312, #316, #414, #413, #412).
+- Resolve web-server commands relative to the configuration, require an acceptable
+  readiness response, and stop the full owned process tree while preserving reused
+  servers (#480, #482, #481).
+
+### Diagnostics and explicit limitations
+
+- Deliver console events with live argument handles, correct source locations and
+  frame ownership, and bounded native retention that releases evicted arguments
+  (#404).
+- Send page script/module/frame/timer diagnostics to stderr and emit uncaught page
+  exceptions as `pageerror`. Context-isolation regressions avoid nested registrar
+  deadlocks (#302, #406, #299).
+- Reject unsupported reporter configurations and trace/video recording requests
+  explicitly instead of silently ignoring them or inventing artifacts (#455, #465).
+  Offline emulation now uses native context conditions (#306, #508).
+
 ## [0.8.2] - 2026-11-10
 
 Pinned at `turbo-dom = "0.8.2"` on crates.io (all four turbo-dom crates: `turbo-dom`, `turbo-dom-browser-env`, `turbo-dom-layout`, `turbo-dom-raster`; `turbo-dom-v8` 150.4.1 unchanged). `[patch.crates-io]` git bridge dropped.

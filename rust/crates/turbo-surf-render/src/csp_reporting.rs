@@ -312,7 +312,10 @@ impl Reporter {
             context,
             jar,
             target,
-            client: self.0.client.clone(),
+            client: self
+                .0
+                .client
+                .with_network_conditions(client_hints.network_conditions()),
             client_hints,
             response_effects,
             permit,

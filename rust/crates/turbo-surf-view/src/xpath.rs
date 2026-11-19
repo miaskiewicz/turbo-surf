@@ -4,6 +4,7 @@
 //! - `/a/b`, `//a` descendant, relative `a/b`, `*` wildcard
 //! - predicates `[@a='v']`, `[@a]`, `[contains(@a,'v')]`, `[text()='v']`,
 //!   `[contains(text(),'v')]`, `[n]` (1-based)
+//! - parent/self/ancestor axes and node unions (`|`)
 //! - trailing `//a/@href` → returns the attribute string(s)
 
 use std::collections::HashSet;
@@ -31,6 +32,11 @@ enum Pred {
 enum Axis {
     Child,
     Descendant,
+    Parent,
+    SelfNode,
+    Ancestor,
+    AncestorOrSelf,
+    DescendantOrSelf,
 }
 
 struct Step {
@@ -112,7 +118,28 @@ fn split_steps(expr: &str) -> Vec<Step> {
     steps
 }
 
+fn named_axis(name: &str) -> Option<Axis> {
+    match name {
+        "child" => Some(Axis::Child),
+        "descendant" => Some(Axis::Descendant),
+        "parent" => Some(Axis::Parent),
+        "self" => Some(Axis::SelfNode),
+        "ancestor" => Some(Axis::Ancestor),
+        "ancestor-or-self" => Some(Axis::AncestorOrSelf),
+        "descendant-or-self" => Some(Axis::DescendantOrSelf),
+        _ => None,
+    }
+}
+
 fn parse_step(axis: Axis, text: &str) -> Step {
+    let (axis, text) = match text {
+        ".." => (Axis::Parent, "*"),
+        "." => (Axis::SelfNode, "*"),
+        _ => text
+            .split_once("::")
+            .and_then(|(name, test)| named_axis(name).map(|axis| (axis, test)))
+            .unwrap_or((axis, text)),
+    };
     if let Some(attr) = text.strip_prefix('@') {
         return Step {
             axis,
@@ -252,18 +279,39 @@ fn tag_matches(tree: &Tree, h: Handle, test: &str) -> bool {
     test == "*" || tree.tag_name(h).as_deref() == Some(&test.to_ascii_uppercase())
 }
 
-fn candidates(tree: &Tree, ctx: Handle, step: &Step) -> Vec<Handle> {
-    match step.axis {
-        Axis::Descendant => tree
-            .descendants(ctx)
-            .into_iter()
-            .filter(|&h| tree.node_type_id(h) == ELEMENT_NODE && tag_matches(tree, h, &step.test))
-            .collect(),
-        Axis::Child => element_children(tree, ctx)
-            .into_iter()
-            .filter(|&h| tag_matches(tree, h, &step.test))
-            .collect(),
+fn ancestor_nodes(tree: &Tree, ctx: Handle, include_self: bool) -> Vec<Handle> {
+    let mut nodes = Vec::new();
+    let mut current = if include_self {
+        Some(ctx)
+    } else {
+        tree.parent(ctx)
+    };
+    while let Some(node) = current {
+        nodes.push(node);
+        current = tree.parent(node);
     }
+    nodes
+}
+
+fn axis_nodes(tree: &Tree, ctx: Handle, axis: Axis) -> Vec<Handle> {
+    match axis {
+        Axis::Child => element_children(tree, ctx),
+        Axis::Descendant => tree.descendants(ctx),
+        Axis::Parent => tree.parent(ctx).into_iter().collect(),
+        Axis::SelfNode => vec![ctx],
+        Axis::Ancestor => ancestor_nodes(tree, ctx, false),
+        Axis::AncestorOrSelf => ancestor_nodes(tree, ctx, true),
+        Axis::DescendantOrSelf => std::iter::once(ctx).chain(tree.descendants(ctx)).collect(),
+    }
+}
+
+fn candidates(tree: &Tree, ctx: Handle, step: &Step) -> Vec<Handle> {
+    axis_nodes(tree, ctx, step.axis)
+        .into_iter()
+        .filter(|&node| {
+            tree.node_type_id(node) == ELEMENT_NODE && tag_matches(tree, node, &step.test)
+        })
+        .collect()
 }
 
 fn apply_predicate(tree: &Tree, nodes: Vec<Handle>, pred: &Pred) -> Vec<Handle> {
@@ -283,18 +331,37 @@ fn dedupe(nodes: Vec<Handle>) -> Vec<Handle> {
 
 fn run_step(tree: &Tree, ctx: &[Handle], step: &Step) -> Vec<Handle> {
     let mut matched = Vec::new();
-    for &c in ctx {
-        matched.extend(candidates(tree, c, step));
+    for &root in ctx {
+        let mut nodes = candidates(tree, root, step);
+        for pred in &step.preds {
+            nodes = apply_predicate(tree, nodes, pred);
+        }
+        matched.extend(nodes);
     }
-    let mut result = dedupe(matched);
-    for pred in &step.preds {
-        result = apply_predicate(tree, result, pred);
+    dedupe(matched)
+}
+
+fn union_branches(expr: &str) -> Vec<&str> {
+    let mut branches = Vec::new();
+    let mut start = 0;
+    let mut scan = Scan {
+        depth: 0,
+        quote: None,
+    };
+    for (index, ch) in expr.char_indices() {
+        if ch == '|' && scan.depth == 0 && scan.quote.is_none() {
+            branches.push(expr[start..index].trim());
+            start = index + 1;
+        } else {
+            advance_scan(&mut scan, ch);
+        }
     }
-    result
+    branches.push(expr[start..].trim());
+    branches
 }
 
 /// Evaluate an XPath subset against `root`.
-pub fn evaluate(tree: &Tree, root: Handle, expr: &str) -> XPath {
+fn evaluate_branch(tree: &Tree, root: Handle, expr: &str) -> XPath {
     let steps = split_steps(expr.trim());
     let mut ctx = vec![root];
     for step in &steps {
@@ -308,6 +375,32 @@ pub fn evaluate(tree: &Tree, root: Handle, expr: &str) -> XPath {
         ctx = run_step(tree, &ctx, step);
     }
     XPath::Nodes(ctx)
+}
+
+/// Evaluate paths and node unions, preserving the document order of a union.
+pub fn evaluate(tree: &Tree, root: Handle, expr: &str) -> XPath {
+    let branches = union_branches(expr.trim());
+    if branches.len() == 1 {
+        return evaluate_branch(tree, root, branches[0]);
+    }
+    let mut nodes = Vec::new();
+    let mut values = Vec::new();
+    for branch in branches {
+        match evaluate_branch(tree, root, branch) {
+            XPath::Nodes(found) => nodes.extend(found),
+            XPath::Values(found) => values.extend(found),
+        }
+    }
+    if nodes.is_empty() && !values.is_empty() {
+        return XPath::Values(values);
+    }
+    let selected: HashSet<_> = nodes.into_iter().collect();
+    XPath::Nodes(
+        tree.descendants(tree.root())
+            .into_iter()
+            .filter(|node| selected.contains(node))
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -325,6 +418,74 @@ mod tests {
             XPath::Values(v) => v,
             XPath::Nodes(_) => panic!("expected values"),
         }
+    }
+
+    #[test]
+    fn attribute_unions_keep_value_results_and_empty_node_unions_stay_nodes() {
+        let tree = Tree::parse("<a href='/a'></a><b href='/b'></b>");
+        assert_eq!(vals(&tree, "//a/@href | //b/@href"), vec!["/a", "/b"]);
+        assert!(
+            matches!(evaluate(&tree, tree.root(), "//missing | //absent"), XPath::Nodes(found) if found.is_empty())
+        );
+    }
+
+    #[test]
+    fn node_unions_deduplicate_and_return_document_order() {
+        let tree = Tree::parse(
+            "<div id='a' data-kind='a|b'><span id='b'>one</span></div><div id='c'>two</div>",
+        );
+        let result = nodes(&tree, "//*[@id='c'] | //*[@id='a'] | //*[@id='c']");
+        assert_eq!(
+            result
+                .iter()
+                .map(|&node| tree.get_attribute(node, "id").unwrap())
+                .collect::<Vec<_>>(),
+            vec!["a", "c"]
+        );
+        assert_eq!(nodes(&tree, "//*[@data-kind='a|b'] | //missing").len(), 1);
+        let child = tree.query_selector("#b").unwrap();
+        assert!(
+            matches!(evaluate(&tree, child, "ancestor::*[1]"), XPath::Nodes(found) if found == vec![tree.query_selector("#a").unwrap()])
+        );
+        assert!(
+            matches!(evaluate(&tree, child, "ancestor-or-self::span"), XPath::Nodes(found) if found == vec![child])
+        );
+    }
+
+    #[test]
+    fn relative_parent_axes_and_union_preserve_context() {
+        let tree = Tree::parse("<section class='MuiPickersInputBase-root'><div id='field'><div class='MuiPickersSectionList-root'>01</div></div></section><button>outside</button>");
+        let field = tree.query_selector("#field").unwrap();
+        for (expression, count) in [
+            ("child::div", 1),
+            ("descendant::div", 1),
+            ("parent::section", 1),
+            ("self::div", 1),
+            ("ancestor::section", 1),
+            ("ancestor-or-self::div", 1),
+            ("descendant-or-self::div", 2),
+            ("unsupported::div", 0),
+        ] {
+            assert!(
+                matches!(evaluate(&tree, field, expression), XPath::Nodes(found) if found.len() == count),
+                "{expression}"
+            );
+        }
+        let parent = match evaluate(&tree, field, "..") {
+            XPath::Nodes(nodes) => nodes,
+            _ => unreachable!(),
+        };
+        assert_eq!(parent, vec![tree.parent(field).unwrap()]);
+        let expr = "descendant-or-self::div[contains(@class,'MuiPickersSectionList-root')] | ancestor::*[contains(@class,'MuiPickersInputBase-root')][1]//div[contains(@class,'MuiPickersSectionList-root')]";
+        let matches = match evaluate(&tree, field, expr) {
+            XPath::Nodes(nodes) => nodes,
+            _ => unreachable!(),
+        };
+        assert_eq!(matches.len(), 1);
+        assert_eq!(tree.text_content(matches[0]), "01");
+        assert!(
+            matches! (evaluate(&tree, field, "."), XPath::Nodes(nodes) if nodes == vec![field])
+        );
     }
 
     #[test]

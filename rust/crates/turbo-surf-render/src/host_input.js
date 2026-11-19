@@ -10,6 +10,7 @@
   const activeElement = Object.getOwnPropertyDescriptor(Document.prototype, "activeElement").get;
   const connected = Object.getOwnPropertyDescriptor(Node.prototype, "isConnected").get;
   const requestSubmit = HTMLFormElement.prototype.requestSubmit;
+  const click = HTMLElement.prototype.click;
   const controls = document.querySelectorAll.bind(document);
   const matches = Element.prototype.matches;
   const controlGetters = [HTMLInputElement, HTMLButtonElement].map((Constructor) =>
@@ -25,12 +26,13 @@
       (name) => [name, globalThis[name]],
     ),
   );
-  const dispatch = ops.op_dispatch_host_event;
+  const dispatch = (event, target) => ops.op_host_input_dispatch(document, event, target);
   const pointer = (command) => ops.op_host_pointer(document, command);
   const parentOf = Object.getOwnPropertyDescriptor(Node.prototype, "parentNode").get;
   const nodeTypeOf = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
   const shadowHost = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, "host").get;
-  const activate = ops.op_host_user_activation;
+  const notifyActivation = ops.op_host_user_activation;
+  const activate = () => notifyActivation(document);
   const closeRequest = ops.op_host_close_request,
     lightDismiss = ops.op_host_light_dismiss,
     backdropOf = ops.op_host_modal_backdrop,
@@ -156,24 +158,32 @@
   }
   const schedule = setTimeout.bind(globalThis),
     clear = clearTimeout.bind(globalThis);
-  const waits = new Map();
+  const waits = new Map(),
+    WaitPromise = Promise,
+    waitSet = Map.prototype.set,
+    waitDelete = Map.prototype.delete,
+    waitEach = Map.prototype.forEach,
+    waitClear = Map.prototype.clear;
   let activeRun = 0;
   const wait = (milliseconds) =>
-    new Promise((resolve) => {
+    new WaitPromise((resolve) => {
       const timer = schedule(() => {
-        waits.delete(timer);
+        apply(waitDelete, waits, [timer]);
         resolve();
       }, milliseconds);
-      waits.set(timer, resolve);
+      apply(waitSet, waits, [timer, resolve]);
     });
   const cancel = () => {
     activeRun++;
     guardedInput = null;
-    for (const [timer, resolve] of waits) {
-      clear(timer);
-      resolve();
-    }
-    waits.clear();
+    // Cleanup cannot enter guest replacements after the execution watchdog stops.
+    apply(waitEach, waits, [
+      (resolve, timer) => {
+        clear(timer);
+        resolve();
+      },
+    ]);
+    apply(waitClear, waits, []);
   };
   // The mouse pointer: the elements under it for pointer and for compatibility mouse
   // boundaries, its position (null before the first event), pressed buttons, the
@@ -235,7 +245,7 @@
   }
   // The driver installs before public geometry methods; use the captured native op.
   function targetCenter(target) {
-    const box = elementGeometry(target).bounds;
+    const box = elementGeometry(target, true).bounds;
     cursorX = box[0] + box[2] / 2;
     cursorY = box[1] + box[3] / 2;
   }
@@ -444,11 +454,41 @@
     }
     return null;
   }
-  function submit(target) {
+  const blockingImplicitStates = {
+    __proto__: null,
+    text: true,
+    search: true,
+    tel: true,
+    url: true,
+    email: true,
+    password: true,
+    date: true,
+    month: true,
+    week: true,
+    time: true,
+    "datetime-local": true,
+    number: true,
+  };
+  const implicitSubmissionStates = {
+    __proto__: null,
+    ...blockingImplicitStates,
+    checkbox: true,
+    radio: true,
+    range: true,
+  };
+  function trustedSubmitter(candidate) {
+    fire(candidate, "PointerEvent", "click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+  }
+  function untrustedSubmitter(candidate) {
+    apply(click, candidate, []);
+  }
+  function submit(target, activateSubmitter = trustedSubmitter) {
     const state = controlState(target);
-    const blocking =
-      /^(text|search|tel|url|email|password|date|month|week|time|datetime-local|number)$/;
-    if (!state || state.kind !== 0 || !blocking.test(state.type) || !state.form) return;
+    if (!state || state.kind !== 0 || !state.form || !implicitSubmissionStates[state.type]) return;
     let fields = 0;
     const candidates = controls("input,button");
     for (let index = 0; index < candidates.length; index++) {
@@ -456,15 +496,10 @@
         value = controlState(candidate);
       if (value?.form !== state.form) continue;
       if (value.type === "submit" || (value.kind === 0 && value.type === "image")) {
-        if (!apply(matches, candidate, [":disabled"]))
-          fire(candidate, "PointerEvent", "click", {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-          });
+        if (!apply(matches, candidate, [":disabled"])) activateSubmitter(candidate);
         return;
       }
-      if (value.kind === 0 && blocking.test(value.type)) fields++;
+      if (value.kind === 0 && blockingImplicitStates[value.type]) fields++;
     }
     if (fields <= 1) apply(requestSubmit, state.form, []);
   }
@@ -522,7 +557,7 @@
         // its close event is a queued task, which (like a real keyboard's inter-event gap)
         // drains before keyup. keyup then targets whatever now holds focus.
         if (down && key === "Escape") {
-          closeRequest();
+          closeRequest(document);
           await wait(0);
           if (run !== activeRun) return;
           fire(apply(activeElement, document, []), "KeyboardEvent", "keyup", init);
@@ -540,5 +575,9 @@
       throw new TypeError("Unsupported input step");
     }
   }
+  // The shim retains its existing untrusted event contract; only the Rust input
+  // capability above uses trusted dispatch. Neither callback is a page global.
+  __G.implicitSubmit = (target) => submit(target, untrustedSubmitter);
+  __G.keyboardClick = untrustedSubmitter;
   ops.op_set_host_input_driver(input, cancel);
 })();

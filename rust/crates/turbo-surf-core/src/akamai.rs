@@ -235,6 +235,7 @@ impl ChallengeSolver for AkamaiSolver {
     }
 
     async fn solve(&self, ch: &Challenge, ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         let sensor = generate_sensor_versioned(
             &SensorInput {
                 user_agent: ctx.user_agent.clone(),

@@ -11,7 +11,6 @@ use turbo_dom_parser::rtdom::cascade::{computed_style, get_property_value};
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::{DocumentExt, Tree};
 
-const ELEMENT_NODE: u8 = 1;
 const EDITABLE_TAGS: &[&str] = &["INPUT", "TEXTAREA", "SELECT"];
 
 /// Collapsed, trimmed text content.
@@ -27,14 +26,127 @@ pub fn input_value_of(tree: &Tree, h: Handle) -> String {
     tree.get_attribute(h, "value").unwrap_or("").to_string()
 }
 
-/// Not `disabled`.
+/// Native form-control disabled state plus supported ARIA disabled semantics.
 pub fn is_enabled(tree: &Tree, h: Handle) -> bool {
-    tree.get_attribute(h, "disabled").is_none()
+    !natively_disabled(tree, h) && !aria_disabled(tree, h)
 }
 
-/// Has the `checked` attribute (static model of `.checked`).
+fn natively_disabled(tree: &Tree, h: Handle) -> bool {
+    let tag = tree.tag_name(h).unwrap_or_default();
+    if ![
+        "BUTTON", "INPUT", "SELECT", "TEXTAREA", "OPTION", "OPTGROUP",
+    ]
+    .contains(&tag.as_str())
+    {
+        return false;
+    }
+    if tree.get_attribute(h, "disabled").is_some() {
+        return true;
+    }
+    let mut ancestor = tree.parent(h);
+    while let Some(parent) = ancestor {
+        let parent_tag = tree.tag_name(parent).unwrap_or_default();
+        if tag == "OPTION"
+            && parent_tag == "OPTGROUP"
+            && tree.get_attribute(parent, "disabled").is_some()
+        {
+            return true;
+        }
+        if parent_tag == "FIELDSET" && tree.get_attribute(parent, "disabled").is_some() {
+            let legend = tree
+                .children(parent)
+                .into_iter()
+                .find(|child| tree.tag_name(*child).as_deref() == Some("LEGEND"));
+            return !legend.is_some_and(|legend| descendant_of(tree, h, legend));
+        }
+        ancestor = tree.parent(parent);
+    }
+    false
+}
+
+fn descendant_of(tree: &Tree, h: Handle, ancestor: Handle) -> bool {
+    let mut node = Some(h);
+    while let Some(current) = node {
+        if current == ancestor {
+            return true;
+        }
+        node = tree.parent(current);
+    }
+    false
+}
+
+fn aria_disabled(tree: &Tree, h: Handle) -> bool {
+    const ROLES: &[&str] = &[
+        "application",
+        "button",
+        "composite",
+        "gridcell",
+        "group",
+        "input",
+        "link",
+        "menuitem",
+        "scrollbar",
+        "separator",
+        "tab",
+        "checkbox",
+        "columnheader",
+        "combobox",
+        "grid",
+        "listbox",
+        "menu",
+        "menubar",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "option",
+        "radio",
+        "radiogroup",
+        "row",
+        "rowheader",
+        "searchbox",
+        "select",
+        "slider",
+        "spinbutton",
+        "switch",
+        "tablist",
+        "textbox",
+        "toolbar",
+        "tree",
+        "treegrid",
+        "treeitem",
+    ];
+    if !ROLES.contains(&crate::aria::role_of(tree, h).as_str()) {
+        return false;
+    }
+    let mut node = Some(h);
+    while let Some(current) = node {
+        if let Some(value) = tree.get_attribute(current, "aria-disabled") {
+            if value.eq_ignore_ascii_case("true") {
+                return true;
+            }
+            if value.eq_ignore_ascii_case("false") {
+                return false;
+            }
+        }
+        node = tree.parent(current);
+    }
+    false
+}
+
+/// Native checkbox/radio or supported ARIA checked state.
 pub fn is_checked(tree: &Tree, h: Handle) -> bool {
-    tree.get_attribute(h, "checked").is_some()
+    if tree.tag_name(h).as_deref() == Some("INPUT")
+        && matches!(tree.get_attribute(h, "type"), Some("checkbox" | "radio"))
+    {
+        return tree.get_attribute(h, "checked").is_some();
+    }
+    tree.get_attribute(h, "role").is_some_and(|roles| {
+        roles.split_whitespace().any(|role| {
+            matches!(
+                role,
+                "checkbox" | "radio" | "switch" | "menuitemcheckbox" | "menuitemradio"
+            )
+        })
+    }) && tree.get_attribute(h, "aria-checked") == Some("true")
 }
 
 fn is_content_editable(tree: &Tree, h: Handle) -> bool {
@@ -56,13 +168,17 @@ pub fn is_editable(tree: &Tree, h: Handle) -> bool {
         && tree.get_attribute(h, "readonly").is_none()
 }
 
-/// `toBeEmpty`: no text and no element children.
+/// `toBeEmpty`: control value or descendant textual content is empty.
 pub fn is_empty(tree: &Tree, h: Handle) -> bool {
-    text_of(tree, h).is_empty()
-        && !tree
-            .children(h)
-            .into_iter()
-            .any(|c| tree.node_type_id(c) == ELEMENT_NODE)
+    match tree.tag_name(h).as_deref() {
+        Some("INPUT") => input_value_of(tree, h).trim().is_empty(),
+        Some("TEXTAREA") => tree
+            .get_attribute(h, "value")
+            .map_or_else(|| tree.text_content(h), str::to_string)
+            .trim()
+            .is_empty(),
+        _ => text_of(tree, h).is_empty(),
+    }
 }
 
 // An <option>'s submitted value: `value` attr, else its label text.
@@ -132,7 +248,7 @@ mod tests {
     #[test]
     fn enabled_checked_editable() {
         let tree = Tree::parse(
-            "<input id='a'><input id='b' disabled><input id='c' checked><input id='d' readonly>",
+            "<input id='a'><input id='b' disabled><input id='c' type='checkbox' checked><input id='d' readonly>",
         );
         assert!(is_enabled(&tree, first(&tree, "#a")));
         assert!(!is_enabled(&tree, first(&tree, "#b")));
@@ -141,6 +257,39 @@ mod tests {
         assert!(is_editable(&tree, first(&tree, "#a")));
         assert!(!is_editable(&tree, first(&tree, "#b"))); // disabled
         assert!(!is_editable(&tree, first(&tree, "#d"))); // readonly
+    }
+
+    #[test]
+    fn disabled_state_matches_native_and_aria_controls() {
+        let tree = Tree::parse("<div id='mui' role='combobox' aria-disabled='true'></div><div aria-disabled='true'><button id='inherited'>Save</button><div aria-disabled='false'><div id='override' role='combobox'></div></div><div id='generic'>Text</div></div><div id='attribute' disabled></div><input id='native' disabled aria-disabled='false'><div id='uppercase' role='button' aria-disabled='TRUE'></div><div id='invalid' role='button' aria-disabled='invalid'></div><fieldset disabled><legend><input id='legend'></legend><input id='fieldset'></fieldset><select><optgroup disabled><option id='option'>One</option></optgroup></select>");
+        for selector in [
+            "#mui",
+            "#inherited",
+            "#native",
+            "#uppercase",
+            "#fieldset",
+            "#option",
+        ] {
+            assert!(
+                !is_enabled(&tree, first(&tree, selector)),
+                "{selector} must be disabled"
+            );
+        }
+        for selector in ["#override", "#generic", "#attribute", "#invalid", "#legend"] {
+            assert!(
+                is_enabled(&tree, first(&tree, selector)),
+                "{selector} must be enabled"
+            );
+        }
+    }
+
+    #[test]
+    fn checked_state_requires_native_type_or_aria_role() {
+        let tree = Tree::parse("<div id='aria' role='checkbox' aria-checked='true'></div><div id='plain' checked></div><input id='text' checked><div id='mixed' role='switch' aria-checked='mixed'></div>");
+        assert!(is_checked(&tree, first(&tree, "#aria")));
+        for selector in ["#plain", "#text", "#mixed"] {
+            assert!(!is_checked(&tree, first(&tree, selector)));
+        }
     }
 
     #[test]
@@ -160,7 +309,11 @@ mod tests {
         let t2 = Tree::parse("<div id='a'>text</div>");
         assert!(!is_empty(&t2, first(&t2, "#a")));
         let t3 = Tree::parse("<div id='a'><span></span></div>");
-        assert!(!is_empty(&t3, first(&t3, "#a")));
+        assert!(is_empty(&t3, first(&t3, "#a")));
+        let controls = Tree::parse("<input id='filled' value='present'><input id='blank'><textarea id='text'>present</textarea>");
+        assert!(!is_empty(&controls, first(&controls, "#filled")));
+        assert!(is_empty(&controls, first(&controls, "#blank")));
+        assert!(!is_empty(&controls, first(&controls, "#text")));
     }
 
     #[test]

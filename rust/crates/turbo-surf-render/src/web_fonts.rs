@@ -74,7 +74,7 @@ fn document_of(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> u32
 }
 
 /// Rebuild the document's registry and hand it to this realm's canvases.
-fn changed(scope: &mut v8::PinScope, document: u32) {
+fn changed(context: v8::Local<v8::Context>, document: u32) {
     let registry = STORE.with(|store| {
         let mut store = store.borrow_mut();
         let entry = store.documents.entry(document).or_default();
@@ -88,7 +88,6 @@ fn changed(scope: &mut v8::PinScope, document: u32) {
         });
         entry.registry.clone()
     });
-    let context = scope.get_current_context();
     let fonts = registry.map_or_else(
         || crate::live_layout_backend::initialize_system_fonts().clone(),
         |registry| (*registry).clone(),
@@ -98,11 +97,14 @@ fn changed(scope: &mut v8::PinScope, document: u32) {
 
 /// A loaded face joined the document's `FontFaceSet`.
 #[op2(fast, reentrant)]
-pub(crate) fn op_font_face_attach(
-    scope: &mut v8::PinScope,
-    document: v8::Local<v8::Object>,
+pub(crate) fn op_font_face_attach<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
     face: u32,
 ) -> bool {
+    let Some(context) = crate::runtime::active_document_context(scope, document) else {
+        return false;
+    };
     let document = document_of(scope, document);
     let attached = STORE.with(|store| {
         let mut store = store.borrow_mut();
@@ -117,18 +119,21 @@ pub(crate) fn op_font_face_attach(
         true
     });
     if attached {
-        changed(scope, document);
+        changed(context, document);
     }
     attached
 }
 
 /// A face left the document's `FontFaceSet`.
 #[op2(fast, reentrant)]
-pub(crate) fn op_font_face_detach(
-    scope: &mut v8::PinScope,
-    document: v8::Local<v8::Object>,
+pub(crate) fn op_font_face_detach<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
     face: u32,
 ) -> bool {
+    let Some(context) = crate::runtime::active_document_context(scope, document) else {
+        return false;
+    };
     let document = document_of(scope, document);
     let detached = STORE.with(|store| {
         let mut store = store.borrow_mut();
@@ -138,7 +143,7 @@ pub(crate) fn op_font_face_detach(
         before != entry.faces.len()
     });
     if detached {
-        changed(scope, document);
+        changed(context, document);
     }
     detached
 }

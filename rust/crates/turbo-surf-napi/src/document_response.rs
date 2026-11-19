@@ -1,6 +1,6 @@
 use napi::{Error, Result};
 use serde::Deserialize;
-use turbo_surf_render::DocumentResponseMetadata;
+use turbo_surf_render::{AuxiliaryResourcePolicy, DocumentResponseMetadata};
 
 #[derive(Clone, Default, Deserialize)]
 #[serde(default)]
@@ -8,6 +8,23 @@ pub(crate) struct DocumentResponse {
     #[serde(flatten)]
     pub metadata: DocumentResponseMetadata,
     pub headers: Vec<(String, String)>,
+    pub viewport: Option<[u32; 2]>,
+    #[serde(rename = "hostNetworkLog")]
+    pub host_network_log: Option<u32>,
+    #[serde(rename = "auxiliaryInitScript")]
+    pub auxiliary_init_script: String,
+    #[serde(rename = "auxiliaryEngineInitScript")]
+    pub auxiliary_engine_init_script: String,
+    #[serde(rename = "pageInitScript")]
+    pub page_init_script: String,
+    #[serde(rename = "pageEngineInitScript")]
+    pub page_engine_init_script: String,
+    #[serde(rename = "auxiliaryPolicy")]
+    pub auxiliary_policy: Option<AuxiliaryResourcePolicy>,
+    #[serde(rename = "rootHistory")]
+    pub root_history: Option<turbo_surf_render::AuxiliaryDriverHistory>,
+    #[serde(rename = "retainInitialHydrationTimeout")]
+    pub retain_initial_hydration_timeout: bool,
 }
 pub(crate) fn parse(value: Option<String>) -> Result<DocumentResponse> {
     value.map_or_else(

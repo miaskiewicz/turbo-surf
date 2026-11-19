@@ -208,6 +208,7 @@ impl ChallengeSolver for RecaptchaSolver {
     }
 
     async fn solve(&self, ch: &Challenge, _ctx: &SolveContext) -> Result<SolvedToken, SolveError> {
+        crate::challenge::check_host_solver_policy()?;
         // Fetch the wall/page so we can classify the widget and hand its real markup to
         // the isolate. (Mirrors CloudflareSolver, which re-fetches the interstitial.)
         let page = self

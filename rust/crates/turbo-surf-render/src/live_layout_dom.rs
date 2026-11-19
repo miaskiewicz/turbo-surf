@@ -5,9 +5,9 @@ use crate::live_layout_composed::Composition;
 use crate::live_stylesheets::SheetSnapshot;
 use std::collections::HashSet;
 use turbo_dom_browser_env::host_internals::{
-    cascade_policy, current_document_context, current_document_id, document_id_of,
-    enter_document_of, handle_of, host_composed_children, interface_record, is_browsing_context,
-    is_connected, with_tree, wrap, Handle, Tree,
+    cascade_policy, css_effect_lifecycle, current_document_context, current_document_id,
+    document_id_of, enter_document_of, handle_of, host_composed_children, interface_record,
+    is_browsing_context, is_connected, with_tree, wrap, Handle, Tree,
 };
 
 /// The receiver a capture was taken from, so a stale capture can be taken again.
@@ -116,6 +116,58 @@ fn capture_kind<'s>(
         sheets,
         range: None,
     })
+}
+// Called only after pure native admission identifies actual animation blockers,
+// outside every live-tree borrow. Proof lives through one fresh final capture.
+pub(crate) fn observe_animation_candidates(
+    scope: &mut v8::PinScope<'_, '_>,
+    input: &NativeLayoutInput<'_>,
+    request: &crate::live_layout_resources::AnimationNeedsLifecycle,
+) -> Result<crate::live_layout_resources::CompletedAnimations, String> {
+    let _dom = enter_document_of(scope, input.document);
+    let document_id = current_document_id();
+    let mut completed = crate::live_layout_resources::CompletedAnimations::new();
+    for (&handle, names) in &request.targets {
+        if scope.is_execution_terminating() {
+            return Err("native CSS lifecycle inspection execution terminated".into());
+        }
+        let element = wrap(scope, handle);
+        let _inspection = crate::layout_profile::Timer::new(
+            scope,
+            crate::layout_profile::Stage::AnimationInspection,
+        );
+        let snapshot = css_effect_lifecycle(scope, element);
+        if scope.is_execution_terminating() {
+            return Err("native CSS lifecycle inspection execution terminated".into());
+        }
+        let Some(snapshot) = snapshot else {
+            continue;
+        };
+        if snapshot.document_id != document_id
+            || snapshot.element != handle
+            || !snapshot.allows_underlying_geometry()
+        {
+            continue;
+        }
+        let proof = if snapshot.presentation_suppressed {
+            // This producer policy suppresses all canonical effect composition,
+            // including effects scoped to shadow stylesheets. It is distinct from
+            // inferring enabled-mode completion from missing canonical names.
+            crate::live_layout_resources::AnimationGeometryProof::PresentationSuppressed
+        } else if !snapshot.animation_names.is_empty()
+            && names
+                .iter()
+                .all(|name| snapshot.animation_names.contains(name))
+        {
+            crate::live_layout_resources::AnimationGeometryProof::CompletedNonFilling(
+                snapshot.animation_names,
+            )
+        } else {
+            continue;
+        };
+        completed.insert(handle, proof);
+    }
+    Ok(completed)
 }
 /// The live tree input: a composed document gets the UA rules matched in each of
 /// its scopes and the composed tree; anything else an empty tree.

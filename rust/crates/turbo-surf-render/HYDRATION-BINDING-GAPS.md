@@ -1,4 +1,27 @@
-# browser_env gaps blocking real-SPA hydration (for turbo-test)
+# Historical browser_env hydration-gap investigation
+
+> Historical receipt from the turbo-test vendoring era. The statuses and tables
+> below describe the named old revisions, not current missing APIs or release
+> acceptance. They are retained to explain the original investigation.
+
+The current renderer consumes `turbo-dom-browser-env` as a dependency; binding
+fixes belong upstream in turbo-dom, never in a copied binding here. Native live
+layout now provides admitted geometry rather than general zero-rect stubs.
+Source/purpose-scoped animation admission permits unaffected boxes and leaf
+extents; affected queries/ancestors, animated extent descendants, nonzero scroll,
+uncertain gutters and actual point hit-tests retain strict checks. Animation
+toggling is future [v0.8.4 work (#500)](https://github.com/miaskiewicz/turbo-surf/issues/500).
+
+Current behavior and limits are documented in
+[HEADLESS-HYDRATION.md](../../HEADLESS-HYDRATION.md),
+[the shim limitations](../../playwright-shim/LIMITATIONS.md), and
+[the detection parity gaps](../../../harness/detection/PARITY-GAPS.md).
+The v0.8.3 candidate integrates fixes; this document does not establish a final
+release gate pass or a successful present-day payroll/authentication flow. The
+old attribution of an unsettled auth request to the environment below is an
+observation from that run, not proof that current engine/auth semantics are complete.
+
+## Original investigation (historical)
 
 turbo-surf's render tier runs turbo-test's `browser_env` (the rtdom↔V8 DOM
 binding; vendored when this was written, now the `turbo-dom-browser-env` crate
@@ -61,7 +84,7 @@ crash is gone.)
 React controlled components read `el.value`/`el.checked` on every render; reading
 `undefined` then doing `.toLowerCase()`/comparisons throws and kills the render.
 
-| API | Current | Expected |
+| API | Then-observed behavior | Then-proposed behavior |
 |---|---|---|
 | `input.value` (getter) | `undefined` | reflect the live value (the `value` attribute until set, then the set value). NB: the **setter works** (`el.value = x` then get returns `x`) — only the initial getter (no prior set) is missing the attribute fallback. |
 | `textarea.value` (getter) | `undefined` | text content / `value` |
@@ -75,7 +98,7 @@ React controlled components read `el.value`/`el.checked` on every render; readin
 
 Frameworks + their helpers use these to move/replace nodes during hydration.
 
-| API | Current | Expected |
+| API | Then-observed behavior | Then-proposed behavior |
 |---|---|---|
 | `Element.insertAdjacentHTML(pos, html)` | missing | parse + insert at beforebegin/afterbegin/beforeend/afterend |
 | `Element.insertAdjacentElement(pos, el)` | missing | insert node at position |
@@ -87,14 +110,14 @@ Frameworks + their helpers use these to move/replace nodes during hydration.
 
 ## MEDIUM — document state
 
-| API | Current | Expected |
+| API | Then-observed behavior | Then-proposed behavior |
 |---|---|---|
 | `document.readyState` | `undefined` | `"complete"` (the tier runs after parse) |
 | `document.visibilityState` | `undefined` | `"visible"` |
 
 ## LOW — layout/geometry stubs (no real layout, zero-rects OK)
 
-| API | Current | Expected |
+| API | Then-observed behavior | Then-proposed behavior |
 |---|---|---|
 | `Element.getClientRects()` | `undefined` | `[]` or `[zeroRect]` (mirrors the existing `getBoundingClientRect` stub) |
 | `document.elementFromPoint(x, y)` | `undefined` | `null` |

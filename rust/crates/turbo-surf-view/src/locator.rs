@@ -11,7 +11,50 @@ use turbo_dom_parser::rtdom::Tree;
 
 const ELEMENT_NODE: u8 = 1;
 
-/// Text match mode. `Exact` compares trimmed strings; `Substring` is a
+#[derive(Default, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LocatorOptions {
+    pub include_hidden: bool,
+    pub pressed: Option<bool>,
+    pub level: Option<u32>,
+    pub exact: bool,
+}
+
+fn accessibility_hidden(tree: &Tree, h: Handle) -> bool {
+    use turbo_dom_parser::rtdom::cascade::{computed_style, get_property_value};
+    let visibility = get_property_value(&computed_style(tree, h), "visibility");
+    if visibility == "hidden" || visibility == "collapse" {
+        return true;
+    }
+    let mut node = Some(h);
+    while let Some(current) = node {
+        if tree.get_attribute(current, "hidden").is_some()
+            || tree.get_attribute(current, "aria-hidden") == Some("true")
+            || get_property_value(&computed_style(tree, current), "display") == "none"
+        {
+            return true;
+        }
+        node = tree.parent(current);
+    }
+    false
+}
+
+pub fn matches_role_options(tree: &Tree, h: Handle, options: &LocatorOptions) -> bool {
+    if !options.include_hidden && accessibility_hidden(tree, h) {
+        return false;
+    }
+    if options
+        .level
+        .is_some_and(|level| crate::aria::heading_level(tree, h) != Some(level))
+    {
+        return false;
+    }
+    options.pressed.is_none_or(|pressed| {
+        tree.get_attribute(h, "aria-pressed") == Some(if pressed { "true" } else { "false" })
+    })
+}
+
+/// Text match mode. `Exact` compares whitespace-normalized strings; `Substring` is a
 /// case-insensitive `contains` (the Playwright default); `Regex` treats `want`
 /// as a `/source/flags` literal (Playwright passes `RegExp` names this way).
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -26,8 +69,15 @@ pub fn is_regex_literal(want: &str) -> bool {
     want.len() >= 2 && want.starts_with('/') && want[1..].rfind('/').is_some()
 }
 
+#[cfg(test)]
+thread_local! {
+    static REGEX_COMPILES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `/source/flags` → compiled `Regex` (`i` flag honored via inline `(?i)`).
 fn compile_regex_literal(want: &str) -> Option<regex::Regex> {
+    #[cfg(test)]
+    REGEX_COMPILES.with(|count| count.set(count.get() + 1));
     let body = want.strip_prefix('/')?;
     let last = body.rfind('/')?;
     let (src, flags) = (&body[..last], &body[last + 1..]);
@@ -41,11 +91,42 @@ fn compile_regex_literal(want: &str) -> Option<regex::Regex> {
 
 /// Does `value` match `want` under `mode` (after trimming)?
 pub fn text_match(value: &str, want: &str, mode: TextMode) -> bool {
-    let v = value.trim();
-    match mode {
-        TextMode::Exact => v == want,
-        TextMode::Substring => v.to_lowercase().contains(&want.to_lowercase()),
-        TextMode::Regex => compile_regex_literal(want).is_some_and(|re| re.is_match(v)),
+    TextMatcher::new(want, mode).matches(value)
+}
+
+/// A compiled text matcher: built once per query, reused across candidates.
+/// Per-candidate compilation made regex names quadratic-scale (the regex is
+/// built in every comparison otherwise).
+pub struct TextMatcher {
+    want: String,
+    mode: TextMode,
+    re: Option<regex::Regex>,
+}
+
+impl TextMatcher {
+    pub fn new(want: &str, mode: TextMode) -> Self {
+        let re = match mode {
+            TextMode::Regex => compile_regex_literal(want),
+            _ => None,
+        };
+        Self {
+            want: if mode == TextMode::Exact {
+                want.split_whitespace().collect::<Vec<_>>().join(" ")
+            } else {
+                want.to_string()
+            },
+            mode,
+            re,
+        }
+    }
+
+    pub fn matches(&self, value: &str) -> bool {
+        let v = value.trim();
+        match self.mode {
+            TextMode::Exact => v.split_whitespace().eq(self.want.split_whitespace()),
+            TextMode::Substring => v.to_lowercase().contains(&self.want.to_lowercase()),
+            TextMode::Regex => self.re.as_ref().is_some_and(|re| re.is_match(v)),
+        }
     }
 }
 
@@ -62,41 +143,67 @@ fn push_unique(out: &mut Vec<Handle>, seen: &mut HashSet<Handle>, h: Handle) {
 /// `getByRole(role, name?)` — elements whose resolved ARIA role equals `role`,
 /// optionally filtered by accessible-name match.
 pub fn by_role(tree: &Tree, role: &str, name: Option<(&str, TextMode)>) -> Vec<Handle> {
+    let matcher = name.map(|(want, mode)| TextMatcher::new(want, mode));
     all_elements(tree)
         .into_iter()
         .filter(|&h| role_of(tree, h) == role)
-        .filter(|&h| match name {
-            Some((want, mode)) => text_match(&accessible_name(tree, h), want, mode),
+        .filter(|&h| match matcher {
+            Some(ref matcher) => matcher.matches(&accessible_name(tree, h)),
             None => true,
         })
         .collect()
 }
 
-fn has_matching_child(tree: &Tree, h: Handle, want: &str, mode: TextMode) -> bool {
+/// Resolve roles only within the selected subtrees, preserving document order.
+pub fn by_role_in(
+    tree: &Tree,
+    roots: &[Handle],
+    role: &str,
+    name: Option<(&str, TextMode)>,
+) -> Vec<Handle> {
+    let matcher = name.map(|(want, mode)| TextMatcher::new(want, mode));
+    let mut candidates = HashSet::new();
+    for &root in roots {
+        candidates.insert(root);
+        candidates.extend(tree.descendants(root));
+    }
+    all_elements(tree)
+        .into_iter()
+        .filter(|h| candidates.contains(h))
+        .filter(|&h| role_of(tree, h) == role)
+        .filter(|&h| {
+            matcher
+                .as_ref()
+                .is_none_or(|matcher| matcher.matches(&accessible_name(tree, h)))
+        })
+        .collect()
+}
+
+fn has_matching_child(tree: &Tree, h: Handle, matcher: &TextMatcher) -> bool {
     tree.descendants(h)
         .into_iter()
         .filter(|&c| tree.node_type_id(c) == ELEMENT_NODE)
-        .any(|c| text_match(&text_of(tree, c), want, mode))
+        .any(|c| matcher.matches(&text_of(tree, c)))
 }
 
 /// `getByText(want)` — innermost elements whose text matches and which have no
 /// matching descendant (so the deepest holder wins).
 pub fn by_text(tree: &Tree, want: &str, mode: TextMode) -> Vec<Handle> {
+    let matcher = TextMatcher::new(want, mode);
     all_elements(tree)
         .into_iter()
-        .filter(|&h| {
-            text_match(&text_of(tree, h), want, mode) && !has_matching_child(tree, h, want, mode)
-        })
+        .filter(|&h| matcher.matches(&text_of(tree, h)) && !has_matching_child(tree, h, &matcher))
         .collect()
 }
 
 /// `getByAttr(attr, want)` — elements with `attr` whose value matches.
 pub fn by_attr_text(tree: &Tree, attr: &str, want: &str, mode: TextMode) -> Vec<Handle> {
+    let matcher = TextMatcher::new(want, mode);
     tree.query_selector_all(&format!("[{attr}]"))
         .iter()
         .copied()
         .filter(|&h| match tree.get_attribute(h, attr) {
-            Some(v) => text_match(v, want, mode),
+            Some(v) => matcher.matches(v),
             None => unreachable!("the [attr] selector only matches elements with {attr}"),
         })
         .collect()
@@ -139,16 +246,17 @@ fn first_descendant_control(tree: &Tree, h: Handle) -> Option<Handle> {
 /// `getByLabel(want)` — controls labelled by a matching `<label>` (for=/wrapped/
 /// aria-labelledby), plus controls whose own `aria-label` matches.
 pub fn by_label(tree: &Tree, want: &str, mode: TextMode) -> Vec<Handle> {
+    let matcher = TextMatcher::new(want, mode);
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for label in tree.query_selector_all("label").iter() {
-        if text_match(&tree.text_content(*label), want, mode) {
+        if matcher.matches(&tree.text_content(*label)) {
             collect_label_targets(tree, *label, &mut out, &mut seen);
         }
     }
     for el in tree.query_selector_all("[aria-label]").iter() {
         if let Some(v) = tree.get_attribute(*el, "aria-label") {
-            if text_match(v, want, mode) {
+            if matcher.matches(v) {
                 push_unique(&mut out, &mut seen, *el);
             }
         }
@@ -241,5 +349,82 @@ mod tests {
         // for= and aria-label both point at the same control → counted once.
         let tree = Tree::parse("<label for='e'>Email</label><input id='e' aria-label='Email'>");
         assert_eq!(by_label(&tree, "Email", Exact).len(), 1);
+    }
+    #[test]
+    fn scoped_roles_preserve_order_and_empty_roots() {
+        let tree = Tree::parse("<button id='outside'>Hit</button><div id='scope'><button id='a'>Hit</button><div id='inner'><button id='b'>Hit</button></div></div>");
+        let roots = tree.query_selector_all("#scope, #inner");
+        let hits = by_role_in(&tree, &roots, "button", Some(("Hit", Exact)));
+        assert_eq!(
+            hits.iter()
+                .map(|&h| tree.get_attribute(h, "id").unwrap())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        assert!(by_role_in(&tree, &[], "button", None).is_empty());
+        let root = tree.query_selector_all("#a");
+        assert_eq!(by_role_in(&tree, &root, "button", None), root.to_vec());
+    }
+    #[test]
+    fn role_options_distinguish_accessibility_hidden_and_pressed_states() {
+        let tree = Tree::parse("<button id='yes' aria-pressed='true'>Toggle</button><button id='no' aria-pressed='false'>Toggle</button><button id='transparent' style='opacity:0'>visible</button><div aria-hidden='true'><button id='aria'>hidden</button></div><div style='display:none'><button id='css'>hidden</button></div><button id='hidden' hidden>hidden</button>");
+        let options = LocatorOptions {
+            pressed: Some(true),
+            ..Default::default()
+        };
+        assert!(matches_role_options(
+            &tree,
+            tree.get_element_by_id("yes").unwrap(),
+            &options
+        ));
+        assert!(!matches_role_options(
+            &tree,
+            tree.get_element_by_id("no").unwrap(),
+            &options
+        ));
+        assert!(matches_role_options(
+            &tree,
+            tree.get_element_by_id("transparent").unwrap(),
+            &LocatorOptions::default()
+        ));
+        for id in ["aria", "css", "hidden"] {
+            let node = tree.get_element_by_id(id).unwrap();
+            assert!(!matches_role_options(
+                &tree,
+                node,
+                &LocatorOptions::default()
+            ));
+            assert!(matches_role_options(
+                &tree,
+                node,
+                &LocatorOptions {
+                    include_hidden: true,
+                    ..Default::default()
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn exact_text_matching_normalizes_whitespace_without_substring_matches() {
+        assert!(text_match(
+            "  Hello \n world  ",
+            " Hello world ",
+            TextMode::Exact
+        ));
+        assert!(!text_match("Payroll export", "Payroll", TextMode::Exact));
+        let tree = Tree::parse("<label for='a'>Employee name</label><input id='a'><label for='b'>Employee name extra</label><input id='b'>");
+        assert_eq!(
+            by_label(&tree, "Employee name", TextMode::Exact),
+            vec![tree.get_element_by_id("a").unwrap()]
+        );
+    }
+
+    #[test]
+    fn role_regex_compiles_once_per_query() {
+        let tree = Tree::parse(&"<button>Hit</button>".repeat(100));
+        REGEX_COMPILES.with(|count| count.set(0));
+        assert_eq!(by_role(&tree, "button", Some(("/Hit/", Regex))).len(), 100);
+        REGEX_COMPILES.with(|count| assert_eq!(count.get(), 1));
     }
 }

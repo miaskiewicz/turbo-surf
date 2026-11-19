@@ -9,6 +9,145 @@ use turbo_surf_render::{
     DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
 };
 
+#[test]
+fn page_diagnostics_use_stderr_and_preserve_stdio_protocol_output() {
+    const CHILD: &str = "TURBO_SURF_DIAGNOSTIC_STREAM_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(render_hydrate(
+                "<body><script>console.log('surf-console-stream-marker');setTimeout(()=>{throw Error('surf-timer-stream-marker')},0);throw Error('surf-script-stream-marker')</script></body>",
+                "https://example.test/",
+            ))
+            .unwrap();
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "page_diagnostics_use_stderr_and_preserve_stdio_protocol_output",
+        ])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for marker in [
+        "surf-console-stream-marker",
+        "surf-script-stream-marker",
+        "surf-timer-stream-marker",
+    ] {
+        assert!(
+            !stdout.contains(marker),
+            "page output corrupted stdout: {stdout}"
+        );
+        assert!(
+            stderr.contains(marker),
+            "missing stderr diagnostic {marker}: {stderr}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn deferred_classics_download_concurrently_and_execute_in_document_order() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let counters = (requests.clone(), active.clone(), peak.clone());
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let (requests, active, peak) = counters.clone();
+            tokio::spawn(async move {
+                let mut buffer = [0; 4096];
+                let count = stream.read(&mut buffer).await.unwrap();
+                let request = String::from_utf8_lossy(&buffer[..count]);
+                let path = request.split_whitespace().nth(1).unwrap();
+                let index: usize = path.trim_matches('/').parse().unwrap();
+                requests.fetch_add(1, Ordering::SeqCst);
+                peak.fetch_max(active.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                // A barrier measures overlap without asserting wall-clock performance.
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+                    while requests.load(Ordering::SeqCst) < 3 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await;
+                tokio::time::sleep(std::time::Duration::from_millis((2 - index) as u64 * 20)).await;
+                let body =
+                    format!("order.push({index});document.body.dataset.order=order.join(',');");
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).await.unwrap();
+                active.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    });
+    let html = render_hydrate(
+        "<head><script>window.order=[]</script><script defer src=/0></script><script defer src=/1></script><script defer src=/2></script></head><body></body>",
+        &format!("http://127.0.0.1:{port}/"),
+    )
+    .await
+    .unwrap();
+    server.abort();
+    assert!(html.contains("data-order=\"0,1,2\""), "{html}");
+    assert_eq!(requests.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        3,
+        "deferred downloads must overlap"
+    );
+}
+
+#[tokio::test]
+async fn idle_scalar_evaluations_do_not_scan_the_dom_signature() {
+    let mut session = PageSession::open(
+        &format!("<body>{}</body>", "<input value=abc>".repeat(5000)),
+        "https://example.test/",
+        "",
+        "",
+        DEFAULT_RENDER_BUDGET_MS,
+    )
+    .await
+    .unwrap();
+    session
+        .eval_engine("const original=__tsNs.domSig;globalThis.signatureScans=0;__tsNs.domSig=()=>{signatureScans++;return original()};")
+        .await
+        .unwrap();
+    session
+        .eval("signatureScans=0;globalThis.__RESULT=42")
+        .await
+        .unwrap();
+    assert_eq!(
+        session
+            .eval_expression("String(signatureScans)")
+            .await
+            .unwrap(),
+        "0",
+        "genuinely idle evaluations do not need a settling heuristic"
+    );
+    session
+        .eval("setTimeout(()=>{document.querySelector('input').value='updated'},0)")
+        .await
+        .unwrap();
+    assert_eq!(
+        session
+            .eval_expression("document.querySelector('input').value")
+            .await
+            .unwrap(),
+        "updated",
+        "pending timer work still settles before returning"
+    );
+}
+
 // The deno_core `Deno` global must NOT leak to page scope — `'Deno' in window` /
 // `typeof window.Deno` is the single most-checked browserless/electron tell. Bootstrap
 // captures the op table into closures then deletes the global. This also exercises the
@@ -2752,7 +2891,7 @@ async fn live_session_opens_best_effort_on_budget_exceed() {
         document.getElementById('root').appendChild(m);
       </script>
       <script>while (true) {}</script></body>"#;
-    let session = PageSession::open(html, "https://app.test/", "", "", 300)
+    let mut session = PageSession::open(html, "https://app.test/", "", "", 300)
         .await
         .expect("open() must succeed best-effort on a budget-exceed");
     let out = session.serialize();
@@ -3199,11 +3338,10 @@ async fn createobjecturl_anchor_download_is_captured() {
         download["filename"], "template.csv",
         "download filename must be captured: {out}"
     );
-    assert!(
-        download["content"]
-            .as_str()
-            .is_some_and(|c| c.contains("a,b,c")),
-        "download blob content must be captured: {out}"
+    assert_eq!(
+        download["bodyBytes"],
+        serde_json::json!(b"a,b,c\n1,2,3".to_vec()),
+        "download blob bytes must be captured exactly: {out}"
     );
 }
 
@@ -4688,21 +4826,23 @@ async fn frame_navigation_retains_the_old_blank_realm_without_exposing_the_repla
         oldWindow.setTimeout(()=>parent.document.body.setAttribute('data-old-timer','ran'),100000);
         window.onmessage=e=>{{if(!e.data.loaded)return;
           const current=frame.contentWindow;
-          let blocked=false;try{{current.document.body}}catch(error){{blocked=/SecurityError|denied|access/i.test(error.name+' '+error.message)}}
-          document.body.setAttribute('data-blocked',String(blocked));
+          const denied=read=>{{try{{read();return false;}}catch(error){{return /SecurityError|TypeError|EvalError/.test(error.name);}}}};
+          document.body.setAttribute('data-blocked',String(denied(()=>current.document.body)));
+          document.body.setAttribute('data-old-window-denied',String(denied(()=>oldWindow.document)));
           document.body.setAttribute('data-identity',String(oldWindow===current));
-          document.body.setAttribute('data-old-document',String(oldWindow.document===oldDocument && oldDocument.body.getAttribute('data-retained')==='old'));
-          document.body.setAttribute('data-old-function',String(oldFunction('return globalThis.remoteSecret')()===undefined));
+          document.body.setAttribute('data-old-document',String(oldDocument.defaultView===null && oldDocument.body.getAttribute('data-retained')==='old'));
+          document.body.setAttribute('data-old-function',String(denied(()=>oldFunction('return 73')())));
           oldDocument.body.setAttribute('data-mutated','old-again');
           const script=oldDocument.createElement('script');script.textContent="parent.document.body.setAttribute('data-old-script','ran')";oldDocument.body.appendChild(script);
-          const retiredChild=oldFunction("return document.body.appendChild(document.createElement('iframe')).contentWindow")()===null;
+          const retiredChild=oldDocument.body.appendChild(oldDocument.createElement('iframe')).contentWindow===null;
           document.body.setAttribute('data-retired-child',String(retiredChild));
-          document.body.setAttribute('data-new-isolation',String(oldFunction('return globalThis.document.body.getAttribute("data-secret")')()===null));
+          document.body.setAttribute('data-new-isolation',String(oldDocument.body.getAttribute('data-secret')===null));
         }};
         frame.src='http://127.0.0.1:{port}/child';
     "#)).await.unwrap();
     for key in [
         "blocked",
+        "old-window-denied",
         "old-document",
         "old-function",
         "new-isolation",
@@ -4713,9 +4853,9 @@ async fn frame_navigation_retains_the_old_blank_realm_without_exposing_the_repla
             "{key}: {html}"
         );
     }
-    // Stable WindowProxy identity is an explicit remaining gap; old globals are
-    // isolated and retained rather than being repurposed for a new origin.
-    assert!(html.contains("data-identity=\"false\""), "{html}");
+    // Chrome retains the WindowProxy, while the old document loses its Window
+    // and its saved Function constructor cannot execute retired-realm code.
+    assert!(html.contains("data-identity=\"true\""), "{html}");
     assert!(!html.contains("data-old-timer"), "{html}");
     assert!(!html.contains("data-old-script"), "{html}");
 }
@@ -5108,4 +5248,83 @@ fn runaway_script_stops_when_budget_expires_during_setup() {
             "budget {budget}ms got: {err}"
         );
     }
+}
+
+#[tokio::test]
+async fn host_viewport_resize_updates_geometry_media_and_events_without_guest_authority() {
+    let mut page = PageSession::open(
+        "<style>#target{width:220px;height:20px}@media(max-width:600px){#target{width:80px}}</style><div id=target></div><script>globalThis.resizeCount=0;addEventListener('resize',()=>resizeCount++);</script>",
+        "https://viewport.test/", "", "", 5000,
+    ).await.unwrap();
+    page.set_viewport(375, 812).await.unwrap();
+    let actual = page.eval_engine_expression("JSON.stringify([innerWidth,innerHeight,matchMedia('(max-width:600px)').matches,document.getElementById('target').getBoundingClientRect().width,resizeCount])").await.unwrap();
+    assert_eq!(actual, "[375,812,true,80,1]");
+    page.set_viewport(375, 812).await.unwrap();
+    assert_eq!(
+        page.eval_engine_expression("String(resizeCount)")
+            .await
+            .unwrap(),
+        "1"
+    );
+    assert!(page.set_viewport(0, 812).await.is_err());
+    page.set_viewport(1280, 800).await.unwrap();
+    assert_eq!(page.eval_engine_expression("JSON.stringify([innerWidth,matchMedia('(max-width:600px)').matches,document.getElementById('target').getBoundingClientRect().width,resizeCount])").await.unwrap(), "[1280,false,220,2]");
+    page.close();
+}
+
+#[test]
+fn set_content_host_handoff_keeps_realm_and_runs_parser_lifecycle() {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let mut session = PageSession::open("<div id='target'>old</div>", "https://content.test/", "", "", 3000).await.unwrap();
+        session.eval("globalThis.savedDocument=document;globalThis.savedPrototype=HTMLElement.prototype;globalThis.oldNode=document.querySelector('#target');globalThis.contentOrder=[];customElements.define('content-check',class extends HTMLElement{constructor(){super();contentOrder.push('construct:'+document.querySelector('#target').textContent)}connectedCallback(){contentOrder.push('connected:'+this.isConnected)}});document.addEventListener('DOMContentLoaded',()=>contentOrder.push('dcl'));window.addEventListener('load',()=>contentOrder.push('load')); ").await.unwrap();
+        session.set_content("<style>#target{color:rgb(11,22,33)}</style><div id='target'>new</div><content-check></content-check><script>contentOrder.push('script');globalThis.contentMarker=44</script>", "load", Some(3000)).await.unwrap();
+        assert_eq!(session.eval_expression("JSON.stringify({same:savedDocument===document,prototype:savedPrototype===HTMLElement.prototype,detached:!oldNode.isConnected&&oldNode.ownerDocument===document,custom:document.querySelector('content-check') instanceof customElements.get('content-check'),marker:globalThis.contentMarker,state:document.readyState,color:getComputedStyle(document.querySelector('#target')).color,order:contentOrder})").await.unwrap(), r#"{"same":true,"prototype":true,"detached":true,"custom":true,"marker":44,"state":"complete","color":"rgb(11, 22, 33)","order":["construct:new","connected:true","script","dcl","load"]}"#);
+        session.set_content("<p>again</p><script>contentMarker++</script>", "networkidle", Some(3000)).await.unwrap();
+        assert_eq!(session.eval_expression("JSON.stringify({marker:contentMarker,loads:contentOrder.filter(value=>value==='load').length,same:savedDocument===document})").await.unwrap(), r#"{"marker":45,"loads":2,"same":true}"#);
+        assert!(session.set_content("ignored", "unsupported", None).await.unwrap_err().contains("waitUntil"));
+        session.close();
+    });
+}
+
+#[tokio::test]
+async fn engine_reads_are_synchronous_bounded_and_preserve_the_live_document() {
+    let mut session = PageSession::open(
+        "<body><button>one</button></body>",
+        "https://example.test/",
+        "",
+        "",
+        150,
+    )
+    .await
+    .unwrap();
+    assert_eq!(session.read_engine("globalThis.readTimer = false; setTimeout(() => { readTimer = true; }, 0); document.querySelector('button').textContent='two'; return {text: document.querySelector('button').textContent, timer: readTimer, helper: typeof __tsNs.tcQuerySelector};").unwrap(), r#"{"text":"two","timer":false,"helper":"function"}"#);
+    assert!(session
+        .read_engine("return Promise.resolve(1)")
+        .unwrap_err()
+        .contains("synchronous"));
+    assert!(session
+        .read_engine("while (true) {}")
+        .unwrap_err()
+        .contains("budget"));
+    assert_eq!(
+        session
+            .read_engine("return document.querySelector('button').textContent")
+            .unwrap(),
+        "\"two\""
+    );
+    session.close();
+}
+
+#[test]
+fn scoped_css_nesting_in_shadow_styles_preserves_document_visibility_and_cssom() {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let html = r#"<!doctype html><body><input id=entry><div id=overlay></div><script>
+        const root = document.querySelector('#overlay').attachShadow({mode:'open'});
+        root.innerHTML = `<style>:host { display:block; width:100px; @media print { display:none; } } .mark, #absent { width:30px; & > .icon { width:20px; height:8px; } @supports(display:block) { & > .icon { height:9px; } } } #inside { width:40px; }</style><div class=mark><div id=inside class=icon></div></div>`;
+        </script>"#;
+        let mut page = PageSession::open(html, "https://nesting.test/", "", "", 5000).await.unwrap();
+        let result = page.eval_expression(r#"JSON.stringify((() => { const host=document.querySelector('#overlay'); const root=host.shadowRoot; const child=root.querySelector('#inside'); return {entry:getComputedStyle(document.querySelector('#entry')).visibility,host:getComputedStyle(host).display,width:getComputedStyle(child).width,height:getComputedStyle(child).height,nested:root.querySelector('style').sheet.cssRules[0].cssRules.length}; })())"#).await.unwrap();
+        assert_eq!(result, r#"{"entry":"visible","host":"block","width":"20px","height":"9px","nested":1}"#);
+        page.close();
+    });
 }

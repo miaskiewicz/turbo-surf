@@ -2,6 +2,8 @@
 
 ## [0.8.5] - 2026-11-19
 
+- Reuse observed fulfilled and rejected Promise states in native async-work bookkeeping, avoiding repeated V8 reads while retaining live checks for pending and unknown Promises.
+
 - Preserve executable permissions for native npm CLI binaries on macOS and Linux before creating the platform tarballs.
 - Reject non-executable Unix binaries in archive validation, and run extracted/installed smoke tests without repairing permissions.
 - Finish observed default/load navigation at the actual document load milestone while retaining background requests and their later DOM updates. Initial host callbacks retain the original caller deadline and document ownership; Rust/MCP hydration and later interaction quiescence remain unchanged.

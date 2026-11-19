@@ -49,9 +49,23 @@ struct Node {
     parent: Option<u32>,
     reacted: bool,
     terminal: Cell<Option<TerminalPromiseState>>,
+    #[cfg(test)]
+    native_state_observations: Cell<usize>,
 }
 
 impl Node {
+    fn observe_native_state(&self, promise: v8::Local<v8::Promise>) -> v8::PromiseState {
+        if let Some(terminal) = self.terminal.get() {
+            return terminal.native();
+        }
+        #[cfg(test)]
+        self.native_state_observations
+            .set(self.native_state_observations.get() + 1);
+        let state = promise.state();
+        self.observe_terminal(&state);
+        state
+    }
+
     fn observe_terminal(&self, state: &v8::PromiseState) {
         if let Some(terminal) = TerminalPromiseState::observed(state) {
             self.terminal.set(Some(terminal));
@@ -136,8 +150,10 @@ impl PromiseWork {
             parent: None,
             reacted: false,
             terminal: Cell::new(None),
+            #[cfg(test)]
+            native_state_observations: Cell::new(0),
         });
-        node.observe_terminal(&promise.state());
+        node.observe_native_state(promise);
         Some(id)
     }
 
@@ -226,10 +242,11 @@ impl PromiseWork {
 
     fn state(&self, scope: &mut v8::PinScope, node: u32) -> Option<v8::PromiseState> {
         let node = self.nodes.get(&node)?;
+        if let Some(terminal) = node.terminal.get() {
+            return Some(terminal.native());
+        }
         if let Some(promise) = node.promise.to_local(scope) {
-            let state = promise.state();
-            node.observe_terminal(&state);
-            return Some(state);
+            return Some(node.observe_native_state(promise));
         }
         // Queued reactions may outlive their collected parent. Only an actual
         // native terminal observation survives; pending/unseen parents stay unknown.
@@ -377,3 +394,7 @@ impl PromiseWork {
         self.nodes.retain(|id, _| keep.contains(id));
     }
 }
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "work_terminal_cache_tests.rs"]
+mod terminal_cache_tests;

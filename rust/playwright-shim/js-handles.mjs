@@ -6,6 +6,8 @@ import {
   encodeEvaluationError,
   decodeEvaluationError,
   evaluationArgument,
+  safeStringifyEnvelope,
+  safeStringifyTuple,
 } from "./evaluation-codec.mjs";
 const native = createRequire(import.meta.url)("../crates/turbo-surf-napi/index.js");
 const states = new WeakMap();
@@ -100,7 +102,11 @@ export async function handleEvaluation(owner, script, arg, retain = false) {
   const resultExpression = retain
     ? `({id:__tsNs.remoteHandleRetain(owner,value),kind:value instanceof owner.Element?'element':'value'})`
     : `(${encodeEvaluationValue.toString()})(value)`;
-  const body = `(async()=>{try{const owner=${window};const value=await (${evaluator})(${argument});return JSON.stringify({value:${resultExpression}});}catch(error){return JSON.stringify({error:(${encodeEvaluationError.toString()})(error)});}})()`;
+  // `#531`: serialize the `{value}` / `{error}` envelope without `JSON.stringify`,
+  // so a guest that set `Object.prototype.toJSON` or `Array.prototype.toJSON`
+  // cannot corrupt the host's wire. Both helpers are inlined into the body; the
+  // envelope helper references `safeStringifyTuple` by name through this scope.
+  const body = `(async()=>{const safeStringifyTuple=${safeStringifyTuple.toString()};const safeStringifyEnvelope=${safeStringifyEnvelope.toString()};try{const owner=${window};const value=await (${evaluator})(${argument});return safeStringifyEnvelope("value",${resultExpression});}catch(error){return safeStringifyEnvelope("error",(${encodeEvaluationError.toString()})(error));}})()`;
   const raw = page._mergedBindings().size
     ? await page._evaluateWithBindings(body)
     : await native.liveEvalEngineExpression(page._session, body);

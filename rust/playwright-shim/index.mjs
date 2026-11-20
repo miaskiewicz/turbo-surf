@@ -48,6 +48,8 @@ import {
   encodeEvaluationError,
   encodeEvaluationValue,
   evaluationArgument,
+  safeStringifyEnvelope,
+  safeStringifyTuple,
 } from "./evaluation-codec.mjs";
 import { makeKeyboard } from "./keyboard.mjs";
 import { scheduleBindingDrain, throwBindingDrainError } from "./binding-drain.mjs";
@@ -2141,17 +2143,22 @@ class Frame {
       return this._parentPage._evaluateWithBindings(expression);
     const raw = await native.liveEvalExpression(
       this._session,
+      // #531: encode the envelope without `JSON.stringify` so guest toJSON hooks
+      // on `Object.prototype` / `Array.prototype` cannot corrupt the wire. Same
+      // tuple+envelope helpers are inlined into every guest-side return site.
       `(async () => {
+      const safeStringifyTuple = ${safeStringifyTuple.toString()};
+      const safeStringifyEnvelope = ${safeStringifyEnvelope.toString()};
       try {
         const value = await (${expression});
-        return JSON.stringify({ok:true, value: (${encodeEvaluationValue.toString()})(value)});
-      } catch(error) { return JSON.stringify({ok:false, error: (${encodeEvaluationError.toString()})(error)}); }
+        return safeStringifyEnvelope("value", (${encodeEvaluationValue.toString()})(value));
+      } catch(error) { return safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error)); }
     })()`,
     );
     await this._parentPage._refreshFromSession();
     await this._parentPage._drainBindings();
     const result = JSON.parse(raw);
-    if (!result.ok) throw decodeEvaluationError(result.error);
+    if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
   }
   async content() {
@@ -2779,15 +2786,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const id = (this._bindingEvalId = (this._bindingEvalId ?? 0) + 1);
     await native.liveEvalEngine(
       this._session,
+      // #531: use the toJSON-free envelope/tuple serializer.
       `(() => {
+      const safeStringifyTuple = ${safeStringifyTuple.toString()};
+      const safeStringifyEnvelope = ${safeStringifyEnvelope.toString()};
       const bag = __tsNs.shimBindings;
       bag.evaluations[${id}] = null;
       Promise.resolve().then(() => (${body})).then(
         value => {
-          try { bag.evaluations[${id}] = JSON.stringify({value: (${encodeEvaluationValue.toString()})(value)}); }
-          catch (error) { bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); }
+          try { bag.evaluations[${id}] = safeStringifyEnvelope("value", (${encodeEvaluationValue.toString()})(value)); }
+          catch (error) { bag.evaluations[${id}] = safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error)); }
         },
-        error => {bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)});});
+        error => {bag.evaluations[${id}] = safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error));});
     })()`,
     );
     const deadline = Date.now() + 5000;
@@ -4127,9 +4137,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const tracked = JSON.parse(
       await native.liveEvalExpressionTracked(
         this._session,
-        `(async () => { try {
-        return JSON.stringify({value: (${encodeEvaluationValue.toString()})(await (${body}))});
-      } catch(error) { return JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); } })()`,
+        // #531: envelope without JSON.stringify, so guest toJSON hooks don't bite.
+        `(async () => {
+        const safeStringifyTuple = ${safeStringifyTuple.toString()};
+        const safeStringifyEnvelope = ${safeStringifyEnvelope.toString()};
+        try {
+          return safeStringifyEnvelope("value", (${encodeEvaluationValue.toString()})(await (${body})));
+        } catch(error) { return safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error)); } })()`,
       ),
     );
     // The authored result is settled; metadata must not wait for unrelated page work.

@@ -1,3 +1,43 @@
+// A toJSON-free serializer for the explicit-tag tuple shape below (#531, split
+// from #527). `JSON.stringify` invokes `value.toJSON()` by spec, so a guest that
+// sets `Object.prototype.toJSON` or `Array.prototype.toJSON` can corrupt the
+// result envelope the host relies on. The encoded tuple is finite: strings,
+// finite numbers, booleans, null, nested arrays of the same. This hand-written
+// encoder covers that shape without calling any guest-reachable method — valid
+// only for the output of `encodeEvaluationValue`, not general values.
+export function safeStringifyTuple(value) {
+  if (value === null) return "null";
+  if (value === true) return "true";
+  if (value === false) return "false";
+  const kind = typeof value;
+  if (kind === "number") return Number.isFinite(value) ? String(value) : "null";
+  if (kind === "string") {
+    let out = '"';
+    for (let i = 0; i < value.length; i++) {
+      const c = value.charCodeAt(i);
+      if (c === 0x22) out += '\\"';
+      else if (c === 0x5c) out += "\\\\";
+      else if (c === 0x08) out += "\\b";
+      else if (c === 0x09) out += "\\t";
+      else if (c === 0x0a) out += "\\n";
+      else if (c === 0x0c) out += "\\f";
+      else if (c === 0x0d) out += "\\r";
+      else if (c < 0x20 || c === 0x7f) out += `\\u${c.toString(16).padStart(4, "0")}`;
+      else out += value[i];
+    }
+    return out + '"';
+  }
+  if (Array.isArray(value)) {
+    let out = "[";
+    for (let i = 0; i < value.length; i++) {
+      if (i > 0) out += ",";
+      out += safeStringifyTuple(value[i]);
+    }
+    return out + "]";
+  }
+  throw new TypeError("safeStringifyTuple: unencodable value");
+}
+
 // The bridge carries strings; explicit tags preserve values JSON would erase.
 export function encodeEvaluationValue(value, references = new Map()) {
   if (value === undefined || typeof value === "function" || typeof value === "symbol")
@@ -61,6 +101,23 @@ export function encodeEvaluationError(error) {
     message: String(error?.message ?? error),
     stack: typeof error?.stack === "string" ? error.stack : undefined,
   };
+}
+
+// Serialize the `{value: ...}` / `{error: ...}` envelope the guest sends back
+// to the host without invoking `JSON.stringify` — guest `Object.prototype.toJSON`
+// or `Array.prototype.toJSON` hooks would corrupt the wire otherwise. The value
+// payload is the tuple output of `encodeEvaluationValue`; the error payload is
+// the plain-string object from `encodeEvaluationError`.
+export function safeStringifyEnvelope(key, payload) {
+  if (key === "value") return '{"value":' + safeStringifyTuple(payload) + "}";
+  if (key === "error") {
+    const err = payload;
+    let out = '{"error":{"name":' + safeStringifyTuple(err.name);
+    out += ',"message":' + safeStringifyTuple(err.message);
+    if (err.stack !== undefined) out += ',"stack":' + safeStringifyTuple(err.stack);
+    return out + "}}";
+  }
+  throw new TypeError("safeStringifyEnvelope: unknown key " + key);
 }
 
 export function decodeEvaluationError(value) {

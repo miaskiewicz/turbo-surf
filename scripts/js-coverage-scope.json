@@ -47,6 +47,7 @@
     "rust/playwright-shim/screenshot-test-utils.mjs",
     "rust/playwright-shim/storage-state.mjs",
     "rust/playwright-shim/target-network-idle.mjs",
+    "rust/playwright-shim/test-output.mjs",
     "rust/playwright-shim/visible-selector.mjs",
     "rust/playwright-shim/xhr-body-fixture.mjs"
   ],

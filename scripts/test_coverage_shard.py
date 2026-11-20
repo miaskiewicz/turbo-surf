@@ -52,9 +52,17 @@ class ShardTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 SHARD.parse(bad)
 
+    def test_unchunked_run_keeps_default_clean_and_propagates_failure(self):
+        with mock.patch("builtins.open", mock.mock_open()), \
+                mock.patch.object(SHARD.tomllib, "load", return_value={"surf": CONFIG}), \
+                mock.patch.object(SHARD.subprocess, "call", return_value=7) as run, \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(SHARD.main(["x", "rest", "a", "b"]), 7)
+        run.assert_called_once_with(SHARD.tarpaulin_args(CONFIG, "rest", ["a", "b"]))
+
 
 class ChunkExecutionTests(unittest.TestCase):
-    def run_slice(self, statuses, missing_report=None):
+    def run_slice(self, statuses, missing_report=None, slice_index=0):
         with tempfile.TemporaryDirectory() as temporary, chdir(temporary), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             tests = Path("crates/c/tests")
             tests.mkdir(parents=True)
@@ -62,19 +70,38 @@ class ChunkExecutionTests(unittest.TestCase):
                 (tests / f"{name}.rs").touch()
             path = Path("target/cov/report-render/tarpaulin-report.json")
             path.parent.mkdir(parents=True)
+            profraws = Path(CONFIG["target-dir"], "tarpaulin", "profraws")
+            profraws.mkdir(parents=True)
+            (profraws / "stale.profraw").write_text("prior run")
             calls = []
 
             def run(args):
                 index = len(calls)
                 calls.append(args)
                 self.assertFalse(path.exists(), "Each chunk must produce its own report")
+                self.assertFalse(profraws.exists(), "No chunk may inherit earlier raw counters")
+                profraws.mkdir(parents=True)
+                (profraws / "current.profraw").write_text(str(index))
                 if index != missing_report:
                     path.write_text(json.dumps(report(["a.rs"], [(index + 1, 1)])))
                 return statuses[index]
 
             with mock.patch.object(SHARD.subprocess, "call", side_effect=run):
-                status = SHARD.run_chunked(CONFIG, "render", "c", 4, 0, 2)
+                status = SHARD.run_chunked(CONFIG, "render", "c", 4, slice_index, 2)
+            self.assertFalse(profraws.exists(), "Final raw counters must also be removed")
             return status, json.loads(path.read_text()), calls
+
+    def test_each_runner_cleans_once_then_reuses_the_same_instrumented_build(self):
+        for slice_index in (0, 1):
+            with self.subTest(slice_index=slice_index):
+                status, merged, calls = self.run_slice([0, 0], slice_index=slice_index)
+                targets = SHARD.chunk_targets(["a", "b", "c", "d"], 4)
+                selected = targets[slice_index * 2:(slice_index + 1) * 2]
+                expected = [SHARD.tarpaulin_args(CONFIG, "render", ["c"], row) for row in selected]
+                self.assertEqual(calls[0], expected[0])
+                self.assertEqual(calls[1], expected[1] + ["--skip-clean"])
+                self.assertEqual(status, 0)
+                self.assertEqual(merged["covered"], 2)
 
     def test_sliced_failure_still_exports_merged_reports_and_fails(self):
         status, merged, calls = self.run_slice([0, 3])

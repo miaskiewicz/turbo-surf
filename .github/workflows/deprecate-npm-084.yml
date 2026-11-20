@@ -1,0 +1,31 @@
+name: Deprecate npm v0.8.4
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deprecate:
+    if: github.repository == 'miaskiewicz/turbo-surf' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/tags/v0.8.5'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, registry-url: 'https://registry.npmjs.org' }
+      - name: Require the published replacement
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const local = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          if (local.name !== 'turbo-surf' || local.version !== '0.8.5') throw new Error('Unexpected release metadata');
+          const response = await fetch('https://registry.npmjs.org/turbo-surf/0.8.5');
+          if (!response.ok) throw new Error('Replacement is not published');
+          const published = await response.json();
+          if (published.name !== local.name || published.version !== local.version || !published.dist?.integrity) throw new Error('Invalid published replacement');
+          NODE
+      - name: Deprecate the affected launcher version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm deprecate 'turbo-surf@0.8.4' 'The native CLI cannot launch on macOS/Linux because of package executable permissions. Upgrade to turbo-surf@0.8.5.' --registry=https://registry.npmjs.org

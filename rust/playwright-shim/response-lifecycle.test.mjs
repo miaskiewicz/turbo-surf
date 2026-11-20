@@ -187,6 +187,9 @@ for (const mode of ["initial", "initial-close", "form", "form-console"])
       action = mode.startsWith("form")
         ? page.locator("#submit").click()
         : page.goto(origin, { waitUntil: "networkidle" });
+      // Closing can reject the action while header/body assertions still await other work.
+      // Observe it now; each branch below still verifies its required outcome.
+      action.catch(() => {});
       // Cold isolate startup and form navigation precede the transport under test.
       // Start the delivery deadline only once the server has flushed its headers;
       // the body remains gated until the response has actually been observed.
@@ -209,6 +212,7 @@ for (const mode of ["initial", "initial-close", "form", "form-console"])
       if (mode === "initial-close") {
         await page.close();
         await assert.rejects(body, /closed|cancel/i);
+        await assert.rejects(action, /closed|cancel/i);
       } else {
         release();
         assert.deepEqual(await body, { ok: true });

@@ -48,10 +48,37 @@ struct Node {
     owner: Option<OwnerId>,
     parent: Option<u32>,
     reacted: bool,
+    retained_for_prune: bool,
     terminal: Cell<Option<TerminalPromiseState>>,
+    #[cfg(test)]
+    native_state_observations: Cell<usize>,
 }
 
 impl Node {
+    fn state(&self, scope: &mut v8::PinScope) -> Option<v8::PromiseState> {
+        if let Some(terminal) = self.terminal.get() {
+            return Some(terminal.native());
+        }
+        if let Some(promise) = self.promise.to_local(scope) {
+            return Some(self.observe_native_state(promise));
+        }
+        // Queued reactions may outlive their collected parent. Only an actual
+        // native terminal observation survives; pending/unseen parents stay unknown.
+        self.terminal.get().map(TerminalPromiseState::native)
+    }
+
+    fn observe_native_state(&self, promise: v8::Local<v8::Promise>) -> v8::PromiseState {
+        if let Some(terminal) = self.terminal.get() {
+            return terminal.native();
+        }
+        #[cfg(test)]
+        self.native_state_observations
+            .set(self.native_state_observations.get() + 1);
+        let state = promise.state();
+        self.observe_terminal(&state);
+        state
+    }
+
     fn observe_terminal(&self, state: &v8::PromiseState) {
         if let Some(terminal) = TerminalPromiseState::observed(state) {
             self.terminal.set(Some(terminal));
@@ -77,6 +104,22 @@ pub struct WorkSnapshot {
     pub tracking_error: Option<&'static str>,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+struct PruneMeasurements {
+    calls: usize,
+    candidates: usize,
+    ancestors: usize,
+    retained_candidates: usize,
+    peak_candidates: usize,
+    live_after_prune: usize,
+    peak_nodes: usize,
+    bulk_membership_lookups: usize,
+    promise_owner_discoveries: usize,
+    promise_inits: usize,
+    cached_owner_hits: usize,
+}
+
 pub struct PromiseWork {
     key: v8::Global<v8::Private>,
     sequence: u32,
@@ -84,7 +127,10 @@ pub struct PromiseWork {
     ops: HashMap<(i32, u64), NativeOp>,
     inconsistent_owners: bool,
     tracking_error: Option<&'static str>,
-    maintenance: u16,
+    maintenance: usize,
+    next_maintenance: usize,
+    #[cfg(test)]
+    prune_measurements: PruneMeasurements,
 }
 
 impl PromiseWork {
@@ -98,6 +144,9 @@ impl PromiseWork {
             inconsistent_owners: false,
             tracking_error: None,
             maintenance: 0,
+            next_maintenance: 1024,
+            #[cfg(test)]
+            prune_measurements: PruneMeasurements::default(),
         }
     }
 
@@ -135,10 +184,81 @@ impl PromiseWork {
             owner: None,
             parent: None,
             reacted: false,
+            retained_for_prune: false,
             terminal: Cell::new(None),
+            #[cfg(test)]
+            native_state_observations: Cell::new(0),
         });
-        node.observe_terminal(&promise.state());
+        node.observe_native_state(promise);
+        #[cfg(test)]
+        {
+            self.prune_measurements.peak_nodes =
+                self.prune_measurements.peak_nodes.max(self.nodes.len());
+        }
         Some(id)
+    }
+
+    fn recorded_identity<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        promise: v8::Local<'s, v8::Promise>,
+    ) -> Option<u32> {
+        if self.tracking_error.is_some() {
+            return None;
+        }
+        let key = v8::Local::new(scope, &self.key);
+        promise
+            .get_private(scope, key)
+            .filter(|value| value.is_uint32())
+            .and_then(|value| value.uint32_value(scope))
+    }
+
+    #[cfg(test)]
+    pub(super) fn recorded_owner<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        promise: v8::Local<'s, v8::Promise>,
+    ) -> Option<OwnerId> {
+        let id = self.recorded_identity(scope, promise)?;
+        let node = self.nodes.get(&id)?;
+        (node.promise.to_local(scope) == Some(promise))
+            .then_some(node.owner)
+            .flatten()
+    }
+
+    pub(super) fn reuse_known_turn<'s>(
+        &mut self,
+        scope: &mut v8::PinScope<'s, '_>,
+        turn: PromiseTurn,
+        promise: v8::Local<'s, v8::Promise>,
+    ) -> bool {
+        if matches!(turn, PromiseTurn::Init) {
+            return false;
+        }
+        let Some(id) = self.recorded_identity(scope, promise) else {
+            return false;
+        };
+        let Some(node) = self.nodes.get_mut(&id) else {
+            return false;
+        };
+        if node.owner.is_none() || node.promise.to_local(scope) != Some(promise) {
+            return false;
+        }
+        node.observe_native_state(promise);
+        if matches!(turn, PromiseTurn::After) {
+            node.reacted = true;
+        }
+        #[cfg(test)]
+        {
+            self.prune_measurements.cached_owner_hits += 1;
+        }
+        self.maintain_after_turn(scope);
+        true
+    }
+
+    #[cfg(test)]
+    pub(super) fn note_owner_discovery(&mut self) {
+        self.prune_measurements.promise_owner_discoveries += 1;
     }
 
     pub fn promise_turn<'s>(
@@ -149,6 +269,10 @@ impl PromiseWork {
         parent: Option<v8::Local<'s, v8::Promise>>,
         owner: Option<OwnerId>,
     ) {
+        #[cfg(test)]
+        if matches!(turn, PromiseTurn::Init) {
+            self.prune_measurements.promise_inits += 1;
+        }
         let parent = parent.and_then(|parent| self.node(scope, parent));
         let Some(id) = self.node(scope, promise) else {
             return;
@@ -167,9 +291,12 @@ impl PromiseWork {
             // use the hook alone to declare a Promise settled.
             PromiseTurn::Before | PromiseTurn::Resolve => {}
         }
-        self.maintenance += 1;
-        if self.maintenance == 1024 {
-            self.maintenance = 0;
+        self.maintain_after_turn(scope);
+    }
+
+    fn maintain_after_turn(&mut self, scope: &mut v8::PinScope) {
+        self.maintenance = self.maintenance.saturating_add(1);
+        if self.maintenance >= self.next_maintenance {
             self.prune(scope);
         }
     }
@@ -225,15 +352,7 @@ impl PromiseWork {
     }
 
     fn state(&self, scope: &mut v8::PinScope, node: u32) -> Option<v8::PromiseState> {
-        let node = self.nodes.get(&node)?;
-        if let Some(promise) = node.promise.to_local(scope) {
-            let state = promise.state();
-            node.observe_terminal(&state);
-            return Some(state);
-        }
-        // Queued reactions may outlive their collected parent. Only an actual
-        // native terminal observation survives; pending/unseen parents stay unknown.
-        node.terminal.get().map(TerminalPromiseState::native)
+        self.nodes.get(&node)?.state(scope)
     }
 
     fn pending(&self, scope: &mut v8::PinScope, node: u32) -> bool {
@@ -358,22 +477,78 @@ impl PromiseWork {
             && parent.terminal.get().is_none()
     }
 
+    fn mark_for_prune(nodes: &mut HashMap<u32, Node>, id: u32, frontier: &mut Vec<u32>) {
+        let Some(node) = nodes.get_mut(&id) else {
+            return;
+        };
+        if !node.retained_for_prune {
+            node.retained_for_prune = true;
+            frontier.push(id);
+        }
+    }
+
     pub fn prune(&mut self, scope: &mut v8::PinScope) {
-        let mut keep: HashSet<u32> = self
-            .nodes
-            .keys()
-            .copied()
-            .filter(|id| self.pending(scope, *id))
-            .collect();
-        keep.extend(self.ops.values().map(|op| op.node));
-        let mut frontier: Vec<_> = keep.iter().copied().collect();
-        while let Some(id) = frontier.pop() {
-            if let Some(parent) = self.nodes.get(&id).and_then(|node| node.parent) {
-                if keep.insert(parent) {
-                    frontier.push(parent);
-                }
+        self.maintenance = 0;
+        let mut frontier = Vec::new();
+        #[cfg(test)]
+        let mut candidates = 0;
+        for (id, node) in &mut self.nodes {
+            #[cfg(test)]
+            {
+                candidates += 1;
+            }
+            // This mark belongs only to this complete maintenance pass. No JS
+            // runs between clearing it and retaining the dependency closure.
+            node.retained_for_prune = node.state(scope) == Some(v8::PromiseState::Pending);
+            if node.retained_for_prune {
+                frontier.push(*id);
             }
         }
-        self.nodes.retain(|id, _| keep.contains(id));
+        for op in self.ops.values() {
+            Self::mark_for_prune(&mut self.nodes, op.node, &mut frontier);
+        }
+        #[cfg(test)]
+        let mut ancestors = 0;
+        while let Some(id) = frontier.pop() {
+            #[cfg(test)]
+            {
+                ancestors += 1;
+            }
+            if let Some(parent) = self.nodes.get(&id).and_then(|node| node.parent) {
+                Self::mark_for_prune(&mut self.nodes, parent, &mut frontier);
+            }
+        }
+        #[cfg(test)]
+        let retained_candidates = Cell::new(0);
+        self.nodes.retain(|_, node| {
+            #[cfg(test)]
+            retained_candidates.set(retained_candidates.get() + 1);
+            node.retained_for_prune
+        });
+        // Charge graph-wide maintenance in proportion to the live graph, while
+        // keeping a small graph responsive to collected/settled nodes.
+        self.next_maintenance = self.nodes.len().max(1024);
+        #[cfg(test)]
+        {
+            self.prune_measurements.calls += 1;
+            self.prune_measurements.peak_candidates =
+                self.prune_measurements.peak_candidates.max(candidates);
+            self.prune_measurements.live_after_prune = self.nodes.len();
+            self.prune_measurements.candidates += candidates;
+            self.prune_measurements.ancestors += ancestors;
+            self.prune_measurements.retained_candidates += retained_candidates.get();
+        }
     }
 }
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "work_terminal_cache_tests.rs"]
+mod terminal_cache_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "work_prune_scaling_tests.rs"]
+mod prune_scaling_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "work_owner_discovery_tests.rs"]
+mod owner_discovery_tests;

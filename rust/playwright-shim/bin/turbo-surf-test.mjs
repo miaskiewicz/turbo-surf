@@ -67,7 +67,6 @@ export async function run(argv) {
   let hooksStarted = false;
   let failed = 0;
   let matchedFiles = 0;
-  const failedProjects = new Set();
   try {
     if (!values["list-only"]) {
       webHandles.push(
@@ -76,30 +75,7 @@ export async function run(argv) {
       hooksStarted = true;
       globalCleanup = await runGlobalHook(config.globalSetup, config);
     }
-    for (const project of chosen) {
-      if ((project.dependencies ?? []).some((name) => failedProjects.has(name))) {
-        console.log(`[${project.name}] skipped because a dependency failed`);
-        failedProjects.add(project.name);
-        continue;
-      }
-      const files = positionals.length
-        ? positionals.map((p) => resolve(p))
-        : discoverTests(project);
-      if (!files.length) {
-        console.log(`[${project.name}] no test files matched`);
-        continue;
-      }
-      matchedFiles += files.length;
-      if (values["list-only"]) {
-        for (const f of files) console.log(`[${project.name}] ${f}`);
-        continue;
-      }
-      const code = await runProject(project, files, reporter);
-      if (code !== 0) {
-        failed++;
-        failedProjects.add(project.name);
-      }
-    }
+    ({ failed, matchedFiles } = await runProjects(chosen, positionals, values, reporter));
   } finally {
     await teardownRun(config, globalCleanup, webHandles, hooksStarted);
   }
@@ -108,6 +84,35 @@ export async function run(argv) {
     return 1;
   }
   return failed ? 1 : 0;
+}
+
+async function runProjects(chosen, positionals, values, reporter) {
+  let failed = 0;
+  let matchedFiles = 0;
+  const failedProjects = new Set();
+  for (const project of chosen) {
+    if ((project.dependencies ?? []).some((name) => failedProjects.has(name))) {
+      console.log(`[${project.name}] skipped because a dependency failed`);
+      failedProjects.add(project.name);
+      continue;
+    }
+    const files = positionals.length ? positionals.map((p) => resolve(p)) : discoverTests(project);
+    if (!files.length) {
+      console.log(`[${project.name}] no test files matched`);
+      continue;
+    }
+    matchedFiles += files.length;
+    if (values["list-only"]) {
+      for (const f of files) console.log(`[${project.name}] ${f}`);
+      continue;
+    }
+    const code = await runProject(project, files, reporter);
+    if (code !== 0) {
+      failed++;
+      failedProjects.add(project.name);
+    }
+  }
+  return { failed, matchedFiles };
 }
 
 async function teardownRun(config, globalCleanup, webHandles, hooksStarted) {
@@ -141,6 +146,11 @@ function runProject(project, files, reporter) {
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_OPTIONS;
   env.TURBO_PW_PROJECT_NAME = project.name;
+  env.TURBO_PW_PROJECT = JSON.stringify({
+    name: project.name,
+    testDir: project.testDir,
+    outputDir: project.outputDir,
+  });
   env.TURBO_PW_EXECUTION = JSON.stringify({ timeout: project.timeout, retries: project.retries });
   env.TURBO_PW_USE = JSON.stringify(use);
   // Playwright's canonical `use` keys that the shim already reads — forward them

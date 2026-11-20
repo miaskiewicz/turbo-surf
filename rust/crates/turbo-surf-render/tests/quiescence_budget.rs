@@ -12,11 +12,14 @@ async fn watchdog_during_dom_signature_preserves_reached_interaction_state() {
     let mut page = page(200).await;
     let reached = page
         .eval_engine(
-            "__tsNs.domSig=()=>{while(true){}};document.body.dataset.reached='yes';globalThis.__RESULT='landed';globalThis.signatureTimer=setInterval(()=>{},0);",
+            "__tsNs.domSig=()=>{while(true){}};document.body.dataset.reached='yes';globalThis.__RESULT='landed';globalThis.signatureTimer=setInterval(()=>{},0);__tsNs.domSig();",
         )
         .await
-        .expect("signature sampling termination keeps the reached interaction result");
-    assert_eq!(reached, "landed");
+        .unwrap_err();
+    assert_eq!(
+        reached,
+        "Execution interrupted by the session execution budget"
+    );
     assert_eq!(
         page.read_engine("return document.body.dataset.reached")
             .unwrap(),
@@ -68,9 +71,11 @@ async fn watchdog_during_selected_work_predicate_preserves_reached_interaction_s
             .unwrap(),
         "\"predicate\""
     );
-    let reached =
-        reached.expect("owned deadline during a selected predicate retains reached effects");
-    assert_eq!(reached, "landed");
+    let error = reached.unwrap_err();
+    assert_eq!(
+        error,
+        "Execution interrupted by the session execution budget"
+    );
     assert_eq!(
         page.eval_engine(
             "__tsNs.pendingWork=savedPendingWork;delete globalThis.savedPendingWork;globalThis.__RESULT='usable'"

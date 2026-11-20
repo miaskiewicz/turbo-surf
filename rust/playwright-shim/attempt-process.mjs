@@ -1,5 +1,6 @@
 import { nodePreloadArgs } from "./node-preloads.mjs";
 import { fork } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const workers = new Map();
@@ -96,7 +97,7 @@ export async function closeAttemptProcesses() {
   if (errors.length) throw new AggregateError(errors, "Attempt worker cleanup failed");
 }
 
-function runAttempt(worker, id, retry, timeout) {
+function runAttempt(worker, id, retry, timeout, file) {
   return new Promise((resolve, reject) => {
     let started;
     let timer;
@@ -142,7 +143,7 @@ function runAttempt(worker, id, retry, timeout) {
     worker.child.once("exit", exit);
     // Bound an unresponsive dispatcher separately from the actual test budget.
     timer = setTimeout(() => expire("Test attempt worker dispatch timed out"), 30000);
-    worker.child.send({ kind: "run", id, retry, timeout });
+    worker.child.send({ kind: "run", id, retry, timeout, file });
   });
 }
 
@@ -153,7 +154,7 @@ async function executeQueued(plan, t, options) {
     let worker = workers.get(entry) ?? startWorker(entry);
     try {
       await worker.ready;
-      const result = await runAttempt(worker, plan.id, retry, options.timeout);
+      const result = await runAttempt(worker, plan.id, retry, options.timeout, realpathSync(entry));
       if (result.skipped) t.skip(result.reason);
       if (retry) console.log(`[flaky] ${plan.name} passed on retry ${retry}`);
       return;

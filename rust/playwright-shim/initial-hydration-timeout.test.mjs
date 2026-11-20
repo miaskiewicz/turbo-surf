@@ -66,13 +66,23 @@ test("navigation binding deadlines require the exact owned hub error", async () 
     assert.equal(normalize(error, deadline, 30), error);
 });
 
-async function fixture(run) {
+async function fixture(run, holdScript = false) {
+  let scriptRequested;
+  const requested = new Promise((resolve) => (scriptRequested = resolve));
+  let heldResponse;
   const timers = new Set();
+  const requests = [];
   const server = createServer((request, response) => {
+    requests.push(request.url);
     if (request.url === "/slow.js") {
+      response.setHeader("content-type", "application/javascript");
+      scriptRequested();
+      if (holdScript) {
+        heldResponse = response;
+        return;
+      }
       const timer = setTimeout(() => {
         timers.delete(timer);
-        response.setHeader("content-type", "application/javascript");
         response.end("document.body.dataset.late='old'");
       }, 180);
       timers.add(timer);
@@ -95,7 +105,15 @@ async function fixture(run) {
       true,
     );
   try {
-    await run({ base, open });
+    await run({
+      base,
+      open,
+      requests,
+      requested,
+      releaseScript() {
+        heldResponse?.end("document.body.dataset.late='old'");
+      },
+    });
   } finally {
     for (const timer of timers) clearTimeout(timer);
     server.closeAllConnections();
@@ -109,13 +127,21 @@ test("initial timeout keeps legacy native open rejection by default", () =>
   }));
 
 test("retained initial timeout keeps the actual native target usable", () =>
-  fixture(async ({ base, open }) => {
+  fixture(async ({ base, open, requests }) => {
     const actor = await open({ retainInitialHydrationTimeout: true });
     try {
-      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), {
+      const initialStatus = JSON.parse(native.liveInitialHydrationStatus(actor));
+      // The absolute caller deadline includes native runtime setup. A cold
+      // opening may expire before the hydration future admits a parser request.
+      const phase = initialStatus.initialProgress.phase;
+      assert.ok(["document-loading", "parser-and-deferred-scripts"].includes(phase));
+      assert.deepEqual(initialStatus, {
         timedOut: true,
         timeoutMs: 30,
+        initialProgress: { phase, completed_pumps: 0 },
       });
+      if (phase === "document-loading") assert.deepEqual(requests, []);
+      else assert.ok(requests.includes("/slow.js"), "the parser request must actually start");
       const initial = JSON.parse(native.liveAuxiliaryState(actor));
       assert.equal(typeof initial.root, "string");
       const receipt = JSON.parse(
@@ -132,11 +158,68 @@ test("retained initial timeout keeps the actual native target usable", () =>
         JSON.parse(native.liveReadEngine(actor, "return document.body.textContent")),
         "ready",
       );
+      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), initialStatus);
     } finally {
       native.liveActorClose(actor);
     }
     assert.throws(() => native.liveInitialHydrationStatus(actor), /closed|no such live actor/);
   }));
+
+test("retained parser timeout retires an actually admitted held script", () =>
+  fixture(async ({ base, open, requests, requested, releaseScript }) => {
+    // This independent admission case allows runtime setup, then holds EOF until
+    // the original absolute caller deadline expires. The 30ms case above stays unchanged.
+    const opening = open(
+      { retainInitialHydrationTimeout: true },
+      '<body><script src="/slow.js"></script></body>',
+      1500,
+    );
+    await Promise.race([
+      requested,
+      opening.then((actor) => {
+        if (!requests.includes("/slow.js")) {
+          native.liveActorClose(actor);
+          assert.fail("initial opening expired before parser request admission");
+        }
+      }),
+    ]);
+    assert.deepEqual(requests, ["/slow.js"]);
+    const actor = await opening;
+    try {
+      const initialStatus = JSON.parse(native.liveInitialHydrationStatus(actor));
+      assert.deepEqual(initialStatus, {
+        timedOut: true,
+        timeoutMs: 1500,
+        initialProgress: { phase: "parser-and-deferred-scripts", completed_pumps: 0 },
+      });
+      const initial = JSON.parse(native.liveAuxiliaryState(actor));
+      const receipt = JSON.parse(
+        await native.liveNavigateTarget(
+          actor,
+          `${base}/ready`,
+          "replace",
+          JSON.stringify({ timeoutMs: 1000, waitUntil: "load" }),
+        ),
+      );
+      releaseScript();
+      await native.liveEvalEngine(actor, "return document.body.textContent", true);
+      assert.equal(receipt.status, 200);
+      assert.equal(JSON.parse(native.liveAuxiliaryState(actor)).root, initial.root);
+      assert.deepEqual(
+        JSON.parse(
+          native.liveReadEngine(
+            actor,
+            "return [document.body.textContent, document.body.dataset.late ?? null]",
+          ),
+        ),
+        ["ready", null],
+      );
+      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), initialStatus);
+    } finally {
+      native.liveActorClose(actor);
+    }
+    assert.throws(() => native.liveInitialHydrationStatus(actor), /closed|no such live actor/);
+  }, true));
 
 test("initial timeout status rejects pending and unknown actors", () =>
   fixture(async ({ open }) => {
@@ -156,10 +239,18 @@ test("initial timeout status cannot be borrowed through children or a retired ro
   fixture(async ({ open }) => {
     const actor = await open({ retainInitialHydrationTimeout: true }, "<body>root</body>", 1000);
     try {
-      assert.deepEqual(JSON.parse(native.liveInitialHydrationStatus(actor)), {
+      const initialStatus = JSON.parse(native.liveInitialHydrationStatus(actor));
+      assert.deepEqual(initialStatus, {
         timedOut: false,
         timeoutMs: null,
+        initialProgress: {
+          phase: "complete",
+          completed_pumps: initialStatus.initialProgress?.completed_pumps,
+        },
       });
+      assert.ok(Number.isSafeInteger(initialStatus.initialProgress.completed_pumps));
+      assert.ok(initialStatus.initialProgress.completed_pumps >= 0);
+      assert.ok(initialStatus.initialProgress.completed_pumps <= 500);
       await native.liveEvalEngineExpression(
         actor,
         "(() => { window.open('about:blank', 'status-child'); return true; })()",
@@ -176,3 +267,88 @@ test("initial timeout status cannot be borrowed through children or a retired ro
       native.liveActorClose(actor);
     }
   }));
+
+test("hard execution interruption propagates the original error after cached diagnostics", async () => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent('<!doctype html><p id="reached">Reached state</p>');
+    const interruption = new Error("Execution interrupted by the session execution budget");
+    const collect = page._collectSession;
+    // One native transport rejection; subsequent collection remains real. The
+    // old catch refreshed successfully and silently turned this into success.
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(interruption);
+    };
+    await assert.rejects(page._redrain(), (error) => error === interruption);
+    assert.ok(page._html.includes("Reached state"));
+    assert.equal(typeof interruption.hydrationDiagnostics, "object");
+  } finally {
+    await context.close();
+  }
+});
+
+test("failed cached hydration diagnostics cannot replace a hard interruption", async (t) => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent("<!doctype html><p>State retained before interruption</p>");
+    const interruption = new Error("Execution interrupted by the session execution budget");
+    const collect = page._collectSession;
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(interruption);
+    };
+    t.mock.method(native, "liveInitialHydrationStatus", () => {
+      throw new Error("diagnostic transport unavailable");
+    });
+    await assert.rejects(page._redrain(), (error) => error === interruption);
+    assert.ok(page._html.includes("State retained before interruption"));
+    assert.equal(interruption.hydrationDiagnostics, undefined);
+  } finally {
+    await context.close();
+  }
+});
+
+test("primitive hard interruption rejection retains its identity", async () => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent("<!doctype html><p>Reached state</p>");
+    const interruption = "Execution interrupted by the session execution budget";
+    const collect = page._collectSession;
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(interruption);
+    };
+    await assert.rejects(page._redrain(), (error) => error === interruption);
+    assert.ok(page._html.includes("Reached state"));
+  } finally {
+    await context.close();
+  }
+});
+
+test("aggregate drain expiry still refreshes state from the actual live document", async () => {
+  const { BrowserContext } = await import("./index.mjs");
+  const context = new BrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent("<!doctype html><p>Actual live document</p>");
+    page._html = "<p>Old serialized state</p>";
+    const collect = page._collectSession;
+    page._collectSession = function () {
+      this._collectSession = collect;
+      return Promise.reject(new Error("Driver collection exceeded its aggregate drain budget"));
+    };
+    await page._redrain();
+    assert.ok(page._html.includes("Actual live document"));
+    assert.ok(!page._html.includes("Old serialized state"));
+    assert.equal(await page.locator("p").textContent(), "Actual live document");
+  } finally {
+    await context.close();
+  }
+});

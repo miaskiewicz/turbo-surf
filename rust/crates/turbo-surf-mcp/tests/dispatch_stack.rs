@@ -90,6 +90,26 @@ fn cold_dispatch_initializes_on_a_standard_two_mib_thread() {
                             .unwrap(),
                             "before"
                         );
+                    } else if mode == "session" {
+                        let opening = turbo_surf_render::PageSession::open(
+                            HTML,
+                            "https://stack.test/",
+                            "",
+                            "",
+                            5_000,
+                        );
+                        eprintln!(
+                            "mcp-stack-session-future-bytes:{}",
+                            std::mem::size_of_val(&opening)
+                        );
+                        let mut page = opening.await.unwrap();
+                        assert_eq!(
+                            page.eval_expression("document.getElementById('p').textContent")
+                                .await
+                                .unwrap(),
+                            "after"
+                        );
+                        page.close();
                     } else {
                         assert_eq!(mode, "dispatch");
                         dispatch_sequence().await;
@@ -101,7 +121,7 @@ fn cold_dispatch_initializes_on_a_standard_two_mib_thread() {
             .unwrap();
         return;
     }
-    for mode in ["direct", "dispatch"] {
+    for mode in ["direct", "session", "dispatch"] {
         let output = child_case(mode);
         assert!(
             output.status.success(),

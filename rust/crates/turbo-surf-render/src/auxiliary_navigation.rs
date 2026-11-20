@@ -202,6 +202,14 @@ fn history_operation(mode: HistoryMode) -> &'static str {
     }
 }
 
+struct PendingInit {
+    context: v8::Weak<v8::Context>,
+    document: v8::Weak<v8::Object>,
+    document_id: u64,
+    job: Job,
+    receipt: serde_json::Value,
+}
+
 struct Loading {
     _activity: crate::network_activity::RequestActivity,
     generation: u64,
@@ -218,9 +226,26 @@ pub(super) enum ActionCompletion {
     NavigationFailed(String),
 }
 
+#[derive(Debug, PartialEq)]
 enum NavigationWaitError {
     Navigation(String),
     Driver(String),
+}
+
+fn finish_navigation_wait(
+    result: Result<String, NavigationWaitError>,
+    cleanup: Result<(), String>,
+    caller_expired: bool,
+) -> Result<String, NavigationWaitError> {
+    let interrupted = matches!(&result, Err(NavigationWaitError::Driver(error))
+        if error == "Execution interrupted by the session execution budget");
+    if caller_expired || interrupted {
+        return result;
+    }
+    match cleanup {
+        Ok(()) => result,
+        Err(error) => Err(NavigationWaitError::Driver(error)),
+    }
 }
 
 enum ActionTerminalError {
@@ -236,6 +261,7 @@ pub(super) struct State {
     action_commits: BTreeMap<u64, (u64, Result<(), ActionTerminalError>)>,
     jobs: BTreeMap<u64, Job>,
     loading: BTreeMap<u64, Loading>,
+    pending_init: BTreeMap<u64, PendingInit>,
     results: BTreeMap<u64, Result<serde_json::Value, String>>,
     waiters: BTreeSet<u64>,
 }
@@ -296,9 +322,9 @@ fn state(state: &mut OpState) -> &mut State {
 }
 
 pub(super) fn pending(state: &OpState) -> bool {
-    state
-        .try_borrow::<State>()
-        .is_some_and(|state| !state.jobs.is_empty() || !state.loading.is_empty())
+    state.try_borrow::<State>().is_some_and(|state| {
+        !state.jobs.is_empty() || !state.loading.is_empty() || !state.pending_init.is_empty()
+    })
 }
 
 pub(super) fn cancel(state: &mut OpState, target: u64) {
@@ -308,6 +334,14 @@ pub(super) fn cancel(state: &mut OpState, target: u64) {
         if state.waiters.contains(&job.generation) {
             state.results.insert(
                 job.generation,
+                Err("Navigation target closed or superseded".into()),
+            );
+        }
+    }
+    if let Some(init) = state.pending_init.remove(&target) {
+        if state.waiters.contains(&init.job.generation) {
+            state.results.insert(
+                init.job.generation,
                 Err("Navigation target closed or superseded".into()),
             );
         }
@@ -720,12 +754,13 @@ fn receipt(fetched: &Fetched) -> serde_json::Value {
 fn commit_fetched(
     rt: &mut JsRuntime,
     target: u64,
-    job: &Job,
+    job: Job,
     fetched: Fetched,
-) -> Result<serde_json::Value, String> {
+    execution: &PollExecutionBudget,
+) -> Result<Option<serde_json::Value>, String> {
     let receipt = receipt(&fetched);
     if attachment(&fetched.response) || matches!(fetched.response.status, 204 | 205) {
-        return Ok(receipt);
+        return Ok(Some(receipt));
     }
     native_history::admit_navigation(
         &rt.op_state().borrow(),
@@ -733,43 +768,153 @@ fn commit_fetched(
         job.history,
         &fetched.response.final_url,
     )?;
-    // Defer the driver deadline only across trusted native document setup.
-    let setup = navigation_deadline::TrustedSetup::enter(rt, target, job.generation)?;
-    let installed = {
-        deno_core::scope!(scope, rt);
-        let previous = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
-        let installed = install_response(scope, previous, &fetched, job)?;
-        let current = v8::Local::new(scope, &installed);
-        navigation_deadline::capture_source_lease(scope, current, target, job.generation)?;
-        installed
-    };
-    adopt_root_response(rt, target, &fetched, job.form_action)?;
-    setup.finish()?;
-    navigation_deadline::run_deferred_frames(rt)?;
-    {
+    // Staged binding setup runs fixed engine code; authored/frame initialization
+    // stays deferred until the owned execution clock has resumed.
+    let installed = execution.during_trusted_setup(|| {
+        let setup = navigation_deadline::TrustedSetup::enter(rt, target, job.generation)?;
+        let installed = {
+            deno_core::scope!(scope, rt);
+            let previous = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
+            let installed = install_response(scope, previous, &fetched, &job)?;
+            let current = v8::Local::new(scope, &installed);
+            navigation_deadline::capture_source_lease(scope, current, target, job.generation)?;
+            installed
+        };
+        adopt_root_response(rt, target, &fetched, job.form_action)?;
+        // This captured host capability resets private lifecycle state without dispatching events.
+        auxiliary_pages::target_call(rt, AuxiliaryContextId(target), "documentLoading", &[])?;
+        setup.finish()?;
+        Ok(installed)
+    })?;
+    let pending = {
         deno_core::scope!(scope, rt);
         let current = v8::Local::new(scope, installed);
+        let document = current
+            .get_slot::<ActiveDocument>()
+            .and_then(|active| active.0.to_local(scope))
+            .ok_or("Navigation document is unavailable")?;
+        PendingInit {
+            context: v8::Weak::new(scope, current),
+            document: v8::Weak::new(scope, document),
+            document_id: binding::document_id_of(scope, document),
+            job,
+            receipt,
+        }
+    };
+    self::state(&mut rt.op_state().borrow_mut())
+        .pending_init
+        .insert(target, pending);
+    Ok(None)
+}
+
+fn validate_pending_init(
+    rt: &mut JsRuntime,
+    target: u64,
+    pending: &PendingInit,
+) -> Result<(), String> {
+    {
+        deno_core::scope!(scope, rt);
+        let current = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
+        let context = pending
+            .context
+            .to_local(scope)
+            .ok_or("Navigation document retired")?;
+        let document = pending
+            .document
+            .to_local(scope)
+            .ok_or("Navigation document retired")?;
+        let active = context
+            .get_slot::<ActiveDocument>()
+            .and_then(|active| active.0.to_local(scope));
+        let admitted = current_admission(
+            &JsRuntime::op_state_from(scope).borrow(),
+            target,
+            Some(&pending.job.activity),
+        );
+        if !admitted
+            || current != context
+            || context.get_slot::<FrameRetired>().is_some()
+            || active != Some(document)
+            || document.get_creation_context(scope) != Some(context)
+            || binding::document_id_of(scope, document) != pending.document_id
+        {
+            return Err("Navigation document closed or superseded".into());
+        }
+    }
+    Ok(())
+}
+
+fn finish_pending_init(
+    rt: &mut JsRuntime,
+    target: u64,
+    pending: &PendingInit,
+) -> Result<(), String> {
+    validate_pending_init(rt, target, pending)?;
+    navigation_deadline::run_deferred_frames(rt)?;
+    validate_pending_init(rt, target, pending)?;
+    {
+        deno_core::scope!(scope, rt);
+        let current = pending
+            .context
+            .to_local(scope)
+            .ok_or("Navigation document retired")?;
         let scope = &mut v8::ContextScope::new(scope, current);
         let bootstrap = auxiliary_pages::bootstrap_for_context(scope, current);
         run_navigation_init(scope, current, &bootstrap)?;
     }
+    validate_pending_init(rt, target, pending)?;
     let id = AuxiliaryContextId(target);
-    auxiliary_pages::target_call(rt, id, "documentLoading", &[])?;
     let promise =
         auxiliary_pages::execute_target(rt, id, "return __tsNs.hydrate(300,200000,false)", true)?;
+    validate_pending_init(rt, target, pending)?;
     let shared = rt.op_state();
     let mut shared = shared.borrow_mut();
     let state = self::state(&mut shared);
     state.loading.insert(
         target,
         Loading {
-            _activity: job.activity.clone(),
-            generation: job.generation,
+            _activity: pending.job.activity.clone(),
+            generation: pending.job.generation,
             promise,
             phase: LoadPhase::Parsing,
         },
     );
-    Ok(receipt)
+    Ok(())
+}
+
+fn record_commit(
+    rt: &mut JsRuntime,
+    target: u64,
+    job: &Job,
+    result: Result<serde_json::Value, String>,
+    terminal: Result<(), ActionTerminalError>,
+) {
+    record_result(
+        rt,
+        target,
+        job.generation,
+        job.activity.navigation_revision(),
+        result,
+        terminal,
+    );
+}
+fn record_result(
+    rt: &mut JsRuntime,
+    target: u64,
+    generation: u64,
+    revision: Option<u64>,
+    result: Result<serde_json::Value, String>,
+    terminal: Result<(), ActionTerminalError>,
+) {
+    let shared = rt.op_state();
+    let mut shared = shared.borrow_mut();
+    let state = self::state(&mut shared);
+    if let Some(revision) = revision {
+        state.action_commits.insert(target, (revision, terminal));
+    }
+    if state.waiters.contains(&generation) {
+        state.results.insert(generation, result);
+    }
 }
 
 fn promise_result(
@@ -879,26 +1024,37 @@ impl PageSession {
         waiter: Option<u64>,
     ) -> Result<(), String> {
         let budget = self.budget_ms;
-        let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
+        let execution = PollExecutionBudget::new(self.rt.v8_isolate(), budget);
+        let deadline_exceeded = std::sync::atomic::AtomicBool::new(false);
         let key = self.rt.activation_key();
         let result = key
-            .during(tokio::time::timeout(
-                std::time::Duration::from_millis(budget),
-                self.service_auxiliary_navigation_active(owner, waiter),
+            .during(with_async_execution_budget(
+                true,
+                budget,
+                &deadline_exceeded,
+                execution.run(self.service_auxiliary_navigation_active(owner, waiter, &execution)),
             ))
             .await;
-        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
-        drop(watchdog);
+        let interrupted = execution.interrupted();
+        let stopped = execution.stopped_at_boundary()
+            || deadline_exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(execution);
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = if exceeded {
-            Err("Native auxiliary work exceeded execution budget".into())
+        let result = if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else if stopped {
+            // Jobs and phases stay in OpState; only their actual goal publishes a receipt.
+            Ok(())
         } else {
-            result.unwrap_or_else(|_| {
-                Err("Native auxiliary work exceeded execution budget".to_owned())
-            })
+            result
         };
-        self.finish_history_command(result)
+        let result = self.finish_history_command(result);
+        if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else {
+            result
+        }
     }
 
     fn has_pending_auxiliary_work_for(&self, owner: Option<u64>) -> bool {
@@ -909,7 +1065,9 @@ impl PageSession {
                 .borrow()
                 .try_borrow::<State>()
                 .is_some_and(|state| {
-                    state.jobs.contains_key(&target) || state.loading.contains_key(&target)
+                    state.jobs.contains_key(&target)
+                        || state.loading.contains_key(&target)
+                        || state.pending_init.contains_key(&target)
                 }),
             None => self.has_pending_auxiliary_work(),
         }
@@ -919,6 +1077,7 @@ impl PageSession {
         &mut self,
         owner: Option<u64>,
         waiter: Option<u64>,
+        execution: &PollExecutionBudget,
     ) -> Result<(), String> {
         loop {
             let navigation = {
@@ -945,6 +1104,32 @@ impl PageSession {
                 HistoryMode::Push
             });
             start(&mut self.rt, navigation, mode, self.budget_ms)?;
+        }
+        let init = {
+            let shared = self.rt.op_state();
+            let mut shared = shared.borrow_mut();
+            let state = self::state(&mut shared);
+            let target = state
+                .pending_init
+                .keys()
+                .copied()
+                .find(|target| owner.is_none_or(|owner| owner == *target));
+            target.and_then(|target| {
+                state
+                    .pending_init
+                    .remove(&target)
+                    .map(|init| (target, init))
+            })
+        };
+        if let Some((target, init)) = init {
+            // Removal before guest entry makes a hard-interrupted initializer non-replayable.
+            let result = finish_pending_init(&mut self.rt, target, &init).map(|()| init.receipt);
+            let terminal = result
+                .as_ref()
+                .map(|_| ())
+                .map_err(|error| ActionTerminalError::Driver(error.clone()));
+            record_commit(&mut self.rt, target, &init.job, result, terminal);
+            return Ok(());
         }
         if !self.has_pending_auxiliary_work_for(owner) {
             return Ok(());
@@ -1000,32 +1185,32 @@ impl PageSession {
         })
         .await?;
         for (target, job, fetched) in completed {
-            let (result, terminal) = match fetched {
-                Err(NavigationFetchError::Failed(error)) => (
-                    Err(error.clone()),
-                    Err(ActionTerminalError::Navigation(error)),
-                ),
-                Err(NavigationFetchError::Deadline) => {
-                    let error = "Native target navigation exceeded session budget".to_owned();
-                    (Err(error.clone()), Err(ActionTerminalError::Driver(error)))
-                }
+            match fetched {
                 Ok(fetched) => {
-                    let result = commit_fetched(&mut self.rt, target, &job, fetched);
-                    let terminal = result
-                        .as_ref()
-                        .map(|_| ())
-                        .map_err(|error| ActionTerminalError::Driver(error.clone()));
-                    (result, terminal)
+                    let generation = job.generation;
+                    let revision = job.activity.navigation_revision();
+                    let result = commit_fetched(&mut self.rt, target, job, fetched, execution);
+                    if let Some(result) = result.transpose() {
+                        let terminal = result
+                            .as_ref()
+                            .map(|_| ())
+                            .map_err(|error| ActionTerminalError::Driver(error.clone()));
+                        record_result(&mut self.rt, target, generation, revision, result, terminal);
+                    }
                 }
-            };
-            let shared = self.rt.op_state();
-            let mut shared = shared.borrow_mut();
-            let state = self::state(&mut shared);
-            if let Some(revision) = job.activity.navigation_revision() {
-                state.action_commits.insert(target, (revision, terminal));
-            }
-            if state.waiters.contains(&job.generation) {
-                state.results.insert(job.generation, result);
+                Err(error) => {
+                    let (error, terminal) = match error {
+                        NavigationFetchError::Failed(error) => {
+                            (error.clone(), ActionTerminalError::Navigation(error))
+                        }
+                        NavigationFetchError::Deadline => {
+                            let error =
+                                "Native target navigation exceeded session budget".to_owned();
+                            (error.clone(), ActionTerminalError::Driver(error))
+                        }
+                    };
+                    record_commit(&mut self.rt, target, &job, Err(error), Err(terminal));
+                }
             }
         }
         if !navigation_deadline::expired(&self.rt) {
@@ -1346,6 +1531,7 @@ impl PageSession {
             let _activation = key.enter();
             frames.retire(&mut self.rt);
         }
+        let caller_expired = exceeded || result.is_err();
         let result = if exceeded {
             Err(NavigationWaitError::Driver(format!(
                 "Target navigation timeout after {budget}ms"
@@ -1357,10 +1543,8 @@ impl PageSession {
                 )))
             })
         };
-        let result = match self.finish_history_command(Ok(())) {
-            Ok(()) => result,
-            Err(error) => Err(NavigationWaitError::Driver(error)),
-        };
+        let cleanup = self.finish_history_command(Ok(()));
+        let result = finish_navigation_wait(result, cleanup, caller_expired);
         waiter.completed = result.is_ok();
         result
     }
@@ -1384,6 +1568,9 @@ impl Drop for NavigationWaiter {
             state
                 .loading
                 .retain(|_, load| load.generation != self.generation);
+            state
+                .pending_init
+                .retain(|_, init| init.job.generation != self.generation);
         }
     }
 }
@@ -1570,6 +1757,13 @@ impl PageSession {
                         .is_some_and(|revision| revision == latest)
                 })
                 .map(|job| job.generation)
+                .or_else(|| {
+                    self::state(&mut shared)
+                        .pending_init
+                        .get(&target)
+                        .filter(|init| init.job.activity.navigation_revision() == Some(latest))
+                        .map(|init| init.job.generation)
+                })
         };
         if let Some(generation) = generation {
             return self
@@ -1688,6 +1882,62 @@ impl PageSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_completion_error_priority_preserves_owned_interruptions() {
+        let hard = "Execution interrupted by the session execution budget";
+        let cases = [
+            (
+                Ok("receipt".into()),
+                false,
+                Err(NavigationWaitError::Driver("cleanup".into())),
+            ),
+            (
+                Err(NavigationWaitError::Navigation("HTTP failed".into())),
+                false,
+                Err(NavigationWaitError::Driver("cleanup".into())),
+            ),
+            (
+                Err(NavigationWaitError::Driver(
+                    "ordinary driver failure".into(),
+                )),
+                false,
+                Err(NavigationWaitError::Driver("cleanup".into())),
+            ),
+            (
+                Err(NavigationWaitError::Driver(hard.into())),
+                false,
+                Err(NavigationWaitError::Driver(hard.into())),
+            ),
+            (
+                Err(NavigationWaitError::Driver(
+                    "Target navigation timeout after 1000ms".into(),
+                )),
+                true,
+                Err(NavigationWaitError::Driver(
+                    "Target navigation timeout after 1000ms".into(),
+                )),
+            ),
+        ];
+        for (result, caller_expired, expected) in cases {
+            assert_eq!(
+                finish_navigation_wait(result, Err("cleanup".into()), caller_expired),
+                expected
+            );
+        }
+        assert_eq!(
+            finish_navigation_wait(Ok("receipt".into()), Ok(()), false),
+            Ok("receipt".into())
+        );
+        assert_eq!(
+            finish_navigation_wait(
+                Err(NavigationWaitError::Navigation("HTTP failed".into())),
+                Ok(()),
+                false
+            ),
+            Err(NavigationWaitError::Navigation("HTTP failed".into()))
+        );
+    }
 
     #[test]
     fn target_history_traversal_and_replacement_preserve_independent_entries() {
@@ -1889,6 +2139,10 @@ pub(super) fn queue_interrupted_frame<'s>(
 ) {
     navigation_deadline::queue_interrupted_frame(scope, context, previous)
 }
+pub(super) fn finish_canceled_execution(rt: &mut OwnedRuntime) {
+    navigation_deadline::finish_canceled_execution(rt)
+}
+
 pub(super) fn retire_interrupted_frames(rt: &mut OwnedRuntime) {
     navigation_deadline::retire_interrupted_frames(rt)
 }

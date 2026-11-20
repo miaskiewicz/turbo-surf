@@ -15,12 +15,17 @@ import tarfile
 SPEC = importlib.util.spec_from_file_location('release_smoke', Path(__file__).with_name('smoke-mcp-release.py'))
 SMOKE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SMOKE)
+INSTALL_SPEC = importlib.util.spec_from_file_location('installed_npm_smoke', Path(__file__).with_name('smoke-installed-npm.py'))
+INSTALLED = importlib.util.module_from_spec(INSTALL_SPEC)
+INSTALL_SPEC.loader.exec_module(INSTALLED)
 PLATFORMS = {
     'darwin-arm64': ('darwin', 'arm64', 'turbo-surf-mcp', 'turbo-surf.darwin-arm64.node'),
     'linux-x64': ('linux', 'x64', 'turbo-surf-mcp', 'turbo-surf.linux-x64-gnu.node'),
     'linux-arm64': ('linux', 'arm64', 'turbo-surf-mcp', 'turbo-surf.linux-arm64-gnu.node'),
     'win32-x64': ('win32', 'x64', 'turbo-surf-mcp.exe', 'turbo-surf.win32-x64-msvc.node'),
 }
+UNIX_EXECUTABLES = {'@miaskiewicz/turbo-surf-' + platform: files[2]
+                    for platform, files in PLATFORMS.items() if files[0] != 'win32'}
 
 
 def sha(path):
@@ -42,6 +47,17 @@ def members(archive):
         if name.is_absolute() or '..' in name.parts or '\\' in row.name or not name.parts or name.parts[0] != 'package' or not (row.isfile() or row.isdir()):
             raise ValueError('Unsafe npm archive entry: ' + row.name)
     return rows
+
+
+def require_executable_mode(mode):
+    if mode & 0o777 != 0o755:
+        raise ValueError('Actual packaged MCP executable mode must be 0755')
+
+
+def verify_archive_permissions(archive, package_name):
+    binary = UNIX_EXECUTABLES.get(package_name)
+    if binary:
+        require_executable_mode(archive.getmember('package/' + binary).mode)
 
 
 def pack(source, output, expected_name, version, required):
@@ -69,6 +85,7 @@ def pack(source, output, expected_name, version, required):
         identity = json.loads(stream.extractfile('package/package.json').read())
         if identity['name'] != expected_name or identity['version'] != version:
             raise ValueError('Actual archive metadata differs')
+        verify_archive_permissions(stream, expected_name)
         for name in sorted(required):
             payload = stream.extractfile('package/' + name).read()
             if payload != (source / name).read_bytes():
@@ -115,7 +132,11 @@ def prepare_platform(root, artifacts, output, platform, version, commit):
     metadata = json.loads((source / 'package.json').read_text())
     if metadata.get('os') != [PLATFORMS[platform][0]] or metadata.get('cpu') != [PLATFORMS[platform][1]]:
         raise ValueError('Platform package metadata differs')
-    shutil.copy2(binary, source / PLATFORMS[platform][2])
+    staged_binary = source / PLATFORMS[platform][2]
+    shutil.copy2(binary, staged_binary)
+    if PLATFORMS[platform][0] != 'win32':
+        # Artifact downloads discard executable permissions before this staging step.
+        staged_binary.chmod(0o755)
     shutil.copy2(addon, source / PLATFORMS[platform][3])
     for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(root / name, source / name)
@@ -135,7 +156,7 @@ def smoke_tarballs(thin, platform, output, version, commit, checkout):
     target.parent.mkdir(parents=True)
     shutil.move(str(dependency), target)
     binary = target / PLATFORMS['linux-x64'][2]
-    binary.chmod(binary.stat().st_mode | 0o111)
+    require_executable_mode(binary.stat().st_mode)
     # Only the extracted archive is allowed to supply the consumer entrypoint.
     cli = installed / 'cli.js'
     if cli.is_relative_to(checkout):
@@ -146,6 +167,11 @@ def smoke_tarballs(thin, platform, output, version, commit, checkout):
     if sha(thin['archive']) != thin['sha256'] or sha(platform['archive']) != platform['sha256']:
         raise ValueError('Actual npm archive changed during smoke')
     return {'entrypoint': str(cli), 'extractedPackage': str(installed), 'platformPackage': str(target), 'receipt': receipt}
+
+
+def smoke_installed_tarballs(thin, platform, output, version, commit):
+    # The registered signal handler and the child supervisor must share ownership.
+    return INSTALLED.smoke(thin['archive'], platform['archive'], output, version, commit, SMOKE.smoke)
 
 
 def prepare(root, artifacts, output, version, commit):
@@ -159,11 +185,12 @@ def prepare(root, artifacts, output, version, commit):
     required.update('rust/crates/turbo-surf-napi/' + name for name in ('index.d.ts', 'package.json', 'LICENSE', 'README.md'))
     thin = pack(root, output / 'thin-launcher', 'turbo-surf', version, required)
     smoke = smoke_tarballs(thin, platforms['linux-x64'], output, version, commit, root)
+    installed = smoke_installed_tarballs(thin, platforms['linux-x64'], output / 'normal-install', version, commit)
     napi = output / 'packaged-napi-smoke.json'
     subprocess.run(['node', str(root / 'scripts/smoke-napi-release.mjs'), str(Path(smoke['platformPackage']) / PLATFORMS['linux-x64'][3]), version, commit, str(napi)], check=True, timeout=60)
     for record in [thin, *platforms.values()]:
         record['archive'] = str(Path(record['archive']).relative_to(output))
-    receipt = {'passed': True, 'sourceCommit': commit, 'version': version, 'thin': thin, 'platforms': platforms, 'consumer': smoke, 'packagedNapiReceiptSha256': sha(napi), 'allNativeBuildsVerified': True}
+    receipt = {'passed': True, 'sourceCommit': commit, 'version': version, 'thin': thin, 'platforms': platforms, 'consumer': smoke, 'installedConsumer': installed, 'packagedNapiReceiptSha256': sha(napi), 'allNativeBuildsVerified': True}
     write(output / 'FINAL.json', receipt)
     return receipt
 

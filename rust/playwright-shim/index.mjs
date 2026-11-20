@@ -14,6 +14,7 @@
 // cannot do (pixels, real input devices, network interception) throws honestly
 // or no-ops — see LIMITATIONS.md.
 
+import { createTestOutput } from "./test-output.mjs";
 import {
   handleEvaluation,
   hasJSHandles,
@@ -1111,12 +1112,15 @@ class Locator {
             (node) => node.node === match.node,
           );
     if (index == null) return null;
-    const script = `globalThis.__RESULT = (() => {
+    const expression = `(() => {
       try { const element = ${live ? "__tsNs.tcLocatorAll()" : "document.querySelectorAll('*')"}[${index}];
         return JSON.stringify({value: element ? (${fn.toString()})(element) : null});
       } catch (error) { return JSON.stringify({error: String(error.message)}); }
     })()`;
-    const raw = live ? await this._page._evalEngine(script) : native.evaluate(this._html, script);
+    // A DOM accessor observes reached state without settling unrelated page work.
+    const raw = live
+      ? await this._page._readEngineAsync(`return ${expression};`)
+      : native.evaluate(this._html, `globalThis.__RESULT = ${expression}`);
     const result = JSON.parse(raw);
     if (result.error) throw new Error(result.error);
     return result.value;
@@ -1403,7 +1407,7 @@ class Locator {
       if (completed.error || typeof completed.navigationRevision !== "string")
         throw new Error(completed.error ?? "Native navigation baseline is unavailable");
       if (completed.navigationRevision !== state.navigationRevision)
-        await owner._refreshFromSession();
+        await owner._refreshFromSession(true);
       else await owner._drainNetworkEvents();
     }
     return result;
@@ -2389,6 +2393,8 @@ const NETWORK_EVENTS = [
   "console",
   "dialog",
 ];
+const supersededInitialHydrationErrors = new WeakSet();
+
 class Page {
   constructor(context) {
     this._html = "";
@@ -2815,12 +2821,12 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
-  _openLiveSession(timeoutMs) {
+  _openLiveSession(timeoutMs, initialGoal) {
     if (this._closed) throw new Error("Page session closed");
     if (this._openingSession) return this._openingSession.promise;
     if (this._auxiliaryActor && this._session != null) return Promise.resolve();
     if (this._session != null) this._closeSession();
-    const opening = { id: native.liveNetworkLogCreate() };
+    const opening = { id: native.liveNetworkLogCreate(), initialGoal };
     this._openingSession = opening;
     this._openingNetworkId = opening.id;
     this._updateNetworkPump();
@@ -2845,6 +2851,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
     return JSON.stringify({
       ...this._documentResponse,
       hostNetworkLog: opening.id,
+      initialHydrationGoal: opening.initialGoal,
       rootHistory: this._driverHistorySnapshot(),
       retainInitialHydrationTimeout: Boolean(native.liveInitialHydrationStatus),
       auxiliaryPolicy: this._context._auxiliaryPolicy,
@@ -2863,20 +2870,30 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (native.liveAuxiliaryState) await this._context._attachActor(this, opening.id, true);
   }
 
-  async _completeActorOpen(session) {
+  async _completeActorOpen(session, opening = this._openingSession) {
     if (!native.liveAuxiliaryState) return;
+    this._assertInitialOpening(opening);
     this._actorHub.opening = false;
-    await this._context._attachActor(this, session);
+    try {
+      await this._context._attachActor(this, session);
+    } catch (error) {
+      // Target retirement can reject attachment before its normal post-await
+      // ownership check. Preserve the native error when this opening is still live.
+      this._assertInitialOpening(opening, { cause: error });
+      throw error;
+    }
   }
 
   async _failedActorOpen(opening) {
-    const actor = this._actorHub;
+    if (!this._ownsInitialOpening(opening)) return;
+    const actor = opening.actorHub ?? this._actorHub;
     if (actor) {
       try {
         await actor.drain();
       } catch {}
+      if (!this._ownsInitialOpening(opening)) return;
       if (actor.capability === "supported") {
-        if (this._targetId != null) await actor.closeTarget(this._targetId);
+        if (opening.targetId != null) await actor.closeTarget(opening.targetId);
         return;
       }
       actor.releaseRoot(new Error("Root initialization failed"));
@@ -2911,6 +2928,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _settleFailedLiveOpen(error, opening) {
+    if (!this._ownsInitialOpening(opening) || supersededInitialHydrationErrors.has(error)) return;
     if (/navigation timeout after/.test(error.message)) error.name = "TimeoutError";
     if (this._openingClosePromise) await this._openingClosePromise;
     else if (!this._canRetainTimedOutActor(error)) {
@@ -2919,8 +2937,24 @@ return String(globalThis.__RESULT ?? ""); })()`,
     }
   }
 
-  _throwIfOpeningClosed() {
-    if (this._closed || this._openingClosePromise) throw new Error("Page session closed");
+  _ownsInitialOpening(opening) {
+    return (
+      this._openingSession === opening &&
+      !opening.superseded &&
+      (opening.targetId === undefined || this._targetId === opening.targetId) &&
+      (opening.session === undefined || this._session === opening.session) &&
+      (!opening.actorHub || this._actorHub === opening.actorHub)
+    );
+  }
+
+  _assertInitialOpening(opening, options) {
+    this._throwIfOpeningClosed(options);
+    if (!this._ownsInitialOpening(opening))
+      throw new Error("Page session changed during initialization", options);
+  }
+
+  _throwIfOpeningClosed(options) {
+    if (this._closed || this._openingClosePromise) throw new Error("Page session closed", options);
   }
 
   async _startLiveSession(timeoutMs, opening) {
@@ -2942,21 +2976,28 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._imageCache?.documentToken,
       );
       await this._observeActorOpen(opened, opening);
+      this._assertInitialOpening(opening);
+      opening.actorHub = this._actorHub;
+      opening.targetId = this._targetId;
       const session = await opened;
       if (this._closed || this._openingSession !== opening) {
         native.liveClose(session);
         throw new Error("Page session closed");
       }
       this._session = session;
-      await this._completeActorOpen(session);
-      this._throwIfOpeningClosed();
+      opening.session = session;
+      opening.targetId = this._targetId;
+      await this._completeActorOpen(session, opening);
+      this._assertInitialOpening(opening);
       this._hydrated = true;
       this._loadedPath = pathOf(this._url);
       const initialTimeout = this._initialHydrationTimeout(session);
       if (initialTimeout != null) throw new Error(`navigation timeout after ${initialTimeout}ms`);
       await this._refreshFromSession(true);
-      await this._drainBindings(timeoutMs > 0 ? started + timeoutMs : Infinity);
-      this._throwIfOpeningClosed();
+      this._assertInitialOpening(opening);
+      const deadline = timeoutMs > 0 ? started + timeoutMs : Infinity;
+      await this._finishInitialHydration(opening, session, deadline);
+      this._assertInitialOpening(opening);
       if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
         if (!this._auxiliaryActor) this._closeSession();
         throw new Error(`navigation timeout after ${timeoutMs}ms`);
@@ -2970,6 +3011,31 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._openingNetworkId = null;
       }
       this._updateNetworkPump();
+    }
+  }
+
+  async _finishInitialHydration(opening, session, deadline) {
+    this._assertInitialOpening(opening);
+    if (opening.initialGoal !== "load") {
+      await this._drainBindings(deadline);
+      this._assertInitialOpening(opening);
+      return;
+    }
+    if (typeof native.liveContinueInitialHydration !== "function")
+      throw new Error("Native initial-load continuation capability is unsupported");
+    for (;;) {
+      const outcome = await native.liveContinueInitialHydration(session);
+      this._assertInitialOpening(opening);
+      if (outcome === "reached") return;
+      if (outcome === "superseded") {
+        const error = new Error("Initial navigation document was replaced or retired");
+        supersededInitialHydrationErrors.add(error);
+        throw error;
+      }
+      if (outcome !== "host-reply")
+        throw new Error("Invalid native initial-load continuation result");
+      await this._drainBindings(deadline);
+      this._assertInitialOpening(opening);
     }
   }
 
@@ -3090,8 +3156,24 @@ return String(globalThis.__RESULT ?? ""); })()`,
     if (this._session == null) return;
     try {
       await this._collectSession(this._session, "globalThis.__RESULT = '';");
-    } catch {
-      /* terminated mid-drain — refresh reads best-effort state */
+    } catch (error) {
+      if (
+        String(error?.message ?? error).includes(
+          "Execution interrupted by the session execution budget",
+        )
+      ) {
+        try {
+          this._html = native.liveSerialize(this._session);
+          if (native.liveInitialHydrationStatus)
+            error.hydrationDiagnostics = JSON.parse(
+              native.liveInitialHydrationStatus(this._session),
+            );
+        } catch {
+          /* Keep the original interruption if cached diagnostics are unavailable. */
+        }
+        throw error;
+      }
+      /* Aggregate drain expiry can still expose reached state. */
     }
     await this._refreshFromSession();
     await this._drainBindings();
@@ -3459,7 +3541,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       this._session,
       interactionScript(selector, index ?? 0, kind, value, strict),
     );
-    await this._refreshFromSession();
+    // Dispatch already waits for document commit; metadata must not wait for load.
+    await this._refreshFromSession(true);
     // Surface the NO_MATCH signal before draining so a binding-handler
     // rejection that happens to be in the queue can't shadow the original
     // locator failure. Drain is best-effort; a throwing binding writes to
@@ -3479,8 +3562,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
   // keyboard (key-event dispatch) and other live-only side effects.
   async _sessionEval(script, { waitForBindings = true } = {}) {
     if (this._session == null) return undefined;
-    const r = await native.liveEvalEngine(this._session, script);
-    await this._refreshFromSession();
+    // Raw input must deliver its remaining events before a replacement finishes loading.
+    const r = await native.liveEvalEngine(this._session, script, !waitForBindings);
+    await this._refreshFromSession(!waitForBindings);
     if (waitForBindings) await this._drainBindings();
     else scheduleBindingDrain(this);
     return r;
@@ -3623,6 +3707,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
   }
 
   async _navigateActorTarget(url, method, body, opts = {}) {
+    if (this._openingSession) this._openingSession.superseded = true;
     const navigationStarted = performance.now();
     const session = this._session;
     const bindingDeadline = this._navigationBindingDeadline(opts);
@@ -3856,6 +3941,9 @@ return String(globalThis.__RESULT ?? ""); })()`,
     error.name = "TimeoutError";
     throw error;
   }
+  _initialNavigationGoal(opts) {
+    return opts?.waitUntil == null || opts.waitUntil === "load" ? "load" : undefined;
+  }
   _needsObservedHydration(opts) {
     return (
       !this._live &&
@@ -3909,7 +3997,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     // wait short-circuits on a real response instead of timing out with
     // the synthetic 200 fallback. Harmless when nothing is waiting.
     else if (this._needsObservedHydration(opts)) {
-      await this._openLiveSession(this._remainingNavigationTimeout(opts, started));
+      await this._openLiveSession(
+        this._remainingNavigationTimeout(opts, started),
+        this._initialNavigationGoal(opts),
+      );
     }
     return resp;
   }
@@ -4041,7 +4132,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
       } catch(error) { return JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); } })()`,
       ),
     );
-    if (tracked.needsSync) await this._refreshFromSession();
+    // The authored result is settled; metadata must not wait for unrelated page work.
+    if (tracked.needsSync) await this._refreshFromSession(true);
     else if (tracked.events || this._auxiliaryActor) await this._drainNetworkEvents(true);
     const result = JSON.parse(tracked.value);
     if (result.error) throw decodeEvaluationError(result.error);
@@ -7076,7 +7168,7 @@ function startAttemptPhase(info) {
 }
 
 async function executeAttempt(plan, t) {
-  const info = makeTestInfo(plan.name);
+  const info = makeTestInfo(plan.name, plan);
   startAttemptPhase(info);
   if (plan.expectedFailure) info.expectedStatus = "failed";
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
@@ -7106,7 +7198,7 @@ async function executeAttempt(plan, t) {
 }
 
 async function invokeWorkerHook(fn, plan) {
-  const info = makeTestInfo("worker hook");
+  const info = makeTestInfo("worker hook", plan);
   startAttemptPhase(info);
   const defs = { ...plan.extDefs, ...fixtureUses(plan.useKeys, plan.frames) };
   const fixtures = await openFixtures(plan.baseDefs, defs, info, undefined, true);
@@ -7281,12 +7373,19 @@ function makeDescribe() {
   return d;
 }
 
-function makeTestInfo(title) {
+function makeTestInfo(title, plan) {
+  const output = createTestOutput(workerAttempt, [
+    ...(plan?.frames ?? []).map((frame) => frame.title),
+    title,
+  ]);
   const info = {
     title,
-    titlePath: [title],
-    outputDir: "/tmp",
-    outputPath: (...p) => ["/tmp", ...p].join("/"),
+    file: output.file,
+    titlePath: output.titlePath,
+    get outputDir() {
+      return output.outputDir;
+    },
+    outputPath: (...p) => output.outputPath(...p),
     snapshotPath: (...p) => ["/tmp", ...p].join("/"),
     attach: async (name, options) => {
       const attachment = { name, contentType: options.contentType ?? "application/octet-stream" };
@@ -7314,7 +7413,7 @@ function makeTestInfo(title) {
     status: "passed",
     expectedStatus: "passed",
     retry: workerAttempt?.retry ?? 0,
-    project: { name: process.env.TURBO_PW_PROJECT_NAME ?? "turbo-surf" },
+    project: output.project,
   };
   return info;
 }

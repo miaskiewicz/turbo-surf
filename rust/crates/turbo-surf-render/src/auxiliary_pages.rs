@@ -965,6 +965,37 @@ fn target_result(
     result
 }
 
+async fn target_expression_value(
+    rt: &mut JsRuntime,
+    target: AuxiliaryContextId,
+    expression: &str,
+    engine: bool,
+    json: bool,
+) -> Result<String, String> {
+    let source = if engine {
+        format!(
+            "return (\n{}\n)",
+            expression.trim_end().trim_end_matches(';')
+        )
+    } else {
+        expression.to_owned()
+    };
+    let value = execute_target(rt, target, &source, engine)?;
+    let completion = {
+        deno_core::scope!(scope, rt);
+        let context = context(scope, target)?;
+        let scope = &mut v8::ContextScope::new(scope, context);
+        JsRuntime::scoped_resolve(scope, value.clone())
+    };
+    execute_target(rt, target, "__tsNs.resetTimerBudget();", true)?;
+    drain_event_loop_until_completion_for(rt, None, Some(&value), Some(target.0)).await?;
+    let value = rt
+        .with_event_loop_promise(completion, Default::default())
+        .await
+        .map_err(|error| error.to_string())?;
+    target_result(rt, target, value, json)
+}
+
 impl PageSession {
     pub async fn eval_target_expression(
         &mut self,
@@ -986,55 +1017,39 @@ impl PageSession {
         json: bool,
     ) -> Result<String, String> {
         auxiliary_navigation::reconcile_expired_source_modules(&mut self.rt, target)?;
-        let target = AuxiliaryContextId(target);
-        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
-                let source = if engine {
-                    format!(
-                        "return (\n{}\n)",
-                        expression.trim_end().trim_end_matches(';')
-                    )
-                } else {
-                    expression.to_owned()
-                };
-                let value = execute_target(&mut self.rt, target, &source, engine)?;
-                // Promise observers must belong to the live target realm: a backing
-                // replacement can leave JsRuntime's original main context detached.
-                let completion = {
-                    deno_core::scope!(scope, self.rt);
-                    let context = context(scope, target)?;
-                    let scope = &mut v8::ContextScope::new(scope, context);
-                    JsRuntime::scoped_resolve(scope, value.clone())
-                };
-                execute_target(&mut self.rt, target, "__tsNs.resetTimerBudget();", true)?;
-                drain_event_loop_until_completion_for(
-                    &mut self.rt,
-                    None,
-                    Some(&value),
-                    Some(target.0),
-                )
-                .await?;
-                let value = self
-                    .rt
-                    .with_event_loop_promise(completion, Default::default())
-                    .await
-                    .map_err(|error| error.to_string())?;
-                target_result(&mut self.rt, target, value, json)
-            })
-            .await;
-        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
-        drop(watchdog);
+        let budget = self.budget_ms;
+        let execution = PollExecutionBudget::new(self.rt.v8_isolate(), budget);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(budget),
+            execution.run(target_expression_value(
+                &mut self.rt,
+                AuxiliaryContextId(target),
+                expression,
+                engine,
+                json,
+            )),
+        )
+        .await;
+        let interrupted = execution.interrupted();
+        let expired = execution.expired();
+        drop(execution);
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = if exceeded {
+        let result = if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else if expired {
             Err("Target expression exceeded session execution budget".into())
         } else {
             result.unwrap_or_else(|_| {
-                Err("Target expression exceeded session execution budget".to_owned())
+                Err("Target expression exceeded session execution budget".into())
             })
         };
-        self.finish_history_command(result)
+        let result = self.finish_history_command(result);
+        if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else {
+            result
+        }
     }
 
     pub async fn eval_target_engine(
@@ -1043,16 +1058,62 @@ impl PageSession {
         source: &str,
         collect: bool,
     ) -> Result<String, String> {
+        let key = self.rt.activation_key();
+        key.during(self.eval_target_engine_active(target, source, collect))
+            .await
+    }
+
+    async fn eval_target_engine_active(
+        &mut self,
+        target: u64,
+        source: &str,
+        collect: bool,
+    ) -> Result<String, String> {
+        auxiliary_navigation::reconcile_expired_source_modules(&mut self.rt, target)?;
         let expression = format!("(() => {{ {source}\n; return globalThis.__RESULT == null ? '' : String(globalThis.__RESULT); }})()");
-        let result = self
-            .eval_target_expression(target, &expression, true, false)
-            .await?;
-        if !collect {
-            let hydration = "__tsNs.hydrate(300, 200000, true)";
-            self.eval_target_expression(target, hydration, true, false)
-                .await?;
+        let budget = self.budget_ms;
+        let execution = PollExecutionBudget::new(self.rt.v8_isolate(), budget);
+        let mut reached = None;
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(budget),
+            execution.run(async {
+                reached = Some(
+                    target_expression_value(
+                        &mut self.rt,
+                        AuxiliaryContextId(target),
+                        &expression,
+                        true,
+                        false,
+                    )
+                    .await?,
+                );
+                if !collect {
+                    target_quiescence::drain(&mut self.rt, target).await?;
+                }
+                Ok(())
+            }),
+        )
+        .await;
+        let interrupted = execution.interrupted();
+        let expired = execution.expired() || result.is_err();
+        drop(execution);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
+        let result = if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else if expired {
+            reached.ok_or_else(|| "Target expression exceeded session execution budget".into())
+        } else {
+            result
+                .unwrap()
+                .and_then(|()| reached.ok_or_else(|| "Target expression result unavailable".into()))
+        };
+        let result = self.finish_history_command(result);
+        if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else {
+            result
         }
-        Ok(result)
     }
 }
 
@@ -1276,20 +1337,35 @@ impl PageSession {
         let budget = timeout_ms
             .filter(|value| *value > 0)
             .unwrap_or(self.budget_ms);
-        let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
+        let caller = timeout_ms
+            .filter(|value| *value > 0)
+            .map(|value| std::time::Instant::now() + std::time::Duration::from_millis(value));
+        let execution = AsyncEntryBudget::new(self.rt.v8_isolate(), self.budget_ms, caller);
         let key = self.rt.activation_key();
-        let operation = key.during(self.set_target_content_active(target, html, wait_until));
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(budget), operation).await;
-        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
-        drop(watchdog);
+        let result = key
+            .during(execution.run(
+                true,
+                Box::pin(self.set_target_content_active(target, html, wait_until)),
+            ))
+            .await;
+        let outcome = execution.finish();
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = match (result, exceeded) {
-            (Ok(result), false) => result,
-            _ => Err(format!("setContent timeout after {budget}ms")),
+        let error = if outcome.caller_expired {
+            format!("setContent timeout after {budget}ms")
+        } else {
+            outcome.error(format!("setContent timeout after {}ms", self.budget_ms))
         };
-        self.finish_history_command(result)?;
+        let result = if outcome.exceeded {
+            Err(error.clone())
+        } else {
+            result
+        };
+        let result = self.finish_history_command(result);
+        if outcome.interrupted {
+            return Err(error);
+        }
+        result?;
         self.serialize_target_for_driver(target)
     }
 
@@ -1313,6 +1389,7 @@ impl PageSession {
             "replaceDocumentContent",
             &[HostArg::Value(content)],
         )?;
+        auxiliary_navigation::cancel(&mut self.rt.op_state().borrow_mut(), target.0);
         self.eval_target_expression(target.0, "__tsNs.hydrate(300,200000,true)", true, false)
             .await?;
         target_call(&mut self.rt, target, "dispatchDocumentInteractive", &[])?;

@@ -158,6 +158,49 @@ async function recover(page, origin, target) {
 }
 
 test(
+  "Page.evaluate still awaits its authored pending peer module during observational metadata collection",
+  { timeout: 10000 },
+  () =>
+    fixture(async ({ context, origin, peerGateEntered, releasePeerGate, requests }) => {
+      const page = await context.newPage();
+      await page.goto(`${origin}/ready`, { waitUntil: "networkidle" });
+      const created = page.waitForEvent("popup", { timeout: 2000 });
+      await page.locator("#child").click();
+      const peer = await created;
+      await peer.waitForURL(`${origin}/child`, { timeout: 2000 });
+      let settled = false;
+      const evaluation = peer
+        .evaluate(async () => {
+          const module = await import(location.origin + "/peer-held.mjs");
+          return {
+            marker: module.marker,
+            sameDocument: module.ownDocument === document,
+            finished: peerModuleFinished,
+            runs: peerModuleRuns,
+          };
+        })
+        .then(
+          (value) => {
+            settled = true;
+            return { value };
+          },
+          (error) => {
+            settled = true;
+            return { error };
+          },
+        );
+      await peerGateEntered;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.equal(settled, false, "the authored await must not become a snapshot-only read");
+      assert.equal(requests.filter((url) => url === "/peer-gate").length, 1);
+      releasePeerGate();
+      assert.deepEqual(await evaluation, {
+        value: { marker: 53, sameDocument: true, finished: true, runs: 1 },
+      });
+    }),
+);
+
+test(
   "pending module cancellation preserves the root module map and another actual Page graph",
   { timeout: 20000 },
   () =>

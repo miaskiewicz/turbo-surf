@@ -907,18 +907,31 @@ pub(super) fn queue_interrupted_frame<'s>(
     }
 }
 
-pub(super) fn retire_interrupted_frames(rt: &mut OwnedRuntime) {
+fn execution_is_active(rt: &mut OwnedRuntime) -> bool {
     if Watchdog::any_active(rt.v8_isolate()) {
+        return true;
+    }
+    rt.op_state()
+        .borrow()
+        .try_borrow::<Active>()
+        .is_some_and(|active| active.clock.is_some())
+}
+
+pub(super) fn finish_canceled_execution(rt: &mut OwnedRuntime) {
+    // Nested command futures have dropped and joined their guards. A still-live
+    // parent guard retains authority over its own termination and cleanup.
+    if execution_is_active(rt) {
+        return;
+    }
+    rt.v8_isolate().cancel_terminate_execution();
+    retire_interrupted_frames(rt);
+}
+
+pub(super) fn retire_interrupted_frames(rt: &mut OwnedRuntime) {
+    if execution_is_active(rt) || rt.v8_isolate().is_execution_terminating() {
         return;
     }
     let shared = rt.op_state();
-    let driver_active = shared
-        .borrow()
-        .try_borrow::<Active>()
-        .is_some_and(|active| active.clock.is_some());
-    if driver_active || rt.v8_isolate().is_execution_terminating() {
-        return;
-    }
     let _activation = rt.activation_key().enter();
     retire_uninstalled_frame_allocations(rt);
     settle_deferred_classic_interruptions(rt);

@@ -89,8 +89,8 @@ pub use runtime::{
     AuxiliaryCapability, AuxiliaryDriverHistory, AuxiliaryHostServices, AuxiliaryPageEvent,
     AuxiliaryPageEventLog, AuxiliaryPageInfo, AuxiliaryResourcePolicy, BrowserStorage,
     HydrationDiagnostics, HydrationPhase, HydrationProgress, InitialDocumentImages,
-    NavigationActivationSnapshot, PageSession, PageSessionOptions, WindowTimerMode,
-    DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
+    InitialHydrationGoal, InitialHydrationOutcome, NavigationActivationSnapshot, PageSession,
+    PageSessionOptions, WindowTimerMode, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
 pub use web_fonts::{font_face_sources, web_font_face, WebFontSource};
 

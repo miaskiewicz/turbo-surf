@@ -52,6 +52,7 @@ export function normalizeConfig(raw, rootDir) {
   const projects = rawProjects.length
     ? rawProjects.map((p) => ({
         name: String(p.name ?? "default"),
+        outputDir: resolve(rootDir, p.outputDir ?? r.outputDir ?? "test-results"),
         workers: Math.min(workers, normalizeWorkers(p.workers ?? workers)),
         timeout: p.timeout ?? r.timeout ?? 30000,
         retries: p.retries ?? r.retries ?? 0,
@@ -66,6 +67,7 @@ export function normalizeConfig(raw, rootDir) {
     : [
         {
           name: "default",
+          outputDir: resolve(rootDir, r.outputDir ?? "test-results"),
           workers,
           timeout: r.timeout ?? 30000,
           retries: r.retries ?? 0,

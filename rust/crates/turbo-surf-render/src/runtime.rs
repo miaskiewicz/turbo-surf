@@ -39,6 +39,9 @@ mod registered_module_scripts;
 
 #[path = "async_owner.rs"]
 mod async_owner;
+#[path = "initial_hydration.rs"]
+mod initial_hydration;
+pub use initial_hydration::{InitialHydrationGoal, InitialHydrationOutcome};
 #[path = "selected_document_tasks.rs"]
 mod selected_document_tasks;
 
@@ -4729,6 +4732,8 @@ pub enum WindowTimerMode {
 /// Host-owned policy installed before any document or frame script executes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PageSessionOptions {
+    pub initial_hydration_goal: InitialHydrationGoal,
+    pub initial_hydration_deadline: Option<std::time::Instant>,
     /// Explicit per-runtime override; otherwise inherit the browsing profile's
     /// animation presentation policy. Installed before every Window's scripts.
     pub animation_policy: Option<crate::AnimationPolicy>,
@@ -13730,6 +13735,35 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     if (!ranScript && fired === 0) break;
   }
 };
+// Retain the actual script pass in its owning Window across driver host-reply
+// handoffs. Native task turns, not this Promise, own interaction timer execution.
+let __interactionHydrate = null;
+const __interactionHydrateState = () => {
+  if (__interactionHydrate && __interactionHydrate.generation !== __resourceDocumentGeneration) __interactionHydrate = null;
+  return __interactionHydrate;
+};
+const __observeInteractionHydrate = async (state, promise) => {
+  try { await promise; }
+  catch (error) { state.failed = true; state.error = error; }
+  finally { state.pending = false; state.promise = null; }
+};
+const __startInteractionHydrate = () => {
+  const current = __interactionHydrateState();
+  if (current && (current.pending || current.failed)) return;
+  const state = {generation:__resourceDocumentGeneration, pending:true, failed:false, error:null, promise:null};
+  __interactionHydrate = state;
+  state.promise = __G.hydrate(1, 1, false);
+  __observeInteractionHydrate(state, state.promise);
+};
+const __interactionHydratePending = () => {
+  const state = __interactionHydrateState();
+  if (state && state.failed) {
+    const error = state.error; state.failed = false; state.error = null;
+    throw error;
+  }
+  return state && state.pending ? "1" : "0";
+};
+ops.op_set_host_capabilities({startInteractionHydrate:__startInteractionHydrate, interactionHydratePending:__interactionHydratePending});
 // The parser pass of the initial load; the host's load gate polls its completion
 // (turbo-surf#87: through these functions, not page-reachable `.finally`/globals).
 let __initialHydrated = false;
@@ -18421,7 +18455,12 @@ pub async fn render_hydrate_with_budget(
     rt.park();
     let key = rt.activation_key();
     let result = key
-        .during(hydrate_installed_document(&mut rt, base, ""))
+        .during(hydrate_installed_document(
+            &mut rt,
+            base,
+            "",
+            InitialHydrationGoal::Quiescent,
+        ))
         .await;
     let _activation = key.enter();
     drop(watchdog);
@@ -18599,6 +18638,7 @@ async fn hydrate_installed_document(
     rt: &mut JsRuntime,
     base: &str,
     init_script: &str,
+    goal: InitialHydrationGoal,
 ) -> Result<String, String> {
     rt.op_state().borrow_mut().put(HydrationProgress::default());
     hydration_phase(rt, HydrationPhase::DocumentLoading);
@@ -18619,13 +18659,23 @@ async fn hydrate_installed_document(
     }
     hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
     namespace_call(rt, "startInitialHydrate", &[])?;
-    resume_host_hydration(rt, base).await?;
+    resume_host_hydration_until(rt, base, goal).await?;
     Ok(crate::browser_env::document_html())
 }
 
 async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
+    resume_host_hydration_until(rt, base, InitialHydrationGoal::Quiescent).await
+}
+async fn resume_host_hydration_until(
+    rt: &mut JsRuntime,
+    base: &str,
+    goal: InitialHydrationGoal,
+) -> Result<(), String> {
     loop {
         let phase = rt.op_state().borrow().borrow::<HydrationProgress>().phase;
+        if initial_hydration::load_reached(goal, phase) {
+            return Ok(());
+        }
         let next = match phase {
             HydrationPhase::ParserAndDeferredScripts => {
                 drain_event_loop_until(rt, Some("initialHydrateDone")).await?;
@@ -18658,6 +18708,10 @@ async fn resume_host_hydration(rt: &mut JsRuntime, base: &str) -> Result<(), Str
             }
             _ => return Ok(()),
         };
+        if initial_hydration::load_reached(goal, next) {
+            hydration_phase(rt, next);
+            return Ok(());
+        }
         if crate::shim_bindings::pending(rt) {
             return Ok(());
         }
@@ -18782,6 +18836,16 @@ impl Watchdog {
             .is_some_and(|active| active.0.iter().any(|flag| flag.strong_count() > 0))
     }
     fn start(isolate: &mut v8::Isolate, budget_ms: u64) -> Self {
+        Self::start_clock(isolate, budget_ms, None)
+    }
+    fn until(isolate: &mut v8::Isolate, deadline: std::time::Instant) -> Self {
+        Self::start_clock(isolate, 0, Some(deadline))
+    }
+    fn start_clock(
+        isolate: &mut v8::Isolate,
+        budget_ms: u64,
+        absolute: Option<std::time::Instant>,
+    ) -> Self {
         let handle = isolate.thread_safe_handle();
         use std::sync::atomic::Ordering;
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -18801,7 +18865,10 @@ impl Watchdog {
         let thread = std::thread::spawn(move || {
             let start = std::time::Instant::now();
             while !watch.load(Ordering::Relaxed) {
-                if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                if absolute.map_or_else(
+                    || start.elapsed() >= std::time::Duration::from_millis(budget_ms),
+                    |deadline| std::time::Instant::now() >= deadline,
+                ) {
                     timed_out.store(true, Ordering::Relaxed);
                     // Nested native callbacks can clear V8's termination state.
                     // Keep the deadline enforced until the owner joins this guard.
@@ -18866,6 +18933,15 @@ mod watchdog_cancellation_tests {
     }
 }
 
+#[path = "runtime/execution_budget.rs"]
+mod execution_budget;
+use execution_budget::PollExecutionBudget;
+#[path = "runtime/async_entry_budget.rs"]
+mod async_entry_budget;
+#[path = "runtime/target_quiescence.rs"]
+mod target_quiescence;
+use async_entry_budget::AsyncEntryBudget;
+
 // The V8 watchdog interrupts synchronous work; an opted-in async deadline also
 // wakes a session awaiting a timer or native I/O beyond that same budget.
 async fn with_async_execution_budget<T>(
@@ -18912,6 +18988,7 @@ async fn drain_to_quiescence_with_scripts(
     let mut stable = 0usize;
     let mut last_sig = String::new();
     for _ in 0..MAX_ROUNDS {
+        tokio::task::yield_now().await;
         let turn = quiescence_pump_scripts(rt, execute_document_scripts).await?;
         if turn.host_reply {
             return Ok(());
@@ -18959,6 +19036,7 @@ async fn quiescence_pump_scripts(
     if first.host_reply {
         return Ok(first);
     }
+    tokio::task::yield_now().await;
     if execute_document_scripts {
         let base = rt.op_state().borrow().borrow::<Base>().0.clone();
         drain_module_scripts(rt, &base).await?;
@@ -18981,12 +19059,20 @@ async fn run_quiescence_timers(
     }
     // Reuse each timer's authenticated selection for native task interleaving,
     // rather than polling the complete VM between otherwise empty callbacks.
-    let timers = run_window_timer_tasks(rt, allowance, true)?;
-    if timers.host_reply {
-        return Ok(timers);
+    let mut fired = 0;
+    for _ in 0..allowance {
+        let turn = run_window_timer_tasks(rt, 1, true)?;
+        fired += turn.fired;
+        if turn.host_reply {
+            return Ok(async_owner::QuiescenceTurn { fired, ..turn });
+        }
+        if turn.fired == 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
     }
     let mut last = drain_quiescence_turn(rt, false).await?;
-    last.fired += timers.fired;
+    last.fired += fired;
     Ok(last)
 }
 
@@ -19594,28 +19680,42 @@ impl PageSession {
         let initial_budget_ms = options
             .initial_hydration_budget_ms
             .map_or(budget_ms, |limit| limit.min(budget_ms));
+        let initial_goal = options.initial_hydration_goal;
+        let caller_deadline = options.initial_hydration_deadline;
+        initial_hydration::begin(
+            &mut rt,
+            initial_goal,
+            options.initial_hydration_deadline,
+            options.initial_hydration_budget_ms,
+        )?;
         let options = PageSessionOptions {
             initial_hydration_budget_ms: None,
+            initial_hydration_goal: InitialHydrationGoal::Quiescent,
+            initial_hydration_deadline: None,
             ..options
         };
-        let watchdog = Watchdog::start(rt.v8_isolate(), initial_budget_ms);
-        let exceeded = watchdog.exceeded.clone();
+        rt.op_state().borrow_mut().put(HydrationProgress::default());
+        let execution = AsyncEntryBudget::new(rt.v8_isolate(), initial_budget_ms, caller_deadline);
         rt.park();
         let key = rt.activation_key();
-        let result = with_async_execution_budget(
-            enforce_initial_deadline,
-            initial_budget_ms,
-            &exceeded,
-            key.during(hydrate_installed_document(&mut rt, base, init_script)),
-        )
-        .await;
-        drop(watchdog);
+        let result = execution
+            .run(
+                enforce_initial_deadline,
+                key.during(hydrate_installed_document(
+                    &mut rt,
+                    base,
+                    init_script,
+                    initial_goal,
+                )),
+            )
+            .await;
+        let outcome = execution.finish();
         if let Some(inventory) = &mut script_inventory {
             let _activation = key.enter();
             inventory.stop_profile();
             inventory.flush();
         }
-        let budget_exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        let budget_exceeded = outcome.exceeded;
         let progress = rt.op_state().borrow().borrow::<HydrationProgress>().clone();
         let unsupported_csp = {
             let _activation = rt.activation_key().enter();
@@ -19638,7 +19738,9 @@ impl PageSession {
                     budget_exceeded,
                     progress,
                     open_error: budget_exceeded.then(|| {
-                        format!("Hydration exceeded its {initial_budget_ms}ms execution budget")
+                        outcome.error(format!(
+                            "Hydration exceeded its {initial_budget_ms}ms execution budget"
+                        ))
                     }),
                     unsupported_csp,
                 },
@@ -19663,11 +19765,11 @@ impl PageSession {
                     hydration_diagnostics: HydrationDiagnostics {
                         budget_exceeded,
                         progress,
-                        open_error: Some(if budget_exceeded {
+                        open_error: Some(outcome.error(if budget_exceeded {
                             format!("render budget exceeded ({initial_budget_ms}ms): {e}")
                         } else {
                             e
-                        }),
+                        })),
                         unsupported_csp,
                     },
                     budget_ms,
@@ -19797,6 +19899,12 @@ impl PageSession {
             key.during(self.eval_active(script, engine)).await
         };
         self.publish_auxiliary_state();
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Execution interrupted by the session execution budget")
+        {
+            return result;
+        }
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
         result
@@ -19824,13 +19932,14 @@ impl PageSession {
     async fn eval_active(&mut self, script: &str, engine: bool) -> Result<String, String> {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
-        let (drained, exceeded) = {
-            let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
-            let drained = with_async_execution_budget(
-                self.options.window_timer_mode == WindowTimerMode::RealTime,
+        let execution = PollExecutionBudget::new(self.rt.v8_isolate(), budget);
+        let deadline_exceeded = std::sync::atomic::AtomicBool::new(false);
+        let drained = {
+            with_async_execution_budget(
+                true,
                 budget,
-                &watchdog.exceeded,
-                async {
+                &deadline_exceeded,
+                execution.run(async {
                     if engine {
                         execute_engine_script(&mut self.rt, script)?;
                     } else {
@@ -19839,19 +19948,17 @@ impl PageSession {
                     let base = self.rt.op_state().borrow().borrow::<Base>().0.clone();
                     resume_host_hydration(&mut self.rt, &base).await?;
                     drain_to_quiescence(&mut self.rt).await
-                },
+                }),
             )
-            .await;
-            let exceeded = watchdog.exceeded.clone();
-            drop(watchdog);
-            let exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
-            (drained, exceeded)
+            .await
         };
-        // The watchdog may have terminated mid-drain. Clear that terminate state so the
-        // isolate is usable again, then read the result BEST-EFFORT: an interaction's
-        // important effects (the login POST, a client navigation) land early in the
-        // drain — the budget is normally hit later on background churn (analytics
-        // polling, React's idle scheduler). Returning the reached state beats throwing.
+        let interrupted = execution.interrupted();
+        let exceeded = interrupted
+            || execution.expired()
+            || deadline_exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(execution);
+        // Stop only between healthy task turns. A hard guest interruption cannot
+        // promise usable framework state; aggregate expiry retains reached state.
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
         self.hydration_diagnostics.progress = self
@@ -19860,7 +19967,11 @@ impl PageSession {
             .borrow()
             .borrow::<HydrationProgress>()
             .clone();
-        if let Err(error) = self.finish_history_command(Ok(())) {
+        let history = self.finish_history_command(Ok(()));
+        if interrupted {
+            return Err("Execution interrupted by the session execution budget".into());
+        }
+        if let Err(error) = history {
             return Err(drained.err().unwrap_or(error));
         }
         let result = match drained {
@@ -19915,6 +20026,12 @@ impl PageSession {
                 .await
         };
         self.publish_auxiliary_state();
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Execution interrupted by the session execution budget")
+        {
+            return result;
+        }
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
         result
@@ -19929,9 +20046,10 @@ impl PageSession {
         if self.closed {
             return Err("Page session is closed".into());
         }
-        let watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
+        let execution = PollExecutionBudget::new(self.rt.v8_isolate(), self.budget_ms);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(self.budget_ms),
+            execution.run(async {
                 let value = if engine {
                     let body = format!(
                         "return (\n{}\n)",
@@ -19956,20 +20074,29 @@ impl PageSession {
                 } else {
                     read_string(&mut self.rt, value)
                 }
-            })
-            .await;
-        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
-        drop(watchdog);
+            }),
+        )
+        .await;
+        let interrupted = execution.interrupted();
+        let expired = execution.expired();
+        drop(execution);
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = if exceeded {
+        let result = if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else if expired {
             Err("Expression exceeded the session execution budget".into())
         } else {
             result.unwrap_or_else(|_| {
                 Err("Expression exceeded the session execution budget".to_owned())
             })
         };
-        self.finish_history_command(result)
+        let result = self.finish_history_command(result);
+        if interrupted {
+            Err("Execution interrupted by the session execution budget".into())
+        } else {
+            result
+        }
     }
 
     /// Deliver embedder input through a private native dispatch capability.
@@ -19979,6 +20106,12 @@ impl PageSession {
         let key = self.rt.activation_key();
         let result = key.during(self.input_active(steps)).await;
         self.publish_auxiliary_state();
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Execution interrupted by the session execution budget")
+        {
+            return result;
+        }
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
         result
@@ -19990,57 +20123,53 @@ impl PageSession {
         }
         // Cancellation belongs to this operation's document, even if navigation replaces it.
         let selected = private_infrastructure::context(&mut self.rt)?;
-        let _watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
-                let promise = {
-                    deno_core::scope!(scope, self.rt);
-                    let context = v8::Local::new(scope, &selected);
-                    let scope = &mut v8::ContextScope::new(scope, context);
-                    let driver = context
-                        .get_slot::<HostInputDriver>()
-                        .ok_or("Host input driver unavailable")?;
-                    let callback = crate::context_ownership::local(scope, &driver.input);
-                    let arguments = deno_core::serde_v8::to_v8(scope, steps)
-                        .map_err(|error| error.to_string())?;
-                    let receiver = v8::undefined(scope).into();
-                    let result = callback
-                        .call(scope, receiver, &[arguments])
-                        .ok_or("Host input dispatch failed")?;
-                    v8::Global::new(scope, result)
-                };
-                if _watchdog
-                    .exceeded
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                {
-                    return Err("Host input exceeded the session execution budget".into());
-                }
-                let completion = self.rt.resolve(promise.clone());
-                namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
-                drain_event_loop_until_completion(&mut self.rt, None, Some(&promise)).await?;
-                self.rt
-                    .with_event_loop_promise(completion, Default::default())
-                    .await
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            })
+        let execution = AsyncEntryBudget::new(self.rt.v8_isolate(), self.budget_ms, None);
+        let result = execution
+            .run(
+                true,
+                Box::pin(async {
+                    let promise = {
+                        deno_core::scope!(scope, self.rt);
+                        let context = v8::Local::new(scope, &selected);
+                        let scope = &mut v8::ContextScope::new(scope, context);
+                        let driver = context
+                            .get_slot::<HostInputDriver>()
+                            .ok_or("Host input driver unavailable")?;
+                        let callback = crate::context_ownership::local(scope, &driver.input);
+                        let arguments = deno_core::serde_v8::to_v8(scope, steps)
+                            .map_err(|error| error.to_string())?;
+                        let receiver = v8::undefined(scope).into();
+                        let result = callback
+                            .call(scope, receiver, &[arguments])
+                            .ok_or("Host input dispatch failed")?;
+                        v8::Global::new(scope, result)
+                    };
+                    if execution.interrupted() {
+                        return Err("Host input exceeded the session execution budget".into());
+                    }
+                    let completion = self.rt.resolve(promise.clone());
+                    namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
+                    drain_event_loop_until_completion(&mut self.rt, None, Some(&promise)).await?;
+                    self.rt
+                        .with_event_loop_promise(completion, Default::default())
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                }),
+            )
             .await;
-        let exceeded = _watchdog
-            .exceeded
-            .load(std::sync::atomic::Ordering::Relaxed);
-        drop(_watchdog);
+        let outcome = execution.finish();
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = if exceeded {
-            Err("Host input exceeded the session execution budget".into())
+        let result = if outcome.exceeded {
+            Err(outcome.error("Host input exceeded the session execution budget".into()))
         } else {
-            result.unwrap_or_else(|_| {
-                Err("Host input exceeded the session execution budget".to_string())
-            })
+            result
         };
-        if let Err(error) = self.finish_history_command(Ok(())) {
-            return result.and(Err(error));
-        }
+        let result = match self.finish_history_command(Ok(())) {
+            Ok(()) => result,
+            Err(error) => result.and(Err(error)),
+        };
         if result.is_err() {
             deno_core::scope!(scope, self.rt);
             let context = v8::Local::new(scope, &selected);
@@ -20053,7 +20182,12 @@ impl PageSession {
                 }
             }
         }
-        self.finish_history_command(result)
+        let result = self.finish_history_command(result);
+        if outcome.interrupted {
+            Err(outcome.error("Host input exceeded the session execution budget".into()))
+        } else {
+            result
+        }
     }
 
     /// Host-only retention diagnostics; never installed on the guest global.

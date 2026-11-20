@@ -9,6 +9,7 @@ const { spawnSync } = require("node:child_process");
 const { testInventory } = require("./js-test-completeness.cjs");
 const {
   scope,
+  snapshot,
   sha,
   checkSummary,
   checkRun,
@@ -26,6 +27,12 @@ function report(covered = 100, total = 100) {
   return { files: [{ path: "/fixture/a.js", ...counts }], totals: { ...counts } };
 }
 const check = (value) => checkSummary(value, "/fixture", ["a.js"]);
+
+test("every tracked product runtime file participates in the coverage snapshot", () => {
+  const sources = snapshot(path.resolve(__dirname, ".."));
+  assert.equal(sources.length, scope.files.length);
+  assert.ok(sources.every((source) => /^[a-f0-9]{64}$/.test(source.sha256)));
+});
 
 test("line floor is exactly 92.5% while branches and functions retain their 90% floors", () => {
   assert.deepEqual(scope.floors, { lines: 92.5, branches: 90, functions: 90 });
@@ -219,7 +226,7 @@ test("aggregation rejects absent and malformed raw reports", (t) => {
   assert.match(result.stderr, /Invalid raw V8 report/);
 });
 
-test("real V8 merge retains all 43 files, including zero-hit unloaded sources", (t) => {
+test("real V8 merge retains all 44 files, including zero-hit unloaded sources", (t) => {
   const { directory, root } = fixture(t);
   const raw = path.join(directory, "raw");
   fs.mkdirSync(raw);
@@ -232,11 +239,11 @@ test("real V8 merge retains all 43 files, including zero-hit unloaded sources", 
   assert.notEqual(result.status, 0, "Unloaded product lines must keep the gate red");
   assert.match(result.stderr, /Unloaded product files/);
   const summary = JSON.parse(fs.readFileSync(path.join(directory, "coverage.json"), "utf8"));
-  assert.equal(summary.files.length, 43);
-  assert.equal(summary.files.filter((f) => f.coveredLineCount === 0).length, 42);
+  assert.equal(summary.files.length, 44);
+  assert.equal(summary.files.filter((f) => f.coveredLineCount === 0).length, 43);
   const gate = JSON.parse(fs.readFileSync(path.join(directory, "gate.json"), "utf8"));
   assert.equal(gate.testsPassed, false);
-  assert.equal(gate.unloadedFiles.length, 42);
+  assert.equal(gate.unloadedFiles.length, 43);
   assert.equal(gate.pass, false);
   assert.ok(gate.metrics.lines.total > gate.metrics.lines.covered);
 });

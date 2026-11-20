@@ -548,6 +548,23 @@ async fn push_snapshot(
     Ok(())
 }
 
+// A consumed guest navigation can remain in the native target's HTTP stage.
+fn record_native_pending_navigation(
+    page: &mut PageSession,
+    trace: &mut Value,
+) -> Result<(), BoxError> {
+    let root = page.auxiliary_root_id()?;
+    let target = root.to_string();
+    let state = page.network_event_log().target_network_state(&target);
+    let pending = state["pendingNavigation"] == true;
+    trace["observation"]["nativeNetworkState"] = json!({"targetId":target,"state":state});
+    if pending && trace["observation"]["pendingNavigation"].is_null() {
+        trace["observation"]["pendingNavigation"] =
+            json!({"source":"native-root","targetId":target});
+    }
+    Ok(())
+}
+
 /// Record that a followed navigation outlived the observation window.
 fn timed_out(trace: &mut Value) -> Option<PageSession> {
     trace["observation"]["navigationWaitTimedOut"] = json!(true);
@@ -1028,6 +1045,7 @@ impl Capture<'_> {
         {
             trace["observation"]["pendingNavigation"] = row["nav"].clone();
         }
+        record_native_pending_navigation(page, trace)?;
         trace["pages"].as_array_mut().unwrap().push(row);
         Ok(())
     }
@@ -1410,6 +1428,75 @@ mod tests {
         assert_eq!(final_page["browserFixture"]["lateScriptRan"], true);
         assert_eq!(final_page["readyState"], "complete");
         page.close();
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn held_native_navigation_cannot_report_a_complete_observation() {
+        turbo_surf_mcp::initialize_render_hooks();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let (entered, seen) = tokio::sync::oneshot::channel();
+        let (_release, released) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(gated_navigation_response(listener, entered, released));
+        let mut page = PageSession::open_with_document_response_and_options(
+            "<body>source",
+            &base,
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &[],
+            Default::default(),
+            Default::default(),
+            None,
+            realtime_options(),
+        )
+        .await
+        .unwrap();
+        let root = page.auxiliary_root_id().unwrap().to_string();
+        let network = page.network_event_log();
+        let before = NavigationCounters::read(&page);
+        let out = capture_fixture_directory();
+        let config = json!({"requireNativeFormNavigation":false});
+        let capture = Capture {
+            config: &config,
+            out: &out,
+            profile: fingerprint::default_profile(),
+            hints: ClientHints::default(),
+            storage: Default::default(),
+            budget: 5000,
+            init: String::new(),
+            wait_ms: 0,
+            cadence_ms: 0,
+        };
+        let mut trace = json!({"pages":[]});
+        let window = ObservationWindow::start(200, 0, &mut trace);
+        page.eval_expression("location.assign('/late');void 0")
+            .await
+            .unwrap();
+        let mut observing = Box::pin(capture.finish_observation(page, window, before, &mut trace));
+        tokio::select! {
+            result = &mut observing => panic!("observation finished before actual held request: {result:?}"),
+            requested = tokio::time::timeout(Duration::from_secs(1), seen) => requested.unwrap().unwrap(),
+        }
+        let pending = network.target_network_state(&root);
+        assert_eq!(pending["pendingNavigation"], true);
+        observing.await.unwrap();
+        server.abort();
+        eprintln!(
+            "HELD_NATIVE_STATE {pending} OBSERVATION {}",
+            trace["observation"]
+        );
+        assert_eq!(
+            trace["pages"].as_array().unwrap().last().unwrap()["url"],
+            base
+        );
+        assert_eq!(
+            trace["observation"]["completed"], false,
+            "a real admitted navigation with held response headers is not complete"
+        );
         fs::remove_dir_all(out).unwrap();
     }
 

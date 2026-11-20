@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.5] - 2026-11-19
+
+- Reuse authenticated Promise ownership on subsequent native hooks without repeating async-context discovery, preserving unknown-owner fallback, retired-document checks and guest execution limits.
+
+- Reuse per-node retention marks during native Promise graph maintenance, avoiding repeated membership hashing while preserving pending work, native operations and ancestor dependencies.
+- Stop internal input and document-content drains between healthy callbacks, preserve explicit content caller deadlines, and prevent queued form navigation after hard input interruption.
+
+- Reduce repeated scans during large native Promise reaction bursts, retaining pending owners and ancestor dependencies while bounding transient bookkeeping beside a live graph.
+
+- Keep budgeted runtime drain futures on the heap before polling so cold MCP rendering fits an ordinary 2 MiB host thread, retaining caller deadlines and hard execution limits.
+- Keep click/key actions at document commit and synchronous DOM/evaluation metadata reads independent of unrelated pending page work; normalize opening-close races by the original opening identity.
+- Stop initial hydration and host-reply continuation at safe aggregate budget boundaries, while retaining hard execution limits and the original explicit caller deadline. Report pre-expired openings with truthful zero-pump progress instead of panicking.
+- Amortize native Promise graph maintenance against the retained graph size, preserving pending work and ancestor ownership while avoiding repeated whole-graph scans in large reaction bursts.
+- Retain navigation initialization as owned pending work after trusted document installation, so response waiting does not interrupt a healthy initialization callback. Preserve caller deadlines, hard interruption errors and cancellation when a document is replaced or closed.
+
+- Reuse observed fulfilled and rejected Promise states in native async-work bookkeeping, avoiding repeated V8 reads while retaining live checks for pending and unknown Promises.
+
+- Preserve executable permissions for native npm CLI binaries on macOS and Linux before creating the platform tarballs.
+- Reject non-executable Unix binaries in archive validation, and run extracted/installed smoke tests without repairing permissions.
+- Finish observed default/load navigation at the actual document load milestone while retaining background requests and their later DOM updates. Initial host callbacks retain the original caller deadline and document ownership; Rust/MCP hydration and later interaction quiescence remain unchanged.
+- Update the DOM, layout, raster and browser bindings to the published turbo-dom 0.8.5 crates, retaining the single V8 150.4.2 dependency.
+- Verify retired timeout-signal collection after actual frame-load cancellation has unwound, retaining the original collection assertions and checking the real timeout adapter against a strong-reference inverse.
+
 ## [0.8.4] - 2026-11-19
 
 - Refresh actor readiness after native opening completes, reject navigation closed during final metadata refresh, and honor network-idle waits on the initial actor navigation.

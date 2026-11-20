@@ -742,14 +742,7 @@ mod definition_tests {
         // #529: under the explicit Disabled presentation policy a descriptor-only
         // animation like `fadeOut` must not reject layout; the animation doesn't
         // run, so it can't invalidate the result.
-        struct Guard;
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                crate::animation_policy::DISABLED.with(|cell| cell.set(false));
-            }
-        }
-        crate::animation_policy::DISABLED.with(|cell| cell.set(true));
-        let _guard = Guard;
+        let _guard = crate::animation_policy::push_disabled_for_tests(true);
         // An unsafe animation (width changes layout) that would normally be
         // rejected is accepted when presentation is disabled.
         let rules = vec![crate::live_stylesheets::ActiveRule {

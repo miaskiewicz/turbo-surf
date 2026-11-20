@@ -50,6 +50,34 @@ test("driver evaluation transport survives Object.prototype.toJSON = () => ({}) 
   }
 });
 
+test("evaluateHandle round-trips the descriptor under a toJSON hook (#531)", async () => {
+  const { chromium } = shim;
+  const browser = await chromium.launch();
+  try {
+    await withFixture(async (origin) => {
+      const context = await browser.newContext();
+      try {
+        const page = await context.newPage();
+        await page.goto(origin, { waitUntil: "networkidle" });
+        await page.evaluate(() => {
+          Object.prototype.toJSON = () => ({ hijacked: true });
+        });
+        const handle = await page.evaluateHandle(() => ({ seen: 42 }));
+        const seen = await handle.evaluate((value) => value.seen);
+        assert.equal(
+          seen,
+          42,
+          "retain=true descriptor must still round-trip when toJSON is hooked",
+        );
+      } finally {
+        await context.close();
+      }
+    });
+  } finally {
+    await browser.close();
+  }
+});
+
 test("driver evaluation transport survives Array.prototype.toJSON = () => ({}) (#531)", async () => {
   const { chromium } = shim;
   const browser = await chromium.launch();

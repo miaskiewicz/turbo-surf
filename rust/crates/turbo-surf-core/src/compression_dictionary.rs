@@ -240,11 +240,6 @@ pub(crate) fn publication_delay() -> std::time::Duration {
 pub fn set_publication_delay_micros_for_tests(micros: u64) {
     PUBLICATION_DELAY_MICROS.store(micros, std::sync::atomic::Ordering::Release);
 }
-/// Test alias the Core unit test uses to keep the Chrome-parity gap measurable
-/// without tying the assertion to the production default.
-#[cfg(test)]
-pub(crate) const PUBLICATION_DELAY: std::time::Duration =
-    std::time::Duration::from_micros(DEFAULT_PUBLICATION_DELAY_MICROS);
 impl SelectedDictionary {
     /// These codings are inserted only after selecting a genuine scoped dictionary.
     pub(crate) fn negotiate(&self, headers: &mut BTreeMap<String, String>) {

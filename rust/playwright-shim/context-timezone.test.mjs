@@ -50,6 +50,12 @@ test("BrowserContext timezoneId overrides Date accessors and Intl default zone (
         assert.equal(seen.zone, "Pacific/Auckland");
         assert.equal(seen.hour, 13);
         assert.ok(seen.formatted.includes("13:"), `formatted=${seen.formatted}`);
+        // getTimezoneOffset is UTC-evaluated − local-evaluated, so Auckland
+        // (UTC+13) must return −780, matching real Chromium.
+        const offset = await page.evaluate(() =>
+          new Date("2026-01-01T00:00:00Z").getTimezoneOffset(),
+        );
+        assert.equal(offset, -780, "getTimezoneOffset sign must match Chromium");
       } finally {
         await context.close();
       }

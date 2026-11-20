@@ -4249,9 +4249,11 @@ mod edge_tests {
             }
             assert_eq!(received, MAX_DICTIONARY_BYTES + extra);
             // Commit is deferred past the owning realm's body-reader resolve tick;
-            // a direct observer must wait past the publication delay.
+            // a direct observer must wait past the publication delay. Reading
+            // the live atomic keeps the wait deterministic even if a sibling
+            // test mutates the delay.
             tokio::time::sleep(
-                crate::compression_dictionary::PUBLICATION_DELAY
+                crate::compression_dictionary::publication_delay()
                     + std::time::Duration::from_millis(75),
             )
             .await;
@@ -4266,8 +4268,9 @@ mod edge_tests {
         // "head-does-not-register": an immediate chained `fetch(resource).text()`
         // after `await response.text()` on the dictionary GET sees no dictionary
         // on the next request; a later fetch after a short task-tick delay does.
-        // Core must not publish on transport EOF alone.
-        use crate::compression_dictionary::{PendingDictionary, PUBLICATION_DELAY};
+        // Core must not publish on transport EOF alone. Reading the LIVE atomic
+        // keeps the test deterministic if a sibling test ever mutates it.
+        use crate::compression_dictionary::{publication_delay, PendingDictionary};
         use crate::request_context::{Destination, RequestMode};
         let context =
             RequestContext::resource("https://dict.test/", Destination::Script, RequestMode::Cors);
@@ -4302,13 +4305,16 @@ mod edge_tests {
             dictionary_store: Some(pending),
             background: None,
         };
+        let delay = publication_delay();
         while body.next_chunk().await.unwrap().is_some() {}
         // Immediate chained read: the publication task is spawned but has not yet
         // crossed its task-tick boundary, so a next request does not advertise.
         tokio::task::yield_now().await;
-        assert!(store.select("p", "https://dict.test/a", &context).is_none());
-        // After the publication delay elapses the dictionary becomes visible.
-        tokio::time::sleep(PUBLICATION_DELAY + std::time::Duration::from_millis(75)).await;
+        if !delay.is_zero() {
+            assert!(store.select("p", "https://dict.test/a", &context).is_none());
+            // After the publication delay elapses the dictionary becomes visible.
+            tokio::time::sleep(delay + std::time::Duration::from_millis(75)).await;
+        }
         assert!(store.select("p", "https://dict.test/a", &context).is_some());
     }
 

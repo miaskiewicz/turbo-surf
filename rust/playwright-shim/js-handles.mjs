@@ -99,14 +99,18 @@ export async function handleEvaluation(owner, script, arg, retain = false) {
       : `return (${String(script)});`;
   const evaluator = realm(owner, `globalThis.Function('arg',${JSON.stringify(source)})`);
   const window = realm(owner, "globalThis");
-  const resultExpression = retain
-    ? `({id:__tsNs.remoteHandleRetain(owner,value),kind:value instanceof owner.Element?'element':'value'})`
-    : `(${encodeEvaluationValue.toString()})(value)`;
   // `#531`: serialize the `{value}` / `{error}` envelope without `JSON.stringify`,
   // so a guest that set `Object.prototype.toJSON` or `Array.prototype.toJSON`
-  // cannot corrupt the host's wire. Both helpers are inlined into the body; the
-  // envelope helper references `safeStringifyTuple` by name through this scope.
-  const body = `(async()=>{const safeStringifyTuple=${safeStringifyTuple.toString()};const safeStringifyEnvelope=${safeStringifyEnvelope.toString()};try{const owner=${window};const value=await (${evaluator})(${argument});return safeStringifyEnvelope("value",${resultExpression});}catch(error){return safeStringifyEnvelope("error",(${encodeEvaluationError.toString()})(error));}})()`;
+  // cannot corrupt the host's wire.
+  //
+  // The retain-path descriptor is a PLAIN OBJECT `{id, kind}`, not a tuple;
+  // `safeStringifyTuple` would throw `unencodable value` on it. The `id` is a
+  // native u32 and `kind` is one of two literals, so a hand-built JSON literal
+  // is safer and cheaper than widening the tuple shape.
+  const envelope = retain
+    ? `'{"value":{"id":'+__tsNs.remoteHandleRetain(owner,value)+',"kind":'+(value instanceof owner.Element?'"element"':'"value"')+'}}'`
+    : `safeStringifyEnvelope("value",(${encodeEvaluationValue.toString()})(value))`;
+  const body = `(async()=>{const safeStringifyTuple=${safeStringifyTuple.toString()};const safeStringifyEnvelope=${safeStringifyEnvelope.toString()};try{const owner=${window};const value=await (${evaluator})(${argument});return ${envelope};}catch(error){return safeStringifyEnvelope("error",(${encodeEvaluationError.toString()})(error));}})()`;
   const raw = page._mergedBindings().size
     ? await page._evaluateWithBindings(body)
     : await native.liveEvalEngineExpression(page._session, body);

@@ -1337,20 +1337,35 @@ impl PageSession {
         let budget = timeout_ms
             .filter(|value| *value > 0)
             .unwrap_or(self.budget_ms);
-        let watchdog = Watchdog::start(self.rt.v8_isolate(), budget);
+        let caller = timeout_ms
+            .filter(|value| *value > 0)
+            .map(|value| std::time::Instant::now() + std::time::Duration::from_millis(value));
+        let execution = AsyncEntryBudget::new(self.rt.v8_isolate(), self.budget_ms, caller);
         let key = self.rt.activation_key();
-        let operation = key.during(self.set_target_content_active(target, html, wait_until));
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(budget), operation).await;
-        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
-        drop(watchdog);
+        let result = key
+            .during(execution.run(
+                true,
+                Box::pin(self.set_target_content_active(target, html, wait_until)),
+            ))
+            .await;
+        let outcome = execution.finish();
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = match (result, exceeded) {
-            (Ok(result), false) => result,
-            _ => Err(format!("setContent timeout after {budget}ms")),
+        let error = if outcome.caller_expired {
+            format!("setContent timeout after {budget}ms")
+        } else {
+            outcome.error(format!("setContent timeout after {}ms", self.budget_ms))
         };
-        self.finish_history_command(result)?;
+        let result = if outcome.exceeded {
+            Err(error.clone())
+        } else {
+            result
+        };
+        let result = self.finish_history_command(result);
+        if outcome.interrupted {
+            return Err(error);
+        }
+        result?;
         self.serialize_target_for_driver(target)
     }
 

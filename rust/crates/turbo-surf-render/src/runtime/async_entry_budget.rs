@@ -11,12 +11,14 @@ pub(super) struct AsyncEntryBudget {
     caller: Option<Watchdog>,
     caller_deadline: Option<Instant>,
     aggregate_exceeded: AtomicBool,
+    nested_interrupted: AtomicBool,
     budget_ms: u64,
 }
 #[derive(Clone, Copy)]
 pub(super) struct EntryOutcome {
     pub interrupted: bool,
     pub exceeded: bool,
+    pub caller_expired: bool,
 }
 impl AsyncEntryBudget {
     pub(super) fn new(isolate: &mut v8::Isolate, budget_ms: u64, caller: Option<Instant>) -> Self {
@@ -25,6 +27,7 @@ impl AsyncEntryBudget {
             caller: caller.map(|deadline| Watchdog::until(isolate, deadline)),
             caller_deadline: caller,
             aggregate_exceeded: AtomicBool::new(false),
+            nested_interrupted: AtomicBool::new(false),
             budget_ms,
         }
     }
@@ -50,17 +53,25 @@ impl AsyncEntryBudget {
                         .max(1) as u64,
                 )
             });
-            with_async_execution_budget(
+            let result = with_async_execution_budget(
                 enforce_deadline || self.caller.is_some(),
                 budget,
                 &self.aggregate_exceeded,
                 self.execution.run(future),
             )
-            .await
+            .await;
+            // An inner guard can win the stop before this poll's supervisor.
+            if hard_interruption(&result) {
+                self.nested_interrupted.store(true, Ordering::Relaxed);
+            }
+            result
         })
     }
+    pub(super) fn interrupted(&self) -> bool {
+        self.execution.interrupted() || self.nested_interrupted.load(Ordering::Relaxed)
+    }
     pub(super) fn finish(self) -> EntryOutcome {
-        let interrupted = self.execution.interrupted();
+        let interrupted = self.interrupted();
         let exceeded = self.execution.expired() || self.aggregate_exceeded.load(Ordering::Relaxed);
         let caller: Option<Arc<AtomicBool>> =
             self.caller.as_ref().map(|guard| guard.exceeded.clone());
@@ -69,12 +80,13 @@ impl AsyncEntryBudget {
             .is_some_and(|deadline| Instant::now() >= deadline);
         // Disarm/join both workers before observing the final caller request or clearing V8.
         drop(self);
-        let interrupted = interrupted
-            || caller_expired
-            || caller.is_some_and(|flag| flag.load(Ordering::Relaxed));
+        let caller_expired =
+            caller_expired || caller.is_some_and(|flag| flag.load(Ordering::Relaxed));
+        let interrupted = interrupted || caller_expired;
         EntryOutcome {
             interrupted,
             exceeded: exceeded || interrupted,
+            caller_expired,
         }
     }
 }
@@ -86,5 +98,23 @@ impl EntryOutcome {
         } else {
             fallback
         }
+    }
+}
+
+fn hard_interruption<T>(result: &Result<T, String>) -> bool {
+    result
+        .as_ref()
+        .is_err_and(|error| error == "Execution interrupted by the session execution budget")
+}
+#[cfg(test)]
+mod error_priority_tests {
+    use super::*;
+    #[test]
+    fn nested_hard_error_is_distinct_from_an_ordinary_error_or_reached_result() {
+        assert!(hard_interruption::<()>(&Err(
+            "Execution interrupted by the session execution budget".into()
+        )));
+        assert!(!hard_interruption::<()>(&Err("ordinary failure".into())));
+        assert!(!hard_interruption(&Ok(())));
     }
 }

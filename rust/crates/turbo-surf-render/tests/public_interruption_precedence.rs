@@ -198,3 +198,47 @@ async fn a_public_navigation_caller_deadline_expires_with_its_response_withheld(
     );
     page.close();
 }
+
+async fn public_input_submission(infinite: bool) {
+    let server = Server::start();
+    let mut page = page(&server, DEFAULT_RENDER_BUDGET_MS).await;
+    let work = if infinite { "while(true){}" } else { "" };
+    page.read_engine(&format!("const button=document.createElement('button');button.id='submit-input';button.type='button';document.body.append(button);globalThis.inputEntered=false;button.onclick=()=>{{inputEntered=true;document.querySelector('form').submit();{work}}};return true;")).unwrap();
+    page.set_execution_budget_for_testing(if infinite {
+        100
+    } else {
+        DEFAULT_RENDER_BUDGET_MS
+    });
+    let result = page
+        .input(&serde_json::json!([{"click":"#submit-input"}]))
+        .await;
+    let requests = server.requests.load(Ordering::Acquire);
+    if infinite {
+        assert_eq!(
+            requests, 0,
+            "input must not start queued navigation after hard interruption: {result:?}"
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "Execution interrupted by the session execution budget"
+        );
+        assert_eq!(page.read_engine("return inputEntered;").unwrap(), "true");
+    } else {
+        result.unwrap();
+        assert_eq!(requests, 1);
+        assert_eq!(
+            page.read_engine("return document.getElementById('landed')!==null;")
+                .unwrap(),
+            "true"
+        );
+    }
+    page.close();
+}
+#[tokio::test(flavor = "current_thread")]
+async fn public_input_does_not_follow_a_form_after_hard_interruption() {
+    public_input_submission(true).await;
+}
+#[tokio::test(flavor = "current_thread")]
+async fn ordinary_public_input_still_follows_its_form_submission() {
+    public_input_submission(false).await;
+}

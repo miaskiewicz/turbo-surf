@@ -20106,6 +20106,12 @@ impl PageSession {
         let key = self.rt.activation_key();
         let result = key.during(self.input_active(steps)).await;
         self.publish_auxiliary_state();
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Execution interrupted by the session execution budget")
+        {
+            return result;
+        }
         self.follow_form_navigation().await?;
         self.publish_auxiliary_state();
         result
@@ -20117,57 +20123,53 @@ impl PageSession {
         }
         // Cancellation belongs to this operation's document, even if navigation replaces it.
         let selected = private_infrastructure::context(&mut self.rt)?;
-        let _watchdog = Watchdog::start(self.rt.v8_isolate(), self.budget_ms);
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
-                let promise = {
-                    deno_core::scope!(scope, self.rt);
-                    let context = v8::Local::new(scope, &selected);
-                    let scope = &mut v8::ContextScope::new(scope, context);
-                    let driver = context
-                        .get_slot::<HostInputDriver>()
-                        .ok_or("Host input driver unavailable")?;
-                    let callback = crate::context_ownership::local(scope, &driver.input);
-                    let arguments = deno_core::serde_v8::to_v8(scope, steps)
-                        .map_err(|error| error.to_string())?;
-                    let receiver = v8::undefined(scope).into();
-                    let result = callback
-                        .call(scope, receiver, &[arguments])
-                        .ok_or("Host input dispatch failed")?;
-                    v8::Global::new(scope, result)
-                };
-                if _watchdog
-                    .exceeded
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                {
-                    return Err("Host input exceeded the session execution budget".into());
-                }
-                let completion = self.rt.resolve(promise.clone());
-                namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
-                drain_event_loop_until_completion(&mut self.rt, None, Some(&promise)).await?;
-                self.rt
-                    .with_event_loop_promise(completion, Default::default())
-                    .await
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            })
+        let execution = AsyncEntryBudget::new(self.rt.v8_isolate(), self.budget_ms, None);
+        let result = execution
+            .run(
+                true,
+                Box::pin(async {
+                    let promise = {
+                        deno_core::scope!(scope, self.rt);
+                        let context = v8::Local::new(scope, &selected);
+                        let scope = &mut v8::ContextScope::new(scope, context);
+                        let driver = context
+                            .get_slot::<HostInputDriver>()
+                            .ok_or("Host input driver unavailable")?;
+                        let callback = crate::context_ownership::local(scope, &driver.input);
+                        let arguments = deno_core::serde_v8::to_v8(scope, steps)
+                            .map_err(|error| error.to_string())?;
+                        let receiver = v8::undefined(scope).into();
+                        let result = callback
+                            .call(scope, receiver, &[arguments])
+                            .ok_or("Host input dispatch failed")?;
+                        v8::Global::new(scope, result)
+                    };
+                    if execution.interrupted() {
+                        return Err("Host input exceeded the session execution budget".into());
+                    }
+                    let completion = self.rt.resolve(promise.clone());
+                    namespace_call(&mut self.rt, "resetTimerBudget", &[])?;
+                    drain_event_loop_until_completion(&mut self.rt, None, Some(&promise)).await?;
+                    self.rt
+                        .with_event_loop_promise(completion, Default::default())
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                }),
+            )
             .await;
-        let exceeded = _watchdog
-            .exceeded
-            .load(std::sync::atomic::Ordering::Relaxed);
-        drop(_watchdog);
+        let outcome = execution.finish();
         self.rt.v8_isolate().cancel_terminate_execution();
         auxiliary_navigation::retire_interrupted_frames(&mut self.rt);
-        let result = if exceeded {
-            Err("Host input exceeded the session execution budget".into())
+        let result = if outcome.exceeded {
+            Err(outcome.error("Host input exceeded the session execution budget".into()))
         } else {
-            result.unwrap_or_else(|_| {
-                Err("Host input exceeded the session execution budget".to_string())
-            })
+            result
         };
-        if let Err(error) = self.finish_history_command(Ok(())) {
-            return result.and(Err(error));
-        }
+        let result = match self.finish_history_command(Ok(())) {
+            Ok(()) => result,
+            Err(error) => result.and(Err(error)),
+        };
         if result.is_err() {
             deno_core::scope!(scope, self.rt);
             let context = v8::Local::new(scope, &selected);
@@ -20180,7 +20182,12 @@ impl PageSession {
                 }
             }
         }
-        self.finish_history_command(result)
+        let result = self.finish_history_command(result);
+        if outcome.interrupted {
+            Err(outcome.error("Host input exceeded the session execution budget".into()))
+        } else {
+            result
+        }
     }
 
     /// Host-only retention diagnostics; never installed on the guest global.

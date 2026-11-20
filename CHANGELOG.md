@@ -3,6 +3,7 @@
 ## [0.8.5] - 2026-11-19
 
 - Reuse per-node retention marks during native Promise graph maintenance, avoiding repeated membership hashing while preserving pending work, native operations and ancestor dependencies.
+- Stop internal input and document-content drains between healthy callbacks, preserve explicit content caller deadlines, and prevent queued form navigation after hard input interruption.
 
 - Reduce repeated scans during large native Promise reaction bursts, retaining pending owners and ancestor dependencies while bounding transient bookkeeping beside a live graph.
 

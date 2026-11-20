@@ -531,7 +531,11 @@ impl Session {
             self.requests.clear();
             self.dom_history.clear();
         }
-        self.record_event("target.closed", Some(id.to_string()), Some(json!({ "url": removed.url })));
+        self.record_event(
+            "target.closed",
+            Some(id.to_string()),
+            Some(json!({ "url": removed.url })),
+        );
         Ok(removed)
     }
 
@@ -590,7 +594,10 @@ impl Session {
             return;
         };
         for mut entry in entries {
-            let Some(kind) = entry.get("event").and_then(Value::as_str).map(str::to_owned)
+            let Some(kind) = entry
+                .get("event")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
             else {
                 continue;
             };
@@ -3717,7 +3724,7 @@ fn call_sync_session_tool(
                     Some(n) => Some(n),
                     None => {
                         return Some(Err(
-                            "events_read: 'after' must be a non-negative integer".into(),
+                            "events_read: 'after' must be a non-negative integer".into()
                         ))
                     }
                 },
@@ -4206,8 +4213,7 @@ fn initialize_result() -> Value {
 /// Decode a `artifact_create` call's base64 payload + metadata and hand it to
 /// `Session::artifact_create`. Explicit per-arg errors replace silent defaults.
 fn artifact_create_from_args(session: &mut Session, args: &Value) -> Result<Value, String> {
-    let bytes_b64 = arg_str(args, "bytesBase64")
-        .ok_or("artifact_create: missing 'bytesBase64'")?;
+    let bytes_b64 = arg_str(args, "bytesBase64").ok_or("artifact_create: missing 'bytesBase64'")?;
     let bytes = BASE64
         .decode(bytes_b64.as_bytes())
         .map_err(|error| format!("artifact_create: invalid base64 — {error}"))?;
@@ -6034,7 +6040,10 @@ mod tests {
         // #525 minimum: register, list, read, delete; empty + oversize + path
         // traversal + unknown-ID paths are explicit errors; aggregate cap holds.
         let mut s = Session::new();
-        assert_eq!(call(&mut s, "artifact_list", json!({})).await["artifacts"], json!([]));
+        assert_eq!(
+            call(&mut s, "artifact_list", json!({})).await["artifacts"],
+            json!([])
+        );
         // Arbitrary binary bytes including nulls and high bits — proof that
         // the store is 8-bit clean, not hidden text.
         let payload: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
@@ -6048,7 +6057,10 @@ mod tests {
             }),
         )
         .await;
-        assert_eq!(created["name"], "passwd", "path-traversal names must sanitize");
+        assert_eq!(
+            created["name"], "passwd",
+            "path-traversal names must sanitize"
+        );
         assert_eq!(created["size"], 1024);
         let id = created["id"].as_str().unwrap().to_owned();
         // Round-trip bytes.
@@ -6082,7 +6094,10 @@ mod tests {
         // Delete releases the slot; unknown-ID delete is an explicit error.
         let deleted = call(&mut s, "artifact_delete", json!({ "id": &id })).await;
         assert_eq!(deleted["deleted"]["id"], id);
-        assert_eq!(call(&mut s, "artifact_list", json!({})).await["artifacts"], json!([]));
+        assert_eq!(
+            call(&mut s, "artifact_list", json!({})).await["artifacts"],
+            json!([])
+        );
         let missing = call_tool(&mut s, "artifact_delete", &json!({ "id": "artifact-999" }))
             .await
             .unwrap_err();
@@ -6151,17 +6166,17 @@ mod tests {
             .unwrap()
             .clone();
         // console + pageerror + request + response, responsebody filtered out.
-        let kinds: Vec<&str> = events
-            .iter()
-            .map(|e| e["kind"].as_str().unwrap())
-            .collect();
+        let kinds: Vec<&str> = events.iter().map(|e| e["kind"].as_str().unwrap()).collect();
         assert_eq!(kinds, ["console", "pageerror", "request", "response"]);
         // Redaction: cookie / authorization / set-cookie never carry raw values.
         let req = &events[2]["body"]["requestHeaders"];
         assert_eq!(req["cookie"], "<redacted>");
         assert_eq!(req["authorization"], "<redacted>");
         assert_eq!(req["accept"], "application/json");
-        assert_eq!(events[3]["body"]["responseHeaders"]["set-cookie"], "<redacted>");
+        assert_eq!(
+            events[3]["body"]["responseHeaders"]["set-cookie"],
+            "<redacted>"
+        );
         // Body bytes dropped — a dropped-flag replaces them so the reader can
         // tell the body existed but is not leaked.
         assert!(events[2]["body"].get("requestBody").is_none());
@@ -6228,7 +6243,10 @@ mod tests {
         let bad_negative = call_tool(&mut s, "events_read", &json!({ "after": -1 }))
             .await
             .unwrap_err();
-        assert!(bad_negative.contains("non-negative integer"), "{bad_negative}");
+        assert!(
+            bad_negative.contains("non-negative integer"),
+            "{bad_negative}"
+        );
     }
 
     #[tokio::test]
@@ -6237,7 +6255,10 @@ mod tests {
         // it; close_target drops both the registry entry and the live tree. A
         // second goto afterward mints a fresh ID (never recycles).
         let mut s = Session::new();
-        assert_eq!(call(&mut s, "list_targets", json!({})).await["targets"], json!([]));
+        assert_eq!(
+            call(&mut s, "list_targets", json!({})).await["targets"],
+            json!([])
+        );
         s.load("https://x.test/", PAGE);
         let targets = call(&mut s, "list_targets", json!({})).await;
         let listed = targets["targets"].as_array().unwrap();
@@ -6261,10 +6282,16 @@ mod tests {
         // clean (#523 nit from review round 2).
         let closed = call(&mut s, "close_target", json!({ "id": first_id })).await;
         assert_eq!(closed["closed"]["id"], first_id);
-        assert_eq!(call(&mut s, "list_targets", json!({})).await["targets"], json!([]));
+        assert_eq!(
+            call(&mut s, "list_targets", json!({})).await["targets"],
+            json!([])
+        );
         assert!(s.tree().is_err());
         assert!(s.requests.is_empty(), "requests should reset on root close");
-        assert!(s.dom_history.is_empty(), "dom_history should reset on root close");
+        assert!(
+            s.dom_history.is_empty(),
+            "dom_history should reset on root close"
+        );
         assert!(s.back.is_empty(), "back history should reset on root close");
         // The next load mints a fresh ID that never collides with the closed one.
         s.load("https://x.test/again", PAGE);

@@ -232,7 +232,9 @@ const DEFAULT_PUBLICATION_DELAY_MICROS: u64 = 25_000;
 static PUBLICATION_DELAY_MICROS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(DEFAULT_PUBLICATION_DELAY_MICROS);
 pub(crate) fn publication_delay() -> std::time::Duration {
-    std::time::Duration::from_micros(PUBLICATION_DELAY_MICROS.load(std::sync::atomic::Ordering::Acquire))
+    std::time::Duration::from_micros(
+        PUBLICATION_DELAY_MICROS.load(std::sync::atomic::Ordering::Acquire),
+    )
 }
 /// Integration-test hook: let a test flatten the body-reader → task-tick → commit
 /// gap to zero so existing dictionary fixtures that select immediately after a

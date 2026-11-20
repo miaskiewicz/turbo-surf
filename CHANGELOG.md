@@ -4,6 +4,7 @@
 
 - Update the DOM, layout, raster and browser bindings to the published turbo-dom 0.8.6 crates, retaining the single V8 150.4.2 dependency. Brings turbo-dom's grid baseline regression fix (#537 — baseline-aligned grid items no longer measure at min-content width, restoring prior one-page payslip layout) and a faster `parseBuffer` parser (arena tree sink + SIMD scan, 9–25% Rust-level speedup).
 - Publish admitted session dictionaries after the owning realm's body-reader resolves instead of transport EOF (#253, split from #137). An immediate chained `fetch()` after `await response.text()` on the dictionary GET no longer sees the new entry; a later task-tick request does, matching Chrome 156 control case 28 "head-does-not-register" phases after/after100/after500.
+- Apply `BrowserContext.timezoneId` to the live session's Date accessors and `Intl.DateTimeFormat` default zone (#397). The Playwright shim injects a context-level init script that wraps `Intl.DateTimeFormat` with the configured `timeZone` and reroutes `Date.prototype.getFullYear/getMonth/getDate/getDay/getHours/getMinutes/getSeconds/getTimezoneOffset` through `formatToParts(timeZone)`. Author `timeZone` options still win inside a user-supplied Intl option bag; UTC-time getters and `Date.now()` are untouched.
 
 ## [0.8.5] - 2026-11-19
 

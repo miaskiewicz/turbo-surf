@@ -205,7 +205,20 @@ impl PendingDictionary {
             self.stored,
         );
     }
+    /// Publish after the owning realm's body reader has resolved and the V8
+    /// microtask queue has drained. Chrome 156 publishes on the task tick that
+    /// follows `Response.text()` (the frozen headless shell is measured as
+    /// ≈100ms later); an immediate chained `fetch()` must not see the entry.
+    /// Spawning on the ambient tokio runtime with a short post-drain delay
+    /// crosses that boundary without a V8 task hook here in Core.
+    pub(crate) fn commit_deferred(self) {
+        tokio::spawn(async move {
+            tokio::time::sleep(PUBLICATION_DELAY).await;
+            self.commit();
+        });
+    }
 }
+pub(crate) const PUBLICATION_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
 impl SelectedDictionary {
     /// These codings are inserted only after selecting a genuine scoped dictionary.
     pub(crate) fn negotiate(&self, headers: &mut BTreeMap<String, String>) {

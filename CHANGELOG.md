@@ -3,6 +3,7 @@
 ## [0.8.6] - 2026-11-20 (unreleased candidate)
 
 - Update the DOM, layout, raster and browser bindings to the published turbo-dom 0.8.6 crates, retaining the single V8 150.4.2 dependency. Brings turbo-dom's grid baseline regression fix (#537 — baseline-aligned grid items no longer measure at min-content width, restoring prior one-page payslip layout) and a faster `parseBuffer` parser (arena tree sink + SIMD scan, 9–25% Rust-level speedup).
+- Publish admitted session dictionaries after the owning realm's body-reader resolves instead of transport EOF (#253, split from #137). An immediate chained `fetch()` after `await response.text()` on the dictionary GET no longer sees the new entry; a later task-tick request does, matching Chrome 156 control case 28 "head-does-not-register" phases after/after100/after500.
 
 ## [0.8.5] - 2026-11-19
 

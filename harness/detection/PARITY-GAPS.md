@@ -530,10 +530,14 @@ Brotli/Zstandard decoding and policy-aware discovery are integrated. Both final
 workspace commands pass, including10 real HTTPS controls per transport and32
 independent Chrome discovery/lifecycle controls on each engine.
 
-Publication scheduling is a pinned known gap (#137, Chrome 156 control
-`fixtures/compression-dictionary-chrome156.json`). Chrome's immediate post-GET
-request lacks the newly stored dictionary, while +100ms/+500ms requests advertise
-it; native EOF publication is synchronous. Range requests match Chrome 156:
+Publication scheduling (#253, split from #137) now defers past the owning
+realm's body-reader resolve: `PendingDictionary::commit_deferred` spawns the
+cache insert on a tokio task after a bounded post-drain delay
+(`compression_dictionary::PUBLICATION_DELAY`), so an immediate chained
+`fetch(resource).text()` after `await response.text()` on the dictionary GET no
+longer sees the entry. Chrome 156 control `fixtures/compression-dictionary-chrome156.json`
+case 28 "head-does-not-register" exercises the exact wire: after/after100/after500
+phases. Offline regression lives in `net::tests::dictionary_publishes_after_body_reader_resolves_not_at_transport_eof`. Range requests match Chrome 156:
 `Accept-Encoding: identity`, or `identity, dcb, dcz` with a selected dictionary.
 Stable delayed positives do not close that difference. [RFC9842](https://www.rfc-editor.org/rfc/rfc9842.html)
 requires an eligible dictionary before advertising its encodings. Native explicit

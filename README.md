@@ -31,7 +31,7 @@ library, and they get their DOM from a real browser (Playwright/Puppeteer/
 Selenium) or an in-process fake DOM with no security isolation (jsdom,
 happy-dom). turbo-surf is unusual on four axes at once:
 
-1. **AI-agent-ready out of the box.** It ships a full **MCP server** (80 tools:
+1. **AI-agent-ready out of the box.** It ships a full **MCP server** (88 tools:
    navigate, click/fill/submit, query, extract, accessibility tree, markdown,
    `crawl` a whole site, `batch` a URL list, `render`/`set_mode` to run page JS,
    `eval_js`/`inject_js` against the live render heap with a DOM-history trail,
@@ -95,7 +95,7 @@ canonical dedupe, depth/page caps), structured extraction, CSS+XPath query, a
 no-Chromium JS render tier (a true V8 isolate over the native DOM) with re-enterable
 live-heap `eval_js`/`inject_js` + a DOM-history trail, **synthetic screenshots**
 (PNG/SVG from a native layout+paint of any HTML snapshot — still no browser), and an
-80-tool MCP server (native binary). Chrome parity is measured, not complete — see
+88-tool MCP server (native binary). Chrome parity is measured, not complete — see
 [Chrome parity (0.6.0)](#chrome-parity-060). Benchmarks are pending a re-run
 ([below](#benchmarks--pending-re-run)).
 
@@ -134,7 +134,7 @@ source-build overrides.
 ## MCP server (agents)
 
 ```sh
-npx --yes --package turbo-surf turbo-surf-mcp   # stdio MCP server (80 tools), e.g.:
+npx --yes --package turbo-surf turbo-surf-mcp   # stdio MCP server (88 tools), e.g.:
 # navigation:  goto, go_back, go_forward, reload, set_user_agent
 # content:     interactive_elements, accessibility_tree, aria_snapshot, markdown,
 #              text, html, links, requests, snapshot, query, get_by,
@@ -153,9 +153,40 @@ npx --yes --package turbo-surf turbo-surf-mcp   # stdio MCP server (80 tools), e
 # fetch:       fetch_markdown, fetch_markdown_batch, fetch_json, fetch_raw
 # render/JS:   render, set_mode, eval_js, inject_js, latest_dom, dom_history,
 #              evaluate, detect, detect_js, run_playwright, probe, human_interact
+# targets:     list_targets, close_target            # #523 opaque Page IDs
+# events:      events_read, events_clear             # #524 cursor-keyed diagnostics
+# artifacts:   artifact_create, artifact_list,       # #525 bounded byte store
+#              artifact_read, artifact_delete        #       (base64 wire, sanitized names)
 # stealth:     stealth_status, set_fingerprint, analyze_akamai, probe_mint
 # session:     get_cookies, set_cookie, set_extra_headers, robots_check
 ```
+
+### Retained targets, event diagnostics, artifacts (v0.8.6 minimum deliverables)
+
+- `list_targets` returns `{targets: [{id, url, opener?, createdAtSecs}]}`.
+  The root target is minted with an opaque Page ID on first `goto` / `load` and
+  stays stable across navigations. Frame addressing, popup discovery and
+  per-target cancellation are deferred follow-up work on #523.
+- `close_target` by id drops the registry entry. Closing the root also clears
+  the session's live tree; closing any other target drops only its entry.
+  Unknown IDs return explicit errors. Closing an opener does NOT implicitly
+  kill surviving popups.
+- `events_read(after?)` → `{events, nextCursor}`. Each event carries
+  `{cursor, kind, target?, atSecs, body?}`. Pass the returned `nextCursor` as
+  `after` for the next call to only receive later events; cursors never
+  recycle inside a session. Buffer is capped at 1024 with oldest-first
+  eviction. `events_clear` drops the retained entries without rewinding the
+  cursor. Today `close_target` is the only event source; full console /
+  pageerror / network / dialog capture is deferred follow-up on #524.
+- `artifact_create(bytesBase64, name?, mime?)` registers bounded bytes under
+  an opaque id and returns `{id, name, mime, size, createdAtSecs}`. Suggested
+  names are sanitized to a bare basename (a value like `../../etc/passwd`
+  can never choose a host write path). Per-artifact 32 MiB; aggregate
+  session 128 MiB; oversized / empty payloads are explicit errors.
+  `artifact_list`, `artifact_read` (round-trips base64 bytes), and
+  `artifact_delete` complete the lifecycle. The target-coupled
+  `set_input_files` and real download capture depend on the fuller #523
+  retained PageSession and are deferred follow-up on #525.
 
 The server speaks newline-delimited JSON-RPC 2.0 (MCP `2024-11-05`, `ping`
 included). A tool that runs and fails answers a normal result with `isError: true`
@@ -211,7 +242,7 @@ claude mcp list
 ```
 
 Now start (or restart) Claude Code and ask it to, e.g., *"use turbo-surf to fetch
-the markdown of example.com"* — the 80 tools above are available. Remove it later
+the markdown of example.com"* — the 88 tools above are available. Remove it later
 with `claude mcp remove turbo-surf`.
 
 **Scope (where the server is registered).** By default it's registered for your

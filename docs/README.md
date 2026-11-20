@@ -29,7 +29,7 @@ anymore (the engine is Rust; its modules are crates). Start here:
   itself is not published to crates.io.
 
 ## Agent & test surfaces
-- **MCP server** — 80 tools over stdio; see the "MCP server" section of
+- **MCP server** — 88 tools over stdio (v0.8.6 adds retained-target, event-diagnostics, and artifact-store tools for #523 / #524 / #525 minimums); see the "MCP server" section of
   [`../README.md`](../README.md).
 - **Playwright drop-in** — [`../rust/playwright-shim/LIMITATIONS.md`](../rust/playwright-shim/LIMITATIONS.md)
   is the per-method coverage map (what's supported / no-op / throws).

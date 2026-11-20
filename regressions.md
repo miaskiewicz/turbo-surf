@@ -1268,3 +1268,28 @@ Coverage runner cache reuse integrated as `7704bb69` (component `ac61fdc7`): eac
 The complete frozen `e6201df4` local runs finished: Rust workspace 2225 passed, 0 failed, 7 ignored; Render coverage 1565 passed, 0 failed, 93.879%; offline JS 1210 passed, 0 failed, with its gates passing. These receipts predate the following fix and do not establish a full-run pass for the new head.
 
 Linux ordinary Rust and LLVM both still exceeded the unchanged 5000ms deadline in the 32768 fanout workload. Bulk-membership optimization integrated as `bfeed204` (component `4ef832ec`): native per-node marks retain the same pending/native-operation/ancestor closure while removing repeated full-scan membership hashing. Actual tests-first baseline has 649000 chain and 1304928 fanout bulk lookups and fails only the new counter assertions after original results/order/deadline premises pass. Fixed 15 behavior controls pass, including cache, collected parents, held peers and bounded metadata/reclamation; focused clippy, formatting and complexity pass. Current Linux CI confirmation remains pending; no limit, workload or gate floor changed. Payroll/Flux server access remains paused.
+
+### CI e620 — committed response lifecycle before deferred initialization
+
+The `retry-fast-boundary/native` capture records the actual terminal HTTP 429 response
+finished at `1795129166419`, before the unchanged observation deadline
+`1795129166432`. At the `1795129166492` snapshot, the current terminal document's
+inline evidence script is present but unexecuted and native `pendingNavigation`
+is true, while guest `document.readyState` incorrectly reports `complete`.
+The native lifecycle remains at its default complete state between response
+installation and the next actor turn's deferred initializer. The fixed-window
+fixture and its strict partial terminal checks remain unchanged. Deterministic public lifecycle controls check
+the real installed document before initialization, later parser completion, and
+retirement by close, content replacement and superseding navigation. The
+original source fails all four installation-boundary controls; moving the
+non-dispatching host `documentLoading` transition into trusted response
+installation passes all four. Restoring only the old transition reproduces all
+four failures; the exact restored fix passes seven lifecycle, navigation and
+execution-budget controls. Render all-target Clippy with `-D warnings`, workspace
+formatting and modified Rust complexity checks pass. A freshly built native
+detector and local Chrome-for-Testing pass the unchanged paired localhost
+collector fixture and its three evidence-validation controls (four passed, no
+skips). The short native fast-boundary window retains its earlier HTTP 200 document
+on this run, while the 1000 ms control reaches HTTP 429; the deterministic Rust controls
+prove the installed-before-parser boundary directly. This is component proof,
+not a fresh complete release-gate result.

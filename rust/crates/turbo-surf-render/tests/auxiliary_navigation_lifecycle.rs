@@ -33,6 +33,11 @@ async fn installed_before_initialization(page: &mut PageSession, root: u64) {
         "installation must yield before the guest initializer"
     );
     assert!(page.has_pending_auxiliary_work());
+    assert_eq!(
+        read(page, root, "return document.readyState"),
+        "loading",
+        "a committed document must stay loading before its deferred initializer and parser"
+    );
 }
 
 async fn exercise(operation: &str) {
@@ -123,4 +128,35 @@ async fn set_content_retires_installed_navigation_without_replaying_its_initiali
 #[tokio::test(flavor = "current_thread")]
 async fn superseding_navigation_retires_the_old_installed_initializer() {
     exercise("navigation").await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn committed_document_enters_loading_before_initializer_then_completes_its_parser() {
+    let server = fixture::Server::start().await;
+    let services = AuxiliaryHostServices {
+        root_bootstrap: AuxiliaryBootstrap {
+            init_script: "if(location.pathname==='/deferred'){globalThis.deferredInitializerRan=true;globalThis.initializerReadyState=document.readyState;}".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut page = fixture::open(&server.origin, services).await;
+    let root = page.auxiliary_root_id().unwrap();
+    installed_before_initialization(&mut page, root).await;
+    assert_eq!(
+        read(&mut page, root, "return globalThis.bootObservation??null"),
+        Value::Null,
+        "the actual response parser must not run during trusted installation"
+    );
+    fixture::settle(&mut page).await;
+    assert_eq!(
+        read(
+            &mut page,
+            root,
+            "return [initializerReadyState,document.readyState,bootObservation]"
+        ),
+        json!(["loading", "complete", [null, null]])
+    );
+    assert!(!page.has_pending_auxiliary_work());
+    page.close();
 }

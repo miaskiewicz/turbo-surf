@@ -778,6 +778,9 @@ fn commit_fetched(
         installed
     };
     adopt_root_response(rt, target, &fetched, job.form_action)?;
+    // Installation is observable before the next turn runs guest initialization.
+    // This host capability only resets private lifecycle state; it dispatches no events.
+    auxiliary_pages::target_call(rt, AuxiliaryContextId(target), "documentLoading", &[])?;
     setup.finish()?;
     let pending = {
         deno_core::scope!(scope, rt);
@@ -857,8 +860,6 @@ fn finish_pending_init(
     }
     validate_pending_init(rt, target, pending)?;
     let id = AuxiliaryContextId(target);
-    auxiliary_pages::target_call(rt, id, "documentLoading", &[])?;
-    validate_pending_init(rt, target, pending)?;
     let promise =
         auxiliary_pages::execute_target(rt, id, "return __tsNs.hydrate(300,200000,false)", true)?;
     validate_pending_init(rt, target, pending)?;

@@ -38,12 +38,11 @@ async fn open(origin: &str) -> PageSession {
     .unwrap()
 }
 fn turn(page: &mut PageSession, target: u64) -> Value {
-    serde_json::from_str(
-        &page
-            .read_target_engine(target, "return globalThis.turn;")
-            .unwrap(),
-    )
-    .unwrap()
+    let raw = page
+        .read_target_engine(target, "return globalThis.turn;")
+        .unwrap();
+    serde_json::from_str(&raw)
+        .unwrap_or_else(|error| panic!("actual selected-state read {raw:?}: {error}"))
 }
 fn check(page: &mut PageSession, target: u64, result: Result<(), String>, infinite: bool) {
     let state = turn(page, target);
@@ -90,20 +89,27 @@ async fn input(infinite: bool) {
 struct ScriptServer {
     origin: String,
     requested: Arc<AtomicBool>,
+    release: Arc<tokio::sync::Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 impl ScriptServer {
     async fn start(infinite: bool) -> Self {
+        Self::with_held_response(infinite, false).await
+    }
+    async fn with_held_response(infinite: bool, held: bool) -> Self {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}/", listener.local_addr().unwrap());
         let requested = Arc::new(AtomicBool::new(false));
         let seen = requested.clone();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let released = release.clone();
         let body = format!("{}runTurn();", callback(infinite));
         let task = tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 let body = body.clone();
                 let seen = seen.clone();
+                let released = released.clone();
                 tokio::spawn(async move {
                     let mut request = Vec::new();
                     loop {
@@ -119,7 +125,11 @@ impl ScriptServer {
                     }
                     assert!(request.starts_with(b"GET /gate.js "));
                     seen.store(true, Ordering::Release);
-                    tokio::time::sleep(std::time::Duration::from_millis(140)).await;
+                    if held {
+                        released.notified().await;
+                    } else {
+                        tokio::time::sleep(std::time::Duration::from_millis(140)).await;
+                    }
                     let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                     let _ = socket.write_all(response.as_bytes()).await;
                 });
@@ -128,6 +138,7 @@ impl ScriptServer {
         Self {
             origin,
             requested,
+            release,
             task,
         }
     }
@@ -165,14 +176,50 @@ async fn content(targeted: bool, infinite: bool, timeout: Option<u64>) {
         assert_eq!(state["exited"], 0);
         assert_eq!(result.unwrap_err(), "setContent timeout after 200ms");
     } else {
-        if timeout == Some(1000) && !infinite {
-            assert_eq!(
-                result.as_ref().unwrap_err(),
-                "setContent timeout after 200ms"
-            );
-        }
         check(&mut page, target, result.map(|_| ()), infinite);
     }
+    page.close();
+}
+// Request admission does not imply that an external script has arrived. Hold
+// its real response so the earlier internal deadline has an unambiguous cause.
+async fn content_internal_expiry(targeted: bool) {
+    let server = ScriptServer::with_held_response(false, true).await;
+    let mut page = open(&server.origin).await;
+    let target = page.auxiliary_root_id().unwrap();
+    page.set_execution_budget_for_testing(INTERNAL);
+    let html = "<!doctype html><p>Replacement</p><script src='/gate.js'></script>";
+    let result = if targeted {
+        page.set_target_content(target, html, "load", Some(1000))
+            .await
+    } else {
+        page.set_content(html, "load", Some(1000)).await
+    };
+    assert!(server.requested.load(Ordering::Acquire));
+    assert_eq!(result.unwrap_err(), "setContent timeout after 200ms");
+    assert_eq!(
+        page.read_target_engine(target, "return typeof globalThis.turn;")
+            .unwrap(),
+        "\"undefined\""
+    );
+    server.release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            page.poll_background_work().await.unwrap();
+            if page
+                .read_target_engine(target, "return globalThis.turn?.exited === 1;")
+                .unwrap()
+                == "true"
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the retained script must finish after its response is released");
+    assert_eq!(
+        turn(&mut page, target),
+        json!({"entered":1,"active":false,"exited":1})
+    );
     page.close();
 }
 #[tokio::test(flavor = "current_thread")]
@@ -210,11 +257,11 @@ async fn target_content_explicit_caller_deadline_remains_hard() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn root_content_reports_internal_expiry_before_a_later_caller_deadline() {
-    content(false, false, Some(1000)).await;
+    content_internal_expiry(false).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn target_content_reports_internal_expiry_before_a_later_caller_deadline() {
-    content(true, false, Some(1000)).await;
+    content_internal_expiry(true).await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn root_content_internal_hard_stop_is_not_relabelled_as_a_later_caller_timeout() {

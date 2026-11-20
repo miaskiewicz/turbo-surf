@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.8.6] - 2026-11-20 (unreleased candidate)
+
+- Update the DOM, layout, raster and browser bindings to the published turbo-dom 0.8.6 crates, retaining the single V8 150.4.2 dependency. Brings turbo-dom's grid baseline regression fix (#537 — baseline-aligned grid items no longer measure at min-content width, restoring prior one-page payslip layout) and a faster `parseBuffer` parser (arena tree sink + SIMD scan, 9–25% Rust-level speedup).
+
 ## [0.8.5] - 2026-11-19
 
 - Reuse authenticated Promise ownership on subsequent native hooks without repeating async-context discovery, preserving unknown-owner fallback, retired-document checks and guest execution limits.

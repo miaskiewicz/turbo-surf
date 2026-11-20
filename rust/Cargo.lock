@@ -5814,9 +5814,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef6a245f5a1754b082ea8315a324cc3dd0ddb233d5b1a585822b8aad7011092b"
+checksum = "ca32786ddbea983986ed455d11fb4170b17f6b1cd5de9794158edd3663a27861"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5830,9 +5830,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-browser-env"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "139e4eaedad32a93b5172b976d4ca7a1aef739f9e9b9622a5d38c83628c6928f"
+checksum = "feab6d9de0d59af4e619c908c8a35f98a4b1591b1be93c3888bb541de6f4cf8e"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5849,9 +5849,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-layout"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fd97e1fa43f50f44b3b7b153431cf28d5bb1517d5dd66a067aeb97864ec670d"
+checksum = "2c86ed183966210c0a0bd773251630ea2b3284a8c66fcad8be23cd0c62b15b87"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5872,9 +5872,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-raster"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d83e4423209d050db963faf828b5b7d1299cedec8ab4584eee1990ebc28c548"
+checksum = "794604a9d30debd4bc0e68930c195ffda78a550512100818c0734bb14fdf0661"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5959,7 +5959,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-core"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "async-trait",
  "base64",
@@ -6127,7 +6127,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-mcp"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "async-trait",
  "base64",
@@ -6148,7 +6148,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-napi"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "image",
  "mime_guess",
@@ -6170,7 +6170,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-page"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6182,7 +6182,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-py"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "pyo3",
  "serde",
@@ -6197,7 +6197,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-render"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "async-trait",
  "base64",
@@ -6262,14 +6262,14 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-transform"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "swc_core",
 ]
 
 [[package]]
 name = "turbo-surf-view"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "criterion",
  "regex",

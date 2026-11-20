@@ -83,8 +83,8 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-Status: **v0.8.5 release**.
-Version 0.8.5 uses the published turbo-dom 0.8.5 crates. See
+Status: **v0.8.6 release**.
+Version 0.8.6 uses the published turbo-dom 0.8.6 crates. See
 [CHANGELOG.md](./CHANGELOG.md) for release changes and
 [PUBLISHING.md](./PUBLISHING.md) for release validation and artifact verification.
 The engine includes hardened
@@ -712,8 +712,8 @@ To run the full CI workflow without a PR, use **Actions → CI → Run workflow*
 select the branch, or dispatch it with GitHub CLI:
 
 ```sh
-gh workflow run ci.yml --repo miaskiewicz/turbo-surf --ref release/v0.8.5
-gh run list --repo miaskiewicz/turbo-surf --workflow ci.yml --branch release/v0.8.5 --event workflow_dispatch
+gh workflow run ci.yml --repo miaskiewicz/turbo-surf --ref release/v0.8.6
+gh run list --repo miaskiewicz/turbo-surf --workflow ci.yml --branch release/v0.8.6 --event workflow_dispatch
 ```
 
 Replace the ref with your branch. It must contain the `workflow_dispatch` trigger;

@@ -16,7 +16,7 @@ is the authoritative map of what is **supported**, what is a **no-op**, and what
 faithfully emulated is described below; some compatibility surfaces are stored values
 or no-ops rather than complete browser implementations.
 
-This describes the v0.8.5 source. Release verification is documented in
+This describes the v0.8.6 source. Release verification is documented in
 [PUBLISHING.md](../../PUBLISHING.md). The default renderer is Rust/V8;
 Chrome/Playwright are development oracles. An explicitly selected browser solver is
 a separate optional path. See [build features](../../docs/BUILD-FEATURES.md).

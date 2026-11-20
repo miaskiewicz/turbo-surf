@@ -6126,7 +6126,10 @@ mod tests {
         let missing_b64 = call_tool(&mut s, "artifact_create", &json!({}))
             .await
             .unwrap_err();
-        assert!(missing_b64.contains("missing 'bytesBase64'"), "{missing_b64}");
+        assert!(
+            missing_b64.contains("missing 'bytesBase64'"),
+            "{missing_b64}"
+        );
         let bad_b64 = call_tool(
             &mut s,
             "artifact_create",
@@ -6138,7 +6141,10 @@ mod tests {
         let missing_read_id = call_tool(&mut s, "artifact_read", &json!({}))
             .await
             .unwrap_err();
-        assert!(missing_read_id.contains("missing 'id'"), "{missing_read_id}");
+        assert!(
+            missing_read_id.contains("missing 'id'"),
+            "{missing_read_id}"
+        );
         let unknown_read = call_tool(&mut s, "artifact_read", &json!({ "id": "artifact-999" }))
             .await
             .unwrap_err();
@@ -6146,7 +6152,10 @@ mod tests {
         let missing_delete_id = call_tool(&mut s, "artifact_delete", &json!({}))
             .await
             .unwrap_err();
-        assert!(missing_delete_id.contains("missing 'id'"), "{missing_delete_id}");
+        assert!(
+            missing_delete_id.contains("missing 'id'"),
+            "{missing_delete_id}"
+        );
         // Aggregate cap: a fresh session fills to exactly the cap and one
         // more byte is rejected.
         let mut t = Session::new();

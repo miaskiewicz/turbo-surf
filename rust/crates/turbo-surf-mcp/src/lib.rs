@@ -274,6 +274,33 @@ pub struct Session {
     /// Monotonic generation, used to produce fresh Page IDs that never recycle
     /// within a session.
     target_generation: u64,
+    /// Session-side event log (#524, minimum deliverable): an opaque monotonic
+    /// cursor keyed ring buffer. `events_read(after?)` returns `{events,
+    /// nextCursor}` so an agent can pull diagnostics incrementally; the full
+    /// console / pageerror / network / dialog surface is deferred follow-up.
+    /// Capped at [`MAX_EVENTS`] with oldest-first eviction.
+    event_log: std::collections::VecDeque<SessionEvent>,
+    event_cursor: u64,
+}
+
+/// Oldest-first eviction cap on the session event buffer. Keeps a bounded
+/// memory footprint across long-lived sessions without surprising agents.
+pub const MAX_EVENTS: usize = 1024;
+
+/// A diagnostic event the MCP session surfaces through `events_read` (#524).
+/// Kinds are open to extension; today only `target.closed` is produced.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SessionEvent {
+    /// Opaque monotonic cursor. `events_read(after)` returns events whose
+    /// cursor is strictly greater than `after`. Cursors never recycle inside a
+    /// session.
+    pub cursor: u64,
+    pub kind: String,
+    pub target: Option<String>,
+    /// Seconds-since-epoch of registration.
+    pub at_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<Value>,
 }
 
 /// A retained MCP target (#523). Minimal metadata today; later work adds
@@ -434,7 +461,50 @@ impl Session {
             self.tree = None;
             self.url.clear();
         }
+        self.record_event("target.closed", Some(id.to_string()), Some(json!({ "url": removed.url })));
         Ok(removed)
+    }
+
+    /// Append a diagnostic event. Oldest entries evict past [`MAX_EVENTS`] so
+    /// the buffer stays bounded. Cursors never recycle; an agent that observes
+    /// a cursor value `n` can pass `after: n` to a later `events_read` to only
+    /// receive events that landed after its observation.
+    fn record_event(&mut self, kind: &str, target: Option<String>, body: Option<Value>) {
+        self.event_cursor = self.event_cursor.wrapping_add(1);
+        while self.event_log.len() >= MAX_EVENTS {
+            self.event_log.pop_front();
+        }
+        let at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.event_log.push_back(SessionEvent {
+            cursor: self.event_cursor,
+            kind: kind.to_string(),
+            target,
+            at_secs,
+            body,
+        });
+    }
+
+    /// Return every event strictly after `after` (or every retained event when
+    /// `after` is `None`), plus the current cursor to resume from.
+    pub fn events_read(&self, after: Option<u64>) -> (Vec<SessionEvent>, u64) {
+        let bound = after.unwrap_or(0);
+        let events = self
+            .event_log
+            .iter()
+            .filter(|event| event.cursor > bound)
+            .cloned()
+            .collect();
+        (events, self.event_cursor)
+    }
+
+    /// Drop every retained event without resetting the cursor. An agent that
+    /// held a cursor `n` can still pass it as `after`; it will see every event
+    /// recorded after the clear.
+    pub fn events_clear(&mut self) {
+        self.event_log.clear();
     }
 
     // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
@@ -3016,6 +3086,24 @@ pub fn tools() -> Value {
              drops only its registry entry. An opener close does NOT implicitly \
              kill surviving popups. Arg: id",
         ),
+        // event diagnostics (#524, minimum deliverable)
+        (
+            "events_read",
+            "Read session diagnostic events incrementally → {events: \
+             [{cursor,kind,target?,atSecs,body?}], nextCursor}. Pass the \
+             returned nextCursor as `after` on the next call to only receive \
+             later events. Cursors never recycle inside a session. Minimum \
+             scaffolding for #524 — today emits `target.closed`; full \
+             console / pageerror / network / dialog capture is deferred \
+             follow-up. Buffer is capped and oldest-first-evicted",
+        ),
+        (
+            "events_clear",
+            "Drop every retained session diagnostic event without resetting \
+             the cursor → {ok}. An agent that held cursor `n` can still pass \
+             it as `after` to a later events_read and receive only post-clear \
+             events",
+        ),
         (
             "set_user_agent",
             "Set the User-Agent for subsequent fetches",
@@ -3369,6 +3457,15 @@ fn call_sync_session_tool(
                 Err(message) => return Some(Err(message)),
             },
         },
+        "events_read" => {
+            let after = args.get("after").and_then(Value::as_u64);
+            let (events, next_cursor) = session.events_read(after);
+            json!({ "events": events, "nextCursor": next_cursor })
+        }
+        "events_clear" => {
+            session.events_clear();
+            json!({ "ok": true })
+        }
         _ => return None,
     };
     Some(Ok(out))
@@ -5614,6 +5711,52 @@ mod tests {
         assert_eq!(st["renderFingerprintOverrides"]["hardwareConcurrency"], 16);
         // Reset the process-global for other tests.
         turbo_surf_render::set_fingerprint("{}");
+    }
+
+    #[tokio::test]
+    async fn events_read_captures_target_close_with_a_monotonic_cursor_and_clear() {
+        // #524 minimum: target.closed lands in the event log, the cursor is
+        // monotonic, and events_clear drops entries without resetting cursors
+        // an earlier observer may still pass as `after`.
+        let mut s = Session::new();
+        let initial = call(&mut s, "events_read", json!({})).await;
+        assert_eq!(initial["events"], json!([]));
+        assert_eq!(initial["nextCursor"], 0);
+        s.load("https://x.test/", PAGE);
+        let id = call(&mut s, "list_targets", json!({})).await["targets"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        call(&mut s, "close_target", json!({ "id": id })).await;
+        let first = call(&mut s, "events_read", json!({})).await;
+        let events = first["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["kind"], "target.closed");
+        assert_eq!(events[0]["target"], id);
+        assert_eq!(events[0]["body"]["url"], "https://x.test/");
+        let cursor = first["nextCursor"].as_u64().unwrap();
+        assert!(cursor >= 1);
+        // A read with `after: cursor` returns no events.
+        let next = call(&mut s, "events_read", json!({ "after": cursor })).await;
+        assert_eq!(next["events"], json!([]));
+        assert_eq!(next["nextCursor"], cursor);
+        // Open + close a second target; the new event arrives and the cursor advances.
+        s.load("https://x.test/another", PAGE);
+        let next_id = call(&mut s, "list_targets", json!({})).await["targets"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        call(&mut s, "close_target", json!({ "id": next_id })).await;
+        let after = call(&mut s, "events_read", json!({ "after": cursor })).await;
+        let after_events = after["events"].as_array().unwrap();
+        assert_eq!(after_events.len(), 1);
+        assert_eq!(after_events[0]["target"], next_id);
+        assert!(after_events[0]["cursor"].as_u64().unwrap() > cursor);
+        // Clearing drops entries but keeps the cursor moving forward.
+        call(&mut s, "events_clear", json!({})).await;
+        let cleared = call(&mut s, "events_read", json!({})).await;
+        assert_eq!(cleared["events"], json!([]));
+        assert!(cleared["nextCursor"].as_u64().unwrap() >= after["nextCursor"].as_u64().unwrap());
     }
 
     #[tokio::test]

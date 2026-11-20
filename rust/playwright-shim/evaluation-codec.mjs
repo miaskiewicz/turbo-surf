@@ -22,8 +22,21 @@ export function safeStringifyTuple(value) {
       else if (c === 0x0a) out += "\\n";
       else if (c === 0x0c) out += "\\f";
       else if (c === 0x0d) out += "\\r";
-      else if (c < 0x20 || c === 0x7f) out += `\\u${c.toString(16).padStart(4, "0")}`;
-      else out += value[i];
+      else if (c < 0x20) out += `\\u${c.toString(16).padStart(4, "0")}`;
+      // Lone surrogates must round-trip exactly; emit them as `\uXXXX` so
+      // Node's JSON.parse recovers the original UTF-16 code unit instead of
+      // folding to U+FFFD. Paired surrogates are emitted as-is (same bytes).
+      else if (c >= 0xd800 && c <= 0xdbff) {
+        const next = value.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          out += value[i] + value[i + 1];
+          i++;
+        } else {
+          out += `\\u${c.toString(16).padStart(4, "0")}`;
+        }
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        out += `\\u${c.toString(16).padStart(4, "0")}`;
+      } else out += value[i];
     }
     return out + '"';
   }

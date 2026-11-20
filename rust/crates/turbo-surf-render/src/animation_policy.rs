@@ -17,6 +17,19 @@ pub enum AnimationPolicy {
 /// policy or accidentally give a newly created child a different presentation.
 pub(crate) struct Selected(pub(crate) AnimationPolicy);
 
+std::thread_local! {
+    // Mirrors the installed presentation for the owning realm on this thread, so
+    // the surf-local layout admission can honor Disabled without a browser-env
+    // getter. Set by `install`; read by `validate_or_request`. Only this thread's
+    // runtime writes this cell, and layout admission for that runtime reads it
+    // from the same thread.
+    pub(crate) static DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn presentation_disabled() -> bool {
+    DISABLED.with(|cell| cell.get())
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope) -> Result<(), String> {
     use turbo_dom_browser_env::host_internals::{
         set_animation_presentation, AnimationPresentation,
@@ -29,6 +42,7 @@ pub(crate) fn install(scope: &mut v8::PinScope) -> Result<(), String> {
         AnimationPolicy::Enabled => AnimationPresentation::Enabled,
         AnimationPolicy::Disabled => AnimationPresentation::Disabled,
     };
+    DISABLED.with(|cell| cell.set(policy == AnimationPolicy::Disabled));
     let installed = set_animation_presentation(scope, presentation);
     if scope.is_execution_terminating() {
         return Err("Native animation presentation policy execution terminated".into());

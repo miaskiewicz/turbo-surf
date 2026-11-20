@@ -328,10 +328,7 @@ pub const MAX_ARTIFACT_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
 /// name verbatim cannot be fooled by POSIX NUL truncation. Collapses empty
 /// results to a safe placeholder.
 pub fn sanitize_artifact_name(name: &str) -> String {
-    let basename = name
-        .rsplit(|c: char| c == '/' || c == '\\')
-        .next()
-        .unwrap_or("");
+    let basename = name.rsplit(['/', '\\']).next().unwrap_or("");
     let stripped: String = basename.chars().filter(|c| !c.is_control()).collect();
     let trimmed = stripped
         .trim_matches(|c: char| c == '.' || c.is_whitespace())

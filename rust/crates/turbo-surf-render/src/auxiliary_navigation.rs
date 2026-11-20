@@ -2134,6 +2134,10 @@ pub(super) fn queue_interrupted_frame<'s>(
 ) {
     navigation_deadline::queue_interrupted_frame(scope, context, previous)
 }
+pub(super) fn finish_canceled_execution(rt: &mut OwnedRuntime) {
+    navigation_deadline::finish_canceled_execution(rt)
+}
+
 pub(super) fn retire_interrupted_frames(rt: &mut OwnedRuntime) {
     navigation_deadline::retire_interrupted_frames(rt)
 }

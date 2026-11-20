@@ -1,6 +1,18 @@
 //! Explicit driver interactions await only native navigation admitted for their owner.
 use super::*;
 
+struct CanceledAction<'a> {
+    session: &'a mut PageSession,
+    completed: bool,
+}
+impl Drop for CanceledAction<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            auxiliary_navigation::finish_canceled_execution(&mut self.session.rt);
+        }
+    }
+}
+
 impl PageSession {
     /// Finish only main-frame signals admitted after the driver's whole action began.
     /// This method executes no guest source and never waits for resource loading.
@@ -79,13 +91,24 @@ impl PageSession {
             .or_else(|| snapshot["navigationRevision"].as_str())
             .ok_or("Native navigation baseline is unavailable")?
             .to_owned();
-        tokio::time::timeout(std::time::Duration::from_millis(budget), async {
+        let mut action = CanceledAction {
+            session: self,
+            completed: false,
+        };
+        let outcome = tokio::time::timeout(std::time::Duration::from_millis(budget), async {
             let result = if source.is_empty() {
                 String::new()
             } else {
-                self.eval_target_engine(target, source, false).await?
+                action
+                    .session
+                    .eval_target_engine(target, source, false)
+                    .await?
             };
-            match self.finish_target_action_since(target, &baseline).await? {
+            match action
+                .session
+                .finish_target_action_since(target, &baseline)
+                .await?
+            {
                 auxiliary_navigation::ActionCompletion::Released if signal_only => {
                     Ok(serde_json::json!({"status":"released"}).to_string())
                 }
@@ -96,7 +119,8 @@ impl PageSession {
                 auxiliary_navigation::ActionCompletion::NavigationFailed(error) => Err(error),
             }
         })
-        .await
-        .map_err(|_| format!("Target interaction timeout after {budget}ms"))?
+        .await;
+        action.completed = outcome.is_ok();
+        outcome.map_err(|_| format!("Target interaction timeout after {budget}ms"))?
     }
 }

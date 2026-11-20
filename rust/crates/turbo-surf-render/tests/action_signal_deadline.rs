@@ -12,6 +12,7 @@ struct Fixture {
     origin: String,
     release: mpsc::Sender<()>,
     requests: mpsc::Receiver<String>,
+    held_headers: Arc<tokio::sync::Notify>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -24,6 +25,8 @@ impl Fixture {
         let (send, requests) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
+        let held_headers = Arc::new(tokio::sync::Notify::new());
+        let headers_sent = held_headers.clone();
         let thread = std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(15);
             while !stopping.load(Ordering::SeqCst) && Instant::now() < deadline {
@@ -43,6 +46,7 @@ impl Fixture {
                     let body = "<!doctype html><p>replacement</p>";
                     write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n<!doctype html>",body.len()).unwrap();
                     stream.flush().unwrap();
+                    headers_sent.notify_one();
                     let _ = released.recv_timeout(Duration::from_secs(10));
                     let _ = stream.write_all(b"<p>replacement</p>");
                 } else {
@@ -55,6 +59,7 @@ impl Fixture {
             origin,
             release,
             requests,
+            held_headers,
             stop,
             thread: Some(thread),
         }
@@ -87,7 +92,7 @@ fn read_request(stream: &mut TcpStream) -> String {
         .into()
 }
 
-async fn assert_signal_deadline(seed_peer_failure: bool) {
+async fn assert_signal_deadline(seed_peer_failure: bool, stall_executor: bool) {
     let fixture = Fixture::start();
     // This existing public budget governs native driver eval, fetch and commit wait.
     let mut page = PageSession::open(
@@ -137,9 +142,22 @@ async fn assert_signal_deadline(seed_peer_failure: bool) {
             "the peer failure must have the same admission serial to exercise target ownership"
         );
     }
+    let blocker = stall_executor.then(|| {
+        let headers = fixture.held_headers.clone();
+        let block_at = tokio::time::Instant::now() + Duration::from_millis(900);
+        tokio::spawn(async move {
+            headers.notified().await;
+            tokio::time::sleep_until(block_at).await;
+            // Reproduce a late executor poll while the genuine native deadline expires.
+            std::thread::sleep(Duration::from_millis(200));
+        })
+    });
     let result = page
         .dispatch_target_engine_since(root, "", Some(&baseline))
         .await;
+    if let Some(blocker) = blocker {
+        blocker.await.unwrap();
+    }
     assert!(result.is_err(), "held own HTML must reject at the actual native budget, never release as navigation-failed: {result:?}");
     assert_eq!(
         fixture.request(),
@@ -166,12 +184,12 @@ async fn assert_signal_deadline(seed_peer_failure: bool) {
 
 #[tokio::test(flavor = "current_thread")]
 async fn signal_only_completion_preserves_the_actual_native_action_deadline() {
-    assert_signal_deadline(false).await;
+    assert_signal_deadline(false, false).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn matching_peer_failure_cannot_release_an_owned_navigation_deadline() {
-    assert_signal_deadline(true).await;
+    assert_signal_deadline(true, false).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -197,6 +215,52 @@ async fn failed_navigation_signal_release_keeps_later_generation_live() {
     let outcome: serde_json::Value = serde_json::from_str(&outcome).unwrap();
     assert_eq!(outcome["status"], "navigation-failed");
     assert_eq!(fixture.request(), "GET /reject HTTP/1.1");
+    page.dispatch_target_engine(root, "location.assign('/recovered');")
+        .await
+        .unwrap();
+    assert_eq!(fixture.request(), "GET /recovered HTTP/1.1");
+    assert!(page
+        .serialize_target(root)
+        .unwrap()
+        .contains("id=\"recovered\""));
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn late_signal_timeout_cleans_up_its_owned_navigation_before_recovery() {
+    assert_signal_deadline(true, true).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dropping_an_expired_signal_completion_preserves_healthy_owner_entry() {
+    let fixture = Fixture::start();
+    let mut page = PageSession::open("<p>old document</p>", &fixture.origin, "", "", 1000)
+        .await
+        .unwrap();
+    let root = page.auxiliary_root_id().unwrap();
+    let network = page.network_event_log();
+    let baseline = network.target_network_state(&root.to_string())["navigationRevision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    page.eval_target_engine(root, "location.assign('/held');", false)
+        .await
+        .unwrap();
+    let mut completion = Box::pin(page.dispatch_target_engine_since(root, "", Some(&baseline)));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::select! {
+            biased;
+            result = &mut completion => panic!("held HTTP body must remain pending: {result:?}"),
+            _ = fixture.held_headers.notified() => {},
+        }
+    })
+    .await
+    .expect("the owned navigation must reach real held HTTP");
+    assert_eq!(fixture.request(), "GET /held HTTP/1.1");
+    // The runtime cannot poll a canceled caller while its native watchdog expires.
+    std::thread::sleep(Duration::from_millis(1100));
+    drop(completion);
+    fixture.release.send(()).unwrap();
     page.dispatch_target_engine(root, "location.assign('/recovered');")
         .await
         .unwrap();

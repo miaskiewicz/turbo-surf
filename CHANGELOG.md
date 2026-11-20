@@ -2,6 +2,8 @@
 
 ## [0.8.5] - 2026-11-19
 
+- Reuse authenticated Promise ownership on subsequent native hooks without repeating async-context discovery, preserving unknown-owner fallback, retired-document checks and guest execution limits.
+
 - Reuse per-node retention marks during native Promise graph maintenance, avoiding repeated membership hashing while preserving pending work, native operations and ancestor dependencies.
 - Stop internal input and document-content drains between healthy callbacks, preserve explicit content caller deadlines, and prevent queued form navigation after hard input interruption.
 

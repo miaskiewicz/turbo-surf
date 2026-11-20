@@ -77,6 +77,8 @@ async fn scaling(fanout: bool) {
         largest.bulk_membership_lookups, 0,
         "whole-graph scans must use already-visited native nodes instead of per-node membership hashing"
     );
+    assert!(largest.promise_owner_discoveries <= 2 * largest.promise_inits,
+        "authenticated Promise identities must not rediscover their unchanged owner on every hook: {largest:?}");
     let per_node_scan_budget = if fanout { 40 } else { 24 };
     assert!(
         largest.candidates <= 32768 * per_node_scan_budget,

@@ -115,6 +115,9 @@ struct PruneMeasurements {
     live_after_prune: usize,
     peak_nodes: usize,
     bulk_membership_lookups: usize,
+    promise_owner_discoveries: usize,
+    promise_inits: usize,
+    cached_owner_hits: usize,
 }
 
 pub struct PromiseWork {
@@ -195,6 +198,69 @@ impl PromiseWork {
         Some(id)
     }
 
+    fn recorded_identity<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        promise: v8::Local<'s, v8::Promise>,
+    ) -> Option<u32> {
+        if self.tracking_error.is_some() {
+            return None;
+        }
+        let key = v8::Local::new(scope, &self.key);
+        promise
+            .get_private(scope, key)
+            .filter(|value| value.is_uint32())
+            .and_then(|value| value.uint32_value(scope))
+    }
+
+    #[cfg(test)]
+    pub(super) fn recorded_owner<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        promise: v8::Local<'s, v8::Promise>,
+    ) -> Option<OwnerId> {
+        let id = self.recorded_identity(scope, promise)?;
+        let node = self.nodes.get(&id)?;
+        (node.promise.to_local(scope) == Some(promise))
+            .then_some(node.owner)
+            .flatten()
+    }
+
+    pub(super) fn reuse_known_turn<'s>(
+        &mut self,
+        scope: &mut v8::PinScope<'s, '_>,
+        turn: PromiseTurn,
+        promise: v8::Local<'s, v8::Promise>,
+    ) -> bool {
+        if matches!(turn, PromiseTurn::Init) {
+            return false;
+        }
+        let Some(id) = self.recorded_identity(scope, promise) else {
+            return false;
+        };
+        let Some(node) = self.nodes.get_mut(&id) else {
+            return false;
+        };
+        if node.owner.is_none() || node.promise.to_local(scope) != Some(promise) {
+            return false;
+        }
+        node.observe_native_state(promise);
+        if matches!(turn, PromiseTurn::After) {
+            node.reacted = true;
+        }
+        #[cfg(test)]
+        {
+            self.prune_measurements.cached_owner_hits += 1;
+        }
+        self.maintain_after_turn(scope);
+        true
+    }
+
+    #[cfg(test)]
+    pub(super) fn note_owner_discovery(&mut self) {
+        self.prune_measurements.promise_owner_discoveries += 1;
+    }
+
     pub fn promise_turn<'s>(
         &mut self,
         scope: &mut v8::PinScope<'s, '_>,
@@ -203,6 +269,10 @@ impl PromiseWork {
         parent: Option<v8::Local<'s, v8::Promise>>,
         owner: Option<OwnerId>,
     ) {
+        #[cfg(test)]
+        if matches!(turn, PromiseTurn::Init) {
+            self.prune_measurements.promise_inits += 1;
+        }
         let parent = parent.and_then(|parent| self.node(scope, parent));
         let Some(id) = self.node(scope, promise) else {
             return;
@@ -221,6 +291,10 @@ impl PromiseWork {
             // use the hook alone to declare a Promise settled.
             PromiseTurn::Before | PromiseTurn::Resolve => {}
         }
+        self.maintain_after_turn(scope);
+    }
+
+    fn maintain_after_turn(&mut self, scope: &mut v8::PinScope) {
         self.maintenance = self.maintenance.saturating_add(1);
         if self.maintenance >= self.next_maintenance {
             self.prune(scope);
@@ -474,3 +548,7 @@ mod terminal_cache_tests;
 #[cfg(all(test, not(turbo_surf_native_proxy)))]
 #[path = "work_prune_scaling_tests.rs"]
 mod prune_scaling_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "work_owner_discovery_tests.rs"]
+mod owner_discovery_tests;

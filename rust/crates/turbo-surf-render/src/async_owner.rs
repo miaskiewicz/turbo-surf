@@ -106,6 +106,8 @@ fn promise_owner<'s>(
     shared: &Rc<RefCell<State>>,
     promise: v8::Local<'s, v8::Promise>,
 ) -> Option<OwnerId> {
+    #[cfg(test)]
+    shared.borrow_mut().work.note_owner_discovery();
     // A borrowed foreign Promise constructor does not replace the native
     // registering continuation's owner.
     if let Some(owner) = current_owner(scope, shared) {
@@ -129,7 +131,6 @@ extern "C" fn promise_hook(
     let Some(shared) = tracker(scope) else {
         return;
     };
-    let owner = promise_owner(scope, &shared, promise);
     let parent = v8::Local::<v8::Promise>::try_from(parent).ok();
     let turn = match turn {
         v8::PromiseHookType::Init => PromiseTurn::Init,
@@ -137,6 +138,17 @@ extern "C" fn promise_hook(
         v8::PromiseHookType::After => PromiseTurn::After,
         v8::PromiseHookType::Resolve => PromiseTurn::Resolve,
     };
+    // No new authority is needed for a known immutable owner. The graph borrow
+    // ends before any fallback can call the trusted async-context getter.
+    if parent.is_none()
+        && shared
+            .borrow_mut()
+            .work
+            .reuse_known_turn(scope, turn, promise)
+    {
+        return;
+    }
+    let owner = promise_owner(scope, &shared, promise);
     shared
         .borrow_mut()
         .work

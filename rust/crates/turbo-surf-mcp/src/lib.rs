@@ -262,6 +262,31 @@ pub struct Session {
     /// (turbo-dom#371) so an indeterminate checkbox paints the Chrome glyph the
     /// serialized HTML does not express. Empty when no render ran or no input was set.
     pub indeterminate_input_indices: Vec<usize>,
+    /// Retained MCP targets (#523, minimum deliverable): an opaque Page ID is
+    /// minted for the root page on its first `goto` / `load`, and auxiliary
+    /// pages (popups/children) register here with their opener's ID. `list_targets`
+    /// / `close_target` act on this registry. Existing tools without a `target`
+    /// argument keep operating on the root; frame-scoped waits and per-target
+    /// cancellation are out of this minimum scope.
+    targets: std::collections::BTreeMap<String, RetainedTarget>,
+    /// The root target's ID — `None` until the first `goto` / `load`.
+    root_target: Option<String>,
+    /// Monotonic generation, used to produce fresh Page IDs that never recycle
+    /// within a session.
+    target_generation: u64,
+}
+
+/// A retained MCP target (#523). Minimal metadata today; later work adds
+/// per-target document generation, frame registry and cancellation handles.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RetainedTarget {
+    pub id: String,
+    pub url: String,
+    /// The target that opened this one (window.open / target=_blank). `None`
+    /// for the session root.
+    pub opener: Option<String>,
+    /// Seconds-since-epoch of registration.
+    pub created_at_secs: u64,
 }
 
 /// Install process-global render hooks once: a raster-backed text measurer (system fonts on) that
@@ -357,6 +382,59 @@ impl Session {
         self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
         self.last_render_navigation_count = 0;
         self.indeterminate_input_indices.clear();
+        self.sync_root_target(url);
+    }
+
+    /// Ensure the root target is registered under a stable Page ID; subsequent
+    /// `goto` / `load` calls update its URL in place. Minimum-deliverable
+    /// scaffolding for #523 — auxiliary target discovery (popups / children)
+    /// comes with the frame-addressing work the full issue covers.
+    fn sync_root_target(&mut self, url: &str) {
+        let id = match self.root_target.clone() {
+            Some(id) => id,
+            None => {
+                let id = self.mint_target_id();
+                self.root_target = Some(id.clone());
+                id
+            }
+        };
+        let created_at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let entry = self.targets.entry(id.clone()).or_insert(RetainedTarget {
+            id: id.clone(),
+            url: url.to_string(),
+            opener: None,
+            created_at_secs,
+        });
+        entry.url = url.to_string();
+    }
+
+    fn mint_target_id(&mut self) -> String {
+        self.target_generation = self.target_generation.wrapping_add(1);
+        format!("page-{}", self.target_generation)
+    }
+
+    /// Return every retained target in registration order.
+    pub fn list_targets(&self) -> Vec<RetainedTarget> {
+        self.targets.values().cloned().collect()
+    }
+
+    /// Drop a target by opaque ID. Closing the root clears the session's live
+    /// tree; closing any other target drops only its registry entry. An opener
+    /// close does NOT implicitly kill surviving popups (per the issue).
+    pub fn close_target(&mut self, id: &str) -> Result<RetainedTarget, String> {
+        let removed = self
+            .targets
+            .remove(id)
+            .ok_or_else(|| format!("unknown target: {id}"))?;
+        if self.root_target.as_deref() == Some(id) {
+            self.root_target = None;
+            self.tree = None;
+            self.url.clear();
+        }
+        Ok(removed)
     }
 
     // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
@@ -2923,6 +3001,21 @@ pub fn tools() -> Value {
         ("reload", "Re-fetch the current URL"),
         ("go_back", "Navigate to the previous URL"),
         ("go_forward", "Navigate forward"),
+        // retained targets (#523, minimum deliverable)
+        (
+            "list_targets",
+            "List retained MCP targets → {targets: [{id,url,opener?,createdAtSecs}]}. \
+             The root target is minted on first goto/load with an opaque Page ID \
+             that stays stable across navigations. Minimum scaffolding for #523 — \
+             frame addressing and per-target cancellation come with the full issue",
+        ),
+        (
+            "close_target",
+            "Close a retained MCP target by opaque Page ID → {closed}. Closing the \
+             root target clears the session's live tree; closing any other target \
+             drops only its registry entry. An opener close does NOT implicitly \
+             kill surviving popups. Arg: id",
+        ),
         (
             "set_user_agent",
             "Set the User-Agent for subsequent fetches",
@@ -3268,6 +3361,14 @@ fn call_sync_session_tool(
         "latest_dom" => json!(session.dom_history.last()),
         "dom_history" => json!(session.dom_history),
         "requests" => json!(session.requests),
+        "list_targets" => json!({ "targets": session.list_targets() }),
+        "close_target" => match arg_str(args, "id") {
+            None => return Some(Err("close_target: missing 'id'".into())),
+            Some(id) => match session.close_target(id) {
+                Ok(removed) => json!({ "closed": removed }),
+                Err(message) => return Some(Err(message)),
+            },
+        },
         _ => return None,
     };
     Some(Ok(out))
@@ -5513,6 +5614,45 @@ mod tests {
         assert_eq!(st["renderFingerprintOverrides"]["hardwareConcurrency"], 16);
         // Reset the process-global for other tests.
         turbo_surf_render::set_fingerprint("{}");
+    }
+
+    #[tokio::test]
+    async fn retained_target_lists_the_root_and_close_clears_the_live_tree() {
+        // #523 minimum: first load mints an opaque root ID; list_targets returns
+        // it; close_target drops both the registry entry and the live tree. A
+        // second goto afterward mints a fresh ID (never recycles).
+        let mut s = Session::new();
+        assert_eq!(call(&mut s, "list_targets", json!({})).await["targets"], json!([]));
+        s.load("https://x.test/", PAGE);
+        let targets = call(&mut s, "list_targets", json!({})).await;
+        let listed = targets["targets"].as_array().unwrap();
+        assert_eq!(listed.len(), 1);
+        let first_id = listed[0]["id"].as_str().unwrap().to_owned();
+        assert!(first_id.starts_with("page-"));
+        assert_eq!(listed[0]["url"], "https://x.test/");
+        assert_eq!(listed[0]["opener"], Value::Null);
+        // Same ID survives a navigation.
+        s.load("https://x.test/next", PAGE);
+        let after = call(&mut s, "list_targets", json!({})).await;
+        assert_eq!(after["targets"][0]["id"], first_id);
+        assert_eq!(after["targets"][0]["url"], "https://x.test/next");
+        // Closing the root drops the registry and the live tree.
+        let closed = call(&mut s, "close_target", json!({ "id": first_id })).await;
+        assert_eq!(closed["closed"]["id"], first_id);
+        assert_eq!(call(&mut s, "list_targets", json!({})).await["targets"], json!([]));
+        assert!(s.tree().is_err());
+        // The next load mints a fresh ID that never collides with the closed one.
+        s.load("https://x.test/again", PAGE);
+        let next = call(&mut s, "list_targets", json!({})).await["targets"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_ne!(next, first_id);
+        // Unknown IDs are explicit errors, not silent no-ops.
+        let error = call_tool(&mut s, "close_target", &json!({ "id": "page-999" }))
+            .await
+            .unwrap_err();
+        assert!(error.contains("unknown target"), "{error}");
     }
 
     #[tokio::test]

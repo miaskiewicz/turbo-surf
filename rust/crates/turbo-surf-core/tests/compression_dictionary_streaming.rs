@@ -50,6 +50,12 @@ async fn permission(
 }
 impl Server {
     async fn new(encoding: &'static str, truncate: bool) -> Self {
+        // These streaming fixtures observe publication effects immediately
+        // after `fetch_stream`; flatten the post-drain publication delay
+        // (#253) so the existing `fetch dictionary` → `fetch resource`
+        // sequencing stays synchronous. Unit tests in `net.rs` cover the
+        // Chrome 156 split separately.
+        turbo_surf_core::compression_dictionary::set_publication_delay_micros_for_tests(0);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("https://{}", listener.local_addr().unwrap());
         let first = Arc::new(Semaphore::new(0));

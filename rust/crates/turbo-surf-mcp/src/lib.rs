@@ -281,6 +281,50 @@ pub struct Session {
     /// Capped at [`MAX_EVENTS`] with oldest-first eviction.
     event_log: std::collections::VecDeque<SessionEvent>,
     event_cursor: u64,
+    /// Bounded session artifact store (#525, minimum deliverable). Holds
+    /// opaque IDs → byte payloads with name + MIME metadata, used as the
+    /// upload source for a future `set_input_files` tool and the storage for
+    /// captured downloads. The target-coupled upload/download lifecycle
+    /// (triggering a real application input / download) depends on the fuller
+    /// retained PageSession in #523 and is deferred follow-up.
+    artifacts: std::collections::BTreeMap<String, SessionArtifact>,
+    artifact_generation: u64,
+    artifact_total_bytes: u64,
+}
+
+/// A bounded session artifact (#525). Byte payload is kept in memory; agents
+/// read it back via `artifact_read`. Opaque IDs never recycle inside a session.
+#[derive(Clone, Debug)]
+pub struct SessionArtifact {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+    /// Seconds-since-epoch of registration.
+    pub created_at_secs: u64,
+}
+
+/// Per-artifact and aggregate caps for the session's artifact store. A caller
+/// that supplies more is rejected explicitly instead of silently truncating.
+pub const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_ARTIFACT_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Sanitize a caller-supplied filename down to a bare basename with no path
+/// components, matching the issue's hard constraint that a download's suggested
+/// `../../name` cannot choose a host write path. Collapses empty results to a
+/// safe placeholder.
+pub fn sanitize_artifact_name(name: &str) -> String {
+    let trimmed = name
+        .rsplit(|c: char| c == '/' || c == '\\')
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c: char| c == '.' || c.is_whitespace())
+        .to_string();
+    if trimmed.is_empty() {
+        "artifact".to_string()
+    } else {
+        trimmed
+    }
 }
 
 /// Oldest-first eviction cap on the session event buffer. Keeps a bounded
@@ -505,6 +549,91 @@ impl Session {
     /// recorded after the clear.
     pub fn events_clear(&mut self) {
         self.event_log.clear();
+    }
+
+    /// Register bytes as a bounded artifact (#525). Rejects empty inputs and
+    /// anything that would push the per-artifact or aggregate cap past its
+    /// limit. Opaque IDs never recycle inside a session.
+    pub fn artifact_create(
+        &mut self,
+        bytes: Vec<u8>,
+        name: &str,
+        mime: &str,
+    ) -> Result<SessionArtifact, String> {
+        if bytes.is_empty() {
+            return Err("artifact_create: bytes cannot be empty".into());
+        }
+        if bytes.len() > MAX_ARTIFACT_BYTES {
+            return Err(format!(
+                "artifact_create: {} bytes exceeds the per-artifact cap ({MAX_ARTIFACT_BYTES})",
+                bytes.len()
+            ));
+        }
+        let new_total = self.artifact_total_bytes.saturating_add(bytes.len() as u64);
+        if new_total > MAX_ARTIFACT_TOTAL_BYTES {
+            return Err(format!(
+                "artifact_create: would exceed the session aggregate cap ({MAX_ARTIFACT_TOTAL_BYTES})"
+            ));
+        }
+        self.artifact_generation = self.artifact_generation.wrapping_add(1);
+        let id = format!("artifact-{}", self.artifact_generation);
+        let created_at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let safe_name = sanitize_artifact_name(name);
+        let safe_mime = if mime.trim().is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            mime.to_string()
+        };
+        self.artifact_total_bytes = new_total;
+        let artifact = SessionArtifact {
+            id: id.clone(),
+            name: safe_name,
+            mime: safe_mime,
+            bytes,
+            created_at_secs,
+        };
+        self.artifacts.insert(id, artifact.clone());
+        Ok(artifact)
+    }
+
+    /// Return every retained artifact's metadata in registration order (byte
+    /// payload omitted; agents fetch with `artifact_read`).
+    pub fn artifact_list(&self) -> Vec<Value> {
+        self.artifacts
+            .values()
+            .map(|a| {
+                json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "mime": a.mime,
+                    "size": a.bytes.len(),
+                    "createdAtSecs": a.created_at_secs,
+                })
+            })
+            .collect()
+    }
+
+    /// Fetch a retained artifact by opaque ID.
+    pub fn artifact_read(&self, id: &str) -> Result<&SessionArtifact, String> {
+        self.artifacts
+            .get(id)
+            .ok_or_else(|| format!("unknown artifact: {id}"))
+    }
+
+    /// Drop a retained artifact by opaque ID, releasing its bytes toward the
+    /// aggregate cap. Returns the dropped metadata so callers can confirm.
+    pub fn artifact_delete(&mut self, id: &str) -> Result<SessionArtifact, String> {
+        let removed = self
+            .artifacts
+            .remove(id)
+            .ok_or_else(|| format!("unknown artifact: {id}"))?;
+        self.artifact_total_bytes = self
+            .artifact_total_bytes
+            .saturating_sub(removed.bytes.len() as u64);
+        Ok(removed)
     }
 
     // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
@@ -3104,6 +3233,35 @@ pub fn tools() -> Value {
              it as `after` to a later events_read and receive only post-clear \
              events",
         ),
+        // artifact store (#525, minimum deliverable)
+        (
+            "artifact_create",
+            "Register bounded caller-supplied bytes as a retained session \
+             artifact → {id, name, mime, size, createdAtSecs}. Args: \
+             bytesBase64 (required), name?, mime? (default \
+             'application/octet-stream'). The suggested name is sanitized to \
+             a bare basename — a value like '../../etc/passwd' can never \
+             choose a host write path. Per-artifact cap 32 MiB; aggregate \
+             session cap 128 MiB. The target-coupled set_input_files / real \
+             download capture lifecycle depends on the fuller #523 retained \
+             PageSession and is deferred follow-up",
+        ),
+        (
+            "artifact_list",
+            "List retained session artifacts (no byte payloads) → \
+             {artifacts: [{id, name, mime, size, createdAtSecs}]}",
+        ),
+        (
+            "artifact_read",
+            "Fetch a retained artifact by opaque ID → {id, name, mime, size, \
+             bytesBase64, createdAtSecs}. Arg: id",
+        ),
+        (
+            "artifact_delete",
+            "Drop a retained artifact by opaque ID, releasing bytes toward \
+             the session aggregate cap → {deleted}. Arg: id. Unknown IDs are \
+             explicit errors, not silent no-ops",
+        ),
         (
             "set_user_agent",
             "Set the User-Agent for subsequent fetches",
@@ -3466,6 +3624,39 @@ fn call_sync_session_tool(
             session.events_clear();
             json!({ "ok": true })
         }
+        "artifact_create" => match artifact_create_from_args(session, args) {
+            Ok(value) => value,
+            Err(message) => return Some(Err(message)),
+        },
+        "artifact_list" => json!({ "artifacts": session.artifact_list() }),
+        "artifact_read" => match arg_str(args, "id") {
+            None => return Some(Err("artifact_read: missing 'id'".into())),
+            Some(id) => match session.artifact_read(id) {
+                Ok(a) => json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "mime": a.mime,
+                    "size": a.bytes.len(),
+                    "bytesBase64": BASE64.encode(&a.bytes),
+                    "createdAtSecs": a.created_at_secs,
+                }),
+                Err(message) => return Some(Err(message)),
+            },
+        },
+        "artifact_delete" => match arg_str(args, "id") {
+            None => return Some(Err("artifact_delete: missing 'id'".into())),
+            Some(id) => match session.artifact_delete(id) {
+                Ok(removed) => json!({
+                    "deleted": {
+                        "id": removed.id,
+                        "name": removed.name,
+                        "mime": removed.mime,
+                        "size": removed.bytes.len(),
+                    }
+                }),
+                Err(message) => return Some(Err(message)),
+            },
+        },
         _ => return None,
     };
     Some(Ok(out))
@@ -3907,6 +4098,26 @@ fn initialize_result() -> Value {
 }
 
 /// Whether `tools/list` advertises `name`.
+/// Decode a `artifact_create` call's base64 payload + metadata and hand it to
+/// `Session::artifact_create`. Explicit per-arg errors replace silent defaults.
+fn artifact_create_from_args(session: &mut Session, args: &Value) -> Result<Value, String> {
+    let bytes_b64 = arg_str(args, "bytesBase64")
+        .ok_or("artifact_create: missing 'bytesBase64'")?;
+    let bytes = BASE64
+        .decode(bytes_b64.as_bytes())
+        .map_err(|error| format!("artifact_create: invalid base64 — {error}"))?;
+    let name = arg_str(args, "name").unwrap_or("artifact");
+    let mime = arg_str(args, "mime").unwrap_or("");
+    let artifact = session.artifact_create(bytes, name, mime)?;
+    Ok(json!({
+        "id": artifact.id,
+        "name": artifact.name,
+        "mime": artifact.mime,
+        "size": artifact.bytes.len(),
+        "createdAtSecs": artifact.created_at_secs,
+    }))
+}
+
 fn is_listed_tool(name: &str) -> bool {
     tools()["tools"]
         .as_array()
@@ -5711,6 +5922,76 @@ mod tests {
         assert_eq!(st["renderFingerprintOverrides"]["hardwareConcurrency"], 16);
         // Reset the process-global for other tests.
         turbo_surf_render::set_fingerprint("{}");
+    }
+
+    #[tokio::test]
+    async fn artifact_store_round_trips_bytes_sanitizes_names_and_enforces_caps() {
+        // #525 minimum: register, list, read, delete; empty + oversize + path
+        // traversal + unknown-ID paths are explicit errors; aggregate cap holds.
+        let mut s = Session::new();
+        assert_eq!(call(&mut s, "artifact_list", json!({})).await["artifacts"], json!([]));
+        // Arbitrary binary bytes including nulls and high bits — proof that
+        // the store is 8-bit clean, not hidden text.
+        let payload: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
+        let created = call(
+            &mut s,
+            "artifact_create",
+            json!({
+                "bytesBase64": BASE64.encode(&payload),
+                "name": "../../etc/passwd",
+                "mime": "application/octet-stream",
+            }),
+        )
+        .await;
+        assert_eq!(created["name"], "passwd", "path-traversal names must sanitize");
+        assert_eq!(created["size"], 1024);
+        let id = created["id"].as_str().unwrap().to_owned();
+        // Round-trip bytes.
+        let read = call(&mut s, "artifact_read", json!({ "id": &id })).await;
+        let decoded = BASE64
+            .decode(read["bytesBase64"].as_str().unwrap().as_bytes())
+            .unwrap();
+        assert_eq!(decoded, payload);
+        // Metadata matches via list.
+        let listed = call(&mut s, "artifact_list", json!({})).await;
+        assert_eq!(listed["artifacts"].as_array().unwrap().len(), 1);
+        // Empty payload is rejected.
+        let empty = call_tool(
+            &mut s,
+            "artifact_create",
+            &json!({ "bytesBase64": "", "name": "x" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(empty.contains("empty"), "{empty}");
+        // Oversized payload is rejected without being stored.
+        let huge = vec![0u8; MAX_ARTIFACT_BYTES + 1];
+        let over = call_tool(
+            &mut s,
+            "artifact_create",
+            &json!({ "bytesBase64": BASE64.encode(&huge), "name": "big" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(over.contains("per-artifact cap"), "{over}");
+        // Delete releases the slot; unknown-ID delete is an explicit error.
+        let deleted = call(&mut s, "artifact_delete", json!({ "id": &id })).await;
+        assert_eq!(deleted["deleted"]["id"], id);
+        assert_eq!(call(&mut s, "artifact_list", json!({})).await["artifacts"], json!([]));
+        let missing = call_tool(&mut s, "artifact_delete", &json!({ "id": "artifact-999" }))
+            .await
+            .unwrap_err();
+        assert!(missing.contains("unknown artifact"), "{missing}");
+        // A fresh create mints a new ID (never recycles across the deleted slot).
+        let later = call(
+            &mut s,
+            "artifact_create",
+            json!({ "bytesBase64": BASE64.encode(b"hi") }),
+        )
+        .await;
+        assert_ne!(later["id"].as_str().unwrap(), id);
+        // Default MIME lands when none was supplied.
+        assert_eq!(later["mime"], "application/octet-stream");
     }
 
     #[tokio::test]

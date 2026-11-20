@@ -5778,7 +5778,11 @@ function DTF(locales,options){
 }
 DTF.prototype=OrigDTF.prototype;
 DTF.supportedLocalesOf=OrigDTF.supportedLocalesOf;
-Object.defineProperty(Intl,"DateTimeFormat",{value:DTF,writable:true,configurable:true});
+// Match the spec descriptor of the replaced builtin: DateTimeFormat.length is 0
+// and Intl.DateTimeFormat is enumerable — otherwise the override is a tell.
+Object.defineProperty(DTF,"length",{value:0,configurable:true});
+Object.defineProperty(DTF,"name",{value:"DateTimeFormat",configurable:true});
+Object.defineProperty(Intl,"DateTimeFormat",{value:DTF,writable:true,enumerable:true,configurable:true});
 const partsFmt=new OrigDTF("en-US",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false,weekday:"short"});
 const weekdays={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
 function parts(date){
@@ -5799,7 +5803,7 @@ wrap("getDay",function(){return weekdays[partsFmt.formatToParts(this).find(p=>p.
 wrap("getHours",function(){return parts(this).hour;});
 wrap("getMinutes",function(){return parts(this).minute;});
 wrap("getSeconds",function(){return parts(this).second;});
-wrap("getTimezoneOffset",function(){const p=parts(this);return Math.round((utcMs(p)-this.getTime())/60000);});
+wrap("getTimezoneOffset",function(){const p=parts(this);return Math.round((this.getTime()-utcMs(p))/60000);});
 })();`;
 }
 

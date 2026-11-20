@@ -493,8 +493,10 @@ impl Session {
     }
 
     /// Drop a target by opaque ID. Closing the root clears the session's live
-    /// tree; closing any other target drops only its registry entry. An opener
-    /// close does NOT implicitly kill surviving popups (per the issue).
+    /// tree AND its navigation history / response metadata so a later `goto`
+    /// is a fresh start (no `go_back` into the dropped target's URLs). Closing
+    /// any other target drops only its registry entry. An opener close does
+    /// NOT implicitly kill surviving popups (per the issue).
     pub fn close_target(&mut self, id: &str) -> Result<RetainedTarget, String> {
         let removed = self
             .targets
@@ -504,6 +506,12 @@ impl Session {
             self.root_target = None;
             self.tree = None;
             self.url.clear();
+            self.back.clear();
+            self.forward.clear();
+            self.response_headers.clear();
+            self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
+            self.last_render_navigation_count = 0;
+            self.indeterminate_input_indices.clear();
         }
         self.record_event("target.closed", Some(id.to_string()), Some(json!({ "url": removed.url })));
         Ok(removed)

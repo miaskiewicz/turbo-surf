@@ -6121,6 +6121,55 @@ mod tests {
         )
         .await;
         assert_eq!(controlled["name"], "evilshort.exe");
+        // Missing / invalid base64 and unknown-id reads surface as explicit
+        // tool errors rather than silent empties.
+        let missing_b64 = call_tool(&mut s, "artifact_create", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(missing_b64.contains("missing 'bytesBase64'"), "{missing_b64}");
+        let bad_b64 = call_tool(
+            &mut s,
+            "artifact_create",
+            &json!({ "bytesBase64": "!!!not base64!!!" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(bad_b64.contains("invalid base64"), "{bad_b64}");
+        let missing_read_id = call_tool(&mut s, "artifact_read", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(missing_read_id.contains("missing 'id'"), "{missing_read_id}");
+        let unknown_read = call_tool(&mut s, "artifact_read", &json!({ "id": "artifact-999" }))
+            .await
+            .unwrap_err();
+        assert!(unknown_read.contains("unknown artifact"), "{unknown_read}");
+        let missing_delete_id = call_tool(&mut s, "artifact_delete", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(missing_delete_id.contains("missing 'id'"), "{missing_delete_id}");
+        // Aggregate cap: a fresh session fills to exactly the cap and one
+        // more byte is rejected.
+        let mut t = Session::new();
+        let fits = (MAX_ARTIFACT_TOTAL_BYTES / MAX_ARTIFACT_BYTES as u64) as usize;
+        let near_cap = vec![0u8; MAX_ARTIFACT_BYTES];
+        for _ in 0..fits {
+            let descriptor = call_tool(
+                &mut t,
+                "artifact_create",
+                &json!({ "bytesBase64": BASE64.encode(&near_cap) }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(descriptor["size"], MAX_ARTIFACT_BYTES);
+        }
+        let overflow = call_tool(
+            &mut t,
+            "artifact_create",
+            &json!({ "bytesBase64": BASE64.encode(b"x") }),
+        )
+        .await
+        .unwrap_err();
+        assert!(overflow.contains("aggregate cap"), "{overflow}");
     }
 
     #[tokio::test]
@@ -6302,6 +6351,11 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.contains("unknown target"), "{error}");
+        // Missing 'id' surfaces a dedicated error rather than a silent close.
+        let missing = call_tool(&mut s, "close_target", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(missing.contains("missing 'id'"), "{missing}");
     }
 
     #[tokio::test]

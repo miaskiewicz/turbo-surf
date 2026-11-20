@@ -577,6 +577,55 @@ impl Session {
         self.event_log.clear();
     }
 
+    /// Pump console / pageerror / request / response events from a render
+    /// `drain_network_log()` snapshot into the session event log (#524 full
+    /// scope). Redacts `cookie`, `authorization`, `proxy-authorization` and
+    /// `set-cookie` headers on each entry before storing so default
+    /// diagnostics cannot leak HttpOnly credentials. Response bodies are
+    /// dropped before storage; agents that need body bytes should use the
+    /// deliberate `fetch_raw` path. `responsebody` entries are dropped — their
+    /// headers already landed under the `response` event via drain_snapshot.
+    pub fn capture_network_events(&mut self, snapshot: &str) {
+        let Ok(serde_json::Value::Array(entries)) = serde_json::from_str::<Value>(snapshot) else {
+            return;
+        };
+        for mut entry in entries {
+            let Some(kind) = entry.get("event").and_then(Value::as_str).map(str::to_owned)
+            else {
+                continue;
+            };
+            if kind == "responsebody" {
+                continue;
+            }
+            // Drop request/response bodies and sensitive header values before
+            // retention. Rejection headers / cookies / auth never appear in the
+            // default diagnostic stream.
+            for header_bag in ["requestHeaders", "responseHeaders", "headers"] {
+                if let Some(bag) = entry.get_mut(header_bag).and_then(Value::as_object_mut) {
+                    for sensitive in [
+                        "cookie",
+                        "authorization",
+                        "proxy-authorization",
+                        "set-cookie",
+                    ] {
+                        if let Some(value) = bag.get_mut(sensitive) {
+                            *value = Value::String("<redacted>".into());
+                        }
+                    }
+                }
+            }
+            for body_field in ["body", "bodyBytes", "requestBody"] {
+                if let Some(bag) = entry.as_object_mut() {
+                    if bag.remove(body_field).is_some() {
+                        bag.insert(format!("{body_field}Dropped"), Value::Bool(true));
+                    }
+                }
+            }
+            let target = self.root_target.clone();
+            self.record_event(&kind, target, Some(entry));
+        }
+    }
+
     /// Register bytes as a bounded artifact (#525). Rejects empty inputs and
     /// anything that would push the per-artifact or aggregate cap past its
     /// limit. Opaque IDs never recycle inside a session. Returns a lightweight
@@ -1045,7 +1094,13 @@ impl Session {
         // carry it, so a later screenshot forwards it via ScreenshotOptions.idl_states
         // (turbo-dom#371).
         self.indeterminate_input_indices = Self::snapshot_indeterminate_inputs(&mut page).await;
+        // #524 full-scope: pump console / pageerror / request / response events
+        // from the render's network log into the session event log before the
+        // PageSession drops. Redaction + body stripping happens inside
+        // `capture_network_events` so HttpOnly / auth header values never surface.
+        let network_snapshot = page.drain_network_log();
         page.close();
+        self.capture_network_events(&network_snapshot);
         self.jar = CookieJar::from_storage_state(&cookies);
         self.last_render_navigation_count = count;
         if count > 0 {
@@ -6054,6 +6109,70 @@ mod tests {
         )
         .await;
         assert_eq!(controlled["name"], "evilshort.exe");
+    }
+
+    #[tokio::test]
+    async fn capture_network_events_pumps_console_pageerror_and_redacts_cookies() {
+        // #524 full scope: `capture_network_events` drains a render's network
+        // log into the session event log, redacts cookie/auth headers, and
+        // drops body bytes before storage.
+        let mut s = Session::new();
+        s.load("https://x.test/", PAGE);
+        let snapshot = serde_json::json!([
+            {"event": "console", "level": "log", "args": [{"value": "ready"}]},
+            {"event": "pageerror", "name": "Error", "message": "boom", "context": {"frame": 0}},
+            {
+                "event": "request",
+                "url": "https://x.test/api",
+                "requestHeaders": {
+                    "cookie": "session=abc123",
+                    "authorization": "Bearer secret",
+                    "accept": "application/json",
+                },
+                "requestBody": "login=greg&password=hunter2",
+            },
+            {
+                "event": "response",
+                "url": "https://x.test/api",
+                "status": 200,
+                "responseHeaders": {
+                    "set-cookie": "token=xyz",
+                    "content-type": "application/json",
+                },
+                "body": "{\"ok\":true}",
+                "bodyBytes": 11,
+            },
+            {"event": "responsebody", "id": 7, "body": "ignored"},
+        ])
+        .to_string();
+        s.capture_network_events(&snapshot);
+        let events = call(&mut s, "events_read", json!({})).await["events"]
+            .as_array()
+            .unwrap()
+            .clone();
+        // console + pageerror + request + response, responsebody filtered out.
+        let kinds: Vec<&str> = events
+            .iter()
+            .map(|e| e["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, ["console", "pageerror", "request", "response"]);
+        // Redaction: cookie / authorization / set-cookie never carry raw values.
+        let req = &events[2]["body"]["requestHeaders"];
+        assert_eq!(req["cookie"], "<redacted>");
+        assert_eq!(req["authorization"], "<redacted>");
+        assert_eq!(req["accept"], "application/json");
+        assert_eq!(events[3]["body"]["responseHeaders"]["set-cookie"], "<redacted>");
+        // Body bytes dropped — a dropped-flag replaces them so the reader can
+        // tell the body existed but is not leaked.
+        assert!(events[2]["body"].get("requestBody").is_none());
+        assert_eq!(events[2]["body"]["requestBodyDropped"], true);
+        assert!(events[3]["body"].get("body").is_none());
+        assert_eq!(events[3]["body"]["bodyDropped"], true);
+        // Target annotation points at the root (the capture is session-wide).
+        let root_id = s.root_target.as_deref().unwrap().to_owned();
+        for event in &events {
+            assert_eq!(event["target"], root_id);
+        }
     }
 
     #[tokio::test]

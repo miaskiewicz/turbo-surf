@@ -6121,6 +6121,15 @@ mod tests {
         )
         .await;
         assert_eq!(controlled["name"], "evilshort.exe");
+        // A name that sanitizes to empty (all dots + whitespace, no base) falls
+        // back to the "artifact" placeholder.
+        let placeholder = call(
+            &mut s,
+            "artifact_create",
+            json!({ "bytesBase64": BASE64.encode(b"p"), "name": "..." }),
+        )
+        .await;
+        assert_eq!(placeholder["name"], "artifact");
         // Missing / invalid base64 and unknown-id reads surface as explicit
         // tool errors rather than silent empties.
         let missing_b64 = call_tool(&mut s, "artifact_create", &json!({}))
@@ -6243,6 +6252,31 @@ mod tests {
         for event in &events {
             assert_eq!(event["target"], root_id);
         }
+        // Non-array JSON short-circuits without touching the event log.
+        let before = s.event_log.len();
+        s.capture_network_events("not-json");
+        s.capture_network_events("{\"shape\":\"object\"}");
+        assert_eq!(s.event_log.len(), before);
+        // Pushing more than MAX_EVENTS entries evicts oldest-first.
+        s.events_clear();
+        let mut entries = Vec::with_capacity(MAX_EVENTS + 5);
+        for i in 0..MAX_EVENTS + 5 {
+            entries.push(serde_json::json!({
+                "event": "console",
+                "sequence": i,
+            }));
+        }
+        let big_snapshot = serde_json::Value::Array(entries).to_string();
+        s.capture_network_events(&big_snapshot);
+        // The log is capped at MAX_EVENTS and the earliest sequences are gone.
+        assert_eq!(s.event_log.len(), MAX_EVENTS);
+        let sequences: Vec<u64> = s
+            .event_log
+            .iter()
+            .map(|event| event.body.as_ref().unwrap()["sequence"].as_u64().unwrap())
+            .collect();
+        assert_eq!(*sequences.first().unwrap(), 5);
+        assert_eq!(*sequences.last().unwrap(), (MAX_EVENTS + 4) as u64);
     }
 
     #[tokio::test]

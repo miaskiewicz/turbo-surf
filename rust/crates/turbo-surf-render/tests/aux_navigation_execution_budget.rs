@@ -57,6 +57,12 @@ async fn exercise(hard: bool) {
     )
     .await
     .unwrap();
+    assert!(
+        !page.hydration_diagnostics().budget_exceeded,
+        "fixture opening must finish before navigation: {:?}",
+        page.hydration_diagnostics()
+    );
+    assert!(page.hydration_diagnostics().open_error.is_none());
     let target = page.auxiliary_root_id().unwrap();
     let result = page
         .navigate_target_with_options(

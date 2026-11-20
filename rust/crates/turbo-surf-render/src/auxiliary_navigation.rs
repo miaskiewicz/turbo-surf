@@ -756,6 +756,7 @@ fn commit_fetched(
     target: u64,
     job: Job,
     fetched: Fetched,
+    execution: &PollExecutionBudget,
 ) -> Result<Option<serde_json::Value>, String> {
     let receipt = receipt(&fetched);
     if attachment(&fetched.response) || matches!(fetched.response.status, 204 | 205) {
@@ -767,21 +768,24 @@ fn commit_fetched(
         job.history,
         &fetched.response.final_url,
     )?;
-    // Defer the driver deadline only across trusted native document setup.
-    let setup = navigation_deadline::TrustedSetup::enter(rt, target, job.generation)?;
-    let installed = {
-        deno_core::scope!(scope, rt);
-        let previous = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
-        let installed = install_response(scope, previous, &fetched, &job)?;
-        let current = v8::Local::new(scope, &installed);
-        navigation_deadline::capture_source_lease(scope, current, target, job.generation)?;
-        installed
-    };
-    adopt_root_response(rt, target, &fetched, job.form_action)?;
-    // Installation is observable before the next turn runs guest initialization.
-    // This host capability only resets private lifecycle state; it dispatches no events.
-    auxiliary_pages::target_call(rt, AuxiliaryContextId(target), "documentLoading", &[])?;
-    setup.finish()?;
+    // Staged binding setup runs fixed engine code; authored/frame initialization
+    // stays deferred until the owned execution clock has resumed.
+    let installed = execution.during_trusted_setup(|| {
+        let setup = navigation_deadline::TrustedSetup::enter(rt, target, job.generation)?;
+        let installed = {
+            deno_core::scope!(scope, rt);
+            let previous = auxiliary_pages::context(scope, AuxiliaryContextId(target))?;
+            let installed = install_response(scope, previous, &fetched, &job)?;
+            let current = v8::Local::new(scope, &installed);
+            navigation_deadline::capture_source_lease(scope, current, target, job.generation)?;
+            installed
+        };
+        adopt_root_response(rt, target, &fetched, job.form_action)?;
+        // This captured host capability resets private lifecycle state without dispatching events.
+        auxiliary_pages::target_call(rt, AuxiliaryContextId(target), "documentLoading", &[])?;
+        setup.finish()?;
+        Ok(installed)
+    })?;
     let pending = {
         deno_core::scope!(scope, rt);
         let current = v8::Local::new(scope, installed);
@@ -1028,7 +1032,7 @@ impl PageSession {
                 true,
                 budget,
                 &deadline_exceeded,
-                execution.run(self.service_auxiliary_navigation_active(owner, waiter)),
+                execution.run(self.service_auxiliary_navigation_active(owner, waiter, &execution)),
             ))
             .await;
         let interrupted = execution.interrupted();
@@ -1073,6 +1077,7 @@ impl PageSession {
         &mut self,
         owner: Option<u64>,
         waiter: Option<u64>,
+        execution: &PollExecutionBudget,
     ) -> Result<(), String> {
         loop {
             let navigation = {
@@ -1184,7 +1189,7 @@ impl PageSession {
                 Ok(fetched) => {
                     let generation = job.generation;
                     let revision = job.activity.navigation_revision();
-                    let result = commit_fetched(&mut self.rt, target, job, fetched);
+                    let result = commit_fetched(&mut self.rt, target, job, fetched, execution);
                     if let Some(result) = result.transpose() {
                         let terminal = result
                             .as_ref()

@@ -304,6 +304,18 @@ pub struct SessionArtifact {
     pub created_at_secs: u64,
 }
 
+/// A byte-less view of a `SessionArtifact` for `artifact_create` + listings.
+/// Lets the store keep the one copy of the payload the caller handed over
+/// without round-tripping the whole Vec<u8> back through the result.
+#[derive(Clone, Debug)]
+pub struct ArtifactDescriptor {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    pub size: usize,
+    pub created_at_secs: u64,
+}
+
 /// Per-artifact and aggregate caps for the session's artifact store. A caller
 /// that supplies more is rejected explicitly instead of silently truncating.
 pub const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
@@ -311,13 +323,17 @@ pub const MAX_ARTIFACT_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Sanitize a caller-supplied filename down to a bare basename with no path
 /// components, matching the issue's hard constraint that a download's suggested
-/// `../../name` cannot choose a host write path. Collapses empty results to a
-/// safe placeholder.
+/// `../../name` cannot choose a host write path. Also drops embedded control
+/// bytes (NUL, newline, `\r`, DEL, …) so a downstream consumer that saves the
+/// name verbatim cannot be fooled by POSIX NUL truncation. Collapses empty
+/// results to a safe placeholder.
 pub fn sanitize_artifact_name(name: &str) -> String {
-    let trimmed = name
+    let basename = name
         .rsplit(|c: char| c == '/' || c == '\\')
         .next()
-        .unwrap_or("")
+        .unwrap_or("");
+    let stripped: String = basename.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = stripped
         .trim_matches(|c: char| c == '.' || c.is_whitespace())
         .to_string();
     if trimmed.is_empty() {
@@ -512,6 +528,8 @@ impl Session {
             self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
             self.last_render_navigation_count = 0;
             self.indeterminate_input_indices.clear();
+            self.requests.clear();
+            self.dom_history.clear();
         }
         self.record_event("target.closed", Some(id.to_string()), Some(json!({ "url": removed.url })));
         Ok(removed)
@@ -561,13 +579,15 @@ impl Session {
 
     /// Register bytes as a bounded artifact (#525). Rejects empty inputs and
     /// anything that would push the per-artifact or aggregate cap past its
-    /// limit. Opaque IDs never recycle inside a session.
+    /// limit. Opaque IDs never recycle inside a session. Returns a lightweight
+    /// descriptor (bytes stay owned by the store — no double-buffering of
+    /// the payload past the one copy the caller already made).
     pub fn artifact_create(
         &mut self,
         bytes: Vec<u8>,
         name: &str,
         mime: &str,
-    ) -> Result<SessionArtifact, String> {
+    ) -> Result<ArtifactDescriptor, String> {
         if bytes.is_empty() {
             return Err("artifact_create: bytes cannot be empty".into());
         }
@@ -596,15 +616,24 @@ impl Session {
             mime.to_string()
         };
         self.artifact_total_bytes = new_total;
-        let artifact = SessionArtifact {
+        let descriptor = ArtifactDescriptor {
             id: id.clone(),
-            name: safe_name,
-            mime: safe_mime,
-            bytes,
+            name: safe_name.clone(),
+            mime: safe_mime.clone(),
+            size: bytes.len(),
             created_at_secs,
         };
-        self.artifacts.insert(id, artifact.clone());
-        Ok(artifact)
+        self.artifacts.insert(
+            id,
+            SessionArtifact {
+                id: descriptor.id.clone(),
+                name: safe_name,
+                mime: safe_mime,
+                bytes,
+                created_at_secs,
+            },
+        );
+        Ok(descriptor)
     }
 
     /// Return every retained artifact's metadata in registration order (byte
@@ -3624,7 +3653,20 @@ fn call_sync_session_tool(
             },
         },
         "events_read" => {
-            let after = args.get("after").and_then(Value::as_u64);
+            // Reject a non-integer `after` explicitly instead of quietly
+            // falling back to 0 (which would replay the whole buffer and
+            // make an agent loop forever on stale events).
+            let after = match args.get("after") {
+                None | Some(Value::Null) => None,
+                Some(value) => match value.as_u64() {
+                    Some(n) => Some(n),
+                    None => {
+                        return Some(Err(
+                            "events_read: 'after' must be a non-negative integer".into(),
+                        ))
+                    }
+                },
+            };
             let (events, next_cursor) = session.events_read(after);
             json!({ "events": events, "nextCursor": next_cursor })
         }
@@ -4116,13 +4158,13 @@ fn artifact_create_from_args(session: &mut Session, args: &Value) -> Result<Valu
         .map_err(|error| format!("artifact_create: invalid base64 — {error}"))?;
     let name = arg_str(args, "name").unwrap_or("artifact");
     let mime = arg_str(args, "mime").unwrap_or("");
-    let artifact = session.artifact_create(bytes, name, mime)?;
+    let descriptor = session.artifact_create(bytes, name, mime)?;
     Ok(json!({
-        "id": artifact.id,
-        "name": artifact.name,
-        "mime": artifact.mime,
-        "size": artifact.bytes.len(),
-        "createdAtSecs": artifact.created_at_secs,
+        "id": descriptor.id,
+        "name": descriptor.name,
+        "mime": descriptor.mime,
+        "size": descriptor.size,
+        "createdAtSecs": descriptor.created_at_secs,
     }))
 }
 
@@ -6000,6 +6042,18 @@ mod tests {
         assert_ne!(later["id"].as_str().unwrap(), id);
         // Default MIME lands when none was supplied.
         assert_eq!(later["mime"], "application/octet-stream");
+        // Embedded control bytes (NUL, newline, DEL) are stripped from names
+        // so a downstream save-by-name cannot be NUL-truncated (#525 nit).
+        let controlled = call(
+            &mut s,
+            "artifact_create",
+            json!({
+                "bytesBase64": BASE64.encode(b"a"),
+                "name": "evil\0\n\r\x7fshort.exe",
+            }),
+        )
+        .await;
+        assert_eq!(controlled["name"], "evilshort.exe");
     }
 
     #[tokio::test]
@@ -6046,6 +6100,16 @@ mod tests {
         let cleared = call(&mut s, "events_read", json!({})).await;
         assert_eq!(cleared["events"], json!([]));
         assert!(cleared["nextCursor"].as_u64().unwrap() >= after["nextCursor"].as_u64().unwrap());
+        // A non-integer `after` is an explicit error, not a silent replay
+        // of the whole buffer (#524 nit from review round 2).
+        let bad_string = call_tool(&mut s, "events_read", &json!({ "after": "7" }))
+            .await
+            .unwrap_err();
+        assert!(bad_string.contains("non-negative integer"), "{bad_string}");
+        let bad_negative = call_tool(&mut s, "events_read", &json!({ "after": -1 }))
+            .await
+            .unwrap_err();
+        assert!(bad_negative.contains("non-negative integer"), "{bad_negative}");
     }
 
     #[tokio::test]
@@ -6068,11 +6132,21 @@ mod tests {
         let after = call(&mut s, "list_targets", json!({})).await;
         assert_eq!(after["targets"][0]["id"], first_id);
         assert_eq!(after["targets"][0]["url"], "https://x.test/next");
-        // Closing the root drops the registry and the live tree.
+        // Simulate per-lifetime trails that belong to the dropped target.
+        s.requests.push("https://x.test/beacon".into());
+        s.dom_history.push("<p>rendered</p>".into());
+        s.back.push("https://x.test/earlier".into());
+        // Closing the root drops the registry, the live tree, AND every
+        // per-lifetime trail (requests, dom_history, back/forward history,
+        // response metadata, indeterminate indices) so a fresh goto starts
+        // clean (#523 nit from review round 2).
         let closed = call(&mut s, "close_target", json!({ "id": first_id })).await;
         assert_eq!(closed["closed"]["id"], first_id);
         assert_eq!(call(&mut s, "list_targets", json!({})).await["targets"], json!([]));
         assert!(s.tree().is_err());
+        assert!(s.requests.is_empty(), "requests should reset on root close");
+        assert!(s.dom_history.is_empty(), "dom_history should reset on root close");
+        assert!(s.back.is_empty(), "back history should reset on root close");
         // The next load mints a fresh ID that never collides with the closed one.
         s.load("https://x.test/again", PAGE);
         let next = call(&mut s, "list_targets", json!({})).await["targets"][0]["id"]

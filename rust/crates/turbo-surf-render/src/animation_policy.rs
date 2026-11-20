@@ -65,7 +65,14 @@ pub(crate) fn install(scope: &mut v8::PinScope) -> Result<(), String> {
         AnimationPolicy::Enabled => AnimationPresentation::Enabled,
         AnimationPolicy::Disabled => AnimationPresentation::Disabled,
     };
-    let guard = PolicyGuard(());
+    // Pop a previous install's policy BEFORE pushing the new one, so a repeat
+    // `install` on the same runtime does not leave the stale value at the top.
+    // `put::<PolicyGuard>` would drop the old guard AFTER the new push, which
+    // pops the WRONG value — `take::<PolicyGuard>()` first drops the old
+    // guard (popping its own push) and leaves the stack clean for ours.
+    let _ = JsRuntime::op_state_from(scope)
+        .borrow_mut()
+        .try_take::<PolicyGuard>();
     DISABLED_STACK.with(|stack| stack.borrow_mut().push(policy == AnimationPolicy::Disabled));
     // Hand the guard to the runtime so the policy stays active for the realm's
     // lifetime and pops when the opstate is torn down. Dropping the guard on
@@ -73,7 +80,7 @@ pub(crate) fn install(scope: &mut v8::PinScope) -> Result<(), String> {
     // call ran under it.
     JsRuntime::op_state_from(scope)
         .borrow_mut()
-        .put::<PolicyGuard>(guard);
+        .put::<PolicyGuard>(PolicyGuard(()));
     let installed = set_animation_presentation(scope, presentation);
     if scope.is_execution_terminating() {
         return Err("Native animation presentation policy execution terminated".into());

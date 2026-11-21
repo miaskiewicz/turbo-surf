@@ -1,5 +1,102 @@
 # Release regressions
 
+## Current v0.8.7 payroll acceptance — native async ownership blocker
+
+On 2026-11-21, a fresh isolated default-feature release NAPI build of Surf
+`d1dd8878b7e19ea32c8b789f94fb77ac2522374a` with local unpublished turbo-dom
+`d00712fc01c9cb1a2a81ed11df2cd338f76d3541` fails the unchanged Flux super admin
+`delegatedWriteStep.spec.ts` case with `Native async work has unclassified ownership`.
+The signed artifact SHA256 is
+`9a6e75d6d5251ce198289a8e43dd833597957c10c9f2e4ac33538dc5c483b83c`.
+Actual compiled inputs and feature fingerprints are in Root
+`.recovery/payroll-v087-20261121/ARTIFACT.json`; all six Surf crates compiled fresh.
+The development DOM patch remains in use; this is not a registry release proof.
+
+The case passed real PropelAuth login, admin-shell navigation, read access, and
+the exact read-banner geometry assertions (height 44), then failed during the
+grant portion after 64.184 seconds. It did not reach the write-banner assertions.
+Result: 0 passed, 1 failed, 0 skipped, 0 canceled. The native failure-capture
+fixture also observed the authenticated admin shell. The precise failing native
+operation and ownership-guard branch are still under investigation; the shared
+error string alone does not prove an unknown op, collected Promise parent, or
+inconsistent owner. Surf owns this diagnosis; no producer defect is established.
+The independently reproduced collected-root-parent defect is fixed in `728fd61`;
+application-causal confirmation and restored-green application validation remain
+pending. The offline control and gate results below do not establish an auth pass.
+
+The service owner explicitly reserved ports 3000/3001 and paused edits/tests/writes
+for this single case. Frontend: the audit worktree at `7ad381b96` plus pending #772
+changes; backend: disposable flux-apis `b822541ab8f1ddfcc874096bcbf15b73a7c8e882`.
+The run consumed that worktree's freshly restored fixtures, with global setup,
+teardown, and webServer disabled; fixture JSON remained byte-identical. The owner
+then ran the exact Chromium case successfully (1 passed, 8.1-second case), including
+baseline revoke, grant, end-session, and afterEach cleanup. The service window is
+returned; further native service use requires another coordinated window.
+
+Current main-checkout auth inventory is 46 cases in 15 files. Do not combine that
+inventory with the single owner-worktree execution as if the whole suite ran.
+Fresh-artifact offline controls pass 34/34 (14 Promise/load-boundary controls and
+20 deadline/hydration controls), with zero skips/cancellations. Preserve the
+separate initial sandbox-listener EPERM attempt as an environment failure.
+Evidence: Root `.recovery/payroll-v087-20261121/owner-window/{PREP,RUN,RESULT}.json`,
+`run.log`, `artifacts/**/failure.json`, `offline-controls-localhost.log`, and
+`deadline-controls.log`; owner Chromium log `/tmp/codex-e2e-audit-restored-smoke.log`.
+No deadline, assertion, coverage floor, security policy, or exclusion was relaxed.
+
+An independent deterministic offline candidate now reproduces the same error
+without the application: retain a reaction child of an abandoned pending Promise,
+prove its parent was actually collected using the existing native GC barrier,
+then dispatch a real button click that opens a DOM modal. The click runs exactly
+once and opens the modal, but the action returns the ownership error. Awaiting
+the unresolved child still rejects; its reaction never runs. Retaining the live
+parent makes the identical action pass. Baseline: 1 passed, 1 failed, 0 ignored
+(Cargo exit 101), in 0.48 seconds after compilation. Test-only source is
+`.worktrees/payroll-v087-pending-parent-repro/rust/crates/turbo-surf-render/tests/pending_parent_action.rs`;
+receipt `.recovery/payroll-v087-20261121/pending-parent-repro.log`.
+This establishes an offline Surf defect, not yet application causality. A separate
+diagnostic-only NAPI build labels the original rejection site and numeric guard
+conditions, without changing selection or admission. Live use remains subject to
+a new explicit service-owner window. Candidate production repair is not merged.
+
+The candidate permits only the existing same-authenticated-root collected-parent
+classification for generic action/timer selection, preserving unresolved explicit
+completion, foreign/unknown parent, unowned operation, and inconsistent-owner
+rejections. The unchanged original modal regression passes; restoring the exact
+original production file reproduces its error (3 passed / 1 failed across four
+integration controls), and restoring the candidate byte-for-byte passes 13/13
+related action, Promise-parent, and native lifecycle tests. Four additional native
+guard controls pass, including a genuine unowned operation and collected unknown
+parent. The deliberately contradictory-registration test uses real native Promise
+and document identities as an invariant test. A new guard fixture initially failed
+to enter its destination context; its corrected setup and rerun are separately
+logged, with no production-policy change. Affected strict all-target Render Clippy,
+workspace formatting and workspace CC15 pass. The complete restored workspace
+gate passes 2,268 tests, zero failures, seven existing ignores (one live TLS echo
+and six documentation examples), zero filtered/canceled cases. Workspace
+all-target Clippy with denied warnings also passes. No application pass is claimed. The standalone
+pre-existing unicode-range assertion formatting issue is corrected with rustfmt.
+Receipts: Root `.recovery/payroll-v087-20261121/pending-parent-{candidate,guards-restored,inverse,related-restored}.log`,
+`inverse-source.json`, `CANDIDATE-SOURCE.json`, and `candidate-{fmt-restored,clippy,complexity-restored}.log`.
+
+## v0.8.7 unicode-range workspace test compilation
+
+The first full workspace gate on the candidate stops before test execution with
+Rust E0063 at `turbo-surf-mcp/src/lib.rs:7436`: the existing
+`fetch_font_face_skips_unresolvable_and_refused_urls` test omits the newly added
+`WebFontSource.unicode_range` field from release commit `d302301a`. The fixture
+now explicitly uses an empty range vector, the documented no-descriptor default;
+its existing failure-path assertion is unchanged. The independent existing
+Render unicode-range assertion is rustfmt-normalized. No runtime logic, coverage
+floor, or test scope changes. Corrected in `9feee26`; the restored full workspace gate passes as recorded above. Receipts:
+Root `.recovery/payroll-v087-20261121/candidate-workspace-test{,-restored}.log`.
+
+Offline regression subset: `cd rust && cargo test -p turbo-surf-render --test pending_parent_action`
+and `cargo test -p turbo-surf-render --lib selection_guard_tests` (four controls
+each). The exact baseline production inverse preserves all assertions and fails
+the original modal control; the candidate restoration is byte-identical.
+
+## Historical v0.8.5 work
+
 Target: `release/v0.8.5`. Updated 2026-11-19.
 
 Original batch: **34 test cases (11 Rust, 23 shim)**. **All 34 have component proof and their fixes are merged.** This is not a fresh combined-suite result. Existing intentional ignores/skips are unchanged.

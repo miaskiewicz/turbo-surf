@@ -128,6 +128,11 @@ fn response_for(path: &str, revalidated: bool) -> (String, Vec<u8>) {
 
 impl Server {
     async fn new() -> Self {
+        // These integration fixtures observe publication effects immediately
+        // after `fetch_bytes`; flatten the post-drain publication delay (#253)
+        // so the existing `fetch dictionary` → `fetch resource` sequencing stays
+        // synchronous. Unit tests in `net.rs` cover the actual Chrome 156 split.
+        turbo_surf_core::compression_dictionary::set_publication_delay_micros_for_tests(0);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("https://{}", listener.local_addr().unwrap());
         let rows = Arc::new(Mutex::new(Vec::new()));

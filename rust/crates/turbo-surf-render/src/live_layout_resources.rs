@@ -388,6 +388,13 @@ pub(crate) fn validate_or_request(
     completed: &CompletedAnimations,
     observed: bool,
 ) -> Result<Admission, String> {
+    // An animation whose presentation is disabled contributes no presented value
+    // to this layout and so cannot invalidate it (#529). Dev-overlay / hydration
+    // recovery paths still emit descriptor-only animations like `fadeOut`; those
+    // must be inert under the explicit Disabled policy, not a rejection.
+    if crate::animation_policy::presentation_disabled() {
+        return Ok(Admission::Accepted(true));
+    }
     match validate_with_lifecycle(nodes, rules, requested, completed) {
         Ok(strict) => Ok(Admission::Accepted(strict)),
         Err(rejection) if !observed => {
@@ -728,6 +735,24 @@ mod definition_tests {
             resource: Some(definition(source).unwrap()),
             containers: Vec::new(),
         }])
+    }
+
+    #[test]
+    fn disabled_animation_presentation_short_circuits_resource_admission() {
+        // #529: under the explicit Disabled presentation policy a descriptor-only
+        // animation like `fadeOut` must not reject layout; the animation doesn't
+        // run, so it can't invalidate the result.
+        let _guard = crate::animation_policy::push_disabled_for_tests(true);
+        // An unsafe animation (width changes layout) that would normally be
+        // rejected is accepted when presentation is disabled.
+        let rules = vec![crate::live_stylesheets::ActiveRule {
+            text: "@keyframes fadeOut{0%{width:0}100%{width:100px}}".into(),
+            scoped: None,
+            resource: Some(definition("@keyframes fadeOut{0%{width:0}100%{width:100px}}").unwrap()),
+            containers: Vec::new(),
+        }];
+        let outcome = validate_or_request(&[], &rules, None, &Default::default(), false).unwrap();
+        assert!(matches!(outcome, Admission::Accepted(true)));
     }
 
     #[test]

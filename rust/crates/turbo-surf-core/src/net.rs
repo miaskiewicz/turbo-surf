@@ -311,7 +311,7 @@ impl ResponseBody {
                         pending.cache.store(pending.entry);
                     }
                     if let Some(pending) = self.dictionary_store.take() {
-                        pending.commit();
+                        pending.commit_deferred();
                     }
                     return Ok(None);
                 }
@@ -1411,7 +1411,7 @@ async fn read_capped(res: http::Response, max_bytes: usize) -> Result<Vec<u8>, H
     };
     if let Some(mut registration) = pending.take() {
         if registration.append(&body) {
-            registration.commit();
+            registration.commit_deferred();
         }
     }
     Ok(body)
@@ -4248,9 +4248,74 @@ mod edge_tests {
                 received += chunk.len();
             }
             assert_eq!(received, MAX_DICTIONARY_BYTES + extra);
+            // Commit is deferred past the owning realm's body-reader resolve tick;
+            // a direct observer must wait past the publication delay. Reading
+            // the live atomic keeps the wait deterministic even if a sibling
+            // test mutates the delay.
+            tokio::time::sleep(
+                crate::compression_dictionary::publication_delay()
+                    + std::time::Duration::from_millis(75),
+            )
+            .await;
             let selected = store.select("p", "https://dict.test/a", &context);
             assert_eq!(selected.is_some(), stored, "extra {extra}");
         }
+    }
+
+    #[tokio::test]
+    async fn dictionary_publishes_after_body_reader_resolves_not_at_transport_eof() {
+        // Chrome 156 control `compression-dictionary-chrome156.json` case 28
+        // "head-does-not-register": an immediate chained `fetch(resource).text()`
+        // after `await response.text()` on the dictionary GET sees no dictionary
+        // on the next request; a later fetch after a short task-tick delay does.
+        // Core must not publish on transport EOF alone. Reading the LIVE atomic
+        // keeps the test deterministic if a sibling test ever mutates it.
+        use crate::compression_dictionary::{publication_delay, PendingDictionary};
+        use crate::request_context::{Destination, RequestMode};
+        let context =
+            RequestContext::resource("https://dict.test/", Destination::Script, RequestMode::Cors);
+        let store = DictionaryStore::default();
+        let pending = PendingDictionary::new(
+            &store,
+            store.generation(),
+            "p",
+            "https://dict.test/d",
+            &context,
+            200,
+            vec![
+                ("use-as-dictionary".into(), "match=\"/*\"".into()),
+                ("cache-control".into(), "max-age=60".into()),
+            ],
+            std::time::SystemTime::now(),
+        )
+        .unwrap();
+        let chunks = vec![Ok(bytes::Bytes::from_static(b"dictionary body bytes"))];
+        let mut body = ResponseBody {
+            stream: Some(Box::pin(futures_util::stream::iter(chunks))),
+            received: 0,
+            max_bytes: usize::MAX,
+            trace_id: 0,
+            url: "https://dict.test/d".into(),
+            status: 200,
+            content_type: String::new(),
+            trace_body: None,
+            trace_prefix: 0,
+            trace_skip_prefix: 0,
+            cache_store: None,
+            dictionary_store: Some(pending),
+            background: None,
+        };
+        let delay = publication_delay();
+        while body.next_chunk().await.unwrap().is_some() {}
+        // Immediate chained read: the publication task is spawned but has not yet
+        // crossed its task-tick boundary, so a next request does not advertise.
+        tokio::task::yield_now().await;
+        if !delay.is_zero() {
+            assert!(store.select("p", "https://dict.test/a", &context).is_none());
+            // After the publication delay elapses the dictionary becomes visible.
+            tokio::time::sleep(delay + std::time::Duration::from_millis(75)).await;
+        }
+        assert!(store.select("p", "https://dict.test/a", &context).is_some());
     }
 
     #[tokio::test]

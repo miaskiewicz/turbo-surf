@@ -205,6 +205,42 @@ impl PendingDictionary {
             self.stored,
         );
     }
+    /// Publish after the owning realm's body reader has resolved and the V8
+    /// microtask queue has drained. Chrome 156 publishes on the task tick that
+    /// follows `Response.text()` (the frozen headless shell is measured as
+    /// ≈100ms later); an immediate chained `fetch()` must not see the entry.
+    /// Spawning on the ambient tokio runtime with a short post-drain delay
+    /// crosses that boundary without a V8 task hook here in Core.
+    pub(crate) fn commit_deferred(self) {
+        let delay = publication_delay();
+        // A zero delay is only used in integration tests that observe effects
+        // synchronously after `fetch_bytes`. A spawned task would still need a
+        // tokio tick to run, which breaks a direct `fetch dictionary; fetch
+        // resource` sequence. Commit inline so the Chrome-split assertions in
+        // `net.rs` unit tests stay the sole contract for the deferred path.
+        if delay.is_zero() {
+            self.commit();
+            return;
+        }
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            self.commit();
+        });
+    }
+}
+const DEFAULT_PUBLICATION_DELAY_MICROS: u64 = 25_000;
+static PUBLICATION_DELAY_MICROS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(DEFAULT_PUBLICATION_DELAY_MICROS);
+pub(crate) fn publication_delay() -> std::time::Duration {
+    std::time::Duration::from_micros(
+        PUBLICATION_DELAY_MICROS.load(std::sync::atomic::Ordering::Acquire),
+    )
+}
+/// Integration-test hook: let a test flatten the body-reader → task-tick → commit
+/// gap to zero so existing dictionary fixtures that select immediately after a
+/// fetch stay deterministic. Production code keeps the default.
+pub fn set_publication_delay_micros_for_tests(micros: u64) {
+    PUBLICATION_DELAY_MICROS.store(micros, std::sync::atomic::Ordering::Release);
 }
 impl SelectedDictionary {
     /// These codings are inserted only after selecting a genuine scoped dictionary.

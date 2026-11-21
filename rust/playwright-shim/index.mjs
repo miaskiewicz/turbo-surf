@@ -48,6 +48,8 @@ import {
   encodeEvaluationError,
   encodeEvaluationValue,
   evaluationArgument,
+  safeStringifyEnvelope,
+  safeStringifyTuple,
 } from "./evaluation-codec.mjs";
 import { makeKeyboard } from "./keyboard.mjs";
 import { scheduleBindingDrain, throwBindingDrainError } from "./binding-drain.mjs";
@@ -2141,17 +2143,22 @@ class Frame {
       return this._parentPage._evaluateWithBindings(expression);
     const raw = await native.liveEvalExpression(
       this._session,
+      // #531: encode the envelope without `JSON.stringify` so guest toJSON hooks
+      // on `Object.prototype` / `Array.prototype` cannot corrupt the wire. Same
+      // tuple+envelope helpers are inlined into every guest-side return site.
       `(async () => {
+      const safeStringifyTuple = ${safeStringifyTuple.toString()};
+      const safeStringifyEnvelope = ${safeStringifyEnvelope.toString()};
       try {
         const value = await (${expression});
-        return JSON.stringify({ok:true, value: (${encodeEvaluationValue.toString()})(value)});
-      } catch(error) { return JSON.stringify({ok:false, error: (${encodeEvaluationError.toString()})(error)}); }
+        return safeStringifyEnvelope("value", (${encodeEvaluationValue.toString()})(value));
+      } catch(error) { return safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error)); }
     })()`,
     );
     await this._parentPage._refreshFromSession();
     await this._parentPage._drainBindings();
     const result = JSON.parse(raw);
-    if (!result.ok) throw decodeEvaluationError(result.error);
+    if (result.error) throw decodeEvaluationError(result.error);
     return decodeEvaluationValue(result.value);
   }
   async content() {
@@ -2779,15 +2786,18 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const id = (this._bindingEvalId = (this._bindingEvalId ?? 0) + 1);
     await native.liveEvalEngine(
       this._session,
+      // #531: use the toJSON-free envelope/tuple serializer.
       `(() => {
+      const safeStringifyTuple = ${safeStringifyTuple.toString()};
+      const safeStringifyEnvelope = ${safeStringifyEnvelope.toString()};
       const bag = __tsNs.shimBindings;
       bag.evaluations[${id}] = null;
       Promise.resolve().then(() => (${body})).then(
         value => {
-          try { bag.evaluations[${id}] = JSON.stringify({value: (${encodeEvaluationValue.toString()})(value)}); }
-          catch (error) { bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); }
+          try { bag.evaluations[${id}] = safeStringifyEnvelope("value", (${encodeEvaluationValue.toString()})(value)); }
+          catch (error) { bag.evaluations[${id}] = safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error)); }
         },
-        error => {bag.evaluations[${id}] = JSON.stringify({error: (${encodeEvaluationError.toString()})(error)});});
+        error => {bag.evaluations[${id}] = safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error));});
     })()`,
     );
     const deadline = Date.now() + 5000;
@@ -4127,9 +4137,13 @@ return String(globalThis.__RESULT ?? ""); })()`,
     const tracked = JSON.parse(
       await native.liveEvalExpressionTracked(
         this._session,
-        `(async () => { try {
-        return JSON.stringify({value: (${encodeEvaluationValue.toString()})(await (${body}))});
-      } catch(error) { return JSON.stringify({error: (${encodeEvaluationError.toString()})(error)}); } })()`,
+        // #531: envelope without JSON.stringify, so guest toJSON hooks don't bite.
+        `(async () => {
+        const safeStringifyTuple = ${safeStringifyTuple.toString()};
+        const safeStringifyEnvelope = ${safeStringifyEnvelope.toString()};
+        try {
+          return safeStringifyEnvelope("value", (${encodeEvaluationValue.toString()})(await (${body})));
+        } catch(error) { return safeStringifyEnvelope("error", (${encodeEvaluationError.toString()})(error)); } })()`,
       ),
     );
     // The authored result is settled; metadata must not wait for unrelated page work.
@@ -5748,6 +5762,51 @@ function initializeContextPreferences(context, merged, permissionGrant, geolocat
   context._screen = merged.screen ?? null;
 }
 
+// A BrowserContext `timezoneId` applies to Date accessors and Intl formatting
+// (#397). V8 has no per-isolate TZ override here, so we inject an init script
+// that wraps `Intl.DateTimeFormat` with a default `timeZone` and reroutes the
+// local-time Date getters through `formatToParts(timeZone)` of the same zone.
+// UTC-time getters and `Date.now()` are untouched; author `timeZone` options
+// still win inside a user-supplied Intl option bag.
+function timezoneOverrideInitScript(timezoneId) {
+  return `(()=>{const tz=${JSON.stringify(timezoneId)};
+try{new Intl.DateTimeFormat("en-US",{timeZone:tz});}catch{return;}
+const OrigDTF=Intl.DateTimeFormat;
+function DTF(locales,options){
+  const merged={timeZone:tz,...(options||{})};
+  return new OrigDTF(locales,merged);
+}
+DTF.prototype=OrigDTF.prototype;
+DTF.supportedLocalesOf=OrigDTF.supportedLocalesOf;
+// Match the spec descriptor of the replaced builtin: DateTimeFormat.length is 0
+// and Intl.DateTimeFormat is enumerable — otherwise the override is a tell.
+Object.defineProperty(DTF,"length",{value:0,configurable:true});
+Object.defineProperty(DTF,"name",{value:"DateTimeFormat",configurable:true});
+Object.defineProperty(Intl,"DateTimeFormat",{value:DTF,writable:true,enumerable:true,configurable:true});
+const partsFmt=new OrigDTF("en-US",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false,weekday:"short"});
+const weekdays={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+function parts(date){
+  const map={};
+  for(const p of partsFmt.formatToParts(date))if(p.type!=="literal")map[p.type]=p.value;
+  map.hour=map.hour==="24"?0:Number(map.hour);
+  map.year=Number(map.year);map.month=Number(map.month);map.day=Number(map.day);
+  map.minute=Number(map.minute);map.second=Number(map.second);
+  return map;
+}
+function utcMs(p){return Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second);}
+const proto=Date.prototype;
+function wrap(name,fn){Object.defineProperty(proto,name,{value:fn,writable:true,configurable:true});}
+wrap("getFullYear",function(){return parts(this).year;});
+wrap("getMonth",function(){return parts(this).month-1;});
+wrap("getDate",function(){return parts(this).day;});
+wrap("getDay",function(){return weekdays[partsFmt.formatToParts(this).find(p=>p.type==="weekday").value]??0;});
+wrap("getHours",function(){return parts(this).hour;});
+wrap("getMinutes",function(){return parts(this).minute;});
+wrap("getSeconds",function(){return parts(this).second;});
+wrap("getTimezoneOffset",function(){const p=parts(this);return Math.round((this.getTime()-utcMs(p))/60000);});
+})();`;
+}
+
 function mergedContextOptions(opts) {
   // Playwright CLI serializes the per-project `use` block into TURBO_PW_USE
   // so every supported key can reach fixture-constructed contexts without
@@ -5776,6 +5835,7 @@ class BrowserContext {
     initializeContextIdentity(this, merged);
     initializeContextPreferences(this, merged, permissionGrant, geolocation);
     this._initScripts = [];
+    if (this._timezoneId) this._initScripts.push(timezoneOverrideInitScript(this._timezoneId));
     this._bindings = new Map();
     this._pages = [];
     this._actors = new Map();

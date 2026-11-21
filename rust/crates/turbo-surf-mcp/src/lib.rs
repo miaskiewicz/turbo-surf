@@ -262,6 +262,115 @@ pub struct Session {
     /// (turbo-dom#371) so an indeterminate checkbox paints the Chrome glyph the
     /// serialized HTML does not express. Empty when no render ran or no input was set.
     pub indeterminate_input_indices: Vec<usize>,
+    /// Retained MCP targets (#523, minimum deliverable): an opaque Page ID is
+    /// minted for the root page on its first `goto` / `load`, and auxiliary
+    /// pages (popups/children) register here with their opener's ID. `list_targets`
+    /// / `close_target` act on this registry. Existing tools without a `target`
+    /// argument keep operating on the root; frame-scoped waits and per-target
+    /// cancellation are out of this minimum scope.
+    targets: std::collections::BTreeMap<String, RetainedTarget>,
+    /// The root target's ID — `None` until the first `goto` / `load`.
+    root_target: Option<String>,
+    /// Monotonic generation, used to produce fresh Page IDs that never recycle
+    /// within a session.
+    target_generation: u64,
+    /// Session-side event log (#524, minimum deliverable): an opaque monotonic
+    /// cursor keyed ring buffer. `events_read(after?)` returns `{events,
+    /// nextCursor}` so an agent can pull diagnostics incrementally; the full
+    /// console / pageerror / network / dialog surface is deferred follow-up.
+    /// Capped at [`MAX_EVENTS`] with oldest-first eviction.
+    event_log: std::collections::VecDeque<SessionEvent>,
+    event_cursor: u64,
+    /// Bounded session artifact store (#525, minimum deliverable). Holds
+    /// opaque IDs → byte payloads with name + MIME metadata, used as the
+    /// upload source for a future `set_input_files` tool and the storage for
+    /// captured downloads. The target-coupled upload/download lifecycle
+    /// (triggering a real application input / download) depends on the fuller
+    /// retained PageSession in #523 and is deferred follow-up.
+    artifacts: std::collections::BTreeMap<String, SessionArtifact>,
+    artifact_generation: u64,
+    artifact_total_bytes: u64,
+}
+
+/// A bounded session artifact (#525). Byte payload is kept in memory; agents
+/// read it back via `artifact_read`. Opaque IDs never recycle inside a session.
+#[derive(Clone, Debug)]
+pub struct SessionArtifact {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+    /// Seconds-since-epoch of registration.
+    pub created_at_secs: u64,
+}
+
+/// A byte-less view of a `SessionArtifact` for `artifact_create` + listings.
+/// Lets the store keep the one copy of the payload the caller handed over
+/// without round-tripping the whole Vec<u8> back through the result.
+#[derive(Clone, Debug)]
+pub struct ArtifactDescriptor {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    pub size: usize,
+    pub created_at_secs: u64,
+}
+
+/// Per-artifact and aggregate caps for the session's artifact store. A caller
+/// that supplies more is rejected explicitly instead of silently truncating.
+pub const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_ARTIFACT_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Sanitize a caller-supplied filename down to a bare basename with no path
+/// components, matching the issue's hard constraint that a download's suggested
+/// `../../name` cannot choose a host write path. Also drops embedded control
+/// bytes (NUL, newline, `\r`, DEL, …) so a downstream consumer that saves the
+/// name verbatim cannot be fooled by POSIX NUL truncation. Collapses empty
+/// results to a safe placeholder.
+pub fn sanitize_artifact_name(name: &str) -> String {
+    let basename = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let stripped: String = basename.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = stripped
+        .trim_matches(|c: char| c == '.' || c.is_whitespace())
+        .to_string();
+    if trimmed.is_empty() {
+        "artifact".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Oldest-first eviction cap on the session event buffer. Keeps a bounded
+/// memory footprint across long-lived sessions without surprising agents.
+pub const MAX_EVENTS: usize = 1024;
+
+/// A diagnostic event the MCP session surfaces through `events_read` (#524).
+/// Kinds are open to extension; today only `target.closed` is produced.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SessionEvent {
+    /// Opaque monotonic cursor. `events_read(after)` returns events whose
+    /// cursor is strictly greater than `after`. Cursors never recycle inside a
+    /// session.
+    pub cursor: u64,
+    pub kind: String,
+    pub target: Option<String>,
+    /// Seconds-since-epoch of registration.
+    pub at_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<Value>,
+}
+
+/// A retained MCP target (#523). Minimal metadata today; later work adds
+/// per-target document generation, frame registry and cancellation handles.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RetainedTarget {
+    pub id: String,
+    pub url: String,
+    /// The target that opened this one (window.open / target=_blank). `None`
+    /// for the session root.
+    pub opener: Option<String>,
+    /// Seconds-since-epoch of registration.
+    pub created_at_secs: u64,
 }
 
 /// Install process-global render hooks once: a raster-backed text measurer (system fonts on) that
@@ -357,6 +466,264 @@ impl Session {
         self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
         self.last_render_navigation_count = 0;
         self.indeterminate_input_indices.clear();
+        self.sync_root_target(url);
+    }
+
+    /// Ensure the root target is registered under a stable Page ID; subsequent
+    /// `goto` / `load` calls update its URL in place. Minimum-deliverable
+    /// scaffolding for #523 — auxiliary target discovery (popups / children)
+    /// comes with the frame-addressing work the full issue covers.
+    fn sync_root_target(&mut self, url: &str) {
+        let id = match self.root_target.clone() {
+            Some(id) => id,
+            None => {
+                let id = self.mint_target_id();
+                self.root_target = Some(id.clone());
+                id
+            }
+        };
+        let created_at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let entry = self.targets.entry(id.clone()).or_insert(RetainedTarget {
+            id: id.clone(),
+            url: url.to_string(),
+            opener: None,
+            created_at_secs,
+        });
+        entry.url = url.to_string();
+    }
+
+    fn mint_target_id(&mut self) -> String {
+        self.target_generation = self.target_generation.wrapping_add(1);
+        format!("page-{}", self.target_generation)
+    }
+
+    /// Return every retained target in registration order.
+    pub fn list_targets(&self) -> Vec<RetainedTarget> {
+        self.targets.values().cloned().collect()
+    }
+
+    /// Drop a target by opaque ID. Closing the root clears the session's live
+    /// tree AND its navigation history / response metadata so a later `goto`
+    /// is a fresh start (no `go_back` into the dropped target's URLs). Closing
+    /// any other target drops only its registry entry. An opener close does
+    /// NOT implicitly kill surviving popups (per the issue).
+    pub fn close_target(&mut self, id: &str) -> Result<RetainedTarget, String> {
+        let removed = self
+            .targets
+            .remove(id)
+            .ok_or_else(|| format!("unknown target: {id}"))?;
+        if self.root_target.as_deref() == Some(id) {
+            self.root_target = None;
+            self.tree = None;
+            self.url.clear();
+            self.back.clear();
+            self.forward.clear();
+            self.response_headers.clear();
+            self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
+            self.last_render_navigation_count = 0;
+            self.indeterminate_input_indices.clear();
+            self.requests.clear();
+            self.dom_history.clear();
+        }
+        self.record_event(
+            "target.closed",
+            Some(id.to_string()),
+            Some(json!({ "url": removed.url })),
+        );
+        Ok(removed)
+    }
+
+    /// Append a diagnostic event. Oldest entries evict past [`MAX_EVENTS`] so
+    /// the buffer stays bounded. Cursors never recycle; an agent that observes
+    /// a cursor value `n` can pass `after: n` to a later `events_read` to only
+    /// receive events that landed after its observation.
+    fn record_event(&mut self, kind: &str, target: Option<String>, body: Option<Value>) {
+        self.event_cursor = self.event_cursor.wrapping_add(1);
+        while self.event_log.len() >= MAX_EVENTS {
+            self.event_log.pop_front();
+        }
+        let at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.event_log.push_back(SessionEvent {
+            cursor: self.event_cursor,
+            kind: kind.to_string(),
+            target,
+            at_secs,
+            body,
+        });
+    }
+
+    /// Return every event strictly after `after` (or every retained event when
+    /// `after` is `None`), plus the current cursor to resume from.
+    pub fn events_read(&self, after: Option<u64>) -> (Vec<SessionEvent>, u64) {
+        let bound = after.unwrap_or(0);
+        let events = self
+            .event_log
+            .iter()
+            .filter(|event| event.cursor > bound)
+            .cloned()
+            .collect();
+        (events, self.event_cursor)
+    }
+
+    /// Drop every retained event without resetting the cursor. An agent that
+    /// held a cursor `n` can still pass it as `after`; it will see every event
+    /// recorded after the clear.
+    pub fn events_clear(&mut self) {
+        self.event_log.clear();
+    }
+
+    /// Pump console / pageerror / request / response events from a render
+    /// `drain_network_log()` snapshot into the session event log (#524 full
+    /// scope). Redacts `cookie`, `authorization`, `proxy-authorization` and
+    /// `set-cookie` headers on each entry before storing so default
+    /// diagnostics cannot leak HttpOnly credentials. Response bodies are
+    /// dropped before storage; agents that need body bytes should use the
+    /// deliberate `fetch_raw` path. `responsebody` entries are dropped — their
+    /// headers already landed under the `response` event via drain_snapshot.
+    pub fn capture_network_events(&mut self, snapshot: &str) {
+        let Ok(serde_json::Value::Array(entries)) = serde_json::from_str::<Value>(snapshot) else {
+            return;
+        };
+        for mut entry in entries {
+            let Some(kind) = entry
+                .get("event")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            if kind == "responsebody" {
+                continue;
+            }
+            // Drop request/response bodies and sensitive header values before
+            // retention. Rejection headers / cookies / auth never appear in the
+            // default diagnostic stream.
+            for header_bag in ["requestHeaders", "responseHeaders", "headers"] {
+                if let Some(bag) = entry.get_mut(header_bag).and_then(Value::as_object_mut) {
+                    for sensitive in [
+                        "cookie",
+                        "authorization",
+                        "proxy-authorization",
+                        "set-cookie",
+                    ] {
+                        if let Some(value) = bag.get_mut(sensitive) {
+                            *value = Value::String("<redacted>".into());
+                        }
+                    }
+                }
+            }
+            for body_field in ["body", "bodyBytes", "requestBody"] {
+                if let Some(bag) = entry.as_object_mut() {
+                    if bag.remove(body_field).is_some() {
+                        bag.insert(format!("{body_field}Dropped"), Value::Bool(true));
+                    }
+                }
+            }
+            let target = self.root_target.clone();
+            self.record_event(&kind, target, Some(entry));
+        }
+    }
+
+    /// Register bytes as a bounded artifact (#525). Rejects empty inputs and
+    /// anything that would push the per-artifact or aggregate cap past its
+    /// limit. Opaque IDs never recycle inside a session. Returns a lightweight
+    /// descriptor (bytes stay owned by the store — no double-buffering of
+    /// the payload past the one copy the caller already made).
+    pub fn artifact_create(
+        &mut self,
+        bytes: Vec<u8>,
+        name: &str,
+        mime: &str,
+    ) -> Result<ArtifactDescriptor, String> {
+        if bytes.is_empty() {
+            return Err("artifact_create: bytes cannot be empty".into());
+        }
+        if bytes.len() > MAX_ARTIFACT_BYTES {
+            return Err(format!(
+                "artifact_create: {} bytes exceeds the per-artifact cap ({MAX_ARTIFACT_BYTES})",
+                bytes.len()
+            ));
+        }
+        let new_total = self.artifact_total_bytes.saturating_add(bytes.len() as u64);
+        if new_total > MAX_ARTIFACT_TOTAL_BYTES {
+            return Err(format!(
+                "artifact_create: would exceed the session aggregate cap ({MAX_ARTIFACT_TOTAL_BYTES})"
+            ));
+        }
+        self.artifact_generation = self.artifact_generation.wrapping_add(1);
+        let id = format!("artifact-{}", self.artifact_generation);
+        let created_at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let safe_name = sanitize_artifact_name(name);
+        let safe_mime = if mime.trim().is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            mime.to_string()
+        };
+        self.artifact_total_bytes = new_total;
+        let descriptor = ArtifactDescriptor {
+            id: id.clone(),
+            name: safe_name.clone(),
+            mime: safe_mime.clone(),
+            size: bytes.len(),
+            created_at_secs,
+        };
+        self.artifacts.insert(
+            id,
+            SessionArtifact {
+                id: descriptor.id.clone(),
+                name: safe_name,
+                mime: safe_mime,
+                bytes,
+                created_at_secs,
+            },
+        );
+        Ok(descriptor)
+    }
+
+    /// Return every retained artifact's metadata in registration order (byte
+    /// payload omitted; agents fetch with `artifact_read`).
+    pub fn artifact_list(&self) -> Vec<Value> {
+        self.artifacts
+            .values()
+            .map(|a| {
+                json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "mime": a.mime,
+                    "size": a.bytes.len(),
+                    "createdAtSecs": a.created_at_secs,
+                })
+            })
+            .collect()
+    }
+
+    /// Fetch a retained artifact by opaque ID.
+    pub fn artifact_read(&self, id: &str) -> Result<&SessionArtifact, String> {
+        self.artifacts
+            .get(id)
+            .ok_or_else(|| format!("unknown artifact: {id}"))
+    }
+
+    /// Drop a retained artifact by opaque ID, releasing its bytes toward the
+    /// aggregate cap. Returns the dropped metadata so callers can confirm.
+    pub fn artifact_delete(&mut self, id: &str) -> Result<SessionArtifact, String> {
+        let removed = self
+            .artifacts
+            .remove(id)
+            .ok_or_else(|| format!("unknown artifact: {id}"))?;
+        self.artifact_total_bytes = self
+            .artifact_total_bytes
+            .saturating_sub(removed.bytes.len() as u64);
+        Ok(removed)
     }
 
     // Collect the tree-order indices (over `document.querySelectorAll('input')`) of
@@ -731,7 +1098,13 @@ impl Session {
         // carry it, so a later screenshot forwards it via ScreenshotOptions.idl_states
         // (turbo-dom#371).
         self.indeterminate_input_indices = Self::snapshot_indeterminate_inputs(&mut page).await;
+        // #524 full-scope: pump console / pageerror / request / response events
+        // from the render's network log into the session event log before the
+        // PageSession drops. Redaction + body stripping happens inside
+        // `capture_network_events` so HttpOnly / auth header values never surface.
+        let network_snapshot = page.drain_network_log();
         page.close();
+        self.capture_network_events(&network_snapshot);
         self.jar = CookieJar::from_storage_state(&cookies);
         self.last_render_navigation_count = count;
         if count > 0 {
@@ -2923,6 +3296,68 @@ pub fn tools() -> Value {
         ("reload", "Re-fetch the current URL"),
         ("go_back", "Navigate to the previous URL"),
         ("go_forward", "Navigate forward"),
+        // retained targets (#523, minimum deliverable)
+        (
+            "list_targets",
+            "List retained MCP targets → {targets: [{id,url,opener?,createdAtSecs}]}. \
+             The root target is minted on first goto/load with an opaque Page ID \
+             that stays stable across navigations. Minimum scaffolding for #523 — \
+             frame addressing and per-target cancellation come with the full issue",
+        ),
+        (
+            "close_target",
+            "Close a retained MCP target by opaque Page ID → {closed}. Closing the \
+             root target clears the session's live tree; closing any other target \
+             drops only its registry entry. An opener close does NOT implicitly \
+             kill surviving popups. Arg: id",
+        ),
+        // event diagnostics (#524, minimum deliverable)
+        (
+            "events_read",
+            "Read session diagnostic events incrementally → {events: \
+             [{cursor,kind,target?,atSecs,body?}], nextCursor}. Pass the \
+             returned nextCursor as `after` on the next call to only receive \
+             later events. Cursors never recycle inside a session. Minimum \
+             scaffolding for #524 — today emits `target.closed`; full \
+             console / pageerror / network / dialog capture is deferred \
+             follow-up. Buffer is capped and oldest-first-evicted",
+        ),
+        (
+            "events_clear",
+            "Drop every retained session diagnostic event without resetting \
+             the cursor → {ok}. An agent that held cursor `n` can still pass \
+             it as `after` to a later events_read and receive only post-clear \
+             events",
+        ),
+        // artifact store (#525, minimum deliverable)
+        (
+            "artifact_create",
+            "Register bounded caller-supplied bytes as a retained session \
+             artifact → {id, name, mime, size, createdAtSecs}. Args: \
+             bytesBase64 (required), name?, mime? (default \
+             'application/octet-stream'). The suggested name is sanitized to \
+             a bare basename — a value like '../../etc/passwd' can never \
+             choose a host write path. Per-artifact cap 32 MiB; aggregate \
+             session cap 128 MiB. The target-coupled set_input_files / real \
+             download capture lifecycle depends on the fuller #523 retained \
+             PageSession and is deferred follow-up",
+        ),
+        (
+            "artifact_list",
+            "List retained session artifacts (no byte payloads) → \
+             {artifacts: [{id, name, mime, size, createdAtSecs}]}",
+        ),
+        (
+            "artifact_read",
+            "Fetch a retained artifact by opaque ID → {id, name, mime, size, \
+             bytesBase64, createdAtSecs}. Arg: id",
+        ),
+        (
+            "artifact_delete",
+            "Drop a retained artifact by opaque ID, releasing bytes toward \
+             the session aggregate cap → {deleted}. Arg: id. Unknown IDs are \
+             explicit errors, not silent no-ops",
+        ),
         (
             "set_user_agent",
             "Set the User-Agent for subsequent fetches",
@@ -3268,6 +3703,69 @@ fn call_sync_session_tool(
         "latest_dom" => json!(session.dom_history.last()),
         "dom_history" => json!(session.dom_history),
         "requests" => json!(session.requests),
+        "list_targets" => json!({ "targets": session.list_targets() }),
+        "close_target" => match arg_str(args, "id") {
+            None => return Some(Err("close_target: missing 'id'".into())),
+            Some(id) => match session.close_target(id) {
+                Ok(removed) => json!({ "closed": removed }),
+                Err(message) => return Some(Err(message)),
+            },
+        },
+        "events_read" => {
+            // Reject a non-integer `after` explicitly instead of quietly
+            // falling back to 0 (which would replay the whole buffer and
+            // make an agent loop forever on stale events).
+            let after = match args.get("after") {
+                None | Some(Value::Null) => None,
+                Some(value) => match value.as_u64() {
+                    Some(n) => Some(n),
+                    None => {
+                        return Some(Err(
+                            "events_read: 'after' must be a non-negative integer".into()
+                        ))
+                    }
+                },
+            };
+            let (events, next_cursor) = session.events_read(after);
+            json!({ "events": events, "nextCursor": next_cursor })
+        }
+        "events_clear" => {
+            session.events_clear();
+            json!({ "ok": true })
+        }
+        "artifact_create" => match artifact_create_from_args(session, args) {
+            Ok(value) => value,
+            Err(message) => return Some(Err(message)),
+        },
+        "artifact_list" => json!({ "artifacts": session.artifact_list() }),
+        "artifact_read" => match arg_str(args, "id") {
+            None => return Some(Err("artifact_read: missing 'id'".into())),
+            Some(id) => match session.artifact_read(id) {
+                Ok(a) => json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "mime": a.mime,
+                    "size": a.bytes.len(),
+                    "bytesBase64": BASE64.encode(&a.bytes),
+                    "createdAtSecs": a.created_at_secs,
+                }),
+                Err(message) => return Some(Err(message)),
+            },
+        },
+        "artifact_delete" => match arg_str(args, "id") {
+            None => return Some(Err("artifact_delete: missing 'id'".into())),
+            Some(id) => match session.artifact_delete(id) {
+                Ok(removed) => json!({
+                    "deleted": {
+                        "id": removed.id,
+                        "name": removed.name,
+                        "mime": removed.mime,
+                        "size": removed.bytes.len(),
+                    }
+                }),
+                Err(message) => return Some(Err(message)),
+            },
+        },
         _ => return None,
     };
     Some(Ok(out))
@@ -3709,6 +4207,25 @@ fn initialize_result() -> Value {
 }
 
 /// Whether `tools/list` advertises `name`.
+/// Decode a `artifact_create` call's base64 payload + metadata and hand it to
+/// `Session::artifact_create`. Explicit per-arg errors replace silent defaults.
+fn artifact_create_from_args(session: &mut Session, args: &Value) -> Result<Value, String> {
+    let bytes_b64 = arg_str(args, "bytesBase64").ok_or("artifact_create: missing 'bytesBase64'")?;
+    let bytes = BASE64
+        .decode(bytes_b64.as_bytes())
+        .map_err(|error| format!("artifact_create: invalid base64 — {error}"))?;
+    let name = arg_str(args, "name").unwrap_or("artifact");
+    let mime = arg_str(args, "mime").unwrap_or("");
+    let descriptor = session.artifact_create(bytes, name, mime)?;
+    Ok(json!({
+        "id": descriptor.id,
+        "name": descriptor.name,
+        "mime": descriptor.mime,
+        "size": descriptor.size,
+        "createdAtSecs": descriptor.created_at_secs,
+    }))
+}
+
 fn is_listed_tool(name: &str) -> bool {
     tools()["tools"]
         .as_array()
@@ -5513,6 +6030,375 @@ mod tests {
         assert_eq!(st["renderFingerprintOverrides"]["hardwareConcurrency"], 16);
         // Reset the process-global for other tests.
         turbo_surf_render::set_fingerprint("{}");
+    }
+
+    #[tokio::test]
+    async fn artifact_store_round_trips_bytes_sanitizes_names_and_enforces_caps() {
+        // #525 minimum: register, list, read, delete; empty + oversize + path
+        // traversal + unknown-ID paths are explicit errors; aggregate cap holds.
+        let mut s = Session::new();
+        assert_eq!(
+            call(&mut s, "artifact_list", json!({})).await["artifacts"],
+            json!([])
+        );
+        // Arbitrary binary bytes including nulls and high bits — proof that
+        // the store is 8-bit clean, not hidden text.
+        let payload: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
+        let created = call(
+            &mut s,
+            "artifact_create",
+            json!({
+                "bytesBase64": BASE64.encode(&payload),
+                "name": "../../etc/passwd",
+                "mime": "application/octet-stream",
+            }),
+        )
+        .await;
+        assert_eq!(
+            created["name"], "passwd",
+            "path-traversal names must sanitize"
+        );
+        assert_eq!(created["size"], 1024);
+        let id = created["id"].as_str().unwrap().to_owned();
+        // Round-trip bytes.
+        let read = call(&mut s, "artifact_read", json!({ "id": &id })).await;
+        let decoded = BASE64
+            .decode(read["bytesBase64"].as_str().unwrap().as_bytes())
+            .unwrap();
+        assert_eq!(decoded, payload);
+        // Metadata matches via list.
+        let listed = call(&mut s, "artifact_list", json!({})).await;
+        assert_eq!(listed["artifacts"].as_array().unwrap().len(), 1);
+        // Empty payload is rejected.
+        let empty = call_tool(
+            &mut s,
+            "artifact_create",
+            &json!({ "bytesBase64": "", "name": "x" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(empty.contains("empty"), "{empty}");
+        // Oversized payload is rejected without being stored.
+        let huge = vec![0u8; MAX_ARTIFACT_BYTES + 1];
+        let over = call_tool(
+            &mut s,
+            "artifact_create",
+            &json!({ "bytesBase64": BASE64.encode(&huge), "name": "big" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(over.contains("per-artifact cap"), "{over}");
+        // Delete releases the slot; unknown-ID delete is an explicit error.
+        let deleted = call(&mut s, "artifact_delete", json!({ "id": &id })).await;
+        assert_eq!(deleted["deleted"]["id"], id);
+        assert_eq!(
+            call(&mut s, "artifact_list", json!({})).await["artifacts"],
+            json!([])
+        );
+        let missing = call_tool(&mut s, "artifact_delete", &json!({ "id": "artifact-999" }))
+            .await
+            .unwrap_err();
+        assert!(missing.contains("unknown artifact"), "{missing}");
+        // A fresh create mints a new ID (never recycles across the deleted slot).
+        let later = call(
+            &mut s,
+            "artifact_create",
+            json!({ "bytesBase64": BASE64.encode(b"hi") }),
+        )
+        .await;
+        assert_ne!(later["id"].as_str().unwrap(), id);
+        // Default MIME lands when none was supplied.
+        assert_eq!(later["mime"], "application/octet-stream");
+        // Embedded control bytes (NUL, newline, DEL) are stripped from names
+        // so a downstream save-by-name cannot be NUL-truncated (#525 nit).
+        let controlled = call(
+            &mut s,
+            "artifact_create",
+            json!({
+                "bytesBase64": BASE64.encode(b"a"),
+                "name": "evil\0\n\r\x7fshort.exe",
+            }),
+        )
+        .await;
+        assert_eq!(controlled["name"], "evilshort.exe");
+        // A name that sanitizes to empty (all dots + whitespace, no base) falls
+        // back to the "artifact" placeholder.
+        let placeholder = call(
+            &mut s,
+            "artifact_create",
+            json!({ "bytesBase64": BASE64.encode(b"p"), "name": "..." }),
+        )
+        .await;
+        assert_eq!(placeholder["name"], "artifact");
+        // Missing / invalid base64 and unknown-id reads surface as explicit
+        // tool errors rather than silent empties.
+        let missing_b64 = call_tool(&mut s, "artifact_create", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(
+            missing_b64.contains("missing 'bytesBase64'"),
+            "{missing_b64}"
+        );
+        let bad_b64 = call_tool(
+            &mut s,
+            "artifact_create",
+            &json!({ "bytesBase64": "!!!not base64!!!" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(bad_b64.contains("invalid base64"), "{bad_b64}");
+        let missing_read_id = call_tool(&mut s, "artifact_read", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(
+            missing_read_id.contains("missing 'id'"),
+            "{missing_read_id}"
+        );
+        let unknown_read = call_tool(&mut s, "artifact_read", &json!({ "id": "artifact-999" }))
+            .await
+            .unwrap_err();
+        assert!(unknown_read.contains("unknown artifact"), "{unknown_read}");
+        let missing_delete_id = call_tool(&mut s, "artifact_delete", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(
+            missing_delete_id.contains("missing 'id'"),
+            "{missing_delete_id}"
+        );
+        // Aggregate cap: a fresh session fills to exactly the cap and one
+        // more byte is rejected.
+        let mut t = Session::new();
+        let fits = (MAX_ARTIFACT_TOTAL_BYTES / MAX_ARTIFACT_BYTES as u64) as usize;
+        let near_cap = vec![0u8; MAX_ARTIFACT_BYTES];
+        for _ in 0..fits {
+            let descriptor = call_tool(
+                &mut t,
+                "artifact_create",
+                &json!({ "bytesBase64": BASE64.encode(&near_cap) }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(descriptor["size"], MAX_ARTIFACT_BYTES);
+        }
+        let overflow = call_tool(
+            &mut t,
+            "artifact_create",
+            &json!({ "bytesBase64": BASE64.encode(b"x") }),
+        )
+        .await
+        .unwrap_err();
+        assert!(overflow.contains("aggregate cap"), "{overflow}");
+    }
+
+    #[tokio::test]
+    async fn capture_network_events_pumps_console_pageerror_and_redacts_cookies() {
+        // #524 full scope: `capture_network_events` drains a render's network
+        // log into the session event log, redacts cookie/auth headers, and
+        // drops body bytes before storage.
+        let mut s = Session::new();
+        s.load("https://x.test/", PAGE);
+        let snapshot = serde_json::json!([
+            {"event": "console", "level": "log", "args": [{"value": "ready"}]},
+            {"event": "pageerror", "name": "Error", "message": "boom", "context": {"frame": 0}},
+            {
+                "event": "request",
+                "url": "https://x.test/api",
+                "requestHeaders": {
+                    "cookie": "session=abc123",
+                    "authorization": "Bearer secret",
+                    "accept": "application/json",
+                },
+                "requestBody": "login=greg&password=hunter2",
+            },
+            {
+                "event": "response",
+                "url": "https://x.test/api",
+                "status": 200,
+                "responseHeaders": {
+                    "set-cookie": "token=xyz",
+                    "content-type": "application/json",
+                },
+                "body": "{\"ok\":true}",
+                "bodyBytes": 11,
+            },
+            {"event": "responsebody", "id": 7, "body": "ignored"},
+        ])
+        .to_string();
+        s.capture_network_events(&snapshot);
+        let events = call(&mut s, "events_read", json!({})).await["events"]
+            .as_array()
+            .unwrap()
+            .clone();
+        // console + pageerror + request + response, responsebody filtered out.
+        let kinds: Vec<&str> = events.iter().map(|e| e["kind"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["console", "pageerror", "request", "response"]);
+        // Redaction: cookie / authorization / set-cookie never carry raw values.
+        let req = &events[2]["body"]["requestHeaders"];
+        assert_eq!(req["cookie"], "<redacted>");
+        assert_eq!(req["authorization"], "<redacted>");
+        assert_eq!(req["accept"], "application/json");
+        assert_eq!(
+            events[3]["body"]["responseHeaders"]["set-cookie"],
+            "<redacted>"
+        );
+        // Body bytes dropped — a dropped-flag replaces them so the reader can
+        // tell the body existed but is not leaked.
+        assert!(events[2]["body"].get("requestBody").is_none());
+        assert_eq!(events[2]["body"]["requestBodyDropped"], true);
+        assert!(events[3]["body"].get("body").is_none());
+        assert_eq!(events[3]["body"]["bodyDropped"], true);
+        // Target annotation points at the root (the capture is session-wide).
+        let root_id = s.root_target.as_deref().unwrap().to_owned();
+        for event in &events {
+            assert_eq!(event["target"], root_id);
+        }
+        // Non-array JSON short-circuits without touching the event log.
+        let before = s.event_log.len();
+        s.capture_network_events("not-json");
+        s.capture_network_events("{\"shape\":\"object\"}");
+        assert_eq!(s.event_log.len(), before);
+        // Pushing more than MAX_EVENTS entries evicts oldest-first.
+        s.events_clear();
+        let mut entries = Vec::with_capacity(MAX_EVENTS + 5);
+        for i in 0..MAX_EVENTS + 5 {
+            entries.push(serde_json::json!({
+                "event": "console",
+                "sequence": i,
+            }));
+        }
+        let big_snapshot = serde_json::Value::Array(entries).to_string();
+        s.capture_network_events(&big_snapshot);
+        // The log is capped at MAX_EVENTS and the earliest sequences are gone.
+        assert_eq!(s.event_log.len(), MAX_EVENTS);
+        let sequences: Vec<u64> = s
+            .event_log
+            .iter()
+            .map(|event| event.body.as_ref().unwrap()["sequence"].as_u64().unwrap())
+            .collect();
+        assert_eq!(*sequences.first().unwrap(), 5);
+        assert_eq!(*sequences.last().unwrap(), (MAX_EVENTS + 4) as u64);
+    }
+
+    #[tokio::test]
+    async fn events_read_captures_target_close_with_a_monotonic_cursor_and_clear() {
+        // #524 minimum: target.closed lands in the event log, the cursor is
+        // monotonic, and events_clear drops entries without resetting cursors
+        // an earlier observer may still pass as `after`.
+        let mut s = Session::new();
+        let initial = call(&mut s, "events_read", json!({})).await;
+        assert_eq!(initial["events"], json!([]));
+        assert_eq!(initial["nextCursor"], 0);
+        s.load("https://x.test/", PAGE);
+        let id = call(&mut s, "list_targets", json!({})).await["targets"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        call(&mut s, "close_target", json!({ "id": id })).await;
+        let first = call(&mut s, "events_read", json!({})).await;
+        let events = first["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["kind"], "target.closed");
+        assert_eq!(events[0]["target"], id);
+        assert_eq!(events[0]["body"]["url"], "https://x.test/");
+        let cursor = first["nextCursor"].as_u64().unwrap();
+        assert!(cursor >= 1);
+        // A read with `after: cursor` returns no events.
+        let next = call(&mut s, "events_read", json!({ "after": cursor })).await;
+        assert_eq!(next["events"], json!([]));
+        assert_eq!(next["nextCursor"], cursor);
+        // Open + close a second target; the new event arrives and the cursor advances.
+        s.load("https://x.test/another", PAGE);
+        let next_id = call(&mut s, "list_targets", json!({})).await["targets"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        call(&mut s, "close_target", json!({ "id": next_id })).await;
+        let after = call(&mut s, "events_read", json!({ "after": cursor })).await;
+        let after_events = after["events"].as_array().unwrap();
+        assert_eq!(after_events.len(), 1);
+        assert_eq!(after_events[0]["target"], next_id);
+        assert!(after_events[0]["cursor"].as_u64().unwrap() > cursor);
+        // Clearing drops entries but keeps the cursor moving forward.
+        call(&mut s, "events_clear", json!({})).await;
+        let cleared = call(&mut s, "events_read", json!({})).await;
+        assert_eq!(cleared["events"], json!([]));
+        assert!(cleared["nextCursor"].as_u64().unwrap() >= after["nextCursor"].as_u64().unwrap());
+        // A non-integer `after` is an explicit error, not a silent replay
+        // of the whole buffer (#524 nit from review round 2).
+        let bad_string = call_tool(&mut s, "events_read", &json!({ "after": "7" }))
+            .await
+            .unwrap_err();
+        assert!(bad_string.contains("non-negative integer"), "{bad_string}");
+        let bad_negative = call_tool(&mut s, "events_read", &json!({ "after": -1 }))
+            .await
+            .unwrap_err();
+        assert!(
+            bad_negative.contains("non-negative integer"),
+            "{bad_negative}"
+        );
+    }
+
+    #[tokio::test]
+    async fn retained_target_lists_the_root_and_close_clears_the_live_tree() {
+        // #523 minimum: first load mints an opaque root ID; list_targets returns
+        // it; close_target drops both the registry entry and the live tree. A
+        // second goto afterward mints a fresh ID (never recycles).
+        let mut s = Session::new();
+        assert_eq!(
+            call(&mut s, "list_targets", json!({})).await["targets"],
+            json!([])
+        );
+        s.load("https://x.test/", PAGE);
+        let targets = call(&mut s, "list_targets", json!({})).await;
+        let listed = targets["targets"].as_array().unwrap();
+        assert_eq!(listed.len(), 1);
+        let first_id = listed[0]["id"].as_str().unwrap().to_owned();
+        assert!(first_id.starts_with("page-"));
+        assert_eq!(listed[0]["url"], "https://x.test/");
+        assert_eq!(listed[0]["opener"], Value::Null);
+        // Same ID survives a navigation.
+        s.load("https://x.test/next", PAGE);
+        let after = call(&mut s, "list_targets", json!({})).await;
+        assert_eq!(after["targets"][0]["id"], first_id);
+        assert_eq!(after["targets"][0]["url"], "https://x.test/next");
+        // Simulate per-lifetime trails that belong to the dropped target.
+        s.requests.push("https://x.test/beacon".into());
+        s.dom_history.push("<p>rendered</p>".into());
+        s.back.push("https://x.test/earlier".into());
+        // Closing the root drops the registry, the live tree, AND every
+        // per-lifetime trail (requests, dom_history, back/forward history,
+        // response metadata, indeterminate indices) so a fresh goto starts
+        // clean (#523 nit from review round 2).
+        let closed = call(&mut s, "close_target", json!({ "id": first_id })).await;
+        assert_eq!(closed["closed"]["id"], first_id);
+        assert_eq!(
+            call(&mut s, "list_targets", json!({})).await["targets"],
+            json!([])
+        );
+        assert!(s.tree().is_err());
+        assert!(s.requests.is_empty(), "requests should reset on root close");
+        assert!(
+            s.dom_history.is_empty(),
+            "dom_history should reset on root close"
+        );
+        assert!(s.back.is_empty(), "back history should reset on root close");
+        // The next load mints a fresh ID that never collides with the closed one.
+        s.load("https://x.test/again", PAGE);
+        let next = call(&mut s, "list_targets", json!({})).await["targets"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_ne!(next, first_id);
+        // Unknown IDs are explicit errors, not silent no-ops.
+        let error = call_tool(&mut s, "close_target", &json!({ "id": "page-999" }))
+            .await
+            .unwrap_err();
+        assert!(error.contains("unknown target"), "{error}");
+        // Missing 'id' surfaces a dedicated error rather than a silent close.
+        let missing = call_tool(&mut s, "close_target", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(missing.contains("missing 'id'"), "{missing}");
     }
 
     #[tokio::test]

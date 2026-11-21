@@ -280,6 +280,11 @@ async fn run_case_request(
 
 #[tokio::test(flavor = "current_thread")]
 async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() {
+    // #253 deferred publication breaks this Chrome 156 case replay unless the
+    // test sees synchronous commits — the fixture issues the next request
+    // immediately after the dictionary GET resolves. The Chrome-split timing
+    // assertions live in the Core unit tests.
+    turbo_surf_core::compression_dictionary::set_publication_delay_micros_for_tests(0);
     let (_fixture, urls) = fixture();
     let primary = urls["primary"].as_str().unwrap();
     let control: Value = serde_json::from_str(include_str!(

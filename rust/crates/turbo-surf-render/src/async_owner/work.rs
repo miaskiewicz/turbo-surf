@@ -546,6 +546,10 @@ impl PromiseWork {
 mod terminal_cache_tests;
 
 #[cfg(all(test, not(turbo_surf_native_proxy)))]
+#[path = "work_selection_guard_tests.rs"]
+mod selection_guard_tests;
+
+#[cfg(all(test, not(turbo_surf_native_proxy)))]
 #[path = "work_prune_scaling_tests.rs"]
 mod prune_scaling_tests;
 

@@ -7438,6 +7438,7 @@ mod tests {
             weight: 400,
             italic: false,
             urls: vec!["".into(), "http://127.0.0.1:1/dead.woff2".into()],
+            unicode_range: vec![],
         };
         let face = session
             .fetch_font_face("https://font-test.local/", &source)

@@ -426,10 +426,7 @@ mod tests {
             "@font-face{font-family:Latin;src:url(/a.woff2);unicode-range:U+0-7F}\
              @font-face{font-family:Ext;src:url(/b.woff2);unicode-range:U+100-2BA,U+20A0-20AB}",
         );
-        assert_eq!(
-            sources[0].unicode_range,
-            vec![0u32..=0x7f],
-        );
+        assert_eq!(sources[0].unicode_range, vec![0u32..=0x7f],);
         assert_eq!(
             sources[1].unicode_range,
             vec![0x100u32..=0x2ba, 0x20a0u32..=0x20ab],

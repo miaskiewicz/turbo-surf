@@ -107,10 +107,43 @@ comparison are recorded separately. This remains a local unpublished DOM graph.
 
 The current service-owner auth inventory is 46 tests in 15 files. One unique
 case has failed on the original and diagnostic artifacts; 45 cases remain unrun.
-The fixed artifact has not yet rerun the auth journey. No full auth or broader
-payroll acceptance pass is claimed. Owner coordination, source/fixture hashes,
+The fixed artifact rerun below reaches a later modal wait failure. No full auth
+or broader payroll acceptance pass is claimed. Owner coordination, source/fixture hashes,
 exact command, counts and diagnostic guard data are preserved in
 `.recovery/payroll-v087-20261121/diagnostic-owner-window/`.
+
+### Fixed artifact follow-on: request-write modal does not appear
+
+A fresh explicitly reserved service window ran the exact Flux super admin case
+against fixed artifact `186a83cf...cdaf05e`. Login, admin navigation, read access,
+and read-banner geometry passed. The request-write click returned without the
+old ownership error, then the existing 30-second visible wait for
+`delegated-write-modal-note` timed out. The whole case took 99.970 seconds; this
+was a locator timeout, not the 120-second case deadline. Result: 0 passed,
+1 failed, zero skips/cancellations. No note fill or grant-create submit stage was
+reached; the original baseline revoke and afterEach remained enabled.
+
+Page error and console error captures are empty. All 5,157 captured served source
+files and the fixture JSON stayed unchanged during this window. The owner
+confirms API image `flux-apis:codex-e2e-audit`, commit `6e6e54e4b` (cleanup PR #1254),
+with no restart during the run. The window was immediately returned; shared
+service usage is again explicitly held for #772. A current Chromium control on
+this backend was requested from its owner; the earlier passing control used a
+different backend commit and is not substituted for it.
+
+The new failure's root cause and ownership remain unproven. Basic offline
+React/MUI Button+Dialog controls pass. A separate plain-DOM probe shows a
+potential frozen-target mechanism: replacing a child during focus/mousedown can
+leave later shim events on that detached child. Browser-oracle comparison and
+actual-application target-lifetime evidence are still pending; this hypothesis
+is not yet an application diagnosis or a production fix. Fix SHA: none.
+
+Regression subset remains the exact original delegated-write case, with the
+narrow offline controls under Root `.recovery/modal-repro/`. Full run/error,
+source/fixture identities and result receipt are under
+`.recovery/payroll-v087-20261121/fixed-owner-window/`. The same one unique auth case
+remains failed; 45 auth cases are unrun. No deadline, assertion, fixture premise,
+error policy, or exclusion has been relaxed.
 
 ## v0.8.7 unicode-range workspace test compilation
 

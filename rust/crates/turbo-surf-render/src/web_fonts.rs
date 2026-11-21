@@ -245,6 +245,9 @@ pub struct WebFontSource {
     pub weight: u16,
     pub italic: bool,
     pub urls: Vec<String>,
+    /// Parsed `unicode-range` descriptor (turbo-surf#533). Empty vec means no
+    /// range was declared; the face covers every codepoint its cmap supports.
+    pub unicode_range: Vec<std::ops::RangeInclusive<u32>>,
 }
 
 /// The `@font-face` rules of `css` (top-level rules; a rule without a family or a `url()`
@@ -270,6 +273,7 @@ fn font_face_source(properties: &[FontFaceProperty<'_>]) -> Option<WebFontSource
         weight: 400,
         italic: false,
         urls: Vec::new(),
+        unicode_range: Vec::new(),
     };
     for property in properties {
         match property {
@@ -288,6 +292,17 @@ fn font_face_source(properties: &[FontFaceProperty<'_>]) -> Option<WebFontSource
             FontFaceProperty::FontWeight(_) => source.weight = weight(&value_text(property)?),
             FontFaceProperty::FontStyle(_) => {
                 source.italic = value_text(property)?.starts_with(['i', 'o']);
+            }
+            FontFaceProperty::UnicodeRange(_) => {
+                // #533: route runs per codepoint by honoring the declared range.
+                // Malformed input falls back to "covers everything" so a bad
+                // descriptor can never hide a face that would otherwise match.
+                if let Some(ranges) = value_text(property)
+                    .as_deref()
+                    .and_then(turbo_dom_layout::text::parse_unicode_range)
+                {
+                    source.unicode_range = ranges;
+                }
             }
             _ => {}
         }
@@ -310,7 +325,14 @@ fn weight(text: &str) -> u16 {
 /// Chrome's web-font metrics (`FontFace::from_web_font_bytes`); `None` for bytes that are
 /// not a usable font.
 pub fn web_font_face(bytes: &[u8], source: &WebFontSource) -> Option<FontFace> {
-    parse(bytes, source.family.clone(), source.weight, source.italic)
+    let face = parse(bytes, source.family.clone(), source.weight, source.italic)?;
+    // #533 + turbo-dom#539: route per codepoint by handing the parsed range set
+    // to FontRegistry::resolve_glyph via FontFace::has_glyph.
+    Some(if source.unicode_range.is_empty() {
+        face
+    } else {
+        face.with_unicode_range(source.unicode_range.clone())
+    })
 }
 
 #[cfg(test)]
@@ -375,6 +397,7 @@ mod tests {
             weight,
             italic,
             urls: urls.iter().map(|url| url.to_string()).collect(),
+            unicode_range: Vec::new(),
         };
         assert_eq!(
             sources,
@@ -391,5 +414,41 @@ mod tests {
         assert!(face.is_web_font());
         assert_eq!(face.family(), "C");
         assert!(web_font_face(b"not a font", &sources[2]).is_none());
+    }
+
+    #[test]
+    fn unicode_range_is_parsed_and_handed_to_the_face() {
+        // #533: honor the @font-face unicode-range descriptor. Every Next.js
+        // webfont split uses this (e.g. fluxpayroll.ai's Inter at U+?? vs
+        // U+100-2BA). A face without a range covers everything its cmap
+        // supports; a face with a range only resolves codepoints inside it.
+        let sources = font_face_sources(
+            "@font-face{font-family:Latin;src:url(/a.woff2);unicode-range:U+0-7F}\
+             @font-face{font-family:Ext;src:url(/b.woff2);unicode-range:U+100-2BA,U+20A0-20AB}",
+        );
+        assert_eq!(
+            sources[0].unicode_range,
+            vec![0u32..=0x7f],
+        );
+        assert_eq!(
+            sources[1].unicode_range,
+            vec![0x100u32..=0x2ba, 0x20a0u32..=0x20ab],
+        );
+        let latin = web_font_face(WOFF2, &sources[0]).unwrap();
+        // The fixture's cmap has `A` and the declared range covers it:
+        // range AND cmap ⇒ has_glyph.
+        assert!(latin.has_glyph('A'));
+        let ext = web_font_face(WOFF2, &sources[1]).unwrap();
+        // Same cmap, but U+0041 falls outside the declared range → filtered.
+        // This is the regression #533 was filed for: Next.js splits lose basic
+        // Latin coverage when the engine ignores unicode-range.
+        assert!(!ext.has_glyph('A'));
+        // Malformed input falls back to "covers everything the cmap supports":
+        // an unparseable descriptor can never hide a face that would otherwise
+        // match. The face has no declared range, so its cmap alone decides.
+        let bogus = font_face_sources(
+            "@font-face{font-family:Latin;src:url(/a.woff2);unicode-range:not-a-range}",
+        );
+        assert!(bogus[0].unicode_range.is_empty());
     }
 }

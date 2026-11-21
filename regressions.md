@@ -149,14 +149,54 @@ Regression subset remains the exact original delegated-write case, with the
 narrow offline controls under Root `.recovery/modal-repro/`. Full run/error,
 source/fixture identities and result receipt are under
 `.recovery/payroll-v087-20261121/fixed-owner-window/`. The same one unique auth case
-remains failed; 45 auth cases are unrun. A bounded diagnostic observer is prepared for a future coordinated run: passive
-event-path/connectedness records, synchronous no-drain DOM reads, and manually
-selected React boolean/lane metadata only. Its offline fixture proves exactly
-one real handler, matching live/cached modal state, false-to-true boolean state,
-and omission of a sensitive sentinel. It does not replace handlers or reset
-React state; diagnostic perturbation is explicitly labeled. No live observer run
-is claimed while services are on HOLD. No deadline, assertion, fixture premise,
-error policy, or exclusion has been relaxed.
+remains failed; 45 auth cases are unrun.
+
+A subsequent reserved observer window on API commit `67b11bdb6` and owner-declared
+frontend `70267af6c` plus frozen WIP reproduces the modal timeout in 77.557 seconds
+(0 passed, 1 failed, zero skips/cancellations). The complete pointer/mouse/click
+sequence reaches the same connected request-write button. ViewAsIndicator's
+React lanes change from 0 to 2 and remain 2 after the wait, while its modal hook
+stays false and synchronous guest DOM reads find no note. This supports an update
+being queued without committing; it does not establish the precise engine cause.
+The bounded ancestor walk misses HostRoot, so no root scheduler state is inferred.
+This window used the owner's explicit source freeze agreement rather than new
+per-file source hashes; the fixture file stayed unchanged. Receipts are under
+Root `.recovery/payroll-v087-20261121/observer-owner-window/`.
+
+The observer uses passive listeners, synchronous no-drain reads, and selected
+boolean/lane metadata. Offline controls verify one real handler, live/cached
+modal agreement, and omission of a sensitive sentinel. Diagnostic perturbation
+is explicitly labeled. A separate repeated-navigation FluxUI control now aborts
+in the binding's selection scheduler on the second document; plain DOM and pure
+React contrasts pass. That crash is being reduced independently and is not yet
+attributed as the application's modal cause. Services have returned to HOLD.
+No deadline, assertion, fixture premise, error policy, or exclusion is relaxed.
+
+The next owner-reserved window used diagnostic artifact `a2630814...91b91b`
+(source `a11ff6f6` plus bounded termination logging) against frontend
+`a11863430` and backend `f2073bb695933e7907adbe807260f2ad51454ca2`.
+The original case fails in 82.418 seconds, 0 passed / 1 failed, no skips or
+cancellations, with the fixture file unchanged. Direct document HostRoot reads
+now succeed: pending lanes 2050, callback priority 0 and no callback are present
+before the request-write click and remain afterward. ViewAs lanes change 0 to 2
+without opening the modal. A genuine session watchdog requests V8 termination
+at its unchanged 10,000 ms budget (elapsed 10,002 ms, accepted=true). The record
+lacks a wall timestamp, so its exact phase and causal relationship remain
+unproven. No collect-rejection records appear. This diagnostic covers only the
+session/caller watchdog and poll-supervisor families; absence of other stop
+records is not an all-path claim. The service window was returned immediately.
+Receipts: Root `.recovery/payroll-v087-20261121/termination-owner-window-ready/`
+and `.recovery/react-pending-diag/ARTIFACT.json`. The initial sandbox-denied
+connection attempt is separately preserved under `termination-owner-window/`.
+
+The independent second-document crash is now reduced to public React 18.3.1,
+MUI 9.5.0 and `posthog-js/react` 1.447.3 with public Page/Locator calls only.
+Native aborts in `dom_ownership::local → html_popover::schedule_after →
+selection::dispatch`; Chrome 159.0.8154.6 passes all three documents. Producer
+investigation [turbo-dom #540](https://github.com/miaskiewicz/turbo-dom/issues/540)
+is filed under v0.8.7 with portable source, provenance and sanitized backtrace.
+The actual scheduler document identity and application-modal connection remain
+unproven. Packet: Root `.recovery/react-modal-drain/public-repro-packet/`.
 
 ## v0.8.7 unicode-range workspace test compilation
 

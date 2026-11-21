@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2669,7 +2669,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4072,7 +4072,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4422,7 +4422,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5814,9 +5814,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca32786ddbea983986ed455d11fb4170b17f6b1cd5de9794158edd3663a27861"
+version = "0.8.7"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5830,9 +5828,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-browser-env"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feab6d9de0d59af4e619c908c8a35f98a4b1591b1be93c3888bb541de6f4cf8e"
+version = "0.8.7"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5849,9 +5845,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-layout"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c86ed183966210c0a0bd773251630ea2b3284a8c66fcad8be23cd0c62b15b87"
+version = "0.8.7"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5872,9 +5866,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom-raster"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "794604a9d30debd4bc0e68930c195ffda78a550512100818c0734bb14fdf0661"
+version = "0.8.7"
 dependencies = [
  "base64",
  "core-foundation",
@@ -6881,7 +6873,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

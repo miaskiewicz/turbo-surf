@@ -127,22 +127,35 @@ Page error and console error captures are empty. All 5,157 captured served sourc
 files and the fixture JSON stayed unchanged during this window. The owner
 confirms API image `flux-apis:codex-e2e-audit`, commit `6e6e54e4b` (cleanup PR #1254),
 with no restart during the run. The window was immediately returned; shared
-service usage is again explicitly held for #772. A current Chromium control on
-this backend was requested from its owner; the earlier passing control used a
-different backend commit and is not substituted for it.
+service usage is again explicitly held for #772. The owner then ran the exact Chromium case on the same backend commit:
+1 passed, zero skipped, 7.8-second case (8.3 seconds total), including read/write
+banners, grant end, and afterEach cleanup. The earlier different-backend control
+is not substituted for this new one.
 
 The new failure's root cause and ownership remain unproven. Basic offline
 React/MUI Button+Dialog controls pass. A separate plain-DOM probe shows a
 potential frozen-target mechanism: replacing a child during focus/mousedown can
-leave later shim events on that detached child. Browser-oracle comparison and
-actual-application target-lifetime evidence are still pending; this hypothesis
-is not yet an application diagnosis or a production fix. Fix SHA: none.
+leave later shim events on that detached child. A separately identified Chrome 159.0.8154.6 oracle (the pinned 156 binary was
+unavailable) also suppresses the final button click in both replacement modes;
+the unchanged-child contrast opens normally in both engines. Thus this does not
+explain the application modal failure and no production retargeting change is
+justified. Chrome does send pointerup/mouseup to the replacement node while the
+shim dispatches on its detached prior target; that independent event-path
+difference remains tracked, unintegrated, and without application-causal proof.
+The oracle used the required wrapper with an explicit existing-binary override,
+localhost-only flags and no download. Fix SHA for the modal failure: none.
 
 Regression subset remains the exact original delegated-write case, with the
 narrow offline controls under Root `.recovery/modal-repro/`. Full run/error,
 source/fixture identities and result receipt are under
 `.recovery/payroll-v087-20261121/fixed-owner-window/`. The same one unique auth case
-remains failed; 45 auth cases are unrun. No deadline, assertion, fixture premise,
+remains failed; 45 auth cases are unrun. A bounded diagnostic observer is prepared for a future coordinated run: passive
+event-path/connectedness records, synchronous no-drain DOM reads, and manually
+selected React boolean/lane metadata only. Its offline fixture proves exactly
+one real handler, matching live/cached modal state, false-to-true boolean state,
+and omission of a sensitive sentinel. It does not replace handlers or reset
+React state; diagnostic perturbation is explicitly labeled. No live observer run
+is claimed while services are on HOLD. No deadline, assertion, fixture premise,
 error policy, or exclusion has been relaxed.
 
 ## v0.8.7 unicode-range workspace test compilation

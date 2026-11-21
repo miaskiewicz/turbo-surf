@@ -16,13 +16,13 @@ The case passed real PropelAuth login, admin-shell navigation, read access, and
 the exact read-banner geometry assertions (height 44), then failed during the
 grant portion after 64.184 seconds. It did not reach the write-banner assertions.
 Result: 0 passed, 1 failed, 0 skipped, 0 canceled. The native failure-capture
-fixture also observed the authenticated admin shell. The precise failing native
-operation and ownership-guard branch are still under investigation; the shared
-error string alone does not prove an unknown op, collected Promise parent, or
-inconsistent owner. Surf owns this diagnosis; no producer defect is established.
+fixture also observed the authenticated admin shell. The first run did not identify which native guard rejected the action. The
+separately labeled diagnostic rerun below now confirms the same-root collected
+parent branch. Surf owns the repair; no producer defect is established.
 The independently reproduced collected-root-parent defect is fixed in `728fd61`;
-application-causal confirmation and restored-green application validation remain
-pending. The offline control and gate results below do not establish an auth pass.
+application causality is confirmed by the diagnostic run below. Restored-green
+application validation remains pending. The offline control and gate results
+below do not establish an auth pass.
 
 The service owner explicitly reserved ports 3000/3001 and paused edits/tests/writes
 for this single case. Frontend: the audit worktree at `7ad381b96` plus pending #772
@@ -56,7 +56,10 @@ receipt `.recovery/payroll-v087-20261121/pending-parent-repro.log`.
 This establishes an offline Surf defect, not yet application causality. A separate
 diagnostic-only NAPI build labels the original rejection site and numeric guard
 conditions, without changing selection or admission. Live use remains subject to
-a new explicit service-owner window. Candidate production repair is not merged.
+a new explicit service-owner window. Production repair `728fd612` is locally integrated into `release/v0.8.7`, with
+fixture correction `9feee266` and evidence commit `69132a7b`. The development DOM
+patch is retained and must be dropped/replaced with the published dependency
+graph before any release tag; no tag or publication is part of this work.
 
 The candidate permits only the existing same-authenticated-root collected-parent
 classification for generic action/timer selection, preserving unresolved explicit
@@ -77,6 +80,37 @@ all-target Clippy with denied warnings also passes. No application pass is claim
 pre-existing unicode-range assertion formatting issue is corrected with rustfmt.
 Receipts: Root `.recovery/payroll-v087-20261121/pending-parent-{candidate,guards-restored,inverse,related-restored}.log`,
 `inverse-source.json`, `CANDIDATE-SOURCE.json`, and `candidate-{fmt-restored,clippy,complexity-restored}.log`.
+
+### Confirmed application guard branch and full shim validation
+
+A second explicitly reserved two-minute window ran the exact diagnostic case
+with original production selection logic plus numeric error labels. It passed
+login, admin shell, read permission and exact read-banner geometry, then failed
+at 69.512 seconds with:
+`selection inconsistent=false unknown_ops=0 unknown_parents=4 collected_root_parents=4 strict=true`.
+This confirms the application hits the same collected, authenticated root-parent
+state as the deterministic modal regression. It is not an unknown operation or
+inconsistent owner. All 5,157 captured frontend/E2E source files and the shared
+fixture file remained unchanged during this run. The window was immediately
+returned; another live run requires a new explicit owner READY.
+
+The fixed signed artifact from clean commit `69132a7b` has SHA256
+`186a83cf4d855d8cf408bc48bd635fdf627fb8ee3aa9e332006bcbc34cdaf05e`.
+Its full standard shim suite passes 873 tests, zero failures/cancellations and
+one intentional skip that tests skipped bodies do not execute. Node's actual
+loaded-native report contains only this selected addon. The branch's package
+version remains 0.8.6 despite the v0.8.7 branch name. Exact native source, features,
+compiled package paths and library hash are recorded in Root
+`.recovery/payroll-v087-20261121/FIXED-ARTIFACT.json`; `fixed-shim.log` is the full
+exit-zero receipt. The archive identity and unchanged 2,075-file producer source
+comparison are recorded separately. This remains a local unpublished DOM graph.
+
+The current service-owner auth inventory is 46 tests in 15 files. One unique
+case has failed on the original and diagnostic artifacts; 45 cases remain unrun.
+The fixed artifact has not yet rerun the auth journey. No full auth or broader
+payroll acceptance pass is claimed. Owner coordination, source/fixture hashes,
+exact command, counts and diagnostic guard data are preserved in
+`.recovery/payroll-v087-20261121/diagnostic-owner-window/`.
 
 ## v0.8.7 unicode-range workspace test compilation
 

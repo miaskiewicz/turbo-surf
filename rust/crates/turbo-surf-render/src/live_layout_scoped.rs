@@ -120,6 +120,8 @@ fn matches_validated(
     source: &str,
     validated: &mut bool,
 ) -> Result<bool, String> {
+    #[cfg(test)]
+    ORDINARY_MATCHES.with(|count| count.set(count.get() + 1));
     // The checked API validates only the selector, then calls matches. Keep the
     // first eligible checked call and evaluate every later node's current state.
     if *validated {
@@ -147,6 +149,21 @@ fn selector_sources(source: &str) -> Result<Vec<String>, String> {
         });
     result.map_err(|_| "native selector source parsing failed".into())
 }
+fn candidate_seed(selector: &Selector<'_>) -> Option<String> {
+    for component in selector.iter_raw_match_order() {
+        let (prefix, name) = match component {
+            Component::Combinator(_) => break,
+            Component::ID(value) => ("#", value.as_ref()),
+            Component::Class(value) => (".", value.as_ref()),
+            _ => continue,
+        };
+        let mut source = String::from(prefix);
+        cssparser::serialize_identifier(name, &mut source).ok()?;
+        return Some(source);
+    }
+    None
+}
+
 fn shadow_selector(selector: &Selector<'_>) -> bool {
     selector.iter_raw_match_order().any(|part| match part {
         Component::Host(_) | Component::Slotted(_) | Component::Part(_) => true,
@@ -260,9 +277,18 @@ impl Matcher<'_> {
             return self.batched_nodes(source);
         }
         let shadow = shadow_selector(selector);
+        let candidates = self.candidate_nodes(selector, shadow)?;
+        let scoped = candidates
+            .is_none()
+            .then(|| self.graph.scopes.keys().copied());
+        let nodes = candidates
+            .iter()
+            .flatten()
+            .copied()
+            .chain(scoped.into_iter().flatten());
         let mut validated = false;
         let mut result = Vec::new();
-        for &node in self.graph.scopes.keys() {
+        for node in nodes {
             if self.tree.node_type_id(node) != 1 {
                 continue;
             }
@@ -277,6 +303,20 @@ impl Matcher<'_> {
             }
         }
         Ok(result)
+    }
+    fn candidate_nodes(
+        &self,
+        selector: &Selector<'_>,
+        shadow: bool,
+    ) -> Result<Option<Vec<Handle>>, String> {
+        // Reuse only a static rightmost-compound seed. The complete selector,
+        // including every dynamic pseudo and ancestor, is still checked below.
+        if shadow || self.root != self.tree.root() {
+            return Ok(None);
+        }
+        candidate_seed(selector)
+            .map(|seed| self.batched_nodes(&seed))
+            .transpose()
     }
     fn batched_nodes(&self, source: &str) -> Result<Vec<Handle>, String> {
         #[cfg(test)]
@@ -515,6 +555,9 @@ pub(crate) fn ua_rules(
 thread_local! {static ORDINARY_VALIDATIONS:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
 
 #[cfg(test)]
+thread_local! {static ORDINARY_MATCHES:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
+
+#[cfg(test)]
 thread_local! {static BATCH_QUERIES:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
 
 #[cfg(test)]
@@ -692,6 +735,59 @@ mod tests {
         }
         targets.sort_by_key(|target| target.source.0);
         targets
+    }
+
+    #[test]
+    fn dynamic_selector_candidates_only_match_the_rightmost_class() {
+        use turbo_dom_parser::rtdom::tree::FormProp;
+        let html = format!("<body>{}<section class=scope><input id=a type=checkbox class='pick:target'><input id=b type=checkbox class='pick:target'></section><input id=outside type=checkbox class='pick:target' checked>", "<i></i>".repeat(1000));
+        let mut tree = Tree::parse(&html);
+        let a = tree.get_element_by_id("a").unwrap();
+        let b = tree.get_element_by_id("b").unwrap();
+        let css = r#".scope > .pick\:target:checked{width:10px}"#;
+        for checked in [false, true, false] {
+            tree.set_form_property(a, FormProp::Checked, checked);
+            tree.set_form_property(b, FormProp::Checked, !checked);
+            let graph = Composition::scopes(&tree).unwrap();
+            let expected = legacy_targets(&tree, tree.root(), &graph, css);
+            ORDINARY_MATCHES.with(|count| count.set(0));
+            let actual = prepared(&tree, tree.root(), &graph, css).targets;
+            assert_eq!(actual, expected);
+            assert_eq!(actual.len(), 1);
+            assert_eq!(actual[0].source, source_id(1, if checked { a } else { b }));
+            assert!(
+                ORDINARY_MATCHES.with(|count| count.get()) <= 3,
+                "matching calls: {}",
+                ORDINARY_MATCHES.with(|count| count.get())
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_id_candidates_keep_duplicate_ids_and_live_state() {
+        use turbo_dom_parser::rtdom::tree::FormProp;
+        let mut tree = Tree::parse(
+            "<body><input id=duplicate type=checkbox><input id=duplicate type=checkbox>",
+        );
+        let controls = tree.query_selector_all("input");
+        let first = controls[0];
+        let second = controls[1];
+        for checked in [false, true, false] {
+            tree.set_form_property(first, FormProp::Checked, checked);
+            tree.set_form_property(second, FormProp::Checked, !checked);
+            let graph = Composition::scopes(&tree).unwrap();
+            let css = "#duplicate:checked{width:10px}";
+            let expected = legacy_targets(&tree, tree.root(), &graph, css);
+            ORDINARY_MATCHES.with(|count| count.set(0));
+            let actual = prepared(&tree, tree.root(), &graph, css).targets;
+            assert_eq!(actual, expected);
+            assert_eq!(actual.len(), 1);
+            assert!(
+                ORDINARY_MATCHES.with(|count| count.get()) <= 2,
+                "matching calls: {}",
+                ORDINARY_MATCHES.with(|count| count.get())
+            );
+        }
     }
 
     #[test]

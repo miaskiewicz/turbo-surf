@@ -186,10 +186,12 @@ fn animation_values(source: &str) -> Option<AnimationValues> {
         for property in &frame.declarations.declarations {
             if !matches!(property, Property::Opacity(_)) {
                 // Typed vendor aliases share transform dependencies. Stroke dash
-                // paint also leaves another element's CSS border box unchanged.
+                // paint and filters also leave another branch's border box unchanged.
+                // Ancestor and scroll dependencies still need the independence proof.
                 result.paint_or_transform_only &= matches!(
                     property,
                     Property::Transform(_, _)
+                        | Property::Filter(_, _)
                         | Property::StrokeDasharray(_)
                         | Property::StrokeDashoffset(_)
                 );

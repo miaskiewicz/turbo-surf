@@ -95,6 +95,7 @@ struct DrainOptions<'a> {
     completion: Option<&'a v8::Global<v8::Value>>,
     goal: Goal,
     real: bool,
+    navigation: Option<(u64, u64)>,
 }
 
 #[derive(Default)]
@@ -109,7 +110,23 @@ pub(in crate::runtime) async fn quiescence_turn(
     root: u64,
     timers: bool,
 ) -> Result<QuiescenceTurn, String> {
-    drain_selected(rt, root, None, None, Goal::Quiescence { timers }).await
+    drain_selected(rt, root, None, None, Goal::Quiescence { timers }, None).await
+}
+
+pub(in crate::runtime) async fn action_quiescence_turn(
+    rt: &mut JsRuntime,
+    root: u64,
+    baseline: u64,
+) -> Result<QuiescenceTurn, String> {
+    drain_selected(
+        rt,
+        root,
+        None,
+        None,
+        Goal::Quiescence { timers: true },
+        Some((root, baseline)),
+    )
+    .await
 }
 
 /// Poll the shared VM once, then decide whether to wait using native selected
@@ -121,7 +138,7 @@ pub(in crate::runtime) async fn drain(
     condition: Option<&str>,
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
-    drain_selected(rt, root, condition, completion, Goal::Complete)
+    drain_selected(rt, root, condition, completion, Goal::Complete, None)
         .await
         .map(|_| ())
 }
@@ -132,6 +149,7 @@ async fn drain_selected(
     condition: Option<&str>,
     completion: Option<&v8::Global<v8::Value>>,
     goal: Goal,
+    navigation: Option<(u64, u64)>,
 ) -> Result<QuiescenceTurn, String> {
     let real = rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
     let options = DrainOptions {
@@ -139,6 +157,7 @@ async fn drain_selected(
         completion,
         goal,
         real,
+        navigation,
     };
     let storage_waiter = storage_events::waiter(&rt.op_state().borrow());
     let emulation_changed = rt
@@ -150,7 +169,7 @@ async fn drain_selected(
     let mut wake = None;
     checkpoint_window_timer(rt)?;
     loop {
-        if completion.is_some_and(|promise| promise_settled(rt, promise)) {
+        if requested_complete(rt, &options) {
             return Ok(QuiescenceTurn::default());
         }
         let selection = select_for_drain(rt, root, &options)?;
@@ -188,6 +207,9 @@ async fn drain_selected(
             Turn::Complete if matches!(goal, Goal::Complete) => {
                 return Ok(QuiescenceTurn::default());
             }
+            Turn::Complete if requested_complete(rt, &options) => {
+                return Ok(QuiescenceTurn::default())
+            }
             Turn::Complete => return quiescence_result(rt, root, 0),
             Turn::Timer(fired) if matches!(goal, Goal::Quiescence { .. }) => {
                 return quiescence_result(rt, root, fired);
@@ -206,10 +228,10 @@ fn poll_selected_turn(
     cx: &mut std::task::Context<'_>,
     wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
 ) -> Result<std::task::Poll<Turn>, String> {
-    let selection = select_for_drain(rt, root, options)?;
     if requested_complete(rt, options) {
         return Ok(std::task::Poll::Ready(Turn::Complete));
     }
+    let selection = select_for_drain(rt, root, options)?;
     if queued(rt, &selection)? {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
@@ -258,10 +280,10 @@ fn finish_selected_turn(
 ) -> Result<std::task::Poll<Turn>, String> {
     // Trusted task turns may create new native work or record a failed owner
     // admission. Never decide quiescence from the pre-dispatch graph snapshot.
-    let selection = select_for_drain(rt, root, options)?;
     if requested_complete(rt, options) {
         return Ok(std::task::Poll::Ready(Turn::Complete));
     }
+    let selection = select_for_drain(rt, root, options)?;
     if queued(rt, &selection)? {
         return Ok(std::task::Poll::Ready(Turn::Again));
     }
@@ -347,7 +369,13 @@ fn select_for_drain(
 }
 
 fn requested_complete(rt: &mut JsRuntime, options: &DrainOptions<'_>) -> bool {
-    options
+    options.navigation.is_some_and(|(target, baseline)| {
+        rt.op_state()
+            .borrow()
+            .borrow::<NetworkLog>()
+            .current_navigation_revision(target)
+            .is_some_and(|revision| revision > baseline)
+    }) || options
         .completion
         .is_some_and(|completion| promise_settled(rt, completion))
 }

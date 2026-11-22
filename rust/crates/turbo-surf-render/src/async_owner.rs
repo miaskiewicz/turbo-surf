@@ -11,7 +11,7 @@ mod drain;
 mod owners;
 #[path = "async_owner/work.rs"]
 mod work;
-pub(super) use drain::{drain, quiescence_turn, QuiescenceTurn};
+pub(super) use drain::{action_quiescence_turn, drain, quiescence_turn, QuiescenceTurn};
 
 use bridge::OwnerAsyncContext;
 use owners::{LeaseState, WeakOwners};

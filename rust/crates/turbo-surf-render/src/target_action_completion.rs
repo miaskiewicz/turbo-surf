@@ -91,6 +91,9 @@ impl PageSession {
             .or_else(|| snapshot["navigationRevision"].as_str())
             .ok_or("Native navigation baseline is unavailable")?
             .to_owned();
+        let baseline_revision = baseline
+            .parse()
+            .map_err(|_| "Invalid native action baseline")?;
         let mut action = CanceledAction {
             session: self,
             completed: false,
@@ -101,7 +104,7 @@ impl PageSession {
             } else {
                 action
                     .session
-                    .eval_target_engine(target, source, false)
+                    .eval_target_action_engine(target, source, baseline_revision)
                     .await?
             };
             match action

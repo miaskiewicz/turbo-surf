@@ -1059,7 +1059,18 @@ impl PageSession {
         collect: bool,
     ) -> Result<String, String> {
         let key = self.rt.activation_key();
-        key.during(self.eval_target_engine_active(target, source, collect))
+        key.during(self.eval_target_engine_active(target, source, collect, None))
+            .await
+    }
+
+    pub(super) async fn eval_target_action_engine(
+        &mut self,
+        target: u64,
+        source: &str,
+        baseline: u64,
+    ) -> Result<String, String> {
+        let key = self.rt.activation_key();
+        key.during(self.eval_target_engine_active(target, source, false, Some(baseline)))
             .await
     }
 
@@ -1068,6 +1079,7 @@ impl PageSession {
         target: u64,
         source: &str,
         collect: bool,
+        navigation: Option<u64>,
     ) -> Result<String, String> {
         auxiliary_navigation::reconcile_expired_source_modules(&mut self.rt, target)?;
         let expression = format!("(() => {{ {source}\n; return globalThis.__RESULT == null ? '' : String(globalThis.__RESULT); }})()");
@@ -1088,7 +1100,7 @@ impl PageSession {
                     .await?,
                 );
                 if !collect {
-                    target_quiescence::drain(&mut self.rt, target).await?;
+                    target_quiescence::drain(&mut self.rt, target, navigation).await?;
                 }
                 Ok(())
             }),

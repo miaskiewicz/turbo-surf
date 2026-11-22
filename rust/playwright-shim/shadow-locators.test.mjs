@@ -276,3 +276,25 @@ test(
     });
   },
 );
+
+test("inert metadata imports preserve light scopes beside clonable shadow roots", async () => {
+  await fixture(async (page) => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "clone-host";
+      host.innerHTML =
+        '<button id="light-metadata">Light</button><template><b>Inert</b></template>';
+      host.attachShadow({ mode: "open", clonable: true }).innerHTML =
+        '<button id="shadow-metadata">Shadow</button>';
+      document.body.appendChild(host);
+    });
+    assert.equal(await page.locator("#light-metadata").getAttribute("id"), "light-metadata");
+    assert.equal(await page.locator("#shadow-metadata").getAttribute("id"), "shadow-metadata");
+    assert.equal(await page.locator("xpath=//*[@id='shadow-metadata']").count(), 0);
+    assert.equal(
+      await page.evaluate(() => document.querySelectorAll("#shadow-metadata").length),
+      0,
+    );
+    assert.equal(await page.locator("#clone-host template").innerHTML(), "<b>Inert</b>");
+  });
+});

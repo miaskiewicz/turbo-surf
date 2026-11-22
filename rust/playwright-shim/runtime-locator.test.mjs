@@ -93,3 +93,43 @@ test("live role output does not linearly search all elements for every hit", () 
   );
   assert.equal(context.indexSearches, 0);
 });
+
+function copyMetadataFixture(node) {
+  return { children: node.children.map(copyMetadataFixture) };
+}
+
+test("inert locator copies cross the native mutation boundary once per subtree", () => {
+  const source = readFileSync(
+    new URL("../crates/turbo-surf-render/src/locator_dom.js", import.meta.url),
+    "utf8",
+  );
+  const copyStart = source.indexOf("function __locatorInertCopy(");
+  const copyEnd = source.indexOf("\nfunction __locatorMetadataRoot", copyStart);
+  let imports = 0;
+  let appends = 0;
+  const root = { children: Array.from({ length: 1000 }, () => ({ children: [] })) };
+  const context = vm.createContext({
+    __locatorMetadataOwner: () => ({}),
+    __locatorApply: Reflect.apply,
+    __locatorImport(node, deep) {
+      imports++;
+      return deep ? copyMetadataFixture(node) : { children: [] };
+    },
+    __locatorAppend(child) {
+      appends++;
+      this.children.push(child);
+    },
+    __locatorChildren: (node) => node.children,
+    __list: () => [],
+    __locatorPush: (list, value) => list.push(value),
+    __locatorPop: (list) => list.pop(),
+    root,
+  });
+  vm.runInContext(
+    `${source.slice(copyStart, copyEnd)}; result = __locatorInertCopy(root);`,
+    context,
+  );
+  assert.deepEqual(context.result, copyMetadataFixture(root));
+  assert.equal(imports, 1, "one native import must copy the whole subtree");
+  assert.equal(appends, 0, "copying must not reconcile native ownership per child");
+});

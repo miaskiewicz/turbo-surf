@@ -14028,7 +14028,8 @@ __G.tcApplyHover = function (el) {
     for (let i = 0; i < styles.length; i++) cssTexts.push(styles[i].textContent || "");
   } catch (e) {}
   try {
-    const sheets = document.styleSheets || [];
+    // Indexing the public live list refreshes all sheets on every access.
+    const sheets = __cssHost(document).readSheets();
     for (let si = 0; si < sheets.length; si++) {
       let rules;
       try {

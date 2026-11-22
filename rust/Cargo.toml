@@ -25,11 +25,11 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 opt-level = 3
 lto = "thin"
 
-# Temporary patch: pin to the turbo-dom release/0.8.7 branch for the #539
-# unicode-range fix. Revert once turbo-dom 0.8.7 publishes and this workspace
-# repins to it through crates.io.
+# Temporary immutable snapshot: turbo-dom release/0.8.7 at
+# 6f24c1488d596f72b49f6fec78fdd1bc1a97bd8c (#539 and #540).
+# Replace with registry 0.8.7 after publication, before tagging Surf.
 [patch.crates-io]
-turbo-dom = { path = "/tmp/turbo-dom-087/crates/turbo-dom" }
-turbo-dom-layout = { path = "/tmp/turbo-dom-087/crates/turbo-dom-layout" }
-turbo-dom-raster = { path = "/tmp/turbo-dom-087/crates/turbo-dom-raster" }
-turbo-dom-browser-env = { path = "/tmp/turbo-dom-087/crates/turbo-dom-browser-env" }
+turbo-dom = { path = "/tmp/turbo-dom-087-6f24c148/crates/turbo-dom" }
+turbo-dom-layout = { path = "/tmp/turbo-dom-087-6f24c148/crates/turbo-dom-layout" }
+turbo-dom-raster = { path = "/tmp/turbo-dom-087-6f24c148/crates/turbo-dom-raster" }
+turbo-dom-browser-env = { path = "/tmp/turbo-dom-087-6f24c148/crates/turbo-dom-browser-env" }

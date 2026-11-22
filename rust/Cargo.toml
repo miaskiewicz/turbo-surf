@@ -29,7 +29,7 @@ lto = "thin"
 # e741494b63a2cbf3af52f87e3cfec0299068db1b (#539, #540, #541 and host style revisions).
 # Replace with registry 0.8.7 after publication, before tagging Surf.
 [patch.crates-io]
-turbo-dom = { path = "/tmp/turbo-dom-087-905d4125/crates/turbo-dom" }
-turbo-dom-layout = { path = "/tmp/turbo-dom-087-905d4125/crates/turbo-dom-layout" }
-turbo-dom-raster = { path = "/tmp/turbo-dom-087-905d4125/crates/turbo-dom-raster" }
-turbo-dom-browser-env = { path = "/tmp/turbo-dom-087-905d4125/crates/turbo-dom-browser-env" }
+turbo-dom = { path = "/tmp/turbo-dom-087-e777d6db/crates/turbo-dom" }
+turbo-dom-layout = { path = "/tmp/turbo-dom-087-e777d6db/crates/turbo-dom-layout" }
+turbo-dom-raster = { path = "/tmp/turbo-dom-087-e777d6db/crates/turbo-dom-raster" }
+turbo-dom-browser-env = { path = "/tmp/turbo-dom-087-e777d6db/crates/turbo-dom-browser-env" }

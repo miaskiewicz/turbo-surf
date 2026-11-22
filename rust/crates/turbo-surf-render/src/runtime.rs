@@ -13251,17 +13251,20 @@ function __loadImage(el, win = globalThis, parser = false, restart = false) {
 // from the document's mutation consumer below (a src/srcset record on any <img> this
 // document owns, connected or not, and images inserted into its trees), and from
 // loadDocumentResources for parser images, so no image carries own properties.
-__G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
+__G.loadDocumentResources = function(doc = __document, win = globalThis, before = null, onlyStyle = null) {
   if(doc!==__document || __intrinsicApply(__documentType,doc,[])!==9)throw new TypeError("Resource loading requires the owning native Document");
-  __discoverDictionaries();
+  if(!onlyStyle)__discoverDictionaries();
   const styles=__list();
   // The query is already in document order. Avoid a whole-tree position walk
   // for each parser resource, unless a resource hook changed that order.
   const epoch=__resourceMutationEpoch;
-  const selected=__resourceListApply(__resourceDocumentQuery,doc,[before?"link,img,style,script":"link,img,style"]);
-  const length=__resourceListApply(__resourceListLength,selected,[]);
-  const elements={__proto__:null,length};
-  for(let index=0;index<length;index++)elements[index]=__resourceListApply(__resourceListItem,selected,[index]);
+  const elements={__proto__:null,length:0};
+  if(onlyStyle){elements[0]=onlyStyle;elements.length=1;}
+  else{
+    const selected=__resourceListApply(__resourceDocumentQuery,doc,[before?"link,img,style,script":"link,img,style"]);
+    elements.length=__resourceListApply(__resourceListLength,selected,[]);
+    for(let index=0;index<elements.length;index++)elements[index]=__resourceListApply(__resourceListItem,selected,[index]);
+  }
   const cutoff=before?__resourceIndexOf(elements,before):-1;
   for (let index=0;index<elements.length;index++) {
     const el=elements[index];
@@ -13642,6 +13645,23 @@ function __imageMutation(event) {
     if (event.added.length || event.removed.length) __reselectPicture(event.target);
   }
 }
+// Emotion inserts and edits many independent inline sheets during a commit.
+// Reload that sheet alone; unusual resource-containing style subtrees keep the
+// full scan so their nested links, images and dictionary admissions are preserved.
+function __singleMutatedStyle(event) {
+  let style=null;
+  if(__resourceElementKind(event.target)==="STYLE")style=event.target;
+  else if(event.type==="childList" && event.added.length===1 &&
+    __resourceElementKind(event.added[0])==="STYLE")style=event.added[0];
+  for(let index=0;index<event.ancestors.length;index++){
+    const ancestor=event.ancestors[index];
+    if(__resourceElementKind(ancestor)!=="STYLE")continue;
+    if(style && style!==ancestor)return null;
+    style=ancestor;
+  }
+  if(!style || __resourceApply(__resourceElementQuery,style,["link,img,style"])!==null)return null;
+  return style;
+}
 function __resourceMutation(event) {
   if(event.type==="childList")for(let index=0;index<event.removed.length;index++)__dictionaryRemoved(event.removed[index]);
   __imageMutation(event);
@@ -13664,7 +13684,7 @@ function __resourceMutation(event) {
   // Native IO can resume after a hydration round has ended. Admit newly
   // connected resources at their mutation; ordinary text/attribute edits do
   // not trigger a whole-document resource scan.
-  if (relevant) __loadMutatedResources();
+  if (relevant) __loadMutatedResources(__document,globalThis,null,__singleMutatedStyle(event));
 }
 ops.op_install_resource_consumer(__document, event => {
   __resourceMutationEpoch++;

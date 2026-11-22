@@ -286,3 +286,37 @@ async fn used_css_faces_load_before_the_load_event_without_a_layout_read() {
 async fn document_fonts_accessor_matches_chrome156() {
     assert_case("accessor", &[]).await;
 }
+
+async fn sheet_snapshot_probe(poison: bool) -> Value {
+    let mut page = PageSession::open(
+        "<!doctype html><head></head><body></body>",
+        "http://127.0.0.1/",
+        "",
+        "",
+        10000,
+    )
+    .await
+    .unwrap();
+    let probe = include_str!("fixtures/font_sheet_snapshot.js")
+        .strip_prefix("export ")
+        .unwrap();
+    serde_json::from_str(
+        &page
+            .read_engine(&format!("return ({probe})({poison});"))
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn font_discovery_does_not_repeat_live_stylesheet_list_refreshes() {
+    let result = sheet_snapshot_probe(false).await;
+    assert_eq!(result["sizes"], serde_json::json!([1, 2, 1, 0]));
+    assert!(result["firstReads"].as_u64().unwrap() <= 2, "{result}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn font_discovery_ignores_authored_stylesheet_list_accessors() {
+    let result = sheet_snapshot_probe(true).await;
+    assert_eq!(result["sizes"], serde_json::json!([1, 2, 1, 0]));
+}

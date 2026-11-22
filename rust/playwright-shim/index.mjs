@@ -3167,10 +3167,10 @@ return String(globalThis.__RESULT ?? ""); })()`,
     try {
       await this._collectSession(this._session, "globalThis.__RESULT = '';");
     } catch (error) {
+      const message = String(error?.message ?? error);
       if (
-        String(error?.message ?? error).includes(
-          "Execution interrupted by the session execution budget",
-        )
+        message.includes("Execution interrupted by the session execution budget") ||
+        message === "Driver collection exceeded the session execution budget"
       ) {
         try {
           this._html = native.liveSerialize(this._session);
@@ -3183,6 +3183,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
         }
         throw error;
       }
+      if (message !== "Driver collection exceeded its aggregate drain budget") throw error;
       /* Aggregate drain expiry can still expose reached state. */
     }
     await this._refreshFromSession();

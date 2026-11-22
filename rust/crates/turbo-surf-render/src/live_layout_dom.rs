@@ -502,16 +502,48 @@ fn call<'s>(
         .call(scope, host.into(), args)
         .ok_or("native CSS private snapshot interrupted".into())
 }
+fn sheet_state<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    host: v8::Local<'s, v8::Object>,
+    sheet: v8::Local<'s, v8::Object>,
+) -> Result<crate::raw_sheet_cache::SheetState, String> {
+    let record = call(scope, host, "readSheetState", &[sheet.into()])?;
+    deno_core::serde_v8::from_v8(scope, record)
+        .map_err(|error| format!("native CSS snapshot state conversion: {error}"))
+}
 fn export<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     host: v8::Local<'s, v8::Object>,
     sheet: v8::Local<'s, v8::Value>,
 ) -> Result<SheetSnapshot, String> {
-    let _profile =
-        crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::SheetExport);
-    let record = call(scope, host, "exportSheet", &[sheet])?;
-    deno_core::serde_v8::from_v8(scope, record)
-        .map_err(|error| format!("native CSS snapshot conversion: {error}"))
+    let sheet = v8::Local::<v8::Object>::try_from(sheet)
+        .map_err(|_| "native CSS sheet object is unavailable")?;
+    let epoch = turbo_dom_browser_env::host_internals::style_revisions().cssom;
+    let state = sheet_state(scope, host, sheet)?;
+    let stable = epoch == turbo_dom_browser_env::host_internals::style_revisions().cssom;
+    if stable && state.cacheable {
+        if let Some(snapshot) = crate::raw_sheet_cache::read(scope, sheet, epoch, &state) {
+            return Ok(snapshot);
+        }
+    }
+    let snapshot = {
+        let _profile =
+            crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::SheetExport);
+        let record = call(scope, host, "exportSheet", &[sheet.into()])?;
+        deno_core::serde_v8::from_v8(scope, record)
+            .map_err(|error| format!("native CSS snapshot conversion: {error}"))?
+    };
+    if stable
+        && state.cacheable
+        && epoch == turbo_dom_browser_env::host_internals::style_revisions().cssom
+    {
+        let after = sheet_state(scope, host, sheet)?;
+        if after == state && epoch == turbo_dom_browser_env::host_internals::style_revisions().cssom
+        {
+            crate::raw_sheet_cache::remember(scope, sheet, epoch, &state, &snapshot);
+        }
+    }
+    Ok(snapshot)
 }
 
 pub(crate) fn wrap_elements<'s>(

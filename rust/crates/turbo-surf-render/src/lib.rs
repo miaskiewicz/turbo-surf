@@ -57,6 +57,7 @@ mod message_ports;
 mod native_history_log;
 mod network_activity;
 mod network_events;
+mod raw_sheet_cache;
 pub use native_history_log::NativeHistoryLog;
 pub use network_events::NetworkEventLog;
 mod permissions_policy;

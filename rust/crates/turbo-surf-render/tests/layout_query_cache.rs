@@ -370,3 +370,43 @@ async fn prepared_sheets_observe_cssom_dom_and_live_selector_changes() {
     );
     page.close();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn dom_mutations_reuse_raw_sheets_but_rematch_current_targets() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = "<!doctype html><style>#target{box-sizing:border-box;width:40px;height:20px}#target.ready{width:70px}</style><div id=target></div><script>const target=document.getElementById('target');globalThis.widths=Array.from({length:12},(_,index)=>{target.className=index%2?'ready':'';target.setAttribute('data-version',String(index));return target.getBoundingClientRect().width;});</script>";
+    let (mut page, profile, _directory) = profiled_page("raw-sheets", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[40,70,40,70,40,70,40,70,40,70,40,70]"
+    );
+    assert_eq!(profile["stages"]["sheetExport"]["calls"], 1);
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 12);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn raw_sheet_reuse_tracks_native_media_disabled_rules_and_sheet_identity() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style id=rules>#target{width:40px!important}</style><div id=target style="width:10px;height:20px"></div><script>
+      const target=document.getElementById('target'),owner=document.getElementById('rules'),sheet=owner.sheet;
+      const widths=[],read=()=>widths.push(target.getBoundingClientRect().width);
+      read();owner.setAttribute('media','not all');read();owner.setAttribute('media','all');read();
+      sheet.disabled=true;read();sheet.disabled=false;read();
+      sheet.cssRules[0].style.setProperty('width','60px','important');read();
+      owner.textContent='#target{width:70px!important}#target.ready{width:80px!important}';read();
+      target.className='ready';read();target.className='';read();
+      sheet.cssRules[0].style.setProperty('width','90px','important');read();
+      globalThis.widths=widths;
+    </script>"#;
+    let (mut page, _profile, _directory) = profiled_page("raw-sheet-state", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[40,10,40,10,40,60,70,80,70,70]"
+    );
+    page.close();
+}

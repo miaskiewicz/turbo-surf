@@ -11,6 +11,7 @@ const __locatorPrevious = Object.getOwnPropertyDescriptor(
   "previousElementSibling",
 ).get;
 const __locatorMatches = Element.prototype.matches;
+const __locatorGetAttribute = Element.prototype.getAttribute;
 const __locatorDocumentId = Document.prototype.getElementById;
 const __locatorFragmentId = DocumentFragment.prototype.getElementById;
 const __locatorControl = Object.getOwnPropertyDescriptor(HTMLLabelElement.prototype, "control").get;
@@ -72,6 +73,7 @@ __G.tcLocatorAll = () => {
   __locatorRefresh();
   return __locatorSlice(__locatorIndex);
 };
+__G.tcLocatorAttribute = (element, name) => __locatorApply(__locatorGetAttribute, element, [name]);
 __G.tcLocatorParent = (element) => {
   const parent = __locatorApply(__locatorParent, element, []);
   if (parent) return parent;

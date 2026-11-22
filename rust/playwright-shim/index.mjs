@@ -1044,6 +1044,8 @@ class Locator {
   // --- accessors (node-handle backed; cross to Rust) ---
   async getAttribute(name) {
     await this._prepareQuery();
+    if (this._page._live && typeof name === "string")
+      return this._liveRead((element, name) => __tsNs.tcLocatorAttribute(element, name), name);
     const n = this._node();
     return n == null ? null : (native.attrOf(this._html, n, name) ?? null);
   }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.7] - 2026-11-22 (unreleased candidate)
+
+- Finish native actions at admitted network navigation and committed same-document navigation, preserving caller deadlines and execution failures.
+- Read live locator attributes through the captured native getter without copying document metadata.
+- Reuse bounded CSS rule plans while matching current document state, and admit changed inline styles without rescanning unrelated resources.
+- Consume the turbo-dom v0.8.7 development fixes for cross-document scheduling, inert text quotas, and native CSS state. Full original auth acceptance is still pending.
+
 ## [0.8.6] - 2026-11-20 (unreleased candidate)
 
 - #524 full-scope push: `render_script_with_completion` now drains the render tier's console / pageerror / request / response events into the session event log before closing the PageSession. `Session::capture_network_events` redacts `cookie`, `authorization`, `proxy-authorization`, `set-cookie` header values (replaced with `<redacted>`) and drops `body` / `bodyBytes` / `requestBody` payloads (replaced with a `*Dropped: true` marker) so HttpOnly credentials and response bodies never land in the default diagnostic stream. `responsebody` continuation entries are filtered because their fields already merge onto the `response` event in `drain_snapshot`. Offline regression `capture_network_events_pumps_console_pageerror_and_redacts_cookies` asserts the filter and the redaction set.

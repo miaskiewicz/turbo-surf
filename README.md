@@ -83,7 +83,7 @@ crawl, identity), `-view` (extraction views), `-page` (the Playwright-shaped pag
 
 ## Status
 
-Status: **v0.8.6 release**.
+Status: **v0.8.7 release candidate**.
 Version 0.8.6 uses the published turbo-dom 0.8.6 crates. See
 [CHANGELOG.md](./CHANGELOG.md) for release changes and
 [PUBLISHING.md](./PUBLISHING.md) for release validation and artifact verification.

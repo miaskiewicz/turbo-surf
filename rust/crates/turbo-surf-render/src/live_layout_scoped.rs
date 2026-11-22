@@ -1,5 +1,7 @@
 //! Match selectors before slot placement changes physical ancestry. Snapshot
 //! targets retain native identity and the original encapsulation depth.
+#[path = "live_layout_compiled.rs"]
+mod compiled;
 #[path = "live_layout_nesting.rs"]
 mod nesting;
 
@@ -56,6 +58,9 @@ fn prepare_rule(
     graph: &Composition,
     rule: &RuleSnapshot,
 ) -> Result<ScopedRule, String> {
+    if let Some(prepared) = compiled::prepare(tree, document, root, graph, &rule.css_text)? {
+        return Ok(prepared);
+    }
     let depth = *graph
         .depths
         .get(&root)
@@ -63,6 +68,8 @@ fn prepare_rule(
     // The CSSOM kept this rule, so Chrome keeps it too; a selector the native parser
     // rejects (`::selection:window-inactive`) cannot match a laid-out box, so the rule
     // gets no targets instead of failing the whole layout (like #117).
+    #[cfg(test)]
+    RULE_COMPILATIONS.with(|count| count.set(count.get() + 1));
     let Ok(parsed) = StyleSheet::parse(&rule.css_text, ParserOptions::default()) else {
         return Ok(ScopedRule {
             declarations: Vec::new(),
@@ -271,13 +278,26 @@ struct Matcher<'a> {
 impl Matcher<'_> {
     /// The elements of this scope one selector of a rule matches.
     fn selector_nodes(&self, selector: &Selector<'_>, source: &str) -> Result<Vec<Handle>, String> {
-        // Native query results are version-cached. Context-sensitive and dynamic
-        // pseudos retain per-node matching: their state need not bump tree.version.
+        if !shadow_selector(selector) {
+            return self.ordinary_nodes(source, candidate_seed(selector).as_deref());
+        }
+        let mut result = Vec::new();
+        for node in self.graph.scopes.keys().copied() {
+            if self.tree.node_type_id(node) == 1 && self.matches(selector, node, false)? {
+                result.push(node);
+            }
+        }
+        Ok(result)
+    }
+    fn ordinary_nodes(&self, source: &str, seed: Option<&str>) -> Result<Vec<Handle>, String> {
         if self.root == self.tree.root() && !source.contains(':') {
             return self.batched_nodes(source);
         }
-        let shadow = shadow_selector(selector);
-        let candidates = self.candidate_nodes(selector, shadow)?;
+        let candidates = if self.root == self.tree.root() {
+            seed.map(|seed| self.batched_nodes(seed)).transpose()?
+        } else {
+            None
+        };
         let scoped = candidates
             .is_none()
             .then(|| self.graph.scopes.keys().copied());
@@ -289,34 +309,14 @@ impl Matcher<'_> {
         let mut validated = false;
         let mut result = Vec::new();
         for node in nodes {
-            if self.tree.node_type_id(node) != 1 {
-                continue;
-            }
-            let matches = if shadow {
-                self.matches(selector, node, false)?
-            } else {
-                self.graph.scopes.get(&node) == Some(&self.root)
-                    && matches_validated(self.tree, node, source, &mut validated)?
-            };
-            if matches {
+            if self.tree.node_type_id(node) == 1
+                && self.graph.scopes.get(&node) == Some(&self.root)
+                && matches_validated(self.tree, node, source, &mut validated)?
+            {
                 result.push(node);
             }
         }
         Ok(result)
-    }
-    fn candidate_nodes(
-        &self,
-        selector: &Selector<'_>,
-        shadow: bool,
-    ) -> Result<Option<Vec<Handle>>, String> {
-        // Reuse only a static rightmost-compound seed. The complete selector,
-        // including every dynamic pseudo and ancestor, is still checked below.
-        if shadow || self.root != self.tree.root() {
-            return Ok(None);
-        }
-        candidate_seed(selector)
-            .map(|seed| self.batched_nodes(&seed))
-            .transpose()
     }
     fn batched_nodes(&self, source: &str) -> Result<Vec<Handle>, String> {
         #[cfg(test)]
@@ -561,13 +561,25 @@ thread_local! {static ORDINARY_MATCHES:std::cell::Cell<usize>=const {std::cell::
 thread_local! {static BATCH_QUERIES:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
 
 #[cfg(test)]
+thread_local! { static RULE_COMPILATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     fn prepared(tree: &Tree, root: Handle, graph: &Composition, css: &str) -> ScopedRule {
+        prepared_document(tree, 1, root, graph, css)
+    }
+    fn prepared_document(
+        tree: &Tree,
+        document: u32,
+        root: Handle,
+        graph: &Composition,
+        css: &str,
+    ) -> ScopedRule {
         prepare_rule(
             tree,
-            1,
+            document,
             root,
             graph,
             &RuleSnapshot {
@@ -1013,5 +1025,39 @@ mod tests {
             vec![source_id(1, fallback)]
         );
         assert!(matches(shadow, "#host .pick").is_empty());
+    }
+    #[test]
+    fn repeated_css_compiles_once_but_rematches_live_state_and_document_identity() {
+        use turbo_dom_parser::rtdom::tree::FormProp;
+        let mut tree = Tree::parse("<body><input id=pick class=compileplan-live type=checkbox>");
+        let node = tree.get_element_by_id("pick").unwrap();
+        let css = ".compileplan-live:checked{width:77px}";
+        RULE_COMPILATIONS.with(|count| count.set(0));
+        for index in 0..20 {
+            let checked = index % 2 == 0;
+            tree.set_form_property(node, FormProp::Checked, checked);
+            let graph = Composition::scopes(&tree).unwrap();
+            let rule = prepared(&tree, tree.root(), &graph, css);
+            assert_eq!(rule.targets.len(), usize::from(checked));
+            assert_eq!(rule.declarations[0].value, "77px");
+        }
+        assert_eq!(RULE_COMPILATIONS.with(|count| count.get()), 1);
+        let other =
+            Tree::parse("<body><input id=other class=compileplan-live type=checkbox checked>");
+        let graph = Composition::scopes(&other).unwrap();
+        let rule = prepared_document(&other, 9, other.root(), &graph, css);
+        assert_eq!(
+            rule.targets[0].source,
+            source_id(9, other.get_element_by_id("other").unwrap())
+        );
+        assert_eq!(RULE_COMPILATIONS.with(|count| count.get()), 1);
+        let rule = prepared(
+            &other,
+            other.root(),
+            &graph,
+            ".compileplan-live:checked{width:88px}",
+        );
+        assert_eq!(rule.declarations[0].value, "88px");
+        assert_eq!(RULE_COMPILATIONS.with(|count| count.get()), 2);
     }
 }

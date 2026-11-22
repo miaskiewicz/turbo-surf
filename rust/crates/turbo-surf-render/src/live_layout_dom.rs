@@ -29,7 +29,7 @@ pub(crate) struct NativeLayoutInput<'s> {
     pub(crate) handle: Handle,
     pub(crate) connected: bool,
     pub(crate) browsing_context: bool,
-    pub(crate) sheets: Vec<SheetSnapshot>,
+    pub(crate) sheets: std::rc::Rc<Vec<SheetSnapshot>>,
     pub(crate) range: Option<Vec<turbo_dom_layout::cssom_view::range::Selection>>,
 }
 
@@ -101,9 +101,16 @@ fn capture_kind<'s>(
     let tree = capture_tree(scope, document_id, composed, &mut graph)?;
     let owner_context = current_document_context(scope);
     let sheets = if composed {
-        capture_sheets(scope, root, document_id, &graph, &sheets)?
+        prepared_sheets(
+            scope,
+            root,
+            document_id,
+            tree.capture.tree_version,
+            &graph,
+            &sheets,
+        )?
     } else {
-        Vec::new()
+        std::rc::Rc::new(Vec::new())
     };
     Ok(NativeLayoutInput {
         source: CaptureSource::Node(receiver),
@@ -193,6 +200,23 @@ fn capture_tree(
     })
     .ok_or("native layout document is unavailable")?
 }
+fn prepared_sheets(
+    scope: &mut v8::PinScope<'_, '_>,
+    root: Handle,
+    document_id: u32,
+    version: u64,
+    graph: &Composition,
+    sheets: &HashSet<(Handle, Handle)>,
+) -> Result<std::rc::Rc<Vec<SheetSnapshot>>, String> {
+    let key = crate::live_sheet_cache::Key::new(document_id, root, version, graph);
+    if let Some(sheets) = crate::live_sheet_cache::read(scope, &key) {
+        return Ok(sheets);
+    }
+    let sheets = std::rc::Rc::new(capture_sheets(scope, root, document_id, graph, sheets)?);
+    crate::live_sheet_cache::store(scope, key, sheets.clone());
+    Ok(sheets)
+}
+
 /// Every tree scope's stylesheets, prepared against `graph`, in cascade order.
 fn capture_sheets(
     scope: &mut v8::PinScope<'_, '_>,

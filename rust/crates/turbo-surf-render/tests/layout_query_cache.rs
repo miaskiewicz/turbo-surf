@@ -118,6 +118,8 @@ async fn many_distinct_static_targets_share_one_strictly_admitted_layout() {
     assert_eq!(profile["stages"]["layout"]["calls"], 1);
     assert_eq!(profile["cacheMisses"], 1);
     assert_eq!(profile["cacheHits"], 11);
+    assert_eq!(profile["stages"]["sheetExport"]["calls"], 1);
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 1);
     assert_eq!(
         profile["stages"]["animationInspection"]["calls"]
             .as_u64()
@@ -333,6 +335,38 @@ async fn timer_only_post_load_work_hands_off_without_losing_finite_document_work
     assert!(
         diagnostics.progress.completed_pumps < 500,
         "timer-only work exhausted the native-work pump instead of reaching full quiescence: {diagnostics:?}"
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_sheets_observe_cssom_dom_and_live_selector_changes() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>input{box-sizing:border-box;padding:0;border:0;width:10px;height:20px}</style>
+      <style id=rules>input:checked{width:30px}</style><body><input id=control type=checkbox><script>
+      globalThis.widths=[];
+      const read=()=>{widths.push(control.getBoundingClientRect().width);widths.push(control.getBoundingClientRect().width)};
+      read();control.checked=true;read();
+      rules.sheet.cssRules[0].style.width='50px';read();
+      rules.textContent='input:checked{width:70px}';read();
+      rules.sheet.disabled=true;read();rules.sheet.disabled=false;read();
+      rules.sheet.media.mediaText='not all';read();rules.sheet.media.mediaText='all';read();
+      const adopted=new CSSStyleSheet();adopted.replaceSync('input:checked{width:90px}');
+      document.adoptedStyleSheets=[adopted];read();document.adoptedStyleSheets=[];read();
+      </script>"#;
+    let (mut page, profile, _directory) = profiled_page("sheet-invalidation", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[10,10,30,30,50,50,70,70,10,10,70,70,10,10,70,70,90,90,70,70]"
+    );
+    assert!(profile["stages"]["sheetExport"]["calls"].as_u64().unwrap() < 40);
+    assert!(
+        profile["stages"]["selectorPreparation"]["calls"]
+            .as_u64()
+            .unwrap()
+            < 40
     );
     page.close();
 }

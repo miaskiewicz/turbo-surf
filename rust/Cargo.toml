@@ -26,10 +26,10 @@ opt-level = 3
 lto = "thin"
 
 # Temporary immutable snapshot: turbo-dom release/0.8.7 at
-# df749aa9982defc9bd4cfa673dadd9d02fa966e5 (#539, #540 and #541).
+# e741494b63a2cbf3af52f87e3cfec0299068db1b (#539, #540, #541 and host style revisions).
 # Replace with registry 0.8.7 after publication, before tagging Surf.
 [patch.crates-io]
-turbo-dom = { path = "/tmp/turbo-dom-087-df749aa9/crates/turbo-dom" }
-turbo-dom-layout = { path = "/tmp/turbo-dom-087-df749aa9/crates/turbo-dom-layout" }
-turbo-dom-raster = { path = "/tmp/turbo-dom-087-df749aa9/crates/turbo-dom-raster" }
-turbo-dom-browser-env = { path = "/tmp/turbo-dom-087-df749aa9/crates/turbo-dom-browser-env" }
+turbo-dom = { path = "/tmp/turbo-dom-087-e741494b/crates/turbo-dom" }
+turbo-dom-layout = { path = "/tmp/turbo-dom-087-e741494b/crates/turbo-dom-layout" }
+turbo-dom-raster = { path = "/tmp/turbo-dom-087-e741494b/crates/turbo-dom-raster" }
+turbo-dom-browser-env = { path = "/tmp/turbo-dom-087-e741494b/crates/turbo-dom-browser-env" }

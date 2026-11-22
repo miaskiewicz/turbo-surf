@@ -198,6 +198,49 @@ is filed under v0.8.7 with portable source, provenance and sanitized backtrace.
 The actual scheduler document identity and application-modal connection remain
 unproven. Packet: Root `.recovery/react-modal-drain/public-repro-packet/`.
 
+### Producer #540 integration and broader auth sweep — 2026-11-22
+
+Producer fix `6f24c1488d596f72b49f6fec78fdd1bc1a97bd8c` resolves the captured
+scheduler from the current V8 context. Surf's four local DOM patch paths now
+refer coherently to its immutable archived snapshot, committed as `fe54c15`.
+No canonical producer checkout was changed; this remains a development patch
+to replace with registry 0.8.7 after publication and before tagging Surf.
+The actual rebuilt NAPI addon has SHA256
+`f3373776f0d1889a564e8fc70c5b65ce07892a70129891765fa9d936b903b1e5`.
+The unchanged public three-document repro completes all three click/note cycles,
+exit 0, no SIGABRT. This closes the integrated crash reproduction only.
+
+With explicit user takeover of ports 3000/3001, existing API/workers/outbox and
+frontend were restarted without resets, migrations, reaper or fixture changes.
+Frontend is `86303955d4c7b7bd0cfa6db151e90d18d88a460a`; backend remains
+`f2073bb695933e7907adbe807260f2ad51454ca2`. The first cold auth retry hits its
+unchanged 120-second case deadline after login/read-banner checks. The broader
+46-case serial sweep reproduces all five delegated-write modal failures; its
+first three completed files total nine passes and five failures. Employer-admin's
+add-employee case also fails. The full baseline sweep subsequently finishes: **23 passed, 23 failed, zero
+skipped/canceled, all 46 selected cases executed**. Its 3,875.887-second wall
+duration includes two controller-only pauses between files; current browser
+workers were allowed to finish original deadlines and cleanup before either
+exclusive handoff/probe. The frozen original shim and addon f337 were retained
+throughout. Per-case 120-second limits were enforced. The runner does not yet
+enforce the application config's suite-wide globalTimeout; that separate CLI
+contract remains open. These failed diagnostic results are not acceptance.
+
+An independent Surf error-propagation defect is fixed in `d789ec02`: `_redrain`
+previously swallowed ownership, driver execution-budget and transport failures
+as aggregate expiry. Three tests fail with missing rejection before the repair
+and in its exact inverse; the restored fix retains original error identity.
+All 15 hydration controls and the full offline shim suite pass: 876 passed,
+zero failures/cancellations, one existing intentional skip. Ordinary aggregate
+expiry retains its reached-state behavior. This is honest error reporting, not
+proof of the modal's cause or repair. The combined DOM-pin/error-propagation
+phase passes 2,268 Rust workspace tests (zero failures, seven existing ignores),
+strict workspace/all-target Clippy, formatting and complexity. The timestamped
+probe independently records three poll-supervisor interruptions before the CTA
+and ultimately reaches the original 120-second case deadline; no CPU cause is
+inferred from termination alone. Receipts are under Root
+`.recovery/dom540-6f24c148/`.
+
 ## v0.8.7 unicode-range workspace test compilation
 
 The first full workspace gate on the candidate stops before test execution with
@@ -1562,3 +1605,45 @@ At `682e8ac9`, ordinary Linux Rust passes while LLVM Render-A again exceeds the 
 Every hook was still rediscovering ownership through the captured async-context getter even when the native Promise already had an immutable authenticated owner. Actual baseline fanout records 524318 discoveries for 131083 native Init events; the new work-count assertion fails after the original results, task ordering and deadline premises pass. The repair handles only non-Init hooks with no parent, matching the genuine native Promise private identity and weak Promise object and requiring an existing Some owner. Init, unknown, missing, pruned, tracking-error and unmatched-identity paths retain the original discovery logic. No unknown owner is cached as Root, no strong Promise/context root is added, and selection still revalidates native document leases and retirement. Native state observation, reaction flags and maintenance are preserved once per hook.
 
 Final ordinary validation passes 27 controls; LLVM validation passes those 27 plus the same three workloads with two test threads. Fanout discovery calls fall to 131083, exactly its Init count, with 393235 authenticated reuse hits. The unchanged 32768 LLVM fanout completes in 0.864s serially and 1.815s concurrently on the measured host; these are contextual local measurements, not a guarantee of current Linux CI performance. Genuine unknown-infrastructure, pruned identity, foreign errors, retired-root/peer lifetime, parent collection and module isolation controls pass. Render/NAPI all-target Clippy with denied warnings, workspace formatting and modified Rust CC15 pass. Proof is under `.worktrees/promise-owner-discovery/.recovery/owner-discovery/{baseline,final-on,llvm,strict}`. Current Linux confirmation and refreshed affected release artifacts remain pending; no execution limit, workload, assertion ceiling or coverage floor is raised.
+
+
+### Font discovery snapshot repair and text-provenance follow-on
+
+A statistical native CPU sample of an actual auth worker spends most of its
+active actor samples under window-timer dispatch → live element geometry →
+web_fonts::report_used → stylesheet enumeration. This is diagnostic call-path
+support, not an elapsed-time speedup claim. A native work-count fixture proves
+that one document.fonts query refreshes StyleSheetList.length 66 times for 65
+sheets. An authored throwing list getter also hides all four expected font-set
+states. Chromium159.0.8154.6 observes zero public-list reads and sizes [1,2,1,0]
+while sheets are added and removed, including with the authored getter.
+
+Candidate613053978f41b35de9dfef1470ae12389a131d08 captures the existing private
+cssHost.readSheets snapshot once per discovery. No persistent cache, CSS epoch
+assumption, source limit or deadline changes. The only native source difference
+against the preserved baseline addon is font_loading.js. Both native controls
+fail on the old addon, pass on the candidate, fail in the preserved inverse, and
+pass after restoration. All eight Rust font integration controls and the full
+shim suite pass (876 passed, zero failed/canceled, one existing intentional skip).
+The candidate addon SHA256 is
+4682d23e462e55f4c18258b58ca8eaef92ff37852964e04dec57a7c8c334a576.
+It is still on the isolated font-snapshot branch pending release integration and
+combined default-profile validation. Receipts: Root .recovery/font-sheet-snapshot/.
+
+The original app case with this addon and the same frozen shim fails in39.097s
+while checking request-write visibility, before the CTA click, with native text
+provenance exceeding its budget. This is not a modal pass or a controlled
+end-to-end performance comparison. Three baseline login/return-URL cases report
+the same native error. A separate literal-HTML reduction proves that a tiny
+button works beside900,000 inert JSON-script characters but geometry rejects at
+1,000,100, below the live2,000,000 raw-source cap. The producer text preflight
+charges all styled text, including display:none script descendants, against its
+1,000,000-character allowance. The visible-large negative control still rejects.
+Chromium159 renders the button in both inert cases; script display is none.
+
+Producer investigation [turbo-dom#541](https://github.com/miaskiewicz/turbo-dom/issues/541)
+is filed under v0.8.7 with the portable driver, Rust reproduction, source evidence,
+and preserved-limit requirements. Which text consumes the actual app's quota is
+not yet measured; matching errors alone are not full application-causal proof.
+The user must manually relay this issue; no producer agent notification is claimed.
+Services were explicitly returned to the audit owner after the app retry.

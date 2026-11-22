@@ -51,13 +51,13 @@ impl Sample {
 pub(super) async fn drain(
     rt: &mut JsRuntime,
     target: u64,
-    navigation: Option<u64>,
+    navigation: Option<target_action_completion::ActionNavigation>,
 ) -> Result<(), String> {
     let mut stable = 0;
     let mut signature = String::new();
     for _ in 0..500 {
         tokio::task::yield_now().await;
-        if navigation_admitted(rt, target, navigation)? {
+        if navigation_admitted(rt, navigation)? {
             return Ok(());
         }
         // Keep actual script discovery/admission in its original target realm,
@@ -69,7 +69,7 @@ pub(super) async fn drain(
             &[],
         )?;
         let turn = next_turn(rt, target, navigation).await?;
-        if turn.host_reply || navigation_admitted(rt, target, navigation)? {
+        if turn.host_reply || navigation_admitted(rt, navigation)? {
             return Ok(());
         }
         let sample = Sample::capture(rt, target, &turn)?;
@@ -93,25 +93,20 @@ pub(super) async fn drain(
     Ok(())
 }
 
-fn navigation_admitted(rt: &JsRuntime, target: u64, baseline: Option<u64>) -> Result<bool, String> {
-    let Some(baseline) = baseline else {
-        return Ok(false);
-    };
-    rt.op_state()
-        .borrow()
-        .borrow::<NetworkLog>()
-        .current_navigation_revision(target)
-        .map(|revision| revision > baseline)
-        .ok_or_else(|| "Native navigation tracking is invalid".into())
+fn navigation_admitted(
+    rt: &JsRuntime,
+    navigation: Option<target_action_completion::ActionNavigation>,
+) -> Result<bool, String> {
+    navigation.map_or(Ok(false), |navigation| navigation.admitted(rt))
 }
 
 async fn next_turn(
     rt: &mut JsRuntime,
     target: u64,
-    navigation: Option<u64>,
+    navigation: Option<target_action_completion::ActionNavigation>,
 ) -> Result<async_owner::QuiescenceTurn, String> {
-    if let Some(baseline) = navigation {
-        async_owner::action_quiescence_turn(rt, target, baseline).await
+    if let Some(navigation) = navigation {
+        async_owner::action_quiescence_turn(rt, target, navigation).await
     } else {
         async_owner::quiescence_turn(rt, target, true).await
     }

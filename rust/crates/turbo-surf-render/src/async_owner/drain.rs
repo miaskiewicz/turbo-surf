@@ -95,7 +95,7 @@ struct DrainOptions<'a> {
     completion: Option<&'a v8::Global<v8::Value>>,
     goal: Goal,
     real: bool,
-    navigation: Option<(u64, u64)>,
+    navigation: Option<target_action_completion::ActionNavigation>,
 }
 
 #[derive(Default)]
@@ -116,7 +116,7 @@ pub(in crate::runtime) async fn quiescence_turn(
 pub(in crate::runtime) async fn action_quiescence_turn(
     rt: &mut JsRuntime,
     root: u64,
-    baseline: u64,
+    navigation: target_action_completion::ActionNavigation,
 ) -> Result<QuiescenceTurn, String> {
     drain_selected(
         rt,
@@ -124,7 +124,7 @@ pub(in crate::runtime) async fn action_quiescence_turn(
         None,
         None,
         Goal::Quiescence { timers: true },
-        Some((root, baseline)),
+        Some(navigation),
     )
     .await
 }
@@ -149,7 +149,7 @@ async fn drain_selected(
     condition: Option<&str>,
     completion: Option<&v8::Global<v8::Value>>,
     goal: Goal,
-    navigation: Option<(u64, u64)>,
+    navigation: Option<target_action_completion::ActionNavigation>,
 ) -> Result<QuiescenceTurn, String> {
     let real = rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
     let options = DrainOptions {
@@ -169,7 +169,7 @@ async fn drain_selected(
     let mut wake = None;
     checkpoint_window_timer(rt)?;
     loop {
-        if requested_complete(rt, &options) {
+        if requested_complete(rt, &options)? {
             return Ok(QuiescenceTurn::default());
         }
         let selection = select_for_drain(rt, root, &options)?;
@@ -207,7 +207,7 @@ async fn drain_selected(
             Turn::Complete if matches!(goal, Goal::Complete) => {
                 return Ok(QuiescenceTurn::default());
             }
-            Turn::Complete if requested_complete(rt, &options) => {
+            Turn::Complete if requested_complete(rt, &options)? => {
                 return Ok(QuiescenceTurn::default())
             }
             Turn::Complete => return quiescence_result(rt, root, 0),
@@ -228,7 +228,7 @@ fn poll_selected_turn(
     cx: &mut std::task::Context<'_>,
     wake: &mut Option<(tokio::time::Instant, std::pin::Pin<Box<tokio::time::Sleep>>)>,
 ) -> Result<std::task::Poll<Turn>, String> {
-    if requested_complete(rt, options) {
+    if requested_complete(rt, options)? {
         return Ok(std::task::Poll::Ready(Turn::Complete));
     }
     let selection = select_for_drain(rt, root, options)?;
@@ -280,7 +280,7 @@ fn finish_selected_turn(
 ) -> Result<std::task::Poll<Turn>, String> {
     // Trusted task turns may create new native work or record a failed owner
     // admission. Never decide quiescence from the pre-dispatch graph snapshot.
-    if requested_complete(rt, options) {
+    if requested_complete(rt, options)? {
         return Ok(std::task::Poll::Ready(Turn::Complete));
     }
     let selection = select_for_drain(rt, root, options)?;
@@ -358,7 +358,7 @@ fn select_for_drain(
     }
     let selection = async_owner::completion_selection(rt, root)?;
     if !selection.blocked_reactions
-        || requested_complete(rt, options)
+        || requested_complete(rt, options)?
         || selected_busy(&selection)
         || queued(rt, &selection)?
         || selected_timer_pending(rt, &selection.contexts)?
@@ -368,16 +368,14 @@ fn select_for_drain(
     Err("Native async work has unclassified ownership".into())
 }
 
-fn requested_complete(rt: &mut JsRuntime, options: &DrainOptions<'_>) -> bool {
-    options.navigation.is_some_and(|(target, baseline)| {
-        rt.op_state()
-            .borrow()
-            .borrow::<NetworkLog>()
-            .current_navigation_revision(target)
-            .is_some_and(|revision| revision > baseline)
-    }) || options
-        .completion
-        .is_some_and(|completion| promise_settled(rt, completion))
+fn requested_complete(rt: &mut JsRuntime, options: &DrainOptions<'_>) -> Result<bool, String> {
+    let navigation = options
+        .navigation
+        .map_or(Ok(false), |navigation| navigation.admitted(rt))?;
+    Ok(navigation
+        || options
+            .completion
+            .is_some_and(|completion| promise_settled(rt, completion)))
 }
 
 fn selected_timer_pending(

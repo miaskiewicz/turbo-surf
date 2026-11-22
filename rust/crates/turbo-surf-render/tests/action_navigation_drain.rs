@@ -6,6 +6,15 @@ use turbo_surf_render::PageSession;
 
 #[tokio::test(flavor = "current_thread")]
 async fn async_action_navigation_does_not_wait_for_retiring_document_background_fetch() {
+    action_navigation_with_held_fetch(false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn same_document_action_commit_does_not_wait_for_background_fetch() {
+    action_navigation_with_held_fetch(true).await;
+}
+
+async fn action_navigation_with_held_fetch(same_document: bool) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}/", listener.local_addr().unwrap());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -31,7 +40,14 @@ async fn async_action_navigation_does_not_wait_for_retiring_document_background_
             });
         }
     });
-    let mut page=PageSession::open(r#"<button onclick="fetch('/auth').then(()=>{location.href='/next';fetch('/held')})">Go</button>"#,&origin,"","",5000).await.unwrap();
+    let html = if same_document {
+        r#"<button onclick="fetch('/auth').then(()=>{history.pushState({},'', '/ready');fetch('/held')})">Go</button>"#
+    } else {
+        r#"<button onclick="fetch('/auth').then(()=>{location.href='/next';fetch('/held')})">Go</button>"#
+    };
+    let mut page = PageSession::open(html, &origin, "", "", 5000)
+        .await
+        .unwrap();
     let target = page.auxiliary_root_id().unwrap();
     let completed = {
         let action = page.dispatch_target_engine(
@@ -51,10 +67,18 @@ async fn async_action_navigation_does_not_wait_for_retiring_document_background_
             }
         }
     };
-    assert!(page
-        .serialize_target(target)
-        .unwrap()
-        .contains("new document"));
+    if same_document {
+        assert_eq!(
+            page.read_target_engine(target, "return location.pathname;")
+                .unwrap(),
+            "\"/ready\""
+        );
+    } else {
+        assert!(page
+            .serialize_target(target)
+            .unwrap()
+            .contains("new document"));
+    }
     page.close();
     server.abort();
     assert!(
@@ -85,7 +109,7 @@ async fn action_without_navigation_still_drains_its_own_fetch() {
     {
         let action = page.dispatch_target_engine(
             target,
-            "fetch('/held').then(()=>globalThis.finished=true);globalThis.__RESULT='dispatched';",
+            "try{history.pushState({},'', 'https://different.invalid/');throw new Error('accepted invalid history')}catch(error){if(error.name!=='SecurityError')throw error;globalThis.historyRejected=true;}fetch('/held').then(()=>globalThis.finished=true);globalThis.__RESULT='dispatched';",
         );
         tokio::pin!(action);
         assert!(
@@ -98,6 +122,11 @@ async fn action_without_navigation_still_drains_its_own_fetch() {
     }
     assert_eq!(
         page.read_target_engine(target, "return globalThis.finished;")
+            .unwrap(),
+        "true"
+    );
+    assert_eq!(
+        page.read_target_engine(target, "return globalThis.historyRejected;")
             .unwrap(),
         "true"
     );

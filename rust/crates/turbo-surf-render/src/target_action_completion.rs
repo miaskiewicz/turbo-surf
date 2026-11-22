@@ -1,6 +1,35 @@
 //! Explicit driver interactions await only native navigation admitted for their owner.
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) struct ActionNavigation {
+    target: u64,
+    network: u64,
+    history: Option<u64>,
+}
+impl ActionNavigation {
+    fn capture(rt: &JsRuntime, target: u64, network: u64) -> Self {
+        Self {
+            target,
+            network,
+            history: native_history::current_revision(&rt.op_state().borrow(), target),
+        }
+    }
+    pub(super) fn admitted(self, rt: &JsRuntime) -> Result<bool, String> {
+        let state = rt.op_state();
+        let state = state.borrow();
+        let network = state
+            .borrow::<NetworkLog>()
+            .current_navigation_revision(self.target)
+            .ok_or("Native navigation tracking is invalid")?;
+        let history = self
+            .history
+            .zip(native_history::current_revision(&state, self.target))
+            .is_some_and(|(baseline, current)| current > baseline);
+        Ok(network > self.network || history)
+    }
+}
+
 struct CanceledAction<'a> {
     session: &'a mut PageSession,
     completed: bool,
@@ -94,6 +123,7 @@ impl PageSession {
         let baseline_revision = baseline
             .parse()
             .map_err(|_| "Invalid native action baseline")?;
+        let navigation = ActionNavigation::capture(&self.rt, target, baseline_revision);
         let mut action = CanceledAction {
             session: self,
             completed: false,
@@ -104,7 +134,7 @@ impl PageSession {
             } else {
                 action
                     .session
-                    .eval_target_action_engine(target, source, baseline_revision)
+                    .eval_target_action_engine(target, source, navigation)
                     .await?
             };
             match action

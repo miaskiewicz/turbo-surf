@@ -3175,6 +3175,25 @@ impl FetchResponseTrace {
         self.last.lock().unwrap().as_ref().map(|(id, _)| *id)
     }
 }
+// Dropping an in-flight op also drops its transport future. Its observed headers
+// still need a terminal record even though the async cancellation branch cannot run.
+struct FetchResponseCancellation<'a> {
+    log: &'a NetworkLog,
+    trace: Option<&'a FetchResponseTrace>,
+}
+impl FetchResponseCancellation<'_> {
+    fn complete(&mut self) {
+        self.trace = None;
+    }
+}
+impl Drop for FetchResponseCancellation<'_> {
+    fn drop(&mut self) {
+        if let Some(trace) = self.trace {
+            append_cancelled_response_trace(self.log, trace);
+        }
+    }
+}
+
 fn append_response_trace(
     log: &mut NetworkLog,
     mut entry: serde_json::Value,
@@ -4068,6 +4087,10 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         ..Default::default()
     };
     let event_log = state.borrow().borrow::<NetworkLog>().clone();
+    let mut response_cancellation = FetchResponseCancellation {
+        log: &event_log,
+        trace: Some(&response_trace),
+    };
     let observer = |hop| response_trace.observe(&event_log, &event_context, hop);
     let mut opts = FetchOptions {
         response_observer: Some(&observer),
@@ -4100,7 +4123,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         ..Default::default()
     };
     if is_streaming_fetch(destination, integrity, &init) {
-        return run_stream_fetch_branch(
+        let out = run_stream_fetch_branch(
             &target,
             source,
             &context,
@@ -4118,6 +4141,8 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
             &response_trace,
         )
         .await;
+        response_cancellation.complete();
+        return out;
     }
     let mut script_errors_muted = false;
     let request_metadata = FetchRequestMetadata::from_options(&opts);
@@ -4174,6 +4199,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
         jar_rc.borrow_mut().merge_request_changes(local);
         fetch_streams::release(&mut state.borrow_mut(), cancel_id);
         append_cancelled_response_trace(&event_log, &response_trace);
+        response_cancellation.complete();
         return FetchOut {
             aborted: true,
             final_url: target,
@@ -4210,6 +4236,7 @@ async fn page_fetch(state: Rc<RefCell<OpState>>, url: String, init_json: String)
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
     append_response_trace(log, entry, &response_trace);
+    response_cancellation.complete();
     out
 }
 

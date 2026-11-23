@@ -436,3 +436,50 @@ async fn borrowed_timeout_keeps_its_function_relevant_global() {
         .unwrap();
     assert_eq!(page.eval_expression("(async()=>{const frame=document.createElement('iframe');document.body.append(frame);const child=frame.contentWindow;const signal=child.AbortSignal.timeout.call(AbortSignal,20);const brands=[signal instanceof child.AbortSignal,signal instanceof AbortSignal];await new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));return JSON.stringify([...brands,signal.aborted,signal.reason.name,signal.reason instanceof child.DOMException,signal.reason instanceof DOMException]);})()").await.unwrap(), r#"[true,false,true,"TimeoutError",true,false]"#);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn disposing_an_interrupted_integrity_fetch_finishes_its_observed_response() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let mut chunk = [0; 4096];
+            let read = socket.read(&mut chunk).await.unwrap();
+            assert_ne!(read, 0);
+            request.extend_from_slice(&chunk[..read]);
+        }
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n").await.unwrap();
+        let mut byte = [0];
+        socket.read(&mut byte).await.unwrap()
+    });
+    let mut page = PageSession::open("<body>", &origin, "", "", 1000)
+        .await
+        .unwrap();
+    let log = page.network_event_log();
+    let interrupted = page.eval_engine_expression(
+        "fetch('/held',{integrity:'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='}).then(()=>1,()=>0)"
+    ).await;
+    let rows: Vec<Value> = serde_json::from_str(&page.drain_network_log()).unwrap();
+    page.close();
+    let eof = tokio::time::timeout(std::time::Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+    let completed = log
+        .wait_all_response_completion_async(std::time::Duration::from_millis(100))
+        .await;
+    assert!(
+        interrupted.is_err(),
+        "the held body must outlive the execution budget"
+    );
+    assert!(rows
+        .iter()
+        .any(|row| row["event"] == "response" && row["bodyPending"] == true));
+    assert_eq!(eof, 0, "isolate disposal must close the actual transport");
+    assert!(
+        completed,
+        "a disposed fetch must terminate its already observed response"
+    );
+}

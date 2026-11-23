@@ -1860,10 +1860,13 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   }
   // click
   return `(() => { ${pick} else {
-    // Prefer the actual contained hit over document order: a labelled control's
-    // first child can be a pointer-transparent label beside its interactive input.
-    // Keep the existing fallback for retargeted shadow hits and unavailable hits.
-    let tgt = el; while (tgt.firstElementChild) tgt = tgt.firstElementChild;
+    // Only ambiguous descendant branches need a document-wide hit test: a leaf
+    // or single chain must not depend on unrelated animated sibling geometry.
+    let tgt = el, branched = false;
+    while (tgt.firstElementChild) {
+      branched ||= tgt.childElementCount > 1;
+      tgt = tgt.firstElementChild;
+    }
     const options = ${val} || {};
     const rect = el.getBoundingClientRect();
     const position = options.position || { x: rect.width / 2, y: rect.height / 2 };
@@ -1874,8 +1877,10 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
       detail: options.clickCount || 1, shiftKey: modifiers.includes("Shift"),
       ctrlKey: modifiers.includes("Control"),
       altKey: modifiers.includes("Alt"), metaKey: modifiers.includes("Meta") };
-    const hit = el.ownerDocument.elementFromPoint(o.clientX, o.clientY);
-    if (hit && el.contains(hit)) tgt = hit;
+    if (branched || options.position) {
+      const hit = el.ownerDocument.elementFromPoint(o.clientX, o.clientY);
+      if (hit && el.contains(hit)) tgt = hit;
+    }
     // Full pointer+mouse sequence like a real browser: pointer events FIRST (MUI v5+ /
     // Radix / many libs gate selection on pointerdown/up, and MUI Autocomplete/Select
     // options preventDefault mousedown to keep input focus — without the pointer pair the

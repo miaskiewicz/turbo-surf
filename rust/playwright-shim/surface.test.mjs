@@ -71,6 +71,74 @@ test("locator click position chooses the actual child under that point", async (
   });
 });
 
+async function activeSiblingAnimationFixture(run) {
+  await clickTargetFixture(async (page) => {
+    await page.evaluate(() => {
+      const style = document.createElement("style");
+      style.textContent = `@keyframes fadeInUp {
+        from { opacity:0; transform:translateY(8px) }
+        to { opacity:1; transform:translateY(0) }
+      }
+      #message { position:absolute; left:500px; top:300px; width:50px; height:50px }
+      #nested { width:120px; height:40px }`;
+      document.head.append(style);
+      const message = document.createElement("div");
+      message.id = "message";
+      message.textContent = "Unrelated";
+      document.body.append(message);
+      const nested = document.createElement("button");
+      nested.id = "nested";
+      nested.innerHTML = "<span><b>Nested</b></span>";
+      nested.addEventListener("click", () => {
+        document.body.dataset.clicked = "nested";
+      });
+      document.body.append(nested);
+      message.style.animation = "fadeInUp 100s linear";
+    });
+    await run(page);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        document
+          .getElementById("message")
+          .getAnimations()
+          .map((a) => a.playState),
+      ),
+      ["running"],
+    );
+  });
+}
+
+test("leaf locator clicks do not require unrelated animated sibling geometry", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await page.locator("#left").click();
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked), "left");
+  });
+});
+
+test("single descendant-chain clicks do not require unrelated animated sibling geometry", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await page.locator("#nested").click();
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked), "nested");
+  });
+});
+
+test("ambiguous locator clicks retain unsupported global hit-test guards", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await assert.rejects(page.locator("#field").click(), /animation resource.*fadeInUp/);
+    assert.equal(await page.getByRole("option").count(), 0);
+  });
+});
+
+test("explicit click positions retain unsupported global hit-test guards", async () => {
+  await activeSiblingAnimationFixture(async (page) => {
+    await assert.rejects(
+      page.locator("#left").click({ position: { x: 5, y: 5 } }),
+      /animation resource.*fadeInUp/,
+    );
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked ?? null), null);
+  });
+});
+
 async function checkedStateFixture(run) {
   const server = createServer((_request, response) => {
     response.setHeader("content-type", "text/html");

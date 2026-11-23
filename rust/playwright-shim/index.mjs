@@ -1301,19 +1301,23 @@ class Locator {
     await this._prepareQuery();
     return this.type(value);
   }
-  async check() {
-    await this._prepareQuery();
-    if (this._canDriveLive) return void (await this._driveLive("check"));
-    this._page._html = native.setCheckedNode(this._html, this._requireNode(), true);
+  async check(options) {
+    return this.setChecked(true, options);
   }
-  async uncheck() {
-    await this._prepareQuery();
-    if (this._canDriveLive) return void (await this._driveLive("uncheck"));
-    this._page._html = native.setCheckedNode(this._html, this._requireNode(), false);
+  async uncheck(options) {
+    return this.setChecked(false, options);
   }
-  async setChecked(on) {
+  async setChecked(on, options) {
     await this._prepareQuery();
-    return on ? this.check() : this.uncheck();
+    if (!this._canDriveLive) {
+      this._page._html = native.setCheckedNode(this._html, this._requireNode(), on);
+      return;
+    }
+    if ((await this.isChecked()) === on) return;
+    // ARIA controls publish their state through the real handler, often at the
+    // click's microtask checkpoint; never substitute an input-only property.
+    await this.click(options);
+    if ((await this.isChecked()) !== on) throw new Error("Click did not change checked state");
   }
   async selectOption(value, options = {}) {
     await this._prepareQuery();
@@ -1760,16 +1764,6 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   const pick = interactionTarget(selector, index, strict);
   if (kind === "type") return typingInteractionScript(pick, val, typingDriver(frameTyping));
   if (kind === "fill") return fillInteractionScript(pick, val);
-  if (kind === "check" || kind === "uncheck") {
-    const on = kind === "check";
-    return `(() => { ${pick} else {
-      if (el.checked !== ${on}) {
-        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        if (el.checked !== ${on}) throw new Error("Click did not change checked state");
-      }
-      globalThis.__RESULT = "OK";
-    } })();`;
-  }
   if (kind === "select") {
     return `(() => { ${pick} else {
       globalThis.__RESULT = JSON.stringify((${selectOptionOperation.toString()})(el, ${val}, false));

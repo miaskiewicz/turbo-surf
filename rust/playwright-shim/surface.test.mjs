@@ -71,6 +71,86 @@ test("locator click position chooses the actual child under that point", async (
   });
 });
 
+async function checkedStateFixture(run) {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "text/html");
+    response.end(`<!doctype html><body>
+      <button id="radio" role="radio" aria-checked="false">Dated history</button>
+      <button id="checkbox" role="checkbox" aria-checked="false">Enable</button>
+      <input id="native" type="checkbox"><input id="cancelled" type="checkbox">
+      <input id="disabled" type="checkbox" disabled>
+      <input id="first" type="radio" name="group" checked>
+      <input id="second" type="radio" name="group">
+      <script>
+      globalThis.clicks = {};
+      document.addEventListener('click', event => {
+        const target = event.target;
+        clicks[target.id] = (clicks[target.id] || 0) + 1;
+        if (target.id === 'cancelled') event.preventDefault();
+        if (target.getAttribute('role') === 'radio')
+          queueMicrotask(() => target.setAttribute('aria-checked', 'true'));
+        if (target.getAttribute('role') === 'checkbox')
+          queueMicrotask(() => target.setAttribute('aria-checked',
+            target.getAttribute('aria-checked') === 'true' ? 'false' : 'true'));
+      });
+      </script>`);
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base, { waitUntil: "networkidle" });
+    await run(page);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("check observes real ARIA radio state after the click checkpoint", async () => {
+  await checkedStateFixture(async (page) => {
+    const radio = page.getByRole("radio", { name: "Dated history" });
+    await radio.check();
+    assert.equal(await radio.isChecked(), true);
+    await radio.check();
+    assert.equal(await page.evaluate(() => clicks.radio), 1);
+  });
+});
+
+test("setChecked observes real ARIA checkbox state and remains idempotent", async () => {
+  await checkedStateFixture(async (page) => {
+    const checkbox = page.getByRole("checkbox", { name: "Enable" });
+    await checkbox.setChecked(true);
+    await checkbox.setChecked(true);
+    assert.equal(await checkbox.isChecked(), true);
+    await checkbox.uncheck();
+    await checkbox.uncheck();
+    assert.equal(await checkbox.isChecked(), false);
+    assert.equal(await page.evaluate(() => clicks.checkbox), 2);
+  });
+});
+
+test("checked actions retain native defaults, cancellation and disabled controls", async () => {
+  await checkedStateFixture(async (page) => {
+    const checkbox = page.locator("#native");
+    await checkbox.check();
+    await checkbox.check();
+    assert.equal(await checkbox.isChecked(), true);
+    await checkbox.uncheck();
+    assert.equal(await checkbox.isChecked(), false);
+    assert.equal(await page.evaluate(() => clicks.native), 2);
+    await assert.rejects(page.locator("#cancelled").check(), /Click did not change checked state/);
+    assert.equal(await page.locator("#cancelled").isChecked(), false);
+    await assert.rejects(page.locator("#disabled").check({ timeout: 25 }), /Timeout/);
+    assert.equal(await page.locator("#disabled").isChecked(), false);
+    assert.equal(await page.evaluate(() => clicks.disabled || 0), 0);
+    await page.locator("#second").check();
+    assert.equal(await page.locator("#first").isChecked(), false);
+    await assert.rejects(page.locator("#second").uncheck(), /Click did not change checked state/);
+    assert.equal(await page.locator("#second").isChecked(), true);
+  });
+});
+
 test("uncaught live handler exceptions emit Error payloads", async () => {
   const page = newPage();
   const errors = [];

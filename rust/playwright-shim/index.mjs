@@ -3167,7 +3167,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
   async _redrain() {
     if (this._session == null) return;
     try {
-      await this._collectSession(this._session, "globalThis.__RESULT = '';");
+      // Observe reached state without joining unrelated document IO between assertions.
+      await this._collectSession(this._session, "globalThis.__RESULT = '';", true);
     } catch (error) {
       const message = String(error?.message ?? error);
       if (
@@ -3188,7 +3189,7 @@ return String(globalThis.__RESULT ?? ""); })()`,
       if (message !== "Driver collection exceeded its aggregate drain budget") throw error;
       /* Aggregate drain expiry can still expose reached state. */
     }
-    await this._refreshFromSession();
+    await this._refreshFromSession(true);
     await this._drainBindings();
   }
 

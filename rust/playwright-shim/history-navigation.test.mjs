@@ -65,7 +65,13 @@ test("nested replacements and repeated URL entries retain identity (#319)", asyn
     assert.equal(new URL(page.url()).pathname, "/");
     await page.goForward();
     assert.deepEqual(await page.evaluate(() => history.state), { step: 2 });
-    await page.evaluate(() => history.forward());
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          addEventListener("popstate", () => resolve(), { once: true });
+          history.forward();
+        }),
+    );
     assert.deepEqual(await page.evaluate(() => history.state), { step: 3 });
     assert.equal(await page.evaluate(() => marker === savedMarker), true);
     assert.deepEqual(requests, ["/"]);

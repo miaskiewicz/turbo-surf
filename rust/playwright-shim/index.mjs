@@ -1873,10 +1873,9 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
   }
   // click
   return `(() => { ${pick} else {
-    // A real click lands on the deepest element under the cursor and bubbles up;
-    // dispatch there so handlers bound to inner nodes (e.g. a MUI Select's inner
-    // role="combobox", which opens on its own mousedown) actually fire. Focus and
-    // the default-action (form submit) logic stay on the matched control \`el\`.
+    // Prefer the actual contained hit over document order: a labelled control's
+    // first child can be a pointer-transparent label beside its interactive input.
+    // Keep the existing fallback for retargeted shadow hits and unavailable hits.
     let tgt = el; while (tgt.firstElementChild) tgt = tgt.firstElementChild;
     const options = ${val} || {};
     const rect = el.getBoundingClientRect();
@@ -1888,6 +1887,8 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
       detail: options.clickCount || 1, shiftKey: modifiers.includes("Shift"),
       ctrlKey: modifiers.includes("Control"),
       altKey: modifiers.includes("Alt"), metaKey: modifiers.includes("Meta") };
+    const hit = el.ownerDocument.elementFromPoint(o.clientX, o.clientY);
+    if (hit && el.contains(hit)) tgt = hit;
     // Full pointer+mouse sequence like a real browser: pointer events FIRST (MUI v5+ /
     // Radix / many libs gate selection on pointerdown/up, and MUI Autocomplete/Select
     // options preventDefault mousedown to keep input focus — without the pointer pair the

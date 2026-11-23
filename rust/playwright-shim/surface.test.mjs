@@ -21,6 +21,56 @@ try {
 }
 const { BrowserContext, chromium, devices, expect, newPage, request, test: pw } = shim;
 
+async function clickTargetFixture(run) {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "text/html");
+    response.end(`<!doctype html><style>
+      #field { position:relative; width:200px; height:56px; }
+      #label { position:absolute; top:0; left:0; pointer-events:none; }
+      #control { width:200px; height:56px; }
+      #pair { display:flex; width:200px; height:40px; }
+      #pair button { width:100px; height:40px; padding:0; border:0; }
+      </style><div id="field"><div id="label">Pay schedule</div>
+      <div id="control" role="combobox" tabindex="0">Choose</div></div>
+      <div id="pair"><button id="left">Left</button><button id="right">Right</button></div>
+      <script>
+      document.querySelector('#control').addEventListener('mousedown', () => {
+        const option = document.createElement('div');
+        option.setAttribute('role', 'option'); option.textContent = 'Monthly';
+        document.body.append(option);
+      });
+      document.querySelector('#pair').addEventListener('click', event => {
+        document.body.dataset.clicked = event.target.id;
+      });
+      </script>`);
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.goto(base);
+    await run(page);
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("locator click hits a sibling combobox beneath a pointer-transparent label", async () => {
+  await clickTargetFixture(async (page) => {
+    await page.locator("#field").click();
+    assert.equal(await page.getByRole("option").count(), 1);
+    assert.equal(await page.getByRole("option").textContent(), "Monthly");
+  });
+});
+
+test("locator click position chooses the actual child under that point", async () => {
+  await clickTargetFixture(async (page) => {
+    await page.locator("#pair").click({ position: { x: 150, y: 20 } });
+    assert.equal(await page.evaluate(() => document.body.dataset.clicked), "right");
+  });
+});
+
 test("uncaught live handler exceptions emit Error payloads", async () => {
   const page = newPage();
   const errors = [];

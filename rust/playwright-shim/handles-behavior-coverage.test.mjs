@@ -168,6 +168,76 @@ test("checkbox handles check and uncheck idempotently with actual change events"
   });
 });
 
+test("retained ARIA handles observe actual click state and remain idempotent", async () => {
+  await fixture(
+    '<button id="radio" role="radio" aria-checked="false">History</button><button id="checkbox" role="checkbox" aria-checked="false">Enable</button>',
+    async (page, keep) => {
+      await page.evaluate(() => {
+        globalThis.clicks = {};
+        document.addEventListener("click", ({ target }) => {
+          clicks[target.id] = (clicks[target.id] || 0) + 1;
+          queueMicrotask(() => {
+            const on =
+              target.getAttribute("role") === "radio" ||
+              target.getAttribute("aria-checked") !== "true";
+            target.setAttribute("aria-checked", String(on));
+          });
+        });
+      });
+      const radio = keep(await page.locator("#radio").elementHandle());
+      const checkbox = keep(await page.locator("#checkbox").elementHandle());
+      await radio.check();
+      await radio.check();
+      assert.equal(await radio.getAttribute("aria-checked"), "true");
+      await checkbox.check();
+      await checkbox.check();
+      assert.equal(await checkbox.getAttribute("aria-checked"), "true");
+      await checkbox.uncheck();
+      await checkbox.uncheck();
+      assert.equal(await checkbox.getAttribute("aria-checked"), "false");
+      assert.deepEqual(await page.evaluate(() => clicks), { radio: 1, checkbox: 2 });
+    },
+  );
+});
+
+test("checked handles preserve cancellation and disabled actionability", async () => {
+  await fixture(
+    '<input id="cancelled" type="checkbox"><input id="disabled" type="checkbox" disabled>',
+    async (page, keep) => {
+      await page.evaluate(() => {
+        globalThis.disabledClicks = 0;
+        document
+          .getElementById("cancelled")
+          .addEventListener("click", (event) => event.preventDefault());
+        document.getElementById("disabled").addEventListener("click", () => disabledClicks++);
+      });
+      const cancelled = keep(await page.locator("#cancelled").elementHandle());
+      const disabled = keep(await page.locator("#disabled").elementHandle());
+      await assert.rejects(cancelled.check(), /Click did not change checked state/);
+      assert.equal(await cancelled.evaluate((element) => element.checked), false);
+      await assert.rejects(disabled.check({ timeout: 25 }), isActionTimeout);
+      assert.equal(await disabled.evaluate((element) => element.checked), false);
+      assert.equal(await page.evaluate(() => disabledClicks), 0);
+    },
+  );
+});
+
+test("an already checked detached handle cannot act on a same-id replacement", async () => {
+  await fixture('<input id="toggle" type="checkbox" checked>', async (page, keep) => {
+    const old = keep(await page.locator("#toggle").elementHandle());
+    await page.evaluate(() => {
+      const current = document.getElementById("toggle");
+      const replacement = document.createElement("input");
+      replacement.id = "toggle";
+      replacement.type = "checkbox";
+      current.replaceWith(replacement);
+    });
+    await assert.rejects(old.check(), /not attached/);
+    assert.equal(await page.locator("#toggle").isChecked(), false);
+    assert.equal(await old.evaluate((element) => element.checked), true);
+  });
+});
+
 test("object handles preserve cyclic arguments, own-property projections and getter failures", async () => {
   await fixture("<p>object handles</p>", async (page, keep) => {
     const object = keep(

@@ -16,6 +16,7 @@
 
 import { createTestOutput } from "./test-output.mjs";
 import {
+  checkedState,
   handleEvaluation,
   hasJSHandles,
   ensureHandleSession,
@@ -1080,15 +1081,7 @@ class Locator {
   }
   async isChecked() {
     await this._prepareQuery();
-    return this._readElement((element) => {
-      if (element.tagName === "INPUT" && /^(checkbox|radio)$/.test(element.type))
-        return element.checked;
-      const roles = ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"];
-      if ((element.getAttribute("role") ?? "").split(/\s+/).some((role) => roles.includes(role))) {
-        return element.getAttribute("aria-checked") === "true";
-      }
-      throw new Error("Not a checkbox or radio button");
-    });
+    return this._readElement(checkedState);
   }
   async isEnabled() {
     await this._prepareQuery();

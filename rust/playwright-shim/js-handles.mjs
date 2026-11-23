@@ -187,6 +187,16 @@ export class JSHandle {
     return "JSHandle";
   }
 }
+export function checkedState(element) {
+  if (element.tagName === "INPUT" && /^(checkbox|radio)$/.test(element.type))
+    return element.checked;
+  const roles = ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"];
+  if ((element.getAttribute("role") ?? "").split(/\s+/).some((role) => roles.includes(role))) {
+    return element.getAttribute("aria-checked") === "true";
+  }
+  throw new Error("Not a checkbox or radio button");
+}
+
 export class ElementHandle extends JSHandle {
   asElement() {
     return this;
@@ -268,10 +278,18 @@ export class ElementHandle extends JSHandle {
     return (item.owner.keyboard ?? makeKeyboard(item.owner)).press(key);
   }
 
-  check() {
-    return this._action("check");
+  check(options) {
+    return this.setChecked(true, options);
   }
-  uncheck() {
-    return this._action("uncheck");
+  uncheck(options) {
+    return this.setChecked(false, options);
+  }
+  async setChecked(on, options) {
+    if (!(await this.evaluate((element) => element.isConnected)))
+      throw new Error("Element is not attached to the DOM");
+    if ((await this.evaluate(checkedState)) === on) return;
+    await this.click(options);
+    if ((await this.evaluate(checkedState)) !== on)
+      throw new Error("Click did not change checked state");
   }
 }

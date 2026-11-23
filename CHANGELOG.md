@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.8.7] - 2026-11-22 (unreleased candidate)
+## [0.8.7] - 2026-11-23 (unreleased candidate)
 
 - Keep pooled HTTP connection drivers active during synchronous guest work, preserving cancellation and one delivery per write.
 - Terminate observed response records when interrupted fetch operations are dropped.
@@ -8,7 +8,7 @@
 - Finish native actions at admitted network navigation and committed same-document navigation, preserving caller deadlines and execution failures.
 - Read live locator attributes through the captured native getter without copying document metadata.
 - Reuse bounded CSS rule plans while matching current document state, and admit changed inline styles without rescanning unrelated resources.
-- Consume the turbo-dom v0.8.7 development fixes for cross-document scheduling, inert text quotas, and native CSS state. Full original auth acceptance is still pending.
+- Consume the turbo-dom v0.8.7 development fixes for cross-document scheduling, inert text quotas, and native CSS state. All 46 original payroll auth cases pass on the packaged native engine, with zero retries or skips.
 
 ## [0.8.6] - 2026-11-20 (unreleased candidate)
 

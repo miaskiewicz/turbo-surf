@@ -1,6 +1,44 @@
 # Release regressions
 
-## Current v0.8.7 payroll acceptance — native async ownership blocker
+## Validated v0.8.7 payroll acceptance — 2026-11-23
+
+The complete original auth suite passes on the packaged v0.8.7 native engine:
+**46 passed, 0 failed, 0 skipped, 0 cancelled, 0 retries**, across all 15 files,
+in 1,132.2 seconds. The shared fixture file remained byte-identical. Tests,
+assertions and per-case deadlines were unchanged; global setup, teardown and
+webServer were disabled for the existing coordinated service window. The native
+CLI does not enforce the config-level globalTimeout; the original per-case
+limits remained enforced.
+
+The tested production source is Surf `8b54914b7e369224e02d26d42c00a67a9cc48f64`,
+with turbo-dom `5ef97ac1618fe4fc563dd6a643418593c433f853` coherently pinned by
+Git revision. The actual locally installed platform NAPI artifact is SHA256
+`acd47b67366763ce39a969e2e42f4ec327329a2958f05ac85451aadd98995caf`.
+The validation head `9e77b6b9` adds only a deterministic Rust integration-test
+fixture; production code and packaged runtime JavaScript remain identical.
+Receipts live in the root checkout under
+`.recovery/transport-io-runtime/release/auth46/{RUN,RESULT}.json` and `run.log`;
+`ARTIFACT.json` records both native artifact hashes and compiled features.
+
+The previous completed full cohort was 42/46. Its four failed grant-revocation
+cases now pass both individually and in this full run. A real persistent-HTTP
+regression showed that synchronous guest work could starve pooled connection
+drivers and leave writes using closed sockets. The native transport now owns
+those drivers on a separate two-thread I/O runtime, with cancellation preserved
+and no added write retry. Interrupted fetches also terminate observed response
+records when their operation is dropped. Earlier navigation, Promise ownership,
+CSS resource and producer fixes remain included.
+
+Final offline gates passed: Rust workspace 2,296 passed, 0 failed, 7 existing
+ignored; strict workspace clippy, format and complexity checks; shim 878 passed,
+E2E 55 passed and detection 262 passed (their existing skips remain recorded in
+`JS-GATES.json`). The packaged MCP smoke and all three public modal document
+cycles passed without SIGABRT. This supersedes the historical blocker notes
+below. This is release-candidate validation, not registry publication; the
+producer Git development pin remains until the matching registry payload is
+published and verified. No tag or publication was performed.
+
+## Historical 2026-11-21 v0.8.7 payroll acceptance — native async ownership blocker
 
 On 2026-11-21, a fresh isolated default-feature release NAPI build of Surf
 `d1dd8878b7e19ea32c8b789f94fb77ac2522374a` with local unpublished turbo-dom

@@ -60,3 +60,5 @@ pub mod http_cache;
 mod http_cache_ranges;
 
 pub mod upload_body;
+
+mod http_transport;

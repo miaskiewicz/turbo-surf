@@ -2,6 +2,9 @@
 
 ## [0.8.7] - 2026-11-22 (unreleased candidate)
 
+- Keep pooled HTTP connection drivers active during synchronous guest work, preserving cancellation and one delivery per write.
+- Terminate observed response records when interrupted fetch operations are dropped.
+
 - Finish native actions at admitted network navigation and committed same-document navigation, preserving caller deadlines and execution failures.
 - Read live locator attributes through the captured native getter without copying document metadata.
 - Reuse bounded CSS rule plans while matching current document state, and admit changed inline styles without rescanning unrelated resources.

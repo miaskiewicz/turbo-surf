@@ -1116,7 +1116,11 @@ async fn send(cl: &http::Client, hop: Outgoing<'_>) -> Result<http::Response, Ht
         method,
         streaming_upload || body.is_some() || body_bytes.is_some(),
     );
-    let mut result = send_with_stale_recovery(req, retry, network.as_ref()).await;
+    let mut result = crate::http_transport::run(async move {
+        send_with_stale_recovery(req, retry, network.as_ref()).await
+    })
+    .await
+    .map_err(|error| err(error, ErrorCode::Network))?;
     finish_transport_response(&mut result, url, method, trace_id);
     result.map_err(|e| transport_error(&e, url))
 }

@@ -9,6 +9,7 @@
 - Wait for proven finite, running, non-filling animations during locator readiness without changing animation presentation or caller deadlines.
 - Narrow dynamic CSS selector candidates by element type while preserving more selective ID/class buckets and live state matching.
 - Avoid source-element scans for pseudo-element rules and narrow positive functional selector alternatives without caching live matches.
+- Keep user-agent rules in stable scope order so identical geometry reads reuse their prepared stylesheet and layout caches.
 - Consume native History, DOMParser and absolute checkbox padding-box fixes from the turbo-dom v0.8.7 development branch.
 
 - Keep pooled HTTP connection drivers active during synchronous guest work, preserving cancellation and one delivery per write.

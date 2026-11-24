@@ -683,6 +683,72 @@ const waitingVisibilitySource = `function(element) {
   }
 }`;
 
+function captureHitTestAnimations(element) {
+  const records = [];
+  for (const animation of element.ownerDocument.getAnimations()) {
+    const effect = animation.effect;
+    const node = effect?.target;
+    if (
+      typeof animation.animationName !== "string" ||
+      node?.ownerDocument !== element.ownerDocument
+    )
+      continue;
+    records.push({
+      node,
+      animation,
+      effect,
+      target: node,
+      name: animation.animationName,
+      state: animation.playState,
+      rate: animation.playbackRate,
+      timing: effect.getComputedTiming(),
+    });
+  }
+  return records;
+}
+
+function clickHitTestReady(element, options) {
+  let node = element,
+    branched = !!options?.position;
+  while (node.firstElementChild) {
+    branched ||= node.childElementCount > 1;
+    node = node.firstElementChild;
+  }
+  if (!branched) return true;
+  const rect = element.getBoundingClientRect();
+  const position = options?.position || { x: rect.width / 2, y: rect.height / 2 };
+  element.ownerDocument.elementFromPoint(rect.left + position.x, rect.top + position.y);
+  return true;
+}
+
+function finiteHitTestReadiness(error, records) {
+  const name = animationReadinessName(error);
+  return (
+    finiteGeometryReadiness(error, records) &&
+    records
+      .filter((record) => record.name === name)
+      .every((record) => getComputedStyle(record.node).pointerEvents === "none")
+  );
+}
+
+const waitingClickHitTestSource = `function(element, options) {
+  const clickHitTestReady = ${clickHitTestReady.toString()};
+  const animationReadinessName = ${animationReadinessName.toString()};
+  const captureHitTestAnimations = ${captureHitTestAnimations.toString()};
+  const finiteGeometryTiming = ${finiteGeometryTiming.toString()};
+  const unchangedGeometryAnimation = ${unchangedGeometryAnimation.toString()};
+  const finiteGeometryReadiness = ${finiteGeometryReadiness.toString()};
+  const finiteHitTestReadiness = ${finiteHitTestReadiness.toString()};
+  try { return clickHitTestReady(element, options); }
+  catch (error) { if (!animationReadinessName(error)) throw error; }
+  const records = captureHitTestAnimations(element);
+  try { return clickHitTestReady(element, options); }
+  catch (error) {
+    if (finiteHitTestReadiness(error, records)) return undefined;
+    throw error;
+  }
+}`;
+
 class Locator {
   constructor(page, resolve, opts = {}) {
     this._page = page;
@@ -1343,7 +1409,11 @@ class Locator {
           }))
         : this._snapshot();
       const visible = live ? await this._waitVisibility() : state?.visible;
-      if (state?.enabled && (kind !== "fill" || state.editable) && visible) return;
+      if (state?.enabled && (kind !== "fill" || state.editable) && visible) {
+        // Check the read-only dispatch hit test before emitting any input event.
+        // A later dispatch failure is still propagated without retrying the action.
+        if (await this._waitActionGeometry(kind, options)) return;
+      }
       if (Date.now() >= deadline) break;
       await this._page._redrain();
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1351,6 +1421,10 @@ class Locator {
     throw Object.assign(new Error(`Timeout waiting for locator to be actionable for ${kind}`), {
       name: "TimeoutError",
     });
+  }
+  async _waitActionGeometry(kind, options) {
+    if (!this._page._live || kind !== "click") return true;
+    return this._liveReadSource(waitingClickHitTestSource, { position: options.position });
   }
   async _waitVisibility() {
     // Proof and geometry share one guest task, including effect/target identity.

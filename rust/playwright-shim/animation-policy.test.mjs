@@ -170,13 +170,17 @@ test("dispatch guard failures are never retried after actionability succeeds", a
   await animationReadinessFixture("none", async (page, target) => {
     await page.evaluate(() => {
       document.getElementById("target").innerHTML = "<span>Left</span><span>Right</span>";
-      const sibling = document.createElement("div");
-      sibling.style.cssText = "position:absolute;left:500px;top:300px;width:40px;height:40px";
-      document.body.append(sibling);
-      sibling.style.animation = "entrance 300ms linear";
+      const nativeHit = document.elementFromPoint;
+      globalThis.dispatchHitReads = 0;
+      document.elementFromPoint = function (...args) {
+        if (++dispatchHitReads === 2)
+          throw new Error("native live layout animation resource is unsupported: entrance");
+        return nativeHit.apply(this, args);
+      };
     });
     assert.equal(await target.isVisible(), true);
     await assert.rejects(target.click({ timeout: 1000 }), /animation resource.*entrance/);
+    assert.equal(await page.evaluate(() => dispatchHitReads), 2);
     assert.equal(await page.evaluate(() => readinessClicks), 0);
   });
 });
@@ -307,5 +311,84 @@ test("same-name replacement with an infinite effect is not finite readiness", as
     );
     assert.equal(await page.evaluate(() => replacedAnimationIdentity), true);
     assert.equal(await page.evaluate(() => readinessClicks), 0);
+  });
+});
+
+test("branched click waits for a proven finite hit-test animation before dispatch", async () => {
+  await animationReadinessFixture("none", async (page, target) => {
+    await page.evaluate(() => {
+      document.getElementById("target").innerHTML = "<span>Left</span><span>Right</span>";
+      const ripple = document.createElement("span");
+      ripple.style.cssText =
+        "position:absolute;left:500px;top:300px;width:40px;height:40px;pointer-events:none;animation:entrance 300ms linear";
+      document.body.append(ripple);
+    });
+    assert.equal(await target.isVisible(), true);
+    await target.click({ timeout: 1000 });
+    assert.equal(await page.evaluate(() => readinessClicks), 1);
+  });
+});
+
+test("finite hit-test readiness stays within the click deadline", async () => {
+  await animationReadinessFixture("none", async (page, target) => {
+    await page.evaluate(() => {
+      document.getElementById("target").innerHTML = "<span>Left</span><span>Right</span>";
+      const ripple = document.createElement("span");
+      ripple.style.cssText =
+        "position:absolute;left:500px;top:300px;width:40px;height:40px;pointer-events:none;animation:entrance 3s linear";
+      document.body.append(ripple);
+    });
+    await assert.rejects(target.click({ timeout: 40 }), (error) => error.name === "TimeoutError");
+    assert.equal(await page.evaluate(() => readinessClicks), 0);
+  });
+});
+
+test("hit-test readiness refuses infinite paused and filling transparent effects", async () => {
+  for (const animation of [
+    "entrance 1s linear infinite",
+    "entrance 1s linear paused",
+    "entrance 1s linear forwards",
+  ]) {
+    await animationReadinessFixture("none", async (page, target) => {
+      await page.evaluate((animation) => {
+        document.getElementById("target").innerHTML = "<span>Left</span><span>Right</span>";
+        const ripple = document.createElement("span");
+        ripple.style.cssText =
+          "position:absolute;left:500px;top:300px;width:40px;height:40px;pointer-events:none";
+        ripple.style.animation = animation;
+        document.body.append(ripple);
+      }, animation);
+      await assert.rejects(target.click({ timeout: 1000 }), /animation resource.*entrance/);
+      assert.equal(await page.evaluate(() => readinessClicks), 0);
+    });
+  }
+});
+
+test("hit-test preflight preserves arbitrary failures without input dispatch", async () => {
+  await animationReadinessFixture("none", async (page, target) => {
+    await page.evaluate(() => {
+      document.getElementById("target").innerHTML = "<span>Left</span><span>Right</span>";
+      document.elementFromPoint = () => {
+        throw new Error("hit-test-preflight-marker");
+      };
+    });
+    await assert.rejects(target.click({ timeout: 1000 }), /hit-test-preflight-marker/);
+    assert.equal(await page.evaluate(() => readinessClicks), 0);
+  });
+});
+
+test("supported branched clicks do not inspect document animations", async () => {
+  await animationReadinessFixture("none", async (page, target) => {
+    await page.evaluate(() => {
+      document.getElementById("target").innerHTML = "<span>Left</span><span>Right</span>";
+      globalThis.documentAnimationReads = 0;
+      document.getAnimations = () => {
+        documentAnimationReads++;
+        throw new Error("unexpected animation metadata");
+      };
+    });
+    await target.click({ timeout: 1000 });
+    assert.equal(await page.evaluate(() => documentAnimationReads), 0);
+    assert.equal(await page.evaluate(() => readinessClicks), 1);
   });
 });

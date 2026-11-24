@@ -561,8 +561,11 @@ pub(crate) fn ua_rules(
     );
     let parsed = StyleSheet::parse(&css, ParserOptions::default())
         .map_err(|error| format!("native UA CSS parse failed: {error:?}"))?;
+    let mut roots = graph.depths.keys().copied().collect::<Vec<_>>();
+    // Equivalent captures must retain the same UA cascade order and cache key.
+    roots.sort_unstable_by_key(|root| (graph.depths[root], *root));
     let mut result = Vec::new();
-    for &root in graph.depths.keys() {
+    for root in roots {
         for rule in &parsed.rules.0 {
             let text = lightningcss::traits::ToCss::to_css_string(
                 rule,
@@ -631,6 +634,57 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn ua_rule_scope_order_is_independent_of_hash_iteration() {
+        let mut tree = Tree::parse("<body><input><div id=a></div><div id=b></div><div id=c></div>");
+        for id in ["a", "b", "c"] {
+            let host = tree.get_element_by_id(id).unwrap();
+            let shadow = tree.attach_shadow(host);
+            let child = tree.create_element("input");
+            tree.set_attribute(child, "type", "checkbox");
+            tree.append_child(shadow, child);
+        }
+        let mut graph = Composition::scopes(&tree).unwrap();
+        let count = graph.depths.len();
+        // Make an iteration-order dependency observable with every hash seed.
+        for (index, depth) in graph.depths.values_mut().enumerate() {
+            *depth = (count - index) as _;
+        }
+        let mut expected = Vec::new();
+        for rank in 1..=count {
+            let root = *graph
+                .depths
+                .iter()
+                .find(|(_, depth)| **depth as usize == rank)
+                .unwrap()
+                .0;
+            let mut single = graph.clone();
+            single.depths.retain(|&scope, _| scope == root);
+            expected.extend(ua_rules(&tree, 1, &single).unwrap());
+        }
+        assert_eq!(ua_rules(&tree, 1, &graph).unwrap(), expected);
+        let entries = graph
+            .depths
+            .iter()
+            .map(|(&root, &depth)| (root, depth))
+            .collect::<Vec<_>>();
+        graph.depths = entries.into_iter().rev().collect();
+        assert_eq!(ua_rules(&tree, 1, &graph).unwrap(), expected);
+        let natural = Composition::scopes(&tree).unwrap();
+        let mut expected = Vec::new();
+        let mut roots = vec![tree.root()];
+        roots.extend(["a", "b", "c"].map(|id| {
+            tree.shadow_root(tree.get_element_by_id(id).unwrap())
+                .unwrap()
+        }));
+        for root in roots {
+            let mut single = natural.clone();
+            single.depths.retain(|&scope, _| scope == root);
+            expected.extend(ua_rules(&tree, 1, &single).unwrap());
+        }
+        assert_eq!(ua_rules(&tree, 1, &natural).unwrap(), expected);
     }
 
     #[test]

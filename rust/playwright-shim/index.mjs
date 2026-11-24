@@ -3266,6 +3266,8 @@ return String(globalThis.__RESULT ?? ""); })()`,
         this._session,
         "globalThis.__RESULT = __tsNs.rscNav || ''; __tsNs.rscNav = '';",
       );
+      // Native targets already own client history; a transport hint is not navigation.
+      if (hasNativeHistory(this)) return false;
       if (!nav || pathOf(nav) === this._loadedPath) return false;
       const target = this._resolveUrl(nav);
       if (target === historyNavigation?.url) return false;

@@ -571,6 +571,78 @@ function responseBudget(value) {
   return value;
 }
 
+function animationReadinessName(error) {
+  return /^(?:Error: )*native live layout animation resource is unsupported: (.+)$/.exec(
+    String(error?.message ?? error),
+  )?.[1];
+}
+
+function captureGeometryAnimations(element) {
+  const records = [];
+  for (let node = element; node; node = __tsNs.tcLocatorParent(node)) {
+    for (const animation of node.getAnimations()) {
+      if (typeof animation.animationName !== "string") continue;
+      const effect = animation.effect;
+      records.push({
+        node,
+        animation,
+        effect,
+        target: effect?.target,
+        name: animation.animationName,
+        state: animation.playState,
+        rate: animation.playbackRate,
+        timing: effect?.getComputedTiming(),
+      });
+    }
+  }
+  return records;
+}
+
+function finiteGeometryTiming(timing, rate) {
+  return (
+    timing &&
+    Number.isFinite(rate) &&
+    rate > 0 &&
+    Number.isFinite(timing.endTime) &&
+    Number.isFinite(timing.activeDuration) &&
+    ["none", "auto"].includes(timing.fill)
+  );
+}
+
+function unchangedGeometryAnimation(record, records) {
+  const { node, animation, effect, target, name } = record;
+  if (
+    !node.isConnected ||
+    animation.effect !== effect ||
+    effect?.target !== target ||
+    !["running", "finished"].includes(animation.playState) ||
+    !finiteGeometryTiming(effect?.getComputedTiming(), animation.playbackRate)
+  )
+    return false;
+  return node
+    .getAnimations()
+    .every(
+      (current) =>
+        current.animationName !== name ||
+        records.some((prior) => prior.node === node && prior.animation === current),
+    );
+}
+
+function finiteGeometryReadiness(error, records) {
+  const name = animationReadinessName(error);
+  if (!name) return false;
+  const matching = records.filter((record) => record.name === name);
+  return (
+    matching.length > 0 &&
+    matching.every(
+      (record) =>
+        record.state === "running" &&
+        finiteGeometryTiming(record.timing, record.rate) &&
+        unchangedGeometryAnimation(record, records),
+    )
+  );
+}
+
 function renderedVisibility(element) {
   for (let ancestor = element; ancestor; ancestor = __tsNs.tcLocatorParent(ancestor)) {
     if (ancestor.hasAttribute("hidden") || getComputedStyle(ancestor).display === "none")
@@ -593,6 +665,21 @@ function renderedVisibility(element) {
   const rect = element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
 }
+
+const waitingVisibilitySource = `function(element) {
+  const renderedVisibility = ${renderedVisibility.toString()};
+  const animationReadinessName = ${animationReadinessName.toString()};
+  const captureGeometryAnimations = ${captureGeometryAnimations.toString()};
+  const finiteGeometryTiming = ${finiteGeometryTiming.toString()};
+  const unchangedGeometryAnimation = ${unchangedGeometryAnimation.toString()};
+  const finiteGeometryReadiness = ${finiteGeometryReadiness.toString()};
+  const records = captureGeometryAnimations(element);
+  try { return renderedVisibility(element); }
+  catch (error) {
+    if (finiteGeometryReadiness(error, records)) return undefined;
+    throw error;
+  }
+}`;
 
 class Locator {
   constructor(page, resolve, opts = {}) {
@@ -1051,13 +1138,16 @@ class Locator {
     return n == null ? null : (native.attrOf(this._html, n, name) ?? null);
   }
   async _liveRead(fn, arg) {
+    return this._liveReadSource(fn.toString(), arg);
+  }
+  async _liveReadSource(source, arg) {
     await this._prepareQuery();
     const index = await this._resolveLiveIdx();
     if (index == null) return null;
     // Pure DOM reads must not await unrelated exposed host callbacks.
     const result = await this._page._readEngineAsync(`
       try { return {value: (${encodeEvaluationValue.toString()})(
-        (${fn.toString()})(__tsNs.tcLocatorAll()[${index}],${JSON.stringify(arg ?? null)}))}; }
+        (${source})(__tsNs.tcLocatorAll()[${index}],${JSON.stringify(arg ?? null)}))}; }
       catch (error) { return {error: (${encodeEvaluationError.toString()})(error)}; }
     `);
     if (result.error) throw decodeEvaluationError(result.error);
@@ -1250,7 +1340,7 @@ class Locator {
             editable: !element.readOnly,
           }))
         : this._snapshot();
-      const visible = live ? await this.isVisible() : state?.visible;
+      const visible = live ? await this._waitVisibility() : state?.visible;
       if (state?.enabled && (kind !== "fill" || state.editable) && visible) return;
       if (Date.now() >= deadline) break;
       await this._page._redrain();
@@ -1259,6 +1349,11 @@ class Locator {
     throw Object.assign(new Error(`Timeout waiting for locator to be actionable for ${kind}`), {
       name: "TimeoutError",
     });
+  }
+  async _waitVisibility() {
+    // Proof and geometry share one guest task, including effect/target identity.
+    // Unknown geometry is neither visible nor hidden; the caller owns its deadline.
+    return this._liveReadSource(waitingVisibilitySource);
   }
   async fill(value, options = {}) {
     await this._prepareQuery();
@@ -1450,20 +1545,25 @@ class Locator {
     await this._prepareQuery();
     const state = opts.state ?? "visible";
     const timeout = opts.timeout ?? 5000;
-    const ok = () => {
+    const ok = async () => {
       const snap = this._snapshot();
       if (state === "attached") return snap != null;
       if (state === "detached") return snap == null;
-      if (state === "hidden") return snap == null || !snap.visible;
-      return snap != null && snap.visible; // 'visible'
+      if (snap == null) return state === "hidden";
+      const visible = await this._waitVisibility();
+      if (visible === undefined) return false;
+      return state === "hidden" ? !visible : visible;
     };
     if (!this._page._live) return undefined; // static page: best-effort, no polling surface
     const start = Date.now();
-    while (!ok() && Date.now() - start < timeout) {
+    let ready = await ok();
+    while (!ready && Date.now() - start < timeout) {
       await this._page._redrain();
       await this._prepareQuery();
+      if (Date.now() - start >= timeout) break;
+      ready = await ok();
     }
-    if (!ok()) throw new Error(`turbo-surf: waitFor(state=${state}) timed out`);
+    if (!ready) throw new Error(`turbo-surf: waitFor(state=${state}) timed out`);
     return undefined;
   }
 

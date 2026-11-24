@@ -8,6 +8,7 @@
 - Read native and ARIA checked state after real clicks, including retained element handles.
 - Wait for proven finite, running, non-filling animations during locator readiness without changing animation presentation or caller deadlines.
 - Narrow dynamic CSS selector candidates by element type while preserving more selective ID/class buckets and live state matching.
+- Avoid source-element scans for pseudo-element rules and narrow positive functional selector alternatives without caching live matches.
 - Consume native History, DOMParser and absolute checkbox padding-box fixes from the turbo-dom v0.8.7 development branch.
 
 - Keep pooled HTTP connection drivers active during synchronous guest work, preserving cancellation and one delivery per write.

@@ -1,6 +1,13 @@
 # Changelog
 
-## [0.8.7] - 2026-11-23 (unreleased candidate)
+## [0.8.7] - 2026-11-24 (unreleased candidate)
+
+- Preserve the FormData constructor's native document across navigation and collection, including retained constructors and multipart uploads.
+- Distinguish superseded navigation from genuine target closure so existing interrupted-navigation handling receives the correct error.
+- Keep lifecycle history delivery independent of the initiating caller's deadline.
+- Preserve root/BODY scroll ownership under containment, and keep size query containers from becoming fixed-position containing blocks.
+- Wait for proven finite pointer-transparent geometry dependencies during visibility polling within the existing deadline.
+- Consume the turbo-dom v0.8.7 scrollport and hit-clipping ownership fixes together. Record the latest packaged auth and offline gate results in [the acceptance receipt](docs/release/0.8.7-payroll-auth-2026-11-24.md); the wider payroll suite remains incomplete.
 
 - Wait for attached input controls when reading their values, preserving empty values and missing-element timeouts.
 - Keep native history URLs authoritative during RSC refreshes and wait for private history acknowledgements without occupying the host worker pool.

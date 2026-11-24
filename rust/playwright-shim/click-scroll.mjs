@@ -13,6 +13,11 @@ export const clickScrollBootstrap = `(${captureClickScroll.toString()})();`;
 export function scrollClickTarget(element) {
   const document = element.ownerDocument;
   const view = document.defaultView;
+  const permitsBodyPropagation = (style) =>
+    style.display !== "none" &&
+    ["", "none"].includes(style.contain) &&
+    !["auto", "hidden"].includes(style.contentVisibility) &&
+    !/(?:^|\s)(?:size|inline-size)(?:\s|$)/.test(style.containerType);
   const bodyOverflowIsViewport = (body, style) => {
     const root = document.documentElement;
     if (
@@ -21,15 +26,14 @@ export function scrollClickTarget(element) {
       root?.namespaceURI !== "http://www.w3.org/1999/xhtml" ||
       root.localName !== "html" ||
       body.localName !== "body" ||
-      style.display === "none" ||
-      !["", "none"].includes(style.contain)
+      !permitsBodyPropagation(style)
     )
       return false;
     const rootStyle = view.getComputedStyle(root);
     return (
       rootStyle.overflowX === "visible" &&
       rootStyle.overflowY === "visible" &&
-      ["", "none"].includes(rootStyle.contain)
+      permitsBodyPropagation(rootStyle)
     );
   };
   const fixedContainingBlock = (style) =>
@@ -40,8 +44,7 @@ export function scrollClickTarget(element) {
     /(?:^|[,\s])(?:transform|perspective|filter|backdrop-filter|contain)(?:[,\s]|$)/.test(
       style.willChange,
     ) ||
-    ["auto", "hidden"].includes(style.contentVisibility) ||
-    ["size", "inline-size"].includes(style.containerType);
+    ["auto", "hidden"].includes(style.contentVisibility);
   const clipBounds = () => {
     let fixedEscapes = view.getComputedStyle(element).position === "fixed";
     const clip = { left: 0, top: 0, right: view.innerWidth, bottom: view.innerHeight };

@@ -226,3 +226,46 @@ test("a fixed containing block retains its genuine ancestor clip", async () => {
     },
   );
 });
+
+test("query containers do not capture viewport-fixed click targets", async () => {
+  for (const type of ["size", "inline-size"]) {
+    await standardsFixture(
+      styles +
+        `<style>#clip{height:40px;overflow:clip;container-type:${type}}#root{position:fixed;top:300px}</style><div id="clip">` +
+        control +
+        "</div>" +
+        events,
+      async (page) => {
+        await page.locator("#root").click({ timeout: 1000 });
+        assert.equal((await page.evaluate(observed)).expanded, "true");
+        assert.equal(await page.evaluate(() => scrollY), 0);
+      },
+    );
+  }
+});
+
+test("root and BODY query containment retain BODY's own click scrollport", async () => {
+  for (const owner of ["html", "body"]) {
+    for (const rule of [
+      "content-visibility:auto",
+      "container-type:size",
+      "container-type:inline-size",
+    ]) {
+      await standardsFixture(
+        styles +
+          `<style>body{height:40px;overflow:hidden}${owner}{${rule}}</style><div style="height:100px"></div>` +
+          control +
+          events,
+        async (page) => {
+          await page.locator("#root").click({ timeout: 1000 });
+          assert.equal((await page.evaluate(observed)).expanded, "true", `${owner} ${rule}`);
+          assert.ok(
+            (await page.locator("body").evaluate((body) => body.scrollTop)) > 0,
+            `${owner} ${rule}`,
+          );
+          assert.equal(await page.evaluate(() => events.length), 1);
+        },
+      );
+    }
+  }
+});

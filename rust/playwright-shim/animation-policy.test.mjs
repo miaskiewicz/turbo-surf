@@ -392,3 +392,63 @@ test("supported branched clicks do not inspect document animations", async () =>
     assert.equal(await page.evaluate(() => readinessClicks), 1);
   });
 });
+
+async function dependentGeometryFixture(animation, pointerEvents, run) {
+  await animationReadinessFixture("none", async (page, target) => {
+    await page.evaluate(
+      ({ animation, pointerEvents }) => {
+        const ripple = document.createElement("span");
+        ripple.id = "dependent-ripple";
+        ripple.style.cssText = "position:absolute;width:40px;height:40px;left:500px;top:300px";
+        ripple.style.pointerEvents = pointerEvents;
+        ripple.style.animation = animation;
+        document.body.append(ripple);
+        const nativeRect = Element.prototype.getBoundingClientRect;
+        document.getElementById("target").getBoundingClientRect = function () {
+          nativeRect.call(ripple);
+          return nativeRect.call(this);
+        };
+      },
+      { animation, pointerEvents },
+    );
+    await run(page, target);
+  });
+}
+
+test("visible waits preserve a real native dependency on a finite transparent animation", async () => {
+  await dependentGeometryFixture("entrance 300ms linear", "none", async (page, target) => {
+    await assert.rejects(target.isVisible(), /animation resource.*entrance/);
+    await target.waitFor({ state: "visible", timeout: 1000 });
+    assert.equal(await target.isVisible(), true);
+    await target.click({ timeout: 1000 });
+    assert.equal(await page.evaluate(() => readinessClicks), 1);
+  });
+});
+
+test("dependent visibility readiness preserves the caller deadline without input", async () => {
+  await dependentGeometryFixture("entrance 3s linear", "none", async (page, target) => {
+    await assert.rejects(target.waitFor({ state: "visible", timeout: 40 }), (error) => {
+      assert.equal(error.constructor, Error);
+      assert.equal(error.message, "turbo-surf: waitFor(state=visible) timed out");
+      return true;
+    });
+    assert.equal(await page.evaluate(() => readinessClicks), 0);
+  });
+});
+
+test("dependent visibility still rejects interactive paused infinite and filling effects", async () => {
+  for (const [animation, pointerEvents] of [
+    ["entrance 1s linear", "auto"],
+    ["entrance 1s linear paused", "none"],
+    ["entrance 1s linear infinite", "none"],
+    ["entrance 1s linear forwards", "none"],
+  ]) {
+    await dependentGeometryFixture(animation, pointerEvents, async (page, target) => {
+      await assert.rejects(
+        target.waitFor({ state: "visible", timeout: 1000 }),
+        /animation resource/,
+      );
+      assert.equal(await page.evaluate(() => readinessClicks), 0);
+    });
+  }
+});

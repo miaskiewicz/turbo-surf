@@ -677,9 +677,13 @@ const waitingVisibilitySource = `function(element) {
   try { return renderedVisibility(element); }
   catch (error) { if (!animationReadinessName(error)) throw error; }
   const records = captureGeometryAnimations(element);
+  const captureHitTestAnimations = ${captureHitTestAnimations.toString()};
+  const finiteHitTestReadiness = ${finiteHitTestReadiness.toString()};
+  const dependencies = captureHitTestAnimations(element);
   try { return renderedVisibility(element); }
   catch (error) {
-    if (finiteGeometryReadiness(error, records)) return undefined;
+    if (finiteGeometryReadiness(error, records) || finiteHitTestReadiness(error, dependencies))
+      return undefined;
     throw error;
   }
 }`;

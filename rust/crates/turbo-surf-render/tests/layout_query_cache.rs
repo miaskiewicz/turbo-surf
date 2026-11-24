@@ -134,6 +134,88 @@ async fn detached_render_construction_reuses_connected_document_geometry() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn connected_shadow_trees_preserve_detached_construction_cache_reuse() {
+    let _environment = PROFILE_ENV.lock().await;
+    for mode in ["open", "closed"] {
+        let html = format!(
+            r#"<!doctype html><div id="target" style="width:60px;height:20px"></div>
+<next-route-announcer id="host"></next-route-announcer><script>
+const shadow=document.querySelector('#host').attachShadow({{mode:'{mode}'}});
+shadow.innerHTML='<span>Announcement</span>';
+globalThis.widths=[];globalThis.scratch=[];
+for(let index=0;index<6;index++){{
+  widths.push(document.querySelector('#target').clientWidth);
+  const node=document.createElement('div');node.textContent='detached';scratch.push(node);
+}}
+</script>"#
+        );
+        let (mut page, profile, _directory) = profiled_page("connected-shadow", &html).await;
+        assert_eq!(
+            page.eval_expression("JSON.stringify(widths)")
+                .await
+                .unwrap(),
+            "[60,60,60,60,60,60]",
+            "mode={mode}"
+        );
+        assert_eq!(profile["stages"]["layout"]["calls"], 1, "mode={mode}");
+        assert_eq!(profile["cacheMisses"], 1, "mode={mode}");
+        assert_eq!(profile["cacheHits"], 5, "mode={mode}");
+        page.close();
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_allocations_reuse_prepared_sheet_targets() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>#target{width:60px;height:20px}</style>
+<div id="target"></div><script>
+globalThis.widths=[];globalThis.scratch=[];
+for(let index=0;index<6;index++){
+  widths.push(document.querySelector('#target').clientWidth);
+  scratch.push(document.createElement('div'));
+}
+</script>"#;
+    let (mut page, profile, _directory) = profiled_page("detached-preparation", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[60,60,60,60,60,60]"
+    );
+    assert_eq!(profile["stages"]["layout"]["calls"], 1);
+    assert_eq!(profile["cacheHits"], 5);
+    assert_eq!(profile["stages"]["sheetExport"]["calls"], 1);
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 1);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_targets_refresh_for_checked_state_and_cssom() {
+    let _environment = PROFILE_ENV.lock().await;
+    let html = r#"<!doctype html><style>
+#target{width:20px;height:20px}
+#host:has(input:checked) #target{width:40px}
+#host:has(input:focus) #target{width:80px!important}
+</style><div id="host"><input id="input" type="checkbox"><div id="target"></div></div><script>
+const target=document.querySelector('#target'),input=document.querySelector('#input');
+globalThis.widths=[target.clientWidth];
+globalThis.scratch=document.createElement('div');widths.push(target.clientWidth);
+input.checked=true;widths.push(target.clientWidth);widths.push(target.clientWidth);
+document.styleSheets[0].insertRule('#host:has(input:checked) #target{width:60px}',3);
+widths.push(target.clientWidth);
+</script>"#;
+    let (mut page, profile, _directory) = profiled_page("prepared-selector-state", html).await;
+    assert_eq!(
+        page.eval_expression("JSON.stringify(widths)")
+            .await
+            .unwrap(),
+        "[20,20,40,40,60]"
+    );
+    assert_eq!(profile["stages"]["selectorPreparation"]["calls"], 3);
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn many_distinct_static_targets_share_one_strictly_admitted_layout() {
     let _environment = PROFILE_ENV.lock().await;
     let mut html = String::from(

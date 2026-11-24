@@ -33,6 +33,16 @@ pub(crate) struct NativeLayoutInput<'s> {
     pub(crate) range: Option<Vec<turbo_dom_layout::cssom_view::range::Selection>>,
 }
 
+pub(crate) fn current_document_checkpoint(
+    scope: &mut v8::PinScope<'_, '_>,
+) -> Option<turbo_dom_browser_env::host_internals::DocumentCheckpoint> {
+    let context = current_document_context(scope)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let root = with_tree(|tree| tree.root())?;
+    let document = wrap(scope, root);
+    turbo_dom_browser_env::host_internals::document_checkpoint(scope, document)
+}
+
 pub(crate) fn capture<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
@@ -208,7 +218,8 @@ fn prepared_sheets(
     graph: &Composition,
     sheets: &HashSet<(Handle, Handle)>,
 ) -> Result<std::rc::Rc<Vec<SheetSnapshot>>, String> {
-    let key = crate::live_sheet_cache::Key::new(document_id, root, version, graph);
+    let checkpoint = current_document_checkpoint(scope);
+    let key = crate::live_sheet_cache::Key::new(document_id, root, version, checkpoint, graph);
     if let Some(sheets) = crate::live_sheet_cache::read(scope, &key) {
         return Ok(sheets);
     }

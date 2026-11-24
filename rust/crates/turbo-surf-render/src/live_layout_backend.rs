@@ -66,15 +66,8 @@ fn document_input_version(
     input: &crate::live_layout_dom::NativeLayoutInput<'_>,
 ) -> DocumentInputVersion {
     // The input retains an owner witness, which may be an Element rather than a Document.
-    let checkpoint = (|| {
-        let _owner =
-            turbo_dom_browser_env::host_internals::enter_document_of(scope, input.document);
-        let context = turbo_dom_browser_env::host_internals::current_document_context(scope)?;
-        let scope = &mut v8::ContextScope::new(scope, context);
-        let root = turbo_dom_browser_env::host_internals::with_tree(|tree| tree.root())?;
-        let document = turbo_dom_browser_env::host_internals::wrap(scope, root);
-        turbo_dom_browser_env::host_internals::document_checkpoint(scope, document)
-    })();
+    let _owner = turbo_dom_browser_env::host_internals::enter_document_of(scope, input.document);
+    let checkpoint = crate::live_layout_dom::current_document_checkpoint(scope);
     checkpoint.map_or(
         DocumentInputVersion::Full(input.tree.capture.tree_version),
         DocumentInputVersion::Connected,

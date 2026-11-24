@@ -11,7 +11,7 @@
 - Avoid source-element scans for pseudo-element rules and narrow positive functional selector alternatives without caching live matches.
 - Keep user-agent rules in stable scope order so identical geometry reads reuse their prepared stylesheet and layout caches.
 - Wait for proven finite, pointer-transparent ripple animations before ambiguous click hit testing, preserving caller deadlines and one input dispatch.
-- Consume native History, DOMParser and absolute checkbox padding-box fixes from the turbo-dom v0.8.7 development branch.
+- Consume native History, DOMParser, XPath value admission and absolute checkbox padding-box fixes from the turbo-dom v0.8.7 development branch.
 
 - Keep pooled HTTP connection drivers active during synchronous guest work, preserving cancellation and one delivery per write.
 - Terminate observed response records when interrupted fetch operations are dropped.

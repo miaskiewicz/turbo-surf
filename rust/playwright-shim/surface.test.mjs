@@ -139,6 +139,75 @@ test("explicit click positions retain unsupported global hit-test guards", async
   });
 });
 
+async function transparentRippleFixture(override, run) {
+  await clickTargetFixture(async (page) => {
+    await page.evaluate((override) => {
+      const button = document.createElement("button");
+      button.id = "ripple-button";
+      button.style.cssText = "position:relative;width:200px;height:60px";
+      button.innerHTML = "End<span id='ripple'><span id='ripple-leaf'>Ripple</span></span>";
+      document.body.append(button);
+      const ripple = document.getElementById("ripple");
+      const leaf = document.getElementById("ripple-leaf");
+      ripple.style.cssText = "position:absolute;inset:0;pointer-events:none";
+      leaf.style.cssText = "position:absolute;inset:0";
+      if (override) leaf.style.pointerEvents = "auto";
+      globalThis.rippleClicks = 0;
+      globalThis.rippleEvents = [];
+      for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+        button.addEventListener(type, (event) => {
+          rippleEvents.push([type, event.target.id, event.target.isConnected]);
+          if (type === "pointerdown" && !override) ripple.remove();
+          if (type === "click") rippleClicks++;
+        });
+      }
+    }, override);
+    await run(page);
+  });
+}
+
+test("a removed pointer-transparent ripple does not swallow its button click", async () => {
+  await transparentRippleFixture(false, async (page) => {
+    await page.locator("#ripple-button").click();
+    assert.equal(await page.evaluate(() => rippleClicks), 1);
+    assert.deepEqual(
+      await page.evaluate(() => rippleEvents),
+      ["pointerdown", "mousedown", "mouseup", "click"].map((type) => [type, "ripple-button", true]),
+    );
+    assert.equal(await page.locator("#ripple").count(), 0);
+  });
+});
+
+test("a descendant pointer-events auto override remains the real click recipient", async () => {
+  await transparentRippleFixture(true, async (page) => {
+    await page.locator("#ripple-button").click();
+    assert.equal(await page.evaluate(() => rippleClicks), 1);
+    assert.deepEqual(
+      await page.evaluate(() => rippleEvents),
+      ["pointerdown", "mousedown", "mouseup", "click"].map((type) => [type, "ripple-leaf", true]),
+    );
+  });
+});
+
+test("transparent descendants retain an eligible inner control rather than the locator root", async () => {
+  await transparentRippleFixture(false, async (page) => {
+    await page.evaluate(() => {
+      const wrapper = document.createElement("div");
+      wrapper.id = "ripple-wrapper";
+      wrapper.style.cssText = "width:200px;height:60px";
+      const button = document.getElementById("ripple-button");
+      button.replaceWith(wrapper);
+      wrapper.append(button);
+    });
+    await page.locator("#ripple-wrapper").click();
+    assert.equal(await page.evaluate(() => rippleClicks), 1);
+    assert.deepEqual(
+      await page.evaluate(() => rippleEvents),
+      ["pointerdown", "mousedown", "mouseup", "click"].map((type) => [type, "ripple-button", true]),
+    );
+  });
+});
+
 async function checkedStateFixture(run) {
   const server = createServer((_request, response) => {
     response.setHeader("content-type", "text/html");

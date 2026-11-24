@@ -1980,6 +1980,11 @@ function interactionScript(selector, index, kind, value, strict = false, frameTy
     if (branched || options.position) {
       const hit = el.ownerDocument.elementFromPoint(o.clientX, o.clientY);
       if (hit && el.contains(hit)) tgt = hit;
+    } else {
+      // Transparent ripple descendants can disappear on pointerdown. Dispatch
+      // to their eligible ancestor before starting the one real event sequence.
+      while (tgt !== el && getComputedStyle(tgt).pointerEvents === "none")
+        tgt = __tsNs.tcLocatorParent(tgt) ?? el;
     }
     // Full pointer+mouse sequence like a real browser: pointer events FIRST (MUI v5+ /
     // Radix / many libs gate selection on pointerdown/up, and MUI Autocomplete/Select
